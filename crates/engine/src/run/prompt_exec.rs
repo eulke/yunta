@@ -71,7 +71,6 @@ async fn resume_target(
     ctx: &RunCtx<'_>,
     node: &Node,
     adapter: &dyn yunta_core::port::Adapter,
-    adapter_id: &yunta_core::AdapterId,
 ) -> Result<Option<yunta_core::SessionId>, RunError> {
     let policy = node
         .on_interrupt
@@ -79,31 +78,40 @@ async fn resume_target(
     if policy != yunta_core::OnInterrupt::ResumeSession {
         return Ok(None);
     }
-    let degraded = || {
-        EventPayload::Session(SessionEvent::CapabilityDegraded(
-            yunta_core::events::CapabilityDegradedPayload::new(
-                yunta_core::Capability::ResumeSession,
-                adapter_id.clone(),
-                yunta_core::events::Policy::FreshSession,
-            ),
-        ))
-    };
     match crate::replay::derive(&ctx.load_events().await?)
         .nodes
         .get(&node.id)
         .and_then(|record| record.orphaned_session.clone())
     {
         Some(OrphanedSession::Open(session_id)) => {
-            if adapter
-                .capabilities()
-                .declares(yunta_core::Capability::ResumeSession)
+            match crate::run::capability::require(
+                ctx,
+                adapter,
+                yunta_core::Capability::ResumeSession,
+                node,
+            )
+            .await?
             {
-                return Ok(Some(session_id));
+                crate::run::capability::Decision::Granted => return Ok(Some(session_id)),
+                crate::run::capability::Decision::Degraded => {}
+                crate::run::capability::Decision::Refused(error) => return Err(error),
             }
-            ctx.emit(Some(&node.id), degraded()).await?;
         }
+        // The capability is not what is missing here — there is nothing
+        // to resume. The run still says so, with the same fallback it
+        // took, so a reader knows the interrupted node started over.
         Some(OrphanedSession::NoneRecorded) => {
-            ctx.emit(Some(&node.id), degraded()).await?;
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::Session(SessionEvent::CapabilityDegraded(
+                    yunta_core::events::CapabilityDegradedPayload::new(
+                        yunta_core::Capability::ResumeSession,
+                        adapter.id().clone(),
+                        yunta_core::events::Policy::FreshSession,
+                    ),
+                )),
+            )
+            .await?;
         }
         None => {}
     }
@@ -128,7 +136,7 @@ pub(super) async fn execute_prompt(
     };
 
     let adapter = &ctx.adapters[&chosen.adapter];
-    report_declarative_network(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
+    report_declarative_network(ctx, node, adapter.as_ref()).await?;
     let setup = match super::session_plan::resolve_setup(ctx, node, &chosen).await? {
         Ok(setup) => setup,
         Err(end) => return Ok(end),
@@ -162,7 +170,7 @@ pub(super) async fn execute_prompt(
         }
     };
 
-    let resume_session = resume_target(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
+    let resume_session = resume_target(ctx, node, adapter.as_ref()).await?;
     // The staging is the session's. A session continuing here already
     // wrote in it and what it left is work it did; a fresh session —
     // including one replacing an interrupted session the adapter cannot

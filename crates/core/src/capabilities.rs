@@ -63,6 +63,21 @@ pub enum Capability {
 }
 
 impl Capability {
+    /// Every capability an adapter can declare. The closed set, in the
+    /// order [`Capabilities`] declares them — what a table about
+    /// capabilities is checked against, so one added here and nowhere
+    /// else stops compiling or fails its test.
+    pub const ALL: [Capability; 8] = [
+        Capability::ResumeSession,
+        Capability::EditHooks,
+        Capability::PermissionProfiles,
+        Capability::CustomAgents,
+        Capability::UsageReporting,
+        Capability::Skills,
+        Capability::RunTools,
+        Capability::NetworkIsolation,
+    ];
+
     /// The field name, as the log and the spec spell it.
     pub fn as_str(self) -> &'static str {
         match self {

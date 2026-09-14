@@ -257,8 +257,33 @@ impl RunCtx<'_> {
             });
         };
         let state = self.run_view().await?.state;
-        let non_terminal = self
-            .manifest
+        // A run whose adapter reports no usage cannot count what it
+        // spends, so it does not hand sessions a cap it has no way to
+        // enforce. The `capability_degraded` on the log already said so.
+        if state
+            .degradations
+            .already_stated(yunta_core::Capability::UsageReporting)
+        {
+            return Ok(yunta_core::port::Budget {
+                timeout,
+                ..Default::default()
+            });
+        }
+        Ok(yunta_core::port::Budget {
+            max_tokens: Some(budget::session_token_budget(
+                cap,
+                state.total_tokens().total(),
+                self.nodes_still_owed(&state),
+            )),
+            timeout,
+            ..Default::default()
+        })
+    }
+
+    /// How many of this run's nodes are short of a terminal — what the
+    /// remaining cap is shared among.
+    fn nodes_still_owed(&self, state: &crate::replay::RunState) -> usize {
+        self.manifest
             .workflow
             .iter_nodes()
             .filter(|node| {
@@ -267,16 +292,7 @@ impl RunCtx<'_> {
                     Some(crate::replay::NodeState::Finished { .. })
                 )
             })
-            .count();
-        Ok(yunta_core::port::Budget {
-            max_tokens: Some(budget::session_token_budget(
-                cap,
-                state.total_tokens().total(),
-                non_terminal,
-            )),
-            timeout,
-            ..Default::default()
-        })
+            .count()
     }
 
     /// The opaque `adapter_settings` the config declares for `adapter`

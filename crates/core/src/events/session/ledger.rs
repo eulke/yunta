@@ -40,6 +40,15 @@ impl DegradationLedger {
         self.all.is_empty()
     }
 
+    /// Whether the run already said this capability was missing. A
+    /// fallback the whole run works under is stated once: repeating it
+    /// per node or per session says nothing new and buries what does.
+    pub fn already_stated(&self, capability: Capability) -> bool {
+        self.all
+            .iter()
+            .any(|degradation| degradation.capability == capability)
+    }
+
     /// Folds one session-domain event.
     pub fn apply(&mut self, event: &SessionEvent, meta: &EventMeta<'_>) {
         match event {

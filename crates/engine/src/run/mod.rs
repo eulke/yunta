@@ -19,6 +19,7 @@
 
 mod bash_exec;
 mod budget;
+pub(crate) mod capability;
 mod check_exec;
 mod context_resolve;
 mod create;

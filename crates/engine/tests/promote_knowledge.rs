@@ -78,7 +78,7 @@ fn the_reference_workflow_passes_static_check() {
     .unwrap();
     let workflow: Workflow = serde_norway::from_str(&workflow_yaml).unwrap();
     let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-    let errors = check(&workflow, &config);
+    let errors = check(&workflow, &config, &|_| None);
     assert!(errors.is_empty(), "{errors:?}");
 }
 

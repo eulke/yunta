@@ -639,6 +639,7 @@ nodes:
 /// nodes); sessions 2 and 3 (the corrective, then `first`'s retry) only
 /// ever run if a human lets the run continue past the cap.
 pub const BUDGET_FIXTURE: &str = r#"
+capabilities: { usage_reporting: true }
 sessions:
   - steps:
       - { type: usage, input_tokens: 150, output_tokens: 50 }

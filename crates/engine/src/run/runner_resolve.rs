@@ -9,7 +9,7 @@ use crate::runner::resolve_runner;
 use super::node_close::fail;
 use super::step::Step;
 use super::{RunCtx, RunError};
-use yunta_core::events::{NodeEvent, SessionEvent};
+use yunta_core::events::NodeEvent;
 
 /// Resolves the node's runner or fails the node; on success emits
 /// `runner_resolved` and hands back the request pieces.
@@ -165,30 +165,29 @@ pub(crate) fn run_tools_allowed(
     ctx: &RunCtx<'_>,
     node: &Node,
     adapter: &dyn yunta_core::port::Adapter,
-    adapter_id: &AdapterId,
-) -> Result<bool, RunToolsSetupError> {
+) -> Result<(), RunToolsSetupError> {
     if adapter
         .capabilities()
         .declares(yunta_core::Capability::RunTools)
     {
-        return Ok(true);
+        return Ok(());
     }
     // The blackboard's own reason comes first: it is the older one, and
     // a node can owe both.
     if ctx.run_tools_host.is_blackboard_member(&node.id) {
         return Err(RunToolsSetupError::NoRunToolsCapability {
             node: node.id.clone(),
-            adapter: adapter_id.clone(),
+            adapter: adapter.id().clone(),
         });
     }
     if let Some(kind) = declared_typed_artifact(ctx, node) {
         return Err(RunToolsSetupError::TypedArtifactNeedsRunTools {
             node: node.id.clone(),
             kind,
-            adapter: adapter_id.clone(),
+            adapter: adapter.id().clone(),
         });
     }
-    Ok(false)
+    Ok(())
 }
 
 /// Records that a node's `network: false` is declarative only when the
@@ -200,22 +199,15 @@ pub(super) async fn report_declarative_network(
     ctx: &RunCtx<'_>,
     node: &Node,
     adapter: &dyn yunta_core::port::Adapter,
-    adapter_id: &AdapterId,
 ) -> Result<(), RunError> {
-    if node.network == Some(false)
-        && !adapter
-            .capabilities()
-            .declares(yunta_core::Capability::NetworkIsolation)
-    {
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::Session(SessionEvent::CapabilityDegraded(
-                yunta_core::events::CapabilityDegradedPayload::new(
-                    yunta_core::Capability::NetworkIsolation,
-                    adapter_id.clone(),
-                    yunta_core::events::Policy::NetworkOpen,
-                ),
-            )),
+    // Only an explicit `network: false` asks for isolation; a node that
+    // never mentions the network declares no policy to degrade.
+    if node.network == Some(false) {
+        crate::run::capability::require(
+            ctx,
+            adapter,
+            yunta_core::Capability::NetworkIsolation,
+            node,
         )
         .await?;
     }

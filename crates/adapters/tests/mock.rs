@@ -759,3 +759,40 @@ sessions:
         "the refusal names what could not be resolved: {refused}"
     );
 }
+
+/// The fixture's capability twin names the same eight flags the port
+/// does, and each one a fixture declares reaches the adapter. A twin
+/// that drifted would let a test claim a capability the engine never
+/// saw — or hide one it did.
+#[test]
+fn every_capability_round_trips_through_a_fixture() {
+    for capability in yunta_core::Capability::ALL {
+        let fixture = MockFixture::parse_without_a_run(&format!(
+            "capabilities: {{ {}: true }}\nsessions:\n  - outcome: {{ type: completed, summary: ok }}\n",
+            capability.as_str()
+        ))
+        .unwrap_or_else(|e| panic!("a fixture declaring `{capability}` parses: {e}"));
+        let declared = MockAdapter::new(fixture).capabilities();
+        for other in yunta_core::Capability::ALL {
+            assert_eq!(
+                declared.declares(other),
+                other == capability,
+                "a fixture declaring `{capability}` declares it and nothing else"
+            );
+        }
+    }
+}
+
+/// And a flag the twin does not know is refused, naming it: a fixture is
+/// authored, so a typo is a mistake and never a silent `false`.
+#[test]
+fn a_fixture_that_declares_an_unknown_capability_is_refused() {
+    let error = MockFixture::parse_without_a_run(
+        "capabilities: { teleportation: true }\nsessions:\n  - outcome: { type: completed, summary: ok }\n",
+    )
+    .expect_err("an unknown capability flag is refused");
+    assert!(
+        error.to_string().contains("teleportation"),
+        "the refusal names the flag: {error}"
+    );
+}

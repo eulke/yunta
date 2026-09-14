@@ -250,7 +250,7 @@ async fn prepare_loop<'a>(
     // Once for the whole loop: the network policy is the node's, not the
     // task's, so its declarative-only degradation is recorded here rather
     // than per task session.
-    report_declarative_network(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
+    report_declarative_network(ctx, node, adapter.as_ref()).await?;
 
     let setup = match super::session_plan::resolve_setup(ctx, node, &chosen).await? {
         Ok(setup) => setup,

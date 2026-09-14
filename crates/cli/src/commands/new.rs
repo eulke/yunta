@@ -216,7 +216,7 @@ pub fn new_workflow(
             .map(|(_, l)| l),
     );
 
-    let errors = yunta_engine::check(&workflow, &config);
+    let errors = yunta_engine::check(&workflow, &config, &super::declared_capabilities);
     if errors.is_empty() {
         println!("{}: OK", path.display());
         Ok(Outcome::Success)

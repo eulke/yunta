@@ -162,6 +162,17 @@ pub(crate) fn built_adapters(
     ]
 }
 
+/// What every adapter this binary builds declares it can do — what
+/// `check` judges a workflow's `permissions:` and `agent:` against.
+/// `None` for an adapter this binary does not build: a capability it
+/// cannot see is not one it can call absent.
+pub(crate) fn declared_capabilities(adapter: &AdapterId) -> Option<yunta_core::Capabilities> {
+    built_adapters(|_| AdapterSettings::default())
+        .iter()
+        .find(|built| built.id() == adapter)
+        .map(|built| built.capabilities())
+}
+
 /// What this binary can run on, as a person reads it: every built
 /// adapter's own id, in order, comma-separated — the phrase a refusal
 /// ends with, derived rather than written.
@@ -354,7 +365,7 @@ pub(crate) fn check_or_refuse(
     for warning in yunta_engine::check_warnings(workflow, config) {
         warn(warning);
     }
-    let mut errors = yunta_engine::check(workflow, config);
+    let mut errors = yunta_engine::check(workflow, config, &declared_capabilities);
     // The composition reference graph (`use:` names resolve, acyclic,
     // within depth) reads the repo catalog under the current
     // directory — the same `.yunta/workflows/` a run's children resolve

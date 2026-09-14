@@ -5,7 +5,16 @@ use yunta_core::{
     ArtifactSpec, ConfigLayer, JoinPolicy, ModeInclude, ModeName, ModeSpec, Node, NodeKind,
     OnFailure, PromptSource, RunnerCandidate, Workflow,
 };
-use yunta_engine::{check, check_warnings, CheckError, CheckWarning, SchemaRangeError};
+use yunta_engine::{
+    check as check_against, check_warnings, CheckError, CheckWarning, SchemaRangeError,
+};
+
+/// The rules under test here are about the workflow, not about which
+/// adapter would run it: these check against a binary that builds none,
+/// so a capability nothing declares is a capability nothing can refuse.
+fn check(workflow: &yunta_core::Workflow, config: &yunta_core::ConfigLayer) -> Vec<CheckError> {
+    check_against(workflow, config, &|_| None)
+}
 
 fn modes(entries: &[(&str, ModeInclude)]) -> IndexMap<ModeName, ModeSpec> {
     entries
@@ -2051,4 +2060,129 @@ fn every_node_kind_may_declare_an_interpreted_artifact() {
             "`{node_kind}` may declare a tasks document"
         );
     }
+}
+
+// --- what a workflow asks of its adapters ------------------------------
+
+/// A capability set with one flag on and everything else off.
+fn only(capability: yunta_core::Capability) -> yunta_core::Capabilities {
+    let mut declared = yunta_core::Capabilities::default();
+    match capability {
+        yunta_core::Capability::PermissionProfiles => declared.permission_profiles = true,
+        yunta_core::Capability::CustomAgents => declared.custom_agents = true,
+        yunta_core::Capability::ResumeSession => declared.resume_session = true,
+        yunta_core::Capability::EditHooks => declared.edit_hooks = true,
+        yunta_core::Capability::UsageReporting => declared.usage_reporting = true,
+        yunta_core::Capability::Skills => declared.skills = true,
+        yunta_core::Capability::RunTools => declared.run_tools = true,
+        yunta_core::Capability::NetworkIsolation => declared.network_isolation = true,
+    }
+    declared
+}
+
+/// A `bash`-free node on runner `planner`, declaring `permissions:` or
+/// `agent:` as the caller asks.
+fn asking_node(yaml: &str) -> Workflow {
+    workflow(vec![serde_norway::from_str(yaml).expect("the node parses")])
+}
+
+#[test]
+fn check_refuses_read_only_on_an_adapter_without_permission_profiles() {
+    let wf = asking_node(
+        "{ id: audit, kind: prompt, runner: planner, prompt: \"look\", permissions: read-only }",
+    );
+    let config = config_with_runner("planner", 1);
+
+    let errors = check_against(&wf, &config, &|_| Some(yunta_core::Capabilities::default()));
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::CapabilityUnsupported { capability, .. }
+                if *capability == yunta_core::Capability::PermissionProfiles
+        )),
+        "a profile the adapter cannot distinguish is refused before a run: {errors:?}"
+    );
+
+    let allowed = check_against(&wf, &config, &|_| {
+        Some(only(yunta_core::Capability::PermissionProfiles))
+    });
+    assert!(
+        allowed.is_empty(),
+        "an adapter that has it runs the same workflow: {allowed:?}"
+    );
+}
+
+#[test]
+fn check_refuses_an_agent_on_an_adapter_without_custom_agents() {
+    let wf = asking_node(
+        "{ id: audit, kind: prompt, runner: planner, prompt: \"look\", agent: reviewer }",
+    );
+    let config = config_with_runner("planner", 1);
+
+    let errors = check_against(&wf, &config, &|_| Some(yunta_core::Capabilities::default()));
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::CapabilityUnsupported { capability, .. }
+                if *capability == yunta_core::Capability::CustomAgents
+        )),
+        "an agent the adapter cannot select is refused before a run: {errors:?}"
+    );
+
+    let allowed = check_against(&wf, &config, &|_| {
+        Some(only(yunta_core::Capability::CustomAgents))
+    });
+    assert!(allowed.is_empty(), "{allowed:?}");
+}
+
+/// A binary that does not build the adapter judges nothing: a capability
+/// it cannot see is not one it can call absent.
+#[test]
+fn an_adapter_this_binary_does_not_build_refuses_nothing() {
+    let wf = asking_node("{ id: audit, kind: prompt, runner: planner, prompt: \"look\", permissions: read-only, agent: reviewer }");
+    let errors = check_against(&wf, &config_with_runner("planner", 1), &|_| None);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// A runner that fans out is refused only when not one of its adapters
+/// can do what the node asks: the run takes the first available
+/// candidate, so one that cannot is not a workflow that cannot run.
+#[test]
+fn a_fan_out_is_refused_only_when_no_candidate_can_do_it() {
+    let wf = asking_node(
+        "{ id: audit, kind: prompt, runner: planner, prompt: \"look\", permissions: read-only }",
+    );
+    let config = ConfigLayer {
+        runners: Some(BTreeMap::from([(
+            "planner".into(),
+            vec![
+                RunnerCandidate {
+                    adapter: "plain".into(),
+                    model: "m".into(),
+                    agent: None,
+                },
+                RunnerCandidate {
+                    adapter: "fancy".into(),
+                    model: "m".into(),
+                    agent: None,
+                },
+            ],
+        )])),
+        ..Default::default()
+    };
+
+    let one_can = check_against(&wf, &config, &|adapter| {
+        Some(if adapter.as_str() == "fancy" {
+            only(yunta_core::Capability::PermissionProfiles)
+        } else {
+            yunta_core::Capabilities::default()
+        })
+    });
+    assert!(
+        one_can.is_empty(),
+        "one candidate can, so the run can: {one_can:?}"
+    );
+
+    let neither_can = check_against(&wf, &config, &|_| Some(yunta_core::Capabilities::default()));
+    assert_eq!(neither_can.len(), 1, "{neither_can:?}");
 }

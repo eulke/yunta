@@ -37,6 +37,20 @@ pub enum CheckError {
     #[error("cycle in depends_on: {path}")]
     DependsOnCycle { path: String },
 
+    /// A node asks its adapter for something the adapter does not
+    /// declare and the engine never emulates. Refused before a run is
+    /// born: a session that ignored the profile or the agent it was
+    /// given would run under something nobody asked for.
+    #[error(
+        "node `{node}` declares `{field}`, which needs `{capability}`, and no adapter its \
+         runner resolves to declares it ({adapters}) — pick a runner on an adapter that has it"
+    )]
+    CapabilityUnsupported {
+        node: NodeId,
+        field: String,
+        capability: yunta_core::Capability,
+        adapters: String,
+    },
     #[error("node `{node}` references runner `{runner}`, which `runners:` does not define")]
     UnknownRunner { node: NodeId, runner: RunnerName },
 

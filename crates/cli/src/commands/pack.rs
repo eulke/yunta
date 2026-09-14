@@ -536,7 +536,7 @@ pub async fn new_pack(pack: &PackRef) -> Result<Outcome, CliError> {
             .into_iter()
             .map(|(_, layer)| layer),
     );
-    let errors = yunta_engine::check(&workflow, &config);
+    let errors = yunta_engine::check(&workflow, &config, &super::declared_capabilities);
     if !errors.is_empty() {
         note(problems(
             dir.join(".yunta/workflows/example.yaml").display(),

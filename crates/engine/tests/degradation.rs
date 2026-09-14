@@ -230,3 +230,106 @@ on_finish:
         "a distill commit blocked by a failing hook must be a finding"
     );
 }
+
+/// A fallback the whole run works under is stated once. `edit_hooks` is
+/// the run's condition, not a node's choice: every node with a declared
+/// scope runs unguarded on an adapter that has none, and repeating that
+/// per node says nothing new and buries what does.
+#[tokio::test]
+async fn a_run_on_an_adapter_without_edit_hooks_says_so_once() {
+    let bench = yunta_testkit::Bench::new();
+    let workflow = r#"
+name: two-scoped-nodes
+nodes:
+  - id: first
+    kind: prompt
+    runner: executor
+    prompt: "Do the first thing."
+    scope: ["a.txt"]
+  - id: second
+    kind: prompt
+    runner: executor
+    depends_on: [first]
+    prompt: "Do the second thing."
+    scope: ["b.txt"]
+"#;
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "first" }
+  - outcome: { type: completed, summary: "second" }
+"#;
+    let (terminal, _) = bench.run(workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let stated = degradations_of(&bench, yunta_core::Capability::EditHooks);
+    assert_eq!(
+        stated.len(),
+        1,
+        "two scoped nodes, one adapter that cannot hold them: {stated:?}"
+    );
+    assert_eq!(
+        stated[0],
+        yunta_core::events::Policy::PostCheckOnly.to_string()
+    );
+}
+
+/// A run whose adapter reports no usage cannot count what it spends, so
+/// it neither hands sessions a cap it cannot enforce nor stays silent
+/// about the cap it was given.
+#[tokio::test]
+async fn a_run_on_an_adapter_without_usage_reporting_says_it_has_no_token_budget() {
+    let bench = yunta_testkit::Bench::new();
+    let workflow = r#"
+name: capped
+nodes:
+  - id: only
+    kind: prompt
+    runner: executor
+    prompt: "Do the thing."
+"#;
+    let config = format!("{}\nlimits:\n  max_tokens_per_run: 100000\n", CONFIG);
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "done" }
+"#;
+    let (terminal, _) = bench.run_with_config(workflow, fixture, &config).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let stated = degradations_of(&bench, yunta_core::Capability::UsageReporting);
+    assert_eq!(stated.len(), 1, "{stated:?}");
+    assert_eq!(
+        stated[0],
+        yunta_core::events::Policy::NoTokenBudget.to_string()
+    );
+
+    // And the cap it cannot count against never reaches a session.
+    let budgets: Vec<Option<u64>> = bench
+        .mock()
+        .requests_seen()
+        .into_iter()
+        .map(|request| request.budget.max_tokens)
+        .collect();
+    assert_eq!(
+        budgets,
+        vec![None],
+        "a run that cannot count tokens hands out no token cap"
+    );
+}
+
+/// The `policy_applied` of every `capability_degraded` the run recorded
+/// for `capability`, in log order.
+fn degradations_of(
+    bench: &yunta_testkit::Bench,
+    capability: yunta_core::Capability,
+) -> Vec<String> {
+    bench
+        .events()
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Session(yunta_core::events::SessionEvent::CapabilityDegraded(
+                p,
+            ))) if p.capability == capability => Some(p.policy_applied().to_string()),
+            _ => None,
+        })
+        .collect()
+}

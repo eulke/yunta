@@ -41,7 +41,7 @@ pub fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome
         }
     };
 
-    let mut errors = yunta_engine::check(&workflow, &config);
+    let mut errors = yunta_engine::check(&workflow, &config, &super::declared_capabilities);
     // Composition references (`use:`) resolve against the repo catalog
     // under `cwd` (`.yunta/workflows/`), then packs — the same catalog a
     // run's children resolve against at birth.

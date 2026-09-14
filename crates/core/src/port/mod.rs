@@ -7,11 +7,13 @@
 //! the compiler to hold, held by the compiler.
 
 pub mod forge;
+pub mod policy;
 pub mod session;
 
 pub use forge::{
     Forge, ForgeError, PolledGate, PublishRequest, PublishedGate, ReviewComment, ReviewOutcome,
 };
+pub use policy::{absence_of, Absence, POLICY};
 pub use session::{
     Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, Budget, Glob, PermissionProfile,
     ProbeReport, RunToolsEndpoint, SessionRequest,

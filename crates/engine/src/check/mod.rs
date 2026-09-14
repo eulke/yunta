@@ -23,6 +23,7 @@
 //! the two entries that run them all and the shared re-exports each family
 //! reads through `use super::*`.
 
+mod capabilities;
 mod declarations;
 mod error;
 mod gates;
@@ -69,7 +70,11 @@ pub(crate) static DEFAULTS: NodeId = NodeId::from_static("defaults");
 /// checked and every violation reported — not just the first one (same
 /// spirit as the tasks document: whoever writes this by hand corrects
 /// once, not once per `yunta check` run).
-pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
+pub fn check(
+    workflow: &Workflow,
+    config: &ConfigLayer,
+    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<yunta_core::Capabilities>,
+) -> Vec<CheckError> {
     // `context: [{ artifact }]` creates an implicit `depends_on` edge
     // — expanded here, on this function's own clone, so cycle detection
     // below sees exactly the graph a real run would build (`build_manifest`
@@ -90,6 +95,10 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     crate::manifest::expand_runner_fanout(&mut workflow);
     crate::manifest::expand_implicit_dependencies(&mut workflow);
     let workflow = &workflow;
+    // What a node asks of its adapter, checked against what this binary
+    // built. `permissions:` and `agent:` have no fallback — refusing
+    // here is the whole of that policy.
+    capabilities::check_adapter_capabilities(workflow, config, declared, &mut errors);
 
     // Global, not per-group: replay derives node state from one flat
     // NodeId -> NodeState map, so a `parallel` child's id colliding
