@@ -805,7 +805,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | 0-02 | corpus des-corrompido (Contrato, rfc-0001, rfc-0002, rfc-0003) | — | cerrado(d9306bf) |
 | 0-03 | ratchets `banned_vocabulary` y `tense_markers` sembrados | — | cerrado(8edcdeb) |
 | 1-01 | `core::port` + `core::process`; engine sin `yunta-adapters`; test de frontera | P1 | cerrado(38f99dc) |
-| 1-02 | `MockFixture::parse(yaml, &RunPaths)`; `commands/test.rs` y `Bench` lo usan | 1-01 | pendiente |
+| 1-02 | `MockFixture::parse(yaml, &RunPaths)`; `commands/test.rs` y `Bench` lo usan | 1-01 | cerrado(874ea82) |
 | 1-03 | `testkit-core`; `core` y `adapters` lo enlazan; `testkit::adapter` | 1-01 | pendiente |
 | 1-04 | registro de adapters derivado en `refuse_unrunnable`, `doctor`, `init` | 1-01 | pendiente |
 | 2-01 | dominios `run` `node` `session` `tasks` `scope` `findings` `artifacts` `gates` `children` con `kinds`/`payloads`/`ledger`/`happening`; `wire.rs`; `events.json` idéntico (37 kinds con `questions_asked`) | P2, 1-01 | pendiente |
