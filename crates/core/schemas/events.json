@@ -298,15 +298,109 @@
       ]
     },
     "ArtifactOrigin": {
-      "description": "How the run came by an artifact.\n\nThe origin is what tells apart an artifact a node produced from one\nthe run was handed, which no hash and no name can: two runs holding\nthe same tasks document differ in whether they planned it or\ninherited it, and every rule about who may replace an artifact reads\nthat difference.",
-      "anyOf": [
+      "description": "Where an artifact came from, as the log spells it: the recorded\norigins and `legacy` are one tagged set on the wire, while in Rust a\nfresh acceptance can only name a [`RecordedOrigin`]. `serde` moves\nbetween the two here, so the type the engine holds is not shaped by\nthe file it is written to.",
+      "oneOf": [
         {
-          "description": "Where the run says the artifact came from.",
-          "$ref": "#/$defs/RecordedOrigin"
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "submitted"
+            }
+          },
+          "required": [
+            "kind"
+          ]
         },
         {
-          "description": "A log that recorded the artifact without saying where it came\nfrom — every `artifact_written` there is. The honest origin of a\nfact stated before origins were: the run held it, and the log\ndoes not say how.\n\nOnly the fold over such a log produces it: everything a run\nrecords today is a [`RecordedOrigin`], and the split is what\nmakes the other answer unreachable from a constructor.",
-          "$ref": "#/$defs/Unrecorded"
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "ingested"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "derived"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "answered"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "input": {
+              "$ref": "#/$defs/InputName"
+            },
+            "kind": {
+              "type": "string",
+              "const": "input"
+            }
+          },
+          "required": [
+            "kind",
+            "input"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "inherited"
+            },
+            "producer": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NodeId"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "run": {
+              "$ref": "#/$defs/RunId"
+            }
+          },
+          "required": [
+            "kind",
+            "run"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "legacy"
+            }
+          },
+          "required": [
+            "kind"
+          ]
         }
       ]
     },
@@ -959,7 +1053,7 @@
       ]
     },
     "EventPayload": {
-      "description": "All 37 event kinds, internally tagged by `kind`.",
+      "description": "All 38 event kinds, internally tagged by `kind`.",
       "oneOf": [
         {
           "type": "object",
@@ -2179,107 +2273,6 @@
         "tokens_used"
       ]
     },
-    "RecordedOrigin": {
-      "description": "Where a run says one of its artifacts came from. The closed set a\nfresh acceptance can state.",
-      "oneOf": [
-        {
-          "description": "A session handed the whole document over through its submission\ntool.",
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "submitted"
-            }
-          },
-          "required": [
-            "kind"
-          ]
-        },
-        {
-          "description": "A command node wrote the file and the engine took it as declared.",
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "ingested"
-            }
-          },
-          "required": [
-            "kind"
-          ]
-        },
-        {
-          "description": "The engine derived the document from the log itself, as it does\nfor a findings artifact.",
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "derived"
-            }
-          },
-          "required": [
-            "kind"
-          ]
-        },
-        {
-          "description": "The answers to a questions artifact.",
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "answered"
-            }
-          },
-          "required": [
-            "kind"
-          ]
-        },
-        {
-          "description": "A `type: document` input, named by the input it came in as.",
-          "type": "object",
-          "properties": {
-            "input": {
-              "$ref": "#/$defs/InputName"
-            },
-            "kind": {
-              "type": "string",
-              "const": "input"
-            }
-          },
-          "required": [
-            "kind",
-            "input"
-          ]
-        },
-        {
-          "description": "Another run's artifact: a mount, a child's output, a promotion.\n`producer` is the node that produced it there, absent when that\nrun acquired it without a node either.",
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "inherited"
-            },
-            "producer": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/NodeId"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "run": {
-              "$ref": "#/$defs/RunId"
-            }
-          },
-          "required": [
-            "kind",
-            "run"
-          ]
-        }
-      ]
-    },
     "Report": {
       "description": "Every problem one document has, reported together.\n\nCollecting them is not a convenience: a reader who corrects one\nproblem per round pays a round per problem, and a writer who hears\none rule at a time rewrites the document once per rule.",
       "type": "object",
@@ -2910,23 +2903,6 @@
       },
       "required": [
         "digest"
-      ]
-    },
-    "Unrecorded": {
-      "description": "What an origin nobody recorded looks like on the wire: the tag the\nfold writes for an `artifact_written` that said nothing.",
-      "oneOf": [
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "const": "legacy"
-            }
-          },
-          "required": [
-            "kind"
-          ]
-        }
       ]
     },
     "WriteRefusedPayload": {

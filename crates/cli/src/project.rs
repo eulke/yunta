@@ -96,6 +96,7 @@ pub(crate) fn process_env() -> yunta_core::Env {
         home: std::env::var_os("HOME").map(PathBuf::from),
         yunta_home: std::env::var_os("YUNTA_HOME").map(PathBuf::from),
         org_config: std::env::var_os("YUNTA_ORG_CONFIG").map(PathBuf::from),
+        fence_var: std::env::var(yunta_core::fence::ENV_VAR).ok(),
         subprocess_vars: Vec::new(),
     }
 }

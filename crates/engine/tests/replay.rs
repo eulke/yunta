@@ -486,7 +486,7 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
     assert_eq!(identities(&old), identities(&new));
     assert_eq!(
         old.artifacts.every().next().unwrap().origin,
-        ArtifactOrigin::Legacy(yunta_core::events::Unrecorded::Legacy),
+        ArtifactOrigin::Legacy,
         "the one thing an old log cannot state is how the run came by it"
     );
 }

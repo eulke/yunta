@@ -202,8 +202,7 @@ impl std::fmt::Display for ArtifactId {
 /// the same tasks document differ in whether they planned it or
 /// inherited it, and every rule about who may replace an artifact reads
 /// that difference.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(untagged)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactOrigin {
     /// Where the run says the artifact came from.
     Recorded(RecordedOrigin),
@@ -214,8 +213,10 @@ pub enum ArtifactOrigin {
     ///
     /// Only the fold over such a log produces it: everything a run
     /// records today is a [`RecordedOrigin`], and the split is what
-    /// makes the other answer unreachable from a constructor.
-    Legacy(Unrecorded),
+    /// makes the other answer unreachable from a constructor. On the
+    /// wire it is one more `kind`, `legacy`, beside the recorded ones
+    /// (`events::wire::ArtifactOriginWire`).
+    Legacy,
 }
 
 impl From<RecordedOrigin> for ArtifactOrigin {
@@ -234,9 +235,10 @@ impl PartialEq<RecordedOrigin> for ArtifactOrigin {
 }
 
 /// Where a run says one of its artifacts came from. The closed set a
-/// fresh acceptance can state.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+/// fresh acceptance can state. Its spelling on the log is
+/// `events::wire::ArtifactOriginWire`'s, which is where every persisted
+/// shape is written down.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordedOrigin {
     /// A session handed the whole document over through its submission
     /// tool.
@@ -255,15 +257,6 @@ pub enum RecordedOrigin {
     /// run acquired it without a node either.
     Inherited {
         run: RunId,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
         producer: Option<NodeId>,
     },
-}
-
-/// What an origin nobody recorded looks like on the wire: the tag the
-/// fold writes for an `artifact_written` that said nothing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Unrecorded {
-    Legacy,
 }

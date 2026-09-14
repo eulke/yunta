@@ -48,6 +48,11 @@ pub struct Env {
     pub yunta_home: Option<PathBuf>,
     /// `$YUNTA_ORG_CONFIG` — the org config path override.
     pub org_config: Option<PathBuf>,
+    /// `$YUNTA_FENCE` — the fence a session's CLI was handed, read back
+    /// by the hook it runs (`crate::fence::ENV_VAR`). Set only in the
+    /// environment an adapter built for its child; every other
+    /// invocation sees `None`.
+    pub fence_var: Option<String>,
     /// Variables layered onto every subprocess the run spawns (bash nodes,
     /// hooks, executors) on top of the inherited environment — a test
     /// prepends a stub directory to `PATH` here instead of mutating the

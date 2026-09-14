@@ -143,7 +143,7 @@ fn a_written_artifact_with_a_kind_folds_as_that_interpreted_identity() {
         .latest(&interpreted(ArtifactKind::Tasks), None)
         .expect("an earlier log still names its tasks document");
     assert_eq!(stood.content_hash, hash("artifacts/plan.yaml"));
-    assert!(matches!(stood.origin, ArtifactOrigin::Legacy(_)));
+    assert!(stood.origin == ArtifactOrigin::Legacy);
 }
 
 #[test]

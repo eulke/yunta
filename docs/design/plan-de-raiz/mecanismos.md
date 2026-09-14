@@ -558,7 +558,16 @@ pub struct VerifiedArtifact { …, pub staged: Option<StagedHash> }   // el hash
 kind; `questions_exec.rs:122-143` lo usa); `core/src/questions/` (shape y
 `RULES` de `answers`); `engine/src/run/node_artifacts.rs:340-349`,
 `questions_exec.rs:69,74,85` (`QuestionId`); `core/src/findings/mod.rs:40`,
-`findings/rules.rs:26-29`; `core/src/diagnostic/{problem,artifact}.rs:171,91,190`;
+`findings/rules.rs:26-29` (la regla `EmptyLocation` y su `RuleCode` se borran:
+un `Location` no puede estar vacío, y lo que la puerta rechaza es `parse` en
+`findings[i].location`, como `tasks[i].id` hoy — `compatibility.md` §problem);
+`engine/src/run/ctx.rs::engine_finding` (toma `Location`, así el engine no
+escribe lo que la puerta rechaza), `engine/src/run/loop_exec/escalate.rs:110,296`
+(la denegación ubica en el primer path pedido; la lista entera ya va en
+`detail`), `engine/src/scope.rs::Breach::location`, los cuatro findings de
+`exec.rs:228,272` y `steps.rs:83,96` que hoy escriben paths absolutos;
+`core/src/tasks/mod.rs:52` (el doc de `Task` dice que `id` no se valida al
+parsear y `TaskId` lo valida); `core/src/diagnostic/{problem,artifact}.rs:171,91,190`;
 `engine/src/receipt/mod.rs` (`DiagnosticCount.code: DiagnosticCode`);
 `core/src/workflow/artifacts.rs:99-102` (`deny_unknown_fields` por
 variante); `core/src/questions/mod.rs:56,64` (deny); `core/src/config/mod.rs:30-33`
@@ -573,7 +582,12 @@ variante); `core/src/questions/mod.rs:56,64` (deny); `core/src/config/mod.rs:30-
 `a_fresh_acceptance_cannot_be_legacy` (core/tests/artifact_ledger.rs — por
 tipo, se prueba que `RecordedOrigin` no tiene `Legacy`);
 `every_diagnostic_code_is_published` (core/tests/vocabulary.rs contra
-`compatibility.md`).
+`compatibility.md`);
+`a_location_that_does_not_read_is_a_parse_problem_at_its_path` (core/tests/shape.rs:
+un `location` vacío o que sube con `..` es `parse` en `findings[0].location`, nunca
+una regla); `an_engine_finding_locates_where_the_door_can_read`
+(engine/tests/degradation.rs: cada `engine_finding` del run, derivado por
+`derive_findings`, vuelve a leerse por `shape::accept`).
 
 **Cierra.** AR-D8, AR-D9, AR-D11, AR-D15, AR-D16, AR-D17, AR-D18, CO-1, CO-2, CO-3, CO-4, CO-12, CO-18, CO-19, DO-D8 (con P4).
 
@@ -613,7 +627,10 @@ queda para lo que necesita config/adapters); `engine/src/run_tools/findings.rs:5
 (`answerer`); `catalog.rs:39,61,100,109,128`, `session.rs:171-179`,
 `notice.rs:119` (`RunTool`); los 15 `manifest.yaml` + `progress.md` +
 `task-worktrees` + `scratch/sessions` + `"artifacts"` en `closing.rs:288`;
-`engine/src/run/steps.rs:256-272` (por `canonical::derive_findings`).
+`engine/src/run/steps.rs:256-272` (por `canonical::derive_findings(events) ->
+Result<FindingsFile, DeriveError>`: un finding del log cuya `location` no lee es
+`RunError::Broken` que lo nombra — con las dos puertas tipadas (M12) sólo un log
+editado a mano llega ahí, y por D141 no hay lector viejo que deber).
 
 **Tests.** `a_workflow_cannot_be_obtained_without_its_rules`
 (core/tests/workflow.rs: un workflow con id duplicado no parsea por `read`);

@@ -412,8 +412,8 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
 /// Runs the hook and leaves the CLI that called it exactly what its own
 /// protocol expects: the streams, and the exit code as the outcome.
 ///
-/// Reading stdin and the environment happens here, at the shell's edge,
-/// and the judgement itself is a pure function below it.
+/// Reading stdin happens here and the environment at the shell's one
+/// boundary; the judgement itself is a pure function below both.
 fn fence_hook(adapter: &yunta_core::AdapterId) -> Result<Outcome, CliError> {
     use std::io::{Read, Write};
 
@@ -422,9 +422,10 @@ fn fence_hook(adapter: &yunta_core::AdapterId) -> Result<Outcome, CliError> {
         CliError::msg(format!("the fence hook cannot read its call: {source}"))
     })?;
     let built = commands::built_adapter(adapter);
+    let env = crate::project::process_env();
     let reply = commands::fence::run(
         built.as_ref().and_then(|built| built.fence_codec()),
-        std::env::var(yunta_core::fence::ENV_VAR).ok().as_deref(),
+        env.fence_var.as_deref(),
         &stdin,
     );
     // A hook that cannot deliver its answer has not answered, and the
