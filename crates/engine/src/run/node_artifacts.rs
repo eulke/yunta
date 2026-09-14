@@ -9,7 +9,7 @@
 
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{ArtifactId, EventPayload, Failure, RecordedOrigin, TokenUsage};
-use yunta_core::{ArtifactSpec, ContentHash, Node, NodeKind, QuestionId, RunId};
+use yunta_core::{ArtifactSpec, Node, NodeKind, QuestionId, RunId};
 
 use crate::artifacts::{
     accept, answered_by_the_log, canonical, interpreted, ArtifactContent, RunArtifacts,
@@ -354,14 +354,13 @@ async fn record_content(
 /// asking happens in ONE place afterwards, the scheduler's own
 /// `AskQuestions` step, which serves the first invocation and every
 /// resume through the identical path.
-pub(super) fn asked(verified: &[VerifiedArtifact]) -> Option<(ContentHash, Vec<QuestionId>)> {
+pub(super) fn asked(verified: &[VerifiedArtifact]) -> Option<Vec<QuestionId>> {
     verified
         .iter()
         .find_map(|artifact| match &artifact.content {
-            ArtifactContent::Questions(questions) => Some((
-                artifact.content_hash.clone(),
-                questions.iter().map(|q| q.id.clone()).collect(),
-            )),
+            ArtifactContent::Questions(questions) => {
+                Some(questions.iter().map(|q| q.id.clone()).collect())
+            }
             _ => None,
         })
 }

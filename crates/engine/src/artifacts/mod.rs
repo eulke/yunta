@@ -39,7 +39,7 @@ use store::ObjectStore;
 use yunta_core::events::ArtifactEvent;
 
 pub(crate) use canonical::{canonical, canonical_document, derive_findings, submit, SubmitError};
-pub use ingest::{close_artifacts, ArtifactContent, VerifiedArtifact};
+pub use ingest::{close_artifacts, ArtifactContent, StagedHash, VerifiedArtifact};
 pub(crate) use ingest::{held_document, interpreted, verify_one};
 pub use integrity::{ArtifactFault, ArtifactIntegrity};
 pub use store::ObjectError;

@@ -47,13 +47,47 @@ pub struct VerifiedArtifact {
     /// or written to — a node's own staging for a file on its way in,
     /// the `artifacts/` view for one the run already holds.
     pub path: PathBuf,
-    /// The bytes as they were read or written, which is what
-    /// `content_hash` is the hash of. What the run stores is their
-    /// canonical rendering, which differs whenever a node wrote an
-    /// interpreted document in its own spelling.
+    /// The bytes as they were read or written. What the run stores is
+    /// their canonical rendering, which differs whenever a node wrote an
+    /// interpreted document in its own spelling — so the hash of what
+    /// the run holds comes from [`accept`](super::accept), never from
+    /// here.
     pub bytes: Vec<u8>,
-    pub content_hash: ContentHash,
+    /// The hash of the file this node staged, for the one construction
+    /// that read a file. `None` for a document that was never one: an
+    /// artifact the run already holds, a document a session submitted,
+    /// one the engine derived.
+    pub staged: Option<StagedHash>,
     pub content: ArtifactContent,
+}
+
+/// The hash of a file as a node staged it.
+///
+/// Never the hash the run's own store answers for. What the run stores
+/// for an interpreted document is the canonical rendering of what those
+/// bytes parsed as, so a node that wrote a tasks document in its own
+/// spelling staged one hash and the run holds another — and a reader
+/// that compared them would call one of the two wrong. The store's
+/// answer is [`accept`](super::accept)'s to give; this one says what
+/// was on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedHash(ContentHash);
+
+impl StagedHash {
+    /// The hash of the bytes a node staged.
+    pub fn of(bytes: &[u8]) -> Self {
+        StagedHash(sha256_hex(bytes))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl std::fmt::Display for StagedHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// What a declared `kind:` turned the bytes into. `Opaque` is what "the
@@ -189,7 +223,7 @@ pub(crate) async fn verify_one(
     Ok(VerifiedArtifact {
         artifact,
         path: relative,
-        content_hash: sha256_hex(&bytes),
+        staged: Some(StagedHash::of(&bytes)),
         bytes,
         content,
     })
@@ -214,7 +248,7 @@ pub(crate) fn interpreted(
     Ok(VerifiedArtifact {
         artifact,
         path,
-        content_hash: sha256_hex(bytes),
+        staged: None,
         bytes: bytes.to_vec(),
         content,
     })

@@ -207,8 +207,13 @@ async fn an_opaque_artifact_is_verified_by_existence_and_hash_never_by_format() 
         }
     );
     assert_eq!(
-        verified[0].content_hash,
-        sha256_hex("{{{ not : parseable ][".as_bytes())
+        verified[0]
+            .staged
+            .as_ref()
+            .map(|staged| staged.to_string())
+            .as_deref(),
+        Some(sha256_hex("{{{ not : parseable ][".as_bytes()).as_str()),
+        "the file this node staged, which is what a close read"
     );
     assert_eq!(verified[0].content, ArtifactContent::Opaque);
     assert_eq!(verified[0].content.kind(), None);

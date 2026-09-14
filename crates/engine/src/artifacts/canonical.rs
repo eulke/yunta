@@ -19,9 +19,7 @@ use yunta_core::diagnostic::{
     ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Problem, Report, Subject,
 };
 use yunta_core::events::{ArtifactId, Finding};
-use yunta_core::{
-    sha256_hex, ArtifactKind, ArtifactSpec, FindingsFile, NodeId, QuestionsFile, TasksFile,
-};
+use yunta_core::{ArtifactKind, ArtifactSpec, FindingsFile, NodeId, QuestionsFile, TasksFile};
 
 use super::ingest::{interpret, ArtifactContent, VerifiedArtifact};
 
@@ -196,7 +194,7 @@ fn rendered_document(
     Ok(VerifiedArtifact {
         artifact,
         path: PathBuf::from(path),
-        content_hash: sha256_hex(&bytes),
+        staged: None,
         bytes,
         content,
     })
@@ -220,7 +218,7 @@ pub(crate) fn canonical_document(
     let document = VerifiedArtifact {
         artifact: ArtifactId::Interpreted { kind },
         path: PathBuf::from(path),
-        content_hash: sha256_hex(bytes),
+        staged: None,
         bytes: bytes.to_vec(),
         content,
     };

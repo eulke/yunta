@@ -23,7 +23,9 @@ use super::hooks_exec::{effective_hooks, run_hook, HookRun};
 use super::node_artifacts::{acquire_from_child, asked, derive_findings, record_artifacts};
 use super::node_exec::{render_artifact_names, NodeEnd};
 use super::{RunCtx, RunError};
+use yunta_core::events::ArtifactId;
 use yunta_core::events::{GateEvent, NodeEvent};
+use yunta_core::{ArtifactKind, ContentHash, NodeId};
 
 /// The child run a `kind: workflow` node closes on: what it produced is
 /// what that node produced, and the run's log is where that is stated.
@@ -169,7 +171,13 @@ pub(super) async fn close_node(
     // of a terminal is what makes the wait a wait rather than a failure
     // read as one.
     match asked(verified) {
-        Some((questions_hash, questions)) => {
+        Some(questions) => {
+            // The hash the fact names is the one the run's own store
+            // answers for, read back off the log rather than taken from
+            // the bytes the close happened to hold: the round that
+            // follows resolves the same acceptance, and one number that
+            // came from two places is one that can disagree with itself.
+            let questions_hash = held_questions(ctx, &node.id).await?;
             match QuestionsAskedPayload::new(questions_hash, questions, tokens) {
                 Some(payload) => {
                     ctx.emit(
@@ -195,6 +203,26 @@ pub(super) async fn close_node(
         }
         None => finish_node(ctx, node, close.outcome, tokens).await,
     }
+}
+
+/// The hash the run holds `node`'s questions document under.
+///
+/// Read from the log, which is the run's only answer to what it holds:
+/// the round that answers these questions resolves the same acceptance
+/// and compares the two, so both have to come from there.
+async fn held_questions(ctx: &RunCtx<'_>, node: &NodeId) -> Result<ContentHash, RunError> {
+    let events = ctx.load_events().await?;
+    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
+    held.held(
+        &ArtifactId::Interpreted {
+            kind: ArtifactKind::Questions,
+        },
+        Some(node),
+    )
+    .map(|found| found.content_hash.clone())
+    .ok_or_else(|| RunError::Broken {
+        diagnostic: format!("node `{node}` handed over a questions document the run does not hold"),
+    })
 }
 
 /// The one place `node_finished` is written.

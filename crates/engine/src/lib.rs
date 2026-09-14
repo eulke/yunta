@@ -78,7 +78,7 @@ mod worktree;
 pub use answers::{AnswersError, Recorded as AnswersRecorded, Reply as AnswersReply};
 pub use artifacts::store::{ObjectError, ObjectStore};
 pub use artifacts::{
-    close_artifacts, AcceptError, ArtifactContent, ArtifactFault, ArtifactIntegrity,
+    close_artifacts, AcceptError, ArtifactContent, ArtifactFault, ArtifactIntegrity, StagedHash,
     VerifiedArtifact,
 };
 pub use catalog::{

@@ -150,20 +150,34 @@ impl SessionTools {
         offered: Result<crate::artifacts::VerifiedArtifact, crate::artifacts::SubmitError>,
     ) -> Result<String, RunToolError> {
         let name = ArtifactId::Interpreted { kind }.view_name();
-        let (outcome, answer, accepted) = match offered {
-            Ok(verified) => (
-                SubmissionOutcome::Accepted {
-                    content_hash: verified.content_hash.clone(),
-                },
-                Ok(format!("{name} — accepted. {}", read_as(&verified))),
-                Some(verified),
-            ),
+        // The acceptance comes first, because the hash the submission
+        // names is the one the run's own store answers for — a session
+        // handed bytes over, and what the run holds for them is
+        // `accept`'s to say. A store that cannot take them is a log that
+        // cannot take either fact.
+        let (outcome, answer) = match offered {
+            Ok(verified) => {
+                let accepted = accept(
+                    &self.log(),
+                    &self.host.run_dir,
+                    Some(&self.node),
+                    verified.artifact.clone(),
+                    &verified.bytes,
+                    RecordedOrigin::Submitted,
+                )
+                .await?;
+                (
+                    SubmissionOutcome::Accepted {
+                        content_hash: accepted.content_hash,
+                    },
+                    Ok(format!("{name} — accepted. {}", read_as(&verified))),
+                )
+            }
             Err(crate::artifacts::SubmitError::Refused(report)) => {
                 let text = submission_refusal(&report, &name);
                 (
                     SubmissionOutcome::Refused { report },
                     Err(RunToolError::Refused { text }),
-                    None,
                 )
             }
             Err(other) => {
@@ -180,17 +194,6 @@ impl SessionTools {
             },
         )))
         .await?;
-        if let Some(verified) = accepted {
-            accept(
-                &self.log(),
-                &self.host.run_dir,
-                Some(&self.node),
-                verified.artifact.clone(),
-                &verified.bytes,
-                RecordedOrigin::Submitted,
-            )
-            .await?;
-        }
         answer
     }
 
