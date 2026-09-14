@@ -1027,6 +1027,94 @@ escrito es el del commit que cierra.
 
 **Pendiente de decisión.** Reescribir §0.9 con la forma elegida.
 
+### L-07 · 2026-09-14 · §4 · un nodo con preguntas contestadas cierra debiendo sus artifacts
+
+**Evidencia.** El pack de referencia no corre de punta a punta. En `fragua`,
+`grill` declara `artifacts: produces: [questions, brief.md]` y su prompt dice
+"Once answered, write the brief"
+(`packs/fragua/.yunta/workflows/build-feature.yaml`). El run muere un nodo
+después, citando un artifact que otro nodo debía:
+
+```
+run 01M2EPK3DAQE9X4QJ1GV5F76Y8: paused — node `plan` failed: context
+`artifact:grill/brief.md` on node `plan`: the artifact `brief.md` (declared by
+node `grill`) was never produced — this run's log holds no such artifact
+```
+
+El engine sí lo había visto. El log de `grill`, en orden:
+
+| seq | evento |
+|---|---|
+| 7 | `artifact_accepted { Interpreted { kind: Questions } }` |
+| 9 | `node_failed { Artifacts [ File { path: ".../grill/brief.md", Missing } ] }` |
+| 10 | `node_started { attempt: 2 }` |
+| 12 | `questions_answered` |
+| 13 | `node_finished { outcome: "questions answered" }` |
+
+Dos mecanismos convierten ese `node_failed` verdadero en un `finished` falso:
+
+1. `engine/src/replay.rs:242` deriva `Waiting` de **cualquier** `node_failed`
+   mientras el nodo tenga preguntas sin contestar. Su propio comentario declara
+   la intención —"a node that failed *because its questions are unanswered*"—
+   pero la condición escrita es sólo que el log tenga un artifact `questions`
+   aceptado (`replay.rs:185-196`). El fallo por `brief.md` faltante desaparece
+   del estado derivado.
+2. `engine/src/run/questions_exec.rs:106-167` cierra el nodo por su cuenta:
+   emite `node_started`, acepta las respuestas y emite `node_finished` sin pasar
+   por `node_close::close_node`. No corren los hooks `after`, no se audita el
+   `scope`, no se llama `close_artifacts` y no se registra artifact alguno. El
+   nodo termina debiendo todo lo que declaró menos `questions`.
+
+Reproducción, que da ese terminal palabra por palabra: un workflow con `grill`
+(`produces: [questions, brief.md]`) y `plan`
+(`context: [{ artifact: { node: grill, name: brief.md } }]`), y un fixture cuya
+sesión de `grill` sólo hace `yunta_submit_questions`. Respondiendo con
+`ScriptedAnswers`, `state.nodes["grill"]` queda
+`Finished { outcome: "questions answered" }`.
+
+**Qué no lo arregla.** Ningún ítem de §4 ni mecanismo M01–M25 toca esto. El
+plan nombra `questions_exec.rs` sólo por líneas —el constructor de
+`NodeStarted` (M03), el `attempt` desde `NodeLedger` (M04), el span (M13), los
+ids tipados (M15)— y ninguna de esas filas cambia qué verifica la ronda de
+preguntas ni qué deriva el replay de un `node_failed`. Es un defecto de
+comportamiento del mismo género que W-01…W-10, sin fila propia.
+
+**El tercer problema, que es de diseño.** Corregidos (1) y (2), el run pararía
+en `grill` diciendo que falta `brief.md`: correcto, y todavía inútil. Al agente
+se le pidió escribir el brief *una vez contestadas* las preguntas, y nadie le da
+nunca las respuestas ni un turno para escribirlo. O un nodo con preguntas debe
+una segunda sesión, o un nodo no puede declarar preguntas y además un artifact
+que sólo puede escribir después de que las contesten.
+
+**Alternativas.**
+
+1. **Cerrar la ronda por `close_node`.** `execute_ask` deja de emitir
+   `node_finished` y cierra como todos los demás kinds; la derivación de
+   `Waiting` exige que el `node_failed` sea el de preguntas pendientes —un
+   `Failure` tipado, no la presencia del artifact. Arregla (1) y (2) y deja el
+   (3) a la vista: `fragua` falla en `grill` con su propio diagnóstico en vez de
+   en `plan` con uno prestado. Exige además corregir el workflow del pack.
+2. **Lo anterior más una segunda sesión.** Contestadas las preguntas, el nodo
+   vuelve a despachar con las respuestas en su contexto y cierra por
+   `close_node` con lo que esa sesión produjo. Es lo que el prompt de `fragua`
+   supone, y hace que un nodo interactivo signifique "preguntá, después
+   trabajá". Cuesta un mecanismo que el plan no nombra: qué contexto lleva esa
+   segunda sesión, qué `attempt` es, qué pasa si vuelve a preguntar.
+3. **Prohibirlo al parsear.** Un nodo que declara `questions` no declara ningún
+   otro artifact, y `yunta check` lo rechaza nombrando los dos. Es la lectura
+   "parsear es validar", no toca el engine, y obliga a partir `grill` en dos
+   nodos. Invalida workflows que hoy parsean.
+4. **Dejarlo.** No: es el único camino por el que el pack de referencia llega a
+   `implement`, y hoy no llega.
+
+**Recomendación.** La 1 como ítem W del tablero: es un bug de comportamiento
+con fix acotado, test en rojo primero y el mismo género que los otros ocho. El
+(3) del diagnóstico va aparte, como decisión P10 con su ADR: si un nodo con
+preguntas debe una segunda sesión (alternativa 2) o si declarar preguntas
+excluye declarar otra cosa (alternativa 3). Lo primero devuelve el diagnóstico
+verdadero; lo segundo decide qué significa `interactive: true`, y eso no lo fija
+ningún documento del repo.
+
 ---
 
 ## 12. Índice: cada defecto, su mecanismo
