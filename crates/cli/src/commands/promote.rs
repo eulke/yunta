@@ -16,6 +16,7 @@ use yunta_core::{IdSource, Manifest, RunId, SystemClock};
 use yunta_engine::{HumanInteraction, RunObserver, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_storage::AsyncStorage;
 
+use crate::error::CliError;
 use crate::project::Project;
 
 /// The CLI-side environment a promotion chain runs in — everything
@@ -61,7 +62,7 @@ pub(crate) async fn drive_promotions(
     mut manifest: Manifest,
     mut worktree: PathBuf,
     mut report: RunReport,
-) -> Result<(RunId, Manifest, PathBuf, RunReport), String> {
+) -> Result<(RunId, Manifest, PathBuf, RunReport), CliError> {
     while let RunTerminal::Promoted { suggested_mode } = &report.terminal {
         let suggested_mode = suggested_mode.clone();
         // The creation mechanics live in the engine (shared with
@@ -88,8 +89,7 @@ pub(crate) async fn drive_promotions(
                 supervision: yunta_engine::process::Supervision::none(),
             },
         )
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
         let ambient = crate::project::process_env();
         let successor_report = yunta_engine::execute_run(yunta_engine::RunEnv {
             run_id: &successor.run_id,
@@ -110,8 +110,7 @@ pub(crate) async fn drive_promotions(
             observer: env.observer.clone(),
             fence_hook: Some(crate::context::fence_hook()),
         })
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
 
         run_id = successor.run_id;
         manifest = successor.manifest;

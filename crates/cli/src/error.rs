@@ -82,6 +82,62 @@ pub enum CliError {
     #[error(transparent)]
     ResolveGate(#[from] yunta_engine::ResolveGateError),
 
+    /// A decision was put to a run that is not parked at one. The
+    /// engine's sentence says what is true of the run; which command
+    /// shows a reader where it actually is is this border's word, so it
+    /// is added here — once, for the command and the control plane
+    /// alike.
+    #[error("{refusal} — `{}` shows where it is", crate::commands::advice::status(.run_id))]
+    NotPaused {
+        run_id: RunId,
+        #[source]
+        refusal: yunta_engine::ResolveGateError,
+    },
+
+    /// A decision was put to a run whose pause reconstructs no menu.
+    /// Those pauses are settled where they were raised — a budget, a
+    /// scope, an answers file, a review on a forge — and the run handed
+    /// back, which is what the advice names.
+    #[error("{refusal} — settle it where it was raised, then `{}`", crate::commands::advice::resume(.run_id))]
+    NoMenu {
+        run_id: RunId,
+        #[source]
+        refusal: yunta_engine::ResolveGateError,
+    },
+
+    /// A mock fixture a `yunta test` case or `yunta run --fixture`
+    /// named does not parse. The path leads the sentence, because a
+    /// person running several cases needs to know which fixture broke
+    /// before they need to know how.
+    #[error("fixture `{}`: {source}", .path.display())]
+    FixtureRefused {
+        path: std::path::PathBuf,
+        #[source]
+        source: yunta_adapters::FixtureError,
+    },
+
+    /// A decision was recorded and the run could not be handed back to
+    /// a detached `yunta resume`. The sentence leads with what did
+    /// happen, because a reader who takes this for a refusal answers
+    /// the same gate twice.
+    #[error("decision recorded, but {source}")]
+    GateRecordedNotResumed {
+        #[source]
+        source: crate::commands::DetachedResumeError,
+    },
+
+    /// A document kind this binary does not publish. The sentence
+    /// lists the kinds that exist, so `yunta schema` and the
+    /// `document_shape` tool answer the same mistake the same way.
+    #[error(transparent)]
+    UnknownArtifactKind(#[from] yunta_core::UnknownArtifactKind),
+
+    /// A value that has to be an identifier and is not — a run id, an
+    /// adapter, a mode, a gate option, a responder — wherever one is
+    /// read off an argument.
+    #[error(transparent)]
+    InvalidId(#[from] yunta_core::InvalidId),
+
     #[error(transparent)]
     Worktree(#[from] yunta_engine::WorktreeError),
 
@@ -91,6 +147,11 @@ pub enum CliError {
     /// A condition specific to one command, already phrased as an
     /// actionable message at the point it is detected — the CLI's own
     /// border for something no shared type names.
+    ///
+    /// Exceptional, and meant to stay that way: a failure two commands
+    /// can reach, or one a caller has to tell apart from another, earns
+    /// an arm of its own. A `String` here is a failure that has exactly
+    /// one site and nothing to match on.
     #[error("{0}")]
     Message(String),
 }
@@ -108,6 +169,28 @@ impl CliError {
     /// A one-off actionable message no shared error type names.
     pub fn msg(message: impl Into<String>) -> Self {
         CliError::Message(message.into())
+    }
+
+    /// An engine refusal to record a decision, in this border's
+    /// vocabulary.
+    ///
+    /// Two of them describe the state the run is in rather than
+    /// anything about the request, and a reader told the run cannot be
+    /// answered wants to know what to do instead. Which command does
+    /// that is the CLI's word, not the engine's, so it is said here —
+    /// and every other refusal already names what to change (an option
+    /// off the menu lists the ones that are on it) and passes through
+    /// untouched.
+    pub fn gate_refused(run_id: &RunId, refusal: yunta_engine::ResolveGateError) -> Self {
+        let run_id = run_id.clone();
+        match refusal {
+            yunta_engine::ResolveGateError::NotPaused => CliError::NotPaused { run_id, refusal },
+            yunta_engine::ResolveGateError::NothingToResolve => {
+                CliError::NoMenu { run_id, refusal }
+            }
+            yunta_engine::ResolveGateError::UnknownOption { .. }
+            | yunta_engine::ResolveGateError::Storage(_) => refusal.into(),
+        }
     }
 }
 

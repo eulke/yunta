@@ -26,6 +26,7 @@ use yunta_core::process::signal::{signal_process, Signal};
 use yunta_core::{Pid, Responder};
 
 use crate::error::warn;
+use crate::surface::Diagnostics;
 
 mod decision;
 mod field;
@@ -34,11 +35,33 @@ mod keys;
 mod menu;
 
 pub(crate) use decision::decide;
+pub(crate) use field::ask_line;
 pub(crate) use form::answer;
+pub(crate) use menu::{choose, Choice};
 
-/// What Escape does, said wherever a prompt opens: one phrase, so the
-/// gesture reads the same on a menu and on a line being typed.
-pub(crate) const PARKS: &str = "esc parks the run";
+/// What Escape ends a prompt with, which is not the same thing
+/// everywhere: a prompt a run stopped on parks that run, and a prompt
+/// in a command with no run behind it leaves the value the command
+/// worked out on its own. One enum, because the gesture is one gesture
+/// and only its consequence differs — and it is said wherever a prompt
+/// opens, so a person never has to guess which of the two they are in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Escape {
+    /// The run this prompt belongs to parks with its state intact.
+    Parks,
+    /// The value the command detected for itself stands.
+    KeepsDefault,
+}
+
+impl Escape {
+    /// The phrase, as every prompt says it.
+    pub(crate) fn said(self) -> &'static str {
+        match self {
+            Escape::Parks => "esc parks the run",
+            Escape::KeepsDefault => "esc keeps the detected default",
+        }
+    }
+}
 
 /// What marks a line an answer is given on, typed or echoed back, so a
 /// person reads a round as answers under the things that asked for
@@ -127,6 +150,11 @@ pub(crate) type Answered<T> = Result<T, NoAnswer>;
 /// prompt is left mid-read.
 #[derive(Clone)]
 pub(crate) struct Console {
+    /// What Escape ends a prompt on this console with — the console
+    /// knows, because whoever opened it knows whether a run is behind
+    /// it, and every prompt then says the same thing without being
+    /// told.
+    escape: Escape,
     term: Term,
     /// The line discipline the terminal was handed over in — what every
     /// key read turns off for as long as it reads, and what
@@ -155,26 +183,43 @@ impl Console {
     /// Nothing attended at all is the ordinary headless case and passes
     /// without a word. A person at the keyboard whose run has nowhere to
     /// draw is not: the run parks on them, so it says what was missing.
-    pub(crate) fn open() -> Option<Self> {
+    ///
+    /// What it has to say goes out through `diagnostics`, the run's own
+    /// door, rather than straight to stderr: a line written around a
+    /// pinned region lands inside the rows the region is redrawing, and
+    /// this is said while one may still be up. A command with no run to
+    /// draw — `yunta init`, `yunta new` — passes
+    /// [`Diagnostics::none`](crate::surface::Diagnostics::none), which
+    /// is the same door onto nothing.
+    pub(crate) async fn open(diagnostics: &Diagnostics, escape: Escape) -> Option<Self> {
         if !std::io::stdin().is_terminal() {
             return None;
         }
         let term = Term::stderr();
         if !term.is_term() {
-            warn(
-                "nothing was asked here: a prompt draws on stderr, and this run's is \
-                 redirected — the run parks with its state intact; run it again with \
-                 stderr on a terminal to be asked",
-            );
+            diagnostics
+                .raise(
+                    "warning: nothing was asked here: a prompt draws on stderr, and this \
+                     run's is redirected — the run parks with its state intact; run it \
+                     again with stderr on a terminal to be asked",
+                )
+                .await;
             return None;
         }
         let console = Self {
             term,
-            mode: handed_mode(),
+            escape,
+            mode: handed_mode(diagnostics).await,
             hidden: Arc::new(AtomicBool::new(false)),
         };
         *prompted_on() = Some(console.clone());
         Some(console)
+    }
+
+    /// What Escape ends a prompt on this console with, for the line
+    /// every prompt names the keys on.
+    pub(crate) fn escape(&self) -> Escape {
+        self.escape
     }
 
     /// One line, drawn as it is.
@@ -304,15 +349,17 @@ impl Console {
 /// A terminal that will not say what mode it is in is one whose mode
 /// cannot be put back either, so the reader is told once, here, rather
 /// than left to find it out in the shell this run returns to.
-fn handed_mode() -> Option<Termios> {
+async fn handed_mode(diagnostics: &Diagnostics) -> Option<Termios> {
     match tcgetattr(std::io::stdin()) {
         Ok(mode) => Some(mode),
         Err(e) => {
-            warn(format!(
-                "this terminal does not say what mode it is in ({e}) — a prompt this run \
-                 leaves mid-read leaves it as the read left it; run `stty sane` to type \
-                 into your shell again"
-            ));
+            diagnostics
+                .raise(format!(
+                    "warning: this terminal does not say what mode it is in ({e}) — a \
+                     prompt this run leaves mid-read leaves it as the read left it; run \
+                     `stty sane` to type into your shell again"
+                ))
+                .await;
             None
         }
     }
@@ -343,6 +390,7 @@ mod tests {
     fn console() -> Console {
         Console {
             term: Term::stderr(),
+            escape: Escape::Parks,
             mode: None,
             hidden: Arc::new(AtomicBool::new(false)),
         }

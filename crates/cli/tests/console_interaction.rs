@@ -597,3 +597,40 @@ fn a_typed_ctrl_c_stops_the_run_the_prompts_raw_mode_hid_it_from() {
         "a round a person stopped records nothing at all"
     );
 }
+
+#[test]
+fn init_asks_through_the_console_and_honours_escape() {
+    // `yunta init -i` asks on the one line every prompt in this binary
+    // is answered on, so the gestures that answer a run answer this
+    // too: Enter takes what was typed, and Escape — "not me, not now" —
+    // takes the value `init` detected on its own.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    yunta_testkit::init_repo(&repo);
+    let home = root.path().join("state");
+
+    let mut terminal = yunta_on_terminal!(&repo, &home, &["init", "-i"]);
+    terminal.wait_for("project name", "init never asked for a project name");
+    terminal.keys("orchard\r");
+    terminal.wait_for("base branch", "init never asked for a base branch");
+    terminal.keys("\x1b");
+
+    let drawn = terminal.ended();
+    assert!(terminal.ran_to_the_end(), "{drawn}");
+    assert!(
+        drawn.contains("esc keeps the detected default"),
+        "every prompt says what Escape does — and this one has no run to \
+         park, so it says the other thing:\n{drawn}"
+    );
+
+    let config = std::fs::read_to_string(repo.join(".yunta/config.yaml")).unwrap();
+    assert!(
+        config.contains("name: orchard"),
+        "the answer that was typed is what was written:\n{config}"
+    );
+    assert!(
+        config.contains("base_branch: "),
+        "and the one that was declined kept the detected default:\n{config}"
+    );
+}

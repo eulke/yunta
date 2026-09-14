@@ -26,9 +26,9 @@ use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::QuestionsFile;
 use yunta_engine::{HumanInteraction, QuestionsReply};
 
-use crate::ask::{answer, decide, Answered, Console, NoAnswer};
+use crate::ask::{answer, decide, Answered, Console, Escape, NoAnswer};
 use crate::error::{note, warn};
-use crate::surface::Curtain;
+use crate::surface::{Curtain, Diagnostics};
 
 /// The console surface of one invocation, holding what a prompt has to
 /// take its turn with.
@@ -36,6 +36,9 @@ pub struct ConsoleInteraction {
     /// What tells the run's live surface to stand down while a prompt
     /// has the terminal, and to come back when it ends.
     curtain: Curtain,
+    /// The door a line goes out through while the region is still up —
+    /// what opening the console has to say when it cannot open one.
+    diagnostics: Diagnostics,
     /// The run's own cancellation. Stopping a run is not answering it:
     /// a cancelled run stops waiting here, and the engine unwinds it the
     /// way every other cancellation path unwinds it.
@@ -43,10 +46,14 @@ pub struct ConsoleInteraction {
 }
 
 impl ConsoleInteraction {
-    /// The surface for a run drawn under `curtain` and stopped by
-    /// `cancel`.
-    pub fn new(curtain: Curtain, cancel: CancellationToken) -> Self {
-        Self { curtain, cancel }
+    /// The surface for a run drawn under `curtain`, saying what it has
+    /// to say through `diagnostics`, and stopped by `cancel`.
+    pub fn new(curtain: Curtain, diagnostics: Diagnostics, cancel: CancellationToken) -> Self {
+        Self {
+            curtain,
+            diagnostics,
+            cancel,
+        }
     }
 
     /// Runs one prompt to its end, off the runtime, and reports what it
@@ -60,7 +67,7 @@ impl ConsoleInteraction {
         T: Send + 'static,
         P: FnOnce(&Console) -> Answered<T> + Send + 'static,
     {
-        let console = Console::open()?;
+        let console = Console::open(&self.diagnostics, Escape::Parks).await?;
         self.curtain.lower().await;
         let _turn = Turn(&self.curtain);
         let reading = tokio::task::spawn_blocking(move || prompt(&console));

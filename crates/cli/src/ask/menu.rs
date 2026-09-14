@@ -32,7 +32,7 @@
 
 use dialoguer::FuzzySelect;
 
-use super::{Answered, Console, NoAnswer, PARKS};
+use super::{Answered, Console, NoAnswer};
 use crate::render::{wrap, INDENT, INDENT_WIDTH, LINE_WIDTH};
 
 /// The keys a list answers to, named above every one of them.
@@ -66,7 +66,7 @@ pub(crate) fn choose<T>(console: &Console, verb: &str, choices: Vec<Choice<T>>) 
         }
         console.say("")?;
     }
-    console.say(&format!("{KEYS}, {PARKS}"))?;
+    console.say(&format!("{KEYS}, {}", console.escape().said()))?;
     let cursor = Cursor::taken(console);
     let picked = FuzzySelect::new()
         .with_prompt(verb)

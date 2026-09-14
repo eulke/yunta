@@ -100,7 +100,7 @@ pub use workflow::{
     LoopUntil, McpQueryParams, ModeInclude, ModeSpec, MountArtifact, MountSpec, Node, NodeDefaults,
     NodeIter, NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnFinishStep, OnInterrupt,
     PromptSource, ReservedIdentity, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams,
-    Workflow, WorkflowIsolation, ARTIFACTS_DIR,
+    UnknownArtifactKind, Workflow, WorkflowIsolation, ARTIFACTS_DIR,
 };
 
 /// The schema major this binary speaks — what a

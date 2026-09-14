@@ -1011,3 +1011,67 @@ async fn a_hand_off_that_cannot_be_spawned_names_the_resume_it_never_started() {
         "the failure names the command that was never started: {text}"
     );
 }
+
+#[tokio::test]
+async fn an_mcp_client_answering_a_running_run_gets_the_advice_a_person_gets() {
+    // One border writes the refusal, so the sentence an agent client
+    // reads out of a tool result is the sentence a person reads on
+    // stderr — including the part that says what to do instead, which
+    // is the CLI's word and not the engine's.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: done\nnodes:\n  - id: touch\n    kind: bash\n    run: \"true\"\n",
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success(), "{}", stderr(&run));
+    let run_id = run_id_from(&run);
+
+    // The person's answer: stderr, one line, from the command.
+    let refused = yunta_in!(&repo, &home, &["resolve-gate", &run_id, "retry"]);
+    assert!(!refused.status.success());
+    let said = stderr(&refused);
+    let sentence = said
+        .trim_end()
+        .strip_prefix("error: ")
+        .unwrap_or_else(|| panic!("the command's own refusal: {said}"));
+    assert!(
+        sentence.contains(&format!("yunta status {run_id}")),
+        "the advice names where the run actually is: {sentence}"
+    );
+
+    // The client's answer: a tool result, from the control plane.
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    command
+        .arg("mcp")
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home);
+    let transport = TokioChildProcess::new(command).unwrap();
+    let client = ().serve(transport).await.unwrap();
+    let answered = client
+        .call_tool(
+            CallToolRequestParams::new("resolve_gate").with_arguments(
+                json!({"run_id": run_id, "option": "retry"})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(answered.is_error, Some(true), "{answered:#?}");
+    assert_eq!(tool_text(&answered), sentence);
+    client.cancel().await.ok();
+}

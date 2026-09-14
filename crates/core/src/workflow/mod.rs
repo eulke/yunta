@@ -29,7 +29,7 @@ pub mod read;
 
 pub use artifacts::{
     ArtifactKind, ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, ReservedIdentity,
-    ARTIFACTS_DIR,
+    UnknownArtifactKind, ARTIFACTS_DIR,
 };
 pub use context::{
     ArtifactContextRef, ContextSpec, KnowledgeLayer, KnowledgeParams, McpQueryParams,

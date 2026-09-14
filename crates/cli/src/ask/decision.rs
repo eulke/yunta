@@ -13,7 +13,7 @@ use yunta_core::OptionId;
 
 use super::field::ask_line;
 use super::menu::{choose, Choice};
-use super::{attributed, Answered, Console, ANSWER, PARKS};
+use super::{attributed, Answered, Console, ANSWER};
 use crate::render::{evidence, option_headline, option_tradeoff, INDENT};
 
 /// Free text is offered on every decision, whatever was on the menu:
@@ -27,7 +27,8 @@ pub(crate) fn decide(console: &Console, escalation: &GateWaitingPayload) -> Answ
     let option = choose(console, "choose", options(escalation))?;
     console.say(&format!("chose `{option}`"))?;
     console.say(&format!(
-        "{ASIDE} (enter records the decision as it stands, {PARKS})"
+        "{ASIDE} (enter records the decision as it stands, {})",
+        console.escape().said()
     ))?;
     let aside = ask_line(console, ANSWER)?.value;
     let by = attributed(console)?;

@@ -8,13 +8,14 @@
 //! non-interactive with a warning when stdin isn't a TTY — `init` must
 //! never hang waiting for input that isn't coming.
 
-use std::io::IsTerminal;
 use std::path::Path;
 
 use yunta_core::port::ProbeReport;
 use yunta_core::{AdapterId, AdapterSettings};
 
+use crate::ask::{ask_line, Console, Escape};
 use crate::error::{warn, CliError, Outcome};
+use crate::surface::Diagnostics;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
 
@@ -268,18 +269,19 @@ fn claude_md_suggestion() -> &'static str {
      tool) for an existing verified workflow that already covers it."
 }
 
-fn prompt_line(prompt: &str, default: &str) -> String {
-    print!("{prompt} [{default}]: ");
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    let mut line = String::new();
-    if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
-        return default.to_string();
-    }
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        default.to_string()
-    } else {
-        trimmed.to_string()
+/// One setting asked for on `console`, or `default` when nobody
+/// answers.
+///
+/// Answered on the one line every prompt in this binary is answered on
+/// — same editing, same Escape, same Ctrl-C, same terminal handed back
+/// — so a person who has answered a run answers `init` the same way.
+/// An empty line takes the default, and so does Escape: "not me, not
+/// now" about a setting that already has a detected value is that
+/// value.
+fn asked(console: &Console, prompt: &str, default: &str) -> String {
+    match ask_line(console, &format!("{prompt} [{default}]: ")) {
+        Ok(typed) if !typed.value.is_empty() => typed.value,
+        _ => default.to_string(),
     }
 }
 
@@ -294,14 +296,17 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         )));
     }
 
-    // `-i` degrades to non-interactive with a warning rather than
-    // hanging on a stdin that will never produce a line.
-    let interactive = if interactive && !std::io::stdin().is_terminal() {
-        warn("--interactive given but stdin isn't a TTY — using detected defaults");
-        false
-    } else {
-        interactive
+    // `-i` degrades with a warning rather than hanging on a terminal
+    // that will never produce a line. There is no run drawing here, so
+    // what opening the console has to say goes out through a door onto
+    // nothing, which is stderr.
+    let console = match interactive {
+        true => Console::open(&Diagnostics::none(), Escape::KeepsDefault).await,
+        false => None,
     };
+    if interactive && console.is_none() {
+        warn("--interactive given but there is no terminal to ask on — using detected defaults");
+    }
 
     let default_name = repo
         .file_name()
@@ -310,13 +315,17 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
     let default_branch = detect_base_branch(&repo);
     let ecosystem = detect_ecosystem(&repo);
 
-    let (project_name, base_branch) = if interactive {
-        (
-            prompt_line("project name", &default_name),
-            prompt_line("base branch", &default_branch),
-        )
-    } else {
-        (default_name, default_branch)
+    let (project_name, base_branch) = match &console {
+        Some(console) => {
+            // What Escape does, said once above the prompts it applies
+            // to — the same place every other surface says it.
+            let _ = console.say(console.escape().said());
+            (
+                asked(console, "project name", &default_name),
+                asked(console, "base branch", &default_branch),
+            )
+        }
+        None => (default_name, default_branch),
     };
 
     let probed = probe_known_adapters().await;

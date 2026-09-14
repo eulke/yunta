@@ -34,9 +34,7 @@ pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
     // One parse and one sentence: `ArtifactKind`'s own `FromStr` names
     // the kinds that exist, so this door and the `document_shape` tool
     // answer the same mistake with the same words.
-    let kind = name
-        .parse::<ArtifactKind>()
-        .map_err(|e| CliError::msg(e.to_string()))?;
+    let kind = name.parse::<ArtifactKind>()?;
     if json {
         // The committed bytes CI proves still match the types (`cargo
         // xtask schema --check`), never a schema generated here:

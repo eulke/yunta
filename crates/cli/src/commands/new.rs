@@ -7,13 +7,13 @@
 //! two stay disjoint on purpose. Runs `check` on what it wrote and
 //! reports the result, same as `yunta check` would.
 
-use std::io::IsTerminal;
-
 use yunta_core::text::problems;
 use yunta_core::{ConfigLayer, Workflow};
 
+use crate::ask::{choose, Choice, Console, Escape};
 use crate::error::{note, warn, CliError, Outcome};
 use crate::project;
+use crate::surface::Diagnostics;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shape {
@@ -124,22 +124,20 @@ nodes:
     prompt: \"Read your next task from the tasks document and implement it.\"
 ";
 
-fn prompt_shape() -> Shape {
-    println!("choose a shape:");
-    for (i, shape) in Shape::all().iter().enumerate() {
-        println!("  {}) {}", i + 1, shape.label());
-    }
-    print!("shape [1]: ");
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    let mut line = String::new();
-    if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
-        return Shape::OneNode;
-    }
-    match line.trim() {
-        "2" => Shape::LintFix,
-        "3" => Shape::Tasks,
-        _ => Shape::OneNode,
-    }
+/// The shape picked off the one list this binary puts choices on —
+/// same arrows, same filter, same numbering, same Escape — or the
+/// first shape when nobody picks: a skeleton is a starting point, and
+/// "not me, not now" about which one is the plainest one.
+fn picked(console: &Console) -> Shape {
+    let choices = Shape::all()
+        .into_iter()
+        .map(|shape| Choice {
+            head: shape.label().to_string(),
+            detail: None,
+            value: shape,
+        })
+        .collect();
+    choose(console, "choose a shape", choices).unwrap_or(Shape::OneNode)
 }
 
 /// A safe file stem: letters, digits, `-` and `_` only, non-empty — the
@@ -160,7 +158,7 @@ fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn new_workflow(
+pub async fn new_workflow(
     name: &str,
     shape: Option<&str>,
     interactive: bool,
@@ -170,13 +168,21 @@ pub fn new_workflow(
 
     let shape = match shape {
         Some(raw) => Shape::parse(raw).map_err(CliError::msg)?,
-        None if interactive && std::io::stdin().is_terminal() => prompt_shape(),
-        None => {
-            if interactive {
-                warn("--interactive given but stdin isn't a TTY — defaulting to `one-node`");
-            }
-            Shape::OneNode
-        }
+        // There is no run drawing here, so what opening the console has
+        // to say goes out through a door onto nothing, which is stderr.
+        None => match interactive {
+            false => Shape::OneNode,
+            true => match Console::open(&Diagnostics::none(), Escape::KeepsDefault).await {
+                Some(console) => picked(&console),
+                None => {
+                    warn(
+                        "--interactive given but there is no terminal to ask on — \
+                         defaulting to `one-node`",
+                    );
+                    Shape::OneNode
+                }
+            },
+        },
     };
 
     // Build the real type before writing: a skeleton that doesn't parse as

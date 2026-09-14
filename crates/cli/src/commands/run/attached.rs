@@ -67,8 +67,7 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
 
     let adapters = match mock_fixture {
         Some(path) => {
-            let mock = load_mock_fixture(path, &prepared.run_dir, &prepared.worktree)
-                .map_err(CliError::msg)?;
+            let mock = load_mock_fixture(path, &prepared.run_dir, &prepared.worktree)?;
             mock_adapters(&ctx.project.config, mock)
         }
         None => real_adapters,

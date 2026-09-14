@@ -147,7 +147,7 @@ pub async fn test(dir: Option<&Path>) -> Result<Outcome, CliError> {
                 continue;
             }
             Ok(problems) => ("FAILED", problems),
-            Err(error) => ("ERROR", vec![error]),
+            Err(error) => ("ERROR", vec![error.to_string()]),
         };
         failures += 1;
         println!(
@@ -203,9 +203,18 @@ pub(crate) fn discover_case_paths(root: &Path) -> Option<Vec<PathBuf>> {
 
 /// Runs one case; `Ok` carries assertion failures (empty = pass), `Err`
 /// carries setup/execution errors.
-pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, String> {
-    let case: TestCase = load_yaml(case_path, "test case")
-        .map_err(|_| format!("could not load test case `{}`", case_path.display()))?;
+///
+/// The failures are the case's own verdict and read as sentences a
+/// person compares; the error is the CLI's one error type, so a case
+/// that could not run at all says why in exactly the words the command
+/// it stands in for would have used.
+pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, CliError> {
+    let case: TestCase = load_yaml(case_path, "test case").map_err(|_| {
+        CliError::msg(format!(
+            "could not load test case `{}`",
+            case_path.display()
+        ))
+    })?;
 
     let workflow_path = cwd
         .join(".yunta/workflows")
@@ -213,27 +222,23 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
     // A case runs the workflow, so a workflow this binary would refuse
     // to run is refused here too — with what is wrong with it, not with
     // a sentence that only says a file could not be loaded.
-    let workflow = crate::load_workflow(&workflow_path).map_err(|error| error.to_string())?;
+    let workflow = crate::load_workflow(&workflow_path)?;
 
-    let config = Context::resolve_in(cwd.to_path_buf())
-        .map_err(|e| yunta_core::describe(&e))?
-        .project
-        .config;
+    let config = Context::resolve_in(cwd.to_path_buf())?.project.config;
 
     // Sandbox: worktree + runs root + event log, all temp.
-    let sandbox = tempfile::tempdir().map_err(|e| format!("cannot create sandbox: {e}"))?;
+    let sandbox = tempfile::tempdir().map_err(|e| CliError::io("create", "a sandbox", e))?;
     let worktree = sandbox.path().join("worktree");
-    std::fs::create_dir_all(&worktree).map_err(|e| yunta_core::describe(&e))?;
+    std::fs::create_dir_all(&worktree)
+        .map_err(|e| CliError::io("create", worktree.display(), e))?;
     if let Some(seed) = &case.worktree {
         let seed = case_path.parent().unwrap_or(Path::new(".")).join(seed);
         copy_dir_all(&seed, &worktree)
-            .map_err(|e| format!("cannot seed the sandbox from `{}`: {e}", seed.display()))?;
+            .map_err(|e| CliError::io("seed the sandbox from", seed.display(), e))?;
     }
     init_git(&worktree)?;
     let runs_root = sandbox.path().join("runs");
-    let storage = AsyncStorage::open(sandbox.path().join("events.db"))
-        .await
-        .map_err(|e| yunta_core::describe(&e))?;
+    let storage = AsyncStorage::open(sandbox.path().join("events.db")).await?;
 
     let run_id = SystemIdSource.mint_run_id(SystemClock.now());
     let run_dir = runs_root.join(run_id.as_str());
@@ -253,8 +258,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         &worktree,
         &provided_inputs,
     )
-    .await
-    .map_err(|e| yunta_core::describe(&e))?;
+    .await?;
     let manifest = frozen.manifest;
 
     // The case's `mode` is frozen into the run the way `--mode` is;
@@ -275,8 +279,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         &storage,
         &SystemClock,
     )
-    .await
-    .map_err(|e| yunta_core::describe(&e))?;
+    .await?;
     // A test case's every session comes from a scripted fixture — a
     // gate here has no human to ask, same as it has no LLM to call.
     let report = yunta_engine::execute_run(RunEnv {
@@ -303,8 +306,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         observer: None,
         fence_hook: Some(crate::context::fence_hook()),
     })
-    .await
-    .map_err(|e| yunta_core::describe(&e))?;
+    .await?;
 
     // Compare against expect — every mismatch reported, not just the first.
     let mut problems = Vec::new();
@@ -342,9 +344,9 @@ pub(crate) fn load_mock_fixture(
     fixture_path: &Path,
     run_dir: &Path,
     worktree: &Path,
-) -> Result<Arc<MockAdapter>, String> {
+) -> Result<Arc<MockAdapter>, CliError> {
     let text = std::fs::read_to_string(fixture_path)
-        .map_err(|e| format!("cannot read fixture `{}`: {e}", fixture_path.display()))?;
+        .map_err(|e| CliError::io("read fixture", fixture_path.display(), e))?;
     let paths = RunPaths {
         run_dir,
         worktree,
@@ -352,7 +354,10 @@ pub(crate) fn load_mock_fixture(
     };
     MockFixture::parse(&text, &paths)
         .map(|fixture| Arc::new(MockAdapter::new(fixture)))
-        .map_err(|e| format!("fixture `{}`: {e}", fixture_path.display()))
+        .map_err(|source| CliError::FixtureRefused {
+            path: fixture_path.to_path_buf(),
+            source,
+        })
 }
 
 /// The mock standing in for every adapter the config names, so the
@@ -393,7 +398,7 @@ fn copy_dir_all(from: &Path, into: &Path) -> std::io::Result<()> {
 /// Turns the sandbox worktree into a repository whose initial commit
 /// holds the seed (or nothing), so a run's scope diff only ever shows
 /// what its sessions changed.
-fn init_git(dir: &Path) -> Result<(), String> {
+fn init_git(dir: &Path) -> Result<(), CliError> {
     for args in [
         vec!["init", "-q"],
         vec!["config", "user.email", "yunta-test@localhost"],
@@ -402,9 +407,12 @@ fn init_git(dir: &Path) -> Result<(), String> {
         vec!["commit", "-q", "--allow-empty", "-m", "sandbox"],
     ] {
         let ran = yunta_engine::git::success_blocking(dir, &args)
-            .map_err(|e| format!("git {args:?}: {}", e.detail()))?;
+            .map_err(|e| CliError::msg(format!("git {args:?}: {}", e.detail())))?;
         if !ran {
-            return Err(format!("git {args:?} failed in `{}`", dir.display()));
+            return Err(CliError::msg(format!(
+                "git {args:?} failed in `{}`",
+                dir.display()
+            )));
         }
     }
     Ok(())

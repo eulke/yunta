@@ -19,7 +19,7 @@ use yunta_engine::QuestionsReply;
 
 use super::field::ask_line;
 use super::menu::{choose, Choice};
-use super::{attributed, Answered, Console, ANSWER, PARKS};
+use super::{attributed, Answered, Console, ANSWER};
 
 /// The option that leaves a question no answer, offered only where the
 /// question allows one, and what stands for the answer that was not
@@ -31,8 +31,9 @@ pub(crate) fn answer(console: &Console, questions: &QuestionsFile) -> Answered<Q
     let total = questions.questions.len();
     console.say("")?;
     console.say(&format!(
-        "{} needed before this node goes on ({PARKS})",
-        yunta_core::text::counted(total, "answer")
+        "{} needed before this node goes on ({})",
+        yunta_core::text::counted(total, "answer"),
+        console.escape().said()
     ))?;
     let mut answers = Vec::new();
     for (index, question) in questions.questions.iter().enumerate() {

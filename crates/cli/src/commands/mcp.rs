@@ -94,10 +94,21 @@ impl ServerHandler for YuntaMcpServer {
                 ))
             }
         };
-        Ok(match outcome {
-            Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]).into(),
-            Err(text) => CallToolResult::error(vec![ContentBlock::text(text)]).into(),
-        })
+        Ok(tool_result(outcome))
+    }
+}
+
+/// The one adapter from a tool's own result to the protocol's.
+///
+/// A tool that ran and failed answers with the sentence [`CliError`]
+/// writes, which is the sentence the equivalent command prints on
+/// stderr — so an agent client asking this server gets the advice a
+/// person at a terminal gets, rather than a second phrasing of the same
+/// refusal.
+fn tool_result(outcome: Result<String, CliError>) -> rmcp::model::CallToolResponse {
+    match outcome {
+        Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]).into(),
+        Err(refusal) => CallToolResult::error(vec![ContentBlock::text(refusal.to_string())]).into(),
     }
 }
 
@@ -120,14 +131,14 @@ fn document_kinds() -> Vec<&'static str> {
 ///
 /// The kind is parsed by `ArtifactKind`'s own `FromStr`, so this tool
 /// and `yunta schema` answer an unknown kind with the same sentence.
-fn tool_document_shape(args: &serde_json::Map<String, Value>) -> Result<String, String> {
+fn tool_document_shape(args: &serde_json::Map<String, Value>) -> Result<String, CliError> {
     let Some(name) = args.get("kind").and_then(Value::as_str) else {
-        return Err(format!(
+        return Err(CliError::msg(format!(
             "`kind` is required: one of {}",
             ArtifactKind::listed()
-        ));
+        )));
     };
-    let kind = name.parse::<ArtifactKind>().map_err(|e| e.to_string())?;
+    let kind = name.parse::<ArtifactKind>()?;
     Ok(yunta_core::shape::contract(kind))
 }
 
@@ -232,21 +243,19 @@ fn tool_definitions() -> Vec<Tool> {
 fn required_str<'a>(
     args: &'a serde_json::Map<String, Value>,
     name: &str,
-) -> Result<&'a str, String> {
+) -> Result<&'a str, CliError> {
     args.get(name)
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("missing or non-string argument `{name}`"))
+        .ok_or_else(|| CliError::msg(format!("missing or non-string argument `{name}`")))
 }
 
 /// The `run_id` argument as the id it has to be, so a call naming
 /// something that is not one is answered before any disk is read.
-fn required_run_id(args: &serde_json::Map<String, Value>) -> Result<RunId, String> {
-    required_str(args, "run_id")?
-        .parse()
-        .map_err(|e: yunta_core::InvalidId| e.to_string())
+fn required_run_id(args: &serde_json::Map<String, Value>) -> Result<RunId, CliError> {
+    Ok(required_str(args, "run_id")?.parse()?)
 }
 
-async fn tool_list_workflows(cwd: &Path) -> Result<String, String> {
+async fn tool_list_workflows(cwd: &Path) -> Result<String, CliError> {
     // The same catalog `yunta list` renders, built in-process: shelling
     // out to a subprocess would print onto this server's own stdout — the
     // very stream its JSON-RPC replies travel on. Best-effort storage, so
@@ -258,10 +267,10 @@ async fn tool_list_workflows(cwd: &Path) -> Result<String, String> {
 async fn tool_workflow_status(
     cwd: &Path,
     args: &serde_json::Map<String, Value>,
-) -> Result<String, String> {
+) -> Result<String, CliError> {
     let run_id = required_run_id(args)?;
-    let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
-    let open = ctx.open_run(&run_id).await.map_err(|e| e.to_string())?;
+    let ctx = Context::resolve_in(cwd.to_path_buf())?;
+    let open = ctx.open_run(&run_id).await?;
     let (events, manifest) = (open.events, open.manifest.doc);
     // The same versioned DTO `yunta status --json` prints, serialized to
     // the tool result rather than to stdout, and read at this server's
@@ -272,12 +281,13 @@ async fn tool_workflow_status(
         &manifest,
         ctx.clock.now(),
     ))
+    .map_err(CliError::msg)
 }
 
 async fn tool_run_workflow(
     cwd: &Path,
     args: &serde_json::Map<String, Value>,
-) -> Result<String, String> {
+) -> Result<String, CliError> {
     let name = required_str(args, "workflow")?;
     let mut inputs: Vec<String> = Vec::new();
     if let Some(object) = args.get("inputs").and_then(Value::as_object) {
@@ -293,22 +303,20 @@ async fn tool_run_workflow(
         .get("adapter")
         .and_then(Value::as_str)
         .map(str::parse::<AdapterId>)
-        .transpose()
-        .map_err(|e| format!("invalid adapter: {e}"))?;
+        .transpose()?;
     let mode = args
         .get("mode")
         .and_then(Value::as_str)
         .map(str::parse::<ModeName>)
-        .transpose()
-        .map_err(|e| format!("invalid mode: {e}"))?;
+        .transpose()?;
 
     // Resolves `name` against the whole catalog — the repo's own
     // `.yunta/workflows/` then a publisher's vendored packs
     // (`acme/review`) — then creates the run and hands it off, all
     // in-process through the same `start_detached` `yunta run --detach`
     // calls.
-    let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
-    let storage = ctx.async_storage().await.map_err(|e| e.to_string())?;
+    let ctx = Context::resolve_in(cwd.to_path_buf())?;
+    let storage = ctx.async_storage().await?;
     let started = super::run::start_detached(
         &ctx,
         &storage,
@@ -317,8 +325,7 @@ async fn tool_run_workflow(
         adapter.as_ref(),
         mode.as_ref(),
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
     // The run id first, so a client that reads one line still reads the
     // thing it asked for, and §8.6's warning under it when this
     // workflow's history has one: a client that starts runs is the one
@@ -333,17 +340,13 @@ async fn tool_run_workflow(
 async fn tool_resume_run(
     cwd: &std::path::Path,
     args: &serde_json::Map<String, Value>,
-) -> Result<String, String> {
+) -> Result<String, CliError> {
     let run_id = required_run_id(args)?;
-    let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
-    let run_dir = ctx
-        .open_run(&run_id)
-        .await
-        .map_err(|e| e.to_string())?
-        .run_dir;
+    let ctx = Context::resolve_in(cwd.to_path_buf())?;
+    let run_dir = ctx.open_run(&run_id).await?.run_dir;
     super::spawn_detached_resume(&run_dir, run_id.as_str(), cwd)
         .await
-        .map_err(|source| super::DetachedResumeError::new(&run_id, source).to_string())?;
+        .map_err(|source| super::DetachedResumeError::new(&run_id, source))?;
     Ok(format!(
         "run {run_id}: resumed, driving forward independently"
     ))
@@ -352,21 +355,20 @@ async fn tool_resume_run(
 async fn tool_resolve_gate(
     cwd: &std::path::Path,
     args: &serde_json::Map<String, Value>,
-) -> Result<String, String> {
+) -> Result<String, CliError> {
     let run_id = required_run_id(args)?;
     let option = required_str(args, "option")?;
     let by = args
         .get("by")
         .and_then(Value::as_str)
         .map(str::parse::<yunta_core::Responder>)
-        .transpose()
-        .map_err(|e| e.to_string())?;
+        .transpose()?;
     let text = args.get("text").and_then(Value::as_str).map(str::to_string);
 
-    let ctx = Context::resolve_in(cwd.to_path_buf()).map_err(|e| e.to_string())?;
-    let open = ctx.open_run(&run_id).await.map_err(|e| e.to_string())?;
+    let ctx = Context::resolve_in(cwd.to_path_buf())?;
+    let open = ctx.open_run(&run_id).await?;
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
-    let storage = ctx.async_storage().await.map_err(|e| e.to_string())?;
+    let storage = ctx.async_storage().await?;
 
     yunta_engine::resolve_gate(
         &manifest,
@@ -374,23 +376,18 @@ async fn tool_resolve_gate(
         &run_id,
         &yunta_core::SystemClock,
         yunta_core::events::HumanChoice {
-            option: option
-                .parse::<yunta_core::OptionId>()
-                .map_err(|e| e.to_string())?,
+            option: option.parse::<yunta_core::OptionId>()?,
             by: crate::identity::responder(by.as_ref()),
             free_text: text,
         },
     )
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|refusal| CliError::gate_refused(&run_id, refusal))?;
 
     super::spawn_detached_resume(&run_dir, run_id.as_str(), cwd)
         .await
-        .map_err(|source| {
-            format!(
-                "decision recorded, but {}",
-                super::DetachedResumeError::new(&run_id, source)
-            )
+        .map_err(|source| CliError::GateRecordedNotResumed {
+            source: super::DetachedResumeError::new(&run_id, source),
         })?;
     Ok(format!(
         "run {run_id}: resolved `{option}`, driving forward independently"

@@ -176,6 +176,9 @@ async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Watching, CliE
             surface
                 .as_ref()
                 .map_or_else(Curtain::none, Surface::curtain),
+            surface
+                .as_ref()
+                .map_or_else(Diagnostics::none, Surface::diagnostics),
             cancel.clone(),
         ),
         cancel,
@@ -216,8 +219,7 @@ async fn finish(
         env.prepared.worktree.clone(),
         report,
     )
-    .await
-    .map_err(CliError::msg)?;
+    .await?;
     close(watching.surface).await;
 
     settle(Settling {
@@ -273,23 +275,7 @@ pub(crate) struct Settling<'a> {
 /// command that executes a run shares, so `run` and `resume` cannot
 /// report the same stop differently.
 pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> {
-    // Only a *finished* run releases isolation `none`'s lock — a paused
-    // run expects a future `resume` on the same checkout, which is the
-    // same logical run, not a second concurrent one. A user cancellation
-    // also releases it: the engine process is exiting, and a Ctrl-C is
-    // designed to leave nothing held.
-    if matches!(
-        settling.report.terminal,
-        RunTerminal::Finished | RunTerminal::Failed { .. }
-    ) || settling.cancelled
-    {
-        yunta_engine::release_worktree(
-            &settling.ctx.cwd,
-            settling.manifest.isolation,
-            yunta_engine::process::Supervision::none(),
-        )
-        .await?;
-    }
+    released(&settling).await?;
     if settling.json {
         return Ok(report_run_json(
             settling.ctx,
@@ -326,6 +312,29 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
         glyphs: settling.glyphs,
     })
     .await
+}
+
+/// Hands back what the run held, when the run is done holding it.
+///
+/// Only a *finished* run releases isolation `none`'s lock — a paused
+/// run expects a future `resume` on the same checkout, which is the
+/// same logical run, not a second concurrent one. A user cancellation
+/// also releases it: the engine process is exiting, and a Ctrl-C is
+/// designed to leave nothing held.
+async fn released(settling: &Settling<'_>) -> Result<(), CliError> {
+    let done = matches!(
+        settling.report.terminal,
+        RunTerminal::Finished | RunTerminal::Failed { .. }
+    ) || settling.cancelled;
+    if done {
+        yunta_engine::release_worktree(
+            &settling.ctx.cwd,
+            settling.manifest.isolation,
+            yunta_engine::process::Supervision::none(),
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Where the run this invocation drove lives, by the same search order

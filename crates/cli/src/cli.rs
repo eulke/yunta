@@ -407,7 +407,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             shape,
             interactive,
             force,
-        } => commands::new::new_workflow(&name, shape.as_deref(), interactive, force),
+        } => commands::new::new_workflow(&name, shape.as_deref(), interactive, force).await,
     }
 }
 
