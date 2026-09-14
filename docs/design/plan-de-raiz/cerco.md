@@ -192,15 +192,16 @@ pub type Glob = …;   // borrado
 
 // crates/core/src/events/session/kinds.rs (M02)
 pub enum SessionEvent { Opened(AgentSessionOpenedPayload), Message(AgentMessagePayload), Degraded(CapabilityDegradedPayload), WriteRefused(WriteRefusedPayload) }
-// KINDS = ["agent_session_opened", "agent_message", "capability_degraded", "write_refused"]; is_audit: write_refused = false (mueve SessionLedger)
+// KINDS = ["agent_session_opened", "agent_message", "capability_degraded", "write_refused"]; is_audit: write_refused = false (mueve NodeLedger, D175)
 // crates/core/src/events/session/payloads.rs (M03)
 pub struct AgentSessionOpenedPayload { pub session_id: SessionId, pub agent: Option<AgentName>, pub model: Option<ModelName>, pub capabilities: Capabilities, #[serde(default, skip_serializing_if = "Option::is_none")] pub fence: Option<Coverage> }
 impl AgentSessionOpenedPayload { pub fn new(session_id: SessionId, agent: Option<AgentName>, model: Option<ModelName>, capabilities: Capabilities, fence: Option<Coverage>) -> Self; }
 // el nivel viaja una vez, en `capabilities.fence`; `fence` es solo la cobertura
 pub struct WriteRefusedPayload { pub session_id: SessionId, pub target: ToolTarget }
 impl WriteRefusedPayload { pub fn new(session_id: SessionId, target: ToolTarget) -> Self; }
-// crates/core/src/events/session/ledger.rs (M04): SessionLedger es el dueño; NodeRecord.sessions (M04) no repite nada
-impl SessionLedger { pub fn coverage_of(&self, session: &SessionId) -> Option<&Coverage>; pub fn refused_by(&self, session: &SessionId) -> &[ToolTarget]; }
+// crates/core/src/events/node/ledger.rs (M04, D175): NodeLedger es el dueño de las sesiones, porque el intento las acota
+// OpenSession.fence: Option<Coverage>; NodeRecord.refused: Vec<RefusedWrite { session_id, target }>
+impl NodeLedger { pub fn coverage_of(&self, node: &NodeId, session: &SessionId) -> Option<&Coverage>; pub fn refused_by(&self, node: &NodeId, session: &SessionId) -> Vec<&ToolTarget>; }
 // crates/core/src/port/policy.rs (M09): la fila
 (Capability::Fence, Absence::DegradeWith(Policy::PostCheckOnly)),   // una vez por run
 ```
@@ -284,7 +285,7 @@ proceso y no lo necesita; `yunta test` y `drive` reciben el de `Context`.
   `write_refused` (`<nodo> — write refused: <display>`) y el sufijo de
   `agent_session_opened` (`· fence exact` / `· fence widened to <n> roots` /
   `· fence on tool calls`; nada sin `fence`). En 5-05 la crónica los dispone
-  desde `SessionLedger::coverage_of` y `Session::Refused`; las filas ya están
+  desde `NodeLedger::coverage_of` y `NodeRecord.refused`; las filas ya están
   en `cronica.md`, y son de 5-05, no de este ítem.
 - **`check` (M09).** Sin cambio: `Fence` degrada, no falla en `check`.
 
@@ -479,7 +480,7 @@ significativo.
 | `coverage_is_the_weakest_channel` | core/tests/fence.rs | la tabla de `Coverage::of`, las seis combinaciones |
 | `a_fence_round_trips_through_the_environment` | core/tests/fence.rs | `to_env` → `from_env` |
 | `a_fence_hook_names_the_subcommand_and_the_adapter` | core/tests/fence.rs | `FenceHook::command` |
-| `write_refused_is_a_session_kind_that_moves_the_ledger` | core/tests/events.rs | KINDS, `is_audit = false`, `SessionLedger::refused_by` |
+| `write_refused_is_a_session_kind_that_moves_the_ledger` | core/tests/events.rs | KINDS, `is_audit = false`, `NodeRecord.refused` |
 | `an_old_log_without_a_fence_level_reads_as_none` | core/tests/events.rs | `Capabilities` con `edit_hooks` |
 | `the_fence_command_refuses_with_exit_two_and_the_reason_on_stderr` | cli/tests/fence_cmd.rs | codec claude-code, stdin real, binario real |
 | `the_fence_command_allows_with_exit_zero_and_nothing_on_stdout` | cli/tests/fence_cmd.rs | ídem |

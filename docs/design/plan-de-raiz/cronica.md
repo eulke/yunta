@@ -83,7 +83,7 @@ pub enum Happening {
 // `impl From<(&XEvent, &EventMeta, &RunState)> for x::Happening`:
 pub mod run     { pub enum Happening { Created { mode: ModeName, base_branch: String }, Paused(PauseReason), Resumed(OnInterrupt), Closed { terminal: TerminalState, tokens: TokenUsage }, PromotionSignaled { to: ModeName, reason: String, evidence: Evidence } } }
 pub mod node    { pub enum Happening { RunnerResolved(ResolvedRunner), Reached { state: NodeState, elapsed: Option<Duration>, children: Vec<ChildLink> }, Rerouted(Reroute), HookRan { phase: HookPhase, exit_code: i32 }, ContextAssembled, CriteriaChecked { task: TaskId, phase: Phase, checked: usize }, ScopeChecked { violations: usize }, BaselineCaptured } }
-pub mod session { pub enum Happening { Opened(OpenSession), Called(ToolCall), Message(AgentMessageType), Degraded(Degradation), Refused(ToolTarget) } }   // el sufijo de cerco de `Opened` sale de `SessionLedger::coverage_of` (M25); `Refused` es de 5-05, el kind de 3-08
+pub mod session { pub enum Happening { Opened(OpenSession), Called(ToolCall), Message(AgentMessageType), Degraded(Degradation), Refused(ToolTarget) } }   // el sufijo de cerco de `Opened` sale de `OpenSession.fence` (M25, D175); `Refused` es de 5-05, el kind de 3-08
 pub mod tasks   { pub enum Happening { Registered { task: TaskId }, Moved { task: TaskId, to: TaskStatus } } }
 pub mod scope   { pub enum Happening { Expansion { task: TaskId, step: ScopeExpansionStep } } }
 pub mod findings{ pub enum Happening { Finding { id: FindingId, severity: FindingSeverity, title: String, change: FindingChange } } }

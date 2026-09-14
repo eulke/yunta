@@ -185,8 +185,7 @@ impl ArtifactAcceptedPayload { pub fn new(artifact: ArtifactId, hash: ContentHas
 // "Every surface that … reads that set from here rather than folding … itself — a second fold is a second answer."
 pub struct RunLedger { phase: RunPhaseRaw, mode: ModeName, closed: Option<(TerminalState, Seq)>, paused: Option<(PauseReason, Seq)>, resumed_after: Option<Seq> }
 pub struct NodeLedger { per_node: BTreeMap<NodeId, NodeRecord> }
-pub struct NodeRecord { attempts: u32, state: NodeState, open_since: Option<(Seq, DateTime<Utc>)>, last_terminal: Option<Seq>, last_failed: Option<Seq>, last_finished: Option<Seq>, reroutes: u32, last_reroute: Option<Reroute>, runner: Option<ResolvedRunner>, tokens_closed: TokenUsage, tokens_in_flight: TokenUsage, sessions: Vec<OpenSession>, calls: Vec<ToolCall>, last_event_at: Option<DateTime<Utc>> }
-pub struct SessionLedger { /* sesiones por (node, attempt) */ }
+pub struct NodeRecord { attempts: u32, state: NodeState, open_since: Option<(Seq, DateTime<Utc>)>, last_terminal: Option<Seq>, last_failed: Option<Seq>, last_finished: Option<Seq>, reroutes: u32, last_reroute: Option<Reroute>, runner: Option<ResolvedRunner>, tokens_closed: TokenUsage, tokens_in_flight: TokenUsage, sessions: Vec<OpenSession> /* cada una con su `fence: Option<Coverage>` */, refused: Vec<RefusedWrite>, calls: Vec<ToolCall>, last_event_at: Option<DateTime<Utc>> }   // el dueño de las sesiones: el intento las acota (D175)
 pub struct DegradationLedger { pub all: Vec<Degradation> }
 pub struct TaskLedger { per_task: BTreeMap<TaskId, TaskRecord> }   // status, owner node, registered_seq, identity (criteria+scope hash), attempt, commit
 pub struct GateLedger { per_node: BTreeMap<NodeId, GateRecord> }   // waiting: Option<(Escalation, Seq)>, resolved: Vec<(GateResolvedPayload, Seq)>, external_ref: Option<String>, approved_sha: Option<CommitSha>, rounds: Vec<QuestionRound> (M26)
@@ -198,12 +197,12 @@ impl ChildLedger { pub fn open_under(&self, node: &NodeId) -> Option<&ChildLink>
 
 // engine/src/replay.rs
 impl RunState { pub fn apply(&mut self, event: &StoredEvent); }   // derive = fold(apply); chronicle lo usa evento a evento
-pub struct RunState { pub run: RunLedger, pub nodes: NodeLedger, pub sessions: SessionLedger, pub degradations: DegradationLedger, pub tasks: TaskLedger, pub grants: GrantLedger, pub findings: FindingLedger, pub artifacts: ArtifactLedger, pub gates: GateLedger, pub children: ChildLedger, pub unknown: UnknownKinds, pub broken: Option<ReplayError>, pub effective_findings: Vec<Finding> /* calculado una vez al final */ }
+pub struct RunState { pub run: RunLedger, pub nodes: NodeLedger, pub degradations: DegradationLedger, pub tasks: TaskLedger, pub grants: GrantLedger, pub findings: FindingLedger, pub artifacts: ArtifactLedger, pub gates: GateLedger, pub children: ChildLedger, pub unknown: UnknownKinds, pub broken: Option<ReplayError>, pub effective_findings: Vec<Finding> /* calculado una vez al final */ }
 ```
 
 **Archivos.**
 - nuevo: `ledger.rs` en `run`, `node`, `session`, `tasks`, `gates`, `children`; `core/src/events/meta.rs` (`EventMeta`).
-- modifica: `engine/src/replay.rs` (`derive` = despacho + `effective` al final; `RunState` con los ledgers; `dedup_findings` única regla); `engine/src/findings.rs::inherited_findings` (llama `dedup_findings`); `engine/src/run_tools/blackboard.rs:26-52,64-86` (por `FindingLedger`); `engine/src/run/schedule.rs` (borra `NodeHistory` 196-303, `last_external_ref` 187-194; lee `state.nodes`, `state.gates`); `engine/src/run/gate_exec.rs` (borra `last_external_ref` 365-375, `last_approved_sha` 352-362, el conteo de attempt 502-518; lee `state.gates`/`state.nodes`); `engine/src/run/questions_exec.rs` (la ronda no cuenta intentos: lee `state.gates.pending_questions`, M26); `engine/src/run/parallel_exec.rs:39-47` (ver M07); `engine/src/live.rs` (`running_since`, `last_event_age`, `open_sessions`, `recent_tool_calls`, `in_flight_tokens`, `since_last_terminal` → lecturas de `NodeLedger`; el módulo queda como fachada o desaparece); `engine/src/stats.rs::walk_attempts` (lee `NodeLedger`); `engine/src/view/mod.rs::walk_log` (borrado: `runner`, `reroute`, `reroutes`, `children`, `degraded` vienen de `RunState`); `engine/src/view/phase.rs` (lee `RunLedger`); `engine/src/receipt/mod.rs` (7 walks → lecturas de `RunState`); `engine/src/verification_effectiveness.rs` (un `derive` por log histórico, 5 pases → lecturas); `engine/src/tasks/{mod,crossing}.rs::{prior_registrations,standing_of}` (`TaskLedger`); `engine/src/run/loop_exec/dispatch.rs:19-46,104-121` (`TaskLedger`, `GrantLedger`); `engine/src/run/loop_exec/mod.rs:413` (`GrantLedger`); `engine/src/run/prompt_exec.rs:294-338::orphaned_session` (`SessionLedger`); `engine/src/run/workflow_exec/mod.rs:129-155` (`ChildLedger::open_under`); `engine/src/run/escalation.rs:259-290::pre_seeded_resolution` (`GateLedger::pre_seeded`); `engine/src/artifacts/mod.rs::RunArtifacts::of` con sus 4 callers (`gate_exec.rs:72`, `questions_exec.rs:32`, `distill.rs:159`, `promote.rs:145` leen `state.artifacts`); `engine/src/run/node_close.rs:190` (`progress.md` desde `RunState`, sin segundo replay); `engine/src/run/distill.rs` (`provenance.yaml` cuenta los findings desde `RunState::effective_findings`, deduplicados por la misma regla que el frame — hoy cuenta los vigentes sin deduplicar).
+- modifica: `engine/src/replay.rs` (`derive` = despacho + `effective` al final; `RunState` con los ledgers; `dedup_findings` única regla); `engine/src/findings.rs::inherited_findings` (llama `dedup_findings`); `engine/src/run_tools/blackboard.rs:26-52,64-86` (por `FindingLedger`); `engine/src/run/schedule.rs` (borra `NodeHistory` 196-303, `last_external_ref` 187-194; lee `state.nodes`, `state.gates`); `engine/src/run/gate_exec.rs` (borra `last_external_ref` 365-375, `last_approved_sha` 352-362, el conteo de attempt 502-518; lee `state.gates`/`state.nodes`); `engine/src/run/questions_exec.rs` (la ronda no cuenta intentos: lee `state.gates.pending_questions`, M26); `engine/src/run/parallel_exec.rs:39-47` (ver M07); `engine/src/live.rs` (`running_since`, `last_event_age`, `open_sessions`, `recent_tool_calls`, `in_flight_tokens`, `since_last_terminal` → lecturas de `NodeLedger`; el módulo queda como fachada o desaparece); `engine/src/stats.rs::walk_attempts` (lee `NodeLedger`); `engine/src/view/mod.rs::walk_log` (borrado: `runner`, `reroute`, `reroutes`, `children`, `degraded` vienen de `RunState`); `engine/src/view/phase.rs` (lee `RunLedger`); `engine/src/receipt/mod.rs` (7 walks → lecturas de `RunState`); `engine/src/verification_effectiveness.rs` (un `derive` por log histórico, 5 pases → lecturas); `engine/src/tasks/{mod,crossing}.rs::{prior_registrations,standing_of}` (`TaskLedger`); `engine/src/run/loop_exec/dispatch.rs:19-46,104-121` (`TaskLedger`, `GrantLedger`); `engine/src/run/loop_exec/mod.rs:413` (`GrantLedger`); `engine/src/run/prompt_exec.rs:294-338::orphaned_session` (`NodeLedger`, D175); `engine/src/run/workflow_exec/mod.rs:129-155` (`ChildLedger::open_under`); `engine/src/run/escalation.rs:259-290::pre_seeded_resolution` (`GateLedger::pre_seeded`); `engine/src/artifacts/mod.rs::RunArtifacts::of` con sus 4 callers (`gate_exec.rs:72`, `questions_exec.rs:32`, `distill.rs:159`, `promote.rs:145` leen `state.artifacts`); `engine/src/run/node_close.rs:190` (`progress.md` desde `RunState`, sin segundo replay); `engine/src/run/distill.rs` (`provenance.yaml` cuenta los findings desde `RunState::effective_findings`, deduplicados por la misma regla que el frame — hoy cuenta los vigentes sin deduplicar).
 
 **Prerequisito cerrado.** W-04 (blackboard por `FindingLedger::effective`; una regla de dedup, la que colapsa espacios y mayúsculas, en `dedup_findings`).
 
@@ -541,8 +540,10 @@ WorkflowName, SkillName, InputName, McpServerName
 // core/src/events/artifacts/payloads.rs
 pub enum RecordedOrigin { Submitted, Ingested, Derived, Answered, Input, Inherited { run: RunId, producer: Option<NodeId> } }
 pub enum ArtifactOrigin { Recorded(RecordedOrigin), Legacy }   // solo el fold produce Legacy
-// core/src/findings/mod.rs
-pub struct Location { pub path: RelativePath, pub range: Option<LineRange> }
+// core/src/findings/location.rs (D175): en FindingEntry.location y en events::Finding.location, el mismo tipo
+pub struct Location { pub root: LocationRoot, pub path: RelativePath, pub range: Option<LineRange> }
+pub enum LocationRoot { Work, Run }   // `src/lib.rs:10-14` es Work; `run:scratch/engine.json` es Run; nunca un path absoluto
+// engine/src/run/ctx.rs: engine_finding(node, id, severity, title, location: Location, detail)
 // core/src/diagnostic/problem.rs
 pub enum DiagnosticCode { Rule(RuleCode), Parse(ParseCode), File(FileCode), Artifact(ArtifactCode) }
 // engine/src/artifacts/ingest.rs
@@ -561,11 +562,16 @@ kind; `questions_exec.rs:122-143` lo usa); `core/src/questions/` (shape y
 `findings/rules.rs:26-29` (la regla `EmptyLocation` y su `RuleCode` se borran:
 un `Location` no puede estar vacío, y lo que la puerta rechaza es `parse` en
 `findings[i].location`, como `tasks[i].id` hoy — `compatibility.md` §problem);
+`core/src/events/findings/payloads.rs` (`Finding.location: Location`, D175 §3);
 `engine/src/run/ctx.rs::engine_finding` (toma `Location`, así el engine no
-escribe lo que la puerta rechaza), `engine/src/run/loop_exec/escalate.rs:110,296`
-(la denegación ubica en el primer path pedido; la lista entera ya va en
-`detail`), `engine/src/scope.rs::Breach::location`, los cuatro findings de
-`exec.rs:228,272` y `steps.rs:83,96` que hoy escriben paths absolutos;
+escribe lo que la puerta rechaza), y cada sitio con su raíz (D175 §4):
+`exec.rs:228` → `run:scratch/engine.json`, `exec.rs:272` → `run:objects`,
+`distill.rs:200` → `run:artifacts/<nodo>/<nombre>`, `distill.rs:272,285,306` →
+`Work` en `DISTILLED_DIR`, `steps.rs:83,96` → `Work` en `.`,
+`loop_exec/escalate.rs:110,296` → `Work` en el primer path pedido (la lista
+entera ya va en `detail`), `scope.rs::Breach::location` → `Work` en el primer
+path cruzado; `docs/compatibility.md` §problem (el prefijo `run:` y que un
+`location` que no lee es `parse`);
 `core/src/tasks/mod.rs:52` (el doc de `Task` dice que `id` no se valida al
 parsear y `TaskId` lo valida); `core/src/diagnostic/{problem,artifact}.rs:171,91,190`;
 `engine/src/receipt/mod.rs` (`DiagnosticCount.code: DiagnosticCode`);
@@ -628,9 +634,7 @@ queda para lo que necesita config/adapters); `engine/src/run_tools/findings.rs:5
 `notice.rs:119` (`RunTool`); los 15 `manifest.yaml` + `progress.md` +
 `task-worktrees` + `scratch/sessions` + `"artifacts"` en `closing.rs:288`;
 `engine/src/run/steps.rs:256-272` (por `canonical::derive_findings(events) ->
-Result<FindingsFile, DeriveError>`: un finding del log cuya `location` no lee es
-`RunError::Broken` que lo nombra — con las dos puertas tipadas (M12) sólo un log
-editado a mano llega ahí, y por D141 no hay lector viejo que deber).
+FindingsFile`: total, porque `Finding.location` ya es `Location` en el log, D175 §3).
 
 **Tests.** `a_workflow_cannot_be_obtained_without_its_rules`
 (core/tests/workflow.rs: un workflow con id duplicado no parsea por `read`);
