@@ -81,9 +81,12 @@ pub(crate) async fn drive_promotions(
                 runs: &env.project.runs_root,
                 worktrees: &env.project.worktrees_root,
             },
-            env.storage,
-            &SystemClock,
-            env.ids,
+            yunta_engine::CallerInfra {
+                storage: env.storage,
+                clock: &SystemClock,
+                ids: env.ids,
+                supervision: yunta_engine::process::Supervision::none(),
+            },
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -199,6 +202,7 @@ nodes:
             &manifest.base_commit,
             &yunta_engine::run_branch(&run_id),
             manifest.isolation,
+            yunta_engine::process::Supervision::none(),
         )
         .await
         .unwrap();

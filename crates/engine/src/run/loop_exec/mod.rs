@@ -103,7 +103,7 @@ pub(super) async fn execute_loop(
         // point — one worktree per task, derived from the current base
         // commit — captured once so all N tasks work from an identical
         // snapshot.
-        let base_commit = head_commit(ctx.worktree).await?;
+        let base_commit = head_commit(ctx.worktree, ctx.root_supervision()).await?;
 
         // Each batch member's brief carries the loop's declared `context:` —
         // resolved per task (volatile sources fresh, stable ones from the

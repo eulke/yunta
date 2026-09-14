@@ -55,6 +55,20 @@ pub struct Predecessor<'a> {
 /// Creates (never runs) the successor of `predecessor`, which just
 /// closed `Promoted` toward `suggested_mode`.
 ///
+/// What the caller brings to a run it creates: where the log goes, the
+/// instant and the ids the log is stamped with, and the supervision every
+/// subprocess that creation spawns is born under.
+///
+/// Grouped because they travel together and none of them is a decision
+/// this function makes: it is handed the caller's infrastructure and
+/// trail, exactly as [`create_run`](crate::create_run) is.
+pub struct CallerInfra<'a> {
+    pub storage: &'a AsyncStorage,
+    pub clock: &'a dyn Clock,
+    pub ids: &'a dyn IdSource,
+    pub supervision: crate::process::Supervision<'a>,
+}
+
 /// `repo` is the checkout a fresh worktree branches from (the original
 /// `cwd` for a top-level chain; the parent run's own tree for a child's).
 /// Under `Isolation::None` the successor reuses the predecessor's
@@ -66,10 +80,14 @@ pub async fn create_promotion_successor(
     repo: &Path,
     suggested_mode: &ModeName,
     roots: RunRoots<'_>,
-    storage: &AsyncStorage,
-    clock: &dyn Clock,
-    ids: &dyn IdSource,
+    caller: CallerInfra<'_>,
 ) -> Result<PromotionSuccessor, RunError> {
+    let CallerInfra {
+        storage,
+        clock,
+        ids,
+        supervision,
+    } = caller;
     let Predecessor {
         id: predecessor_id,
         manifest: predecessor_manifest,
@@ -81,7 +99,7 @@ pub async fn create_promotion_successor(
     let mut manifest = predecessor_manifest.clone();
     // The successor builds on wherever the predecessor's own
     // work left the tree, not on the original base.
-    manifest.base_commit = crate::worktree::head_commit(predecessor_worktree).await?;
+    manifest.base_commit = crate::worktree::head_commit(predecessor_worktree, supervision).await?;
 
     let worktree = match manifest.isolation {
         Isolation::Worktree => {
@@ -92,6 +110,7 @@ pub async fn create_promotion_successor(
                 &manifest.base_commit,
                 &crate::worktree::run_branch(&successor_id),
                 Isolation::Worktree,
+                supervision,
             )
             .await?;
             worktree

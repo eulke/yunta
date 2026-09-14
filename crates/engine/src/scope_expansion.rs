@@ -235,7 +235,14 @@ pub async fn evaluate(
         }
         ScopeExpansionMode::Ask => Decision::Escalate,
         ScopeExpansionMode::Rules => {
-            evaluate_rules(within, request, task_worktree, max_expansion_files).await?
+            evaluate_rules(
+                within,
+                request,
+                task_worktree,
+                max_expansion_files,
+                supervision,
+            )
+            .await?
         }
     };
     Ok((precheck_exit, grants.commit(max_per_run, provisional).await))
@@ -246,6 +253,7 @@ async fn evaluate_rules(
     request: &ScopeExpansionRequest,
     task_worktree: &Path,
     max_expansion_files: usize,
+    supervision: Supervision<'_>,
 ) -> Result<Decision, ScopeExpansionError> {
     let ceiling = build_globset(within)?;
     let requested = build_globset(&request.paths)?;
@@ -267,7 +275,7 @@ async fn evaluate_rules(
         ));
     }
 
-    let touched = diff_paths(task_worktree).await?;
+    let touched = diff_paths(task_worktree, supervision).await?;
     let matched: Vec<_> = touched
         .iter()
         .filter(|path| requested.is_match(path))
@@ -287,8 +295,12 @@ fn build_globset(patterns: &[String]) -> Result<globset::GlobSet, ScopeExpansion
         .map_err(|(glob, source)| ScopeExpansionError::InvalidGlob { glob, source })
 }
 
-async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, ScopeExpansionError> {
-    crate::git::output(cwd, args)
+async fn run_git(
+    cwd: &Path,
+    args: &[&str],
+    supervision: Supervision<'_>,
+) -> Result<String, ScopeExpansionError> {
+    crate::git::output(cwd, args, supervision)
         .await
         .map_err(|e| match e.source {
             Some(source) => ScopeExpansionError::Io {
@@ -303,17 +315,25 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, ScopeExpansionErro
         })
 }
 
-async fn diff_paths(cwd: &Path) -> Result<Vec<std::path::PathBuf>, ScopeExpansionError> {
-    let mut paths: Vec<std::path::PathBuf> = run_git(cwd, &["diff", "--name-only", "HEAD"])
-        .await?
-        .lines()
-        .map(std::path::PathBuf::from)
-        .collect();
-    paths.extend(
-        run_git(cwd, &["ls-files", "--others", "--exclude-standard"])
+async fn diff_paths(
+    cwd: &Path,
+    supervision: Supervision<'_>,
+) -> Result<Vec<std::path::PathBuf>, ScopeExpansionError> {
+    let mut paths: Vec<std::path::PathBuf> =
+        run_git(cwd, &["diff", "--name-only", "HEAD"], supervision)
             .await?
             .lines()
-            .map(std::path::PathBuf::from),
+            .map(std::path::PathBuf::from)
+            .collect();
+    paths.extend(
+        run_git(
+            cwd,
+            &["ls-files", "--others", "--exclude-standard"],
+            supervision,
+        )
+        .await?
+        .lines()
+        .map(std::path::PathBuf::from),
     );
     paths.sort();
     paths.dedup();

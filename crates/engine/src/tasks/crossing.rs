@@ -14,6 +14,7 @@ use std::path::Path;
 use yunta_core::events::{EventPayload, StoredEvent, TaskStatus};
 use yunta_core::{CommitSha, RunId, TaskId, TasksFile};
 
+use crate::process::Supervision;
 use crate::run::RunError;
 
 /// What a source run's log leaves standing about the tasks it was given:
@@ -77,6 +78,7 @@ pub(crate) async fn carried_into(
     standing: &Standing,
     document: &TasksFile,
     tree: &Path,
+    supervision: Supervision<'_>,
 ) -> Result<BTreeMap<TaskId, CommitSha>, RunError> {
     let placed: Vec<(&TaskId, &CommitSha)> = document
         .tasks
@@ -90,14 +92,14 @@ pub(crate) async fn carried_into(
         return Ok(BTreeMap::new());
     }
 
-    let head = crate::worktree::head_commit(tree).await?;
+    let head = crate::worktree::head_commit(tree, supervision).await?;
     let mut answered: BTreeMap<&CommitSha, bool> = BTreeMap::new();
     let mut carried = BTreeMap::new();
     for (id, commit) in placed {
         let in_tree = match answered.get(commit) {
             Some(answer) => *answer,
             None => {
-                let answer = has_commit(tree, commit, &head).await?;
+                let answer = has_commit(tree, commit, &head, supervision).await?;
                 answered.insert(commit, answer);
                 answer
             }
@@ -113,7 +115,12 @@ pub(crate) async fn carried_into(
 /// "no", not a failure: git says the same when the commit is on a branch
 /// this tree never took and when this repository does not have it at
 /// all, and either way the work is not here.
-async fn has_commit(tree: &Path, commit: &CommitSha, head: &CommitSha) -> Result<bool, RunError> {
+async fn has_commit(
+    tree: &Path,
+    commit: &CommitSha,
+    head: &CommitSha,
+    supervision: Supervision<'_>,
+) -> Result<bool, RunError> {
     crate::git::success(
         tree,
         &[
@@ -122,6 +129,7 @@ async fn has_commit(tree: &Path, commit: &CommitSha, head: &CommitSha) -> Result
             commit.as_str(),
             head.as_str(),
         ],
+        supervision,
     )
     .await
     .map_err(|e| {
@@ -203,7 +211,7 @@ mod tests {
         )
         .expect("a log that replays");
 
-        let carried = carried_into(&standing, &document, tree.path())
+        let carried = carried_into(&standing, &document, tree.path(), Supervision::none())
             .await
             .expect("git answers");
 
@@ -227,7 +235,7 @@ mod tests {
         )
         .expect("a log that replays");
 
-        let carried = carried_into(&standing, &document, tree.path())
+        let carried = carried_into(&standing, &document, tree.path(), Supervision::none())
             .await
             .expect("git answers");
 
@@ -247,7 +255,7 @@ mod tests {
         )
         .expect("a log that replays");
 
-        let carried = carried_into(&standing, &document, tree.path())
+        let carried = carried_into(&standing, &document, tree.path(), Supervision::none())
             .await
             .expect("git answers");
 
@@ -275,7 +283,7 @@ mod tests {
         .expect("a log that replays");
         let document = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
 
-        let carried = carried_into(&standing, &document, tree.path())
+        let carried = carried_into(&standing, &document, tree.path(), Supervision::none())
             .await
             .expect("git answers");
 
@@ -315,7 +323,7 @@ mod tests {
             .collect();
         let standing = standing_of(&source(), &source_log(&entries)).expect("a log that replays");
 
-        let carried = carried_into(&standing, &document, tree.path())
+        let carried = carried_into(&standing, &document, tree.path(), Supervision::none())
             .await
             .expect("git answers");
 

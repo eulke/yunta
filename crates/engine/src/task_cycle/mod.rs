@@ -277,6 +277,23 @@ pub async fn run_task(
         }
     }
 
+    // A cycle whose token already fired has nothing to verify: every
+    // subprocess the pre-check would run is governed by that same token,
+    // so it would only produce "killed before it could answer" for the
+    // caller to read as a verdict. A `join: any` sibling winning between
+    // the batch starting and this task's first check is exactly that
+    // case: the task was cut, not judged.
+    if supervision.cancel.is_some_and(|token| token.is_cancelled()) {
+        return Ok(TaskCycleReport {
+            task_id: task.id.clone(),
+            staged: last_staged.clone(),
+            pre_check: Vec::new(),
+            attempts: Vec::new(),
+            outcome: TaskOutcome::Interrupted,
+            needs_human_decision: false,
+        });
+    }
+
     let (pre_runs, pre_outcome) = pre_check(task, cwd, memo, supervision).await?;
 
     // The pre-check validates the criteria before any work: a non-guard that

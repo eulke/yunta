@@ -71,10 +71,19 @@ pub(super) async fn run_one_attempt(
     // verdict, no retry. The attempt is on record; what the cancellation
     // means for the task is the caller's decision, because only it knows
     // which token fired.
-    if matches!(dispatch_outcome, DispatchOutcome::Cancelled) {
+    //
+    // The token is read as well as the outcome: a `join: any` sibling can
+    // win between the session closing and the verdict starting, and every
+    // subprocess the verdict would run is already governed by that same
+    // token — so running it would only produce a "killed before it could
+    // answer" to interpret as a failure. This attempt lost; it did not
+    // fail.
+    let cancelled = matches!(dispatch_outcome, DispatchOutcome::Cancelled)
+        || supervision.cancel.is_some_and(|token| token.is_cancelled());
+    if cancelled {
         let record = AttemptRecord {
             attempt,
-            dispatch: dispatch_outcome,
+            dispatch: DispatchOutcome::Cancelled,
             tokens,
             post_check: Vec::new(),
             scope: crate::scope::ScopeCheckResult::default(),
@@ -109,7 +118,7 @@ pub(super) async fn run_one_attempt(
     // The final diff is evaluated against the declared scope plus any
     // authorized expansions — never against a denied or escalated request's
     // paths.
-    let scope = scope_check(cwd, &effective_scope, &last_staged).await?;
+    let scope = scope_check(cwd, &effective_scope, &last_staged, supervision).await?;
 
     let criteria_green = post_runs.iter().all(|r| r.exit_code == 0);
     let succeeded = criteria_green && scope.violations.is_empty();

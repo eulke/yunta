@@ -87,16 +87,21 @@ impl Memo {
 /// genuinely different trees hash the same and wrongly reuse a stale
 /// result; a bare filename list (from `git status`) isn't enough since a
 /// file can change content without its name changing.
-async fn tree_hash(cwd: &Path) -> Result<ContentHash, TaskCycleError> {
+async fn tree_hash(
+    cwd: &Path,
+    supervision: Supervision<'_>,
+) -> Result<ContentHash, TaskCycleError> {
     let run_git = |args: &'static [&'static str]| async move {
-        crate::git::output(cwd, args).await.map_err(|e| {
-            let detail = e.detail();
-            TaskCycleError::TreeHash {
-                args: e.args,
-                cwd: e.cwd,
-                detail,
-            }
-        })
+        crate::git::output(cwd, args, supervision)
+            .await
+            .map_err(|e| {
+                let detail = e.detail();
+                TaskCycleError::TreeHash {
+                    args: e.args,
+                    cwd: e.cwd,
+                    detail,
+                }
+            })
     };
 
     let head = run_git(&["rev-parse", "HEAD"]).await?;
@@ -161,7 +166,7 @@ async fn run_all_criteria(
     memo: &Memo,
     supervision: Supervision<'_>,
 ) -> Result<Vec<CriterionRun>, TaskCycleError> {
-    let tree_hash = tree_hash(cwd).await?;
+    let tree_hash = tree_hash(cwd, supervision).await?;
     let mut runs = Vec::with_capacity(criteria.len());
     for criterion in criteria {
         let (exit_code, reused, duration_ms) = match memo.get(&criterion.cmd, &tree_hash) {

@@ -339,6 +339,7 @@ pub(super) async fn execute_workflow(
                 &child_manifest.base_commit,
                 &crate::worktree::run_branch(&child_id),
                 Isolation::Worktree,
+                ctx.root_supervision(),
             )
             .await
             {
@@ -607,9 +608,12 @@ async fn drive_child(
                         runs: &runs_root(ctx),
                         worktrees: &worktrees_root(ctx),
                     },
-                    ctx.storage,
-                    ctx.clock.as_ref(),
-                    ctx.ids,
+                    super::promote::CallerInfra {
+                        storage: ctx.storage,
+                        clock: ctx.clock.as_ref(),
+                        ids: ctx.ids,
+                        supervision: ctx.root_supervision(),
+                    },
                 )
                 .await
                 {

@@ -293,7 +293,18 @@ async fn birth_registrations(
                         slot.insert(crate::tasks::standing_of(run, &events)?)
                     }
                 };
-                Some(crate::tasks::carried_into(standing, &document, worktree).await?)
+                Some(
+                    crate::tasks::carried_into(
+                        standing,
+                        &document,
+                        worktree,
+                        // Creating a run has no run to cancel yet: the
+                        // git that answers what the tree carries is the
+                        // caller's, bounded by its own invocation.
+                        crate::process::Supervision::none(),
+                    )
+                    .await?,
+                )
             }
         };
         documents.push(Some(BirthDocument { document, carried }));

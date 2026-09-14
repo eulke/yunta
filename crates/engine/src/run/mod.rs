@@ -65,7 +65,9 @@ pub use escalation::{current_escalation, resolve_gate, ResolveGateError};
 pub(crate) use exec::execute_run_at_depth;
 pub use exec::record_pause_after_crash;
 pub(in crate::run) use exec::{find_node, pause, record_pause};
-pub use promote::{create_promotion_successor, Predecessor, PromotionSuccessor, RunRoots};
+pub use promote::{
+    create_promotion_successor, CallerInfra, Predecessor, PromotionSuccessor, RunRoots,
+};
 
 /// A frozen `manifest.yaml` that cannot be read back.
 #[derive(Debug, Error)]

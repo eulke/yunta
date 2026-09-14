@@ -114,3 +114,67 @@ async fn a_finished_command_reports_its_status_and_both_streams() {
     assert_eq!(String::from_utf8_lossy(&stdout), "out\n");
     assert_eq!(String::from_utf8_lossy(&stderr), "err\n");
 }
+
+/// A `git` a run spawns is a subprocess the run owns: born in its own
+/// process group, registered, and killed with its whole tree when the run
+/// is cancelled. Proven with a `git` of the test's own on an injected
+/// `PATH`, so the assertion is about who governs the child rather than
+/// about what real git does.
+#[tokio::test]
+async fn a_cancelled_run_kills_the_git_it_spawned() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let started = dir.path().join("started");
+    std::fs::write(
+        bin.join("git"),
+        format!(
+            "#!/bin/sh\necho $$ > {}\ntail -f /dev/null\n",
+            started.display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(bin.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let env = [("PATH".to_string(), path.clone())];
+    let supervision = Supervision {
+        registry: None,
+        cancel: Some(&cancel),
+        env: &env,
+    };
+
+    let waiting = started.clone();
+    let trigger = cancel.clone();
+    let killer = tokio::spawn(async move {
+        // The stub is running once it has written its pid.
+        while !waiting.exists() {
+            tokio::task::yield_now().await;
+        }
+        trigger.cancel();
+    });
+
+    let error = yunta_engine::git::output(dir.path(), &["status"], supervision)
+        .await
+        .expect_err("a cancelled git never answers");
+    killer.await.unwrap();
+
+    let pid: i32 = std::fs::read_to_string(&started)
+        .expect("the stub ran")
+        .trim()
+        .parse()
+        .expect("the stub wrote its pid");
+    assert!(
+        !group_running(Pid::try_from(pid).expect("a real pid")),
+        "the git this run spawned outlived the run's cancellation: {error}"
+    );
+}

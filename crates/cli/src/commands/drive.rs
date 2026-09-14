@@ -282,7 +282,12 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
         RunTerminal::Finished | RunTerminal::Failed { .. }
     ) || settling.cancelled
     {
-        yunta_engine::release_worktree(&settling.ctx.cwd, settling.manifest.isolation).await?;
+        yunta_engine::release_worktree(
+            &settling.ctx.cwd,
+            settling.manifest.isolation,
+            yunta_engine::process::Supervision::none(),
+        )
+        .await?;
     }
     if settling.json {
         return print_run_json(&settling.run_id, &settling.report, settling.budget_warning);

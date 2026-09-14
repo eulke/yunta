@@ -318,12 +318,15 @@ async fn verify_before_waking(
     if let Some(diagnostic) = artifacts.diagnostic(ctx.run_id) {
         return Err(steps::broken(ctx, diagnostic).await);
     }
-    let worktree = WorktreeIntegrity::of(RunWorktree {
-        run_id: ctx.run_id,
-        path: ctx.worktree,
-        base_commit: &ctx.manifest.base_commit,
-        isolation: ctx.manifest.isolation,
-    })
+    let worktree = WorktreeIntegrity::of(
+        RunWorktree {
+            run_id: ctx.run_id,
+            path: ctx.worktree,
+            base_commit: &ctx.manifest.base_commit,
+            isolation: ctx.manifest.isolation,
+        },
+        ctx.root_supervision(),
+    )
     .await?;
     if let Some(diagnostic) = worktree.diagnostic() {
         return Err(steps::broken(ctx, diagnostic).await);

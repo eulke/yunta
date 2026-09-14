@@ -16,6 +16,7 @@ use crate::worktree::head_commit;
 
 use super::escalate::{emit_scope_expansion_events, PendingEscalation};
 use super::{BatchIntegration, LoopState};
+use crate::process::Supervision;
 use crate::run::{RunCtx, RunError};
 
 /// Integrates one dispatched batch, serially and in declaration order
@@ -235,11 +236,19 @@ async fn integrate_task(
         worktree: task_worktree,
         staged,
     } = verified;
-    commit_task_work(task_worktree, task).await?;
+    // This task's own token: a cancelled task takes its git with it.
+    let supervision = ctx.supervision(cancel);
+    commit_task_work(task_worktree, task, supervision).await?;
 
-    let integration_head = head_commit(ctx.worktree).await?;
-    if !run_git_ok(task_worktree, &["rebase", integration_head.as_str()]).await? {
-        let _ = crate::git::success(task_worktree, &["rebase", "--abort"]).await;
+    let integration_head = head_commit(ctx.worktree, supervision).await?;
+    if !run_git_ok(
+        task_worktree,
+        &["rebase", integration_head.as_str()],
+        supervision,
+    )
+    .await?
+    {
+        let _ = crate::git::success(task_worktree, &["rebase", "--abort"], supervision).await;
         // No `post_check` ran — nothing to attach the reason to but the
         // rebase itself, so it's recorded the same way any other command
         // outcome is: a synthetic `CriterionRun` naming the git command
@@ -275,7 +284,7 @@ async fn integrate_task(
             }),
         )
         .await?;
-    let scope = scope_check(task_worktree, &task.scope, staged).await?;
+    let scope = scope_check(task_worktree, &task.scope, staged, supervision).await?;
     ctx.emit(
         Some(&node.id),
         EventPayload::ScopeChecked(ScopeCheckedPayload {
@@ -291,8 +300,14 @@ async fn integrate_task(
         return Ok(IntegrationOutcome::Rejected);
     }
 
-    let task_head = head_commit(task_worktree).await?;
-    if !run_git_ok(ctx.worktree, &["merge", "--ff-only", task_head.as_str()]).await? {
+    let task_head = head_commit(task_worktree, supervision).await?;
+    if !run_git_ok(
+        ctx.worktree,
+        &["merge", "--ff-only", task_head.as_str()],
+        supervision,
+    )
+    .await?
+    {
         // Integration is strictly serial (the engine itself, not
         // an external actor, is the only writer to `ctx.worktree` between
         // reading `integration_head` above and this merge) — a non-fast-
@@ -312,18 +327,22 @@ async fn integrate_task(
 /// `concurrency` never applies. A task that changed nothing (its criteria
 /// were satisfied by side effects that left no diff) simply produces no
 /// commit — never an error.
-async fn commit_task_work(cwd: &Path, task: &Task) -> Result<(), RunError> {
+async fn commit_task_work(
+    cwd: &Path,
+    task: &Task,
+    supervision: Supervision<'_>,
+) -> Result<(), RunError> {
     let git_error = |e: crate::git::GitError, action: &str| RunError::Git {
         context: format!("{action} task `{}` work", task.id),
         detail: e.detail(),
     };
-    crate::git::output(cwd, &["add", "-A"])
+    crate::git::output(cwd, &["add", "-A"], supervision)
         .await
         .map_err(|e| git_error(e, "stage"))?;
 
     // `diff --cached --quiet` exits 0 with nothing staged, 1 with staged
     // changes — both are answers, not failures.
-    if crate::git::success(cwd, &["diff", "--cached", "--quiet"])
+    if crate::git::success(cwd, &["diff", "--cached", "--quiet"], supervision)
         .await
         .map_err(|e| git_error(e, "inspect staged work for"))?
     {
@@ -338,14 +357,19 @@ async fn commit_task_work(cwd: &Path, task: &Task) -> Result<(), RunError> {
             "-m",
             &yunta_core::text::detailed(format!("task {}", task.id), &task.title),
         ],
+        supervision,
     )
     .await
     .map_err(|e| git_error(e, "commit"))?;
     Ok(())
 }
 
-async fn run_git_ok(cwd: &Path, args: &[&str]) -> Result<bool, RunError> {
-    crate::git::success(cwd, args)
+async fn run_git_ok(
+    cwd: &Path,
+    args: &[&str],
+    supervision: Supervision<'_>,
+) -> Result<bool, RunError> {
+    crate::git::success(cwd, args, supervision)
         .await
         .map_err(|e| RunError::Git {
             context: format!("run git {}", e.args),

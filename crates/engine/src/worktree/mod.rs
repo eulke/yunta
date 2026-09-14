@@ -36,6 +36,7 @@ use yunta_core::{CommitSha, InvalidId, Isolation, Pid, SystemClock};
 
 use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
 
+use crate::process::Supervision;
 pub use branches::{run_branch, task_branch};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
 
@@ -152,6 +153,7 @@ pub async fn prepare_worktree(
     base_commit: &CommitSha,
     branch_name: &str,
     isolation: Isolation,
+    supervision: Supervision<'_>,
 ) -> Result<WorktreePrepared, WorktreeError> {
     match isolation {
         Isolation::Worktree => {
@@ -162,7 +164,7 @@ pub async fn prepare_worktree(
                     source,
                 })?;
             }
-            let common_dir = common_git_dir(repo).await?;
+            let common_dir = common_git_dir(repo, supervision).await?;
             let _mutation_lock = lock_worktree_mutations(&common_dir).await?;
             run_git(
                 repo,
@@ -174,17 +176,18 @@ pub async fn prepare_worktree(
                     branch_name,
                     base_commit.as_str(),
                 ],
+                supervision,
             )
             .await?;
             Ok(WorktreePrepared::Ready)
         }
         Isolation::None => {
-            if !is_clean(repo).await? {
+            if !is_clean(repo, supervision).await? {
                 return Err(WorktreeError::DirtyTree {
                     path: repo.to_path_buf(),
                 });
             }
-            lock(repo).await
+            lock(repo, supervision).await
         }
     }
 }
@@ -202,11 +205,12 @@ pub async fn hand_over_worktree(
     repo: &Path,
     isolation: Isolation,
     pid: Pid,
+    supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
     match isolation {
         Isolation::Worktree => Ok(()),
         Isolation::None => {
-            let lock_path = lock_path(repo).await?;
+            let lock_path = lock_path(repo, supervision).await?;
             lock::hand_over(&lock_path, pid, &SystemClock).map_err(|source| WorktreeError::Io {
                 action: "hand over the isolation lock".to_string(),
                 path: lock_path,
@@ -222,11 +226,15 @@ pub async fn hand_over_worktree(
 /// Releases what `prepare_worktree` took: for `None`, removes the lock
 /// so a later run may proceed. For `Worktree`, a no-op — the worktree
 /// stays on disk (see module docs).
-pub async fn release_worktree(repo: &Path, isolation: Isolation) -> Result<(), WorktreeError> {
+pub async fn release_worktree(
+    repo: &Path,
+    isolation: Isolation,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
     match isolation {
         Isolation::Worktree => Ok(()),
         Isolation::None => {
-            let lock_path = lock_path(repo).await?;
+            let lock_path = lock_path(repo, supervision).await?;
             match std::fs::remove_file(&lock_path) {
                 Ok(()) => Ok(()),
                 Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -260,15 +268,18 @@ pub enum WorktreeCleanup {
 pub async fn cleanup_worktree(
     worktree: &Path,
     branch: &str,
+    supervision: Supervision<'_>,
 ) -> Result<WorktreeCleanup, WorktreeError> {
     let git_dir = run_git(
         worktree,
         &["rev-parse", "--path-format=absolute", "--git-dir"],
+        supervision,
     )
     .await?;
     let common_dir = run_git(
         worktree,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        supervision,
     )
     .await?;
     if git_dir.trim() == common_dir.trim() {
@@ -287,10 +298,11 @@ pub async fn cleanup_worktree(
             "--force",
             &worktree.display().to_string(),
         ],
+        supervision,
     )
     .await?;
     // Best-effort by design: `-d` refusing is the branch's protection.
-    let _ = run_git(&main_repo, &["branch", "-d", branch]).await;
+    let _ = run_git(&main_repo, &["branch", "-d", branch], supervision).await;
     Ok(WorktreeCleanup::Removed)
 }
 
@@ -298,8 +310,11 @@ pub async fn cleanup_worktree(
 /// checkout where it is, so "HEAD" means the same thing to the batch that
 /// branches from it, the promotion that builds on it, and the resume that
 /// checks the run's base commit is still behind it.
-pub async fn head_commit(repo: &Path) -> Result<CommitSha, WorktreeError> {
-    let output = run_git(repo, &["rev-parse", "HEAD"]).await?;
+pub async fn head_commit(
+    repo: &Path,
+    supervision: Supervision<'_>,
+) -> Result<CommitSha, WorktreeError> {
+    let output = run_git(repo, &["rev-parse", "HEAD"], supervision).await?;
     output
         .trim()
         .parse()
@@ -310,8 +325,8 @@ pub async fn head_commit(repo: &Path) -> Result<CommitSha, WorktreeError> {
         })
 }
 
-async fn is_clean(repo: &Path) -> Result<bool, WorktreeError> {
-    let output = run_git(repo, &["status", "--porcelain"]).await?;
+async fn is_clean(repo: &Path, supervision: Supervision<'_>) -> Result<bool, WorktreeError> {
+    let output = run_git(repo, &["status", "--porcelain"], supervision).await?;
     Ok(output.trim().is_empty())
 }
 
@@ -320,8 +335,11 @@ async fn is_clean(repo: &Path) -> Result<bool, WorktreeError> {
 /// files live, next to git's own metadata rather than inside the
 /// working tree: they must never show up as uncommitted files for the
 /// very checks they exist to support (dirty-tree, scope-by-diff).
-async fn common_git_dir(repo: &Path) -> Result<PathBuf, WorktreeError> {
-    let common_dir = run_git(repo, &["rev-parse", "--git-common-dir"]).await?;
+async fn common_git_dir(
+    repo: &Path,
+    supervision: Supervision<'_>,
+) -> Result<PathBuf, WorktreeError> {
+    let common_dir = run_git(repo, &["rev-parse", "--git-common-dir"], supervision).await?;
     let common_dir = PathBuf::from(common_dir.trim());
     Ok(if common_dir.is_absolute() {
         common_dir
@@ -330,8 +348,10 @@ async fn common_git_dir(repo: &Path) -> Result<PathBuf, WorktreeError> {
     })
 }
 
-async fn lock_path(repo: &Path) -> Result<PathBuf, WorktreeError> {
-    Ok(common_git_dir(repo).await?.join("yunta-none.lock"))
+async fn lock_path(repo: &Path, supervision: Supervision<'_>) -> Result<PathBuf, WorktreeError> {
+    Ok(common_git_dir(repo, supervision)
+        .await?
+        .join("yunta-none.lock"))
 }
 
 /// How long an acquirer waits on a live holder before giving up
@@ -419,8 +439,11 @@ async fn lock_worktree_mutations(
 /// Refuses at once on a present holder — a second run on the same
 /// checkout is the thing this lock exists to prevent — and reports a
 /// takeover from a gone holder, never silently.
-async fn lock(repo: &Path) -> Result<WorktreePrepared, WorktreeError> {
-    let lock_path = lock_path(repo).await?;
+async fn lock(
+    repo: &Path,
+    supervision: Supervision<'_>,
+) -> Result<WorktreePrepared, WorktreeError> {
+    let lock_path = lock_path(repo, supervision).await?;
     match lock::acquire(&lock_path, Contention::Refuse, &SystemProbe, &SystemClock).await {
         Ok(Acquired::Fresh) => Ok(WorktreePrepared::Ready),
         Ok(Acquired::Stolen { dead }) => {
@@ -476,15 +499,21 @@ fn main_repo_of(common_dir: &Path) -> Result<PathBuf, WorktreeError> {
         })
 }
 
-async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, WorktreeError> {
-    crate::git::output(cwd, args).await.map_err(|e| {
-        let detail = e.detail();
-        WorktreeError::Git {
-            args: e.args,
-            cwd: e.cwd,
-            detail,
-        }
-    })
+async fn run_git(
+    cwd: &Path,
+    args: &[&str],
+    supervision: Supervision<'_>,
+) -> Result<String, WorktreeError> {
+    crate::git::output(cwd, args, supervision)
+        .await
+        .map_err(|e| {
+            let detail = e.detail();
+            WorktreeError::Git {
+                args: e.args,
+                cwd: e.cwd,
+                detail,
+            }
+        })
 }
 
 #[cfg(test)]

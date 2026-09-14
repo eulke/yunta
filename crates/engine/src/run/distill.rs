@@ -247,11 +247,18 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     // Best-effort: a git that can't spawn or exits non-zero is a `false`,
     // recorded as a finding — never a hard error that would un-close the
     // run the log is about to close.
-    async fn ran(worktree: &std::path::Path, args: &[&str]) -> bool {
-        crate::git::success(worktree, args).await.unwrap_or(false)
+    async fn ran(
+        worktree: &std::path::Path,
+        args: &[&str],
+        supervision: crate::process::Supervision<'_>,
+    ) -> bool {
+        crate::git::success(worktree, args, supervision)
+            .await
+            .unwrap_or(false)
     }
+    let supervision = ctx.root_supervision();
 
-    if !ran(ctx.worktree, &["add", DISTILLED_DIR]).await {
+    if !ran(ctx.worktree, &["add", DISTILLED_DIR], supervision).await {
         return ctx
             .engine_finding(
                 None,
@@ -264,7 +271,7 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
             .await;
     }
     let message = format!("docs(knowledge): distill from {}", ctx.run_id.as_str());
-    if !ran(ctx.worktree, &["commit", "-m", &message]).await {
+    if !ran(ctx.worktree, &["commit", "-m", &message], supervision).await {
         return ctx
             .engine_finding(
                 None,
@@ -282,9 +289,10 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     let has_upstream = ran(
         ctx.worktree,
         &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        supervision,
     )
     .await;
-    if has_upstream && !ran(ctx.worktree, &["push"]).await {
+    if has_upstream && !ran(ctx.worktree, &["push"], supervision).await {
         return ctx
             .engine_finding(
                 None,

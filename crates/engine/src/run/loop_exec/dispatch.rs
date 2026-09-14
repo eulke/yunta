@@ -97,6 +97,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         base_commit,
         &branch,
         Isolation::Worktree,
+        ctx.root_supervision(),
     )
     .await?;
 

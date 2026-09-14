@@ -106,6 +106,14 @@ impl RunCtx<'_> {
         }
     }
 
+    /// The supervision for a subprocess the run owns but no single node
+    /// does — a worktree it prepares, a commit it makes at the end. The
+    /// run's own token governs it, so Ctrl-C reaches it like anything
+    /// else the run started.
+    pub(crate) fn root_supervision(&self) -> crate::process::Supervision<'_> {
+        self.supervision(&self.root_cancel)
+    }
+
     /// This run's log: its storage handle, its identity, its clock and
     /// the invocation's observer, for the sites that append through
     /// [`RunLog`] rather than through [`RunCtx::emit`].

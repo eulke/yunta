@@ -30,6 +30,7 @@ async fn worktree_isolation_creates_a_real_git_worktree_at_base_commit() {
         &base_commit,
         "yunta/run-1",
         Isolation::Worktree,
+        yunta_engine::process::Supervision::none(),
     )
     .await
     .unwrap();
@@ -57,6 +58,7 @@ async fn two_worktree_isolated_runs_on_the_same_repo_never_collide() {
         &base_commit,
         "yunta/run-1",
         Isolation::Worktree,
+        yunta_engine::process::Supervision::none(),
     )
     .await
     .unwrap();
@@ -66,6 +68,7 @@ async fn two_worktree_isolated_runs_on_the_same_repo_never_collide() {
         &base_commit,
         "yunta/run-2",
         Isolation::Worktree,
+        yunta_engine::process::Supervision::none(),
     )
     .await
     .unwrap();
@@ -87,16 +90,30 @@ async fn none_isolation_with_a_clean_tree_succeeds_and_locks_the_repo() {
     init_repo(&repo);
     let base_commit = head(&repo);
 
-    prepare_worktree(&repo, &repo, &base_commit, "unused", Isolation::None)
-        .await
-        .unwrap();
+    prepare_worktree(
+        &repo,
+        &repo,
+        &base_commit,
+        "unused",
+        Isolation::None,
+        yunta_engine::process::Supervision::none(),
+    )
+    .await
+    .unwrap();
 
     // A second run on the same repo must be refused while the first
     // holds the lock — this is the "no concurrent runs" guarantee
     // required for `none`.
-    let err = prepare_worktree(&repo, &repo, &base_commit, "unused", Isolation::None)
-        .await
-        .unwrap_err();
+    let err = prepare_worktree(
+        &repo,
+        &repo,
+        &base_commit,
+        "unused",
+        Isolation::None,
+        yunta_engine::process::Supervision::none(),
+    )
+    .await
+    .unwrap_err();
     assert!(matches!(err, WorktreeError::Locked { .. }));
 }
 
@@ -109,9 +126,16 @@ async fn none_isolation_with_a_dirty_tree_is_refused_before_anything_runs() {
     let base_commit = head(&repo);
     std::fs::write(repo.join("uncommitted.txt"), "dirty").unwrap();
 
-    let err = prepare_worktree(&repo, &repo, &base_commit, "unused", Isolation::None)
-        .await
-        .unwrap_err();
+    let err = prepare_worktree(
+        &repo,
+        &repo,
+        &base_commit,
+        "unused",
+        Isolation::None,
+        yunta_engine::process::Supervision::none(),
+    )
+    .await
+    .unwrap_err();
     assert!(matches!(err, WorktreeError::DirtyTree { .. }));
 }
 
@@ -123,15 +147,35 @@ async fn releasing_a_none_isolation_lock_lets_a_later_run_proceed() {
     init_repo(&repo);
     let base_commit = head(&repo);
 
-    prepare_worktree(&repo, &repo, &base_commit, "unused", Isolation::None)
-        .await
-        .unwrap();
-    release_worktree(&repo, Isolation::None).await.unwrap();
+    prepare_worktree(
+        &repo,
+        &repo,
+        &base_commit,
+        "unused",
+        Isolation::None,
+        yunta_engine::process::Supervision::none(),
+    )
+    .await
+    .unwrap();
+    release_worktree(
+        &repo,
+        Isolation::None,
+        yunta_engine::process::Supervision::none(),
+    )
+    .await
+    .unwrap();
 
     // No longer locked — a fresh run may proceed.
-    prepare_worktree(&repo, &repo, &base_commit, "unused", Isolation::None)
-        .await
-        .unwrap();
+    prepare_worktree(
+        &repo,
+        &repo,
+        &base_commit,
+        "unused",
+        Isolation::None,
+        yunta_engine::process::Supervision::none(),
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -149,10 +193,17 @@ async fn releasing_a_worktree_isolated_run_leaves_the_worktree_on_disk() {
         &base_commit,
         "yunta/run-1",
         Isolation::Worktree,
+        yunta_engine::process::Supervision::none(),
     )
     .await
     .unwrap();
-    release_worktree(&repo, Isolation::Worktree).await.unwrap();
+    release_worktree(
+        &repo,
+        Isolation::Worktree,
+        yunta_engine::process::Supervision::none(),
+    )
+    .await
+    .unwrap();
 
     // Worktrees are left in place for inspection — cleanup is a
     // separate, not-yet-built concern (on_finish).
@@ -217,9 +268,16 @@ async fn a_dead_owner_s_lock_is_stolen_and_the_takeover_is_reported() {
     let _ = std::process::Child::wait(&mut { dead });
     std::fs::write(lock_file(&repo), owner_record(dead_pid, Utc::now())).unwrap();
 
-    let prepared = prepare_worktree(&repo, &repo, &base_commit, "unused", Isolation::None)
-        .await
-        .unwrap();
+    let prepared = prepare_worktree(
+        &repo,
+        &repo,
+        &base_commit,
+        "unused",
+        Isolation::None,
+        yunta_engine::process::Supervision::none(),
+    )
+    .await
+    .unwrap();
     match prepared {
         yunta_engine::WorktreePrepared::StoleStaleLock { dead_pid: reported } => {
             assert_eq!(reported.as_u32(), dead_pid);
@@ -249,9 +307,16 @@ async fn a_live_owner_s_lock_still_refuses() {
     )
     .unwrap();
 
-    let err = prepare_worktree(&repo, &repo, &base_commit, "unused", Isolation::None)
-        .await
-        .unwrap_err();
+    let err = prepare_worktree(
+        &repo,
+        &repo,
+        &base_commit,
+        "unused",
+        Isolation::None,
+        yunta_engine::process::Supervision::none(),
+    )
+    .await
+    .unwrap_err();
     assert!(matches!(err, WorktreeError::Locked { .. }), "got: {err:?}");
 }
 
@@ -265,9 +330,16 @@ async fn a_legacy_empty_lock_refuses_conservatively_naming_the_file() {
 
     std::fs::write(lock_file(&repo), "").unwrap();
 
-    let err = prepare_worktree(&repo, &repo, &base_commit, "unused", Isolation::None)
-        .await
-        .unwrap_err();
+    let err = prepare_worktree(
+        &repo,
+        &repo,
+        &base_commit,
+        "unused",
+        Isolation::None,
+        yunta_engine::process::Supervision::none(),
+    )
+    .await
+    .unwrap_err();
     let message = err.to_string();
     assert!(
         message.contains("yunta-none.lock"),
@@ -303,7 +375,15 @@ async fn concurrent_worktree_adds_on_one_repo_never_corrupt_git_metadata() {
             let path = root.path().join(format!("worktrees/r{round}-w{i}"));
             let branch = format!("yunta/stress/r{round}-w{i}");
             async move {
-                prepare_worktree(&repo, &path, &base_commit, &branch, Isolation::Worktree).await
+                prepare_worktree(
+                    &repo,
+                    &path,
+                    &base_commit,
+                    &branch,
+                    Isolation::Worktree,
+                    yunta_engine::process::Supervision::none(),
+                )
+                .await
             }
         });
         let results = futures::future::join_all(adds).await;
@@ -433,9 +513,16 @@ async fn both_locks_share_one_protocol() {
 
     // `isolation: none`: stolen by remove + create_new — a new file, a
     // fresh owner record — and reported.
-    let prepared = prepare_worktree(&repo, &repo, &base_commit, "unused", Isolation::None)
-        .await
-        .unwrap();
+    let prepared = prepare_worktree(
+        &repo,
+        &repo,
+        &base_commit,
+        "unused",
+        Isolation::None,
+        yunta_engine::process::Supervision::none(),
+    )
+    .await
+    .unwrap();
     assert!(
         matches!(
             prepared,
@@ -461,6 +548,7 @@ async fn both_locks_share_one_protocol() {
         &base_commit,
         "yunta/shared-protocol",
         Isolation::Worktree,
+        yunta_engine::process::Supervision::none(),
     )
     .await
     .unwrap();
@@ -490,6 +578,7 @@ async fn a_run_branch_and_its_task_branches_coexist() {
         &base_commit,
         &run_branch(&run),
         Isolation::Worktree,
+        yunta_engine::process::Supervision::none(),
     )
     .await
     .expect("the run's own branch");
@@ -499,6 +588,7 @@ async fn a_run_branch_and_its_task_branches_coexist() {
         &base_commit,
         &task_branch(&run, &"T001".into(), 1),
         Isolation::Worktree,
+        yunta_engine::process::Supervision::none(),
     )
     .await
     .expect("a task branch of the same run, beside it and not under it");
@@ -530,6 +620,7 @@ async fn two_runs_working_the_same_task_get_their_own_branches() {
             &base_commit,
             &task_branch(run, &task, 1),
             Isolation::Worktree,
+            yunta_engine::process::Supervision::none(),
         )
         .await
         .expect("each run's own task branch");

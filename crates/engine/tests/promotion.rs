@@ -398,9 +398,12 @@ async fn a_successor_is_born_naming_every_artifact_it_inherits() {
             runs: &closed.runs_root,
             worktrees: &closed.runs_root.parent().unwrap().join("worktrees"),
         },
-        &closed.storage.async_handle(),
-        &FixedClock,
-        &IDS,
+        yunta_engine::CallerInfra {
+            storage: &closed.storage.async_handle(),
+            clock: &FixedClock,
+            ids: &IDS,
+            supervision: yunta_engine::process::Supervision::none(),
+        },
     )
     .await
     .expect("the successor is created");
@@ -481,9 +484,12 @@ async fn a_successor_inherits_what_the_log_holds_and_not_a_stray_file() {
             runs: &closed.runs_root,
             worktrees: &closed.runs_root.parent().unwrap().join("worktrees"),
         },
-        &closed.storage.async_handle(),
-        &FixedClock,
-        &IDS,
+        yunta_engine::CallerInfra {
+            storage: &closed.storage.async_handle(),
+            clock: &FixedClock,
+            ids: &IDS,
+            supervision: yunta_engine::process::Supervision::none(),
+        },
     )
     .await
     .expect("the successor is created");
@@ -569,9 +575,12 @@ async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_d
             runs: &closed.runs_root,
             worktrees: &closed.runs_root.parent().unwrap().join("worktrees"),
         },
-        &closed.storage.async_handle(),
-        &FixedClock,
-        &IDS,
+        yunta_engine::CallerInfra {
+            storage: &closed.storage.async_handle(),
+            clock: &FixedClock,
+            ids: &IDS,
+            supervision: yunta_engine::process::Supervision::none(),
+        },
     )
     .await
     .expect("the successor is created");
@@ -670,9 +679,12 @@ async fn a_done_that_crossed_keeps_the_commit_it_names_so_it_crosses_again() {
             runs: &closed.runs_root,
             worktrees: &worktrees,
         },
-        &closed.storage.async_handle(),
-        &FixedClock,
-        &IDS,
+        yunta_engine::CallerInfra {
+            storage: &closed.storage.async_handle(),
+            clock: &FixedClock,
+            ids: &IDS,
+            supervision: yunta_engine::process::Supervision::none(),
+        },
     )
     .await
     .expect("the first successor is created");
@@ -693,9 +705,12 @@ async fn a_done_that_crossed_keeps_the_commit_it_names_so_it_crosses_again() {
             runs: &closed.runs_root,
             worktrees: &worktrees,
         },
-        &closed.storage.async_handle(),
-        &FixedClock,
-        &IDS,
+        yunta_engine::CallerInfra {
+            storage: &closed.storage.async_handle(),
+            clock: &FixedClock,
+            ids: &IDS,
+            supervision: yunta_engine::process::Supervision::none(),
+        },
     )
     .await
     .expect("the second successor is created");

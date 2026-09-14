@@ -235,7 +235,7 @@ async fn scope_violation(
     let Some(scope) = crate::audited_scope(node) else {
         return Ok(None);
     };
-    let result = scope_check(ctx.worktree, scope, staged).await?;
+    let result = scope_check(ctx.worktree, scope, staged, ctx.root_supervision()).await?;
     ctx.emit(
         Some(&node.id),
         EventPayload::ScopeChecked(yunta_core::events::ScopeCheckedPayload {

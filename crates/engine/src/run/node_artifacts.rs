@@ -294,9 +294,15 @@ async fn record_content(
             // already has — asked of that tree, here, because the
             // document is what names the tasks to ask about.
             let carried = match standing {
-                Some(standing) => {
-                    Some(crate::tasks::carried_into(standing, tasks, ctx.worktree).await?)
-                }
+                Some(standing) => Some(
+                    crate::tasks::carried_into(
+                        standing,
+                        tasks,
+                        ctx.worktree,
+                        ctx.root_supervision(),
+                    )
+                    .await?,
+                ),
                 None => None,
             };
             let provenance = match &carried {

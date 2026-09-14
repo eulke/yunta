@@ -128,11 +128,22 @@ async fn create_and_detach(
     // checkout the child is still working in.
     match spawn_detached_resume(&prepared.run_dir, prepared.run_id.as_str(), &ctx.cwd).await {
         Ok(child) => {
-            yunta_engine::hand_over_worktree(&ctx.cwd, isolation, child).await?;
+            yunta_engine::hand_over_worktree(
+                &ctx.cwd,
+                isolation,
+                child,
+                yunta_engine::process::Supervision::none(),
+            )
+            .await?;
             Ok(prepared.run_id)
         }
         Err(source) => {
-            yunta_engine::release_worktree(&ctx.cwd, isolation).await?;
+            yunta_engine::release_worktree(
+                &ctx.cwd,
+                isolation,
+                yunta_engine::process::Supervision::none(),
+            )
+            .await?;
             Err(DetachedResumeError::new(&prepared.run_id, source).into())
         }
     }

@@ -72,7 +72,7 @@ pub fn clone_url(source: &str) -> String {
 }
 
 async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, PackError> {
-    yunta_engine::git::output(cwd, args)
+    yunta_engine::git::output(cwd, args, yunta_engine::process::Supervision::none())
         .await
         .map(|stdout| stdout.trim().to_string())
         .map_err(|e| {

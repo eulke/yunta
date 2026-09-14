@@ -369,6 +369,7 @@ async fn create_run_from(
         &manifest.base_commit,
         &yunta_engine::run_branch(&run_id),
         manifest.isolation,
+        yunta_engine::process::Supervision::none(),
     )
     .await?
     {

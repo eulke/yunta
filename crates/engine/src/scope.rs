@@ -8,6 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::process::Supervision;
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -48,12 +50,13 @@ pub async fn scope_check(
     cwd: &Path,
     scope: &[String],
     staged: &[PathBuf],
+    supervision: Supervision<'_>,
 ) -> Result<ScopeCheckResult, ScopeCheckError> {
     let set = yunta_core::scope_globset(scope)
         .map_err(|(glob, source)| ScopeCheckError::InvalidGlob { glob, source })?;
 
-    let mut diff = git_diff_names(cwd).await?;
-    diff.extend(git_untracked(cwd).await?);
+    let mut diff = git_diff_names(cwd, supervision).await?;
+    diff.extend(git_untracked(cwd, supervision).await?);
     diff.sort();
     diff.dedup();
 
@@ -67,18 +70,33 @@ pub async fn scope_check(
     Ok(ScopeCheckResult { diff, violations })
 }
 
-async fn git_diff_names(cwd: &Path) -> Result<Vec<PathBuf>, ScopeCheckError> {
-    let bytes = git_bytes(cwd, &["diff", "--name-only", "-z", "HEAD"]).await?;
+async fn git_diff_names(
+    cwd: &Path,
+    supervision: Supervision<'_>,
+) -> Result<Vec<PathBuf>, ScopeCheckError> {
+    let bytes = git_bytes(cwd, &["diff", "--name-only", "-z", "HEAD"], supervision).await?;
     Ok(nul_separated_paths(&bytes))
 }
 
-async fn git_untracked(cwd: &Path) -> Result<Vec<PathBuf>, ScopeCheckError> {
-    let bytes = git_bytes(cwd, &["ls-files", "--others", "--exclude-standard", "-z"]).await?;
+async fn git_untracked(
+    cwd: &Path,
+    supervision: Supervision<'_>,
+) -> Result<Vec<PathBuf>, ScopeCheckError> {
+    let bytes = git_bytes(
+        cwd,
+        &["ls-files", "--others", "--exclude-standard", "-z"],
+        supervision,
+    )
+    .await?;
     Ok(nul_separated_paths(&bytes))
 }
 
-async fn git_bytes(cwd: &Path, args: &[&str]) -> Result<Vec<u8>, ScopeCheckError> {
-    crate::git::output_bytes(cwd, args)
+async fn git_bytes(
+    cwd: &Path,
+    args: &[&str],
+    supervision: Supervision<'_>,
+) -> Result<Vec<u8>, ScopeCheckError> {
+    crate::git::output_bytes(cwd, args, supervision)
         .await
         .map_err(|e| match e.source {
             Some(source) => ScopeCheckError::Io {

@@ -68,6 +68,7 @@ pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<Run
         match crate::worktree::cleanup_worktree(
             ctx.worktree,
             &crate::worktree::run_branch(ctx.run_id),
+            ctx.root_supervision(),
         )
         .await
         {
