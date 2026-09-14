@@ -36,6 +36,7 @@ use yunta_core::{DistillArtifact, Isolation, ModeName, OnFinishStep, WorkflowNam
 
 use super::{RunCtx, RunError};
 use yunta_core::events::NodeEvent;
+use yunta_core::{Location, RelativePath};
 
 /// `provenance.yaml`'s whole document — serialized from structs so the
 /// field order is fixed and the same inputs always give the same bytes.
@@ -202,9 +203,13 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
                     &format!("distill-missing-{}-{}", declaration.node, declaration.id),
                     FindingSeverity::Minor,
                     format!("distill: declared artifact {declaration} was never produced"),
-                    crate::artifacts::store::view_path(Some(&declaration.node), &name)
-                        .display()
-                        .to_string(),
+                    Location::run(
+                        RelativePath::of([crate::artifacts::store::view_path(
+                            Some(&declaration.node),
+                            &name,
+                        )]),
+                        None,
+                    ),
                     "the workflow's `on_finish.distill` names this artifact \
                      but the node that produces it never did in this run"
                         .to_string(),
@@ -274,7 +279,7 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
                 "distill-add",
                 FindingSeverity::Minor,
                 "distill: `git add` failed".to_string(),
-                DISTILLED_DIR.to_string(),
+                Location::work(RelativePath::of([DISTILLED_DIR]), None),
                 "the distilled files stay uncommitted in the run's worktree".to_string(),
             )
             .await;
@@ -287,7 +292,7 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
                 "distill-commit",
                 FindingSeverity::Minor,
                 "distill: `git commit` failed".to_string(),
-                DISTILLED_DIR.to_string(),
+                Location::work(RelativePath::of([DISTILLED_DIR]), None),
                 "the distilled files stay uncommitted in the run's worktree".to_string(),
             )
             .await;
@@ -308,7 +313,7 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
                 "distill-push",
                 FindingSeverity::Minor,
                 "distill: `git push` failed".to_string(),
-                DISTILLED_DIR.to_string(),
+                Location::work(RelativePath::of([DISTILLED_DIR]), None),
                 "the distill commit stays on the run's local branch".to_string(),
             )
             .await;
@@ -341,7 +346,7 @@ mod tests {
             id: id.into(),
             severity,
             title: format!("finding {id}"),
-            location: format!("tasks/{id}"),
+            location: format!("tasks/{id}").as_str().into(),
             detail: "detail".to_string(),
             proposed_criterion: None,
         }

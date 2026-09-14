@@ -15,6 +15,7 @@ use crate::run::node_close::fail_with_tokens;
 use crate::run::node_exec::NodeEnd;
 use crate::run::{RunCtx, RunError};
 use yunta_core::events::{FindingEvent, GateEvent, ScopeEvent, TaskEvent};
+use yunta_core::{Location, RelativePath, ScopeGlob};
 
 /// Resolves each escalated scope-expansion request through the run's human
 /// interaction surface, once the whole batch is on the log: a grant or a
@@ -107,9 +108,15 @@ pub(super) async fn resolve_escalations(
                         ))?,
                         severity: FindingSeverity::Minor,
                         title: format!("scope expansion denied for task `{}`", pending.task_id),
-                        location: yunta_core::listed_globs(&pending.outcome.request.paths),
+                        location: Location::work(
+                            RelativePath::of(
+                                pending.outcome.request.paths.first().map(ScopeGlob::as_str),
+                            ),
+                            None,
+                        ),
                         detail: format!(
-                            "{reason} — agent's stated reason: {}",
+                            "{reason} — paths asked for: {}; agent's stated reason: {}",
+                            yunta_core::listed_globs(&pending.outcome.request.paths),
                             pending.outcome.request.reason
                         ),
                         proposed_criterion: pending
@@ -293,9 +300,13 @@ pub(super) async fn emit_scope_expansion_events(
                         // carries.
                         severity: FindingSeverity::Minor,
                         title: format!("scope expansion denied for task `{task_id}`"),
-                        location: yunta_core::listed_globs(&outcome.request.paths),
+                        location: Location::work(
+                            RelativePath::of(outcome.request.paths.first().map(ScopeGlob::as_str)),
+                            None,
+                        ),
                         detail: format!(
-                            "{reason} — agent's stated reason: {}",
+                            "{reason} — paths asked for: {}; agent's stated reason: {}",
+                            yunta_core::listed_globs(&outcome.request.paths),
                             outcome.request.reason
                         ),
                         proposed_criterion: outcome

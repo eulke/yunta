@@ -23,10 +23,6 @@ pub(super) const RULES: &[Rule] = &[
         demand: "`title` is a non-empty one-line summary",
     },
     Rule {
-        code: RuleCode::EmptyLocation,
-        demand: "`location` names a non-empty path, with its range when there is one",
-    },
-    Rule {
         code: RuleCode::EmptyDetail,
         demand: "`detail` is non-empty: what goes wrong, and when",
     },
@@ -87,7 +83,6 @@ pub(super) fn check(file: &FindingsFile) -> Vec<Diagnostic> {
         }
         for (value, key, code) in [
             (&finding.title, "title", RuleCode::EmptyTitle),
-            (&finding.location, "location", RuleCode::EmptyLocation),
             (&finding.detail, "detail", RuleCode::EmptyDetail),
         ] {
             if value.trim().is_empty() {

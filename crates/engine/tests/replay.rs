@@ -14,7 +14,7 @@ fn finding(id: &str, severity: FindingSeverity, title: &str, location: &str) -> 
         id: id.into(),
         severity,
         title: title.to_string(),
-        location: location.to_string(),
+        location: location.into(),
         detail: "detail".to_string(),
         proposed_criterion: None,
     }

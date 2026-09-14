@@ -20,6 +20,26 @@ fn nonempty() -> impl Strategy<Value = String> {
     "[a-zA-Z][a-zA-Z0-9 ._/:-]{0,40}"
 }
 
+/// Every shape a location has: both roots, a path under each, and the
+/// range in all three of its forms — so the round trip covers the whole
+/// spelling rather than one corner of it.
+fn location() -> impl Strategy<Value = String> {
+    (
+        prop::option::of(Just("run:")),
+        "[a-z][a-z0-9_]{0,5}(/[a-z][a-z0-9_]{0,5}){0,2}",
+        prop::option::of((1u32..500, prop::option::of(0u32..50))),
+    )
+        .prop_map(|(root, path, range)| {
+            let mut text = format!("{}{path}", root.unwrap_or(""));
+            match range {
+                Some((start, Some(span))) => text.push_str(&format!(":{start}-{}", start + span)),
+                Some((start, None)) => text.push_str(&format!(":{start}")),
+                None => {}
+            }
+            text
+        })
+}
+
 /// Distinct ids, so `DuplicateId` never fires: the round trip is what is
 /// under test, not the rules.
 fn distinct_ids(max: usize) -> impl Strategy<Value = Vec<String>> {
@@ -70,7 +90,7 @@ fn findings() -> impl Strategy<Value = FindingsFile> {
     distinct_ids(4).prop_flat_map(|ids| {
         let entries: Vec<_> = ids
             .into_iter()
-            .map(|id| (Just(id), nonempty(), nonempty(), nonempty()))
+            .map(|id| (Just(id), nonempty(), location(), nonempty()))
             .collect();
         entries.prop_map(|entries| {
             let yaml = entries

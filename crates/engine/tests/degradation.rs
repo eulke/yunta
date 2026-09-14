@@ -472,3 +472,73 @@ fn breaches(bench: &yunta_testkit::Bench) -> Vec<Finding> {
         })
         .collect()
 }
+
+#[tokio::test]
+async fn an_engine_finding_locates_where_the_door_can_read() {
+    // The engine's own findings and an agent's are the same thing on the
+    // log, and a successor run inherits both through the one findings
+    // document. So what the engine writes passes the door that document
+    // parses through, and names the root it is under: the process
+    // registry is the run's own bookkeeping, the worktree a cleanup
+    // could not remove is the work itself.
+    let bench = Bench::new();
+    let workflow = r#"
+name: degradation
+nodes:
+  - id: build
+    kind: bash
+    run: "true"
+on_finish:
+  - cleanup: worktree
+"#;
+    let terminal = bench
+        .run_sabotaged(workflow, |run_dir| {
+            std::fs::create_dir_all(run_dir.join("scratch").join("engine.json")).unwrap();
+        })
+        .await;
+
+    assert!(matches!(terminal, RunTerminal::Finished));
+    let events = bench.events();
+
+    assert_eq!(
+        finding(&events, "engine-registry")
+            .expect("the registry finding")
+            .location,
+        "run:scratch/engine.json".into(),
+        "the registry is the run's own, not this host's"
+    );
+    assert_eq!(
+        finding(&events, "cleanup-not-a-worktree")
+            .expect("the cleanup finding")
+            .location,
+        ".".into(),
+        "a tree that stays is the work, whatever absolute path holds it"
+    );
+
+    let posted: Vec<Finding> = events
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Findings(FindingEvent::Posted(p))) => Some(p.finding.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(posted.len() >= 2, "this run posts both findings");
+
+    let document = yunta_core::FindingsFile::from_findings(posted.clone());
+    let yaml = serde_norway::to_string(&document).expect("a findings document serializes");
+    let read = yunta_core::shape::read::<yunta_core::FindingsFile>(
+        yaml.as_bytes(),
+        "artifacts/findings.yaml",
+    )
+    .expect("every engine finding reads back through the door a successor inherits it by");
+    assert_eq!(
+        read.findings
+            .iter()
+            .map(|entry| entry.location.clone())
+            .collect::<Vec<_>>(),
+        posted
+            .iter()
+            .map(|finding| finding.location.clone())
+            .collect::<Vec<_>>(),
+    );
+}

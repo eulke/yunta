@@ -332,7 +332,7 @@ fn finding(id: &str, title: &str, location: &str) -> yunta_core::events::Finding
         id: id.into(),
         severity: yunta_core::events::FindingSeverity::Major,
         title: title.to_string(),
-        location: location.to_string(),
+        location: location.into(),
         detail: "scope expansion denied by a human".to_string(),
         proposed_criterion: None,
     }

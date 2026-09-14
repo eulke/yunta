@@ -167,7 +167,7 @@ impl Bench {
                                 id: id.into(),
                                 severity: yunta_core::events::FindingSeverity::Minor,
                                 title: format!("seeded {id}"),
-                                location: "src/lib.rs".to_string(),
+                                location: "src/lib.rs".into(),
                                 detail: "seeded directly".to_string(),
                                 proposed_criterion: None,
                             },

@@ -49,7 +49,7 @@ mod tests {
             id: id.into(),
             severity: FindingSeverity::Major,
             title: title.to_string(),
-            location: location.to_string(),
+            location: location.into(),
             detail: "detail".to_string(),
             proposed_criterion: None,
         }

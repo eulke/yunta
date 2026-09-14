@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::process::Supervision;
 use yunta_core::fence::Coverage;
-use yunta_core::ScopeGlob;
+use yunta_core::{Location, RelativePath, ScopeGlob};
 
 use thiserror::Error;
 
@@ -177,12 +177,11 @@ impl Breach {
         "the fence declared exact let a write through".to_string()
     }
 
-    /// The first path, which is where a reader looks.
-    pub fn location(&self) -> String {
-        self.paths
-            .first()
-            .map(|path| path.display().to_string())
-            .unwrap_or_default()
+    /// The first path, which is where a reader looks. Under the work:
+    /// a breach is a write to the project that the fence said it had
+    /// stopped.
+    pub fn location(&self) -> Location {
+        Location::work(RelativePath::of(self.paths.first()), None)
     }
 
     pub fn detail(&self, adapter: &yunta_core::AdapterId) -> String {

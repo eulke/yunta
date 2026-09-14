@@ -170,7 +170,11 @@ async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterio
             cmd: "test -f b.txt".to_string()
         })
     );
-    assert!(finding.location.contains("b.txt"));
+    assert_eq!(
+        finding.location,
+        "b.txt".into(),
+        "the finding locates where the agent asked to write"
+    );
 }
 
 #[tokio::test]

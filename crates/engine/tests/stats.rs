@@ -529,7 +529,7 @@ fn finding(id: &str) -> Finding {
         id: id.into(),
         severity: FindingSeverity::Major,
         title: "the tasks document has no criteria".to_string(),
-        location: "plan.yaml".to_string(),
+        location: "plan.yaml".into(),
         detail: "every task needs one".to_string(),
         proposed_criterion: None,
     }

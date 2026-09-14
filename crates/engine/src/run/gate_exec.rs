@@ -33,6 +33,7 @@ use super::step::{GateRender, Step};
 use super::{RunCtx, RunError};
 use crate::reserved::{offers, ReservedOption};
 use yunta_core::events::{FindingEvent, GateEvent, NodeEvent};
+use yunta_core::{Location, RelativePath};
 
 /// What a dispatch call decided — the caller (`run/mod.rs`'s own loop)
 /// either keeps going (events already emitted) or pauses and returns.
@@ -238,10 +239,10 @@ async fn resolve_from_poll(
                             id: FindingId::try_from(format!("{}-review-{i}", node.id))?,
                             severity: FindingSeverity::Major,
                             title: format!("changes requested by {}", comment.author),
-                            location: comment
-                                .path
-                                .clone()
-                                .unwrap_or_else(|| "(pull request)".to_string()),
+                            location: Location::work(
+                                RelativePath::of(comment.path.as_deref()),
+                                None,
+                            ),
                             detail: comment.body.clone(),
                             proposed_criterion: None,
                         },

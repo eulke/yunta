@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use yunta_core::Pid;
+use yunta_core::{Pid, RelativePath};
 
 /// The file's whole content — small enough that every mutation rewrites
 /// it atomically (tempfile + rename) rather than patching in place.
@@ -187,10 +187,18 @@ impl Drop for ProcessRegistry {
 
 /// Where a run's registry lives: `run.dir/scratch/engine.json`.
 pub fn registry_path(run_dir: &Path) -> PathBuf {
-    run_dir
-        .join(crate::run_dir::SCRATCH_DIR)
-        .join("engine.json")
+    run_dir.join(registry_file().as_path())
 }
+
+/// The registry's place under the run directory — what a finding about
+/// it names, since a location is relative to the run and never to this
+/// host.
+pub fn registry_file() -> RelativePath {
+    RelativePath::of([crate::run_dir::SCRATCH_DIR, REGISTRY_NAME])
+}
+
+/// The registry's file name under the run's scratch.
+const REGISTRY_NAME: &str = "engine.json";
 
 /// Reads a run's registry, if one exists and parses — `None` covers
 /// both "no live engine ever wrote one" and "unreadable", because the

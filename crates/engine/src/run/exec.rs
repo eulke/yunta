@@ -25,6 +25,7 @@ use crate::worktree::{RunWorktree, WorktreeIntegrity};
 use super::schedule::{self, Decision};
 use super::{gate_exec, steps, RunCtx, RunEnv, RunError, RunReport, RunTerminal};
 use yunta_core::events::RunEvent;
+use yunta_core::{Location, RelativePath};
 
 /// Records the `run_paused` a post-crash `yunta cancel` writes when it
 /// finds the engine already dead. The CLI never builds an `EventDraft`
@@ -230,9 +231,7 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
             "engine-registry",
             FindingSeverity::Minor,
             "the process registry could not be written".to_string(),
-            crate::process_registry::registry_path(ctx.run_dir)
-                .display()
-                .to_string(),
+            Location::run(crate::process_registry::registry_file(), None),
             format!("nothing outside this invocation can see its process tree: {error}"),
         )
         .await?;
@@ -274,10 +273,10 @@ async fn resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError> {
             "engine-artifact-store",
             FindingSeverity::Minor,
             "the run holds artifacts this binary cannot verify".to_string(),
-            ctx.run_dir
-                .join(crate::artifacts::store::OBJECTS_DIR)
-                .display()
-                .to_string(),
+            Location::run(
+                RelativePath::of([crate::artifacts::store::OBJECTS_DIR]),
+                None,
+            ),
             detail,
         )
         .await?;

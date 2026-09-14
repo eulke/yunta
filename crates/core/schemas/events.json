@@ -1681,7 +1681,7 @@
           "$ref": "#/$defs/FindingId"
         },
         "location": {
-          "type": "string"
+          "$ref": "#/$defs/Location"
         },
         "proposed_criterion": {
           "anyOf": [
@@ -1925,6 +1925,11 @@
     },
     "InputName": {
       "description": "An input name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "Location": {
+      "description": "where a finding is: a path relative to the work, with its lines when they are known (`src/lib.rs`, `src/lib.rs:10`, `src/lib.rs:10-14`), or one relative to the run's own directory under the `run:` prefix (`run:objects`). Never absolute",
       "type": "string",
       "minLength": 1
     },
@@ -2332,7 +2337,6 @@
             "dependency-cycle",
             "manual-review-without-justification",
             "empty-text",
-            "empty-location",
             "empty-detail"
           ]
         },

@@ -20,7 +20,7 @@ nodes:
     kind: bash
     run: |
       printf 'tasks:\n  - id: T001\n    title: ""\n    scope: []\n    criteria: []\n' > {{node.artifacts}}/tasks.yaml
-      printf 'findings:\n  - id: F1\n    severity: minor\n    title: ""\n    location: ""\n    detail: ""\n' > {{node.artifacts}}/findings.yaml
+      printf 'findings:\n  - id: F1\n    severity: minor\n    title: ""\n    location: src/lib.rs\n    detail: ""\n' > {{node.artifacts}}/findings.yaml
     artifacts:
       produces: [tasks, findings]
 "#;
@@ -130,8 +130,8 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
         "a task with an empty `title` says so: {tasks_problems:?}"
     );
     assert!(
-        findings_problems.iter().any(|p| p.contains("location")),
-        "a finding with an empty `location` says so: {findings_problems:?}"
+        findings_problems.iter().any(|p| p.contains("detail")),
+        "a finding with an empty `detail` says so: {findings_problems:?}"
     );
 
     // The node list above stays one line per node, and that one line
@@ -239,8 +239,8 @@ fn status_json_carries_the_document_each_problem_belongs_to() {
     assert!(
         findings_problems
             .iter()
-            .any(|d| d["problem"] == "rule" && d["code"] == "empty-location"),
-        "the finding has an empty `location`: {state:#}"
+            .any(|d| d["problem"] == "rule" && d["code"] == "empty-detail"),
+        "the finding has an empty `detail`: {state:#}"
     );
 }
 

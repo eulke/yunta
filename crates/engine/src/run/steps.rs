@@ -18,6 +18,7 @@ use super::{
     schedule, RunCtx, RunError, RunReport, RunTerminal,
 };
 use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
+use yunta_core::{Location, RelativePath};
 
 /// A corrupt log is exactly the one you most want exported — each event
 /// serializes on its own, so a broken *sequence* doesn't stop the forensic
@@ -85,7 +86,7 @@ pub(super) async fn finish(
                     "cleanup-not-a-worktree",
                     FindingSeverity::Minor,
                     "on_finish.cleanup: worktree skipped".to_string(),
-                    ctx.worktree.display().to_string(),
+                    Location::work(RelativePath::here(), None),
                     "the run's tree is not a linked git worktree, so removing it would delete a \
                      primary checkout — nothing was touched"
                         .to_string(),
@@ -98,7 +99,7 @@ pub(super) async fn finish(
                     "cleanup-failed",
                     FindingSeverity::Minor,
                     "on_finish.cleanup: worktree failed".to_string(),
-                    ctx.worktree.display().to_string(),
+                    Location::work(RelativePath::here(), None),
                     format!("the run's linked worktree could not be removed: {e}"),
                 )
                 .await?;

@@ -159,6 +159,16 @@ the whole of where it is: a diagnostic carries no line and column, and
 and the receipt — so none of them can disagree about the facts, and nothing has
 to take a sentence apart to recover them.
 
+A finding's `location` is where it is: a path with the lines of it when the
+finder named them (`src/lib.rs`, `src/lib.rs:142`, `src/lib.rs:142-150`). The path
+is relative and never climbs out of what it is under, because a findings document
+is inherited by a successor run that need not be on this host — an absolute path
+is that host's, not the run's. A bare path is in the worktree, which is what every
+finding an agent writes is about; the engine's own findings about the run's
+bookkeeping carry the prefix `run:` and are relative to the run directory
+(`run:scratch/engine.json`). A location that does not read is refused where it is
+read, as a `parse` problem at its own key (`findings[0].location`).
+
 A problem is one of two shapes, under the key `problem`. `parse` carries `message`
 and, unless the root itself is at fault, the `path` of the value that stopped the
 read (`tasks[1].manual_review`); its stable code is `parse`. `rule` carries a

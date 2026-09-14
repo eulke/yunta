@@ -131,6 +131,33 @@ fn a_value_outside_a_closed_set_lists_the_set() {
 }
 
 #[test]
+fn a_location_that_does_not_read_is_a_parse_problem_at_its_path() {
+    // A location is parsed where it arrives, so what does not read is
+    // reported like any other value the door refuses: named at its own
+    // key, with the reason the type gives — never a rule of its own
+    // over a string that was let in.
+    for (location, reason) in [
+        (
+            "/etc/passwd",
+            "an absolute path is this host's, not this run's",
+        ),
+        ("../../etc/passwd", "climbs out"),
+        ("a.rs:14-10", "ends before it starts"),
+    ] {
+        let yaml = format!(
+            "findings:\n  - id: f1\n    severity: major\n    title: T\n    location: \"{location}\"\n    detail: D\n"
+        );
+        let report = read::<FindingsFile>(yaml.as_bytes(), FINDINGS)
+            .expect_err("a location that does not read");
+        assert_eq!(report.diagnostics.len(), 1, "{report}");
+        assert_eq!(report.diagnostics[0].problem.code(), "parse", "{report}");
+        let text = report.to_string();
+        assert!(text.contains("findings[0].location"), "at its key: {text}");
+        assert!(text.contains(reason), "with the reason: {text}");
+    }
+}
+
+#[test]
 fn an_id_that_breaks_its_rule_says_what_an_id_is() {
     let report = read::<TasksFile>(
         b"tasks:\n  - id: 1-dark-mode\n    title: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",

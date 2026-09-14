@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::events::scope::payloads::ProposedCriterion;
+use crate::findings::Location;
 use crate::ids::FindingId;
 
 /// `severity`: `blocking | major | minor | note` — confirmed against the
@@ -29,7 +30,7 @@ pub struct Finding {
     pub id: FindingId,
     pub severity: FindingSeverity,
     pub title: String,
-    pub location: String,
+    pub location: Location,
     pub detail: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_criterion: Option<ProposedCriterion>,

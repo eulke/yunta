@@ -16,7 +16,7 @@ fn finding(id: &str, title: &str) -> Finding {
         id: FindingId::try_from(id.to_string()).expect("a well-formed id"),
         severity: FindingSeverity::Major,
         title: title.to_string(),
-        location: "src/a.rs:1".to_string(),
+        location: "src/a.rs:1".into(),
         detail: "d".to_string(),
         proposed_criterion: None,
     }

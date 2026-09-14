@@ -37,7 +37,7 @@ pub struct FindingEntry {
     pub id: FindingId,
     pub severity: FindingSeverity,
     pub title: String,
-    pub location: String,
+    pub location: Location,
     pub detail: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_criterion: Option<ProposedCriterionEntry>,

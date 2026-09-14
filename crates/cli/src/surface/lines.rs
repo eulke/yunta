@@ -302,7 +302,7 @@ mod tests {
                 id: "f1".into(),
                 severity: FindingSeverity::Minor,
                 title: String::new(),
-                location: "src/lib.rs".to_string(),
+                location: "src/lib.rs".into(),
                 detail: String::new(),
                 proposed_criterion: None,
             },

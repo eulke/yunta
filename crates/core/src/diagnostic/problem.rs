@@ -84,7 +84,6 @@ rule_codes! {
     OverlappingScope => "overlapping-scope",
     ManualReviewWithoutJustification => "manual-review-without-justification",
     EmptyText => "empty-text",
-    EmptyLocation => "empty-location",
     EmptyDetail => "empty-detail",
     /// An update or a withdrawal names a finding this node never posted.
     UnknownId => "unknown-id",

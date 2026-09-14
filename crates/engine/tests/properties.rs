@@ -106,13 +106,16 @@ fn payload() -> impl Strategy<Value = EventPayload> {
             };
             EventPayload::Tasks(TaskEvent::StatusChanged(changed))
         }),
-        (severity(), "[a-z]{0,6}", "[a-z]{0,6}").prop_map(|(severity, title, location)| {
+        (severity(), "[a-z]{0,6}", "[a-z]{1,6}").prop_map(|(severity, title, location)| {
             EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: Finding {
                     id: "f1".into(),
                     severity,
                     title,
-                    location,
+                    location: yunta_core::Location::work(
+                        yunta_core::RelativePath::of([location]),
+                        None,
+                    ),
                     detail: "d".to_string(),
                     proposed_criterion: None,
                 },

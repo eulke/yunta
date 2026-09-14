@@ -27,7 +27,7 @@
           "$ref": "#/$defs/FindingId"
         },
         "location": {
-          "type": "string"
+          "$ref": "#/$defs/Location"
         },
         "proposed_criterion": {
           "anyOf": [
@@ -69,6 +69,11 @@
         "minor",
         "note"
       ]
+    },
+    "Location": {
+      "description": "where a finding is: a path relative to the work, with its lines when they are known (`src/lib.rs`, `src/lib.rs:10`, `src/lib.rs:10-14`), or one relative to the run's own directory under the `run:` prefix (`run:objects`). Never absolute",
+      "type": "string",
+      "minLength": 1
     },
     "ProposedCriterionEntry": {
       "description": "A criterion the author proposes to verify the finding's fix.",

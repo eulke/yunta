@@ -381,7 +381,7 @@ fn consolidate_blackboard_is_invariant_under_event_shuffling() {
         id: id.into(),
         severity: FindingSeverity::Minor,
         title: format!("title {id}"),
-        location: "src/x.rs".to_string(),
+        location: "src/x.rs".into(),
         detail: "detail".to_string(),
         proposed_criterion: None,
     };
@@ -428,7 +428,7 @@ fn group_log() -> Vec<yunta_core::events::StoredEvent> {
         id: id.into(),
         severity: FindingSeverity::Minor,
         title: title.to_string(),
-        location: format!("src/{id}.rs"),
+        location: format!("src/{id}.rs").as_str().into(),
         detail: "detail".to_string(),
         proposed_criterion: None,
     };

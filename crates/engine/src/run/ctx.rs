@@ -13,7 +13,7 @@ use yunta_core::events::{
     StoredEvent,
 };
 use yunta_core::port::{Adapter, Forge};
-use yunta_core::{AdapterId, Clock, FindingId, IdSource, Manifest, NodeId, RunId, Seq};
+use yunta_core::{AdapterId, Clock, FindingId, IdSource, Location, Manifest, NodeId, RunId, Seq};
 use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
@@ -217,7 +217,7 @@ impl RunCtx<'_> {
         id: &str,
         severity: FindingSeverity,
         title: String,
-        location: String,
+        location: Location,
         detail: String,
     ) -> Result<(), RunError> {
         self.emit(
