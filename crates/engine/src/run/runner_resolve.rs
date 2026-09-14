@@ -147,15 +147,6 @@ pub(super) struct RunToolsResolution {
     pub degraded: Option<String>,
 }
 
-/// Opens this session attempt's per-run MCP listener, or decides
-/// it must not exist. A resolution with no session and no degradation —
-/// no `run_tools` capability outside a blackboard group — is the resting
-/// state. A resolution carrying `degraded` is the recorded fallback: the
-/// listener could not bind but the node can proceed without it.
-/// `Err(diagnostic)` is the fatal case: the node's group declared
-/// `coordination: blackboard` and this session cannot carry it
-/// (capability missing, or the listener failed to bind) — the caller
-/// fails the node with it, never emulates.
 /// The first interpreted artifact this node declares, if any: the one a
 /// refusal names, so a reader has somewhere to look.
 fn declared_typed_artifact(ctx: &RunCtx<'_>, node: &Node) -> Option<yunta_core::ArtifactKind> {
@@ -206,6 +197,15 @@ pub(super) fn run_tools_allowed(
     Ok(false)
 }
 
+/// Opens this session attempt's per-run MCP listener, or decides
+/// it must not exist. A resolution with no session and no degradation —
+/// no `run_tools` capability outside a blackboard group — is the resting
+/// state. A resolution carrying `degraded` is the recorded fallback: the
+/// listener could not bind but the node can proceed without it.
+/// `Err(diagnostic)` is the fatal case: the node's group declared
+/// `coordination: blackboard` and this session cannot carry it
+/// (capability missing, or the listener failed to bind) — the caller
+/// fails the node with it, never emulates.
 pub(super) async fn open_run_tools(
     ctx: &RunCtx<'_>,
     node: &Node,
