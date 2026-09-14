@@ -806,8 +806,8 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | 0-03 | ratchets `banned_vocabulary` y `tense_markers` sembrados | — | cerrado(8edcdeb) |
 | 1-01 | `core::port` + `core::process`; engine sin `yunta-adapters`; test de frontera | P1 | cerrado(38f99dc) |
 | 1-02 | `MockFixture::parse(yaml, &RunPaths)`; `commands/test.rs` y `Bench` lo usan | 1-01 | cerrado(874ea82) |
-| 1-03 | `testkit-core`; `core` y `adapters` lo enlazan; `testkit::adapter` | 1-01 | pendiente |
-| 1-04 | registro de adapters derivado en `refuse_unrunnable`, `doctor`, `init` | 1-01 | pendiente |
+| 1-03 | `testkit-core`; `core` y `adapters` lo enlazan; `testkit::adapter` | 1-01 | cerrado(6290870) |
+| 1-04 | registro de adapters derivado en `refuse_unrunnable`, `doctor`, `init` | 1-01 | cerrado(5313f8c) |
 | 2-01 | dominios `run` `node` `session` `tasks` `scope` `findings` `artifacts` `gates` `children` con `kinds`/`payloads`/`ledger`/`happening`; `wire.rs`; `events.json` idéntico (37 kinds con `questions_asked`) | P2, 1-01 | pendiente |
 | 2-02 | constructores M03 en cada dominio; todos los emisores los usan; `QuestionsAsked::new` con `NonEmpty`; `finish_node` absorbe los tres `node_finished` de `gate_exec` (M26) | 2-01 | pendiente |
 | 2-03 | ledgers nuevos; `RunState` los sostiene; `NodeHistory` y los pliegues ad hoc borrados; `members_of` en el host del blackboard (M24 I-09); `GateLedger::rounds`, `pending_questions`, `answered_unfinished` (M26) | 2-01 | pendiente |
@@ -874,6 +874,7 @@ uno están en el commit que lo escribió.
 | L-08 | §0.15 | D26 llama "append-only" al blackboard que W-04 dejó plegado; ningún ADR revisa esa palabra | como propiedad del canal sigue siendo verdad y un ADR no se reescribe: D26 queda, el Contrato dice el pliegue en presente | Contrato §5.9 y §6.4 |
 | L-09 | 0-02 | `rfc-0003.md` carga el mismo tag `javascript` sobre un bloque de texto que el ítem nombra en los otros tres, y el pase de corpus se borra en el commit que lo corre | el ítem des-corrompe los cuatro documentos: el pase corre una vez, y lo que no arregle queda sin herramienta que lo arregle | fila 0-02 (§10); M23 |
 | L-10 | 1-01 | el engine importa `Forge` y sus tipos de `yunta_adapters`, así que "quita `yunta-adapters`" los mueve al puerto; `ForgeError::{Transport,Response}` llevan `reqwest::Error` (`adapters/src/forge/mod.rs:35,60`), y moverlos tal cual mete un cliente HTTP en `yunta-core` | el puerto lleva `Forge` con las dos causas como `Box<dyn Error + Send + Sync>`: nadie matchea el tipo concreto (`engine/src/run/mod.rs:164` sólo la encadena) y la causa se conserva; `GitHubForge` la envuelve al construirla | fila 1-01 (§10); M01 |
+| L-11 | 1-03 | "el test de secretos duplicado se vuelve uno parametrizado" supone que es un test del adapter; las dos copias son idénticas byte a byte y lo que afirman es el `Debug` de `SessionRequest`, que desde 1-01 es un tipo de core (`adapters/tests/{claude_code.rs:524,codex.rs:645}`) | un solo test en `core/tests/port.rs`, donde vive el tipo; parametrizar dos entradas idénticas no prueba nada de ningún adapter | fila 1-03 (§10); M01 |
 
 ---
 
