@@ -147,8 +147,8 @@ async fn a_tool_use_block_maps_to_tool_use_digesting_its_target() {
 
     assert!(events.iter().any(|e| matches!(
         e,
-        AgentEvent::ToolUse { name, target_digest }
-            if name == "Edit" && target_digest == &yunta_core::sha256_hex(b"src/lib.rs").abbreviated()
+        AgentEvent::ToolUse { name, target }
+            if name == "Edit" && target.display.as_deref() == Some("src/lib.rs")
     )));
 }
 
@@ -857,23 +857,27 @@ async fn a_tool_use_never_persists_the_command_it_ran() {
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
 
-    let digests: Vec<&String> = events
+    let targets: Vec<&yunta_core::events::ToolTarget> = events
         .iter()
         .filter_map(|event| match event {
-            AgentEvent::ToolUse { target_digest, .. } => Some(target_digest),
+            AgentEvent::ToolUse { target, .. } => Some(target),
             _ => None,
         })
         .collect();
-    assert_eq!(digests.len(), 1, "the stream carries the one call it made");
+    assert_eq!(targets.len(), 1, "the stream carries the one call it made");
+    assert_eq!(
+        targets[0].display, None,
+        "a command is the session's own text: identified, never shown"
+    );
+    let carried = format!("{:?}", targets[0]);
     for fragment in ["psql", "hunter2", "db.internal", "select"] {
         assert!(
-            !digests[0].contains(fragment),
-            "`{fragment}` of the command reached the log as `{}`",
-            digests[0],
+            !carried.contains(fragment),
+            "`{fragment}` of the command reached the log as `{carried}`"
         );
     }
     assert_eq!(
-        digests[0],
-        &yunta_core::sha256_hex(command.as_bytes()).abbreviated(),
+        targets[0].digest,
+        yunta_core::sha256_hex(command.as_bytes())
     );
 }

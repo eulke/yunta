@@ -57,7 +57,8 @@ pub use config::{
     ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, HomeExpansionError,
     Isolation, LimitsConfig, McpServerConfig, NetworkPermissions, PackExecutorPolicy,
     PackPermissions, PathsConfig, PermissionsConfig, PricingEntry, ProcessSecrets, ProjectConfig,
-    PublisherPermissions, RunnerCandidate, SecretSource, SkillsConfig, StorageConfig,
+    PublisherPermissions, Redactor, RunnerCandidate, SecretSource, SkillsConfig, StorageConfig,
+    REDACTED,
 };
 pub use diagnostic::{
     ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, Rule, RuleCode,

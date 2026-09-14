@@ -17,7 +17,7 @@ use serde_json::Value;
 use yunta_core::{ModelName, SessionId};
 
 use crate::failure;
-use crate::session::target_digest;
+use yunta_core::events::ToolTarget;
 use yunta_core::port::{AgentError, AgentEvent, AgentOutcome, RunToolsEndpoint};
 
 pub(super) fn parse_line(line: &str) -> Vec<AgentEvent> {
@@ -120,7 +120,7 @@ fn content_event(item: &Value) -> Option<AgentEvent> {
         }),
         "tool_use" => Some(AgentEvent::ToolUse {
             name: item.get("name")?.as_str()?.to_string(),
-            target_digest: tool_target_digest(item.get("input").unwrap_or(&Value::Null)),
+            target: tool_target(item.get("input").unwrap_or(&Value::Null)),
         }),
         // "thinking"/"redacted_thinking" and anything future: not
         // surfaced as a Note — internal reasoning, not an operator-facing
@@ -129,13 +129,24 @@ fn content_event(item: &Value) -> Option<AgentEvent> {
     }
 }
 
-fn tool_target_digest(input: &Value) -> String {
-    for key in ["file_path", "path", "command", "pattern", "url"] {
-        if let Some(s) = input.get(key).and_then(Value::as_str) {
-            return target_digest(s);
+/// What a tool call acted on, as this CLI reports it.
+///
+/// A path names the repository, so the log carries it as written: that
+/// is how a reader finds the file. A command, a pattern or a URL is
+/// whatever the session typed — the engine cannot vouch for it and never
+/// repeats it, so those are identified and not shown.
+fn tool_target(input: &Value) -> ToolTarget {
+    for key in ["file_path", "path"] {
+        if let Some(path) = input.get(key).and_then(Value::as_str) {
+            return ToolTarget::of_path(std::path::Path::new(path));
         }
     }
-    target_digest(&input.to_string())
+    for key in ["command", "pattern", "url"] {
+        if let Some(text) = input.get(key).and_then(Value::as_str) {
+            return ToolTarget::opaque(text.as_bytes());
+        }
+    }
+    ToolTarget::opaque(input.to_string().as_bytes())
 }
 
 fn result_events(value: &Value) -> Vec<AgentEvent> {

@@ -172,7 +172,7 @@ fn tool_use(tool: &str) -> EventPayload {
     EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
         message_type: AgentMessageType::ToolUse,
         tool_name: Some(tool.to_string()),
-        target_digest: None,
+        target: None,
         input_tokens: None,
         output_tokens: None,
         cached_input_tokens: None,
@@ -636,7 +636,7 @@ fn the_run_total_carries_the_work_in_flight_and_a_node_carries_its_closed_attemp
     let usage = EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
         message_type: AgentMessageType::Usage,
         tool_name: None,
-        target_digest: None,
+        target: None,
         input_tokens: Some(100),
         output_tokens: Some(50),
         cached_input_tokens: None,

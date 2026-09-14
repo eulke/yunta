@@ -83,13 +83,23 @@ impl ProcessRegistry {
         }
     }
 
-    /// Deletes the file — the run reached a terminal, there is nothing
-    /// left for an outside process to signal.
+    /// Deletes what the run's scratch directory holds about live
+    /// processes — the registry itself, and the MCP config a session's
+    /// adapter was pointed at, which carries that session's bearer.
+    ///
+    /// The run reached a terminal: there is nothing left for an outside
+    /// process to signal, and a credential nobody can use is a
+    /// credential nobody should still be able to read.
     pub fn clear(&self) {
+        // blocking: the terminal's last act, on the thread that reached
+        // it, after the log is closed and nothing is left to schedule.
         if let Err(e) = std::fs::remove_file(&self.path) {
             if e.kind() != std::io::ErrorKind::NotFound {
                 tracing::warn!(error = %e, "failed to delete engine.json at run terminal");
             }
+        }
+        if let Some(scratch) = self.path.parent() {
+            delete_credentials_under(scratch);
         }
     }
 
@@ -100,6 +110,33 @@ impl ProcessRegistry {
         let tmp = self.path.with_extension("json.tmp");
         std::fs::write(&tmp, json)?;
         std::fs::rename(&tmp, &self.path)
+    }
+}
+
+/// Deletes every `mcp.json` under `scratch/`: one per session that held
+/// the run's tools, each carrying that session's bearer. A directory
+/// that cannot be listed is left alone — the run already closed, and a
+/// warning about a file nobody can reach helps no one.
+fn delete_credentials_under(scratch: &Path) {
+    // blocking: see `clear`.
+    let Ok(entries) = std::fs::read_dir(scratch) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        match entry.file_type() {
+            Ok(kind) if kind.is_dir() => delete_credentials_under(&path),
+            Ok(_) if path.file_name().is_some_and(|name| name == "mcp.json") => {
+                if let Err(e) = std::fs::remove_file(&path) {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "failed to delete a session's tool credentials at run terminal"
+                    );
+                }
+            }
+            _ => {}
+        }
     }
 }
 

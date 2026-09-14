@@ -199,7 +199,11 @@ pub async fn create_run(
             source,
         })?;
 
-    let log = RunLog::new(storage, run_id, clock);
+    // A birth is written before a run exists to declare secrets
+    // against: `run_created` carries the manifest's hash and the
+    // inputs the caller resolved, never a session's words.
+    let nothing_to_redact = yunta_core::Redactor::default();
+    let log = RunLog::new(storage, run_id, clock, &nothing_to_redact);
     log.record(
         None,
         EventPayload::Run(RunEvent::Created(RunCreatedPayload {

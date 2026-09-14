@@ -84,6 +84,9 @@ pub(crate) struct RunCtx<'a> {
     /// Where a declared secret's value comes from. `None` reaches no
     /// secret at all, which is what a run declaring none needs.
     pub secrets: Option<std::sync::Arc<dyn yunta_core::SecretSource>>,
+    /// What those secrets' values are, for taking them back out of
+    /// every event this run appends.
+    pub redactor: yunta_core::Redactor,
     /// The invocation's display surface, fed by every append this
     /// context makes as the event lands — on the ctx so a `kind:
     /// workflow` node hands the same one down to its child run, whose
@@ -128,8 +131,13 @@ impl RunCtx<'_> {
     /// something hand over a payload and nothing else, and still feed a
     /// live view.
     pub(crate) fn log(&self) -> RunLog<'_> {
-        RunLog::new(self.storage, self.run_id, self.clock.as_ref())
-            .observed_by(self.observer.as_deref())
+        RunLog::new(
+            self.storage,
+            self.run_id,
+            self.clock.as_ref(),
+            &self.redactor,
+        )
+        .observed_by(self.observer.as_deref())
     }
 
     /// Appends one event and returns the seq storage assigned to it.

@@ -24,9 +24,26 @@ use crate::observer::RunObserver;
 /// identity, and which nodes sit in a `coordination: blackboard`
 /// group — for anyone else, the blackboard tools are never even
 /// mounted.
+/// What a host is built from: everything about the run that outlives
+/// any one session. One value because it is read together, once, when
+/// the run wakes.
+pub struct HostOf {
+    pub storage: AsyncStorage,
+    pub run_id: RunId,
+    pub clock: Arc<dyn yunta_core::Clock>,
+    pub observer: Option<Arc<dyn RunObserver>>,
+    pub run_dir: PathBuf,
+    pub max_artifact_bytes: Option<u64>,
+    pub redactor: yunta_core::Redactor,
+}
+
 pub struct RunToolsHost {
     pub(super) storage: AsyncStorage,
     pub(super) run_id: RunId,
+    /// What the config named as a secret, taken out of every event this
+    /// host's listeners append — the same door the run's own appends go
+    /// through.
+    pub(super) redactor: yunta_core::Redactor,
     pub(super) blackboard_members: HashMap<NodeId, Vec<NodeId>>,
     /// Where the run keeps its artifacts. A session's working directory is
     /// the worktree, not this, so a tool that reads what the node declared
@@ -48,15 +65,16 @@ pub struct RunToolsHost {
 }
 
 impl RunToolsHost {
-    pub fn new(
-        storage: AsyncStorage,
-        run_id: RunId,
-        workflow: &Workflow,
-        clock: Arc<dyn yunta_core::Clock>,
-        observer: Option<Arc<dyn RunObserver>>,
-        run_dir: PathBuf,
-        max_artifact_bytes: Option<u64>,
-    ) -> Self {
+    pub fn new(workflow: &Workflow, host: HostOf) -> Self {
+        let HostOf {
+            storage,
+            run_id,
+            clock,
+            observer,
+            run_dir,
+            max_artifact_bytes,
+            redactor,
+        } = host;
         let mut blackboard_members = HashMap::new();
         for node in &workflow.nodes {
             if let NodeKind::Parallel {
@@ -74,6 +92,7 @@ impl RunToolsHost {
         Self {
             storage,
             run_id,
+            redactor,
             blackboard_members,
             clock,
             observer,

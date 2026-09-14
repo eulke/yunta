@@ -143,9 +143,10 @@ async fn a_command_execution_item_maps_to_tool_use_digesting_its_command() {
 
     assert!(events.iter().any(|e| matches!(
         e,
-        AgentEvent::ToolUse { name, target_digest }
+        AgentEvent::ToolUse { name, target }
             if name == "command_execution"
-                && target_digest == &yunta_core::sha256_hex(b"cargo test").abbreviated()
+                && target.display.is_none()
+                && target.digest == yunta_core::sha256_hex(b"cargo test")
     )));
 }
 
@@ -171,9 +172,9 @@ async fn a_file_change_item_maps_to_tool_use_digesting_its_first_path() {
 
     assert!(events.iter().any(|e| matches!(
         e,
-        AgentEvent::ToolUse { name, target_digest }
+        AgentEvent::ToolUse { name, target }
             if name == "file_change"
-                && target_digest == &yunta_core::sha256_hex(b"src/lib.rs").abbreviated()
+                && target.display.as_deref() == Some("src/lib.rs")
     )));
 }
 
@@ -199,9 +200,9 @@ async fn an_mcp_tool_call_item_maps_to_tool_use_digesting_its_server_and_tool() 
 
     assert!(events.iter().any(|e| matches!(
         e,
-        AgentEvent::ToolUse { name, target_digest }
+        AgentEvent::ToolUse { name, target }
             if name == "mcp_tool_call"
-                && target_digest == &yunta_core::sha256_hex(b"yunta:query").abbreviated()
+                && target.display.as_deref() == Some("yunta:query")
     )));
 }
 
@@ -227,10 +228,10 @@ async fn a_web_search_item_maps_to_tool_use_digesting_its_query() {
 
     assert!(events.iter().any(|e| matches!(
         e,
-        AgentEvent::ToolUse { name, target_digest }
+        AgentEvent::ToolUse { name, target }
             if name == "web_search"
-                && target_digest
-                    == &yunta_core::sha256_hex(b"codex exec json schema").abbreviated()
+                && target.display.is_none()
+                && target.digest == yunta_core::sha256_hex(b"codex exec json schema")
     )));
 }
 
@@ -888,23 +889,27 @@ async fn a_tool_use_never_persists_the_command_it_ran() {
     let session = adapter().spawn(req).await.unwrap();
     let events = drain(session).await;
 
-    let digests: Vec<&String> = events
+    let targets: Vec<&yunta_core::events::ToolTarget> = events
         .iter()
         .filter_map(|event| match event {
-            AgentEvent::ToolUse { target_digest, .. } => Some(target_digest),
+            AgentEvent::ToolUse { target, .. } => Some(target),
             _ => None,
         })
         .collect();
-    assert_eq!(digests.len(), 1, "the stream carries the one call it made");
+    assert_eq!(targets.len(), 1, "the stream carries the one call it made");
+    assert_eq!(
+        targets[0].display, None,
+        "a command is the session's own text: identified, never shown"
+    );
+    let carried = format!("{:?}", targets[0]);
     for fragment in ["psql", "hunter2", "db.internal", "select"] {
         assert!(
-            !digests[0].contains(fragment),
-            "`{fragment}` of the command reached the log as `{}`",
-            digests[0],
+            !carried.contains(fragment),
+            "`{fragment}` of the command reached the log as `{carried}`"
         );
     }
     assert_eq!(
-        digests[0],
-        &yunta_core::sha256_hex(command.as_bytes()).abbreviated(),
+        targets[0].digest,
+        yunta_core::sha256_hex(command.as_bytes())
     );
 }

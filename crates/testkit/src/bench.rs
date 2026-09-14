@@ -234,6 +234,30 @@ impl Bench {
             .await
     }
 
+    /// Runs with the secrets a test hands it, instead of reaching the
+    /// process environment: the values are the test's to choose, so what
+    /// happens to them is the test's to assert.
+    pub async fn run_with_secrets(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+        secrets: &[(&str, &str)],
+    ) -> (RunTerminal, RunState) {
+        let known: std::collections::HashMap<String, String> = secrets
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        self.run_with(
+            workflow_yaml,
+            fixture_yaml,
+            config_yaml,
+            &NoInteraction,
+            Some(std::sync::Arc::new(KnownSecrets(known))),
+        )
+        .await
+    }
+
     /// Runs with a caller-chosen interaction surface — for a test that
     /// scripts a gate's resolution instead of degrading to pause.
     pub async fn run_with_interaction(
@@ -253,6 +277,25 @@ impl Bench {
         fixture_yaml: &str,
         config_yaml: &str,
         human_interaction: &dyn HumanInteraction,
+    ) -> (RunTerminal, RunState) {
+        self.run_with(
+            workflow_yaml,
+            fixture_yaml,
+            config_yaml,
+            human_interaction,
+            None,
+        )
+        .await
+    }
+
+    /// The one body every `run…` helper ends in.
+    async fn run_with(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+        human_interaction: &dyn HumanInteraction,
+        secrets: Option<std::sync::Arc<dyn yunta_core::SecretSource>>,
     ) -> (RunTerminal, RunState) {
         let workflow: Workflow = serde_norway::from_str(workflow_yaml).expect("parse workflow");
         *self.workflow.lock().expect("the bench's own lock") = Some(workflow.clone());
@@ -314,11 +357,22 @@ impl Bench {
             cancel: None,
             adapter_override: None,
             ambient: self.ambient.as_ref(),
-            secrets: None,
+            secrets: secrets.clone(),
             observer: self.observer.clone(),
         })
         .await
         .expect("execute run");
         (report.terminal, report.state)
+    }
+}
+
+/// The secrets a test chose, instead of whatever the process happens to
+/// carry: a test that reached the real environment would assert about a
+/// machine rather than about the engine.
+struct KnownSecrets(std::collections::HashMap<String, String>);
+
+impl yunta_core::SecretSource for KnownSecrets {
+    fn get(&self, name: &str) -> Option<yunta_core::Secret<String>> {
+        self.0.get(name).cloned().map(yunta_core::Secret::from)
     }
 }

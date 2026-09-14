@@ -106,7 +106,7 @@ fn mint_token() -> String {
 /// state is touched — including the initialize that would otherwise open
 /// a transport session of its own.
 fn behind_bearer(router: axum::Router, token: &str) -> axum::Router {
-    let expected = format!("Bearer {token}");
+    let expected = yunta_core::Secret::from(format!("Bearer {token}"));
     router.layer(axum::middleware::from_fn(
         move |req: axum::extract::Request, next: axum::middleware::Next| {
             let expected = expected.clone();
@@ -115,8 +115,9 @@ fn behind_bearer(router: axum::Router, token: &str) -> axum::Router {
                 let presented = req
                     .headers()
                     .get(axum::http::header::AUTHORIZATION)
-                    .and_then(|value| value.to_str().ok());
-                if presented == Some(expected.as_str()) {
+                    .map(axum::http::HeaderValue::as_bytes)
+                    .unwrap_or_default();
+                if presents_the_credential(presented, &expected) {
                     next.run(req).await
                 } else {
                     axum::http::StatusCode::UNAUTHORIZED.into_response()
@@ -124,4 +125,47 @@ fn behind_bearer(router: axum::Router, token: &str) -> axum::Router {
             }
         },
     ))
+}
+
+/// Whether `presented` is the credential, compared in time that does
+/// not depend on how much of it is right.
+///
+/// A `==` on two strings stops at the first differing byte, so a caller
+/// that can time the answer learns how long a prefix it guessed and can
+/// walk the whole credential out one byte at a time. The lengths are
+/// compared first and in the clear, which says only how long the
+/// credential is — a constant of this build, not a secret.
+fn presents_the_credential(presented: &[u8], expected: &yunta_core::Secret<String>) -> bool {
+    use subtle::ConstantTimeEq;
+    let expected = expected.expose().as_bytes();
+    presented.len() == expected.len() && bool::from(presented.ct_eq(expected))
+}
+
+#[cfg(test)]
+mod bearer_tests {
+    use super::presents_the_credential;
+    use yunta_core::Secret;
+
+    /// The comparison is constant time, which no test can assert by
+    /// timing. What a test can hold is the shape that makes it so: the
+    /// expected value stays wrapped, and the bytes go through
+    /// `subtle::ConstantTimeEq` rather than `==`. A rewrite back to
+    /// `==` would not compile against a `Secret<String>` without first
+    /// exposing it, which is the line this keeps visible.
+    #[test]
+    fn the_bearer_check_is_constant_time() {
+        let expected = Secret::from("Bearer abcdef".to_string());
+
+        assert!(presents_the_credential(b"Bearer abcdef", &expected));
+        assert!(!presents_the_credential(b"Bearer abcdeg", &expected));
+        assert!(
+            !presents_the_credential(b"Bearer abcde", &expected),
+            "a prefix is not the credential"
+        );
+        assert!(
+            !presents_the_credential(b"Bearer abcdefg", &expected),
+            "and neither is something longer that starts with it"
+        );
+        assert!(!presents_the_credential(b"", &expected));
+    }
 }

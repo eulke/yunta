@@ -22,6 +22,13 @@ globset.workspace = true
 serde_json.workspace = true
 serde = { workspace = true, features = ["derive"] }
 tracing.workspace = true
+# Constant-time byte comparison for the per-run MCP listener's bearer.
+# A `==` on two strings stops at the first differing byte, so how long
+# it takes says how much of the credential a caller got right; a whole
+# credential is then guessable one byte at a time. The crate is the
+# audited, no-std implementation of the one primitive that fixes it —
+# not something to hand-roll (Apache-2.0, no dependencies of its own).
+subtle.workspace = true
 tokio = { workspace = true, features = ["process", "rt", "macros", "time"] }
 # CancellationToken (`join: any`'s interrupt→kill of the losing
 # siblings) — the propagated-cancellation primitive CLAUDE.md's own

@@ -176,7 +176,10 @@ pub enum AgentEvent {
     },
     ToolUse {
         name: String,
-        target_digest: String,
+        /// What the call acted on. An adapter that can name a path says
+        /// so; one reading the session's own text hands it over opaque,
+        /// so what it typed never reaches the log.
+        target: crate::events::ToolTarget,
     },
     Usage {
         input_tokens: u64,

@@ -38,7 +38,7 @@ pub(super) enum RunToolCallError {
 /// The mock's own MCP client leg: one `tools/call` against the
 /// session's per-run endpoint, exactly as a real CLI would place it.
 /// Returns a short digest of the response for the audit stream
-/// (`ToolUse.target_digest` — never full content), or the error that
+/// (`ToolUse.target` — never full content), or the error that
 /// fails the session.
 pub(super) async fn call_run_tool(
     endpoint: Option<&RunToolsEndpoint>,

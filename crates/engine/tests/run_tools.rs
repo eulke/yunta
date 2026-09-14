@@ -102,15 +102,18 @@ impl Bench {
             std::fs::create_dir_all(run_dir.join(dir)).unwrap();
         }
         let host = Arc::new(RunToolsHost::new(
-            storage.async_handle(),
-            run_id.clone(),
             &workflow,
-            clock,
-            // These tests read what a tool call lands on the log; the
-            // mirror of it has its own test (`observer.rs`).
-            None,
-            run_dir.clone(),
-            None,
+            yunta_engine::HostOf {
+                storage: storage.async_handle(),
+                run_id: run_id.clone(),
+                clock,
+                // These tests read what a tool call lands on the log;
+                // the mirror of it has its own test (`observer.rs`).
+                observer: None,
+                run_dir: run_dir.clone(),
+                max_artifact_bytes: None,
+                redactor: yunta_core::Redactor::default(),
+            },
         ));
         Bench {
             _root: root,

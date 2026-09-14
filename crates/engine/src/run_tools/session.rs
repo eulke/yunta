@@ -133,6 +133,7 @@ impl SessionTools {
             &self.host.storage,
             &self.host.run_id,
             self.host.clock.as_ref(),
+            &self.host.redactor,
         )
         .observed_by(self.host.observer.as_deref())
     }

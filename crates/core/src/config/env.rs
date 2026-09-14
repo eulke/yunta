@@ -134,3 +134,78 @@ impl SecretSource for ProcessSecrets {
         std::env::var(name).ok().map(Secret::from)
     }
 }
+
+/// Every declared secret's value, for keeping them out of the log.
+///
+/// A secret reaches a session's environment on purpose, and the session
+/// may then say it back: a note quoting a command line, an error
+/// repeating a URL with a token in it. The log is the run's permanent
+/// record and read by whoever reads the run, so what the config named as
+/// a secret is taken back out of it on the way in — once, at the one
+/// door every event goes through.
+#[derive(Debug, Clone, Default)]
+pub struct Redactor {
+    /// Longest first, so a value that contains another is replaced whole
+    /// rather than leaving the shorter one's remainder behind.
+    values: Vec<String>,
+}
+
+/// What stands in the log where a secret was.
+pub const REDACTED: &str = "[redacted]";
+
+impl Redactor {
+    /// The redactor for the secrets `config` names, as `source` has
+    /// them. A name nothing binds contributes nothing: there is no value
+    /// to keep out.
+    ///
+    /// A value shorter than four characters is left alone — `true`, a
+    /// one-letter flag, an empty string. Replacing those would blank out
+    /// unrelated text everywhere it appeared, which hides more than it
+    /// protects.
+    pub fn of(names: &[String], source: Option<&dyn SecretSource>) -> Self {
+        let Some(source) = source else {
+            return Redactor::default();
+        };
+        let mut values: Vec<String> = names
+            .iter()
+            .filter_map(|name| source.get(name))
+            .map(|secret| secret.expose().to_string())
+            .filter(|value| value.chars().count() >= 4)
+            .collect();
+        values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+        values.dedup();
+        Redactor { values }
+    }
+
+    /// Whether this redactor has anything to take out.
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    /// `text` with every secret value replaced.
+    pub fn text(&self, text: &str) -> String {
+        self.values.iter().fold(text.to_string(), |text, value| {
+            text.replace(value, REDACTED)
+        })
+    }
+
+    /// `value` with every secret replaced wherever a string carries one
+    /// — at any depth, in a field name as well as a field value, since
+    /// neither is a place a secret belongs.
+    pub fn json(&self, value: serde_json::Value) -> serde_json::Value {
+        use serde_json::Value;
+        match value {
+            Value::String(text) => Value::String(self.text(&text)),
+            Value::Array(items) => {
+                Value::Array(items.into_iter().map(|item| self.json(item)).collect())
+            }
+            Value::Object(fields) => Value::Object(
+                fields
+                    .into_iter()
+                    .map(|(name, field)| (self.text(&name), self.json(field)))
+                    .collect(),
+            ),
+            other => other,
+        }
+    }
+}

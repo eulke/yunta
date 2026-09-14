@@ -158,9 +158,9 @@ pub struct ToolCall {
     /// The tool the adapter named; `None` when it reported a call under
     /// no name.
     pub tool_name: Option<String>,
-    /// The adapter's digest of what the call touched; `None` when it
-    /// reported none.
-    pub target_digest: Option<String>,
+    /// What the call acted on, as the log carries it; `None` when the
+    /// adapter reported none.
+    pub target: Option<crate::events::ToolTarget>,
     pub at: DateTime<Utc>,
 }
 
@@ -368,7 +368,7 @@ impl NodeLedger {
             SessionEvent::Message(p) => match p.message_type {
                 AgentMessageType::ToolUse => record.calls.push(ToolCall {
                     tool_name: p.tool_name.clone(),
-                    target_digest: p.target_digest.clone(),
+                    target: p.target.clone(),
                     at: meta.at,
                 }),
                 AgentMessageType::Usage => {

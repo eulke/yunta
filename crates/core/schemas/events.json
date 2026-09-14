@@ -46,10 +46,15 @@
           "format": "uint64",
           "minimum": 0
         },
-        "target_digest": {
-          "type": [
-            "string",
-            "null"
+        "target": {
+          "description": "What the tool acted on. Absent for a message that is not a tool\ncall, and for a log written before the engine recorded it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolTarget"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "text": {
@@ -2785,6 +2790,26 @@
       "required": [
         "input",
         "output"
+      ]
+    },
+    "ToolTarget": {
+      "description": "What a tool call acted on, as the log may carry it.\n\nA tool's argument is the session's own text: a path, a shell command,\na URL. Some of it names the repository, which a reader needs; some of\nit is whatever the session typed, which may be anything at all,\nincluding a secret. So the log carries two things and they are not\nthe same thing: `display` is what a reader may be shown and is only\never present for a value the engine itself can vouch for, and\n`digest` is what identifies the target — the whole hash, so two\ntargets never share one. `abbreviated()` is how a hash is shown,\nnever how it is stored.",
+      "type": "object",
+      "properties": {
+        "digest": {
+          "description": "What identifies the target, whether or not it can be shown.",
+          "$ref": "#/$defs/ContentHash"
+        },
+        "display": {
+          "description": "The target as a reader may see it. Absent whenever the value is\nthe session's own text.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "digest"
       ]
     }
   }

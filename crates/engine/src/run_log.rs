@@ -20,16 +20,43 @@ pub(crate) struct RunLog<'a> {
     run_id: &'a RunId,
     clock: &'a dyn Clock,
     observer: Option<&'a dyn RunObserver>,
+    /// What the config named as a secret, taken back out of every event
+    /// on its way in. Empty for a run that declares none, which is the
+    /// ordinary case and costs nothing.
+    redactor: &'a yunta_core::Redactor,
 }
 
 impl<'a> RunLog<'a> {
-    pub(crate) fn new(storage: &'a AsyncStorage, run_id: &'a RunId, clock: &'a dyn Clock) -> Self {
+    pub(crate) fn new(
+        storage: &'a AsyncStorage,
+        run_id: &'a RunId,
+        clock: &'a dyn Clock,
+        redactor: &'a yunta_core::Redactor,
+    ) -> Self {
         RunLog {
             storage,
             run_id,
             clock,
             observer: None,
+            redactor,
         }
+    }
+
+    /// `payload` with every declared secret taken out of it.
+    ///
+    /// Through JSON rather than field by field: a secret can reach any
+    /// string of any payload — a note, a failure's outcome, a
+    /// diagnostic's detail, a task's title — and a rule that named the
+    /// fields would be a list somebody has to remember to extend. A run
+    /// that declares no secret pays nothing.
+    fn redacted(&self, payload: EventPayload) -> EventPayload {
+        if self.redactor.is_empty() {
+            return payload;
+        }
+        let Ok(value) = serde_json::to_value(&payload) else {
+            return payload;
+        };
+        serde_json::from_value(self.redactor.json(value)).unwrap_or(payload)
     }
 
     /// The same log, mirroring every append it makes to `observer`.
@@ -58,7 +85,7 @@ impl<'a> RunLog<'a> {
         let draft = EventDraft {
             run_id: self.run_id.clone(),
             node_id: node.cloned(),
-            payload,
+            payload: self.redacted(payload),
         };
         let at = self.clock.now();
         let Some(observer) = self.observer else {

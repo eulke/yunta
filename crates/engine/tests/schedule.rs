@@ -74,7 +74,7 @@ fn audit() -> EventPayload {
     EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
         message_type: AgentMessageType::Note,
         tool_name: None,
-        target_digest: None,
+        target: None,
         input_tokens: None,
         output_tokens: None,
         cached_input_tokens: None,

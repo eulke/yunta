@@ -53,7 +53,7 @@ sessions:
   - steps:
       - { type: note, text: "thinking about SECRET-TOKEN-123 carefully" }
       - { type: usage, input_tokens: 40, output_tokens: 10 }
-      - { type: tool_use, name: edit, target_digest: abc123 }
+      - { type: tool_use, name: edit, target: abc123 }
     outcome: { type: completed, summary: "done" }
 "#;
     let (terminal, _) = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
@@ -94,7 +94,18 @@ sessions:
         .find(|m| m.message_type == yunta_core::events::AgentMessageType::ToolUse)
         .unwrap();
     assert_eq!(tool.tool_name.as_deref(), Some("edit"));
-    assert_eq!(tool.target_digest.as_deref(), Some("abc123"));
+    assert_eq!(
+        tool.target.as_ref().map(|target| target.digest.clone()),
+        Some(yunta_core::sha256_hex(b"abc123")),
+        "the mock hands over what the fixture scripted, identified by its hash"
+    );
+    assert_eq!(
+        tool.target
+            .as_ref()
+            .and_then(|target| target.display.clone()),
+        None,
+        "and never shown: a tool's argument is the session's own text"
+    );
 }
 
 #[tokio::test]

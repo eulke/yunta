@@ -1,8 +1,11 @@
 //! An agent session: the CLI it opened on, what it said while it ran,
 //! and a capability the adapter did not have.
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 
+use crate::hash::ContentHash;
 use crate::ids::{AdapterId, AgentName, ModelName, SessionId};
 use crate::{Capabilities, Capability};
 
@@ -73,13 +76,68 @@ pub enum AgentMessageType {
     Note,
 }
 
+/// What a tool call acted on, as the log may carry it.
+///
+/// A tool's argument is the session's own text: a path, a shell command,
+/// a URL. Some of it names the repository, which a reader needs; some of
+/// it is whatever the session typed, which may be anything at all,
+/// including a secret. So the log carries two things and they are not
+/// the same thing: `display` is what a reader may be shown and is only
+/// ever present for a value the engine itself can vouch for, and
+/// `digest` is what identifies the target — the whole hash, so two
+/// targets never share one. `abbreviated()` is how a hash is shown,
+/// never how it is stored.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ToolTarget {
+    /// The target as a reader may see it. Absent whenever the value is
+    /// the session's own text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+    /// What identifies the target, whether or not it can be shown.
+    pub digest: ContentHash,
+}
+
+impl ToolTarget {
+    /// A path the session acted on: shown as written, which is how a
+    /// reader finds the file, and hashed so two edits of one file read
+    /// as the same target.
+    pub fn of_path(path: &Path) -> Self {
+        let display = path.display().to_string();
+        ToolTarget {
+            digest: crate::sha256_hex(display.as_bytes()),
+            display: Some(display),
+        }
+    }
+
+    /// A target the log identifies and never shows: a command, a URL,
+    /// a query — the session's own text, which the engine cannot vouch
+    /// for and therefore does not repeat.
+    pub fn opaque(input: &[u8]) -> Self {
+        ToolTarget {
+            display: None,
+            digest: crate::sha256_hex(input),
+        }
+    }
+
+    /// The one line a surface shows for this target: what it names when
+    /// it can be named, and the shortened hash when it cannot.
+    pub fn sentence(&self) -> String {
+        match &self.display {
+            Some(display) => display.clone(),
+            None => self.digest.abbreviated(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AgentMessagePayload {
     pub message_type: AgentMessageType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
+    /// What the tool acted on. Absent for a message that is not a tool
+    /// call, and for a log written before the engine recorded it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub target_digest: Option<String>,
+    pub target: Option<ToolTarget>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

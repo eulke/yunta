@@ -341,17 +341,14 @@ async fn apply_agent_event(
                     .map_err(DispatchError::Audit)?;
             }
         }
-        AgentEvent::ToolUse {
-            name,
-            target_digest,
-        } => {
+        AgentEvent::ToolUse { name, target } => {
             emit_audit(
                 audit,
                 EventPayload::Session(SessionEvent::Message(
                     yunta_core::events::AgentMessagePayload {
                         message_type: yunta_core::events::AgentMessageType::ToolUse,
                         tool_name: Some(name),
-                        target_digest: Some(target_digest),
+                        target: Some(target),
                         input_tokens: None,
                         output_tokens: None,
                         cached_input_tokens: None,
@@ -369,7 +366,7 @@ async fn apply_agent_event(
                     yunta_core::events::AgentMessagePayload {
                         message_type: yunta_core::events::AgentMessageType::Note,
                         tool_name: None,
-                        target_digest: None,
+                        target: None,
                         input_tokens: None,
                         output_tokens: None,
                         cached_input_tokens: None,
@@ -394,7 +391,7 @@ async fn apply_agent_event(
                     yunta_core::events::AgentMessagePayload {
                         message_type: yunta_core::events::AgentMessageType::Usage,
                         tool_name: None,
-                        target_digest: None,
+                        target: None,
                         input_tokens: Some(input_tokens),
                         output_tokens: Some(output_tokens),
                         cached_input_tokens,

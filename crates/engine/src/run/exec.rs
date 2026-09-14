@@ -370,6 +370,11 @@ fn build_ctx(
         secrets,
         observer,
     } = env;
+    // Resolved once, when the run wakes: every append this invocation
+    // makes takes the same values back out, and a run that declares no
+    // secret builds an empty one and pays nothing.
+    let redactor =
+        yunta_core::Redactor::of(&manifest.config.secrets, secrets.as_deref().map(|s| s as _));
     let root_cancel = cancel.cloned().unwrap_or_default();
     let root_cancel_for_ctx = root_cancel.clone();
     let (registry, registry_error) = match crate::process_registry::ProcessRegistry::create(
@@ -406,22 +411,26 @@ fn build_ctx(
         depth,
         ambient,
         secrets,
+        redactor: redactor.clone(),
         observer,
         // One host per execute_run invocation, shared by every session
         // listener; each of them reads and writes through the host's own
         // clone of the log handle.
         run_tools_host: Arc::new(crate::run_tools::RunToolsHost::new(
-            storage.clone(),
-            run_id.clone(),
             &manifest.workflow,
-            clock_for_host,
-            observer_for_host,
-            run_dir.to_path_buf(),
-            manifest
-                .config
-                .limits
-                .as_ref()
-                .and_then(|limits| limits.max_artifact_bytes),
+            crate::run_tools::HostOf {
+                storage: storage.clone(),
+                run_id: run_id.clone(),
+                clock: clock_for_host,
+                observer: observer_for_host,
+                run_dir: run_dir.to_path_buf(),
+                max_artifact_bytes: manifest
+                    .config
+                    .limits
+                    .as_ref()
+                    .and_then(|limits| limits.max_artifact_bytes),
+                redactor,
+            },
         )),
     };
     (ctx, root_cancel, registry_error)

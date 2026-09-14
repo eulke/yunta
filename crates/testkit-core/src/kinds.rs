@@ -50,7 +50,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
         EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
             message_type: AgentMessageType::Usage,
             tool_name: None,
-            target_digest: None,
+            target: None,
             input_tokens: Some(100),
             output_tokens: Some(50),
             cached_input_tokens: None,

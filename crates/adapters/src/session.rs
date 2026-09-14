@@ -28,14 +28,3 @@ pub fn typed_settings<T: serde::de::DeserializeOwned>(
         message: format!("`adapter_settings`: {e}"),
     })
 }
-
-/// What the log carries for the thing a tool acted on: its digest as a
-/// reader meets it beside something else, and never the thing itself.
-///
-/// A path, a command line or a URL is content: it can name a customer,
-/// carry a token in a query string, or spell out an internal host. A
-/// digest is enough to tell two calls apart and to match one against a
-/// value a reader already holds, which is all a reader of the log needs.
-pub(crate) fn target_digest(target: &str) -> String {
-    yunta_core::sha256_hex(target.as_bytes()).abbreviated()
-}

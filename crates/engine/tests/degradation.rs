@@ -335,3 +335,49 @@ fn degradations_of(
         })
         .collect()
 }
+
+/// A secret the config names never reaches the log.
+///
+/// It reaches the session's environment on purpose, and the session may
+/// then say it back — a note quoting a command line it ran, an error
+/// repeating a URL with a token in it. The log is the run's permanent
+/// record, so what the config called a secret is taken back out on the
+/// way in, at the one door every event goes through.
+#[tokio::test]
+async fn a_secret_the_config_names_never_reaches_the_log() {
+    const VALUE: &str = "hunter2-the-whole-token";
+
+    let bench = yunta_testkit::Bench::new();
+    let config = format!("{CONFIG}\nsecrets: [YUNTA_TEST_TOKEN]\n");
+    let workflow = r#"
+name: leaky
+nodes:
+  - id: talk
+    kind: prompt
+    runner: executor
+    prompt: "Do the thing."
+"#;
+    // The session says the secret back, twice over: once as a note, and
+    // once as the outcome its close records.
+    let fixture = format!(
+        "sessions:\n  - steps:\n      - {{ type: note, text: \"ran psql with {VALUE}\" }}\n    outcome: {{ type: completed, summary: \"used {VALUE}\" }}\n"
+    );
+
+    let (_terminal, _) = bench
+        .run_with_secrets(workflow, &fixture, &config, &[("YUNTA_TEST_TOKEN", VALUE)])
+        .await;
+
+    let log = format!("{:?}", bench.events());
+    assert!(
+        !log.contains(VALUE),
+        "the secret reached the log:\n{}",
+        log.lines()
+            .filter(|line| line.contains(VALUE))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert!(
+        log.contains(yunta_core::REDACTED),
+        "and the log says where it was: {log}"
+    );
+}

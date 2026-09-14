@@ -40,7 +40,7 @@ use serde_json::Value;
 use yunta_core::SessionId;
 
 use crate::failure;
-use crate::session::target_digest;
+use yunta_core::events::ToolTarget;
 use yunta_core::port::{AgentError, AgentEvent, AgentOutcome};
 
 pub(super) fn parse_line(line: &str, last_message: &str) -> Vec<AgentEvent> {
@@ -87,19 +87,19 @@ fn item_completed(value: &Value) -> Option<AgentEvent> {
         }),
         "command_execution" => Some(AgentEvent::ToolUse {
             name: "command_execution".to_string(),
-            target_digest: digest_of_field(item, "command"),
+            target: opaque_field(item, "command"),
         }),
         "file_change" => Some(AgentEvent::ToolUse {
             name: "file_change".to_string(),
-            target_digest: file_change_digest(item),
+            target: file_change_target(item),
         }),
         "mcp_tool_call" => Some(AgentEvent::ToolUse {
             name: "mcp_tool_call".to_string(),
-            target_digest: mcp_tool_call_digest(item),
+            target: mcp_tool_call_target(item),
         }),
         "web_search" => Some(AgentEvent::ToolUse {
             name: "web_search".to_string(),
-            target_digest: digest_of_field(item, "query"),
+            target: opaque_field(item, "query"),
         }),
         // "reasoning", "todo_list", "error" (mid-turn, non-fatal): not
         // operator-facing tool activity — see this module's own doc.
@@ -107,36 +107,42 @@ fn item_completed(value: &Value) -> Option<AgentEvent> {
     }
 }
 
-/// The digest of the field this kind of item acts on, or of the whole
-/// item when it carries none — either way a digest, never the value.
-fn digest_of_field(item: &Value, key: &str) -> String {
+/// The field this kind of item acts on, identified and never shown: it
+/// is the session's own text, which the engine cannot vouch for. The
+/// whole item stands in when the field is absent.
+fn opaque_field(item: &Value, key: &str) -> ToolTarget {
     match item.get(key).and_then(Value::as_str) {
-        Some(found) => target_digest(found),
-        None => target_digest(&item.to_string()),
+        Some(found) => ToolTarget::opaque(found.as_bytes()),
+        None => ToolTarget::opaque(item.to_string().as_bytes()),
     }
 }
 
 /// `changes` is a list (a single `file_change` item can touch several
-/// paths at once) — the first path is the representative digest, same
-/// "pick one meaningful field" convention `claude_code::parse` uses for
-/// its own multi-field tool inputs.
-fn file_change_digest(item: &Value) -> String {
+/// paths at once) — the first path represents the call, the same "pick
+/// one meaningful field" convention `claude_code::parse` uses. A path
+/// names the repository, so it is shown.
+fn file_change_target(item: &Value) -> ToolTarget {
     item.get("changes")
         .and_then(Value::as_array)
         .and_then(|changes| changes.first())
         .and_then(|change| change.get("path"))
         .and_then(Value::as_str)
-        .map(target_digest)
-        .unwrap_or_else(|| target_digest(&item.to_string()))
+        .map(|path| ToolTarget::of_path(std::path::Path::new(path)))
+        .unwrap_or_else(|| ToolTarget::opaque(item.to_string().as_bytes()))
 }
 
-fn mcp_tool_call_digest(item: &Value) -> String {
+/// Which server and which tool — names the workflow itself declares, so
+/// a reader may see them.
+fn mcp_tool_call_target(item: &Value) -> ToolTarget {
     match (
         item.get("server").and_then(Value::as_str),
         item.get("tool").and_then(Value::as_str),
     ) {
-        (Some(server), Some(tool)) => target_digest(&format!("{server}:{tool}")),
-        _ => target_digest(&item.to_string()),
+        (Some(server), Some(tool)) => ToolTarget {
+            digest: yunta_core::sha256_hex(format!("{server}:{tool}").as_bytes()),
+            display: Some(format!("{server}:{tool}")),
+        },
+        _ => ToolTarget::opaque(item.to_string().as_bytes()),
     }
 }
 

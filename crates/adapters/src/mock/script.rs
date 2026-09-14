@@ -99,10 +99,7 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
         if events
             .send(AgentEvent::ToolUse {
                 name: "edit".to_string(),
-                target_digest: crate::session::target_digest(&format!(
-                    "blocked:{}",
-                    path.display()
-                )),
+                target: yunta_core::events::ToolTarget::of_path(&path),
             })
             .is_err()
         {
@@ -139,13 +136,9 @@ async fn played(
     endpoint: Option<&RunToolsEndpoint>,
 ) -> std::result::Result<AgentEvent, String> {
     Ok(match step {
-        MockStep::ToolUse {
+        MockStep::ToolUse { name, target, .. } => AgentEvent::ToolUse {
             name,
-            target_digest,
-            ..
-        } => AgentEvent::ToolUse {
-            name,
-            target_digest,
+            target: yunta_core::events::ToolTarget::opaque(target.as_bytes()),
         },
         MockStep::Usage {
             input_tokens,
@@ -183,13 +176,12 @@ async fn called(
     endpoint: Option<&RunToolsEndpoint>,
 ) -> std::result::Result<AgentEvent, String> {
     match (call_run_tool(endpoint, &tool, arguments).await, expect) {
-        (Ok(digest), ToolExpectation::Accepted) => Ok(AgentEvent::ToolUse {
+        (Ok(answer), ToolExpectation::Accepted) => Ok(AgentEvent::ToolUse {
             name: tool,
-            target_digest: digest,
+            target: yunta_core::events::ToolTarget::opaque(answer.as_bytes()),
         }),
         (Err(error), ToolExpectation::Refused) => Ok(AgentEvent::ToolUse {
-            target_digest: yunta_core::sha256_hex(yunta_core::describe(&error).as_bytes())
-                .to_string(),
+            target: yunta_core::events::ToolTarget::opaque(yunta_core::describe(&error).as_bytes()),
             name: tool,
         }),
         (Err(error), ToolExpectation::Accepted) => Err(yunta_core::describe(&error)),

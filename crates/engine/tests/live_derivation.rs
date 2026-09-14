@@ -122,7 +122,7 @@ fn usage(index: u64, offset_secs: i64, node_id: &str, input: u64, output: u64) -
         EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
             message_type: AgentMessageType::Usage,
             tool_name: None,
-            target_digest: None,
+            target: None,
             input_tokens: Some(input),
             output_tokens: Some(output),
             cached_input_tokens: None,
@@ -139,7 +139,7 @@ fn tool_use(index: u64, offset_secs: i64, node_id: &str, tool: &str, digest: &st
         EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
             message_type: AgentMessageType::ToolUse,
             tool_name: Some(tool.to_string()),
-            target_digest: Some(digest.to_string()),
+            target: Some(yunta_core::events::ToolTarget::opaque(digest.as_bytes())),
             input_tokens: None,
             output_tokens: None,
             cached_input_tokens: None,
@@ -444,7 +444,10 @@ fn tool_calls_come_back_newest_first_and_capped_at_the_limit() {
     let calls = recent_tool_calls(&derive(&events), &"build".into(), 10);
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].tool_name.as_deref(), Some("cargo"));
-    assert_eq!(calls[0].target_digest.as_deref(), Some("digest-cargo"));
+    assert_eq!(
+        calls[0].target.as_ref().map(|target| target.digest.clone()),
+        Some(yunta_core::sha256_hex(b"digest-cargo"))
+    );
     assert_eq!(calls[0].at, at(30));
     assert_eq!(calls[1].tool_name.as_deref(), Some("rg"));
 
@@ -541,7 +544,7 @@ fn usage_no_node_owns_is_left_out_of_the_live_total() {
         EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
             message_type: AgentMessageType::Usage,
             tool_name: None,
-            target_digest: None,
+            target: None,
             input_tokens: Some(42),
             output_tokens: Some(7),
             cached_input_tokens: None,

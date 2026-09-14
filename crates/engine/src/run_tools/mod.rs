@@ -53,6 +53,6 @@ mod tasks;
 mod verdicts;
 
 pub use blackboard::consolidate_blackboard;
-pub use host::{RunToolsAccess, RunToolsHost};
+pub use host::{HostOf, RunToolsAccess, RunToolsHost};
 pub use listener::{open_session_listener, RunToolsSession};
 pub(crate) use notice::submission_notice;

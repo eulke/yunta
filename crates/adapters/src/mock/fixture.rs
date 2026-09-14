@@ -213,7 +213,10 @@ fn default_model() -> ModelName {
 pub enum MockStep {
     ToolUse {
         name: String,
-        target_digest: String,
+        /// What the scripted call acts on. A fixture writes what a real
+        /// session would hand over, so the mock produces the same
+        /// opaque target every other adapter does.
+        target: String,
         #[serde(default)]
         after_ms: u64,
     },
