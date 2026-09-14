@@ -93,14 +93,25 @@ plan. No admiten interpretación.
 14. **Un ítem, un PR** (o una serie corta que el tablero enumera). El título
     del PR nombra el ítem (`W-03`, `2-01`); la descripción lista los defectos
     del índice que cierra por id y pega la salida del gate.
-15. **Lo que deja de usarse se borra.** Un ítem que reemplaza un tipo, una
-    función, una constante, un campo, un archivo, un test o un párrafo de
-    documentación borra lo reemplazado en el mismo commit. No quedan
-    envoltorios que sólo delegan, alias "por compatibilidad", helpers sin
-    llamador, campos que nadie lee, whitelists de un ratchet que ya no
-    protegen nada ni texto que describe algo que el repo no tiene. Lo que
-    se conserva a propósito lo dice el plan (§8) o una decisión registrada;
-    todo lo demás que quedó sin uso es basura y se saca.
+15. **Lo que deja de usarse se borra; lo que falta terminar se termina.**
+    Sin uso no prueba que sobre. Antes de borrar algo hay que decir en cuál
+    de estos tres cae, y sólo el primero se borra:
+    - **Reemplazado**: otro mecanismo ocupó su lugar y nadie puede volver a
+      consumirlo. Se borra en el mismo commit que lo dejó sin uso — el tipo,
+      la función, la constante, el campo, el archivo, el test y el párrafo
+      que lo describía. Un envoltorio que sólo delega y un alias "por
+      compatibilidad" caen acá.
+    - **Inconcluso**: está construido y todavía no conectado, y el sistema
+      lo necesita conectado. No se borra: se termina en el ítem que lo
+      nombra, o se levanta en §11 si ningún ítem lo nombra. Borrarlo
+      esconde trabajo que falta.
+    - **Planificado**: su consumidor llega en una fase que el plan nombra
+      (§7, §10, `mecanismos.md`). No se toca hasta esa fase, y el plan es
+      la prueba de que tiene destino.
+
+    Lo que además se conserva a propósito lo dice §8 o una decisión
+    registrada. Un barrido que no clasifica antes de borrar no es limpieza:
+    es pérdida.
 
 ### Cómo se cierra un ítem
 
