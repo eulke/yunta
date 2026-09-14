@@ -6,9 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{ArtifactId, EventPayload, RecordedOrigin, RunCreatedPayload};
-use yunta_core::{
-    Clock, CommitSha, InputName, Manifest, ModeName, NodeId, RunId, TaskId, ARTIFACTS_DIR,
-};
+use yunta_core::{Clock, CommitSha, InputName, Manifest, ModeName, NodeId, RunId, TaskId};
 use yunta_storage::AsyncStorage;
 
 use crate::artifacts::accept;
@@ -178,7 +176,7 @@ pub async fn create_run(
         }
     }
     for dir in [
-        run_dir.join(ARTIFACTS_DIR),
+        crate::run_dir::artifacts_view(&run_dir),
         run_dir.join(crate::run_dir::SCRATCH_DIR),
     ] {
         tokio::fs::create_dir(&dir)
@@ -189,7 +187,7 @@ pub async fn create_run(
             })?;
     }
 
-    let manifest_path = run_dir.join("manifest.yaml");
+    let manifest_path = crate::run_dir::manifest_path(&run_dir);
     let yaml = yunta_core::yaml::to_string(manifest).map_err(|e| RunError::ManifestWrite {
         path: manifest_path.clone(),
         detail: e.to_string(),

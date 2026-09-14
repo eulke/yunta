@@ -71,10 +71,8 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     } = *env;
     let state = crate::replay::derive(events);
     let attempt = attempt_number(&state, &task.id);
-    let task_worktree = ctx
-        .run_dir
-        .join("task-worktrees")
-        .join(format!("{}-{attempt}", task.id));
+    let task_worktree =
+        crate::run_dir::task_worktrees(ctx.run_dir).join(format!("{}-{attempt}", task.id));
     let branch = crate::worktree::task_branch(ctx.run_id, &task.id, attempt);
     prepare_worktree(
         ctx.worktree,

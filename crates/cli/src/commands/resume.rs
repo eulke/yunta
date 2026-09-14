@@ -46,7 +46,10 @@ fn parked(ctx: &Context, run_id: &RunId) -> Result<Parked, CliError> {
             ctx.project.runs_root.display()
         )));
     };
-    let manifest: Manifest = load_yaml(&run_dir.join("manifest.yaml"), "run manifest")?;
+    let manifest: Manifest = load_yaml(
+        &yunta_engine::run_dir::manifest_path(&run_dir),
+        "run manifest",
+    )?;
     let adapters = super::real_adapters(&manifest.config);
     super::refuse_unrunnable(&manifest.workflow, &adapters)?;
     let worktree = match manifest.isolation {

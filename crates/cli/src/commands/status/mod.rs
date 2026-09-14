@@ -43,8 +43,8 @@ pub fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let manifest_path = ctx
         .project
         .run_dir(run_id.as_str())
-        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()))
-        .join("manifest.yaml");
+        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
+    let manifest_path = yunta_engine::run_dir::manifest_path(&manifest_path);
     let manifest: Manifest = load_yaml(&manifest_path, "run manifest")?;
 
     let now = ctx.clock.now();

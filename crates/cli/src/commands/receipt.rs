@@ -59,7 +59,10 @@ fn gathered(ctx: &Context, run_id: &RunId) -> Result<(PathBuf, Receipt), CliErro
         .project
         .run_dir(run_id.as_str())
         .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
-    let manifest: Manifest = crate::load_yaml(&run_dir.join("manifest.yaml"), "run manifest")?;
+    let manifest: Manifest = crate::load_yaml(
+        &yunta_engine::run_dir::manifest_path(&run_dir),
+        "run manifest",
+    )?;
 
     let chain = match storage.verify_chain(run_id)? {
         ChainVerification::Intact { events } => EventChainStatus::Intact { events },

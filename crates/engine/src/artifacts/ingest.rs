@@ -50,7 +50,7 @@ pub struct VerifiedArtifact {
     /// The bytes as they were read or written. What the run stores is
     /// their canonical rendering, which differs whenever a node wrote an
     /// interpreted document in its own spelling — so the hash of what
-    /// the run holds comes from [`accept`](super::accept), never from
+    /// the run holds comes from the run's own acceptance, never from
     /// here.
     pub bytes: Vec<u8>,
     /// The hash of the file this node staged, for the one construction
@@ -67,9 +67,9 @@ pub struct VerifiedArtifact {
 /// for an interpreted document is the canonical rendering of what those
 /// bytes parsed as, so a node that wrote a tasks document in its own
 /// spelling staged one hash and the run holds another — and a reader
-/// that compared them would call one of the two wrong. The store's
-/// answer is [`accept`](super::accept)'s to give; this one says what
-/// was on disk.
+/// that compared them would call one of the two wrong. What the store
+/// answers for is the acceptance's to say; this one says what was on
+/// disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StagedHash(ContentHash);
 

@@ -21,6 +21,35 @@ pub const SCRATCH_DIR: &str = "scratch";
 /// Where nodes' staging directories live under [`SCRATCH_DIR`].
 const STAGING_DIR: &str = "staging";
 
+/// The manifest a run froze when it was created: what it runs, which
+/// runners it resolves against, which limits it is held to.
+pub fn manifest_path(run_dir: &Path) -> PathBuf {
+    run_dir.join("manifest.yaml")
+}
+
+/// The run's progress note, rewritten at every node close — the file a
+/// person opens to see where a live run is.
+pub fn progress_path(run_dir: &Path) -> PathBuf {
+    run_dir.join("progress.md")
+}
+
+/// Where a session's own transcript directory goes, under the scratch.
+pub fn sessions_root(run_dir: &Path) -> PathBuf {
+    run_dir.join(SCRATCH_DIR).join("sessions")
+}
+
+/// Where a loop's tasks get a worktree each, so two tasks of one run
+/// never share a checkout.
+pub fn task_worktrees(run_dir: &Path) -> PathBuf {
+    run_dir.join("task-worktrees")
+}
+
+/// The run's view of what it holds: one file per artifact, written from
+/// the acceptance that named it.
+pub fn artifacts_view(run_dir: &Path) -> PathBuf {
+    run_dir.join(yunta_core::ARTIFACTS_DIR)
+}
+
 /// Where every node's staging sits, one directory per node id.
 pub fn staging_root(run_dir: &Path) -> PathBuf {
     run_dir.join(SCRATCH_DIR).join(STAGING_DIR)

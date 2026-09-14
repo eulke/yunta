@@ -93,12 +93,18 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
                 }
             }
             None if dry_run => {
-                println!("would purge {} event(s) for run {run_id}", events.len());
+                println!(
+                    "would purge {} for run {run_id}",
+                    yunta_core::text::counted(events.len(), "event")
+                );
                 reclaimed += 1;
             }
             None => match storage.purge_run(&run_id) {
                 Ok(purged) => {
-                    println!("purged {} event(s) for run {run_id}", purged.rows);
+                    println!(
+                        "purged {} for run {run_id}",
+                        yunta_core::text::counted(purged.rows, "event")
+                    );
                     reclaimed += 1;
                 }
                 Err(e) => warn(format!("run `{run_id}`: {e}")),
@@ -109,9 +115,12 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
     if reclaimed == 0 {
         println!("nothing to reclaim");
     } else if dry_run {
-        println!("{reclaimed} run(s) would be reclaimed");
+        println!(
+            "{} would be reclaimed",
+            yunta_core::text::counted(reclaimed, "run")
+        );
     } else {
-        println!("{reclaimed} run(s) reclaimed");
+        println!("{} reclaimed", yunta_core::text::counted(reclaimed, "run"));
     }
     Ok(Outcome::Success)
 }
@@ -157,8 +166,10 @@ fn remove_run(project: &Project, run_dir: &Path, run_id: &RunId, dry_run: bool) 
 /// `run.dir` is still reclaimed, its worktree (if any) left for a human,
 /// never guessed at from the current config.
 fn worktree_of(project: &Project, run_dir: &Path, run_id: &RunId) -> Option<PathBuf> {
-    let manifest: Manifest = match crate::load_yaml(&run_dir.join("manifest.yaml"), "run manifest")
-    {
+    let manifest: Manifest = match crate::load_yaml(
+        &yunta_engine::run_dir::manifest_path(run_dir),
+        "run manifest",
+    ) {
         Ok(manifest) => manifest,
         Err(e) => {
             warn(format!("run `{run_id}`: {e}"));

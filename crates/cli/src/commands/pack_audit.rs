@@ -204,7 +204,7 @@ pub fn print_test_summary(summary: &PackTestSummary) {
     } else if !summary.ran {
         println!(
             "\ntests: {} shipped, not run (pass --run-tests)",
-            super::counted(summary.total, "case")
+            yunta_core::text::counted(summary.total, "case")
         );
     } else {
         // The heading counts cases and the lines under it count
@@ -213,7 +213,7 @@ pub fn print_test_summary(summary: &PackTestSummary) {
         // indented rather than given a second, different total.
         println!(
             "\ntests: {}, {} failed",
-            super::counted(summary.total, "case"),
+            yunta_core::text::counted(summary.total, "case"),
             summary.failed
         );
         if !summary.failures.is_empty() {

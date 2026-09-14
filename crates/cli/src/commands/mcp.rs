@@ -278,8 +278,8 @@ async fn tool_workflow_status(
     let manifest_path = ctx
         .project
         .run_dir(run_id.as_str())
-        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()))
-        .join("manifest.yaml");
+        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
+    let manifest_path = yunta_engine::run_dir::manifest_path(&manifest_path);
     let manifest: Manifest =
         crate::load_yaml(&manifest_path, "run manifest").map_err(|e| e.to_string())?;
     // The same versioned DTO `yunta status --json` prints, serialized to
@@ -390,9 +390,10 @@ async fn tool_resolve_gate(
             ctx.project.runs_root.display()
         )
     })?;
-    let manifest: yunta_core::Manifest = std::fs::read_to_string(run_dir.join("manifest.yaml"))
-        .map_err(|e| e.to_string())
-        .and_then(|text| yunta_core::yaml::parse(&text).map_err(|e| e.to_string()))?;
+    let manifest: yunta_core::Manifest =
+        std::fs::read_to_string(yunta_engine::run_dir::manifest_path(&run_dir))
+            .map_err(|e| e.to_string())
+            .and_then(|text| yunta_core::yaml::parse(&text).map_err(|e| e.to_string()))?;
     let storage = ctx.async_storage().await.map_err(|e| e.to_string())?;
 
     yunta_engine::resolve_gate(

@@ -2481,7 +2481,7 @@ fn run_detach_shows_the_distribution_and_the_budget_warning_before_handing_the_r
     // which the warning beside it still precedes every token spent.
     let distribution = lines
         .iter()
-        .position(|line| line.starts_with("3 past run(s) · "));
+        .position(|line| line.starts_with("3 past runs · "));
     let handoff = lines.iter().position(|line| line.contains("detached"));
     assert!(
         matches!((distribution, handoff), (Some(shown), Some(gone)) if shown < gone),

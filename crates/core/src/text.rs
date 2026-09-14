@@ -101,6 +101,24 @@ pub fn aside(subject: impl fmt::Display, carried: &str) -> String {
     format!("{subject} — {carried}")
 }
 
+/// `n` things, named: `1 case`, `2 cases`. The one place a count already
+/// in hand becomes a phrase, so no message hedges with `(s)` while the
+/// number sits right beside it.
+///
+/// `noun` takes a plain `-s` plural, which is every noun this system
+/// counts.
+///
+/// The phrase is one string, so its width varies with the count. A
+/// column that right-aligns its number (`{:>3}`) has to keep the two
+/// apart — format the count itself and follow it with the noun — or the
+/// column goes ragged the first time a total reaches two digits.
+pub fn counted(n: usize, noun: &str) -> String {
+    match n {
+        1 => format!("1 {noun}"),
+        n => format!("{n} {noun}s"),
+    }
+}
+
 /// The block `spec-ledger.md` §4 fixes: a heading naming what was read
 /// and how many problems it has, then one indented line per problem.
 ///
@@ -114,11 +132,7 @@ pub fn aside(subject: impl fmt::Display, carried: &str) -> String {
 /// here, so a reader meets the same block whether a workflow failed to
 /// check or an artifact failed to close.
 pub fn problems(heading: impl fmt::Display, items: &[impl fmt::Display]) -> String {
-    let mut text = format!(
-        "{heading}: {} {}",
-        items.len(),
-        if items.len() == 1 { "error" } else { "errors" }
-    );
+    let mut text = format!("{heading}: {}", counted(items.len(), "error"));
     for item in items {
         text.push_str(&format!("\n  {item}"));
     }
@@ -127,7 +141,15 @@ pub fn problems(heading: impl fmt::Display, items: &[impl fmt::Display]) -> Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{aside, detailed};
+    use super::{aside, counted, detailed};
+
+    #[test]
+    fn a_count_names_its_noun_in_the_number_it_is() {
+        assert_eq!(counted(0, "run"), "0 runs");
+        assert_eq!(counted(1, "run"), "1 run");
+        assert_eq!(counted(2, "run"), "2 runs");
+        assert_eq!(counted(1, "task instance"), "1 task instance");
+    }
 
     #[test]
     fn a_headline_with_detail_is_joined_by_a_colon() {

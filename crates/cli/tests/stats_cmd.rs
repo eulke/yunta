@@ -108,7 +108,7 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     let fourth = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(fourth.status.success());
     assert!(
-        stdout(&fourth).contains("past run(s)"),
+        stdout(&fourth).contains("past runs"),
         "got: {}",
         stdout(&fourth)
     );
@@ -117,7 +117,7 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     let list = yunta_in!(&repo, &home, &["list"]);
     assert!(list.status.success());
     assert!(
-        stdout(&list).contains("past run(s)"),
+        stdout(&list).contains("past runs"),
         "got: {}",
         stdout(&list)
     );
@@ -129,11 +129,11 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     let text = stdout(&workflow_stats);
     assert!(
         text.lines()
-            .any(|l| l == "workflow `bash-only-stats` — 4 run(s)"),
+            .any(|l| l == "workflow `bash-only-stats` — 4 runs"),
         "got: {text}"
     );
     assert!(
-        text.lines().any(|l| l.starts_with("4 past run(s) · ")),
+        text.lines().any(|l| l.starts_with("4 past runs · ")),
         "got: {text}"
     );
 }

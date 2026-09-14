@@ -319,27 +319,9 @@ pub(crate) fn unknown_kinds_note(counts: &[UnknownKindCount]) -> Option<String> 
         .collect();
     Some(format!(
         "{}, interpreted partially: {}",
-        counted(counts.len(), "unknown event kind"),
+        yunta_core::text::counted(counts.len(), "unknown event kind"),
         kinds.join(", ")
     ))
-}
-
-/// `n` things, named: `1 case`, `2 cases`. The one place the CLI turns a
-/// count it is already holding into a phrase, so no message hedges with
-/// `(s)` while the number sits right there.
-///
-/// `noun` takes a plain `-s` plural, which is every noun the CLI counts.
-///
-/// The phrase is one string, so its width varies with the count. A
-/// column that right-aligns its number (`{:>3}`) has to keep the two
-/// apart — format the count itself and follow it with the noun — or the
-/// column goes ragged the first time a total reaches two digits.
-pub(crate) fn counted(n: usize, noun: &str) -> String {
-    if n == 1 {
-        format!("{n} {noun}")
-    } else {
-        format!("{n} {noun}s")
-    }
 }
 
 /// Resolves a workflow reference to a file, the one rule `check`, `run`

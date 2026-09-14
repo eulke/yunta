@@ -24,9 +24,10 @@ use yunta_core::{Isolation, NodeId, RunId, Workflow};
 use yunta_engine::{run_frame, NodeFrame, PriorEstimation, RunFrame, RunPhase};
 
 use crate::commands::status::decision::{self, Layout};
-use crate::commands::{advice, counted, unknown_kinds_note};
+use crate::commands::{advice, unknown_kinds_note};
 use crate::error::Outcome;
 use crate::render::{format_duration, indent, truncate, Glyphs, StateWord, INDENT, LABEL_WIDTH};
+use yunta_core::text::counted;
 
 use super::view;
 
@@ -285,7 +286,7 @@ impl Closing {
         format!(
             "{} under {}",
             counted(written, "artifact"),
-            self.run_dir.join("artifacts").display()
+            yunta_engine::run_dir::artifacts_view(&self.run_dir).display()
         )
     }
 

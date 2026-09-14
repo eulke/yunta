@@ -156,7 +156,7 @@ pub async fn test(dir: Option<&Path>) -> Result<Outcome, CliError> {
 
     println!(
         "{}, {failures} failed",
-        super::counted(case_paths.len(), "case")
+        yunta_core::text::counted(case_paths.len(), "case")
     );
     if failures == 0 {
         Ok(Outcome::Success)

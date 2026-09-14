@@ -236,7 +236,7 @@ fn run_row(
             ),
         )
     })?;
-    let manifest_path = run_dir.join("manifest.yaml");
+    let manifest_path = yunta_engine::run_dir::manifest_path(&run_dir);
     let manifest: Manifest = std::fs::read_to_string(&manifest_path)
         .ok()
         .and_then(|text| yunta_core::yaml::parse(&text).ok())

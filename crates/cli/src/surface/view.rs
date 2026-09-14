@@ -243,7 +243,7 @@ pub(super) fn counter_line(frame: &RunFrame) -> String {
     if frame.reroutes > 0 {
         line.push_str(&format!(
             " · {}",
-            crate::commands::counted(frame.reroutes, "reroute")
+            yunta_core::text::counted(frame.reroutes, "reroute")
         ));
     }
     line

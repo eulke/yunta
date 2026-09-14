@@ -31,8 +31,8 @@ pub(crate) fn answer(console: &Console, questions: &QuestionsFile) -> Answered<Q
     let total = questions.questions.len();
     console.say("")?;
     console.say(&format!(
-        "{total} {} needed before this node goes on ({PARKS})",
-        if total == 1 { "answer" } else { "answers" }
+        "{} needed before this node goes on ({PARKS})",
+        yunta_core::text::counted(total, "answer")
     ))?;
     let mut answers = Vec::new();
     for (index, question) in questions.questions.iter().enumerate() {

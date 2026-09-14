@@ -60,8 +60,8 @@ fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let manifest_path = ctx
         .project
         .run_dir(run_id.as_str())
-        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()))
-        .join("manifest.yaml");
+        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
+    let manifest_path = yunta_engine::run_dir::manifest_path(&manifest_path);
     let manifest: Manifest = crate::load_yaml(&manifest_path, "run manifest")?;
 
     let run_stats = compute_run_stats(&manifest.workflow, &events);
@@ -139,7 +139,7 @@ pub(crate) fn collect_history(
         let Some(first) = events.first() else {
             continue;
         };
-        let manifest_path = runs_root.join(run_id.as_str()).join("manifest.yaml");
+        let manifest_path = yunta_engine::run_dir::manifest_path(&runs_root.join(run_id.as_str()));
         let Some(manifest) = std::fs::read_to_string(&manifest_path)
             .ok()
             .and_then(|c| yunta_core::yaml::parse::<Manifest>(&c).ok())
@@ -191,7 +191,7 @@ pub(crate) fn collect_raw_history(
         let Some(first) = events.first() else {
             continue;
         };
-        let manifest_path = runs_root.join(run_id.as_str()).join("manifest.yaml");
+        let manifest_path = yunta_engine::run_dir::manifest_path(&runs_root.join(run_id.as_str()));
         let Some(manifest) = std::fs::read_to_string(&manifest_path)
             .ok()
             .and_then(|c| yunta_core::yaml::parse::<Manifest>(&c).ok())
@@ -235,8 +235,8 @@ fn currency_line(
         / pricing.len() as f64;
     let estimate = (tokens as f64 / 1000.0) * avg_per_1k;
     Some(format!(
-        "{INDENT}~{estimate:.2} (avg of {} priced model(s), never authoritative)",
-        pricing.len()
+        "{INDENT}~{estimate:.2} (avg of {}, never authoritative)",
+        yunta_core::text::counted(pricing.len(), "priced model")
     ))
 }
 
@@ -340,7 +340,10 @@ fn node_line(node: &NodeStat, max_tokens: u64, display: &NodeDisplay, glyphs: Gl
 }
 
 fn render_workflow_history(workflow_name: &WorkflowName, history: &[RunSummary], glyphs: Glyphs) {
-    println!("workflow `{workflow_name}` — {} run(s)", history.len());
+    println!(
+        "workflow `{workflow_name}` — {}",
+        yunta_core::text::counted(history.len(), "run")
+    );
 
     println!("\nCPTV over time:");
     println!("{}", cptv_line(history, glyphs));
@@ -348,7 +351,7 @@ fn render_workflow_history(workflow_name: &WorkflowName, history: &[RunSummary],
     println!("\nmodes:");
     for (mode, runs, median_cptv, median_tokens) in mode_table(history) {
         println!(
-            "{INDENT}{} {:>3} run(s)   median CPTV {}   median tokens {}",
+            "{INDENT}{} {:>3} runs   median CPTV {}   median tokens {}",
             truncate(mode.as_str(), LABEL_WIDTH, glyphs),
             runs,
             median_cptv
@@ -407,37 +410,42 @@ pub(crate) fn render_verification_findings(
     out.push_str("verification performance — advisory, nothing here is acted on automatically:\n");
     for c in &findings.never_red_criteria {
         out.push_str(&format!(
-            "{INDENT}criterion `{}` was never red in pre-check across {} run(s) — \
+            "{INDENT}criterion `{}` was never red in pre-check across {} — \
              either redundant, or mis-written (both readings shown, never just one)\n",
-            c.cmd, c.sample_count
+            c.cmd,
+            yunta_core::text::counted(c.sample_count, "run")
         ));
     }
     for r in &findings.never_triggered_reroutes {
         out.push_str(&format!(
-            "{INDENT}node `{}`'s re-route to `{}` never fired across {} run(s) — \
+            "{INDENT}node `{}`'s re-route to `{}` never fired across {} — \
              the prior flow is more reliable than expected\n",
-            r.node, r.goto, r.sample_count
+            r.node,
+            r.goto,
+            yunta_core::text::counted(r.sample_count, "run")
         ));
     }
     for g in &findings.always_approved_gates {
         out.push_str(&format!(
-            "{INDENT}gate `{}` was approved without adjustment across {} resolution(s) — \
+            "{INDENT}gate `{}` was approved without adjustment across {} — \
              still adding value, or become ritual?\n",
-            g.node, g.sample_count
+            g.node,
+            yunta_core::text::counted(g.sample_count, "resolution")
         ));
     }
     if let Some(t) = &findings.always_first_try_tasks {
         out.push_str(&format!(
-            "{INDENT}every task passed on its first try across {} task instance(s) — \
+            "{INDENT}every task passed on its first try across {} — \
              the plan may be cutting too fine\n",
-            t.sample_count
+            yunta_core::text::counted(t.sample_count, "task instance")
         ));
     }
     for m in &findings.unused_modes {
         out.push_str(&format!(
-            "{INDENT}mode `{}` was never chosen across {} run(s) — \
+            "{INDENT}mode `{}` was never chosen across {} — \
              still worth declaring?\n",
-            m.name, m.runs_observed
+            m.name,
+            yunta_core::text::counted(m.runs_observed, "run")
         ));
     }
     out
@@ -479,8 +487,11 @@ pub(crate) fn format_estimation_line(estimation: &yunta_engine::PriorEstimation)
         None => "n/a".to_string(),
     };
     format!(
-        "{} past run(s) · median {:.0} tokens, p90 {:.0} · median wall-clock {}",
-        estimation.sample_count, estimation.tokens.median, estimation.tokens.p90, wall_clock,
+        "{} · median {:.0} tokens, p90 {:.0} · median wall-clock {}",
+        yunta_core::text::counted(estimation.sample_count, "past run"),
+        estimation.tokens.median,
+        estimation.tokens.p90,
+        wall_clock,
     )
 }
 

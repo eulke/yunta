@@ -155,27 +155,22 @@ fn enforce_executor_policy(
     match policy.executors {
         PackExecutorPolicy::Allow => Ok(()),
         PackExecutorPolicy::Deny => Err(CliError::msg(format!(
-            "this pack declares {} executor(s) and `permissions.packs.executors` \
-             is `deny` (declared by the {} config layer{}) — `--yes` cannot override a \
+            "this pack declares {} and `permissions.packs.executors` \
+             is `deny` (declared by the {} config) — `--yes` cannot override a \
              permissions ceiling. Change the policy there, or {verb} a pack \
              without executors.",
-            manifest.declares.executors.len(),
+            yunta_core::text::counted(manifest.declares.executors.len(), "executor"),
             policy.executors_declared_by.join("/"),
-            if policy.executors_declared_by.len() == 1 {
-                ""
-            } else {
-                "s"
-            },
         ))),
         PackExecutorPolicy::Prompt => {
             if confirmed {
                 return Ok(());
             }
             Err(CliError::msg(format!(
-                "this pack declares {} executor(s) — executable code, not just \
+                "this pack declares {} — executable code, not just \
                  declarative YAML. Review the inventory above, then re-run with `--yes` to \
                  confirm the {verb}.",
-                manifest.declares.executors.len()
+                yunta_core::text::counted(manifest.declares.executors.len(), "executor")
             )))
         }
     }

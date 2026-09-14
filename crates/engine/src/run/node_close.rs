@@ -323,7 +323,7 @@ pub(super) async fn fail(
 pub(super) async fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     let events = ctx.load_events().await?;
     let markdown = crate::progress::render_progress(&ctx.manifest.workflow, &events);
-    tokio::fs::write(ctx.run_dir.join("progress.md"), markdown)
+    tokio::fs::write(crate::run_dir::progress_path(ctx.run_dir), markdown)
         .await
         .map_err(|source| RunError::Io {
             context: "write progress.md".to_string(),

@@ -465,7 +465,7 @@ fn the_budget_warning_survives_quiet_and_the_distribution_does_not() {
 
     let loud = yunta_in!(&repo, &home, &mocked);
     assert!(
-        stdout(&loud).contains("past run(s)"),
+        stdout(&loud).contains("past runs"),
         "the distribution is shown when nobody asked for silence: {}",
         stdout(&loud)
     );

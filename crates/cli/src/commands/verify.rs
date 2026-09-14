@@ -39,7 +39,10 @@ pub async fn verify(run_id: &RunId) -> Result<Outcome, CliError> {
 fn chain(run_id: &RunId, storage: &Storage) -> Result<Outcome, CliError> {
     match storage.verify_chain(run_id)? {
         ChainVerification::Intact { events } => {
-            println!("run {run_id}: chain intact — {events} event(s) verified");
+            println!(
+                "run {run_id}: chain intact — {} verified",
+                yunta_core::text::counted(events, "event")
+            );
             Ok(Outcome::Success)
         }
         ChainVerification::Broken { seq, detail } => {
@@ -85,16 +88,15 @@ async fn objects(run_id: &RunId, ctx: &Context, storage: &Storage) -> Result<Out
     let integrity = ArtifactIntegrity::of(&run_dir, &events).await;
     let verdict = if integrity.faults.is_empty() {
         println!(
-            "run {run_id}: objects intact — {} artifact(s) verified",
-            integrity.verified
+            "run {run_id}: objects intact — {} verified",
+            yunta_core::text::counted(integrity.verified, "artifact")
         );
         Outcome::Success
     } else {
         note(format!(
-            "run {run_id}: objects BROKEN — {} of {} artifact(s) are not the bytes the run \
-             accepted",
+            "run {run_id}: objects BROKEN — {} of {} are not the bytes the run accepted",
             integrity.faults.len(),
-            integrity.verified + integrity.faults.len()
+            yunta_core::text::counted(integrity.verified + integrity.faults.len(), "artifact")
         ));
         for fault in &integrity.faults {
             note(format!("  {}: {}", fault.artifact, fault.error));

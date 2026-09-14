@@ -167,7 +167,7 @@ async fn resolve_one(
     let (source_events, producer) = if source_run == *ctx.run_id {
         (events.to_vec(), Some(m.node.clone()))
     } else {
-        read_manifest(&source_dir.join("manifest.yaml"))
+        read_manifest(&crate::run_dir::manifest_path(&source_dir))
             .await
             .map_err(|source| MountError::Unfrozen {
                 artifact: m.id.clone(),

@@ -79,11 +79,6 @@ impl Lines {
 /// never by a separator with nothing behind it: a kind whose whole
 /// detail is that field answers `None`, and one that joins the field to
 /// a headline drops the colon.
-/// How many problems a refusal found, for the one line an event gets.
-fn counted_problems(n: usize) -> String {
-    format!("{n} problem{}", if n == 1 { "" } else { "s" })
-}
-
 fn detail(payload: &EventPayload) -> Option<String> {
     match payload {
         EventPayload::Run(RunEvent::Created(p)) => {
@@ -109,9 +104,10 @@ fn detail(payload: &EventPayload) -> Option<String> {
             p.phase,
             p.results.len()
         )),
-        EventPayload::Node(NodeEvent::ScopeChecked(p)) => {
-            Some(format!("{} path(s) out of scope", p.violations.len()))
-        }
+        EventPayload::Node(NodeEvent::ScopeChecked(p)) => Some(format!(
+            "{} out of scope",
+            yunta_core::text::counted(p.violations.len(), "path")
+        )),
         EventPayload::Node(NodeEvent::Finished(p)) => Some(p.outcome.clone()),
         EventPayload::Node(NodeEvent::Failed(p)) => Some(p.failure.to_string()),
         EventPayload::Node(NodeEvent::HookExecuted(p)) => {
@@ -139,7 +135,7 @@ fn detail(payload: &EventPayload) -> Option<String> {
                 Some(id) => format!("{:?} `{id}`", p.operation),
                 None => format!("{:?}", p.operation),
             },
-            &counted_problems(p.report.diagnostics.len()),
+            &yunta_core::text::counted(p.report.diagnostics.len(), "problem"),
         )),
         // A document a session offered as a whole, and whether the
         // engine took it.
@@ -179,8 +175,8 @@ fn detail(payload: &EventPayload) -> Option<String> {
         // A node that asked: what it asked, so a reader knows what the
         // run is waiting on without opening the document.
         EventPayload::Gates(GateEvent::QuestionsAsked(p)) => Some(format!(
-            "asked {} question(s): {}",
-            p.questions.len(),
+            "asked {}: {}",
+            yunta_core::text::counted(p.questions.len(), "question"),
             p.questions
                 .iter()
                 .map(|id| id.to_string())
@@ -206,7 +202,10 @@ fn fence_covered(coverage: &Coverage) -> String {
     match coverage {
         Coverage::Exact => "fence exact".to_string(),
         Coverage::WidenedToRoots { roots } => {
-            format!("fence widened to {} root(s)", roots.len())
+            format!(
+                "fence widened to {}",
+                yunta_core::text::counted(roots.len(), "root")
+            )
         }
         Coverage::ToolsOnly => "fence on tool calls".to_string(),
     }

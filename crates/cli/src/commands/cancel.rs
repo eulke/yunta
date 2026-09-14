@@ -146,10 +146,9 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         }
     }
     println!(
-        "run {run_id}: engine (pid {}) was already dead — killed {} orphaned process \
-         group(s), recorded the pause",
+        "run {run_id}: engine (pid {}) was already dead — killed {}, recorded the pause",
         registry.engine_pid,
-        registry.process_groups.len()
+        yunta_core::text::counted(registry.process_groups.len(), "orphaned process group")
     );
     Ok(Outcome::Success)
 }

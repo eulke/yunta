@@ -353,9 +353,9 @@ async fn create_run_from(
         let active = count_non_terminal_runs(storage).await?;
         if active >= cap as usize {
             return Err(CliError::msg(format!(
-                "{active} run(s) are still active and `limits.max_concurrent_runs` \
-                 is {cap} — resume or cancel one (`yunta list` names them) before starting \
-                 another"
+                "{} still active and `limits.max_concurrent_runs` is {cap} — resume or \
+                 cancel one (`yunta list` names them) before starting another",
+                yunta_core::text::counted(active, "run")
             )));
         }
     }

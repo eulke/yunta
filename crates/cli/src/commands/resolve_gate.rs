@@ -30,7 +30,10 @@ pub async fn resolve_gate(
             ctx.project.runs_root.display()
         )));
     };
-    let manifest: Manifest = load_yaml(&run_dir.join("manifest.yaml"), "run manifest")?;
+    let manifest: Manifest = load_yaml(
+        &yunta_engine::run_dir::manifest_path(&run_dir),
+        "run manifest",
+    )?;
 
     let storage = ctx.async_storage().await?;
 

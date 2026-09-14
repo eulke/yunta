@@ -37,7 +37,7 @@ impl Project {
         candidates
             .into_iter()
             .map(|root| root.join(run_id))
-            .find(|run_dir| run_dir.join("manifest.yaml").exists())
+            .find(|run_dir| yunta_engine::run_dir::manifest_path(run_dir).exists())
     }
 
     /// The worktrees root a run's checkout lives under: the one *frozen*

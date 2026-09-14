@@ -300,7 +300,10 @@ nodes:
         // Main's own check on what the successor produced, kept as it
         // stands: the artifact is there and carries what it should.
         assert_eq!(
-            std::fs::read_to_string(successor_run_dir.join("artifacts").join("plan.yaml")).unwrap(),
+            std::fs::read_to_string(
+                yunta_engine::run_dir::artifacts_view(&successor_run_dir).join("plan.yaml")
+            )
+            .unwrap(),
             "tasks: []\n"
         );
 
