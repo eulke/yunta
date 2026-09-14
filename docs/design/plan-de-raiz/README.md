@@ -750,7 +750,7 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | W-02 | `ArtifactName::parse` después de renderizar | P8 | cerrado(aa437f7) |
 | W-03 | `target_digest` siempre hash | P8 | cerrado(56ad092) |
 | W-04 | blackboard por `FindingLedger`; una regla de dedup | P8 | cerrado(6bf7baa) |
-| W-05 | `git.rs` por `spawn_governed` | P8 | pendiente |
+| W-05 | `git.rs` por `spawn_governed` | P8 | levantado(§11 L-03) |
 | W-06 | `parallel_exec` por `resume_policies` | P8 | pendiente |
 | W-07 | `MockSession` con handle y `Drop` | P8 | pendiente |
 | W-08 | `run_yunta`/`Terminal::open` herméticos | P8 | pendiente |
@@ -843,6 +843,49 @@ como está escrito.
 
 **Pendiente de decisión.** Si el nombre o el corte no son los que el plan
 quiere, se revisan en un ADR y el ítem se ajusta.
+
+### L-03 · 2026-09-14 · W-05 · gobernar los dos `git` sincrónicos vuelve `build_manifest` async
+
+**Evidencia.** La fila de W-05 pide que "`git.rs` construye `GovernedCommand` y
+llama `spawn_governed`" y que "los dos `std::process::Command` pasan a async".
+Esos dos son `git::output_blocking` y `git::success_blocking`
+(`engine/src/git.rs:157,167`). `output_blocking` lo llama `manifest.rs:305`
+(`git_line`), que llama `pack_provenance` (`manifest.rs:139`), que llama
+`build_manifest` (`manifest.rs:73`), **sincrónica y pública**: 102 llamadas en
+33 archivos (94 en `engine`, 4 en `cli`, 3 en `testkit`, 1 en `core`).
+Volverla async arrastra a todos, casi todos tests, y a `yunta_testkit::Bench`.
+`spawn_governed` es async (`engine/src/process.rs:198`), así que no hay forma
+de gobernar desde una función sincrónica.
+
+Los otros dos llamadores de la pareja sincrónica son `cli/commands/init.rs:89,97`
+y `cli/commands/test.rs:418`, fuera de todo run: no hay registro ni token de
+cancelación que pasarles.
+
+Esto es "un alcance mayor del previsto" (§0.2): el ítem se describe como "un
+subconjunto estricto de su mecanismo —código que la fase igual escribiría, en
+el mismo lugar—" (§4), y esto es una migración async de la API pública del
+engine.
+
+**Alternativas.**
+
+1. Volver `build_manifest` async y migrar las 102 llamadas. Cumple la letra;
+   es un ítem propio, no un subconjunto de M10.
+2. Gobernar sólo las tres funciones async (`output_bytes`, `output`,
+   `success`) — las que un run llama mientras puede ser cancelado — y dejar la
+   pareja sincrónica como está, porque corre al construir el manifest y en
+   comandos del CLI, donde no hay run que cancelar. Cierra el bug que la fila
+   describe y hace pasar el test que nombra; contradice la cláusula "los dos
+   `std::process::Command` pasan a async".
+3. Dar grupo de proceso a la pareja sincrónica sin gobernarla
+   (`process_group(0)` sin registro ni cancelación). Mitad de camino, y el
+   plan no lo dice.
+
+**Recomendación.** La 2, y que la cláusula del plan diga "las tres funciones
+que un run llama"; la migración async de `build_manifest` entra como ítem
+propio de la fase que implementa M10 entero, con su propio tablero.
+
+**Por qué no avancé.** §0.2: "No implementa una parte y deja una nota". El ítem
+queda `levantado(§11)` hasta que el humano decida.
 
 ### L-02 · 2026-09-14 · §0.9 · un commit no puede llevar su propio hash
 
