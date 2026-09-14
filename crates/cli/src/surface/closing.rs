@@ -94,7 +94,7 @@ impl Closing {
     /// does: a paused, failed, cancelled or promoted run ran to a stop
     /// that needs a decision, and its detail is already on this block.
     pub(crate) fn outcome(&self) -> Outcome {
-        RunWord::of(&self.frame.phase).into()
+        RunWord::of(&self.frame.phase).verdict(self.blocking)
     }
 
     /// The whole block, ready to print.

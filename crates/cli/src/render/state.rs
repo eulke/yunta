@@ -309,16 +309,21 @@ impl std::fmt::Display for RunWord {
     }
 }
 
-/// Whether the invocation that reached this word reports success.
-///
-/// One mapping, because "did the command succeed" is one question. Only
-/// a run that finished says yes: every other word is a stop that needs a
-/// decision, and the block above it already says which.
-impl From<RunWord> for crate::error::Outcome {
-    fn from(word: RunWord) -> Self {
-        match word {
-            RunWord::Finished => crate::error::Outcome::Success,
-            RunWord::Created
+impl RunWord {
+    /// Whether the invocation that reached this word reports success.
+    ///
+    /// One mapping, because "did the command succeed" is one question —
+    /// and it takes two facts to answer. A run that finished is the
+    /// only word that can say yes, and it says yes only when nothing is
+    /// still holding the work: a run that finished carrying blocking
+    /// findings is work nobody has accepted, and the block above the
+    /// exit code says exactly that. Every other word is a stop that
+    /// needs a decision, and the block already says which.
+    pub(crate) fn verdict(self, blocking_findings: usize) -> crate::error::Outcome {
+        match self {
+            RunWord::Finished if blocking_findings == 0 => crate::error::Outcome::Success,
+            RunWord::Finished
+            | RunWord::Created
             | RunWord::Running
             | RunWord::Paused
             | RunWord::Failed

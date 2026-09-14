@@ -80,6 +80,10 @@ pub(crate) struct RunDocument {
     /// of the log alone never does.
     #[serde(skip_serializing_if = "Option::is_none")]
     budget_warning: Option<String>,
+    /// How many findings stand blocking now. A run that finished
+    /// carrying any of them is work nobody has accepted, and the count
+    /// is what says so to a reader with only this document.
+    blocking_findings: usize,
     nodes: BTreeMap<String, String>,
     tasks: BTreeMap<String, &'static str>,
     /// Why each failed node failed, in the form a program can act on
@@ -125,6 +129,7 @@ impl RunDocument {
             summary: progress::summary(&frame),
             reason: reason(&frame.phase),
             budget_warning: None,
+            blocking_findings: frame.blocking_findings,
             nodes: state
                 .nodes
                 .iter()
@@ -151,10 +156,10 @@ impl RunDocument {
         self
     }
 
-    /// The word this document reports, for a caller that turns it into
-    /// the invocation's own verdict.
-    pub(crate) fn outcome(&self) -> RunWord {
-        self.outcome
+    /// What an invocation that drove this run to this word reports, by
+    /// the one mapping every surface uses.
+    pub(crate) fn verdict(&self) -> Outcome {
+        self.outcome.verdict(self.blocking_findings)
     }
 }
 

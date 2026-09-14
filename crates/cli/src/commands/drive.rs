@@ -14,7 +14,6 @@ use yunta_storage::AsyncStorage;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::render::state::RunWord;
 use crate::render::Glyphs;
 use crate::surface::{
     Closing, ClosingEnv, Curtain, Delivery, Diagnostics, Outline, Surface, SurfaceEnv, TerminalEnv,
@@ -300,12 +299,21 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
             settling.budget_warning,
         )
         .await?
-        .into());
+        .verdict());
     }
     if settling.quiet {
-        // The run id already went out when the invocation opened, and the
-        // verdict travels in the exit code.
-        return Ok(verdict(&settling.report));
+        // The run id already went out when the invocation opened, and
+        // the verdict travels in the exit code — read off the run's own
+        // log, the same reading the document and the closing block take.
+        return Ok(documented(
+            settling.ctx,
+            settling.storage,
+            &settling.run_id,
+            &settling.manifest,
+            settling.budget_warning,
+        )
+        .await?
+        .verdict());
     }
     report_closing(Closed {
         run_id: &settling.run_id,
@@ -376,23 +384,33 @@ pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliErr
     Ok(closing.outcome())
 }
 
-/// The verdict the exit code carries: success only when the run
-/// finished. A paused, failed or unresolved-promoted run ran to a stop
-/// that needs a decision, which is its own output, not an error.
-pub(crate) fn verdict(report: &RunReport) -> Outcome {
-    RunWord::of_terminal(&report.terminal).into()
+/// The run as its own log describes it, carrying the pre-run warning
+/// this invocation holds — the one reading every way of reporting a run
+/// takes, printed or not.
+///
+/// It is derived from the log, exactly as `yunta status --json` derives
+/// it later: the invocation that drove a run and the command that reads
+/// that run an hour afterwards publish one answer, rather than two
+/// shapes that happen to agree.
+async fn documented(
+    ctx: &Context,
+    storage: &AsyncStorage,
+    run_id: &RunId,
+    manifest: &Manifest,
+    budget_warning: Option<String>,
+) -> Result<crate::json::RunDocument, CliError> {
+    let events = storage.events_for_run(run_id.clone()).await?;
+    Ok(
+        crate::json::RunDocument::of(run_id, &events, manifest, ctx.clock.now())
+            .warning(budget_warning),
+    )
 }
 
 /// Prints the run as the one versioned document `run --json`,
-/// `resume --json` and `run --detach --json` all emit, and hands back
-/// the word it reports.
+/// `resume --json` and `run --detach --json` all emit, and hands the
+/// document back.
 ///
-/// The document is derived from the run's own log, exactly as
-/// `yunta status --json` derives it later: the invocation that drove a
-/// run and the command that reads it an hour afterwards publish one
-/// answer, rather than two shapes that happen to agree.
-///
-/// The word, not a verdict: whether the invocation succeeded is the
+/// The document, not a verdict: whether the invocation succeeded is the
 /// caller's to say. An invocation that drove the run answers for where
 /// the run got to; one that handed it off answers for the handoff, and
 /// a run still moving is exactly what that command set out to leave
@@ -403,10 +421,8 @@ pub(crate) async fn report_run_json(
     run_id: &RunId,
     manifest: &Manifest,
     budget_warning: Option<String>,
-) -> Result<RunWord, CliError> {
-    let events = storage.events_for_run(run_id.clone()).await?;
-    let document = crate::json::RunDocument::of(run_id, &events, manifest, ctx.clock.now())
-        .warning(budget_warning);
+) -> Result<crate::json::RunDocument, CliError> {
+    let document = documented(ctx, storage, run_id, manifest, budget_warning).await?;
     crate::json::print_json(&document)?;
-    Ok(document.outcome())
+    Ok(document)
 }

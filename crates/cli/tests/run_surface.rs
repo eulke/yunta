@@ -564,3 +564,77 @@ fn a_run_reports_the_same_word_on_a_terminal_as_off_one() {
     );
     assert!(drawn.contains("paused"), "{drawn}");
 }
+
+/// A node that reviews and finds something blocking. The run itself
+/// reaches its end: the work is done, and nobody has accepted it.
+const REVIEWS: &str = r#"
+name: reviewed
+nodes:
+  - id: review
+    kind: prompt
+    runner: executor
+    prompt: "Review the change."
+    artifacts:
+      produces: [findings]
+"#;
+
+const FOUND_SOMETHING_BLOCKING: &str = r#"
+capabilities: { run_tools: true }
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_post_finding
+        arguments:
+          id: null-deref
+          severity: blocking
+          title: "Resize handler dereferences a null pointer"
+          location: "src/ui/resize.rs:142"
+          detail: "Resizing before the first paint reaches a null surface."
+    outcome: { type: completed, summary: "reviewed" }
+"#;
+
+#[test]
+fn a_run_that_finished_holding_blocking_findings_is_not_a_success() {
+    // One mapping answers "did the command succeed", and it answers no
+    // here: the work ran to its end and nobody has accepted it, which
+    // is what the block above the exit code says in words. Every
+    // surface reports it the same way, because each reads the same two
+    // facts off the same log.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "runners:\n  executor:\n    - { adapter: claude-code, model: claude-model }\n",
+    );
+    write(&repo.join("wf.yaml"), REVIEWS);
+    write(&repo.join("fixture.yaml"), FOUND_SOMETHING_BLOCKING);
+    yunta_testkit::init_repo(&repo);
+
+    let mocked = ["--adapter", "mock", "--fixture", "fixture.yaml"];
+    let run = yunta_in!(
+        &repo,
+        &home,
+        &[&["run", "wf.yaml"][..], &mocked[..]].concat()
+    );
+    let text = stdout(&run);
+    assert!(
+        text.contains("finished, holding 1 blocking finding"),
+        "the block says what is holding it: {text}\nstderr: {}",
+        stderr(&run)
+    );
+    assert!(
+        !run.status.success(),
+        "and the exit code says the same thing: {text}"
+    );
+    let run_id = run_id_from(&run);
+
+    // The document a program reads carries the count, so a reader with
+    // only this reaches the same conclusion.
+    let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
+    let document: serde_json::Value = serde_json::from_str(&stdout(&status))
+        .unwrap_or_else(|e| panic!("status --json emits JSON: {e}"));
+    assert_eq!(document["outcome"], "finished", "{document:#}");
+    assert_eq!(document["blocking_findings"], 1, "{document:#}");
+}
