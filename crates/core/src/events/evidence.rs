@@ -86,7 +86,7 @@ impl Evidence {
     /// The facts, with an older log's prose read as the one unlabelled
     /// fact it is — the one place that tolerance is applied, and what
     /// every rendering below is built on.
-    fn facts(&self) -> Vec<Fact> {
+    pub(crate) fn facts(&self) -> Vec<Fact> {
         match self {
             Evidence::Facts(facts) => facts.clone(),
             Evidence::Prose(text) => vec![Fact::bare(text.clone())],

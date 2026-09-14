@@ -8,10 +8,10 @@
 //! that could drift apart.
 
 use yunta_core::events::{
-    EventDraft, EventPayload, Fact, GateOption, GateResolvedPayload, GateWaitingPayload,
-    HumanChoice, StoredEvent,
+    Escalation, EscalationError, EventDraft, EventPayload, Fact, GateOption, GateResolvedPayload,
+    GateWaitingPayload, HumanChoice, StoredEvent,
 };
-use yunta_core::{Manifest, ModeName, NodeId, NodeKind, OptionId, RunId, Seq, Workflow};
+use yunta_core::{Manifest, ModeName, NodeId, NodeKind, NonEmpty, OptionId, RunId, Seq, Workflow};
 
 use super::schedule::{self, ScheduleStep};
 use crate::reserved::{offers, ReservedOption};
@@ -36,24 +36,23 @@ pub(crate) fn build_reroute_escalation(
     goto: &NodeId,
     max_reroutes: u32,
     cause: &str,
-) -> GateWaitingPayload {
+) -> Result<Escalation, EscalationError> {
     let suggested_mode = schedule::next_mode_after(workflow, mode_name);
-    let mut options = vec![offers::retry(goto, max_reroutes), offers::abort()];
+    let retry = offers::retry(goto, max_reroutes);
+    let mut rest = vec![offers::abort()];
     if let Some(next_mode) = &suggested_mode {
-        options.push(offers::promote(next_mode, mode_name));
+        rest.push(offers::promote(next_mode, mode_name));
     }
-    GateWaitingPayload {
-        summary: format!(
-            "node `{node}` failed and its {max_reroutes} re-route(s) to `{goto}` are \
-             exhausted"
+    // The cause names itself — `exit 1` needs no word in front of it —
+    // so it is attached as the record, not repeated into the claim
+    // above it.
+    Escalation::new(
+        format!(
+            "node `{node}` failed and its {max_reroutes} re-route(s) to `{goto}` are exhausted"
         ),
-        // The cause names itself — `exit 1` needs no word in front of
-        // it — so it is attached as the record, not repeated into the
-        // claim above it.
-        evidence: vec![Fact::bare(cause)].into(),
-        options,
-        external_ref: None,
-    }
+        vec![Fact::bare(cause)].into(),
+        NonEmpty::from((retry, rest)),
+    )
 }
 
 /// The escalation object for an unresolved internal gate (`kind: gate`,
@@ -67,7 +66,7 @@ pub(crate) fn build_internal_gate_escalation(
     message: Option<&str>,
     options: &[OptionId],
     on: &indexmap::IndexMap<OptionId, NodeId>,
-) -> GateWaitingPayload {
+) -> Result<Escalation, EscalationError> {
     let declared: Vec<OptionId> = if options.is_empty() {
         vec![ReservedOption::Approve.id()]
     } else {
@@ -83,14 +82,19 @@ pub(crate) fn build_internal_gate_escalation(
     if engine_abort {
         gate_options.push(offers::abort());
     }
-    GateWaitingPayload {
-        summary: message
+    // An author's own `message:` is the claim; the assignee is the
+    // record of who it is addressed to.
+    let (first, rest) = gate_options
+        .split_first()
+        .map(|(first, rest)| (first.clone(), rest.to_vec()))
+        .unwrap_or_else(|| (offers::abort(), Vec::new()));
+    Escalation::new(
+        message
             .map(str::to_string)
             .unwrap_or_else(|| format!("gate `{node}` needs a decision")),
-        evidence: vec![Fact::labelled("assignee", assignee)].into(),
-        options: gate_options,
-        external_ref: None,
-    }
+        vec![Fact::labelled("assignee", assignee)].into(),
+        NonEmpty::from((first, rest)),
+    )
 }
 
 /// Reconstructs the escalation object a paused run is
@@ -120,7 +124,7 @@ pub(crate) fn build_internal_gate_escalation(
 pub fn current_escalation(
     manifest: &Manifest,
     events: &[StoredEvent],
-) -> Option<(NodeId, GateWaitingPayload)> {
+) -> Option<(NodeId, Escalation)> {
     let mode_name = current_mode_name(events)?;
     match current_step(manifest, events)? {
         ScheduleStep::GateExhaustedReroutes {
@@ -136,7 +140,8 @@ pub fn current_escalation(
                 &goto,
                 max_reroutes,
                 &cause,
-            );
+            )
+            .ok()?;
             Some((node, escalation))
         }
         ScheduleStep::ResolveInternalGate { node } => {
@@ -152,7 +157,8 @@ pub fn current_escalation(
                 return None;
             };
             let escalation =
-                build_internal_gate_escalation(&node.id, assignee, message.as_deref(), options, on);
+                build_internal_gate_escalation(&node.id, assignee, message.as_deref(), options, on)
+                    .ok()?;
             Some((node.id.clone(), escalation))
         }
         _ => None,
@@ -228,7 +234,7 @@ pub async fn resolve_gate(
             EventDraft {
                 run_id: run_id.clone(),
                 node_id: Some(node.clone()),
-                payload: EventPayload::Gates(GateEvent::Waiting(escalation)),
+                payload: EventPayload::Gates(GateEvent::Waiting(escalation.into_payload())),
             },
             clock.now(),
         )

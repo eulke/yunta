@@ -35,3 +35,24 @@ pub struct ChildRunFinishedPayload {
     #[serde(default)]
     pub tokens: TokenUsage,
 }
+
+impl ChildRunFinishedPayload {
+    /// A child run reached its terminal state, with what it spent.
+    ///
+    /// The spend always aggregates up: replay adds it to the parent's
+    /// own total, so a promotion chain's every member counts exactly
+    /// once and the parent node's own close carries none of it.
+    pub fn new(
+        child_run_id: RunId,
+        child_workflow_hash: ContentHash,
+        terminal_state: TerminalState,
+        tokens: TokenUsage,
+    ) -> Self {
+        ChildRunFinishedPayload {
+            child_run_id,
+            child_workflow_hash,
+            terminal_state,
+            tokens,
+        }
+    }
+}

@@ -107,12 +107,11 @@ pub(super) async fn integrate_batch(
             TaskOutcome::Blocked { reason } => {
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
-                        task_id: task.id.clone(),
-                        new_status: TaskStatus::Blocked,
-                        caused_by: last_check_seq,
-                        commit: None,
-                    })),
+                    EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+                        task.id.clone(),
+                        TaskStatus::Blocked,
+                        last_check_seq,
+                    ))),
                 )
                 .await?;
                 Some(reason)
@@ -144,18 +143,19 @@ pub(super) async fn integrate_batch(
                 // names the commit the tree stands at once the work is
                 // in it, which is what lets another run tell whether its
                 // own tree has that work.
-                let (new_status, commit) = match outcome {
-                    IntegrationOutcome::Integrated { commit } => (TaskStatus::Done, Some(commit)),
-                    IntegrationOutcome::Rejected => (TaskStatus::Pending, None),
+                let changed = match outcome {
+                    IntegrationOutcome::Integrated { commit } => {
+                        TaskStatusChangedPayload::done(task.id.clone(), last_check_seq, commit)
+                    }
+                    IntegrationOutcome::Rejected => TaskStatusChangedPayload::to(
+                        task.id.clone(),
+                        TaskStatus::Pending,
+                        last_check_seq,
+                    ),
                 };
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
-                        task_id: task.id.clone(),
-                        new_status,
-                        caused_by: last_check_seq,
-                        commit,
-                    })),
+                    EventPayload::Tasks(TaskEvent::StatusChanged(changed)),
                 )
                 .await?;
                 // Never counted toward the loop's own "no task ready"

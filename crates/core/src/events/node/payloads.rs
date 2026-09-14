@@ -110,6 +110,18 @@ pub struct NodeStartedPayload {
     pub attempt: u32,
 }
 
+impl NodeStartedPayload {
+    /// A node beginning its `n`th attempt, counted from one.
+    ///
+    /// The number is the whole payload, and every kind of node that
+    /// starts — a session, a gate, a round of questions — counts it the
+    /// same way, so no surface has to know which sort of node it is
+    /// reading to know which try it is on.
+    pub fn attempt(n: u32) -> Self {
+        NodeStartedPayload { attempt: n }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ContextAssembledPayload {
     /// `Some` when this assembly built one *task's* brief inside a loop
@@ -148,6 +160,21 @@ pub struct ScopeCheckedPayload {
 pub struct NodeFinishedPayload {
     pub outcome: String,
     pub tokens_used: TokenUsage,
+}
+
+impl NodeFinishedPayload {
+    /// A node closed, with what it did and what it spent doing it.
+    ///
+    /// The spend is the attempt's own: a node whose accounting already
+    /// closed elsewhere — one that paid for its session when it asked
+    /// its questions — passes nothing, so no surface counts the same
+    /// tokens twice.
+    pub fn new(outcome: impl Into<String>, tokens: TokenUsage) -> Self {
+        NodeFinishedPayload {
+            outcome: outcome.into(),
+            tokens_used: tokens,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -199,6 +226,32 @@ pub struct NodeReroutedPayload {
     /// distinction existed, carry no field and read as `OnFailure`.
     #[serde(default)]
     pub origin: RerouteOrigin,
+}
+
+impl NodeReroutedPayload {
+    /// Control handed to another node, and why.
+    ///
+    /// The retry count belongs to an `on_failure` re-route and to
+    /// nothing else: a gate's routing choice is a decision, not a retry,
+    /// and has no cap to count against. Taking the origin and the count
+    /// together is what keeps a gate's route from being read as a node
+    /// on its last try.
+    pub fn new(
+        to: NodeId,
+        cause: impl Into<String>,
+        origin: RerouteOrigin,
+        attempt: Option<u32>,
+        max_reroutes: Option<u32>,
+    ) -> Self {
+        let retrying = matches!(origin, RerouteOrigin::OnFailure);
+        NodeReroutedPayload {
+            to_node: to,
+            cause: cause.into(),
+            attempt: attempt.filter(|_| retrying),
+            max_reroutes: max_reroutes.filter(|_| retrying),
+            origin,
+        }
+    }
 }
 
 /// What caused a `node_rerouted`. The two mechanisms differ in kind: an

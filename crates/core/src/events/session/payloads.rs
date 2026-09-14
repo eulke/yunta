@@ -95,5 +95,32 @@ pub struct CapabilityDegradedPayload {
     /// The capability the engine consulted and the adapter does not declare.
     pub capability: Capability,
     pub adapter: AdapterId,
-    pub policy_applied: String,
+    policy_applied: String,
+}
+
+impl CapabilityDegradedPayload {
+    /// A capability the adapter does not have, and what the engine did
+    /// instead.
+    ///
+    /// Both halves are the point: a degradation that names only what was
+    /// missing leaves a reader guessing whether anything still holds,
+    /// and one that names only the fallback hides that something was
+    /// asked for and refused. The engine writes them together or not at
+    /// all.
+    pub fn new(
+        capability: Capability,
+        adapter: AdapterId,
+        policy_applied: impl Into<String>,
+    ) -> Self {
+        CapabilityDegradedPayload {
+            capability,
+            adapter,
+            policy_applied: policy_applied.into(),
+        }
+    }
+
+    /// What the engine did instead.
+    pub fn policy_applied(&self) -> &str {
+        &self.policy_applied
+    }
 }

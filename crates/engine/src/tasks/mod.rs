@@ -158,22 +158,13 @@ pub(crate) async fn register(
         let Some(follow) = planned.follow else {
             continue;
         };
-        // Only a `done` states where work landed; a reset states that
-        // nothing about this task is settled, which no commit can name.
-        let (new_status, commit) = match follow {
-            Follow::Reset => (TaskStatus::Pending, None),
-            Follow::Done(commit) => (TaskStatus::Done, Some(commit)),
+        let task_id = planned.task.id.clone();
+        let changed = match follow {
+            Follow::Reset => TaskStatusChangedPayload::to(task_id, TaskStatus::Pending, registered),
+            Follow::Done(commit) => TaskStatusChangedPayload::done(task_id, registered, commit),
         };
-        log.record(
-            node,
-            EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
-                task_id: planned.task.id.clone(),
-                new_status,
-                caused_by: registered,
-                commit,
-            })),
-        )
-        .await?;
+        log.record(node, EventPayload::Tasks(TaskEvent::StatusChanged(changed)))
+            .await?;
     }
     Ok(())
 }

@@ -54,7 +54,26 @@ pub struct PromotionSignaledPayload {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunPausedPayload {
-    pub reason: String,
+    reason: String,
+}
+
+impl RunPausedPayload {
+    /// A run parked, with the one line a reader gets for why.
+    ///
+    /// The reason is what every surface prints for a stopped run — the
+    /// listing's row, the status page's heading, the line a resume
+    /// echoes — so it is composed once, here, rather than invented at
+    /// each place that decides to stop.
+    pub fn new(reason: impl Into<String>) -> Self {
+        RunPausedPayload {
+            reason: reason.into(),
+        }
+    }
+
+    /// Why the run is parked.
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -70,6 +89,28 @@ pub struct RunResumedPayload {
     pub policies: Vec<ResumePolicy>,
 }
 
+impl RunResumedPayload {
+    /// A run woken, with what it found still running and what each of
+    /// those resolved to.
+    ///
+    /// `resume_policy_applied` is derived, never passed: it is the one
+    /// policy every orphan agreed on, and there is no such policy when
+    /// the resume found no orphan or when two of them resolved
+    /// differently. Deriving it here is what keeps the summary and the
+    /// record from disagreeing.
+    pub fn new(policies: Vec<ResumePolicy>) -> Self {
+        let agreed = policies.split_first().and_then(|(first, rest)| {
+            rest.iter()
+                .all(|policy| policy.on_interrupt == first.on_interrupt)
+                .then(|| first.on_interrupt.as_str().to_string())
+        });
+        RunResumedPayload {
+            resume_policy_applied: agreed,
+            policies,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ResumePolicy {
     pub node: NodeId,
@@ -80,6 +121,25 @@ pub struct ResumePolicy {
 pub struct RunFinishedPayload {
     pub terminal_state: TerminalState,
     pub metrics: RunMetrics,
+}
+
+impl RunFinishedPayload {
+    /// A run closed at `terminal`, with the metrics its log implies.
+    ///
+    /// The metrics are derived here and nowhere else: cost per verified
+    /// task is total spend over the tasks that actually reached `done`,
+    /// and a run that verified none has no such cost — `None`, never a
+    /// zero that reads like a free run. Each of the three ways a run
+    /// closes passes the same two numbers and gets the same arithmetic.
+    pub fn closed(terminal: TerminalState, tokens: TokenUsage, tasks_done: usize) -> Self {
+        RunFinishedPayload {
+            terminal_state: terminal,
+            metrics: RunMetrics {
+                cptv: (tasks_done > 0).then(|| tokens.total() as f64 / tasks_done as f64),
+                tokens,
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

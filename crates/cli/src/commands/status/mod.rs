@@ -383,7 +383,11 @@ fn parked_decision(
         return None;
     }
     let (node, escalation) = yunta_engine::current_escalation(manifest, events)?;
-    Some(decision::DecisionJson::new(run_id, &node, escalation))
+    Some(decision::DecisionJson::new(
+        run_id,
+        &node,
+        escalation.into_payload(),
+    ))
 }
 
 /// The artifacts each node's most recent failure names, with what is

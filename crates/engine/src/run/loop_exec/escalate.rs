@@ -3,12 +3,12 @@
 //! denied.
 
 use yunta_core::events::{
-    Decider, EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity,
+    Decider, Escalation, EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity,
     GateResolvedPayload, ProposedCriterionPrecheck, ScopeExpansionDeniedPayload,
     ScopeExpansionGrantedPayload, ScopeExpansionRequestedPayload, TaskStatus,
     TaskStatusChangedPayload, TokenUsage,
 };
-use yunta_core::{FindingId, Node};
+use yunta_core::{FindingId, Node, NonEmpty};
 
 use crate::reserved::{offers, ReservedOption};
 use crate::run::node_close::fail_with_tokens;
@@ -41,7 +41,10 @@ pub(super) async fn resolve_escalations(
     let mut unresolved: Vec<yunta_core::TaskId> = Vec::new();
     for pending in pending_escalations {
         let escalation =
-            expansion_escalation(&pending, mode, max_per_run, *expansions_granted_this_run);
+            expansion_escalation(&pending, mode, max_per_run, *expansions_granted_this_run)
+                .map_err(|source| RunError::Broken {
+                    diagnostic: format!("task `{}`'s expansion request: {source}", pending.task_id),
+                })?;
         let Some(choice) = ctx.ask_human(&escalation).await? else {
             unresolved.push(pending.task_id);
             continue;
@@ -51,7 +54,7 @@ pub(super) async fn resolve_escalations(
         // re-asks on resume instead of remembering a decision nobody made.
         ctx.emit(
             Some(&node.id),
-            EventPayload::Gates(GateEvent::Waiting(escalation)),
+            EventPayload::Gates(GateEvent::Waiting(escalation.into_payload())),
         )
         .await?;
         let resolved_seq = ctx
@@ -126,12 +129,11 @@ pub(super) async fn resolve_escalations(
         if pending.was_blocked {
             ctx.emit(
                 Some(&node.id),
-                EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
-                    task_id: pending.task_id.clone(),
-                    new_status: TaskStatus::Pending,
-                    caused_by: resolved_seq,
-                    commit: None,
-                })),
+                EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+                    pending.task_id.clone(),
+                    TaskStatus::Pending,
+                    resolved_seq,
+                ))),
             )
             .await?;
         }
@@ -173,7 +175,7 @@ fn expansion_escalation(
     mode: yunta_core::ScopeExpansionMode,
     max_per_run: Option<u32>,
     granted_so_far: u32,
-) -> yunta_core::events::GateWaitingPayload {
+) -> Result<Escalation, yunta_core::events::EscalationError> {
     let request = &pending.outcome.request;
     let precheck = match pending.outcome.precheck_exit {
         Some(code) => format!("proposed criterion `{}` pre-check exit: {code}", {
@@ -194,21 +196,23 @@ fn expansion_escalation(
         yunta_core::ScopeExpansionMode::Ask => "ask",
         yunta_core::ScopeExpansionMode::Deny => "deny",
     };
-    yunta_core::events::GateWaitingPayload {
-        summary: format!(
+    Escalation::new(
+        format!(
             "task `{}` requests scope expansion: {}",
             pending.task_id, request.reason
         ),
-        evidence: vec![
+        vec![
             Fact::labelled("paths", request.paths.join(", ")),
             Fact::bare(precheck),
             Fact::labelled("mode", mode_name),
             Fact::bare(cap),
         ]
         .into(),
-        options: vec![offers::grant(&request.paths.join(", ")), offers::deny()],
-        external_ref: None,
-    }
+        NonEmpty::from((
+            offers::grant(&request.paths.join(", ")),
+            vec![offers::deny()],
+        )),
+    )
 }
 
 /// Emits the events one attempt's scope-expansion outcome requires:

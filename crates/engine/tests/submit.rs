@@ -828,9 +828,9 @@ sessions:
         })
         .expect("a session with no run tool of its own is degraded, not silently failed");
     assert!(
-        degraded.policy_applied.contains("none of its tools"),
+        degraded.policy_applied().contains("none of its tools"),
         "the record names what was missing: {}",
-        degraded.policy_applied
+        degraded.policy_applied()
     );
 
     let degraded_at = events

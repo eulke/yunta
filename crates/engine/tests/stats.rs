@@ -125,16 +125,16 @@ fn fixture_events() -> Vec<StoredEvent> {
             2,
             0,
             Some("a"),
-            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
         ),
         event(
             3,
             10,
             Some("a"),
-            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-                outcome: "ok".to_string(),
-                tokens_used: tokens(100, 50, Some(20)),
-            })),
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "ok".to_string(),
+                tokens(100, 50, Some(20)),
+            ))),
         ),
         event(
             4,
@@ -152,7 +152,7 @@ fn fixture_events() -> Vec<StoredEvent> {
             5,
             15,
             Some("b"),
-            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
         ),
         event(
             6,
@@ -168,13 +168,13 @@ fn fixture_events() -> Vec<StoredEvent> {
             7,
             25,
             Some("b"),
-            EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload {
-                to_node: "b".into(),
-                cause: "criteria still red".to_string(),
-                attempt: Some(2),
-                max_reroutes: Some(1),
-                origin: yunta_core::events::RerouteOrigin::OnFailure,
-            })),
+            EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+                "b".into(),
+                "criteria still red".to_string(),
+                yunta_core::events::RerouteOrigin::OnFailure,
+                Some(2),
+                Some(1),
+            ))),
         ),
         event(
             8,
@@ -190,16 +190,16 @@ fn fixture_events() -> Vec<StoredEvent> {
             9,
             26,
             Some("b"),
-            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 2 })),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(2))),
         ),
         event(
             10,
             36,
             Some("b"),
-            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-                outcome: "ok".to_string(),
-                tokens_used: tokens(60, 30, None),
-            })),
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "ok".to_string(),
+                tokens(60, 30, None),
+            ))),
         ),
         event(
             11,
@@ -216,12 +216,11 @@ fn fixture_events() -> Vec<StoredEvent> {
             12,
             37,
             None,
-            EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
-                task_id: "t1".into(),
-                new_status: TaskStatus::Done,
-                caused_by: 10.into(),
-                commit: None,
-            })),
+            EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+                "t1".into(),
+                TaskStatus::Done,
+                10.into(),
+            ))),
         ),
     ]
 }
@@ -294,16 +293,16 @@ fn cache_rate_is_none_without_input() {
             1,
             0,
             Some("a"),
-            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
         ),
         event(
             2,
             5,
             Some("a"),
-            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-                outcome: "ok".to_string(),
-                tokens_used: tokens(0, 50, Some(0)),
-            })),
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "ok".to_string(),
+                tokens(0, 50, Some(0)),
+            ))),
         ),
     ];
     let stats = compute_run_stats(&wf, &events);

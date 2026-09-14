@@ -27,6 +27,9 @@ chrono.workspace = true
 tempfile.workspace = true
 # Benches parse workflow/config/fixture YAML literals the tests write.
 serde_norway.workspace = true
+# An event a constructor refuses still reaches a reader off disk: the
+# wire form is how a test writes one.
+serde_json.workspace = true
 # `ScriptedInteraction` implements the engine's dyn-safe async
 # `HumanInteraction`, same reason the CLI's console surface does.
 async-trait.workspace = true

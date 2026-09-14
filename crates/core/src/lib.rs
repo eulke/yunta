@@ -34,6 +34,7 @@ mod id_source;
 mod ids;
 mod inputs;
 mod manifest;
+mod nonempty;
 mod pack;
 pub mod policy;
 pub mod port;
@@ -74,6 +75,7 @@ pub use ids::{
 };
 pub use inputs::{InputSpec, InputSpecError};
 pub use manifest::{content_hash, FrozenPaths, Manifest, PackProvenance, RelativeRootError};
+pub use nonempty::{Empty, NonEmpty};
 pub use pack::{
     PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest, PackManifestError,
     PackRequires, RequiredRunner,

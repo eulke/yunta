@@ -159,7 +159,7 @@ impl RunCtx<'_> {
             return Err(RunError::OffMenuAnswer {
                 answer: choice.option,
                 offered: escalation.menu(),
-                summary: escalation.summary.clone(),
+                summary: escalation.summary().to_string(),
             });
         }
         Ok(Some(choice))

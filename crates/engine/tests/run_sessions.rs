@@ -787,10 +787,10 @@ nodes:
                 run_id: bench.run_id.clone(),
                 node_id: Some("ghost".into()),
                 payload: yunta_core::events::EventPayload::Node(NodeEvent::Finished(
-                    yunta_core::events::NodeFinishedPayload {
-                        outcome: "??".to_string(),
-                        tokens_used: yunta_core::events::TokenUsage::default(),
-                    },
+                    yunta_core::events::NodeFinishedPayload::new(
+                        "??".to_string(),
+                        yunta_core::events::TokenUsage::default(),
+                    ),
                 )),
             },
             &yunta_core::SystemClock,
@@ -893,7 +893,7 @@ sessions:
         events.iter().any(|e| matches!(
             e.payload(),
             Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p))) if p.capability == yunta_core::Capability::ResumeSession
-                    && p.policy_applied.contains("restart_node")
+                    && p.policy_applied().contains("restart_node")
         )),
         "degrading to a fresh session must be an event, never a silence"
     );
@@ -920,7 +920,7 @@ sessions:
         events.iter().any(|e| matches!(
             e.payload(),
             Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p))) if p.capability == yunta_core::Capability::ResumeSession
-                    && p.policy_applied.contains("no session")
+                    && p.policy_applied().contains("no session")
         )),
         "a crash before the session opened restarts WITH an explicit event"
     );
@@ -1079,7 +1079,7 @@ sessions:
         .expect("network: false the adapter cannot enforce must be an event, never silence");
     assert_eq!(degraded.adapter, "mock");
     assert_eq!(
-        degraded.policy_applied,
+        degraded.policy_applied(),
         "declarative-only — the adapter declares no network isolation; `network: false` is recorded for policy and audit, not enforced"
     );
 }

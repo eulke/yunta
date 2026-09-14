@@ -233,13 +233,11 @@ async fn open_and_dispatch(
                         .emit_session_event(
                             obs_node,
                             EventPayload::Session(SessionEvent::CapabilityDegraded(
-                                CapabilityDegradedPayload {
-                                    capability: Capability::RunTools,
-                                    adapter: adapter.id().clone(),
-                                    policy_applied: format!(
-                                        "the attempt runs without run tools: {e}"
-                                    ),
-                                },
+                                CapabilityDegradedPayload::new(
+                                    Capability::RunTools,
+                                    adapter.id().clone(),
+                                    format!("the attempt runs without run tools: {e}"),
+                                ),
                             )),
                         )
                         .await

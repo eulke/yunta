@@ -4,14 +4,14 @@
 
 use yunta_core::events::{
     EventPayload, Evidence, Fact, FindingSeverity, GateResolvedPayload, NodeReroutedPayload,
-    PromotionSignaledPayload, RerouteOrigin, RunFinishedPayload, RunMetrics, StoredEvent,
-    TerminalState, TokenUsage,
+    PromotionSignaledPayload, RerouteOrigin, RunFinishedPayload, StoredEvent, TerminalState,
+    TokenUsage,
 };
 use yunta_core::{ModeName, NodeId};
 
 use crate::replay::derive;
 use crate::reserved::ReservedOption;
-use crate::stats::cptv;
+use crate::stats::tasks_done;
 
 use super::{
     budget, escalation, find_node, gate_exec, node_close, node_exec, pause, questions_exec,
@@ -43,13 +43,11 @@ pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<Run
     let state = ctx.run_view().await?.state;
     ctx.emit(
         None,
-        EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
-            terminal_state: TerminalState::Done,
-            metrics: RunMetrics {
-                cptv: cptv(&state),
-                tokens: state.total_tokens,
-            },
-        })),
+        EventPayload::Run(RunEvent::Finished(RunFinishedPayload::closed(
+            TerminalState::Done,
+            state.total_tokens,
+            tasks_done(&state),
+        ))),
     )
     .await?;
     ctx.export_events_jsonl().await?;
@@ -117,13 +115,11 @@ pub(super) async fn run_failed(ctx: &RunCtx<'_>, reason: String) -> Result<RunRe
     let state = ctx.run_view().await?.state;
     ctx.emit(
         None,
-        EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
-            terminal_state: TerminalState::Failed,
-            metrics: RunMetrics {
-                cptv: cptv(&state),
-                tokens: state.total_tokens,
-            },
-        })),
+        EventPayload::Run(RunEvent::Finished(RunFinishedPayload::closed(
+            TerminalState::Failed,
+            state.total_tokens,
+            tasks_done(&state),
+        ))),
     )
     .await?;
     ctx.export_events_jsonl().await?;
@@ -145,13 +141,13 @@ pub(super) async fn reroute(
 ) -> Result<(), RunError> {
     ctx.emit(
         Some(&from),
-        EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload {
-            to_node: to,
+        EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+            to,
             cause,
-            attempt: Some(attempt),
-            max_reroutes: Some(max_reroutes),
-            origin: RerouteOrigin::OnFailure,
-        })),
+            RerouteOrigin::OnFailure,
+            Some(attempt),
+            Some(max_reroutes),
+        ))),
     )
     .await?;
     Ok(())
@@ -180,7 +176,10 @@ pub(super) async fn gate_exhausted(
         &goto,
         max_reroutes,
         &cause,
-    );
+    )
+    .map_err(|source| RunError::Broken {
+        diagnostic: format!("node `{node}`'s escalation: {source}"),
+    })?;
     // A decision `resolve_gate` pre-seeded onto the log while this run was
     // parked is consumed here, by this same consequence code — never
     // re-asked, and its escalation pair is already recorded so it is never
@@ -201,7 +200,7 @@ pub(super) async fn gate_exhausted(
     if !already_recorded {
         ctx.emit(
             Some(&node),
-            EventPayload::Gates(GateEvent::Waiting(escalation)),
+            EventPayload::Gates(GateEvent::Waiting(escalation.clone().into_payload())),
         )
         .await?;
         ctx.emit(
@@ -216,13 +215,13 @@ pub(super) async fn gate_exhausted(
     if chosen == Some(ReservedOption::Retry) {
         ctx.emit(
             Some(&node),
-            EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload {
-                to_node: goto,
+            EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+                goto,
                 cause,
-                attempt: Some(max_reroutes + 1),
-                max_reroutes: Some(max_reroutes),
-                origin: RerouteOrigin::OnFailure,
-            })),
+                RerouteOrigin::OnFailure,
+                Some(max_reroutes + 1),
+                Some(max_reroutes),
+            ))),
         )
         .await?;
         Ok(None)
@@ -282,13 +281,11 @@ pub(super) async fn gate_exhausted(
         let state = derive(&events_for_close);
         ctx.emit(
             None,
-            EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
-                terminal_state: TerminalState::Promoted,
-                metrics: RunMetrics {
-                    cptv: cptv(&state),
-                    tokens: state.total_tokens,
-                },
-            })),
+            EventPayload::Run(RunEvent::Finished(RunFinishedPayload::closed(
+                TerminalState::Promoted,
+                state.total_tokens,
+                tasks_done(&state),
+            ))),
         )
         .await?;
         ctx.export_events_jsonl().await?;
@@ -331,7 +328,10 @@ pub(super) async fn execute_batch(
         {
             let spent = derive(events).total_tokens.total();
             if spent >= cap {
-                let (escalation, reason) = budget::over_budget_escalation(ctx, spent, cap);
+                let (escalation, reason) = budget::over_budget_escalation(ctx, spent, cap)
+                    .map_err(|source| RunError::Broken {
+                        diagnostic: format!("the run's budget escalation: {source}"),
+                    })?;
                 match budget::escalate(ctx, None, escalation, reason).await? {
                     budget::BudgetDecision::Continue => ctx
                         .budget_lifted

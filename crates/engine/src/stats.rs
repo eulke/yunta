@@ -43,7 +43,10 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use yunta_core::events::{EventPayload, StoredEvent, SubmissionOutcome, TaskStatus, TokenUsage};
+use yunta_core::events::{
+    EventPayload, RunFinishedPayload, StoredEvent, SubmissionOutcome, TaskStatus, TerminalState,
+    TokenUsage,
+};
 use yunta_core::{Node, NodeId, RunnerName, Workflow};
 
 use crate::replay::{derive, unknown_kind_counts, RunState, UnknownKindCount};
@@ -196,15 +199,20 @@ impl RunStats {
 /// `RunFinished.metrics` and `RunStats` alike report, computed once here
 /// so the two call sites can never disagree.
 pub fn cptv(state: &RunState) -> Option<f64> {
-    let done = state
+    RunFinishedPayload::closed(TerminalState::Done, state.total_tokens, tasks_done(state))
+        .metrics
+        .cptv
+}
+
+/// How many of the run's tasks reached `done` — the denominator of cost
+/// per verified task, and the only thing a close needs to know about
+/// the tasks document.
+pub fn tasks_done(state: &RunState) -> usize {
+    state
         .tasks
         .values()
         .filter(|status| matches!(status, TaskStatus::Done))
-        .count();
-    if done == 0 {
-        return None;
-    }
-    Some(state.total_tokens.total() as f64 / done as f64)
+        .count()
 }
 
 /// Derives one run's stats from its workflow and event log alone,

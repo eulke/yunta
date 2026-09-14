@@ -153,22 +153,22 @@ async fn a_node_failed_after_a_questions_artifact_derives_failed_not_waiting() {
             &bench.run_id,
             1,
             "grill",
-            EventPayload::Node(NodeEvent::Started(yunta_core::events::NodeStartedPayload {
-                attempt: 1,
-            })),
+            EventPayload::Node(NodeEvent::Started(
+                yunta_core::events::NodeStartedPayload::attempt(1),
+            )),
         ),
         yunta_testkit::stored_for(
             &bench.run_id,
             2,
             "grill",
             EventPayload::Artifacts(ArtifactEvent::Accepted(
-                yunta_core::events::ArtifactAcceptedPayload {
-                    artifact: yunta_core::events::ArtifactId::Interpreted {
+                yunta_core::events::ArtifactAcceptedPayload::new(
+                    yunta_core::events::ArtifactId::Interpreted {
                         kind: yunta_core::ArtifactKind::Questions,
                     },
-                    content_hash: yunta_core::sha256_hex(b"questions"),
-                    origin: yunta_core::events::ArtifactOrigin::Submitted,
-                },
+                    yunta_core::sha256_hex(b"questions"),
+                    yunta_core::events::ArtifactOrigin::Submitted,
+                ),
             )),
         ),
         yunta_testkit::stored_for(

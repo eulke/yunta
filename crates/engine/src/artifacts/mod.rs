@@ -129,11 +129,11 @@ pub(crate) async fn accept(
     let seq = log
         .record(
             producer,
-            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
-                artifact: artifact.clone(),
-                content_hash: content_hash.clone(),
-                origin: origin.clone(),
-            })),
+            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
+                artifact.clone(),
+                content_hash.clone(),
+                origin.clone(),
+            ))),
         )
         .await
         .map_err(|source| AcceptError::Log {

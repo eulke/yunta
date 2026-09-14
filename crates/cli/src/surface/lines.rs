@@ -119,7 +119,7 @@ fn detail(payload: &EventPayload) -> Option<String> {
         EventPayload::Node(NodeEvent::Rerouted(p)) => {
             Some(detailed(format!("to `{}`", p.to_node), &p.cause))
         }
-        EventPayload::Gates(GateEvent::Waiting(p)) => Some(p.summary.clone()),
+        EventPayload::Gates(GateEvent::Waiting(p)) => Some(p.summary().to_string()),
         EventPayload::Gates(GateEvent::Resolved(p)) => Some(resolution(p)),
         EventPayload::Children(ChildEvent::LoopIteration(p)) => {
             Some(format!("iteration {}", p.iteration))
@@ -165,9 +165,9 @@ fn detail(payload: &EventPayload) -> Option<String> {
         )),
         EventPayload::Session(SessionEvent::CapabilityDegraded(p)) => Some(detailed(
             format!("{:?} on {}", p.capability, p.adapter),
-            &p.policy_applied,
+            p.policy_applied(),
         )),
-        EventPayload::Run(RunEvent::Paused(p)) => Some(p.reason.clone()),
+        EventPayload::Run(RunEvent::Paused(p)) => Some(p.reason().to_string()),
         EventPayload::Run(RunEvent::Finished(p)) => {
             Some(view::closed_as(p.terminal_state).to_string())
         }
@@ -245,13 +245,13 @@ mod tests {
     /// invocation: nothing guarantees the free text on a payload says
     /// anything, and a line built for it must not promise that it does.
     fn rerouted(cause: &str) -> EventPayload {
-        EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload {
-            to_node: "fix-lint".into(),
-            cause: cause.to_string(),
-            attempt: None,
-            max_reroutes: None,
-            origin: RerouteOrigin::GateChoice,
-        }))
+        EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+            "fix-lint".into(),
+            cause.to_string(),
+            RerouteOrigin::GateChoice,
+            None,
+            None,
+        )))
     }
 
     #[test]
@@ -294,9 +294,9 @@ mod tests {
 
     #[test]
     fn a_pause_with_no_reason_recorded_leaves_the_line_at_its_kind() {
-        let line = line_for(EventPayload::Run(RunEvent::Paused(RunPausedPayload {
-            reason: "   ".to_string(),
-        })));
+        let line = line_for(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            "   ".to_string(),
+        ))));
         assert_eq!(
             line, "[0s] run_paused",
             "no dash promises what is not there"
@@ -305,19 +305,16 @@ mod tests {
 
     #[test]
     fn a_pause_that_recorded_a_reason_says_it_on_one_line() {
-        let line = line_for(EventPayload::Run(RunEvent::Paused(RunPausedPayload {
-            reason: "budget\n  reached".to_string(),
-        })));
+        let line = line_for(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            "budget\n  reached".to_string(),
+        ))));
         assert_eq!(line, "[0s] run_paused — budget reached");
     }
 
     #[test]
     fn a_node_that_finished_saying_nothing_leaves_the_line_at_its_kind() {
         let line = line_for(EventPayload::Node(NodeEvent::Finished(
-            NodeFinishedPayload {
-                outcome: String::new(),
-                tokens_used: TokenUsage::default(),
-            },
+            NodeFinishedPayload::new(String::new(), TokenUsage::default()),
         )));
         assert_eq!(line, "[0s] node_finished");
     }
@@ -325,11 +322,7 @@ mod tests {
     #[test]
     fn a_degraded_capability_with_no_policy_recorded_reads_as_what_was_missing() {
         let payload = EventPayload::Session(SessionEvent::CapabilityDegraded(
-            CapabilityDegradedPayload {
-                capability: Capability::RunTools,
-                adapter: "codex".into(),
-                policy_applied: String::new(),
-            },
+            CapabilityDegradedPayload::new(Capability::RunTools, "codex".into(), String::new()),
         ));
         assert_eq!(detail(&payload).as_deref(), Some("RunTools on codex"));
     }

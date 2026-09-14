@@ -283,7 +283,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             state.nodes.insert(
                 node_id,
                 NodeState::Waiting {
-                    external_ref: p.external_ref.clone(),
+                    external_ref: p.external_ref().map(str::to_string),
                 },
             );
             Ok(())

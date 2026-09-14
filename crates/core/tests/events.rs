@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use yunta_core::events::EventShapeError;
 use yunta_core::events::*;
 use yunta_core::ScopeExpansionMode;
-use yunta_core::{Capability, RunId, RunnerCandidate};
+use yunta_core::{Capability, NonEmpty, RunId, RunnerCandidate};
 
 fn all_kinds() -> Vec<EventPayload> {
     vec![
@@ -33,7 +33,7 @@ fn all_kinds() -> Vec<EventPayload> {
             },
             hash: yunta_core::sha256_hex(b"sha256:def"),
         })),
-        EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
+        EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
         EventPayload::Session(SessionEvent::Opened(AgentSessionOpenedPayload {
             session_id: "sess-1".into(),
             agent: None,
@@ -86,12 +86,11 @@ fn all_kinds() -> Vec<EventPayload> {
                 duration_ms: None,
             }],
         })),
-        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
-            task_id: "graph-cmd".into(),
-            new_status: TaskStatus::Done,
-            caused_by: 42.into(),
-            commit: Some("deadbeef".into()),
-        })),
+        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::done(
+            "graph-cmd".into(),
+            42.into(),
+            "deadbeef".into(),
+        ))),
         EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {
             task_id: Some("graph-cmd".into()),
             diff: vec!["crates/cli/src/graph.rs".into()],
@@ -118,14 +117,14 @@ fn all_kinds() -> Vec<EventPayload> {
             count_this_run: 2,
             denial_reason: Some("out of declared scope".to_string()),
         })),
-        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-            outcome: "criteria green".to_string(),
-            tokens_used: TokenUsage {
+        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+            "criteria green",
+            TokenUsage {
                 input: 10,
                 output: 5,
                 cached: None,
             },
-        })),
+        ))),
         EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
             Failure::message("criteria red"),
             true,
@@ -136,23 +135,22 @@ fn all_kinds() -> Vec<EventPayload> {
             command: "cargo fmt".to_string(),
             exit_code: 0,
         })),
-        EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload {
-            to_node: "fix-lint".into(),
-            cause: "clippy failed".to_string(),
-            attempt: Some(1),
-            max_reroutes: Some(2),
-            origin: yunta_core::events::RerouteOrigin::OnFailure,
-        })),
-        EventPayload::Gates(GateEvent::Waiting(GateWaitingPayload {
-            summary: "Ready to open the PR?".to_string(),
-            evidence: vec![Fact::bare("all criteria green")].into(),
-            options: vec![GateOption {
-                id: "approve".into(),
-                label: "Approve and open the PR".to_string(),
-                tradeoff: "opens the PR now".to_string(),
-            }],
-            external_ref: Some("https://github.com/example/repo/pull/1".to_string()),
-        })),
+        EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+            "fix-lint".into(),
+            "clippy failed".to_string(),
+            yunta_core::events::RerouteOrigin::OnFailure,
+            Some(1),
+            Some(2),
+        ))),
+        EventPayload::Gates(GateEvent::Waiting(
+            Escalation::published_to(
+                "Ready to open the PR?",
+                vec![Fact::labelled("published at", "example/repo#1")].into(),
+                "https://github.com/example/repo/pull/1",
+            )
+            .expect("the summary states no fact the evidence holds")
+            .into_payload(),
+        )),
         EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
             by: "eulke".into(),
             sha: "deadbeef".into(),
@@ -237,16 +235,16 @@ fn all_kinds() -> Vec<EventPayload> {
                 content_hash: yunta_core::sha256_hex(b"plan"),
             },
         })),
-        EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
-            artifact: ArtifactId::Interpreted {
+        EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
+            ArtifactId::Interpreted {
                 kind: yunta_core::ArtifactKind::Tasks,
             },
-            content_hash: yunta_core::sha256_hex(b"plan"),
-            origin: ArtifactOrigin::Inherited {
+            yunta_core::sha256_hex(b"plan"),
+            ArtifactOrigin::Inherited {
                 run: RunId::from("run-parent"),
                 producer: Some(yunta_core::NodeId::from("plan")),
             },
-        })),
+        ))),
         EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload {
             reason: "all quick-mode nodes green".to_string(),
             evidence: vec![Fact::labelled("criteria", "log")].into(),
@@ -256,22 +254,22 @@ fn all_kinds() -> Vec<EventPayload> {
             child_run_id: "run-child-1".into(),
             child_workflow_hash: yunta_core::sha256_hex(b"sha256:444"),
         })),
-        EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload {
-            child_run_id: "run-child-1".into(),
-            child_workflow_hash: yunta_core::sha256_hex(b"sha256:444"),
-            terminal_state: TerminalState::Done,
-            tokens: TokenUsage::default(),
-        })),
+        EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
+            "run-child-1".into(),
+            yunta_core::sha256_hex(b"sha256:444"),
+            TerminalState::Done,
+            TokenUsage::default(),
+        ))),
         EventPayload::Session(SessionEvent::CapabilityDegraded(
-            CapabilityDegradedPayload {
-                capability: Capability::ResumeSession,
-                adapter: "mock".into(),
-                policy_applied: "on_interrupt: resume_session degraded to restart_node".to_string(),
-            },
+            CapabilityDegradedPayload::new(
+                Capability::ResumeSession,
+                "mock".into(),
+                "on_interrupt: resume_session degraded to restart_node".to_string(),
+            ),
         )),
-        EventPayload::Run(RunEvent::Paused(RunPausedPayload {
-            reason: "gate waiting".to_string(),
-        })),
+        EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            "gate waiting".to_string(),
+        ))),
         EventPayload::Run(RunEvent::Resumed(RunResumedPayload {
             resume_policy_applied: Some("restart_node".to_string()),
             policies: Vec::new(),
@@ -335,6 +333,82 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
         | EventPayload::Run(RunEvent::Paused(_))
         | EventPayload::Run(RunEvent::Resumed(_))
         | EventPayload::Run(RunEvent::Finished(_)) => {}
+    }
+}
+
+#[test]
+fn an_escalation_with_no_options_cannot_be_built() {
+    // Not a runtime check: `NonEmpty::new` is the only way to a menu,
+    // and it answers `None` for an empty one, so the escalation that
+    // would refuse every answer given to it never exists.
+    assert!(NonEmpty::new(Vec::<GateOption>::new()).is_none());
+}
+
+#[test]
+fn an_escalation_whose_summary_repeats_a_fact_is_refused() {
+    let menu = || {
+        NonEmpty::from((
+            GateOption {
+                id: "abort".into(),
+                label: "Abort the run".to_string(),
+                tradeoff: "Pauses here; nothing further executes".to_string(),
+            },
+            Vec::new(),
+        ))
+    };
+
+    // A fact that names itself, repeated word for word in the claim:
+    // every surface prints the two under separate headings, so this
+    // reads as the same sentence twice.
+    let refused = Escalation::new(
+        "node `lint` failed with exit 1",
+        vec![Fact::bare("exit 1")].into(),
+        menu(),
+    )
+    .expect_err("the claim states the record");
+    assert_eq!(
+        refused.to_string(),
+        "the summary repeats what the evidence already states: `exit 1`"
+    );
+
+    // A labelled fact is repeated when both halves are: the label is
+    // what makes a bare number mean anything.
+    assert!(Escalation::new(
+        "run `r1` spent past its limits.max_tokens_per_run of 400",
+        vec![Fact::labelled("limits.max_tokens_per_run", "400")].into(),
+        menu(),
+    )
+    .is_err());
+
+    // The same number without its label is a number the claim needed
+    // for its own reasons, and no repetition of the record.
+    assert!(Escalation::new(
+        "node `lint` failed on attempt 400",
+        vec![Fact::labelled("limits.max_tokens_per_run", "400")].into(),
+        menu(),
+    )
+    .is_ok());
+}
+
+#[test]
+fn a_done_task_carries_its_commit_and_nothing_else_does() {
+    let commit = yunta_core::CommitSha::from("deadbeef");
+    let done = TaskStatusChangedPayload::done("T001".into(), 1.into(), commit.clone());
+    assert_eq!(done.new_status, TaskStatus::Done);
+    assert_eq!(done.commit, Some(commit));
+
+    // Every other status goes through `to`, which has nowhere to put a
+    // commit: what a task that has not finished would be pointing at is
+    // a question the type never asks.
+    for status in [
+        TaskStatus::Pending,
+        TaskStatus::Ready,
+        TaskStatus::Running,
+        TaskStatus::Blocked,
+        TaskStatus::Failed,
+    ] {
+        let changed = TaskStatusChangedPayload::to("T001".into(), status, 1.into());
+        assert_eq!(changed.commit, None, "{status:?} names no commit");
     }
 }
 
@@ -481,9 +555,9 @@ fn the_envelope_flattens_kind_and_payload_fields_together() {
             .unwrap()
             .with_timezone(&chrono::Utc),
         node_id: None,
-        body: EventBody::Known(EventPayload::Run(RunEvent::Paused(RunPausedPayload {
-            reason: "gate waiting".to_string(),
-        }))),
+        body: EventBody::Known(EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            "gate waiting".to_string(),
+        )))),
     };
 
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
@@ -624,7 +698,7 @@ fn a_known_kind_reads_as_its_payload_and_ignores_fields_it_does_not_know() {
     let event: StoredEvent = serde_json::from_value(json).unwrap();
     match event.payload() {
         Some(EventPayload::Run(RunEvent::Paused(p))) => {
-            assert_eq!(p.reason, "waiting on gate approve")
+            assert_eq!(p.reason(), "waiting on gate approve")
         }
         other => panic!("expected run_paused, got {other:?}"),
     }
@@ -636,9 +710,9 @@ fn a_draft_names_what_happened_and_nothing_storage_assigns() {
     let draft = EventDraft {
         run_id: RunId::from("run-1"),
         node_id: None,
-        payload: EventPayload::Run(RunEvent::Paused(RunPausedPayload {
-            reason: "budget".to_string(),
-        })),
+        payload: EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            "budget".to_string(),
+        ))),
     };
     assert_eq!(draft.payload.kind_name(), "run_paused");
 }

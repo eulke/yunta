@@ -425,7 +425,7 @@ mod tests {
     }
 
     fn started() -> EventPayload {
-        EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 }))
+        EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1)))
     }
 
     fn closed(terminal: TerminalState) -> EventPayload {

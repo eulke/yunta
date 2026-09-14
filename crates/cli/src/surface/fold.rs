@@ -92,9 +92,9 @@ mod tests {
             seq: Seq::try_from(seq as i64).expect("a positive seq"),
             timestamp: yunta_core::Clock::now(&FixedClock),
             node_id: None,
-            body: EventBody::Known(EventPayload::Node(NodeEvent::Started(NodeStartedPayload {
-                attempt: seq as u32,
-            }))),
+            body: EventBody::Known(EventPayload::Node(NodeEvent::Started(
+                NodeStartedPayload::attempt(seq as u32),
+            ))),
         }
     }
 

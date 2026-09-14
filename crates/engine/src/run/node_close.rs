@@ -211,10 +211,10 @@ pub(super) async fn finish_node(
 ) -> Result<NodeEnd, RunError> {
     ctx.emit(
         Some(&node.id),
-        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-            outcome: outcome.into(),
-            tokens_used: tokens,
-        })),
+        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+            outcome.into(),
+            tokens,
+        ))),
     )
     .await?;
     write_progress(ctx).await?;

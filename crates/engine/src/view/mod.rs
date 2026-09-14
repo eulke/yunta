@@ -316,7 +316,7 @@ fn walk_log(events: &[StoredEvent]) -> Walk {
                 walk.degraded.push(Degradation {
                     capability: p.capability,
                     adapter: p.adapter.clone(),
-                    policy: p.policy_applied.clone(),
+                    policy: p.policy_applied().to_string(),
                     node: event.node_id.clone(),
                     at: event.timestamp,
                 })

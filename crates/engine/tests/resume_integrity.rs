@@ -127,7 +127,7 @@ async fn paused_run() -> Paused {
             &EventDraft {
                 run_id: bench.run_id.clone(),
                 node_id: Some("only".into()),
-                payload: EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
+                payload: EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
             },
             &SystemClock,
         )

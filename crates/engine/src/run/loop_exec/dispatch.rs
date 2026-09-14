@@ -119,12 +119,11 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         })?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
-            task_id: task.id.clone(),
-            new_status: TaskStatus::Running,
-            caused_by: registered_seq,
-            commit: None,
-        })),
+        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+            task.id.clone(),
+            TaskStatus::Running,
+            registered_seq,
+        ))),
     )
     .await?;
 

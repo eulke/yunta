@@ -68,13 +68,13 @@ pub(crate) fn block(
     escalation: &GateWaitingPayload,
 ) -> String {
     let mut out = layout.heading(node);
-    out.push_str(&layout.lead(&escalation.summary));
+    out.push_str(&layout.lead(escalation.summary()));
     out.push_str(&layout.facts("evidence", &evidence(escalation)));
-    if let Some(external_ref) = &escalation.external_ref {
+    if let Some(external_ref) = escalation.external_ref() {
         out.push_str(&layout.field("published at", external_ref));
     }
     out.push_str(&layout.section("options"));
-    for option in &escalation.options {
+    for option in escalation.options() {
         out.push_str(&layout.option(option));
     }
     out.push_str(&layout.section("answer it with"));
@@ -247,16 +247,22 @@ impl DecisionJson {
 
 #[cfg(test)]
 mod tests {
-    use yunta_core::events::{Evidence, Fact};
+    use yunta_core::events::{Escalation, Evidence, Fact};
+    use yunta_core::NonEmpty;
 
     use super::*;
 
     fn escalation() -> GateWaitingPayload {
-        GateWaitingPayload {
-            summary: "node `lint` failed and its 0 re-route(s) to `fix-lint` are exhausted"
-                .to_string(),
-            evidence: vec![Fact::bare("exit 1")].into(),
-            options: vec![
+        escalation_saying("node `lint` failed and its 0 re-route(s) to `fix-lint` are exhausted")
+    }
+
+    /// The same escalation with a claim of the caller's choosing — for
+    /// a layout test about how long a summary may run.
+    fn escalation_saying(summary: &str) -> GateWaitingPayload {
+        Escalation::new(
+            summary,
+            vec![Fact::bare("exit 1")].into(),
+            NonEmpty::from((
                 GateOption {
                     id: yunta_core::OptionId::from_static("retry"),
                     label: "Re-route to `fix-lint` once more".to_string(),
@@ -265,14 +271,15 @@ mod tests {
                                fix it"
                         .to_string(),
                 },
-                GateOption {
+                vec![GateOption {
                     id: yunta_core::OptionId::from_static("abort"),
                     label: "Abort the run".to_string(),
                     tradeoff: "Pauses here; nothing further executes".to_string(),
-                },
-            ],
-            external_ref: None,
-        }
+                }],
+            )),
+        )
+        .expect("the summary states no fact the evidence holds")
+        .into_payload()
     }
 
     /// An unresolved internal gate, the other pause a menu is rebuilt
@@ -280,16 +287,20 @@ mod tests {
     /// under it — who the gate is assigned to — appears nowhere in that
     /// message.
     fn gate() -> GateWaitingPayload {
-        GateWaitingPayload {
-            summary: "Approve the plan?".to_string(),
-            evidence: vec![Fact::labelled("assignee", "lead")].into(),
-            options: vec![GateOption {
-                id: yunta_core::OptionId::from_static("approve"),
-                label: "approve".to_string(),
-                tradeoff: "resolves this gate; the flow continues".to_string(),
-            }],
-            external_ref: None,
-        }
+        Escalation::new(
+            "Approve the plan?",
+            vec![Fact::labelled("assignee", "lead")].into(),
+            NonEmpty::from((
+                GateOption {
+                    id: yunta_core::OptionId::from_static("approve"),
+                    label: "approve".to_string(),
+                    tradeoff: "resolves this gate; the flow continues".to_string(),
+                },
+                Vec::new(),
+            )),
+        )
+        .expect("the summary states no fact the evidence holds")
+        .into_payload()
     }
 
     const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
@@ -309,13 +320,12 @@ mod tests {
         // tradeoff, the command, and the note that nothing has to stay
         // open. A part that wrapped, or a heading over one, would read
         // as a second page under a block that already said its outcome.
-        let mut escalation = escalation();
         // A summary that says nothing about the exit code, so the
         // evidence under it is a part of its own.
-        escalation.summary = "a sentence longer than the width a terminal is taken to \
-                              have, so a layout that wrapped it would draw more lines \
-                              than there are parts"
-            .to_string();
+        let escalation = escalation_saying(
+            "a sentence longer than the width a terminal is taken to have, so a layout \
+             that wrapped it would draw more lines than there are parts",
+        );
         let trailer = block(Layout::Trailer, &RUN, &NODE, &escalation);
         assert_eq!(
             trailer.lines().map(depth).collect::<Vec<_>>(),
@@ -368,10 +378,20 @@ mod tests {
 
     #[test]
     fn an_escalation_with_nothing_attached_heads_no_record() {
-        let bare = GateWaitingPayload {
-            evidence: Evidence::none(),
-            ..escalation()
-        };
+        let bare = Escalation::new(
+            "node `lint` failed and its 0 re-route(s) to `fix-lint` are exhausted",
+            Evidence::none(),
+            NonEmpty::from((
+                GateOption {
+                    id: yunta_core::OptionId::from_static("abort"),
+                    label: "Abort the run".to_string(),
+                    tradeoff: "Pauses here; nothing further executes".to_string(),
+                },
+                Vec::new(),
+            )),
+        )
+        .expect("an escalation with nothing attached repeats nothing")
+        .into_payload();
         for layout in [Layout::Page, Layout::Trailer] {
             let drawn = block(layout, &RUN, &NODE, &bare);
             assert!(

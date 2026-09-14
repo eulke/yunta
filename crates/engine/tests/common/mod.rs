@@ -927,7 +927,7 @@ pub async fn resume_orphan_with_mock(
     emit(
         "work",
         yunta_core::events::EventPayload::Node(NodeEvent::Started(
-            yunta_core::events::NodeStartedPayload { attempt: 1 },
+            yunta_core::events::NodeStartedPayload::attempt(1),
         )),
     );
     if let Some(session_id) = orphan_session {

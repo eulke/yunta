@@ -4,9 +4,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::events::session::payloads::TokenUsage;
-use crate::events::Evidence;
+use crate::events::{Evidence, Fact};
 use crate::hash::{CommitSha, ContentHash};
 use crate::ids::{OptionId, QuestionId, Responder};
+use crate::NonEmpty;
 
 /// One choice in a gate's escalation: `id` is what
 /// `GateResolvedPayload.chosen_option` names back, `label` is the
@@ -32,11 +33,11 @@ pub struct GateWaitingPayload {
     /// The claim: what happened, in the words of whoever escalated.
     /// It ends where the record begins — a summary that quotes what
     /// `evidence` holds leaves every surface printing it twice.
-    pub summary: String,
+    summary: String,
     /// The record `summary` is audited against, attached by the engine
     /// straight from the log.
-    pub evidence: Evidence,
-    pub options: Vec<GateOption>,
+    evidence: Evidence,
+    options: Vec<GateOption>,
     /// The forge's own handle for this gate — a PR URL,
     /// today — `None` for the internal escalation case (exhausted
     /// re-routes) this payload already covered before external
@@ -45,10 +46,128 @@ pub struct GateWaitingPayload {
     /// waking up to check on the gate) knows what to poll without
     /// re-publishing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub external_ref: Option<String>,
+    external_ref: Option<String>,
+}
+
+/// Why an escalation was refused before it reached anyone.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum EscalationError {
+    /// The claim repeats a fact the record already holds. Every surface
+    /// prints the two under separate headings, so a summary that quotes
+    /// its own evidence reads as the same sentence twice, the second
+    /// time under a heading that promised something new.
+    #[error("the summary repeats what the evidence already states: `{fact}`")]
+    SummaryRepeatsEvidence { fact: String },
+}
+
+/// An escalation on its way to a person: the claim, the record it is
+/// audited against, and the menu of answers.
+///
+/// The one way a `gate_waiting` payload comes to exist. It used to be
+/// built by four independent callers, each deciding for itself which
+/// half of the story went into the summary and which into the evidence,
+/// and one of them shipped an empty menu — an escalation that refuses
+/// every answer it is given. Here the split is decided once and the
+/// menu cannot be empty by type.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Escalation(GateWaitingPayload);
+
+impl Escalation {
+    /// One escalation, refused if its claim repeats its own record.
+    pub fn new(
+        summary: impl Into<String>,
+        evidence: Evidence,
+        options: NonEmpty<GateOption>,
+    ) -> Result<Self, EscalationError> {
+        let summary = summary.into();
+        if let Some(fact) = evidence.facts().iter().find(|fact| repeats(&summary, fact)) {
+            return Err(EscalationError::SummaryRepeatsEvidence { fact: fact.line() });
+        }
+        Ok(Escalation(GateWaitingPayload {
+            summary,
+            evidence,
+            options: options.into_vec(),
+            external_ref: None,
+        }))
+    }
+
+    /// An escalation whose answer comes from a forge: the pull request
+    /// is the menu, and `external_ref` is the handle a later poll needs
+    /// to find it again from a process that knows nothing but the log.
+    ///
+    /// No options, and that is the shape rather than an omission: no
+    /// answer given here would count, because the decision is made and
+    /// recorded on the forge. `offers` refusing every option is the
+    /// truth about this gate, not the bug it would be on a local one.
+    pub fn published_to(
+        summary: impl Into<String>,
+        evidence: Evidence,
+        external_ref: impl Into<String>,
+    ) -> Result<Self, EscalationError> {
+        let summary = summary.into();
+        if let Some(fact) = evidence.facts().iter().find(|fact| repeats(&summary, fact)) {
+            return Err(EscalationError::SummaryRepeatsEvidence { fact: fact.line() });
+        }
+        Ok(Escalation(GateWaitingPayload {
+            summary,
+            evidence,
+            options: Vec::new(),
+            external_ref: Some(external_ref.into()),
+        }))
+    }
+
+    /// The payload, for the event that carries it.
+    pub fn into_payload(self) -> GateWaitingPayload {
+        self.0
+    }
+}
+
+/// Whether `summary` already states what `fact` records.
+///
+/// A fact that names itself is repeated when its whole value appears in
+/// the claim. A labelled one is repeated when both its label and its
+/// value do — a bare number can turn up in a summary for its own
+/// reasons, and it is the pair that makes it the same fact.
+fn repeats(summary: &str, fact: &Fact) -> bool {
+    let value = fact.value.trim();
+    if value.is_empty() {
+        return false;
+    }
+    match &fact.label {
+        None => summary.contains(value),
+        Some(label) => summary.contains(label.trim()) && summary.contains(value),
+    }
+}
+
+impl std::ops::Deref for Escalation {
+    type Target = GateWaitingPayload;
+
+    fn deref(&self) -> &GateWaitingPayload {
+        &self.0
+    }
 }
 
 impl GateWaitingPayload {
+    /// The claim: what happened, in the words of whoever escalated.
+    pub fn summary(&self) -> &str {
+        &self.summary
+    }
+
+    /// The record the claim is audited against.
+    pub fn evidence(&self) -> &Evidence {
+        &self.evidence
+    }
+
+    /// The answers on offer.
+    pub fn options(&self) -> &[GateOption] {
+        &self.options
+    }
+
+    /// The forge's own handle for this gate, when it has one.
+    pub fn external_ref(&self) -> Option<&str> {
+        self.external_ref.as_deref()
+    }
+
     /// Whether `option` is on this escalation's menu: the one test an
     /// answer passes before it counts as a decision on it.
     pub fn offers(&self, option: &OptionId) -> bool {

@@ -185,7 +185,7 @@ fn is_external_gate(node: &Node) -> bool {
 fn last_external_ref(events: &[StoredEvent], node_id: &NodeId) -> Option<String> {
     events.iter().rev().find_map(|e| match e.payload() {
         Some(EventPayload::Gates(GateEvent::Waiting(p))) if e.node_id.as_ref() == Some(node_id) => {
-            p.external_ref.clone()
+            p.external_ref().map(str::to_string)
         }
         _ => None,
     })

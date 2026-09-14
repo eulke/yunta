@@ -87,14 +87,13 @@ fn payload() -> impl Strategy<Value = EventPayload> {
             }
         ))),
         (task_id(), task_status(), any::<bool>()).prop_map(|(id, new_status, placed)| {
-            EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
-                task_id: id.into(),
-                new_status,
-                caused_by: 1u64.into(),
-                // Both shapes a status has on the wire: one naming where
-                // the work landed, and one from a log that never did.
-                commit: placed.then(|| "deadbeef".into()),
-            }))
+            // Both shapes a status has on the wire: a `done` naming where
+            // the work landed, and any other naming no commit at all.
+            let changed = match placed {
+                true => TaskStatusChangedPayload::done(id.into(), 1u64.into(), "deadbeef".into()),
+                false => TaskStatusChangedPayload::to(id.into(), new_status, 1u64.into()),
+            };
+            EventPayload::Tasks(TaskEvent::StatusChanged(changed))
         }),
         (severity(), "[a-z]{0,6}", "[a-z]{0,6}").prop_map(|(severity, title, location)| {
             EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
@@ -116,7 +115,7 @@ fn payload() -> impl Strategy<Value = EventPayload> {
             }))
         }),
         "[a-z ]{0,10}"
-            .prop_map(|reason| EventPayload::Run(RunEvent::Paused(RunPausedPayload { reason }))),
+            .prop_map(|reason| EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(reason)))),
         ("[a-z]{1,4}", tokens()).prop_map(|(content, tokens_used)| EventPayload::Gates(
             GateEvent::QuestionsAsked(
                 yunta_core::events::QuestionsAskedPayload::new(
@@ -206,18 +205,18 @@ fn a_questions_round() -> Vec<StoredEvent> {
         event(
             0,
             Some("grill"),
-            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
         ),
         event(
             1,
             Some("grill"),
-            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
-                artifact: ArtifactId::Interpreted {
+            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
+                ArtifactId::Interpreted {
                     kind: ArtifactKind::Questions,
                 },
-                content_hash: questions.clone(),
-                origin: ArtifactOrigin::Submitted,
-            })),
+                questions.clone(),
+                ArtifactOrigin::Submitted,
+            ))),
         ),
         event(
             2,
@@ -238,13 +237,13 @@ fn a_questions_round() -> Vec<StoredEvent> {
         event(
             3,
             Some("grill"),
-            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
-                artifact: ArtifactId::Opaque {
+            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
+                ArtifactId::Opaque {
                     name: "questions.answers.yaml".to_string(),
                 },
-                content_hash: answers.clone(),
-                origin: ArtifactOrigin::Answered,
-            })),
+                answers.clone(),
+                ArtifactOrigin::Answered,
+            ))),
         ),
         event(
             4,
@@ -260,10 +259,10 @@ fn a_questions_round() -> Vec<StoredEvent> {
         event(
             5,
             Some("grill"),
-            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-                outcome: "questions answered".to_string(),
-                tokens_used: yunta_core::events::TokenUsage::default(),
-            })),
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "questions answered".to_string(),
+                yunta_core::events::TokenUsage::default(),
+            ))),
         ),
     ]
 }

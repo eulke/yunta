@@ -2964,6 +2964,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "nix",
+ "serde_json",
  "serde_norway",
  "tempfile",
  "tokio",

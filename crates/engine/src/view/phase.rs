@@ -105,7 +105,7 @@ pub(super) fn phase(workflow: &Workflow, state: &RunState, events: &[StoredEvent
         // nothing.
         Some(EventPayload::Run(RunEvent::Paused(p))) => RunPhase::Waiting {
             on: waiting_node(workflow, state, standing.pause).unwrap_or_else(|| WaitingOn::Run {
-                reason: p.reason.clone(),
+                reason: p.reason().to_string(),
             }),
         },
         Some(
@@ -143,7 +143,7 @@ fn standing(events: &[StoredEvent]) -> Standing<'_> {
         };
         let settles = match payload {
             EventPayload::Run(RunEvent::Paused(p)) => {
-                standing.pause = Some(p.reason.as_str());
+                standing.pause = Some(p.reason());
                 true
             }
             EventPayload::Run(RunEvent::Resumed(_)) | EventPayload::Run(RunEvent::Finished(_)) => {

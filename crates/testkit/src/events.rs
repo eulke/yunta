@@ -43,18 +43,48 @@ pub fn task_registered(task: &Task) -> EventPayload {
 /// The `task_status_changed` a run writes about `task`: the status it
 /// reached, the commit its work landed at — which a `done` names and no
 /// other status does — and the event that justifies the transition.
+///
+/// The status decides, not the commit: a `done` carries the one it is
+/// given, and every other status carries none, exactly as the payload's
+/// own constructors allow. A test about a log that carries one anyway —
+/// written by something that is not this engine — builds that event with
+/// [`status_changed_carrying`].
 pub fn task_status_changed(
     task: &TaskId,
     status: TaskStatus,
     commit: Option<&CommitSha>,
     caused_by: Seq,
 ) -> EventPayload {
-    EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
-        task_id: task.clone(),
-        new_status: status,
-        caused_by,
-        commit: commit.cloned(),
-    }))
+    let changed = match (status, commit) {
+        (TaskStatus::Done, Some(commit)) => {
+            TaskStatusChangedPayload::done(task.clone(), caused_by, commit.clone())
+        }
+        (status, _) => TaskStatusChangedPayload::to(task.clone(), status, caused_by),
+    };
+    EventPayload::Tasks(TaskEvent::StatusChanged(changed))
+}
+
+/// A `task_status_changed` carrying a commit under a status that has no
+/// business naming one — the shape this engine's constructors refuse and
+/// a persisted log may still hold, because a log is read from whatever
+/// wrote it.
+///
+/// Built through the wire form, which is how such an event actually
+/// reaches a reader: off disk, never out of a constructor.
+pub fn status_changed_carrying(
+    task: &TaskId,
+    status: TaskStatus,
+    commit: &CommitSha,
+    caused_by: Seq,
+) -> EventPayload {
+    let wire = serde_json::json!({
+        "kind": "task_status_changed",
+        "task_id": task.as_str(),
+        "new_status": serde_json::to_value(status).expect("a status is a string on the wire"),
+        "caused_by": caused_by.get(),
+        "commit": commit.as_str(),
+    });
+    serde_json::from_value(wire).expect("the wire shape of a task_status_changed")
 }
 
 /// One event as a log holds it: position `seq` of `run`, with no node

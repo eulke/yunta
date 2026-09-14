@@ -326,12 +326,11 @@ fn each_loop_nodes_tasks_keep_the_node_that_registered_them() {
             4,
             2,
             Some("review-b"),
-            EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
-                task_id: "t2".into(),
-                new_status: TaskStatus::Running,
-                caused_by: 4.into(),
-                commit: None,
-            })),
+            EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+                "t2".into(),
+                TaskStatus::Running,
+                4.into(),
+            ))),
         ),
     ];
 

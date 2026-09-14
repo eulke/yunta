@@ -208,10 +208,10 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
             _ => None,
         })
         .expect("the resolved interaction must be on the log");
-    let ids: Vec<&str> = waiting.options.iter().map(|o| o.id.as_str()).collect();
+    let ids: Vec<&str> = waiting.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["aprobar", "ajustar", "abort"]);
-    assert!(waiting.options.iter().all(|o| !o.tradeoff.is_empty()));
-    assert_eq!(waiting.summary, "Approve the plan?");
+    assert!(waiting.options().iter().all(|o| !o.tradeoff.is_empty()));
+    assert_eq!(waiting.summary(), "Approve the plan?");
 }
 
 #[tokio::test]
@@ -343,22 +343,22 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
     append(
         "plan",
         yunta_core::events::EventPayload::Node(NodeEvent::Started(
-            yunta_core::events::NodeStartedPayload { attempt: 1 },
+            yunta_core::events::NodeStartedPayload::attempt(1),
         )),
     );
     append(
         "plan",
         yunta_core::events::EventPayload::Node(NodeEvent::Finished(
-            yunta_core::events::NodeFinishedPayload {
-                outcome: "ok".to_string(),
-                tokens_used: yunta_core::events::TokenUsage::default(),
-            },
+            yunta_core::events::NodeFinishedPayload::new(
+                "ok".to_string(),
+                yunta_core::events::TokenUsage::default(),
+            ),
         )),
     );
     append(
         "approve",
         yunta_core::events::EventPayload::Node(NodeEvent::Started(
-            yunta_core::events::NodeStartedPayload { attempt: 1 },
+            yunta_core::events::NodeStartedPayload::attempt(1),
         )),
     );
 

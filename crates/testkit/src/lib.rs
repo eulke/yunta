@@ -29,7 +29,10 @@ mod wait;
 pub use bench::{Bench, MOCK_CONFIG};
 pub use bin::{hermetic, run_id_from, run_yunta, stderr, stdout};
 pub use checkout::Checkout;
-pub use events::{accepted, stored, stored_for, task_registered, task_status_changed, SourceLog};
+pub use events::{
+    accepted, status_changed_carrying, stored, stored_for, task_registered, task_status_changed,
+    SourceLog,
+};
 pub use frames::{child_link, node_frame, run_frame};
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use observer::{Frame, RecordingObserver};

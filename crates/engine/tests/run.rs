@@ -1099,7 +1099,7 @@ nodes:
                 run_id: bench.run_id.clone(),
                 node_id: Some("only".into()),
                 payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
-                    yunta_core::events::NodeStartedPayload { attempt: 1 },
+                    yunta_core::events::NodeStartedPayload::attempt(1),
                 )),
             },
             &yunta_core::SystemClock,

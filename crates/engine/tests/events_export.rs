@@ -38,19 +38,19 @@ fn sample_events() -> Vec<StoredEvent> {
         event(
             2,
             Some("lint"),
-            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
         ),
         event(
             3,
             Some("lint"),
-            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-                outcome: "criteria green".to_string(),
-                tokens_used: TokenUsage {
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "criteria green".to_string(),
+                TokenUsage {
                     input: 10,
                     output: 5,
                     cached: None,
                 },
-            })),
+            ))),
         ),
     ]
 }
@@ -87,10 +87,10 @@ fn deriving_from_the_jsonl_round_trip_matches_deriving_from_the_original_events(
         vec![event(
             1,
             Some("a"),
-            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-                outcome: "broken from the start".to_string(),
-                tokens_used: TokenUsage::default(),
-            })),
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "broken from the start".to_string(),
+                TokenUsage::default(),
+            ))),
         )],
         vec![],
     ];

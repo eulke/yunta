@@ -127,14 +127,14 @@ pub enum DispatchError {
 /// where the only visible symptom is a document nobody delivered.
 fn run_tools_unreachable(adapter: &yunta_core::AdapterId) -> EventPayload {
     EventPayload::Session(SessionEvent::CapabilityDegraded(
-        yunta_core::events::CapabilityDegradedPayload {
-            capability: yunta_core::Capability::RunTools,
-            adapter: adapter.clone(),
-            policy_applied: "the session runs on — its per-run tool server is mounted and the \
+        yunta_core::events::CapabilityDegradedPayload::new(
+            yunta_core::Capability::RunTools,
+            adapter.clone(),
+            "the session runs on — its per-run tool server is mounted and the \
                          session holds none of its tools, so this node ends owing every \
                          document it declares"
                 .to_string(),
-        },
+        ),
     ))
 }
 

@@ -81,11 +81,11 @@ async fn resume_target(
     }
     let degraded = |policy_applied: &str| {
         EventPayload::Session(SessionEvent::CapabilityDegraded(
-            yunta_core::events::CapabilityDegradedPayload {
-                capability: yunta_core::Capability::ResumeSession,
-                adapter: adapter_id.clone(),
-                policy_applied: policy_applied.to_string(),
-            },
+            yunta_core::events::CapabilityDegradedPayload::new(
+                yunta_core::Capability::ResumeSession,
+                adapter_id.clone(),
+                policy_applied.to_string(),
+            ),
         ))
     };
     match orphaned_session(&ctx.load_events().await?, &node.id) {
@@ -159,13 +159,13 @@ pub(super) async fn execute_prompt(
         ctx.emit(
             Some(&node.id),
             EventPayload::Session(SessionEvent::CapabilityDegraded(
-                yunta_core::events::CapabilityDegradedPayload {
-                    capability: yunta_core::Capability::Skills,
-                    adapter: chosen.adapter.clone(),
-                    policy_applied: "skills not mounted — the adapter declares no native \
+                yunta_core::events::CapabilityDegradedPayload::new(
+                    yunta_core::Capability::Skills,
+                    chosen.adapter.clone(),
+                    "skills not mounted — the adapter declares no native \
                                  mechanism; the session runs without them"
                         .to_string(),
-                },
+                ),
             )),
         )
         .await?;
@@ -184,11 +184,11 @@ pub(super) async fn execute_prompt(
                 ctx.emit(
                     Some(&node.id),
                     EventPayload::Session(SessionEvent::CapabilityDegraded(
-                        yunta_core::events::CapabilityDegradedPayload {
-                            capability: yunta_core::Capability::RunTools,
-                            adapter: chosen.adapter.clone(),
+                        yunta_core::events::CapabilityDegradedPayload::new(
+                            yunta_core::Capability::RunTools,
+                            chosen.adapter.clone(),
                             policy_applied,
-                        },
+                        ),
                     )),
                 )
                 .await?;

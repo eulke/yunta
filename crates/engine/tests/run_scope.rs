@@ -346,7 +346,7 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     // other gate: waiting + resolved, together.
     assert!(events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(p))) if p.summary.contains("task-h")
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(p))) if p.summary().contains("task-h")
     )));
     assert!(events.iter().any(|e| matches!(
         e.payload(),

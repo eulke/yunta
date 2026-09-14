@@ -8,7 +8,7 @@
 //! [`execute_run_at_depth`] and reads what remains off the log, never from
 //! in-process state.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
@@ -35,9 +35,7 @@ use yunta_core::events::RunEvent;
 /// stops a run (the scheduler's [`record_pause`], a crash's
 /// [`record_pause_after_crash`]) writes the same event.
 fn run_paused(reason: &str) -> EventPayload {
-    EventPayload::Run(RunEvent::Paused(RunPausedPayload {
-        reason: reason.to_string(),
-    }))
+    EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(reason.to_string())))
 }
 
 pub async fn record_pause_after_crash(
@@ -336,8 +334,8 @@ async fn verify_before_waking(
 }
 
 /// Writes the `run_resumed` that says the run woke, carrying the policy
-/// each orphan node resolves to — and the single name they share, when
-/// they share one.
+/// each orphan node resolves to. Whether they share one is the
+/// payload's own arithmetic.
 async fn record_resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError> {
     // A node the mode excludes never ran, so the orphans are the same
     // whichever nodes are in the mode.
@@ -346,20 +344,9 @@ async fn record_resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError>
         &view.state,
         ctx.manifest.config.resolved_on_interrupt(),
     );
-    let shared: BTreeSet<&str> = policies
-        .iter()
-        .map(|policy| policy.on_interrupt.as_str())
-        .collect();
-    let resume_policy_applied = match shared.iter().next() {
-        Some(policy) if shared.len() == 1 => Some((*policy).to_string()),
-        _ => None,
-    };
     ctx.emit(
         None,
-        EventPayload::Run(RunEvent::Resumed(RunResumedPayload {
-            resume_policy_applied,
-            policies,
-        })),
+        EventPayload::Run(RunEvent::Resumed(RunResumedPayload::new(policies))),
     )
     .await?;
     Ok(())

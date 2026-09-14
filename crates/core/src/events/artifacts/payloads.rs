@@ -8,6 +8,16 @@ use serde::{Deserialize, Serialize};
 use crate::hash::ContentHash;
 use crate::ids::{NodeId, RunId};
 
+// A kind nothing in this workspace writes. It is in the log's
+// vocabulary because a log may hold one — written by something that is
+// not this engine — and a reader that could not parse it would report a
+// run's own history as unknown. So it has a fold and a rendering and no
+// constructor: there is nothing here to build one with, which is what
+// says the engine does not emit it. `Serialize` is the wire enum's
+// requirement, not an emitter's. The comment is not a doc comment
+// because a doc comment here would be published in `events.json`, where
+// it would describe the log to a reader who is not writing Rust.
+#[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ArtifactWrittenPayload {
     pub path: PathBuf,
@@ -68,6 +78,22 @@ pub struct ArtifactAcceptedPayload {
     pub artifact: ArtifactId,
     pub content_hash: ContentHash,
     pub origin: ArtifactOrigin,
+}
+
+impl ArtifactAcceptedPayload {
+    /// The engine took `artifact` into the store: what it is, the bytes
+    /// it now holds under that identity, and where they came from.
+    ///
+    /// All three together, always: an acceptance without its hash names
+    /// no bytes, and one without its origin cannot say whether a person,
+    /// a session or the engine itself produced them.
+    pub fn new(artifact: ArtifactId, content_hash: ContentHash, origin: ArtifactOrigin) -> Self {
+        ArtifactAcceptedPayload {
+            artifact,
+            content_hash,
+            origin,
+        }
+    }
 }
 
 /// What an artifact is, which is what a reader asks for it by.

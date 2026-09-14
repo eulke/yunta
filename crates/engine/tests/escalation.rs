@@ -136,11 +136,11 @@ async fn reconstructs_an_exhausted_reroute_escalation_with_retry_and_abort() {
     let (node_id, escalation) = current_escalation(&manifest, &events)
         .expect("an exhausted re-route must reconstruct an escalation");
     assert_eq!(node_id.as_str(), "lint");
-    assert!(escalation.summary.contains("lint"));
-    assert!(escalation.summary.contains("fix-lint"));
-    let ids: Vec<&str> = escalation.options.iter().map(|o| o.id.as_str()).collect();
+    assert!(escalation.summary().contains("lint"));
+    assert!(escalation.summary().contains("fix-lint"));
+    let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["retry", "abort"]);
-    assert!(escalation.options.iter().all(|o| !o.tradeoff.is_empty()));
+    assert!(escalation.options().iter().all(|o| !o.tradeoff.is_empty()));
 }
 
 const INTERNAL_GATE_WORKFLOW: &str = r#"
@@ -173,10 +173,10 @@ async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
     let (node_id, escalation) = current_escalation(&manifest, &events)
         .expect("an unresolved internal gate must reconstruct an escalation");
     assert_eq!(node_id.as_str(), "approve");
-    assert_eq!(escalation.summary, "Approve the plan?");
-    let ids: Vec<&str> = escalation.options.iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(escalation.summary(), "Approve the plan?");
+    let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["aprobar", "ajustar", "abort"]);
-    assert!(escalation.options.iter().all(|o| !o.tradeoff.is_empty()));
+    assert!(escalation.options().iter().all(|o| !o.tradeoff.is_empty()));
 }
 
 #[tokio::test]

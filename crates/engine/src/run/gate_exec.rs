@@ -21,11 +21,11 @@
 //! wake rather than remembering a decision that was never really made.
 
 use yunta_core::events::{
-    EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity, GateResolvedPayload,
-    GateWaitingPayload, NodeFinishedPayload, NodeStartedPayload, TokenUsage,
+    Escalation, EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity,
+    GateResolvedPayload, NodeFinishedPayload, NodeStartedPayload, TokenUsage,
 };
 use yunta_core::port::{Forge, PolledGate, PublishRequest, PublishedGate, ReviewOutcome};
-use yunta_core::{CommitSha, ExternalGate, FindingId, Node, OptionId, Responder};
+use yunta_core::{CommitSha, ExternalGate, FindingId, Node, NonEmpty, OptionId, Responder};
 
 use super::node_close::{fail, write_progress};
 use super::node_exec::template_vars;
@@ -115,12 +115,17 @@ pub(super) async fn publish_gate(
 
     ctx.emit(
         Some(&node.id),
-        EventPayload::Gates(GateEvent::Waiting(GateWaitingPayload {
-            summary,
-            evidence: vec![Fact::labelled("published at", published.url.clone())].into(),
-            options: Vec::new(),
-            external_ref: Some(encode_ref(&published)),
-        })),
+        EventPayload::Gates(GateEvent::Waiting(
+            Escalation::published_to(
+                summary,
+                vec![Fact::labelled("published at", published.url.clone())].into(),
+                encode_ref(&published),
+            )
+            .map_err(|source| RunError::Broken {
+                diagnostic: format!("node `{}`'s external gate: {source}", node.id),
+            })?
+            .into_payload(),
+        )),
     )
     .await?;
     pause(ctx, format!("waiting on external gate: {}", published.url)).await?;
@@ -368,7 +373,7 @@ fn last_external_ref(
 ) -> Option<String> {
     events.iter().rev().find_map(|e| match e.payload() {
         Some(EventPayload::Gates(GateEvent::Waiting(p))) if e.node_id.as_ref() == Some(node_id) => {
-            p.external_ref.clone()
+            p.external_ref().map(str::to_string)
         }
         _ => None,
     })
@@ -397,7 +402,10 @@ pub(super) async fn resolve_internal_gate(
     // reconstructs the identical object instead of a second copy that
     // could drift.
     let escalation =
-        super::escalation::build_internal_gate_escalation(&node.id, assignee, message, options, on);
+        super::escalation::build_internal_gate_escalation(&node.id, assignee, message, options, on)
+            .map_err(|source| RunError::Broken {
+                diagnostic: format!("node `{}`'s gate: {source}", node.id),
+            })?;
     // A decision `resolve_gate` pre-seeded onto the log while
     // this run was parked is consumed here, by this same consequence
     // code — never re-asked, and its escalation pair is already
@@ -431,7 +439,7 @@ pub(super) async fn resolve_internal_gate(
         if !already_recorded {
             ctx.emit(
                 Some(&node.id),
-                EventPayload::Gates(GateEvent::Waiting(escalation)),
+                EventPayload::Gates(GateEvent::Waiting(escalation.clone().into_payload())),
             )
             .await?;
             ctx.emit(
@@ -454,7 +462,7 @@ pub(super) async fn resolve_internal_gate(
     if !already_recorded {
         ctx.emit(
             Some(&node.id),
-            EventPayload::Gates(GateEvent::Waiting(escalation)),
+            EventPayload::Gates(GateEvent::Waiting(escalation.clone().into_payload())),
         )
         .await?;
         ctx.emit(
@@ -483,15 +491,13 @@ pub(super) async fn resolve_internal_gate(
             ctx.emit(
                 Some(&node.id),
                 EventPayload::Node(NodeEvent::Rerouted(
-                    yunta_core::events::NodeReroutedPayload {
-                        to_node: target.clone(),
-                        cause: format!("gate `{}` chose `{chosen}`", node.id),
-                        // A gate choice is a routing decision, not a bounded
-                        // retry: it has no attempt or cap to report.
-                        attempt: None,
-                        max_reroutes: None,
-                        origin: yunta_core::events::RerouteOrigin::GateChoice,
-                    },
+                    yunta_core::events::NodeReroutedPayload::new(
+                        target.clone(),
+                        format!("gate `{}` chose `{chosen}`", node.id),
+                        yunta_core::events::RerouteOrigin::GateChoice,
+                        None,
+                        None,
+                    ),
                 )),
             )
             .await?;
@@ -499,10 +505,10 @@ pub(super) async fn resolve_internal_gate(
         None => {
             ctx.emit(
                 Some(&node.id),
-                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-                    outcome: chosen.to_string(),
-                    tokens_used: TokenUsage::default(),
-                })),
+                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                    chosen.to_string(),
+                    TokenUsage::default(),
+                ))),
             )
             .await?;
             write_progress(ctx).await?;
@@ -553,15 +559,17 @@ async fn degrade_to_console(
     node: &Node,
     summary: String,
 ) -> Result<GateStep, RunError> {
-    let escalation = GateWaitingPayload {
-        summary: summary.clone(),
-        evidence: vec![Fact::bare("no forge reachable from this machine")].into(),
-        options: vec![
+    let escalation = Escalation::new(
+        summary.clone(),
+        vec![Fact::bare("no forge reachable from this machine")].into(),
+        NonEmpty::from((
             offers::approve_from_console(),
-            offers::reject_from_console(),
-        ],
-        external_ref: None,
-    };
+            vec![offers::reject_from_console()],
+        )),
+    )
+    .map_err(|source| RunError::Broken {
+        diagnostic: format!("node `{}`'s gate: {source}", node.id),
+    })?;
     let Some(choice) = ctx.ask_human(&escalation).await? else {
         let reason = escalation.sentence();
         pause(ctx, reason.clone()).await?;
@@ -570,7 +578,7 @@ async fn degrade_to_console(
 
     ctx.emit(
         Some(&node.id),
-        EventPayload::Gates(GateEvent::Waiting(escalation)),
+        EventPayload::Gates(GateEvent::Waiting(escalation.into_payload())),
     )
     .await?;
     ctx.emit(
@@ -584,10 +592,10 @@ async fn degrade_to_console(
     if ReservedOption::of(&choice.option) == Some(ReservedOption::Approve) {
         ctx.emit(
             Some(&node.id),
-            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-                outcome: format!("approved from the console by {}", choice.by),
-                tokens_used: TokenUsage::default(),
-            })),
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                format!("approved from the console by {}", choice.by),
+                TokenUsage::default(),
+            ))),
         )
         .await?;
         write_progress(ctx).await?;

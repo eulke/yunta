@@ -553,12 +553,12 @@ async fn drive_child(
             RunTerminal::Finished => {
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload {
-                        child_run_id: current_id.clone(),
-                        child_workflow_hash: current_manifest.workflow_hash.clone(),
-                        terminal_state: TerminalState::Done,
-                        tokens: report.state.total_tokens,
-                    })),
+                    EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
+                        current_id.clone(),
+                        current_manifest.workflow_hash.clone(),
+                        TerminalState::Done,
+                        report.state.total_tokens,
+                    ))),
                 )
                 .await?;
                 // Only a child that reached `Done` hands anything over.
@@ -588,12 +588,12 @@ async fn drive_child(
                 // becomes the node's next linked child.
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload {
-                        child_run_id: current_id.clone(),
-                        child_workflow_hash: current_manifest.workflow_hash.clone(),
-                        terminal_state: TerminalState::Promoted,
-                        tokens: report.state.total_tokens,
-                    })),
+                    EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
+                        current_id.clone(),
+                        current_manifest.workflow_hash.clone(),
+                        TerminalState::Promoted,
+                        report.state.total_tokens,
+                    ))),
                 )
                 .await?;
                 let successor = match super::promote::create_promotion_successor(
@@ -651,12 +651,12 @@ async fn drive_child(
                 // its spend, and the diagnostic names the child.
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload {
-                        child_run_id: current_id.clone(),
-                        child_workflow_hash: current_manifest.workflow_hash.clone(),
-                        terminal_state: TerminalState::Failed,
-                        tokens: report.state.total_tokens,
-                    })),
+                    EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
+                        current_id.clone(),
+                        current_manifest.workflow_hash.clone(),
+                        TerminalState::Failed,
+                        report.state.total_tokens,
+                    ))),
                 )
                 .await?;
                 // The child's reason keeps its own lines under this

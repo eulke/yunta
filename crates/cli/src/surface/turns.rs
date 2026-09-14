@@ -182,9 +182,9 @@ mod tests {
             seq: Seq::try_from(seq as i64).expect("a positive seq"),
             timestamp: Clock::now(&FixedClock),
             node_id: None,
-            body: EventBody::Known(EventPayload::Node(NodeEvent::Started(NodeStartedPayload {
-                attempt: 1,
-            }))),
+            body: EventBody::Known(EventPayload::Node(NodeEvent::Started(
+                NodeStartedPayload::attempt(1),
+            ))),
         }))
     }
 

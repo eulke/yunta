@@ -91,7 +91,10 @@ pub(super) async fn execute_loop(
                 &node.id,
                 state.iteration,
                 prep.max_iterations,
-            );
+            )
+            .map_err(|source| RunError::Broken {
+                diagnostic: format!("loop `{}`'s escalation: {source}", node.id),
+            })?;
             match super::budget::escalate(ctx, Some(&node.id), escalation, reason).await? {
                 super::budget::BudgetDecision::Continue => state.iterations_lifted = true,
                 super::budget::BudgetDecision::Pause { reason } => {
@@ -271,13 +274,13 @@ async fn prepare_loop<'a>(
         ctx.emit(
             Some(&node.id),
             EventPayload::Session(SessionEvent::CapabilityDegraded(
-                yunta_core::events::CapabilityDegradedPayload {
-                    capability: yunta_core::Capability::Skills,
-                    adapter: chosen.adapter.clone(),
-                    policy_applied: "skills not mounted — the adapter declares no native \
+                yunta_core::events::CapabilityDegradedPayload::new(
+                    yunta_core::Capability::Skills,
+                    chosen.adapter.clone(),
+                    "skills not mounted — the adapter declares no native \
                                  mechanism; task sessions run without them"
                         .to_string(),
-                },
+                ),
             )),
         )
         .await?;

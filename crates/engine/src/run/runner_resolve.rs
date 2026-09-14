@@ -279,14 +279,13 @@ pub(super) async fn report_declarative_network(
         ctx.emit(
             Some(&node.id),
             EventPayload::Session(SessionEvent::CapabilityDegraded(
-                yunta_core::events::CapabilityDegradedPayload {
-                    capability: yunta_core::Capability::NetworkIsolation,
-                    adapter: adapter_id.clone(),
-                    policy_applied:
-                        "declarative-only — the adapter declares no network isolation; \
+                yunta_core::events::CapabilityDegradedPayload::new(
+                    yunta_core::Capability::NetworkIsolation,
+                    adapter_id.clone(),
+                    "declarative-only — the adapter declares no network isolation; \
                                  `network: false` is recorded for policy and audit, not enforced"
-                            .to_string(),
-                },
+                        .to_string(),
+                ),
             )),
         )
         .await?;

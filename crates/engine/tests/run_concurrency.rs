@@ -209,7 +209,7 @@ nodes:
                 run_id: bench.run_id.clone(),
                 node_id: Some("only".into()),
                 payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
-                    yunta_core::events::NodeStartedPayload { attempt: 1 },
+                    yunta_core::events::NodeStartedPayload::attempt(1),
                 )),
             },
             &yunta_core::SystemClock,
@@ -306,7 +306,7 @@ nodes:
                 run_id: bench.run_id.clone(),
                 node_id: Some("only".into()),
                 payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
-                    yunta_core::events::NodeStartedPayload { attempt: 1 },
+                    yunta_core::events::NodeStartedPayload::attempt(1),
                 )),
             },
             &yunta_core::SystemClock,
@@ -545,24 +545,24 @@ nodes:
             run_id: bench.run_id.clone(),
             node_id: Some("pre-launch".into()),
             payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
-                yunta_core::events::NodeStartedPayload { attempt: 1 },
+                yunta_core::events::NodeStartedPayload::attempt(1),
             )),
         },
         yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
             node_id: Some("write-docs".into()),
             payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
-                yunta_core::events::NodeStartedPayload { attempt: 1 },
+                yunta_core::events::NodeStartedPayload::attempt(1),
             )),
         },
         yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
             node_id: Some("write-docs".into()),
             payload: yunta_core::events::EventPayload::Node(NodeEvent::Finished(
-                yunta_core::events::NodeFinishedPayload {
-                    outcome: "exit 0".to_string(),
-                    tokens_used: Default::default(),
-                },
+                yunta_core::events::NodeFinishedPayload::new(
+                    "exit 0".to_string(),
+                    Default::default(),
+                ),
             )),
         },
     ] {
@@ -911,7 +911,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
             run_id: bench.run_id.clone(),
             node_id: Some("plan".into()),
             payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
-                yunta_core::events::NodeStartedPayload { attempt: 1 },
+                yunta_core::events::NodeStartedPayload::attempt(1),
             )),
         },
         yunta_core::events::EventDraft {
@@ -955,53 +955,50 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
             run_id: bench.run_id.clone(),
             node_id: Some("plan".into()),
             payload: yunta_core::events::EventPayload::Node(NodeEvent::Finished(
-                yunta_core::events::NodeFinishedPayload {
-                    outcome: "planned".to_string(),
-                    tokens_used: Default::default(),
-                },
+                yunta_core::events::NodeFinishedPayload::new(
+                    "planned".to_string(),
+                    Default::default(),
+                ),
             )),
         },
         yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
             node_id: Some("implement".into()),
             payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
-                yunta_core::events::NodeStartedPayload { attempt: 1 },
+                yunta_core::events::NodeStartedPayload::attempt(1),
             )),
         },
         yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
             node_id: Some("implement".into()),
             payload: yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(
-                yunta_core::events::TaskStatusChangedPayload {
-                    task_id: "task-p".into(),
-                    new_status: yunta_core::events::TaskStatus::Running,
-                    caused_by: 1.into(),
-                    commit: None,
-                },
+                yunta_core::events::TaskStatusChangedPayload::to(
+                    "task-p".into(),
+                    yunta_core::events::TaskStatus::Running,
+                    1.into(),
+                ),
             )),
         },
         yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
             node_id: Some("implement".into()),
             payload: yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(
-                yunta_core::events::TaskStatusChangedPayload {
-                    task_id: "task-q".into(),
-                    new_status: yunta_core::events::TaskStatus::Running,
-                    caused_by: 1.into(),
-                    commit: None,
-                },
+                yunta_core::events::TaskStatusChangedPayload::to(
+                    "task-q".into(),
+                    yunta_core::events::TaskStatus::Running,
+                    1.into(),
+                ),
             )),
         },
         yunta_core::events::EventDraft {
             run_id: bench.run_id.clone(),
             node_id: Some("implement".into()),
             payload: yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(
-                yunta_core::events::TaskStatusChangedPayload {
-                    task_id: "task-p".into(),
-                    new_status: yunta_core::events::TaskStatus::Done,
-                    caused_by: 1.into(),
-                    commit: None,
-                },
+                yunta_core::events::TaskStatusChangedPayload::to(
+                    "task-p".into(),
+                    yunta_core::events::TaskStatus::Done,
+                    1.into(),
+                ),
             )),
         },
         // task-q never got a follow-up — orphaned Running, no p.txt-style
@@ -1316,7 +1313,7 @@ nodes:
                     run_id: bench.run_id.clone(),
                     node_id: Some(node.into()),
                     payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
-                        yunta_core::events::NodeStartedPayload { attempt: 1 },
+                        yunta_core::events::NodeStartedPayload::attempt(1),
                     )),
                 },
                 &yunta_core::SystemClock,

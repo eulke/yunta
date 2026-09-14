@@ -93,18 +93,18 @@ fn a_finished_node_shows_its_description_outcome_and_artifacts() {
         event(
             1,
             "plan",
-            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
         ),
         event(
             2,
             "plan",
-            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
-                artifact: ArtifactId::Interpreted {
+            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
+                ArtifactId::Interpreted {
                     kind: yunta_core::ArtifactKind::Tasks,
                 },
-                content_hash: yunta_core::sha256_hex(b"deadbeef"),
-                origin: ArtifactOrigin::Submitted,
-            })),
+                yunta_core::sha256_hex(b"deadbeef"),
+                ArtifactOrigin::Submitted,
+            ))),
         ),
         event(
             3,
@@ -118,10 +118,10 @@ fn a_finished_node_shows_its_description_outcome_and_artifacts() {
         event(
             4,
             "plan",
-            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-                outcome: "planned".to_string(),
-                tokens_used: tokens(),
-            })),
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "planned".to_string(),
+                tokens(),
+            ))),
         ),
     ];
 
@@ -149,7 +149,7 @@ fn a_failed_node_appears_under_failed_with_its_outcome() {
         event(
             1,
             "lint",
-            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
         ),
         event(
             2,
@@ -175,7 +175,7 @@ fn a_running_node_appears_under_next_marked_running() {
     let events = vec![event(
         1,
         "implement",
-        EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
+        EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
     )];
 
     let markdown = render_progress(&wf, &events);
@@ -200,15 +200,15 @@ fn parallel_children_are_listed_on_the_same_terms_as_top_level_nodes() {
         event(
             1,
             "write-docs",
-            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
         ),
         event(
             2,
             "write-docs",
-            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-                outcome: "exit 0".to_string(),
-                tokens_used: TokenUsage::default(),
-            })),
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "exit 0".to_string(),
+                TokenUsage::default(),
+            ))),
         ),
     ];
 
@@ -233,7 +233,7 @@ fn a_multi_problem_failure_is_fenced_so_neither_reader_has_to_guess() {
         event(
             1,
             "plan",
-            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
         ),
         event(
             2,

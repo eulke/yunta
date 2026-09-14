@@ -29,22 +29,22 @@ pub(crate) fn option_tradeoff(option: &GateOption) -> String {
 /// side: the second is what the first is audited against. Neither one
 /// repeats the other, so a surface with room for both shows both.
 pub(crate) fn evidence(escalation: &GateWaitingPayload) -> Vec<String> {
-    escalation.evidence.lines()
+    escalation.evidence().lines()
 }
 
 #[cfg(test)]
 mod tests {
+    use yunta_core::events::Escalation;
     use yunta_core::events::{Evidence, Fact};
 
     use super::*;
 
     fn escalation(summary: &str, evidence: Evidence) -> GateWaitingPayload {
-        GateWaitingPayload {
-            summary: summary.to_string(),
-            evidence,
-            options: Vec::new(),
-            external_ref: None,
-        }
+        // Published to a forge: the pull request is the menu, so these
+        // renderings are about the claim and the record alone.
+        Escalation::published_to(summary, evidence, "https://forge/pr/1")
+            .expect("the summary states no fact the evidence holds")
+            .into_payload()
     }
 
     #[test]

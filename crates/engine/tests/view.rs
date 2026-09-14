@@ -11,7 +11,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
     AgentMessagePayload, AgentMessageType, AgentSessionOpenedPayload, ArtifactId, Capabilities,
     CapabilityDegradedPayload, ChildRunCreatedPayload, ChildRunFinishedPayload, DiscardedCandidate,
-    EventBody, EventPayload, Evidence, Fact, Failure, GateWaitingPayload, NodeFailedPayload,
+    Escalation, EventBody, EventPayload, Evidence, Fact, Failure, GateOption, NodeFailedPayload,
     NodeFinishedPayload, NodeReroutedPayload, NodeStartedPayload, PromotionSignaledPayload,
     RerouteOrigin, RunCreatedPayload, RunFinishedPayload, RunMetrics, RunPausedPayload,
     RunResumedPayload, RunnerResolvedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
@@ -20,6 +20,7 @@ use yunta_core::events::{
 use yunta_core::events::{
     ArtifactEvent, ChildEvent, GateEvent, NodeEvent, RunEvent, SessionEvent, TaskEvent,
 };
+use yunta_core::NonEmpty;
 use yunta_core::{
     AgentName, Capability, CommitSha, ContentHash, ModeName, NodeId, NodeKind, RunnerCandidate,
     TaskId, Workflow,
@@ -115,10 +116,10 @@ fn tokens(input: u64, output: u64) -> TokenUsage {
 }
 
 fn finished() -> EventPayload {
-    EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-        outcome: "ok".to_string(),
-        tokens_used: tokens(10, 5),
-    }))
+    EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+        "ok".to_string(),
+        tokens(10, 5),
+    )))
 }
 
 fn failed(outcome: &str) -> EventPayload {
@@ -130,13 +131,13 @@ fn failed(outcome: &str) -> EventPayload {
 }
 
 fn rerouted(to: &str) -> EventPayload {
-    EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload {
-        to_node: to.into(),
-        cause: "criteria still red".to_string(),
-        attempt: Some(1),
-        max_reroutes: Some(2),
-        origin: RerouteOrigin::OnFailure,
-    }))
+    EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+        to.into(),
+        "criteria still red".to_string(),
+        RerouteOrigin::OnFailure,
+        Some(1),
+        Some(2),
+    )))
 }
 
 fn registered(task: &str) -> EventPayload {
@@ -149,12 +150,11 @@ fn registered(task: &str) -> EventPayload {
 }
 
 fn task_now(task: &str, new_status: TaskStatus) -> EventPayload {
-    EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
-        task_id: task.into(),
+    EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+        task.into(),
         new_status,
-        caused_by: 1.into(),
-        commit: None,
-    }))
+        1.into(),
+    )))
 }
 
 fn session_opened(session: &str) -> EventPayload {
@@ -178,14 +178,32 @@ fn tool_use(tool: &str) -> EventPayload {
     }))
 }
 
+/// The one option a locally-answered gate in these tests offers.
+fn approve_option() -> GateOption {
+    GateOption {
+        id: "approve".into(),
+        label: "Approve".to_string(),
+        tradeoff: "goes on".to_string(),
+    }
+}
+
 /// A node parked on a person, as `gate_waiting` records it.
 fn gate_waiting(external_ref: Option<&str>) -> EventPayload {
-    EventPayload::Gates(GateEvent::Waiting(GateWaitingPayload {
-        summary: "answer before going on".to_string(),
-        evidence: Evidence::none(),
-        options: Vec::new(),
-        external_ref: external_ref.map(str::to_string),
-    }))
+    let escalation = match external_ref {
+        Some(reference) => {
+            Escalation::published_to("answer before going on", Evidence::none(), reference)
+        }
+        None => Escalation::new(
+            "answer before going on",
+            Evidence::none(),
+            NonEmpty::from((approve_option(), Vec::new())),
+        ),
+    };
+    EventPayload::Gates(GateEvent::Waiting(
+        escalation
+            .expect("the summary states no fact")
+            .into_payload(),
+    ))
 }
 
 fn run_finished(terminal_state: TerminalState) -> EventPayload {
@@ -519,13 +537,13 @@ fn a_node_carries_every_artifact_it_produced_in_log_order() {
     // file the engine writes from it is a view of the store.
     let produced = |name: &str| {
         EventPayload::Artifacts(ArtifactEvent::Accepted(
-            yunta_core::events::ArtifactAcceptedPayload {
-                artifact: ArtifactId::Opaque {
+            yunta_core::events::ArtifactAcceptedPayload::new(
+                ArtifactId::Opaque {
                     name: name.to_string(),
                 },
-                content_hash: ContentHash::sha256(name.as_bytes()),
-                origin: yunta_core::events::ArtifactOrigin::Ingested,
-            },
+                ContentHash::sha256(name.as_bytes()),
+                yunta_core::events::ArtifactOrigin::Ingested,
+            ),
         ))
     };
     let events = log(vec![
@@ -697,11 +715,11 @@ fn a_degraded_capability_is_carried_with_what_happened_instead() {
             2,
             Some("build"),
             EventPayload::Session(SessionEvent::CapabilityDegraded(
-                CapabilityDegradedPayload {
-                    capability: Capability::ResumeSession,
-                    adapter: "mock".into(),
-                    policy_applied: "restart_node".to_string(),
-                },
+                CapabilityDegradedPayload::new(
+                    Capability::ResumeSession,
+                    "mock".into(),
+                    "restart_node".to_string(),
+                ),
             )),
         ),
     ]);
@@ -796,12 +814,12 @@ nodes:
         (
             3,
             Some("sub"),
-            EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload {
-                child_run_id: "run-child".into(),
-                child_workflow_hash: hash,
-                terminal_state: TerminalState::Done,
-                tokens: tokens(40, 20),
-            })),
+            EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
+                "run-child".into(),
+                hash,
+                TerminalState::Done,
+                tokens(40, 20),
+            ))),
         ),
     ]);
 
@@ -843,12 +861,12 @@ nodes:
         (
             2,
             Some("sub"),
-            EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload {
-                child_run_id: "run-child".into(),
-                child_workflow_hash: ContentHash::sha256(b"child workflow"),
-                terminal_state: TerminalState::Failed,
-                tokens: tokens(40, 20),
-            })),
+            EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
+                "run-child".into(),
+                ContentHash::sha256(b"child workflow"),
+                TerminalState::Failed,
+                tokens(40, 20),
+            ))),
         ),
     ]);
 
@@ -906,19 +924,22 @@ nodes:
         (
             2,
             Some("approve"),
-            EventPayload::Gates(GateEvent::Waiting(GateWaitingPayload {
-                summary: "approve the plan".to_string(),
-                evidence: vec![Fact::bare("the plan")].into(),
-                options: Vec::new(),
-                external_ref: Some("https://forge/pr/1".to_string()),
-            })),
+            EventPayload::Gates(GateEvent::Waiting(
+                Escalation::published_to(
+                    "approve it",
+                    vec![Fact::bare("the plan")].into(),
+                    "https://forge/pr/1",
+                )
+                .expect("the summary states no fact")
+                .into_payload(),
+            )),
         ),
         (
             3,
             None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload {
-                reason: "waiting on external gate: https://forge/pr/1".to_string(),
-            })),
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+                "waiting on external gate: https://forge/pr/1".to_string(),
+            ))),
         ),
     ]);
 
@@ -951,9 +972,7 @@ fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
         (
             3,
             None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload {
-                reason: asked.to_string(),
-            })),
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(asked.to_string()))),
         ),
     ]);
 
@@ -982,9 +1001,9 @@ fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
         (
             3,
             None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload {
-                reason: "token budget exceeded".to_string(),
-            })),
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+                "token budget exceeded".to_string(),
+            ))),
         ),
         (
             4,
@@ -1019,9 +1038,9 @@ fn a_paused_run_with_no_parked_node_names_the_reason_the_log_recorded() {
         (
             3,
             None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload {
-                reason: "token budget exceeded".to_string(),
-            })),
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+                "token budget exceeded".to_string(),
+            ))),
         ),
     ]);
 

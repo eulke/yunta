@@ -11,7 +11,8 @@
 //! resume re-asks; the decision it gets is still audited in the log as
 //! a run-level gate pair (`node_id: None`).
 
-use yunta_core::events::{EventPayload, Fact, GateResolvedPayload, GateWaitingPayload};
+use yunta_core::events::{Escalation, EscalationError, EventPayload, Fact, GateResolvedPayload};
+use yunta_core::NonEmpty;
 
 use super::{RunCtx, RunError};
 use crate::reserved::{offers, ReservedOption};
@@ -35,14 +36,17 @@ pub enum BudgetDecision {
 pub async fn escalate(
     ctx: &RunCtx<'_>,
     node_id: Option<&yunta_core::NodeId>,
-    escalation: GateWaitingPayload,
+    escalation: Escalation,
     pause_reason: String,
 ) -> Result<BudgetDecision, RunError> {
     match ctx.ask_human(&escalation).await? {
         Some(choice) => {
             let continues = ReservedOption::of(&choice.option) == Some(ReservedOption::Continue);
-            ctx.emit(node_id, EventPayload::Gates(GateEvent::Waiting(escalation)))
-                .await?;
+            ctx.emit(
+                node_id,
+                EventPayload::Gates(GateEvent::Waiting(escalation.into_payload())),
+            )
+            .await?;
             ctx.emit(
                 node_id,
                 EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(choice))),
@@ -69,10 +73,10 @@ pub fn over_budget_escalation(
     ctx: &RunCtx<'_>,
     spent: u64,
     cap: u64,
-) -> (GateWaitingPayload, String) {
-    let escalation = GateWaitingPayload {
-        summary: format!("run `{}` exhausted its token budget", ctx.run_id),
-        evidence: vec![
+) -> Result<(Escalation, String), EscalationError> {
+    let escalation = Escalation::new(
+        format!("run `{}` exhausted its token budget", ctx.run_id),
+        vec![
             Fact::labelled("limits.max_tokens_per_run", cap.to_string()),
             Fact::labelled(
                 "total input+output tokens derived from the event log",
@@ -80,14 +84,16 @@ pub fn over_budget_escalation(
             ),
         ]
         .into(),
-        options: vec![offers::continue_past_tokens(), offers::abort_on_tokens()],
-        external_ref: None,
-    };
+        NonEmpty::from((
+            offers::continue_past_tokens(),
+            vec![offers::abort_on_tokens()],
+        )),
+    )?;
     let reason = format!(
         "budget: run spent {spent} tokens with `limits.max_tokens_per_run: {cap}` — \
          resume with an interactive surface to continue past the cap or abort"
     );
-    (escalation, reason)
+    Ok((escalation, reason))
 }
 
 /// The escalation object and pause reason for a loop that hit
@@ -99,13 +105,13 @@ pub fn loop_overrun_escalation(
     node_id: &yunta_core::NodeId,
     iteration: u32,
     cap: u32,
-) -> (GateWaitingPayload, String) {
-    let escalation = GateWaitingPayload {
-        summary: format!(
-            "loop `{node_id}` needs iteration {iteration} but `limits.max_loop_iterations` \
-             is {cap}"
-        ),
-        evidence: vec![
+) -> Result<(Escalation, String), EscalationError> {
+    // The claim is that the loop wants another iteration and the cap
+    // stops it; which cap and how many iterations is the record below,
+    // stated once.
+    let escalation = Escalation::new(
+        format!("loop `{node_id}` needs another iteration and its cap is spent"),
+        vec![
             Fact::labelled(
                 "iterations already run this invocation",
                 (iteration - 1).to_string(),
@@ -114,17 +120,16 @@ pub fn loop_overrun_escalation(
             Fact::bare("the tasks document still has ready tasks"),
         ]
         .into(),
-        options: vec![
+        NonEmpty::from((
             offers::continue_past_iterations(),
-            offers::abort_on_iterations(),
-        ],
-        external_ref: None,
-    };
+            vec![offers::abort_on_iterations()],
+        )),
+    )?;
     let reason = format!(
         "loop `{node_id}` exceeded `limits.max_loop_iterations` ({cap}) — resume with an \
          interactive surface to continue past the cap or abort"
     );
-    (escalation, reason)
+    Ok((escalation, reason))
 }
 
 /// Pure session-budget policy: one agent session may

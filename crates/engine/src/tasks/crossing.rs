@@ -190,11 +190,22 @@ mod tests {
                 registered,
                 yunta_testkit::task_registered(task),
             ));
-            events.push(yunta_testkit::stored(
-                &run,
-                registered + 1,
-                yunta_testkit::task_status_changed(&task.id, *status, *commit, registered.into()),
-            ));
+            // Every status carries a commit here, including the five
+            // that have no business naming one: the point is what a
+            // receiving run stands behind when it reads a log that
+            // holds them anyway.
+            let changed = match commit {
+                Some(commit) => yunta_testkit::status_changed_carrying(
+                    &task.id,
+                    *status,
+                    commit,
+                    registered.into(),
+                ),
+                None => {
+                    yunta_testkit::task_status_changed(&task.id, *status, None, registered.into())
+                }
+            };
+            events.push(yunta_testkit::stored(&run, registered + 1, changed));
         }
         events
     }

@@ -51,7 +51,7 @@ pub(crate) fn decide(console: &Console, escalation: &GateWaitingPayload) -> Answ
 fn present(console: &Console, escalation: &GateWaitingPayload) -> std::io::Result<()> {
     console.say("")?;
     console.say("a decision is needed")?;
-    console.block(&escalation.summary, INDENT)?;
+    console.block(escalation.summary(), INDENT)?;
     let attached = evidence(escalation);
     if !attached.is_empty() {
         console.say("")?;
@@ -66,7 +66,7 @@ fn present(console: &Console, escalation: &GateWaitingPayload) -> std::io::Resul
 /// The menu, an option to a line with what it trades off underneath.
 fn options(escalation: &GateWaitingPayload) -> Vec<Choice<OptionId>> {
     escalation
-        .options
+        .options()
         .iter()
         .map(|option| Choice {
             head: option_headline(option),
@@ -79,19 +79,25 @@ fn options(escalation: &GateWaitingPayload) -> Vec<Choice<OptionId>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use yunta_core::events::Escalation;
     use yunta_core::events::{Fact, GateOption};
+    use yunta_core::NonEmpty;
 
     fn escalation() -> GateWaitingPayload {
-        GateWaitingPayload {
-            summary: "T007 failed three times".to_string(),
-            evidence: vec![Fact::labelled("criteria_checked", "2/3 green")].into(),
-            options: vec![GateOption {
-                id: "approve".into(),
-                label: "Add an in-memory session store".to_string(),
-                tradeoff: "Unblocks now; one more task on the ledger".to_string(),
-            }],
-            external_ref: None,
-        }
+        Escalation::new(
+            "T007 failed three times",
+            vec![Fact::labelled("criteria_checked", "2/3 green")].into(),
+            NonEmpty::from((
+                GateOption {
+                    id: "approve".into(),
+                    label: "Add an in-memory session store".to_string(),
+                    tradeoff: "Unblocks now; one more task in the document".to_string(),
+                },
+                Vec::new(),
+            )),
+        )
+        .expect("the summary states no fact the evidence holds")
+        .into_payload()
     }
 
     #[test]
@@ -101,7 +107,7 @@ mod tests {
         assert_eq!(
             first,
             Some(&Some(
-                "tradeoff: Unblocks now; one more task on the ledger".to_string()
+                "tradeoff: Unblocks now; one more task in the document".to_string()
             )),
             "every option declares what it trades off, and the menu shows it"
         );

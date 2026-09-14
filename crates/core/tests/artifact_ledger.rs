@@ -200,9 +200,9 @@ fn an_event_about_something_else_leaves_the_fold_unmoved() {
     ledger.apply(
         None,
         1u64.into(),
-        &EventPayload::Run(RunEvent::Paused(RunPausedPayload {
-            reason: "gate waiting".to_string(),
-        })),
+        &EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(
+            "gate waiting".to_string(),
+        ))),
     );
     assert_eq!(ledger.every().count(), 0);
 }

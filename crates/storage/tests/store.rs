@@ -32,7 +32,7 @@ fn append_then_read_round_trips() {
     assert_eq!(events.len(), 2);
     assert_eq!(events[1].seq.get(), 2);
     match events[1].payload() {
-        Some(EventPayload::Run(RunEvent::Paused(p))) => assert_eq!(p.reason, "budget exceeded"),
+        Some(EventPayload::Run(RunEvent::Paused(p))) => assert_eq!(p.reason(), "budget exceeded"),
         other => panic!("expected RunPaused, got {other:?}"),
     }
 }
@@ -445,9 +445,7 @@ fn a_second_connection_appends_interleaved_with_the_first_and_seq_stays_monotoni
         .unwrap();
     let mut event = created_draft("run-reopen");
     event.payload = yunta_core::events::EventPayload::Run(RunEvent::Paused(
-        yunta_core::events::RunPausedPayload {
-            reason: "from the second handle".to_string(),
-        },
+        yunta_core::events::RunPausedPayload::new("from the second handle".to_string()),
     ));
     let seq2 = second.append(&event, &yunta_core::SystemClock).unwrap();
 
@@ -482,9 +480,7 @@ fn paused_draft(run_id: &str, reason: &str) -> EventDraft {
     EventDraft {
         run_id: RunId::from(run_id),
         node_id: None,
-        payload: EventPayload::Run(RunEvent::Paused(RunPausedPayload {
-            reason: reason.to_string(),
-        })),
+        payload: EventPayload::Run(RunEvent::Paused(RunPausedPayload::new(reason.to_string()))),
     }
 }
 
@@ -507,7 +503,7 @@ fn a_draft_is_stamped_by_the_injected_clock_and_gets_the_next_seq() {
     assert_eq!(events[1].seq, second);
     assert_eq!(events[1].timestamp, instant);
     match events[1].payload() {
-        Some(EventPayload::Run(RunEvent::Paused(p))) => assert_eq!(p.reason, "budget"),
+        Some(EventPayload::Run(RunEvent::Paused(p))) => assert_eq!(p.reason(), "budget"),
         other => panic!("expected run_paused, got {other:?}"),
     }
 }

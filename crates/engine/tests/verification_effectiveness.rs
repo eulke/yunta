@@ -219,13 +219,13 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
         event(
             101,
             Some("lint"),
-            EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload {
-                to_node: "fix".into(),
-                cause: "lint failed".to_string(),
-                attempt: Some(1),
-                max_reroutes: Some(2),
-                origin: yunta_core::events::RerouteOrigin::OnFailure,
-            })),
+            EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+                "fix".into(),
+                "lint failed".to_string(),
+                yunta_core::events::RerouteOrigin::OnFailure,
+                Some(1),
+                Some(2),
+            ))),
         ),
     ]);
     let findings = analyze(&wf, &history);
@@ -247,10 +247,10 @@ fn a_node_that_always_finishes_clean_is_flagged_even_though_it_never_failed() {
             vec![event(
                 i as u64,
                 Some("lint"),
-                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-                    outcome: "clean".to_string(),
-                    tokens_used: Default::default(),
-                })),
+                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                    "clean".to_string(),
+                    Default::default(),
+                ))),
             )]
         })
         .collect();
@@ -455,10 +455,10 @@ fn an_invariant_node_is_never_the_subject_of_a_remove_shaped_finding() {
             vec![event(
                 i as u64,
                 Some("lint"),
-                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-                    outcome: "clean".to_string(),
-                    tokens_used: Default::default(),
-                })),
+                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                    "clean".to_string(),
+                    Default::default(),
+                ))),
             )]
         })
         .collect();
