@@ -49,6 +49,22 @@ pub struct SessionSetup {
     /// A task session writes the loop node's own artifacts, so it is
     /// told the same directory the node closes on.
     pub artifact_dir: Option<PathBuf>,
+    /// What makes this node's run tools mandatory rather than an offer:
+    /// a `coordination: blackboard` group whose semantics the engine
+    /// never emulates, or an interpreted artifact that has no other way
+    /// in. A listener that fails to bind for such a node fails the node;
+    /// for any other node it degrades and the session runs on.
+    pub run_tools_required: Option<RunToolsNeed>,
+}
+
+/// Why a node cannot proceed without the run tools.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunToolsNeed {
+    /// The node is in a `coordination: blackboard` group.
+    Blackboard,
+    /// The node declares an interpreted artifact a session hands over
+    /// through the tools.
+    TypedArtifact(yunta_core::ArtifactKind),
 }
 
 impl SessionSetup {
@@ -65,6 +81,7 @@ impl SessionSetup {
             node,
             chosen,
             artifact_dir: None,
+            run_tools_required: None,
         }
     }
 

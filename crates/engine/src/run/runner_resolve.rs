@@ -96,7 +96,7 @@ pub(super) async fn resolve_node_runner(
 /// A blackboard group's session that cannot reach the per-run MCP
 /// endpoint — the node fails with it, never emulates.
 #[derive(Debug, thiserror::Error)]
-pub(super) enum RunToolsSetupError {
+pub enum RunToolsSetupError {
     #[error(
         "node `{node}` is in a `coordination: blackboard` group but adapter `{adapter}` declares \
          no `run_tools` capability — the blackboard cannot be mounted; pick a runner on an \
@@ -138,19 +138,12 @@ pub(super) enum RunToolsSetupError {
     },
 }
 
-/// What [`open_run_tools`] resolved. `session` is the listener when one
-/// opened; `degraded` carries the fallback to record when the session
-/// proceeds without run tools — the caller emits that
-/// `capability_degraded` on the run's log, since this function has no
-/// fallible emit of its own.
-pub(super) struct RunToolsResolution {
-    pub session: Option<crate::run_tools::RunToolsSession>,
-    pub degraded: Option<yunta_core::events::Policy>,
-}
-
 /// The first interpreted artifact this node declares, if any: the one a
 /// refusal names, so a reader has somewhere to look.
-fn declared_typed_artifact(ctx: &RunCtx<'_>, node: &Node) -> Option<yunta_core::ArtifactKind> {
+pub(crate) fn declared_typed_artifact(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+) -> Option<yunta_core::ArtifactKind> {
     crate::run::node_exec::declared_artifacts(ctx, node)
         .into_iter()
         .find_map(|spec| spec.kind())
@@ -168,7 +161,7 @@ fn declared_typed_artifact(ctx: &RunCtx<'_>, node: &Node) -> Option<yunta_core::
 /// Asked once per node, and answered without binding anything: a
 /// listener belongs to a session, and a node that opens many owns none
 /// of them itself.
-pub(super) fn run_tools_allowed(
+pub(crate) fn run_tools_allowed(
     ctx: &RunCtx<'_>,
     node: &Node,
     adapter: &dyn yunta_core::port::Adapter,
@@ -196,68 +189,6 @@ pub(super) fn run_tools_allowed(
         });
     }
     Ok(false)
-}
-
-/// Opens this session attempt's per-run MCP listener, or decides
-/// it must not exist. A resolution with no session and no degradation —
-/// no `run_tools` capability outside a blackboard group — is the resting
-/// state. A resolution carrying `degraded` is the recorded fallback: the
-/// listener could not bind but the node can proceed without it.
-/// `Err(diagnostic)` is the fatal case: the node's group declared
-/// `coordination: blackboard` and this session cannot carry it
-/// (capability missing, or the listener failed to bind) — the caller
-/// fails the node with it, never emulates.
-pub(super) async fn open_run_tools(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    adapter: &dyn yunta_core::port::Adapter,
-    adapter_id: &AdapterId,
-    task: Option<&yunta_core::TaskId>,
-) -> Result<RunToolsResolution, RunToolsSetupError> {
-    let host = &ctx.run_tools_host;
-    let needs_blackboard = host.is_blackboard_member(&node.id);
-    let typed = declared_typed_artifact(ctx, node);
-    if !run_tools_allowed(ctx, node, adapter, adapter_id)? {
-        return Ok(RunToolsResolution {
-            session: None,
-            degraded: None,
-        });
-    }
-    match crate::run_tools::open_session_listener(
-        crate::run_tools::RunToolsAccess {
-            host: host.clone(),
-            node: node.id.clone(),
-            declared: crate::run::node_exec::declared_artifacts(ctx, node),
-        },
-        task.cloned(),
-        ctx.worktree.to_path_buf(),
-    )
-    .await
-    {
-        Ok(session) => Ok(RunToolsResolution {
-            session: Some(session),
-            degraded: None,
-        }),
-        Err(e) => {
-            if needs_blackboard {
-                return Err(RunToolsSetupError::ListenerFailed {
-                    node: node.id.clone(),
-                    source: e,
-                });
-            }
-            if let Some(kind) = typed {
-                return Err(RunToolsSetupError::TypedArtifactListenerFailed {
-                    node: node.id.clone(),
-                    kind,
-                    source: e,
-                });
-            }
-            Ok(RunToolsResolution {
-                session: None,
-                degraded: Some(yunta_core::events::Policy::NoRunTools),
-            })
-        }
-    }
 }
 
 /// Records that a node's `network: false` is declarative only when the

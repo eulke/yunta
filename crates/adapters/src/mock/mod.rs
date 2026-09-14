@@ -71,6 +71,10 @@ pub struct MockAdapter {
     /// which sessions were granted the run's artifact directory without
     /// a real CLI.
     artifact_dirs_seen: Mutex<Vec<Option<std::path::PathBuf>>>,
+    /// Every request a session was opened with, in claim order — the
+    /// whole contract, for a test that asserts two sessions were opened
+    /// by the same door rather than field by field.
+    requests_seen: Mutex<Vec<SessionRequest>>,
     /// The next session id's number: every adapter counts from one, so
     /// a fixture's ids never depend on what else ran in the process.
     next_session: AtomicU64,
@@ -88,6 +92,7 @@ impl MockAdapter {
             resumes_seen: Mutex::new(Vec::new()),
             endpoints_seen: Mutex::new(Vec::new()),
             artifact_dirs_seen: Mutex::new(Vec::new()),
+            requests_seen: Mutex::new(Vec::new()),
             next_session: AtomicU64::new(1),
         }
     }
@@ -134,6 +139,11 @@ impl MockAdapter {
     /// directory and which never needed it.
     pub fn artifact_dirs_seen(&self) -> Vec<Option<std::path::PathBuf>> {
         read(&self.artifact_dirs_seen)
+    }
+
+    /// The whole request of every session opened so far, in claim order.
+    pub fn requests_seen(&self) -> Vec<SessionRequest> {
+        read(&self.requests_seen)
     }
 
     /// One adapter from a fixture that names no run directory — every
@@ -264,6 +274,7 @@ impl MockAdapter {
         record(&self.artifact_dirs_seen, req.artifact_dir.clone());
         record(&self.agents_seen, req.agent.clone());
         record(&self.models_seen, req.model.clone());
+        record(&self.requests_seen, req.clone());
     }
 
     /// The index of the script this request claims, marked consumed so no

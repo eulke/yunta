@@ -23,7 +23,7 @@ use super::{RunCtx, RunError};
 use yunta_core::events::NodeEvent;
 
 /// How the node's execution ended, as recorded in the log by the caller.
-pub(super) enum NodeEnd {
+pub(crate) enum NodeEnd {
     Finished,
     Failed,
     /// The run's root cancellation cut this node mid-flight — no

@@ -27,7 +27,7 @@ use attempt::{run_one_attempt, AttemptParams, AttemptStep};
 
 pub use criteria::{post_check, pre_check, Memo};
 pub(crate) use session::dispatch_session;
-pub use session::{DispatchError, SessionObserver, SessionSetup};
+pub use session::{DispatchError, RunToolsNeed, SessionObserver, SessionSetup};
 
 #[derive(Debug, Error)]
 pub enum TaskCycleError {
@@ -49,6 +49,12 @@ pub enum TaskCycleError {
         task: TaskId,
         #[source]
         source: StorageError,
+    },
+    #[error("task `{task}`'s session could not hold the run tools its node needs")]
+    RunTools {
+        task: TaskId,
+        #[source]
+        source: crate::run::runner_resolve::RunToolsSetupError,
     },
     #[error(transparent)]
     ScopeCheck(#[from] ScopeCheckError),
@@ -209,6 +215,10 @@ pub struct ScopeGovernance<'a> {
 /// watching and how it stops).
 pub struct AttemptEnv<'a> {
     pub adapter: &'a dyn Adapter,
+    /// The loop node these task sessions belong to. A task session is
+    /// the node's session: it runs on the node's runner and writes the
+    /// node's declared files.
+    pub node: &'a yunta_core::Node,
     pub cwd: &'a Path,
     pub max_retries: u32,
     pub budget: Budget,
@@ -245,6 +255,7 @@ pub async fn run_task(
     let mut last_staged: Vec<PathBuf> = Vec::new();
     let AttemptEnv {
         adapter,
+        node,
         cwd,
         max_retries,
         budget,
@@ -324,6 +335,7 @@ pub async fn run_task(
         task,
         instruction,
         adapter,
+        node,
         cwd,
         budget,
         memo,

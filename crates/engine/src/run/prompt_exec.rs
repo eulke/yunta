@@ -4,15 +4,14 @@
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::EventPayload;
 use yunta_core::events::OrphanedSession;
-use yunta_core::port::SessionRequest;
 use yunta_core::{Node, PromptSource};
 
 use crate::run_dir::Opening;
 use crate::task_cycle::{dispatch_session, DispatchOutcome};
 
-use super::node_close::{close_node, fail, fail_with_tokens, Close};
+use super::node_close::{close_node, fail_with_tokens, Close};
 use super::node_exec::{cancelled_end, open_staging, render_or_fail, session_profile, NodeEnd};
-use super::runner_resolve::{open_run_tools, report_declarative_network, resolve_node_runner};
+use super::runner_resolve::{report_declarative_network, resolve_node_runner};
 use super::step::Step;
 use super::{RunCtx, RunError};
 use yunta_core::events::SessionEvent;
@@ -130,86 +129,37 @@ pub(super) async fn execute_prompt(
 
     let adapter = &ctx.adapters[&chosen.adapter];
     report_declarative_network(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
-    // Names resolved by the engine; mounting is the adapter's —
-    // and an adapter without the capability degrades with an event,
-    // never a fatal error (a skill is instruction, not correctness).
-    let skills = match crate::skills::resolve_skills(
-        &ctx.manifest.config,
-        &ctx.manifest.workflow,
-        node,
-        ctx.worktree,
-    ) {
-        Ok(skills) => skills,
-        Err(error) => return fail(ctx, node, error.to_string(), false).await,
+    let setup = match super::session_plan::resolve_setup(ctx, node, &chosen).await? {
+        Ok(setup) => setup,
+        Err(end) => return Ok(end),
     };
-    let skills = if !skills.is_empty()
-        && !adapter
-            .capabilities()
-            .declares(yunta_core::Capability::Skills)
+    let super::session_plan::OpenedSession {
+        request,
+        run_tools: _run_tools,
+    } = match super::session_plan::open_session(
+        &setup,
+        super::session_plan::SessionPlan {
+            node,
+            task: None,
+            prompt: rendered,
+            cwd: ctx.worktree.to_path_buf(),
+            profile: session_profile(node),
+            budget: ctx.session_budget().await?,
+        },
+        adapter.as_ref(),
+        Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
+    )
+    .await
     {
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::Session(SessionEvent::CapabilityDegraded(
-                yunta_core::events::CapabilityDegradedPayload::new(
-                    yunta_core::Capability::Skills,
-                    chosen.adapter.clone(),
-                    yunta_core::events::Policy::NoSkills,
-                ),
-            )),
-        )
-        .await?;
-        Vec::new()
-    } else {
-        skills
-    };
-    // A fresh listener + credential for THIS session attempt
-    // when the adapter can be a client of it; `None` without the
-    // capability is the resting state, not degradation — unless the
-    // node sits in a `coordination: blackboard` group, whose declared
-    // semantics the engine never emulates: that's a node failure.
-    let run_tools = match open_run_tools(ctx, node, adapter.as_ref(), &chosen.adapter, None).await {
-        Ok(resolution) => {
-            if let Some(policy) = resolution.degraded {
-                ctx.emit(
-                    Some(&node.id),
-                    EventPayload::Session(SessionEvent::CapabilityDegraded(
-                        yunta_core::events::CapabilityDegradedPayload::new(
-                            yunta_core::Capability::RunTools,
-                            chosen.adapter.clone(),
-                            policy,
-                        ),
-                    )),
-                )
-                .await?;
-            }
-            resolution.session
+        Ok(opened) => opened,
+        // A node that cannot proceed without the run tools it declared:
+        // refused before a token is spent, naming what has no way in.
+        Err(super::session_plan::OpenSessionError::RunTools(error)) => {
+            return super::node_close::fail(ctx, node, error.to_string(), false).await
         }
-        Err(error) => return fail(ctx, node, error.to_string(), false).await,
-    };
-    // The tool sentence is produced by the mount, so a session is never
-    // told to call something this adapter did not give it.
-    let mut rendered = rendered;
-    if let Some(notice) = crate::run_tools::submission_notice(
-        run_tools.as_ref(),
-        &super::node_exec::declared_artifacts(ctx, node),
-        super::node_exec::artifact_dir(ctx, node).as_deref(),
-    ) {
-        rendered.push_str(&notice);
-    }
-    let request = SessionRequest {
-        prompt: rendered,
-        cwd: ctx.worktree.to_path_buf(),
-        model: Some(chosen.model),
-        agent: chosen.agent,
-        permissions: session_profile(node),
-        env: crate::task_cycle::SessionSetup::secrets_env(&ctx.manifest.config),
-        edit_constraints: (!node.scope.is_empty()).then(|| node.scope.clone()),
-        budget: ctx.session_budget().await?,
-        adapter_settings: ctx.adapter_settings(&chosen.adapter),
-        skills,
-        run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
-        artifact_dir: super::node_exec::artifact_dir(ctx, node),
-        scratch_dir: Some(crate::session_dir::SessionSlot::Node(&node.id).scratch_dir(ctx.run_dir)),
+        Err(super::session_plan::OpenSessionError::Audit(source)) => {
+            return Err(RunError::Storage(source))
+        }
     };
 
     let resume_session = resume_target(ctx, node, adapter.as_ref(), &chosen.adapter).await?;

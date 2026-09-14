@@ -19,7 +19,7 @@ use crate::replay::RunState;
 use super::node_close::{close_node, fail, fail_with_tokens, Close};
 use super::node_exec::{render_or_fail, NodeEnd};
 use super::prompt_exec::prompt_text;
-use super::runner_resolve::{report_declarative_network, resolve_node_runner, run_tools_allowed};
+use super::runner_resolve::{report_declarative_network, resolve_node_runner};
 use super::step::Step;
 use super::{RunCtx, RunError};
 use dispatch::{dispatch_task_in_isolation, BatchDispatchEnv};
@@ -27,7 +27,7 @@ use escalate::{resolve_escalations, PendingEscalation};
 use integrate::integrate_batch;
 
 use crate::worktree::head_commit;
-use yunta_core::events::{ChildEvent, ScopeEvent, SessionEvent};
+use yunta_core::events::{ChildEvent, ScopeEvent};
 
 pub(super) async fn execute_loop(
     ctx: &RunCtx<'_>,
@@ -247,76 +247,14 @@ async fn prepare_loop<'a>(
         Step::Ended(end) => return Ok(LoopReady::Ended(end)),
     };
     let adapter = ctx.adapters[&chosen.adapter].clone();
-    // Once for the whole loop, like skills below: the network policy is the
-    // node's, not the task's, so its declarative-only degradation is recorded
-    // here rather than per task session.
+    // Once for the whole loop: the network policy is the node's, not the
+    // task's, so its declarative-only degradation is recorded here rather
+    // than per task session.
     report_declarative_network(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
 
-    // One resolution for the whole loop — every task session mounts the same
-    // skills, and a missing name fails the node before any token is spent.
-    let skills = match crate::skills::resolve_skills(
-        &ctx.manifest.config,
-        &ctx.manifest.workflow,
-        node,
-        ctx.worktree,
-    ) {
-        Ok(skills) => skills,
-        Err(error) => {
-            return Ok(LoopReady::Ended(
-                fail(ctx, node, error.to_string(), false).await?,
-            ))
-        }
-    };
-    let skills = if !skills.is_empty()
-        && !adapter
-            .capabilities()
-            .declares(yunta_core::Capability::Skills)
-    {
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::Session(SessionEvent::CapabilityDegraded(
-                yunta_core::events::CapabilityDegradedPayload::new(
-                    yunta_core::Capability::Skills,
-                    chosen.adapter.clone(),
-                    yunta_core::events::Policy::NoSkills,
-                ),
-            )),
-        )
-        .await?;
-        Vec::new()
-    } else {
-        skills
-    };
-    // The same gate a prompt session passes, so a loop node whose
-    // declared document has no way in — an interpreted artifact, or a
-    // `coordination: blackboard` group, on an adapter that cannot be a
-    // client of the per-run endpoint — is refused before any task
-    // session opens. Each attempt opens its own listener from this
-    // access, and a bind that fails is that attempt's own degradation.
-    let run_tools = match run_tools_allowed(ctx, node, adapter.as_ref(), &chosen.adapter) {
-        Ok(true) => Some(crate::run_tools::RunToolsAccess {
-            host: ctx.run_tools_host.clone(),
-            node: node.id.clone(),
-            // A task session writes into the loop node's own declared
-            // artifacts, so it gets to check them: the file it writes is
-            // the file that node closes on.
-            declared: super::node_exec::declared_artifacts(ctx, node),
-        }),
-        Ok(false) => None,
-        Err(error) => {
-            let end = fail(ctx, node, error.to_string(), false).await?;
-            return Ok(LoopReady::Ended(end));
-        }
-    };
-    let setup = crate::task_cycle::SessionSetup {
-        skills,
-        adapter_settings: ctx.adapter_settings(&chosen.adapter),
-        env: crate::task_cycle::SessionSetup::secrets_env(&ctx.manifest.config),
-        run_tools,
-        run_dir: ctx.run_dir.to_path_buf(),
-        node: node.id.clone(),
-        artifact_dir: super::node_exec::artifact_dir(ctx, node),
-        chosen: chosen.clone(),
+    let setup = match super::session_plan::resolve_setup(ctx, node, &chosen).await? {
+        Ok(setup) => setup,
+        Err(end) => return Ok(LoopReady::Ended(end)),
     };
 
     let view = ctx.run_view().await?;

@@ -4,9 +4,8 @@
 use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{CapabilityDegradedPayload, EventPayload, TokenUsage};
-use yunta_core::port::{Adapter, Budget, PermissionProfile, SessionRequest};
-use yunta_core::Capability;
+use yunta_core::events::TokenUsage;
+use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::Task;
 
 use super::criteria::{post_check, Memo};
@@ -14,7 +13,6 @@ use super::session::{dispatch_session, DispatchError, SessionObserver, SessionSe
 use super::{AttemptRecord, DispatchOutcome, TaskCycleError, TaskOutcome};
 use crate::process::Supervision;
 use crate::scope::scope_check;
-use yunta_core::events::SessionEvent;
 
 /// Everything one attempt of [`run_task`] reads: the per-cycle context that
 /// never changes between attempts, so an attempt takes just this and its
@@ -23,6 +21,7 @@ pub(super) struct AttemptParams<'a> {
     pub(super) task: &'a Task,
     pub(super) instruction: &'a str,
     pub(super) adapter: &'a dyn Adapter,
+    pub(super) node: &'a yunta_core::Node,
     pub(super) cwd: &'a Path,
     pub(super) budget: Budget,
     pub(super) memo: &'a Memo,
@@ -204,6 +203,7 @@ async fn open_and_dispatch(
         task,
         instruction,
         adapter,
+        node,
         cwd,
         budget,
         profile,
@@ -212,87 +212,36 @@ async fn open_and_dispatch(
         setup,
         ..
     } = params;
-    // A fresh listener + credential per attempt — held across the dispatch,
-    // dead with it. A bind failure degrades (the session runs without run
-    // tools) rather than sinking the attempt: the tools are an offer, the
-    // task's own criteria are the contract.
-    let run_tools = match &setup.run_tools {
-        Some(access) => match crate::run_tools::open_session_listener(
-            access.clone(),
-            Some(task.id.clone()),
-            cwd.to_path_buf(),
-        )
-        .await
-        {
-            Ok(session) => Some(session),
-            Err(_) => {
-                // Recorded, not warned: the attempt runs without run
-                // tools, and the log says so.
-                if let Some((observer, obs_node)) = audit {
-                    observer
-                        .emit_session_event(
-                            obs_node,
-                            EventPayload::Session(SessionEvent::CapabilityDegraded(
-                                CapabilityDegradedPayload::new(
-                                    Capability::RunTools,
-                                    adapter.id().clone(),
-                                    yunta_core::events::Policy::NoRunTools,
-                                ),
-                            )),
-                        )
-                        .await
-                        .map_err(|source| TaskCycleError::Audit {
-                            task: task.id.clone(),
-                            source,
-                        })?;
-                }
-                None
-            }
+    // One door for every session: the per-attempt listener (its bind
+    // failure degrades to no tools, recorded, never fatal), the brief,
+    // and the request itself.
+    let crate::run::session_plan::OpenedSession {
+        request,
+        run_tools: _run_tools,
+    } = crate::run::session_plan::open_session(
+        setup,
+        crate::run::session_plan::SessionPlan {
+            node,
+            task: Some(task),
+            prompt: crate::run::session_plan::task_brief(instruction, task),
+            cwd: cwd.to_path_buf(),
+            profile,
+            budget,
         },
-        None => None,
-    };
-    // Minimal brief — the node's instruction plus which task is this
-    // session's, never the plan as prose. Every attempt is a fresh session
-    // with the same request.
-    let mut prompt = format!(
-        "{instruction}\n\nYour task: `{}` — {}. Stay within its declared scope.",
-        task.id, task.title
-    );
-    // The node's own declared artifacts are this session's to hand over:
-    // the file a `loop` node closes on is written from what its task
-    // sessions submit and report.
-    if let Some(notice) = crate::run_tools::submission_notice(
-        run_tools.as_ref(),
-        setup
-            .run_tools
-            .as_ref()
-            .map(|access| access.declared.as_slice())
-            .unwrap_or_default(),
-        None,
-    ) {
-        prompt.push_str(&notice);
-    }
-    let request = SessionRequest {
-        prompt,
-        cwd: cwd.to_path_buf(),
-        model: Some(setup.chosen.model.clone()),
-        agent: setup.chosen.agent.clone(),
-        permissions: profile,
-        env: setup.env.clone(),
-        edit_constraints: Some(task.scope.clone()),
-        budget,
-        adapter_settings: setup.adapter_settings.clone(),
-        skills: setup.skills.clone(),
-        run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
-        // The file this node closes on is written from what its task
-        // sessions hand over, so a session that has one to write is
-        // told where it belongs.
-        artifact_dir: setup.artifact_dir.clone(),
-        scratch_dir: Some(
-            crate::session_dir::SessionSlot::Task(&setup.node, &task.id)
-                .scratch_dir(&setup.run_dir),
-        ),
-    };
+        adapter,
+        audit,
+    )
+    .await
+    .map_err(|error| match error {
+        crate::run::session_plan::OpenSessionError::Audit(source) => TaskCycleError::Audit {
+            task: task.id.clone(),
+            source,
+        },
+        crate::run::session_plan::OpenSessionError::RunTools(source) => TaskCycleError::RunTools {
+            task: task.id.clone(),
+            source,
+        },
+    })?;
     let last_staged = adapter.staged_paths(&request);
     let (dispatch_outcome, tokens) = dispatch_session(adapter, request, cancel, audit, None)
         .await

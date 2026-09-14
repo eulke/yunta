@@ -1227,3 +1227,117 @@ sessions:
         b"the plan\n"
     );
 }
+
+/// A prompt node's session and a loop node's task session are opened by
+/// the same door, so neither can quietly get a different contract.
+///
+/// They differ in exactly three things, all of them the session's own:
+/// what it is asked to do, where it works, and where it may scaffold.
+/// Everything else — the model, the agent, the permissions, the skills,
+/// the secrets, the budget, the adapter settings, the tools endpoint's
+/// presence, the artifact directory — comes from the node, and the two
+/// nodes here declare the same runner.
+#[tokio::test]
+async fn a_prompt_session_and_a_task_session_are_opened_by_the_same_door() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: one-door
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Write the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#;
+    let tasks = format!(
+        "tasks:\n{}",
+        task_yaml("task-1", "t1", "a1.txt", "test -f a1.txt")
+    );
+    let mut fixture = plan_session(&tasks);
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
+    );
+
+    let (terminal, _) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "the run reaches its end");
+
+    let requests = bench.mock().requests_seen();
+    assert_eq!(requests.len(), 2, "one prompt session, one task session");
+    let (prompt, task) = (&requests[0], &requests[1]);
+
+    assert_eq!(prompt.model, task.model, "the same runner, the same model");
+    assert_eq!(prompt.agent, task.agent);
+    assert_eq!(prompt.permissions, task.permissions);
+    assert_eq!(prompt.skills, task.skills);
+    assert_eq!(
+        prompt.env.keys().collect::<Vec<_>>(),
+        task.env.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(prompt.budget, task.budget);
+    assert_eq!(prompt.adapter_settings, task.adapter_settings);
+    assert_eq!(
+        prompt.run_tools_endpoint.is_some(),
+        task.run_tools_endpoint.is_some(),
+        "both sessions hold the run's tools, or neither does"
+    );
+
+    // And the three that are the session's own.
+    assert_ne!(prompt.prompt, task.prompt);
+    assert_ne!(prompt.cwd, task.cwd, "a task works in its own worktree");
+    assert_ne!(
+        prompt.scratch_dir, task.scratch_dir,
+        "concurrent sessions never scaffold over each other"
+    );
+}
+
+/// What a tasks document noted about a task reaches the session that
+/// implements it. `notes` is context for a runner with no history of
+/// this repo; a brief that left it out asked the session to work
+/// without the one thing the document wrote down for it.
+#[tokio::test]
+async fn a_task_brief_carries_the_notes_its_document_wrote() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: noted
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Implement your task."
+"#;
+    let tasks = "tasks:\n  - id: task-1\n    title: \"Write a1\"\n    notes: \"the parser lives in src/lex.rs\"\n    scope: [\"a1.txt\"]\n    criteria:\n      - cmd: \"test -f a1.txt\"\n";
+    let mut fixture = plan_session(tasks);
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
+    );
+
+    let (terminal, _) = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let brief = bench
+        .mock()
+        .requests_seen()
+        .into_iter()
+        .map(|request| request.prompt)
+        .find(|prompt| prompt.contains("task-1"))
+        .expect("the task session's brief");
+    assert!(
+        brief.contains("the parser lives in src/lex.rs"),
+        "the brief carries what the document noted: {brief}"
+    );
+}

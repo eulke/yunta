@@ -21,6 +21,13 @@ fn bare_setup() -> yunta_engine::SessionSetup {
     )
 }
 
+/// The node those task sessions belong to: a `loop` node named `build`,
+/// declaring nothing of its own.
+fn build_node() -> yunta_core::Node {
+    serde_norway::from_str("{ id: build, kind: bash, run: \"true\" }")
+        .expect("the node the setup names")
+}
+
 fn cmd(cmd: &str) -> Criterion {
     Criterion {
         cmd: cmd.to_string(),
@@ -72,6 +79,7 @@ outcome: { type: completed, summary: "wrote it" }
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
             cwd: dir.path(),
             max_retries: 2,
@@ -127,6 +135,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
             cwd: dir.path(),
             max_retries: 0,
@@ -168,6 +177,7 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
             cwd: dir.path(),
             max_retries: 2,
@@ -221,6 +231,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
             cwd: dir.path(),
             max_retries: 2,
@@ -283,6 +294,7 @@ outcome: { type: completed, summary: "done" }
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
             cwd: dir.path(),
             max_retries: 0,
@@ -340,6 +352,7 @@ sessions:
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
             cwd: dir.path(),
             max_retries: 2,
@@ -393,6 +406,7 @@ sessions:
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
             cwd: dir.path(),
             max_retries: 2,
@@ -443,6 +457,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
             cwd: dir.path(),
             max_retries: 0,
@@ -584,6 +599,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
             &t,
             "Implement your task.",
             AttemptEnv {
+                node: &build_node(),
                 adapter: &adapter,
                 cwd: dir.path(),
                 max_retries: 0,
@@ -647,6 +663,7 @@ outcome: { type: completed, summary: "should never be reached" }
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
             cwd: dir.path(),
             max_retries: 0,
@@ -836,6 +853,7 @@ outcome: { type: completed, summary: "wrote it" }
         &t,
         "Implement your task.",
         AttemptEnv {
+            node: &build_node(),
             adapter: &adapter,
             cwd: dir.path(),
             max_retries: 2,

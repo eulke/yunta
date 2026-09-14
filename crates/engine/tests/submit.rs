@@ -846,3 +846,47 @@ sessions:
         "the cause is recorded while the session runs, not after it ends"
     );
 }
+
+/// A loop node's declared document has no way in on an adapter that
+/// cannot be a client of the run's tools, and the refusal lands before
+/// the first task session — not after four of them produced nothing.
+///
+/// The gate used to guard prompt nodes only, so the same workflow shape
+/// with `kind: loop` spent a session per task and failed at the close.
+#[tokio::test]
+async fn a_loop_task_on_a_run_tools_less_adapter_is_refused_before_any_session() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: loop-owes-a-document
+nodes:
+  - id: implement
+    kind: loop
+    runner: executor
+    until: all_tasks_complete
+    prompt: "Implement your task."
+    artifacts:
+      produces: [findings]
+"#;
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "never reached" }
+"#;
+    let (terminal, state) = bench.run(workflow, fixture).await;
+    assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
+
+    match state.nodes.state("implement") {
+        Some(NodeState::Failed { failure, .. }) => {
+            let text = failure.to_string();
+            assert!(
+                text.contains("run_tools") && text.contains("findings"),
+                "the refusal names the capability and the artifact: {text}"
+            );
+        }
+        other => panic!("expected implement failed, got {other:?}"),
+    }
+    assert_eq!(
+        kinds(&bench, "agent_session_opened"),
+        0,
+        "not one token is spent on a node that cannot hand over what it owes"
+    );
+}

@@ -115,6 +115,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         instruction,
         AttemptEnv {
             adapter,
+            node,
             cwd: &task_worktree,
             max_retries: ctx.max_task_retries,
             budget: ctx.session_budget().await?,
