@@ -15,6 +15,7 @@ use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
+use yunta_core::events::{GateEvent, NodeEvent};
 
 #[tokio::test]
 async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_closed() {
@@ -52,7 +53,9 @@ async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_close
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::NodeFinished(_))
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::Finished(
+                _
+            )))
         )),
         "a node with unanswered questions must never reach node_finished"
     );
@@ -176,7 +179,9 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
     let answered = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::QuestionsAnswered(p)) => Some(p),
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::QuestionsAnswered(p))) => {
+                Some(p)
+            }
             _ => None,
         })
         .expect("questions_answered must be on the log");
@@ -248,7 +253,9 @@ async fn a_reply_missing_a_required_answer_pauses_citing_the_question() {
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::QuestionsAnswered(_))
+            Some(yunta_core::events::EventPayload::Gates(
+                GateEvent::QuestionsAnswered(_)
+            ))
         )),
         "an invalid reply must never be recorded as answered"
     );

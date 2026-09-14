@@ -20,6 +20,7 @@ use super::parallel_exec::execute_parallel;
 use super::prompt_exec::execute_prompt;
 use super::step::Step;
 use super::{RunCtx, RunError};
+use yunta_core::events::NodeEvent;
 
 /// How the node's execution ended, as recorded in the log by the caller.
 pub(super) enum NodeEnd {
@@ -78,7 +79,9 @@ pub(super) async fn execute_node(
 ) -> Result<NodeEnd, RunError> {
     ctx.emit(
         Some(&node.id),
-        EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload { attempt }),
+        EventPayload::Node(NodeEvent::Started(yunta_core::events::NodeStartedPayload {
+            attempt,
+        })),
     )
     .await?;
 

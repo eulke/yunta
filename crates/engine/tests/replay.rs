@@ -4,6 +4,7 @@ use yunta_core::events::{
     NodeFinishedPayload, NodeStartedPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload,
     TokenUsage, UnknownEvent,
 };
+use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RunEvent, TaskEvent};
 use yunta_core::events::{RunPausedPayload, TaskRegisteredPayload};
 use yunta_core::Seq;
 use yunta_engine::{dedup_findings, derive, NodeState};
@@ -43,15 +44,15 @@ fn a_node_that_finishes_cleanly_derives_finished_with_its_tokens() {
         event(
             1,
             Some("lint"),
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
         ),
         event(
             2,
             Some("lint"),
-            EventPayload::NodeFinished(NodeFinishedPayload {
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
                 outcome: "criteria green".to_string(),
                 tokens_used: tokens(10, 5),
-            }),
+            })),
         ),
     ];
 
@@ -73,29 +74,29 @@ fn a_retryable_failure_can_restart_and_then_finish() {
         event(
             1,
             Some("lint"),
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
         ),
         event(
             2,
             Some("lint"),
-            EventPayload::NodeFailed(NodeFailedPayload::new(
+            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 Failure::message("criteria red".to_string()),
                 true,
                 tokens(5, 2),
-            )),
+            ))),
         ),
         event(
             3,
             Some("lint"),
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 2 }),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 2 })),
         ),
         event(
             4,
             Some("lint"),
-            EventPayload::NodeFinished(NodeFinishedPayload {
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
                 outcome: "criteria green".to_string(),
                 tokens_used: tokens(3, 1),
-            }),
+            })),
         ),
     ];
 
@@ -117,10 +118,10 @@ fn node_finished_without_a_prior_node_started_is_broken() {
     let events = vec![event(
         1,
         Some("lint"),
-        EventPayload::NodeFinished(NodeFinishedPayload {
+        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
             outcome: "criteria green".to_string(),
             tokens_used: tokens(1, 1),
-        }),
+        })),
     )];
 
     let state = derive(&events);
@@ -140,12 +141,12 @@ fn a_second_node_started_is_a_restart_not_a_broken_log() {
         event(
             1,
             Some("lint"),
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
         ),
         event(
             2,
             Some("lint"),
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 2 }),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 2 })),
         ),
     ];
 
@@ -162,12 +163,12 @@ fn task_status_changed_without_task_registered_is_broken() {
     let events = vec![event(
         1,
         Some("implement"),
-        EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
             task_id: "graph-cmd".into(),
             new_status: TaskStatus::Done,
             caused_by: 1.into(),
             commit: None,
-        }),
+        })),
     )];
 
     let state = derive(&events);
@@ -180,32 +181,32 @@ fn task_lifecycle_derives_its_latest_status() {
         event(
             1,
             Some("implement"),
-            EventPayload::TaskRegistered(TaskRegisteredPayload {
+            EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
                 task_id: "graph-cmd".into(),
                 criteria: vec![],
                 scope: vec!["crates/cli/**".to_string()],
                 depends_on: vec![],
-            }),
+            })),
         ),
         event(
             2,
             Some("implement"),
-            EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+            EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
                 task_id: "graph-cmd".into(),
                 new_status: TaskStatus::Running,
                 caused_by: 1.into(),
                 commit: None,
-            }),
+            })),
         ),
         event(
             3,
             Some("implement"),
-            EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+            EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
                 task_id: "graph-cmd".into(),
                 new_status: TaskStatus::Done,
                 caused_by: 2.into(),
                 commit: None,
-            }),
+            })),
         ),
     ];
 
@@ -220,21 +221,21 @@ fn finding_posted_events_accumulate_in_run_state() {
         event(
             1,
             Some("review"),
-            EventPayload::FindingPosted(FindingPostedPayload {
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: finding(
                     "f1",
                     FindingSeverity::Major,
                     "unchecked error",
                     "src/lib.rs:10",
                 ),
-            }),
+            })),
         ),
         event(
             2,
             Some("review"),
-            EventPayload::FindingPosted(FindingPostedPayload {
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: finding("f2", FindingSeverity::Note, "style nit", "src/lib.rs:20"),
-            }),
+            })),
         ),
     ];
 
@@ -281,28 +282,28 @@ fn replay_stops_deriving_further_state_once_broken() {
         event(
             1,
             Some("lint"),
-            EventPayload::NodeFinished(NodeFinishedPayload {
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
                 outcome: "criteria green".to_string(),
                 tokens_used: tokens(1, 1),
-            }),
+            })),
         ),
         // a perfectly valid event that comes after the break point
         event(
             2,
             None,
-            EventPayload::RunPaused(RunPausedPayload {
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload {
                 reason: "irrelevant".to_string(),
-            }),
+            })),
         ),
         event(
             3,
             Some("implement"),
-            EventPayload::TaskRegistered(TaskRegisteredPayload {
+            EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
                 task_id: "graph-cmd".into(),
                 criteria: vec![],
                 scope: vec![],
                 depends_on: vec![],
-            }),
+            })),
         ),
     ];
 
@@ -321,45 +322,45 @@ fn replay_is_deterministic_across_several_fixtures() {
             event(
                 1,
                 Some("a"),
-                EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+                EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
             ),
             event(
                 2,
                 Some("a"),
-                EventPayload::NodeFinished(NodeFinishedPayload {
+                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
                     outcome: "ok".to_string(),
                     tokens_used: tokens(1, 1),
-                }),
+                })),
             ),
         ],
         vec![
             event(
                 1,
                 Some("a"),
-                EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+                EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
             ),
             event(
                 2,
                 Some("a"),
-                EventPayload::NodeFailed(NodeFailedPayload::new(
+                EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                     Failure::message("bad".to_string()),
                     false,
                     tokens(2, 2),
-                )),
+                ))),
             ),
             event(
                 3,
                 Some("b"),
-                EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+                EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
             ),
         ],
         vec![event(
             1,
             Some("a"),
-            EventPayload::NodeFinished(NodeFinishedPayload {
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
                 outcome: "broken from the start".to_string(),
                 tokens_used: tokens(0, 0),
-            }),
+            })),
         )],
     ];
 
@@ -387,16 +388,16 @@ fn an_unknown_kind_is_counted_and_never_breaks_replay() {
         event(
             1,
             Some("lint"),
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
         ),
         unknown,
         event(
             3,
             Some("lint"),
-            EventPayload::NodeFinished(NodeFinishedPayload {
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
                 outcome: "criteria green".to_string(),
                 tokens_used: tokens(10, 5),
-            }),
+            })),
         ),
     ];
 
@@ -424,32 +425,36 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
             event(
                 1,
                 Some("ask"),
-                EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+                EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
             ),
             event(2, Some("ask"), artifact),
             event(
                 3,
                 Some("ask"),
-                EventPayload::NodeFailed(NodeFailedPayload::new(
+                EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                     Failure::message("scope violated: 1 file(s) outside the declared globs"),
                     false,
                     tokens(0, 0),
-                )),
+                ))),
             ),
         ]
     };
-    let old = run(EventPayload::ArtifactWritten(ArtifactWrittenPayload {
-        path: "artifacts/questions.yaml".into(),
-        content_hash: hash.clone(),
-        artifact_kind: Some(yunta_core::ArtifactKind::Questions),
-    }));
-    let new = run(EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
-        artifact: ArtifactId::Interpreted {
-            kind: yunta_core::ArtifactKind::Questions,
+    let old = run(EventPayload::Artifacts(ArtifactEvent::Written(
+        ArtifactWrittenPayload {
+            path: "artifacts/questions.yaml".into(),
+            content_hash: hash.clone(),
+            artifact_kind: Some(yunta_core::ArtifactKind::Questions),
         },
-        content_hash: hash.clone(),
-        origin: ArtifactOrigin::Submitted,
-    }));
+    )));
+    let new = run(EventPayload::Artifacts(ArtifactEvent::Accepted(
+        ArtifactAcceptedPayload {
+            artifact: ArtifactId::Interpreted {
+                kind: yunta_core::ArtifactKind::Questions,
+            },
+            content_hash: hash.clone(),
+            origin: ArtifactOrigin::Submitted,
+        },
+    )));
 
     let (old, new) = (derive(&old), derive(&new));
     assert!(

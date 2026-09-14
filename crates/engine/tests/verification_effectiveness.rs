@@ -7,6 +7,7 @@ use yunta_core::events::{
     CriteriaCheckedPayload, CriterionResult, EventBody, EventPayload, Failure, GateResolvedPayload,
     NodeFailedPayload, NodeReroutedPayload, Phase, StoredEvent,
 };
+use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
 use yunta_core::{Node, NodeKind, OnFailure, Workflow};
 use yunta_engine::{analyze_verification_effectiveness as analyze, VERIFICATION_MIN_SAMPLES};
 
@@ -109,11 +110,11 @@ fn pre_check_run(cmd: &str, exit_code: i32) -> Vec<StoredEvent> {
     vec![event(
         0,
         None,
-        EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+        EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
             task_id: "T001".into(),
             phase: Phase::Pre,
             results: vec![criterion(cmd, exit_code)],
-        }),
+        })),
     )]
 }
 
@@ -169,11 +170,11 @@ fn a_reroute_that_never_fires_across_enough_failures_is_flagged() {
             vec![event(
                 i as u64,
                 Some("lint"),
-                EventPayload::NodeFailed(NodeFailedPayload::new(
+                EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                     Failure::message("lint failed".to_string()),
                     true,
                     Default::default(),
-                )),
+                ))),
             )]
             // no node_rerouted in any of these — the re-route this node
             // declares was never observed firing.
@@ -196,11 +197,11 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
             vec![event(
                 i as u64,
                 Some("lint"),
-                EventPayload::NodeFailed(NodeFailedPayload::new(
+                EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                     Failure::message("lint failed".to_string()),
                     true,
                     Default::default(),
-                )),
+                ))),
             )]
         })
         .collect();
@@ -209,22 +210,22 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
         event(
             100,
             Some("lint"),
-            EventPayload::NodeFailed(NodeFailedPayload::new(
+            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 Failure::message("lint failed".to_string()),
                 true,
                 Default::default(),
-            )),
+            ))),
         ),
         event(
             101,
             Some("lint"),
-            EventPayload::NodeRerouted(NodeReroutedPayload {
+            EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload {
                 to_node: "fix".into(),
                 cause: "lint failed".to_string(),
                 attempt: Some(1),
                 max_reroutes: Some(2),
                 origin: yunta_core::events::RerouteOrigin::OnFailure,
-            }),
+            })),
         ),
     ]);
     let findings = analyze(&wf, &history);
@@ -246,10 +247,10 @@ fn a_node_that_always_finishes_clean_is_flagged_even_though_it_never_failed() {
             vec![event(
                 i as u64,
                 Some("lint"),
-                EventPayload::NodeFinished(NodeFinishedPayload {
+                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
                     outcome: "clean".to_string(),
                     tokens_used: Default::default(),
-                }),
+                })),
             )]
         })
         .collect();
@@ -269,10 +270,10 @@ fn a_gate_always_approved_without_adjustment_is_flagged() {
             vec![event(
                 i as u64,
                 Some("approve"),
-                EventPayload::GateResolved(GateResolvedPayload::Approved {
+                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
                     by: "reviewer".into(),
                     sha: "deadbeef".into(),
-                }),
+                })),
             )]
         })
         .collect();
@@ -289,19 +290,19 @@ fn a_gate_that_ever_needed_adjustment_is_never_flagged() {
             vec![event(
                 i as u64,
                 Some("approve"),
-                EventPayload::GateResolved(GateResolvedPayload::Approved {
+                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
                     by: "reviewer".into(),
                     sha: "deadbeef".into(),
-                }),
+                })),
             )]
         })
         .collect();
     history.push(vec![event(
         200,
         Some("approve"),
-        EventPayload::GateResolved(GateResolvedPayload::ChangesRequested {
+        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::ChangesRequested {
             by: "reviewer".into(),
-        }),
+        })),
     )]);
     let findings = analyze(&wf, &history);
     assert!(findings.always_approved_gates.is_empty());
@@ -317,11 +318,11 @@ fn post_check_run(task_attempts: &[u32]) -> Vec<StoredEvent> {
                 events.push(event(
                     (i as u64) * 10 + a as u64,
                     None,
-                    EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+                    EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
                         task_id: format!("T{i:03}").parse().unwrap(),
                         phase: Phase::Post,
                         results: vec![criterion("test -f done", 0)],
-                    }),
+                    })),
                 ));
             }
             events
@@ -363,7 +364,7 @@ fn run_created_in_mode(mode: &str) -> Vec<StoredEvent> {
     vec![event(
         0,
         None,
-        EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
+        EventPayload::Run(RunEvent::Created(yunta_core::events::RunCreatedPayload {
             manifest_hash: yunta_core::sha256_hex(b"h"),
             inputs: std::collections::BTreeMap::new(),
             mode: mode.into(),
@@ -371,7 +372,7 @@ fn run_created_in_mode(mode: &str) -> Vec<StoredEvent> {
             yunta_schema: None,
             base_branch: "main".to_string(),
             base_commit: "deadbeef".into(),
-        }),
+        })),
     )]
 }
 
@@ -454,10 +455,10 @@ fn an_invariant_node_is_never_the_subject_of_a_remove_shaped_finding() {
             vec![event(
                 i as u64,
                 Some("lint"),
-                EventPayload::NodeFinished(NodeFinishedPayload {
+                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
                     outcome: "clean".to_string(),
                     tokens_used: Default::default(),
-                }),
+                })),
             )]
         })
         .collect();

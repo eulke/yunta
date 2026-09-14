@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use yunta_adapters::MockAdapter;
 use yunta_core::events::EventPayload;
+use yunta_core::events::{FindingEvent, RunEvent, TaskEvent};
 use yunta_core::port::Adapter;
 use yunta_core::{AdapterId, ConfigLayer, ModeName, RunId, Workflow};
 use yunta_engine::{
@@ -204,11 +205,11 @@ async fn run_planted(
                 &yunta_core::events::EventDraft {
                     run_id: run_id.clone(),
                     node_id: None,
-                    payload: EventPayload::FindingPosted(
+                    payload: EventPayload::Findings(FindingEvent::Posted(
                         yunta_core::events::FindingPostedPayload {
                             finding: finding.clone(),
                         },
-                    ),
+                    )),
                 },
                 &yunta_core::SystemClock,
             )
@@ -264,7 +265,7 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
     }
 
     let signaled = events.iter().find_map(|e| match e.payload() {
-        Some(EventPayload::PromotionSignaled(p)) => Some(p),
+        Some(EventPayload::Run(RunEvent::PromotionSignaled(p))) => Some(p),
         _ => None,
     });
     let signaled = signaled.expect("promotion_signaled must be on the parent's own log");
@@ -272,7 +273,7 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
     assert!(!signaled.reason.is_empty());
 
     let finished = events.iter().find_map(|e| match e.payload() {
-        Some(EventPayload::RunFinished(p)) => Some(p),
+        Some(EventPayload::Run(RunEvent::Finished(p))) => Some(p),
         _ => None,
     });
     assert_eq!(
@@ -283,7 +284,10 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
     // Promoting closes the run for good — no further events after
     // run_finished (nothing reopens a finished run).
     let last = events.last().unwrap();
-    assert!(matches!(last.payload(), Some(EventPayload::RunFinished(_))));
+    assert!(matches!(
+        last.payload(),
+        Some(EventPayload::Run(RunEvent::Finished(_)))
+    ));
 
     // The offered options actually included "promote" — proving the
     // escalation added it, not that this test just got lucky with a
@@ -310,9 +314,10 @@ async fn without_a_live_human_interaction_the_run_just_pauses_never_promotes() {
     let (terminal, events) = run_with_mode(PROMOTABLE_WORKFLOW, "quick", &NoInteraction).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e.payload(), Some(EventPayload::PromotionSignaled(_)))),
+        !events.iter().any(|e| matches!(
+            e.payload(),
+            Some(EventPayload::Run(RunEvent::PromotionSignaled(_)))
+        )),
         "no live surface to choose promote from — must never happen on its own"
     );
 }
@@ -414,7 +419,7 @@ async fn a_successor_is_born_naming_every_artifact_it_inherits() {
     assert!(
         matches!(
             events.first().and_then(|e| e.payload()),
-            Some(EventPayload::RunCreated(_))
+            Some(EventPayload::Run(RunEvent::Created(_)))
         ),
         "the successor exists in its log before anything is said about it"
     );
@@ -530,7 +535,9 @@ fn registration_of(events: &[yunta_core::events::StoredEvent], task: &str) -> yu
     events
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::TaskRegistered(p)) if p.task_id.as_str() == task => Some(event.seq),
+            Some(EventPayload::Tasks(TaskEvent::Registered(p))) if p.task_id.as_str() == task => {
+                Some(event.seq)
+            }
             _ => None,
         })
         .unwrap_or_else(|| panic!("no task_registered for `{task}`: {events:?}"))
@@ -608,7 +615,7 @@ async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_d
     let registered: Vec<String> = events
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::TaskRegistered(p)) => Some(p.task_id.to_string()),
+            Some(EventPayload::Tasks(TaskEvent::Registered(p))) => Some(p.task_id.to_string()),
             _ => None,
         })
         .collect();
@@ -621,7 +628,7 @@ async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_d
     let changes: Vec<(String, yunta_core::events::TaskStatus, yunta_core::Seq)> = events
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::TaskStatusChanged(p)) => {
+            Some(EventPayload::Tasks(TaskEvent::StatusChanged(p))) => {
                 Some((p.task_id.to_string(), p.new_status, p.caused_by))
             }
             _ => None,
@@ -754,7 +761,7 @@ fn done_at(
         .iter()
         .rev()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::TaskStatusChanged(p))
+            Some(EventPayload::Tasks(TaskEvent::StatusChanged(p)))
                 if p.task_id.as_str() == task
                     && p.new_status == yunta_core::events::TaskStatus::Done =>
             {
@@ -774,7 +781,7 @@ fn inherited_findings_dedup_the_way_the_frame_counts_them() {
             &run,
             seq,
             node,
-            EventPayload::FindingPosted(FindingPostedPayload { finding }),
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload { finding })),
         )
     };
     // Two reviewers complaining about the same place, spelled apart by

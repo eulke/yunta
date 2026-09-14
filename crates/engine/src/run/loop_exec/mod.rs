@@ -27,6 +27,7 @@ use escalate::{resolve_escalations, PendingEscalation};
 use integrate::integrate_batch;
 
 use crate::worktree::head_commit;
+use yunta_core::events::{ChildEvent, ScopeEvent, SessionEvent};
 
 pub(super) async fn execute_loop(
     ctx: &RunCtx<'_>,
@@ -58,10 +59,10 @@ pub(super) async fn execute_loop(
                 .all(|task| view.state.tasks.get(&task.id) == Some(&TaskStatus::Done));
             ctx.emit(
                 Some(&node.id),
-                EventPayload::LoopIteration(LoopIterationPayload {
+                EventPayload::Children(ChildEvent::LoopIteration(LoopIterationPayload {
                     iteration: state.iteration,
                     until_result: all_done,
-                }),
+                })),
             )
             .await?;
             if all_done {
@@ -269,13 +270,15 @@ async fn prepare_loop<'a>(
     {
         ctx.emit(
             Some(&node.id),
-            EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
-                capability: yunta_core::Capability::Skills,
-                adapter: chosen.adapter.clone(),
-                policy_applied: "skills not mounted — the adapter declares no native \
+            EventPayload::Session(SessionEvent::CapabilityDegraded(
+                yunta_core::events::CapabilityDegradedPayload {
+                    capability: yunta_core::Capability::Skills,
+                    adapter: chosen.adapter.clone(),
+                    policy_applied: "skills not mounted — the adapter declares no native \
                                  mechanism; task sessions run without them"
-                    .to_string(),
-            }),
+                        .to_string(),
+                },
+            )),
         )
         .await?;
         Vec::new()
@@ -401,7 +404,7 @@ fn granted_count(events: &[StoredEvent]) -> u32 {
         .filter(|event| {
             matches!(
                 event.payload(),
-                Some(EventPayload::ScopeExpansionGranted(_))
+                Some(EventPayload::Scope(ScopeEvent::Granted(_)))
             )
         })
         .count() as u32

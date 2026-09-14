@@ -16,6 +16,7 @@ use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
+use yunta_core::events::{ArtifactEvent, NodeEvent, RunEvent};
 
 #[tokio::test]
 async fn the_bootstrap_shape_runs_end_to_end_plan_loop_and_gate() {
@@ -377,7 +378,9 @@ nodes:
         .filter(|e| {
             matches!(
                 e.payload(),
-                Some(yunta_core::events::EventPayload::NodeStarted(_))
+                Some(yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                    _
+                )))
             )
         })
         .count();
@@ -622,11 +625,10 @@ nodes:
     let source = events
         .iter()
         .find_map(|e| match (&e.node_id, e.payload()) {
-            (Some(n), Some(yunta_core::events::EventPayload::ContextAssembled(p)))
-                if n.as_str() == "read" =>
-            {
-                p.sources.iter().find(|s| s.kind == "run-events").cloned()
-            }
+            (
+                Some(n),
+                Some(yunta_core::events::EventPayload::Node(NodeEvent::ContextAssembled(p))),
+            ) if n.as_str() == "read" => p.sources.iter().find(|s| s.kind == "run-events").cloned(),
             _ => None,
         })
         .expect("a run-events context source assembled for `read`");
@@ -854,7 +856,7 @@ async fn a_run_born_holding_artifacts_names_each_one_after_run_created() {
     assert!(
         matches!(
             events.first().and_then(|e| e.payload()),
-            Some(yunta_core::events::EventPayload::RunCreated(_))
+            Some(yunta_core::events::EventPayload::Run(RunEvent::Created(_)))
         ),
         "the run exists in the log before anything is said about it"
     );
@@ -933,7 +935,7 @@ nodes:
     let created = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::RunCreated(p)) => Some(p.clone()),
+            Some(yunta_core::events::EventPayload::Run(RunEvent::Created(p))) => Some(p.clone()),
             _ => None,
         })
         .expect("run_created is the first event");
@@ -1002,7 +1004,7 @@ nodes:
     assert!(
         matches!(
             events.first().and_then(|e| e.payload()),
-            Some(yunta_core::events::EventPayload::RunCreated(_))
+            Some(yunta_core::events::EventPayload::Run(RunEvent::Created(_)))
         ),
         "the run exists in the log before the document it holds is stated"
     );
@@ -1033,7 +1035,7 @@ nodes:
     let created = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::RunCreated(p)) => Some(p.clone()),
+            Some(yunta_core::events::EventPayload::Run(RunEvent::Created(p))) => Some(p.clone()),
             _ => None,
         })
         .expect("run_created is the first event");
@@ -1096,9 +1098,9 @@ nodes:
             &yunta_core::events::EventDraft {
                 run_id: bench.run_id.clone(),
                 node_id: Some("only".into()),
-                payload: yunta_core::events::EventPayload::NodeStarted(
+                payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
                     yunta_core::events::NodeStartedPayload { attempt: 1 },
-                ),
+                )),
             },
             &yunta_core::SystemClock,
         )
@@ -1133,7 +1135,7 @@ nodes:
     let resumed = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::RunResumed(p)) => Some(p.clone()),
+            Some(yunta_core::events::EventPayload::Run(RunEvent::Resumed(p))) => Some(p.clone()),
             _ => None,
         })
         .expect("a second invocation records run_resumed");
@@ -1353,7 +1355,7 @@ async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stu
             &yunta_core::events::EventDraft {
                 run_id: bench.run_id.clone(),
                 node_id: None,
-                payload: yunta_core::events::EventPayload::ArtifactAccepted(
+                payload: yunta_core::events::EventPayload::Artifacts(ArtifactEvent::Accepted(
                     yunta_core::events::ArtifactAcceptedPayload {
                         artifact: yunta_core::events::ArtifactId::Interpreted {
                             kind: yunta_core::ArtifactKind::Tasks,
@@ -1364,7 +1366,7 @@ async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stu
                             producer: None,
                         },
                     },
-                ),
+                )),
             },
             &yunta_core::SystemClock,
         )

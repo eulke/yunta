@@ -25,6 +25,7 @@
 use std::collections::HashMap;
 
 use yunta_core::events::artifacts::ArtifactLedger;
+use yunta_core::events::{ChildEvent, FindingEvent, GateEvent, NodeEvent, TaskEvent};
 use yunta_core::events::{EventPayload, Failure, Finding, StoredEvent, TaskStatus, TokenUsage};
 use yunta_core::{NodeId, Seq, TaskId};
 
@@ -197,7 +198,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
         .apply(event.node_id.as_ref(), event.seq, payload);
 
     match payload {
-        EventPayload::NodeStarted(p) => {
+        EventPayload::Node(NodeEvent::Started(p)) => {
             let node_id = require_node_id(event)?;
             // Any prior state is a legal starting point: a `Failed` node
             // re-runs after its re-route resolves, a `Finished`
@@ -213,7 +214,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
                 .insert(node_id, NodeState::Running { attempt: p.attempt });
             Ok(())
         }
-        EventPayload::NodeFinished(p) => {
+        EventPayload::Node(NodeEvent::Finished(p)) => {
             let node_id = require_node_id(event)?;
             match state.nodes.get(&node_id) {
                 Some(NodeState::Running { .. }) => {
@@ -238,7 +239,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
                 }),
             }
         }
-        EventPayload::NodeFailed(p) => {
+        EventPayload::Node(NodeEvent::Failed(p)) => {
             let node_id = require_node_id(event)?;
             match state.nodes.get(&node_id) {
                 Some(NodeState::Running { .. }) => {
@@ -265,7 +266,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
                 }),
             }
         }
-        EventPayload::GateWaiting(p) => {
+        EventPayload::Gates(GateEvent::Waiting(p)) => {
             // No node = a run-level escalation (the token budget check):
             // it gates the whole invocation, not any node's
             // state, so derivation records nothing for it.
@@ -287,7 +288,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             );
             Ok(())
         }
-        EventPayload::GateResolved(_) => {
+        EventPayload::Gates(GateEvent::Resolved(_)) => {
             // Run-level resolution (see `GateWaiting` above): audited in
             // the log, invisible to node state.
             if event.node_id.is_none() {
@@ -310,7 +311,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
             }
             Ok(())
         }
-        EventPayload::QuestionsAsked(p) => {
+        EventPayload::Gates(GateEvent::QuestionsAsked(p)) => {
             let node_id = require_node_id(event)?;
             match state.nodes.get(&node_id) {
                 Some(NodeState::Running { .. }) => {
@@ -332,7 +333,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
                 }),
             }
         }
-        EventPayload::QuestionsAnswered(_) => {
+        EventPayload::Gates(GateEvent::QuestionsAnswered(_)) => {
             let node_id = require_node_id(event)?;
             match state.nodes.get(&node_id) {
                 Some(NodeState::Waiting { .. }) => {
@@ -358,7 +359,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
                 }),
             }
         }
-        EventPayload::TaskRegistered(p) => {
+        EventPayload::Tasks(TaskEvent::Registered(p)) => {
             attribute_task(state, &p.task_id, event);
             state
                 .tasks
@@ -366,7 +367,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
                 .or_insert(TaskStatus::Pending);
             Ok(())
         }
-        EventPayload::TaskStatusChanged(p) => {
+        EventPayload::Tasks(TaskEvent::StatusChanged(p)) => {
             if !state.tasks.contains_key(&p.task_id) {
                 return Err(ReplayError::StatusWithoutTask {
                     seq: event.seq,
@@ -380,9 +381,9 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
         // The three finding events fold together or not at all: what a
         // run holds is the last state of every id nobody withdrew, and
         // `FindingLedger` is the one place that says so.
-        EventPayload::FindingPosted(_)
-        | EventPayload::FindingUpdated(_)
-        | EventPayload::FindingWithdrawn(_) => {
+        EventPayload::Findings(FindingEvent::Posted(_))
+        | EventPayload::Findings(FindingEvent::Updated(_))
+        | EventPayload::Findings(FindingEvent::Withdrawn(_)) => {
             aux.findings.apply(event.node_id.as_ref(), payload);
             state.findings = aux
                 .findings
@@ -392,7 +393,7 @@ fn apply(state: &mut RunState, aux: &mut Aux, event: &StoredEvent) -> Result<(),
                 .collect();
             Ok(())
         }
-        EventPayload::ChildRunFinished(p) => {
+        EventPayload::Children(ChildEvent::Finished(p)) => {
             // The child's whole spend aggregates into the
             // parent's total right here — once per chain member, at its
             // close; the parent node's own `node_finished` deliberately

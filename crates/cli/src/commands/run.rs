@@ -29,6 +29,7 @@ use super::Adapters;
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
 use crate::load_yaml;
+use yunta_core::events::RunEvent;
 
 /// Parses `--input name=value` entries into the raw map
 /// `yunta_engine::resolve_inputs` validates against the workflow's own
@@ -83,7 +84,7 @@ async fn count_non_terminal_runs(
         let finished = events.iter().any(|e| {
             matches!(
                 e.payload(),
-                Some(yunta_core::events::EventPayload::RunFinished(_))
+                Some(yunta_core::events::EventPayload::Run(RunEvent::Finished(_)))
             )
         });
         if !events.is_empty() && !finished {

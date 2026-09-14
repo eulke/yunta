@@ -7,7 +7,7 @@ use yunta_core::{Capability, RunId, RunnerCandidate};
 
 fn all_kinds() -> Vec<EventPayload> {
     vec![
-        EventPayload::RunCreated(RunCreatedPayload {
+        EventPayload::Run(RunEvent::Created(RunCreatedPayload {
             manifest_hash: yunta_core::sha256_hex(b"sha256:abc"),
             inputs: BTreeMap::new(),
             mode: "default".into(),
@@ -15,8 +15,8 @@ fn all_kinds() -> Vec<EventPayload> {
             yunta_schema: None,
             base_branch: "main".to_string(),
             base_commit: "deadbeef".into(),
-        }),
-        EventPayload::RunnerResolved(RunnerResolvedPayload {
+        })),
+        EventPayload::Node(NodeEvent::RunnerResolved(RunnerResolvedPayload {
             runner: "executor".into(),
             chosen: RunnerCandidate {
                 adapter: "mock".into(),
@@ -24,23 +24,23 @@ fn all_kinds() -> Vec<EventPayload> {
                 agent: None,
             },
             discarded: vec![],
-        }),
-        EventPayload::BaselineCaptured(BaselineCapturedPayload {
+        })),
+        EventPayload::Node(NodeEvent::BaselineCaptured(BaselineCapturedPayload {
             command: "cargo test --workspace".to_string(),
             results: BaselineResults {
                 exit_code: 0,
                 summary: "12 passed".to_string(),
             },
             hash: yunta_core::sha256_hex(b"sha256:def"),
-        }),
-        EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
-        EventPayload::AgentSessionOpened(AgentSessionOpenedPayload {
+        })),
+        EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
+        EventPayload::Session(SessionEvent::Opened(AgentSessionOpenedPayload {
             session_id: "sess-1".into(),
             agent: None,
             model: Some("mock-model".into()),
             capabilities: Capabilities::default(),
-        }),
-        EventPayload::AgentMessage(AgentMessagePayload {
+        })),
+        EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
             message_type: AgentMessageType::Usage,
             tool_name: None,
             target_digest: None,
@@ -48,13 +48,13 @@ fn all_kinds() -> Vec<EventPayload> {
             output_tokens: Some(50),
             cached_input_tokens: None,
             text: None,
-        }),
-        EventPayload::ArtifactWritten(ArtifactWrittenPayload {
+        })),
+        EventPayload::Artifacts(ArtifactEvent::Written(ArtifactWrittenPayload {
             path: "artifacts/tasks.yaml".into(),
             content_hash: yunta_core::sha256_hex(b"sha256:111"),
             artifact_kind: Some(yunta_core::ArtifactKind::Tasks),
-        }),
-        EventPayload::ContextAssembled(ContextAssembledPayload {
+        })),
+        EventPayload::Node(NodeEvent::ContextAssembled(ContextAssembledPayload {
             task_id: None,
             sources: vec![ContextSourceRef {
                 source_id: "files:docs".to_string(),
@@ -65,8 +65,8 @@ fn all_kinds() -> Vec<EventPayload> {
                 "stable".to_string(),
                 yunta_core::sha256_hex(b"222"),
             )]),
-        }),
-        EventPayload::TaskRegistered(TaskRegisteredPayload {
+        })),
+        EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
             task_id: "graph-cmd".into(),
             criteria: vec![Criterion {
                 cmd: "cargo test -p yunta".to_string(),
@@ -74,8 +74,8 @@ fn all_kinds() -> Vec<EventPayload> {
             }],
             scope: vec!["crates/cli/**".to_string()],
             depends_on: vec![],
-        }),
-        EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+        })),
+        EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
             task_id: "graph-cmd".into(),
             phase: Phase::Pre,
             results: vec![CriterionResult {
@@ -85,65 +85,65 @@ fn all_kinds() -> Vec<EventPayload> {
                 reused: false,
                 duration_ms: None,
             }],
-        }),
-        EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+        })),
+        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
             task_id: "graph-cmd".into(),
             new_status: TaskStatus::Done,
             caused_by: 42.into(),
             commit: Some("deadbeef".into()),
-        }),
-        EventPayload::ScopeChecked(ScopeCheckedPayload {
+        })),
+        EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {
             task_id: Some("graph-cmd".into()),
             diff: vec!["crates/cli/src/graph.rs".into()],
             violations: vec![],
-        }),
-        EventPayload::ScopeExpansionRequested(ScopeExpansionRequestedPayload {
+        })),
+        EventPayload::Scope(ScopeEvent::Requested(ScopeExpansionRequestedPayload {
             task_id: "graph-cmd".into(),
             paths: vec!["crates/cli/src/**".to_string()],
             reason: "need to touch main.rs too".to_string(),
             proposed_criterion: None,
             proposed_criterion_precheck: None,
-        }),
-        EventPayload::ScopeExpansionGranted(ScopeExpansionGrantedPayload {
+        })),
+        EventPayload::Scope(ScopeEvent::Granted(ScopeExpansionGrantedPayload {
             task_id: "graph-cmd".into(),
             decided_by: Decider::Rule,
             mode: ScopeExpansionMode::Rules,
             count_this_run: 1,
             paths: vec!["crates/cli/src/**".to_string()],
-        }),
-        EventPayload::ScopeExpansionDenied(ScopeExpansionDeniedPayload {
+        })),
+        EventPayload::Scope(ScopeEvent::Denied(ScopeExpansionDeniedPayload {
             task_id: "graph-cmd".into(),
             decided_by: Decider::Person { id: "eulke".into() },
             mode: ScopeExpansionMode::Ask,
             count_this_run: 2,
             denial_reason: Some("out of declared scope".to_string()),
-        }),
-        EventPayload::NodeFinished(NodeFinishedPayload {
+        })),
+        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
             outcome: "criteria green".to_string(),
             tokens_used: TokenUsage {
                 input: 10,
                 output: 5,
                 cached: None,
             },
-        }),
-        EventPayload::NodeFailed(NodeFailedPayload::new(
+        })),
+        EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
             Failure::message("criteria red"),
             true,
             TokenUsage::default(),
-        )),
-        EventPayload::HookExecuted(HookExecutedPayload {
+        ))),
+        EventPayload::Node(NodeEvent::HookExecuted(HookExecutedPayload {
             phase: HookPhase::After,
             command: "cargo fmt".to_string(),
             exit_code: 0,
-        }),
-        EventPayload::NodeRerouted(NodeReroutedPayload {
+        })),
+        EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload {
             to_node: "fix-lint".into(),
             cause: "clippy failed".to_string(),
             attempt: Some(1),
             max_reroutes: Some(2),
             origin: yunta_core::events::RerouteOrigin::OnFailure,
-        }),
-        EventPayload::GateWaiting(GateWaitingPayload {
+        })),
+        EventPayload::Gates(GateEvent::Waiting(GateWaitingPayload {
             summary: "Ready to open the PR?".to_string(),
             evidence: vec![Fact::bare("all criteria green")].into(),
             options: vec![GateOption {
@@ -152,12 +152,12 @@ fn all_kinds() -> Vec<EventPayload> {
                 tradeoff: "opens the PR now".to_string(),
             }],
             external_ref: Some("https://github.com/example/repo/pull/1".to_string()),
-        }),
-        EventPayload::GateResolved(GateResolvedPayload::Approved {
+        })),
+        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
             by: "eulke".into(),
             sha: "deadbeef".into(),
-        }),
-        EventPayload::QuestionsAsked(
+        })),
+        EventPayload::Gates(GateEvent::QuestionsAsked(
             QuestionsAskedPayload::new(
                 yunta_core::sha256_hex(b"sha256:222"),
                 vec!["q1".into()],
@@ -168,17 +168,17 @@ fn all_kinds() -> Vec<EventPayload> {
                 },
             )
             .expect("one question is a question"),
-        ),
-        EventPayload::QuestionsAnswered(QuestionsAnsweredPayload {
+        )),
+        EventPayload::Gates(GateEvent::QuestionsAnswered(QuestionsAnsweredPayload {
             answers_hash: yunta_core::sha256_hex(b"sha256:333"),
             channel: Channel::Tty,
             responder: Some("eulke".into()),
-        }),
-        EventPayload::LoopIteration(LoopIterationPayload {
+        })),
+        EventPayload::Children(ChildEvent::LoopIteration(LoopIterationPayload {
             iteration: 3,
             until_result: false,
-        }),
-        EventPayload::FindingPosted(FindingPostedPayload {
+        })),
+        EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
             finding: Finding {
                 id: "f-1".into(),
                 severity: FindingSeverity::Major,
@@ -187,8 +187,8 @@ fn all_kinds() -> Vec<EventPayload> {
                 detail: "unwrap on a fallible call".to_string(),
                 proposed_criterion: None,
             },
-        }),
-        EventPayload::FindingUpdated(FindingUpdatedPayload {
+        })),
+        EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
             finding: Finding {
                 id: "f-1".into(),
                 severity: FindingSeverity::Blocking,
@@ -197,12 +197,12 @@ fn all_kinds() -> Vec<EventPayload> {
                 detail: "unwrap on a fallible call, reached on every run".to_string(),
                 proposed_criterion: None,
             },
-        }),
-        EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+        })),
+        EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
             id: "f-2".into(),
             reason: "the call it named is gone".to_string(),
-        }),
-        EventPayload::FindingRefused(FindingRefusedPayload {
+        })),
+        EventPayload::Findings(FindingEvent::Refused(FindingRefusedPayload {
             operation: FindingOperation::Post,
             id: Some("f-3".into()),
             report: yunta_core::diagnostic::Report::new(
@@ -229,15 +229,15 @@ fn all_kinds() -> Vec<EventPayload> {
                     ),
                 ],
             ),
-        }),
-        EventPayload::ArtifactSubmitted(ArtifactSubmittedPayload {
+        })),
+        EventPayload::Artifacts(ArtifactEvent::Submitted(ArtifactSubmittedPayload {
             name: "plan.yaml".to_string(),
             artifact_kind: yunta_core::ArtifactKind::Tasks,
             outcome: SubmissionOutcome::Accepted {
                 content_hash: yunta_core::sha256_hex(b"plan"),
             },
-        }),
-        EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+        })),
+        EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
             artifact: ArtifactId::Interpreted {
                 kind: yunta_core::ArtifactKind::Tasks,
             },
@@ -246,35 +246,37 @@ fn all_kinds() -> Vec<EventPayload> {
                 run: RunId::from("run-parent"),
                 producer: Some(yunta_core::NodeId::from("plan")),
             },
-        }),
-        EventPayload::PromotionSignaled(PromotionSignaledPayload {
+        })),
+        EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload {
             reason: "all quick-mode nodes green".to_string(),
             evidence: vec![Fact::labelled("criteria", "log")].into(),
             suggested_mode: "standard".into(),
-        }),
-        EventPayload::ChildRunCreated(ChildRunCreatedPayload {
+        })),
+        EventPayload::Children(ChildEvent::Created(ChildRunCreatedPayload {
             child_run_id: "run-child-1".into(),
             child_workflow_hash: yunta_core::sha256_hex(b"sha256:444"),
-        }),
-        EventPayload::ChildRunFinished(ChildRunFinishedPayload {
+        })),
+        EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload {
             child_run_id: "run-child-1".into(),
             child_workflow_hash: yunta_core::sha256_hex(b"sha256:444"),
             terminal_state: TerminalState::Done,
             tokens: TokenUsage::default(),
-        }),
-        EventPayload::CapabilityDegraded(CapabilityDegradedPayload {
-            capability: Capability::ResumeSession,
-            adapter: "mock".into(),
-            policy_applied: "on_interrupt: resume_session degraded to restart_node".to_string(),
-        }),
-        EventPayload::RunPaused(RunPausedPayload {
+        })),
+        EventPayload::Session(SessionEvent::CapabilityDegraded(
+            CapabilityDegradedPayload {
+                capability: Capability::ResumeSession,
+                adapter: "mock".into(),
+                policy_applied: "on_interrupt: resume_session degraded to restart_node".to_string(),
+            },
+        )),
+        EventPayload::Run(RunEvent::Paused(RunPausedPayload {
             reason: "gate waiting".to_string(),
-        }),
-        EventPayload::RunResumed(RunResumedPayload {
+        })),
+        EventPayload::Run(RunEvent::Resumed(RunResumedPayload {
             resume_policy_applied: Some("restart_node".to_string()),
             policies: Vec::new(),
-        }),
-        EventPayload::RunFinished(RunFinishedPayload {
+        })),
+        EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
             terminal_state: TerminalState::Done,
             metrics: RunMetrics {
                 cptv: Some(0.42),
@@ -284,7 +286,7 @@ fn all_kinds() -> Vec<EventPayload> {
                     cached: Some(200),
                 },
             },
-        }),
+        })),
     ]
 }
 
@@ -296,43 +298,95 @@ fn all_kinds() -> Vec<EventPayload> {
 #[allow(dead_code)]
 fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
     match payload {
-        EventPayload::RunCreated(_)
-        | EventPayload::RunnerResolved(_)
-        | EventPayload::BaselineCaptured(_)
-        | EventPayload::NodeStarted(_)
-        | EventPayload::AgentSessionOpened(_)
-        | EventPayload::AgentMessage(_)
-        | EventPayload::ArtifactWritten(_)
-        | EventPayload::ContextAssembled(_)
-        | EventPayload::TaskRegistered(_)
-        | EventPayload::CriteriaChecked(_)
-        | EventPayload::TaskStatusChanged(_)
-        | EventPayload::ScopeChecked(_)
-        | EventPayload::ScopeExpansionRequested(_)
-        | EventPayload::ScopeExpansionGranted(_)
-        | EventPayload::ScopeExpansionDenied(_)
-        | EventPayload::NodeFinished(_)
-        | EventPayload::NodeFailed(_)
-        | EventPayload::HookExecuted(_)
-        | EventPayload::NodeRerouted(_)
-        | EventPayload::GateWaiting(_)
-        | EventPayload::GateResolved(_)
-        | EventPayload::QuestionsAsked(_)
-        | EventPayload::QuestionsAnswered(_)
-        | EventPayload::LoopIteration(_)
-        | EventPayload::FindingPosted(_)
-        | EventPayload::FindingUpdated(_)
-        | EventPayload::FindingWithdrawn(_)
-        | EventPayload::FindingRefused(_)
-        | EventPayload::ArtifactSubmitted(_)
-        | EventPayload::ArtifactAccepted(_)
-        | EventPayload::PromotionSignaled(_)
-        | EventPayload::ChildRunCreated(_)
-        | EventPayload::ChildRunFinished(_)
-        | EventPayload::CapabilityDegraded(_)
-        | EventPayload::RunPaused(_)
-        | EventPayload::RunResumed(_)
-        | EventPayload::RunFinished(_) => {}
+        EventPayload::Run(RunEvent::Created(_))
+        | EventPayload::Node(NodeEvent::RunnerResolved(_))
+        | EventPayload::Node(NodeEvent::BaselineCaptured(_))
+        | EventPayload::Node(NodeEvent::Started(_))
+        | EventPayload::Session(SessionEvent::Opened(_))
+        | EventPayload::Session(SessionEvent::Message(_))
+        | EventPayload::Artifacts(ArtifactEvent::Written(_))
+        | EventPayload::Node(NodeEvent::ContextAssembled(_))
+        | EventPayload::Tasks(TaskEvent::Registered(_))
+        | EventPayload::Node(NodeEvent::CriteriaChecked(_))
+        | EventPayload::Tasks(TaskEvent::StatusChanged(_))
+        | EventPayload::Node(NodeEvent::ScopeChecked(_))
+        | EventPayload::Scope(ScopeEvent::Requested(_))
+        | EventPayload::Scope(ScopeEvent::Granted(_))
+        | EventPayload::Scope(ScopeEvent::Denied(_))
+        | EventPayload::Node(NodeEvent::Finished(_))
+        | EventPayload::Node(NodeEvent::Failed(_))
+        | EventPayload::Node(NodeEvent::HookExecuted(_))
+        | EventPayload::Node(NodeEvent::Rerouted(_))
+        | EventPayload::Gates(GateEvent::Waiting(_))
+        | EventPayload::Gates(GateEvent::Resolved(_))
+        | EventPayload::Gates(GateEvent::QuestionsAsked(_))
+        | EventPayload::Gates(GateEvent::QuestionsAnswered(_))
+        | EventPayload::Children(ChildEvent::LoopIteration(_))
+        | EventPayload::Findings(FindingEvent::Posted(_))
+        | EventPayload::Findings(FindingEvent::Updated(_))
+        | EventPayload::Findings(FindingEvent::Withdrawn(_))
+        | EventPayload::Findings(FindingEvent::Refused(_))
+        | EventPayload::Artifacts(ArtifactEvent::Submitted(_))
+        | EventPayload::Artifacts(ArtifactEvent::Accepted(_))
+        | EventPayload::Run(RunEvent::PromotionSignaled(_))
+        | EventPayload::Children(ChildEvent::Created(_))
+        | EventPayload::Children(ChildEvent::Finished(_))
+        | EventPayload::Session(SessionEvent::CapabilityDegraded(_))
+        | EventPayload::Run(RunEvent::Paused(_))
+        | EventPayload::Run(RunEvent::Resumed(_))
+        | EventPayload::Run(RunEvent::Finished(_)) => {}
+    }
+}
+
+#[test]
+fn every_domain_declares_the_kinds_the_wire_carries() {
+    let domains: Vec<(&str, &[&str])> = vec![
+        ("run", RunEvent::KINDS),
+        ("node", NodeEvent::KINDS),
+        ("session", SessionEvent::KINDS),
+        ("tasks", TaskEvent::KINDS),
+        ("scope", ScopeEvent::KINDS),
+        ("findings", FindingEvent::KINDS),
+        ("artifacts", ArtifactEvent::KINDS),
+        ("gates", GateEvent::KINDS),
+        ("children", ChildEvent::KINDS),
+    ];
+
+    // Every kind belongs to exactly one domain, and between them they
+    // account for the whole log: a kind in no domain is one nothing owns,
+    // and a kind in two is a kind with two homes.
+    let mut owned: Vec<&str> = domains
+        .iter()
+        .flat_map(|(_, kinds)| kinds.iter().copied())
+        .collect();
+    owned.sort_unstable();
+    let mut declared: Vec<&str> = EventPayload::KINDS.to_vec();
+    declared.sort_unstable();
+    assert_eq!(
+        owned, declared,
+        "the domains and the wire name the same set of kinds"
+    );
+
+    // And each domain lists its own in the order the wire writes them, so
+    // a reader moving between a domain and the log never re-sorts.
+    for (name, kinds) in &domains {
+        let placed: Vec<usize> = kinds
+            .iter()
+            .map(|kind| {
+                EventPayload::KINDS
+                    .iter()
+                    .position(|k| k == kind)
+                    .unwrap_or_else(|| {
+                        panic!("`{kind}` of domain `{name}` is not a kind the wire carries")
+                    })
+            })
+            .collect();
+        let mut sorted = placed.clone();
+        sorted.sort_unstable();
+        assert_eq!(
+            placed, sorted,
+            "domain `{name}` lists its kinds in the order the wire writes them"
+        );
     }
 }
 
@@ -427,9 +481,9 @@ fn the_envelope_flattens_kind_and_payload_fields_together() {
             .unwrap()
             .with_timezone(&chrono::Utc),
         node_id: None,
-        body: EventBody::Known(EventPayload::RunPaused(RunPausedPayload {
+        body: EventBody::Known(EventPayload::Run(RunEvent::Paused(RunPausedPayload {
             reason: "gate waiting".to_string(),
-        })),
+        }))),
     };
 
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
@@ -517,7 +571,8 @@ fn a_gate_resolution_is_the_shape_its_fields_spell() {
         (GateResolvedPayload::Closed, &[]),
     ];
     for (shape, fields) in shapes {
-        let json = serde_json::to_value(EventPayload::GateResolved(shape.clone())).unwrap();
+        let json =
+            serde_json::to_value(EventPayload::Gates(GateEvent::Resolved(shape.clone()))).unwrap();
         let mut present: Vec<&str> = json
             .as_object()
             .unwrap()
@@ -530,7 +585,7 @@ fn a_gate_resolution_is_the_shape_its_fields_spell() {
         expected.sort_unstable();
         assert_eq!(present, expected, "the wire for {shape:?}");
         let parsed: EventPayload = serde_json::from_value(json).unwrap();
-        assert_eq!(parsed, EventPayload::GateResolved(shape));
+        assert_eq!(parsed, EventPayload::Gates(GateEvent::Resolved(shape)));
     }
 }
 
@@ -549,7 +604,7 @@ fn an_unnamed_gate_resolution_reads_as_unrecognized_and_writes_back_verbatim() {
     assert!(
         matches!(
             parsed,
-            EventPayload::GateResolved(GateResolvedPayload::Unrecognized(_))
+            EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Unrecognized(_)))
         ),
         "got {parsed:?}"
     );
@@ -568,7 +623,9 @@ fn a_known_kind_reads_as_its_payload_and_ignores_fields_it_does_not_know() {
     });
     let event: StoredEvent = serde_json::from_value(json).unwrap();
     match event.payload() {
-        Some(EventPayload::RunPaused(p)) => assert_eq!(p.reason, "waiting on gate approve"),
+        Some(EventPayload::Run(RunEvent::Paused(p))) => {
+            assert_eq!(p.reason, "waiting on gate approve")
+        }
         other => panic!("expected run_paused, got {other:?}"),
     }
     assert_eq!(event.body.kind_name(), "run_paused");
@@ -579,9 +636,9 @@ fn a_draft_names_what_happened_and_nothing_storage_assigns() {
     let draft = EventDraft {
         run_id: RunId::from("run-1"),
         node_id: None,
-        payload: EventPayload::RunPaused(RunPausedPayload {
+        payload: EventPayload::Run(RunEvent::Paused(RunPausedPayload {
             reason: "budget".to_string(),
-        }),
+        })),
     };
     assert_eq!(draft.payload.kind_name(), "run_paused");
 }
@@ -650,7 +707,8 @@ fn a_capability_parses_to_the_capabilities_field_it_names() {
         serde_json::json!("declarative-only"),
     );
     let body = EventBody::from_object(object, 1).unwrap();
-    let EventBody::Known(EventPayload::CapabilityDegraded(payload)) = body else {
+    let EventBody::Known(EventPayload::Session(SessionEvent::CapabilityDegraded(payload))) = body
+    else {
         panic!("a capability_degraded body parses as its payload: {body:?}");
     };
     assert_eq!(payload.capability, Capability::NetworkIsolation);

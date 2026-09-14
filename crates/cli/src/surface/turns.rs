@@ -144,6 +144,7 @@ mod tests {
     use crate::surface::{Delivery, Screen, SurfaceEnv, Watched};
 
     use super::*;
+    use yunta_core::events::NodeEvent;
 
     const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
 
@@ -181,7 +182,9 @@ mod tests {
             seq: Seq::try_from(seq as i64).expect("a positive seq"),
             timestamp: Clock::now(&FixedClock),
             node_id: None,
-            body: EventBody::Known(EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 })),
+            body: EventBody::Known(EventPayload::Node(NodeEvent::Started(NodeStartedPayload {
+                attempt: 1,
+            }))),
         }))
     }
 

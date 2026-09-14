@@ -13,6 +13,7 @@ use std::sync::Arc;
 use yunta_adapters::MockAdapter;
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{ArtifactId, EventPayload, TerminalState};
+use yunta_core::events::{ChildEvent, FindingEvent, RunEvent, TaskEvent};
 use yunta_core::port::Adapter;
 use yunta_core::{AdapterId, ConfigLayer, IdSource, Manifest, NodeId, RunId, Workflow};
 use yunta_engine::{
@@ -178,7 +179,7 @@ impl Bench {
             .unwrap()
             .into_iter()
             .filter_map(|e| match e.payload() {
-                Some(EventPayload::ChildRunCreated(p)) => {
+                Some(EventPayload::Children(ChildEvent::Created(p))) => {
                     Some((p.child_run_id.clone(), p.child_workflow_hash.clone()))
                 }
                 _ => None,
@@ -194,7 +195,7 @@ impl Bench {
             .unwrap()
             .into_iter()
             .filter_map(|e| match e.payload() {
-                Some(EventPayload::ChildRunCreated(p)) => Some((
+                Some(EventPayload::Children(ChildEvent::Created(p))) => Some((
                     e.node_id
                         .as_ref()
                         .map(ToString::to_string)
@@ -212,7 +213,7 @@ impl Bench {
             .unwrap()
             .into_iter()
             .filter_map(|e| match e.payload() {
-                Some(EventPayload::ChildRunFinished(p)) => {
+                Some(EventPayload::Children(ChildEvent::Finished(p))) => {
                     Some((p.child_run_id.clone(), p.terminal_state))
                 }
                 _ => None,
@@ -287,11 +288,11 @@ nodes:
     let child_events = bench.storage.events_for_run(child_id).unwrap();
     assert!(matches!(
         child_events.first().and_then(|e| e.payload()),
-        Some(EventPayload::RunCreated(_))
+        Some(EventPayload::Run(RunEvent::Created(_)))
     ));
     assert!(child_events
         .iter()
-        .any(|e| matches!(e.payload(), Some(EventPayload::RunFinished(_)))));
+        .any(|e| matches!(e.payload(), Some(EventPayload::Run(RunEvent::Finished(_))))));
     let child_manifest = bench.child_manifest(child_id);
     assert_eq!(child_manifest.workflow.name, "child-wf");
     assert_eq!(&child_manifest.workflow_hash, recorded_hash);
@@ -420,7 +421,7 @@ sessions:
     let recorded = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(EventPayload::ChildRunFinished(p)) => Some(p.tokens),
+            Some(EventPayload::Children(ChildEvent::Finished(p))) => Some(p.tokens),
             _ => None,
         })
         .expect("child_run_finished must carry the child's spend");
@@ -483,7 +484,7 @@ nodes:
         .events_for_run(&child_id)
         .unwrap()
         .iter()
-        .any(|e| matches!(e.payload(), Some(EventPayload::RunPaused(_)))));
+        .any(|e| matches!(e.payload(), Some(EventPayload::Run(RunEvent::Paused(_))))));
 
     // Resume the parent with a surface that answers: the SAME child run
     // resumes (no second child_run_created), its gate resolves, and
@@ -511,7 +512,7 @@ nodes:
         .events_for_run(&child_id)
         .unwrap()
         .iter()
-        .any(|e| matches!(e.payload(), Some(EventPayload::RunResumed(_)))));
+        .any(|e| matches!(e.payload(), Some(EventPayload::Run(RunEvent::Resumed(_))))));
     assert_eq!(
         std::fs::read_to_string(bench.worktree.join("child-out.txt"))
             .unwrap()
@@ -883,7 +884,7 @@ nodes:
         .unwrap()
         .into_iter()
         .find_map(|e| match e.payload() {
-            Some(EventPayload::RunCreated(p)) => Some(p.clone()),
+            Some(EventPayload::Run(RunEvent::Created(p))) => Some(p.clone()),
             _ => None,
         })
         .unwrap();
@@ -994,7 +995,7 @@ nodes:
     assert!(
         matches!(
             child_events.first().and_then(|e| e.payload()),
-            Some(EventPayload::RunCreated(_))
+            Some(EventPayload::Run(RunEvent::Created(_)))
         ),
         "the child exists in its log before anything is said about it"
     );
@@ -1458,7 +1459,10 @@ sessions:
     assert_eq!(
         child_events
             .iter()
-            .filter(|e| matches!(e.payload(), Some(EventPayload::FindingPosted(_))))
+            .filter(|e| matches!(
+                e.payload(),
+                Some(EventPayload::Findings(FindingEvent::Posted(_)))
+            ))
             .count(),
         1
     );
@@ -1473,7 +1477,7 @@ sessions:
     let posted: Vec<(Option<String>, String)> = parent_events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(EventPayload::FindingPosted(p)) => Some((
+            Some(EventPayload::Findings(FindingEvent::Posted(p))) => Some((
                 e.node_id.as_ref().map(ToString::to_string),
                 p.finding.id.to_string(),
             )),
@@ -1530,7 +1534,9 @@ fn task_statuses(bench: &Bench, run_id: &RunId) -> Vec<(String, yunta_core::even
         .unwrap()
         .into_iter()
         .filter_map(|e| match e.payload() {
-            Some(EventPayload::TaskStatusChanged(p)) => Some((p.task_id.to_string(), p.new_status)),
+            Some(EventPayload::Tasks(TaskEvent::StatusChanged(p))) => {
+                Some((p.task_id.to_string(), p.new_status))
+            }
             _ => None,
         })
         .collect()
@@ -1544,7 +1550,7 @@ fn task_registrations(bench: &Bench, run_id: &RunId) -> Vec<(Option<String>, Str
         .unwrap()
         .into_iter()
         .filter_map(|e| match e.payload() {
-            Some(EventPayload::TaskRegistered(p)) => Some((
+            Some(EventPayload::Tasks(TaskEvent::Registered(p))) => Some((
                 e.node_id.as_ref().map(ToString::to_string),
                 p.task_id.to_string(),
             )),

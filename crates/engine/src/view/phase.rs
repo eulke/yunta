@@ -13,6 +13,7 @@ use yunta_core::events::{EventPayload, Failure, StoredEvent, TerminalState};
 use yunta_core::{ModeName, NodeId, Workflow};
 
 use crate::replay::{NodeState, RunState};
+use yunta_core::events::{NodeEvent, RunEvent};
 
 /// Where the run as a whole stands, derived from the log alone.
 #[derive(Debug, Clone, PartialEq)]
@@ -98,21 +99,21 @@ pub(super) fn phase(workflow: &Workflow, state: &RunState, events: &[StoredEvent
     }
     let standing = standing(events);
     match standing.last {
-        Some(EventPayload::RunFinished(p)) => closed(&p.terminal_state, events),
+        Some(EventPayload::Run(RunEvent::Finished(p))) => closed(&p.terminal_state, events),
         // A node parked on a person is the more precise answer, and it
         // quotes the same pause, so naming the node costs the prose
         // nothing.
-        Some(EventPayload::RunPaused(p)) => RunPhase::Waiting {
+        Some(EventPayload::Run(RunEvent::Paused(p))) => RunPhase::Waiting {
             on: waiting_node(workflow, state, standing.pause).unwrap_or_else(|| WaitingOn::Run {
                 reason: p.reason.clone(),
             }),
         },
-        Some(EventPayload::RunResumed(_) | EventPayload::NodeStarted(_)) => {
-            match waiting_node(workflow, state, standing.pause) {
-                Some(on) => RunPhase::Waiting { on },
-                None => RunPhase::Running,
-            }
-        }
+        Some(
+            EventPayload::Run(RunEvent::Resumed(_)) | EventPayload::Node(NodeEvent::Started(_)),
+        ) => match waiting_node(workflow, state, standing.pause) {
+            Some(on) => RunPhase::Waiting { on },
+            None => RunPhase::Running,
+        },
         _ => RunPhase::Created,
     }
 }
@@ -141,12 +142,14 @@ fn standing(events: &[StoredEvent]) -> Standing<'_> {
             continue;
         };
         let settles = match payload {
-            EventPayload::RunPaused(p) => {
+            EventPayload::Run(RunEvent::Paused(p)) => {
                 standing.pause = Some(p.reason.as_str());
                 true
             }
-            EventPayload::RunResumed(_) | EventPayload::RunFinished(_) => true,
-            EventPayload::NodeStarted(_) => false,
+            EventPayload::Run(RunEvent::Resumed(_)) | EventPayload::Run(RunEvent::Finished(_)) => {
+                true
+            }
+            EventPayload::Node(NodeEvent::Started(_)) => false,
             _ => continue,
         };
         if standing.last.is_none() {
@@ -168,13 +171,15 @@ fn closed(terminal: &TerminalState, events: &[StoredEvent]) -> RunPhase {
         TerminalState::Cancelled => RunPhase::Cancelled,
         TerminalState::Failed => RunPhase::Failed {
             failure: events.iter().rev().find_map(|event| match event.payload() {
-                Some(EventPayload::NodeFailed(p)) => Some(p.failure.clone()),
+                Some(EventPayload::Node(NodeEvent::Failed(p))) => Some(p.failure.clone()),
                 _ => None,
             }),
         },
         TerminalState::Promoted => RunPhase::Promoted {
             to: events.iter().rev().find_map(|event| match event.payload() {
-                Some(EventPayload::PromotionSignaled(p)) => Some(p.suggested_mode.clone()),
+                Some(EventPayload::Run(RunEvent::PromotionSignaled(p))) => {
+                    Some(p.suggested_mode.clone())
+                }
                 _ => None,
             }),
         },

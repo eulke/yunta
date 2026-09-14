@@ -20,6 +20,7 @@ use crate::tasks::{Provenance, Standing};
 use super::node_close::{fail_with_tokens, ChildRun};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
+use yunta_core::events::FindingEvent;
 
 /// Whether `node` declares the `findings` artifact the run derives from
 /// what that node posted rather than from anything it wrote.
@@ -320,9 +321,11 @@ async fn record_content(
             for finding in findings {
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::FindingPosted(yunta_core::events::FindingPostedPayload {
-                        finding: finding.clone(),
-                    }),
+                    EventPayload::Findings(FindingEvent::Posted(
+                        yunta_core::events::FindingPostedPayload {
+                            finding: finding.clone(),
+                        },
+                    )),
                 )
                 .await?;
             }

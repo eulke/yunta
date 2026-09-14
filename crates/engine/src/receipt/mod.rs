@@ -21,6 +21,7 @@ use yunta_core::{
 
 use crate::replay::{derive, NodeState};
 use crate::replay::{unknown_kind_counts, UnknownKindCount};
+use yunta_core::events::{NodeEvent, RunEvent};
 
 mod render;
 
@@ -198,7 +199,7 @@ fn counted(failure: &ArtifactFailure) -> Vec<(Option<ArtifactKind>, &'static str
 fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
     let mut counts: HashMap<(Option<ArtifactKind>, &'static str), usize> = HashMap::new();
     let failed = events.iter().filter_map(|event| match event.payload() {
-        Some(EventPayload::NodeFailed(p)) => Some(&p.failure),
+        Some(EventPayload::Node(NodeEvent::Failed(p))) => Some(&p.failure),
         _ => None,
     });
     for failure in failed {
@@ -240,7 +241,9 @@ pub fn build_receipt(
     event_chain: EventChainStatus,
 ) -> Result<Receipt, ReceiptError> {
     let Some((terminal_state, metrics)) = events.iter().find_map(|e| match e.payload() {
-        Some(EventPayload::RunFinished(p)) => Some((p.terminal_state, p.metrics.clone())),
+        Some(EventPayload::Run(RunEvent::Finished(p))) => {
+            Some((p.terminal_state, p.metrics.clone()))
+        }
         _ => None,
     }) else {
         return Err(ReceiptError::NotFinished(run_id.clone()));
@@ -253,7 +256,12 @@ pub fn build_receipt(
     let unknown_kinds = unknown_kind_counts(&crate::replay::derive(events));
     let reroutes = events
         .iter()
-        .filter(|e| matches!(e.payload(), Some(EventPayload::NodeRerouted(_))))
+        .filter(|e| {
+            matches!(
+                e.payload(),
+                Some(EventPayload::Node(NodeEvent::Rerouted(_)))
+            )
+        })
         .count();
 
     Ok(Receipt {
@@ -283,7 +291,7 @@ fn criteria_summary(events: &[StoredEvent]) -> CriteriaSummary {
     let mut latest_post: HashMap<String, &yunta_core::events::CriteriaCheckedPayload> =
         HashMap::new();
     for event in events {
-        if let Some(EventPayload::CriteriaChecked(p)) = event.payload() {
+        if let Some(EventPayload::Node(NodeEvent::CriteriaChecked(p))) = event.payload() {
             if p.phase == Phase::Post {
                 latest_post.insert(p.task_id.to_string(), p);
             }
@@ -313,11 +321,11 @@ fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<Basel
     // every other `baseline_compare` node compared. Read from the event
     // kind and the envelope's node id, never the node's outcome text.
     let capturing_node = events.iter().find_map(|e| match e.payload() {
-        Some(EventPayload::BaselineCaptured(_)) => e.node_id.clone(),
+        Some(EventPayload::Node(NodeEvent::BaselineCaptured(_))) => e.node_id.clone(),
         _ => None,
     });
     let captured = events.iter().find_map(|e| match e.payload() {
-        Some(EventPayload::BaselineCaptured(p)) => Some(p),
+        Some(EventPayload::Node(NodeEvent::BaselineCaptured(p))) => Some(p),
         _ => None,
     })?;
 
@@ -355,7 +363,7 @@ fn scope_summary(events: &[StoredEvent]) -> ScopeSummary {
     let mut files: BTreeSet<PathBuf> = BTreeSet::new();
     let mut violations: BTreeSet<PathBuf> = BTreeSet::new();
     for event in events {
-        if let Some(EventPayload::ScopeChecked(p)) = event.payload() {
+        if let Some(EventPayload::Node(NodeEvent::ScopeChecked(p))) = event.payload() {
             files.extend(p.diff.iter().cloned());
             violations.extend(p.violations.iter().cloned());
         }
@@ -379,7 +387,7 @@ fn runner_usage(events: &[StoredEvent]) -> Vec<RunnerUsage> {
     events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(EventPayload::RunnerResolved(p)) => {
+            Some(EventPayload::Node(NodeEvent::RunnerResolved(p))) => {
                 let node_id = e.node_id.clone()?;
                 seen.insert(node_id.clone()).then(|| RunnerUsage {
                     node_id,

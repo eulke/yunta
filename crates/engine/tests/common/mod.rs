@@ -6,6 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use yunta_adapters::MockAdapter;
+use yunta_core::events::{FindingEvent, NodeEvent, SessionEvent};
 use yunta_core::port::Adapter;
 use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
@@ -104,11 +105,14 @@ pub fn max_open_nodes(events: &[yunta_core::events::StoredEvent]) -> usize {
     let mut max = 0i32;
     for event in events {
         match event.payload() {
-            Some(EventPayload::NodeStarted(_)) => {
+            Some(EventPayload::Node(NodeEvent::Started(_))) => {
                 open += 1;
                 max = max.max(open);
             }
-            Some(EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_)) => open -= 1,
+            Some(
+                EventPayload::Node(NodeEvent::Finished(_))
+                | EventPayload::Node(NodeEvent::Failed(_)),
+            ) => open -= 1,
             _ => {}
         }
     }
@@ -371,7 +375,9 @@ pub fn findings_posted(
     events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::FindingPosted(p)) => Some(&p.finding),
+            Some(yunta_core::events::EventPayload::Findings(FindingEvent::Posted(p))) => {
+                Some(&p.finding)
+            }
             _ => None,
         })
         .collect()
@@ -409,11 +415,10 @@ pub fn context_sources(
     events
         .iter()
         .find_map(|e| match (&e.node_id, e.payload()) {
-            (Some(n), Some(yunta_core::events::EventPayload::ContextAssembled(p)))
-                if n.as_str() == node =>
-            {
-                Some(p.sources.clone())
-            }
+            (
+                Some(n),
+                Some(yunta_core::events::EventPayload::Node(NodeEvent::ContextAssembled(p))),
+            ) if n.as_str() == node => Some(p.sources.clone()),
             _ => None,
         })
         .unwrap_or_else(|| panic!("no context_assembled event found for node `{node}`"))
@@ -468,11 +473,10 @@ pub async fn run_stable_first(
     let payload = events
         .iter()
         .find_map(|e| match (&e.node_id, e.payload()) {
-            (Some(n), Some(yunta_core::events::EventPayload::ContextAssembled(p)))
-                if n.as_str() == "plan" =>
-            {
-                Some(p.clone())
-            }
+            (
+                Some(n),
+                Some(yunta_core::events::EventPayload::Node(NodeEvent::ContextAssembled(p))),
+            ) if n.as_str() == "plan" => Some(p.clone()),
             _ => None,
         })
         .expect("context_assembled event for `plan`");
@@ -922,21 +926,21 @@ pub async fn resume_orphan_with_mock(
     };
     emit(
         "work",
-        yunta_core::events::EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload {
-            attempt: 1,
-        }),
+        yunta_core::events::EventPayload::Node(NodeEvent::Started(
+            yunta_core::events::NodeStartedPayload { attempt: 1 },
+        )),
     );
     if let Some(session_id) = orphan_session {
         emit(
             "work",
-            yunta_core::events::EventPayload::AgentSessionOpened(
+            yunta_core::events::EventPayload::Session(SessionEvent::Opened(
                 yunta_core::events::AgentSessionOpenedPayload {
                     session_id: session_id.into(),
                     agent: None,
                     model: Some("mock-model".into()),
                     capabilities: yunta_core::Capabilities::default(),
                 },
-            ),
+            )),
         );
     }
 

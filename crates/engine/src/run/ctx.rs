@@ -23,6 +23,7 @@ use crate::run_log::RunLog;
 use crate::task_cycle::Memo;
 
 use super::{budget, RunError};
+use yunta_core::events::FindingEvent;
 
 /// Everything node execution needs, borrowed once. Also owns the small
 /// emit helper so every event gets its timestamp from the same injected
@@ -206,7 +207,7 @@ impl RunCtx<'_> {
     ) -> Result<(), RunError> {
         self.emit(
             node,
-            EventPayload::FindingPosted(FindingPostedPayload {
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: Finding {
                     id: FindingId::try_from(id.to_string())?,
                     severity,
@@ -215,7 +216,7 @@ impl RunCtx<'_> {
                     detail,
                     proposed_criterion: None,
                 },
-            }),
+            })),
         )
         .await?;
         Ok(())

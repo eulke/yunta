@@ -13,6 +13,7 @@ use yunta_core::{CommitSha, NodeId, Task, TaskId, TasksFile};
 
 use crate::run::RunError;
 use crate::run_log::RunLog;
+use yunta_core::events::TaskEvent;
 
 pub(crate) use crossing::{carried_into, standing_of, Standing};
 
@@ -53,7 +54,7 @@ pub(crate) fn prior_registrations(events: &[StoredEvent]) -> BTreeMap<TaskId, Id
     events
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::TaskRegistered(p)) => Some((
+            Some(EventPayload::Tasks(TaskEvent::Registered(p))) => Some((
                 p.task_id.clone(),
                 Identity {
                     criteria: p.criteria.clone(),
@@ -146,12 +147,12 @@ pub(crate) async fn register(
         let registered = log
             .record(
                 node,
-                EventPayload::TaskRegistered(TaskRegisteredPayload {
+                EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
                     task_id: planned.task.id.clone(),
                     criteria: planned.task.criteria.iter().map(Into::into).collect(),
                     scope: planned.task.scope.clone(),
                     depends_on: planned.task.depends_on.clone(),
-                }),
+                })),
             )
             .await?;
         let Some(follow) = planned.follow else {
@@ -165,12 +166,12 @@ pub(crate) async fn register(
         };
         log.record(
             node,
-            EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+            EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
                 task_id: planned.task.id.clone(),
                 new_status,
                 caused_by: registered,
                 commit,
-            }),
+            })),
         )
         .await?;
     }

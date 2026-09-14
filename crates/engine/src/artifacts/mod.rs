@@ -36,6 +36,7 @@ use yunta_core::{ArtifactKind, NodeId, NodeKind, ARTIFACTS_DIR};
 
 use crate::run_log::RunLog;
 use store::ObjectStore;
+use yunta_core::events::ArtifactEvent;
 
 pub(crate) use canonical::{canonical, canonical_document, derive_findings, submit, SubmitError};
 pub use ingest::{close_artifacts, ArtifactContent, VerifiedArtifact};
@@ -128,11 +129,11 @@ pub(crate) async fn accept(
     let seq = log
         .record(
             producer,
-            EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
                 artifact: artifact.clone(),
                 content_hash: content_hash.clone(),
                 origin: origin.clone(),
-            }),
+            })),
         )
         .await
         .map_err(|source| AcceptError::Log {

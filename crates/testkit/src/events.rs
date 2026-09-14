@@ -2,6 +2,7 @@
 //! events a run would have written.
 
 use yunta_core::events::artifacts::ArtifactRef;
+use yunta_core::events::{ArtifactEvent, RunEvent, TaskEvent};
 use yunta_core::events::{
     EventBody, EventDraft, EventPayload, RunCreatedPayload, StoredEvent, TaskRegisteredPayload,
     TaskStatus, TaskStatusChangedPayload,
@@ -16,7 +17,7 @@ pub fn accepted(events: &[StoredEvent]) -> Vec<ArtifactRef> {
     events
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::ArtifactAccepted(p)) => Some(ArtifactRef {
+            Some(EventPayload::Artifacts(ArtifactEvent::Accepted(p))) => Some(ArtifactRef {
                 producer: event.node_id.clone(),
                 artifact: p.artifact.clone(),
                 content_hash: p.content_hash.clone(),
@@ -31,12 +32,12 @@ pub fn accepted(events: &[StoredEvent]) -> Vec<ArtifactRef> {
 /// The `task_registered` a run writes for `task` — what the run has to
 /// do about it, in the task's own terms.
 pub fn task_registered(task: &Task) -> EventPayload {
-    EventPayload::TaskRegistered(TaskRegisteredPayload {
+    EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
         task_id: task.id.clone(),
         criteria: task.criteria.iter().map(Into::into).collect(),
         scope: task.scope.clone(),
         depends_on: task.depends_on.clone(),
-    })
+    }))
 }
 
 /// The `task_status_changed` a run writes about `task`: the status it
@@ -48,12 +49,12 @@ pub fn task_status_changed(
     commit: Option<&CommitSha>,
     caused_by: Seq,
 ) -> EventPayload {
-    EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+    EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
         task_id: task.clone(),
         new_status: status,
         caused_by,
         commit: commit.cloned(),
-    })
+    }))
 }
 
 /// One event as a log holds it: position `seq` of `run`, with no node
@@ -95,7 +96,7 @@ impl<'a> SourceLog<'a> {
             storage,
             run_id: run_id.clone(),
         };
-        log.record(EventPayload::RunCreated(RunCreatedPayload {
+        log.record(EventPayload::Run(RunEvent::Created(RunCreatedPayload {
             manifest_hash: yunta_core::sha256_hex(run_id.as_str().as_bytes()),
             inputs: Default::default(),
             mode: Default::default(),
@@ -103,7 +104,7 @@ impl<'a> SourceLog<'a> {
             yunta_schema: None,
             base_branch: "main".to_string(),
             base_commit: yunta_core::sha256_hex(b"base").as_str().into(),
-        }));
+        })));
         log
     }
 

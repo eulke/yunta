@@ -15,6 +15,7 @@ use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
+use yunta_core::events::{GateEvent, NodeEvent};
 
 /// The option a human chose, for a resolution that is a human's choice.
 fn chosen_option(resolution: &yunta_core::events::GateResolvedPayload) -> Option<&str> {
@@ -53,7 +54,9 @@ async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_f
         .filter(|e| {
             matches!(
                 e.payload(),
-                Some(yunta_core::events::EventPayload::NodeRerouted(_))
+                Some(yunta_core::events::EventPayload::Node(NodeEvent::Rerouted(
+                    _
+                )))
             )
         })
         .count();
@@ -64,12 +67,14 @@ async fn a_gate_resolved_to_retry_reroutes_to_the_indicated_node_and_can_still_f
     assert!(
         events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::GateWaiting(_))
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(
+                _
+            )))
         )),
         "the escalation itself must be on the log, not just its resolution"
     );
     let resolved = events.iter().find_map(|e| match e.payload() {
-        Some(yunta_core::events::EventPayload::GateResolved(p)) => Some(p),
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Resolved(p))) => Some(p),
         _ => None,
     });
     assert_eq!(resolved.and_then(chosen_option), Some("retry"));
@@ -199,7 +204,7 @@ async fn an_internal_gate_approved_resolves_and_the_dag_continues() {
     let waiting = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::GateWaiting(p)) => Some(p),
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(p))) => Some(p),
             _ => None,
         })
         .expect("the resolved interaction must be on the log");
@@ -277,7 +282,9 @@ async fn a_surface_answer_off_the_menu_breaks_the_run_instead_of_deciding() {
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::GateResolved(_))
+            Some(yunta_core::events::EventPayload::Gates(
+                GateEvent::Resolved(_)
+            ))
         )),
         "nothing is recorded as the gate's decision"
     );
@@ -335,22 +342,24 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
     };
     append(
         "plan",
-        yunta_core::events::EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload {
-            attempt: 1,
-        }),
+        yunta_core::events::EventPayload::Node(NodeEvent::Started(
+            yunta_core::events::NodeStartedPayload { attempt: 1 },
+        )),
     );
     append(
         "plan",
-        yunta_core::events::EventPayload::NodeFinished(yunta_core::events::NodeFinishedPayload {
-            outcome: "ok".to_string(),
-            tokens_used: yunta_core::events::TokenUsage::default(),
-        }),
+        yunta_core::events::EventPayload::Node(NodeEvent::Finished(
+            yunta_core::events::NodeFinishedPayload {
+                outcome: "ok".to_string(),
+                tokens_used: yunta_core::events::TokenUsage::default(),
+            },
+        )),
     );
     append(
         "approve",
-        yunta_core::events::EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload {
-            attempt: 1,
-        }),
+        yunta_core::events::EventPayload::Node(NodeEvent::Started(
+            yunta_core::events::NodeStartedPayload { attempt: 1 },
+        )),
     );
 
     let interaction = SequencedInteraction::choosing(&["aprobar"]);
@@ -415,7 +424,7 @@ async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    assert!(events.iter().any(|e| matches!(e.payload(), Some(yunta_core::events::EventPayload::NodeRerouted(p)) if p.to_node.as_str() == "plan" && e.node_id.as_ref().map(|n| n.as_str()) == Some("approve"))));
+    assert!(events.iter().any(|e| matches!(e.payload(), Some(yunta_core::events::EventPayload::Node(NodeEvent::Rerouted(p))) if p.to_node.as_str() == "plan" && e.node_id.as_ref().map(|n| n.as_str()) == Some("approve"))));
 }
 
 #[tokio::test]
@@ -434,7 +443,7 @@ async fn gate_reroute_records_its_origin_without_fake_counters() {
     let reroute = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::NodeRerouted(p))
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::Rerouted(p)))
                 if e.node_id.as_ref().map(|n| n.as_str()) == Some("approve") =>
             {
                 Some(p)
@@ -518,7 +527,9 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(!events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::GateWaiting(_))
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(
+            _
+        )))
     )));
 
     let interaction = SequencedInteraction::choosing(&["aprobar"]);
@@ -569,7 +580,9 @@ async fn a_run_over_its_token_budget_pauses_with_reason_budget_when_headless() {
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(!events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::GateWaiting(_))
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(
+            _
+        )))
     )));
 }
 
@@ -598,7 +611,9 @@ async fn authorizing_continue_lifts_the_cap_and_records_a_run_level_gate_pair() 
         .find(|e| {
             matches!(
                 e.payload(),
-                Some(yunta_core::events::EventPayload::GateWaiting(_))
+                Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(
+                    _
+                )))
             )
         })
         .expect("the budget escalation must be recorded");
@@ -609,7 +624,9 @@ async fn authorizing_continue_lifts_the_cap_and_records_a_run_level_gate_pair() 
     let resolved = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::GateResolved(p)) => Some((e.node_id.clone(), p)),
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Resolved(p))) => {
+                Some((e.node_id.clone(), p))
+            }
             _ => None,
         })
         .expect("the authorization must be recorded");
@@ -634,7 +651,7 @@ async fn choosing_abort_on_the_budget_escalation_pauses_with_the_decision_record
     assert!(
         events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::GateResolved(p)) if chosen_option(p) == Some("abort")
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Resolved(p))) if chosen_option(p) == Some("abort")
         )),
         "the abort decision must be auditable in the log"
     );
@@ -657,7 +674,9 @@ limits:
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(!events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::GateWaiting(_))
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(
+            _
+        )))
     )));
 }
 
@@ -805,7 +824,9 @@ async fn authorizing_continue_lifts_the_iteration_cap_for_this_invocation() {
         .filter(|e| {
             matches!(
                 e.payload(),
-                Some(yunta_core::events::EventPayload::GateResolved(_))
+                Some(yunta_core::events::EventPayload::Gates(
+                    GateEvent::Resolved(_)
+                ))
             )
         })
         .count();
@@ -823,7 +844,9 @@ async fn a_tasks_document_within_the_default_iteration_cap_runs_unasked() {
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(!events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::GateWaiting(_))
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(
+            _
+        )))
     )));
 }
 

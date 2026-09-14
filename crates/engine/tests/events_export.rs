@@ -7,6 +7,7 @@ use yunta_core::events::{
     EventBody, EventPayload, NodeFinishedPayload, NodeStartedPayload, RunCreatedPayload,
     StoredEvent, TokenUsage,
 };
+use yunta_core::events::{NodeEvent, RunEvent};
 use yunta_engine::{derive, render_events_jsonl};
 
 fn event(seq: u64, node_id: Option<&str>, payload: EventPayload) -> StoredEvent {
@@ -24,7 +25,7 @@ fn sample_events() -> Vec<StoredEvent> {
         event(
             1,
             None,
-            EventPayload::RunCreated(RunCreatedPayload {
+            EventPayload::Run(RunEvent::Created(RunCreatedPayload {
                 manifest_hash: yunta_core::sha256_hex(b"deadbeef"),
                 inputs: Default::default(),
                 mode: "default".into(),
@@ -32,24 +33,24 @@ fn sample_events() -> Vec<StoredEvent> {
                 yunta_schema: None,
                 base_branch: "main".to_string(),
                 base_commit: "deadbeef".into(),
-            }),
+            })),
         ),
         event(
             2,
             Some("lint"),
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
         ),
         event(
             3,
             Some("lint"),
-            EventPayload::NodeFinished(NodeFinishedPayload {
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
                 outcome: "criteria green".to_string(),
                 tokens_used: TokenUsage {
                     input: 10,
                     output: 5,
                     cached: None,
                 },
-            }),
+            })),
         ),
     ]
 }
@@ -86,10 +87,10 @@ fn deriving_from_the_jsonl_round_trip_matches_deriving_from_the_original_events(
         vec![event(
             1,
             Some("a"),
-            EventPayload::NodeFinished(NodeFinishedPayload {
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
                 outcome: "broken from the start".to_string(),
                 tokens_used: TokenUsage::default(),
-            }),
+            })),
         )],
         vec![],
     ];

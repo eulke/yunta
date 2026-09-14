@@ -15,6 +15,7 @@ use super::node_close::{close_node, fail, Close};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
+use yunta_core::events::NodeEvent;
 
 /// `kind: check`: the engine evaluates its own data,
 /// never a person — no session, no tokens spent. Each builtin's config
@@ -100,7 +101,9 @@ async fn execute_baseline_compare(
             .await?
             .into_iter()
             .find_map(|event| match event.payload() {
-                Some(EventPayload::BaselineCaptured(payload)) => Some(payload.clone()),
+                Some(EventPayload::Node(NodeEvent::BaselineCaptured(payload))) => {
+                    Some(payload.clone())
+                }
                 _ => None,
             });
 
@@ -113,7 +116,7 @@ async fn execute_baseline_compare(
         None => {
             ctx.emit(
                 Some(&node.id),
-                EventPayload::BaselineCaptured(BaselineCapturedPayload {
+                EventPayload::Node(NodeEvent::BaselineCaptured(BaselineCapturedPayload {
                     command: baseline.suite.clone(),
                     results: BaselineResults {
                         exit_code: output.exit_code,
@@ -126,7 +129,7 @@ async fn execute_baseline_compare(
                             .join("\n"),
                     },
                     hash: yunta_core::sha256_hex(output.stdout.as_bytes()),
-                }),
+                })),
             )
             .await?;
             close_node(

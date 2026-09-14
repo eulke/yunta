@@ -17,6 +17,7 @@ use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, Stream
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::MockAdapter;
+use yunta_core::events::NodeEvent;
 use yunta_core::port::Adapter;
 use yunta_core::{AdapterId, ConfigLayer, McpServerConfig, RunId, Workflow};
 use yunta_engine::{
@@ -210,11 +211,10 @@ async fn an_mcp_source_resolves_the_toy_server_s_response_and_is_replayable() {
     let sources: Vec<_> = events
         .iter()
         .find_map(|e| match (&e.node_id, e.payload()) {
-            (Some(n), Some(yunta_core::events::EventPayload::ContextAssembled(p)))
-                if n.as_str() == "ask" =>
-            {
-                Some(p.sources.clone())
-            }
+            (
+                Some(n),
+                Some(yunta_core::events::EventPayload::Node(NodeEvent::ContextAssembled(p))),
+            ) if n.as_str() == "ask" => Some(p.sources.clone()),
             _ => None,
         })
         .expect("context_assembled event for `ask`");

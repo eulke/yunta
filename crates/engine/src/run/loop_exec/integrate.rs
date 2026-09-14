@@ -18,6 +18,7 @@ use super::escalate::{emit_scope_expansion_events, PendingEscalation};
 use super::{BatchIntegration, LoopState};
 use crate::process::Supervision;
 use crate::run::{RunCtx, RunError};
+use yunta_core::events::{NodeEvent, TaskEvent};
 
 /// Integrates one dispatched batch, serially and in declaration order
 /// (never the order dispatch finished in): drains each task's attempts onto
@@ -46,11 +47,11 @@ pub(super) async fn integrate_batch(
         let mut last_check_seq = ctx
             .emit(
                 Some(&node.id),
-                EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+                EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
                     task_id: task.id.clone(),
                     phase: Phase::Pre,
                     results: to_results(&report.pre_check),
-                }),
+                })),
             )
             .await?;
 
@@ -59,20 +60,20 @@ pub(super) async fn integrate_batch(
             last_check_seq = ctx
                 .emit(
                     Some(&node.id),
-                    EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+                    EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
                         task_id: task.id.clone(),
                         phase: Phase::Post,
                         results: to_results(&attempt.post_check),
-                    }),
+                    })),
                 )
                 .await?;
             ctx.emit(
                 Some(&node.id),
-                EventPayload::ScopeChecked(ScopeCheckedPayload {
+                EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {
                     task_id: Some(task.id.clone()),
                     diff: attempt.scope.diff,
                     violations: attempt.scope.violations,
-                }),
+                })),
             )
             .await?;
 
@@ -106,12 +107,12 @@ pub(super) async fn integrate_batch(
             TaskOutcome::Blocked { reason } => {
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+                    EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
                         task_id: task.id.clone(),
                         new_status: TaskStatus::Blocked,
                         caused_by: last_check_seq,
                         commit: None,
-                    }),
+                    })),
                 )
                 .await?;
                 Some(reason)
@@ -149,12 +150,12 @@ pub(super) async fn integrate_batch(
                 };
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+                    EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
                         task_id: task.id.clone(),
                         new_status,
                         caused_by: last_check_seq,
                         commit,
-                    }),
+                    })),
                 )
                 .await?;
                 // Never counted toward the loop's own "no task ready"
@@ -257,7 +258,7 @@ async fn integrate_task(
         *last_check_seq = ctx
             .emit(
                 Some(&node.id),
-                EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+                EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
                     task_id: task.id.clone(),
                     phase: Phase::Post,
                     results: vec![CriterionResult {
@@ -267,7 +268,7 @@ async fn integrate_task(
                         reused: false,
                         duration_ms: None,
                     }],
-                }),
+                })),
             )
             .await?;
         return Ok(IntegrationOutcome::Rejected);
@@ -277,21 +278,21 @@ async fn integrate_task(
     *last_check_seq = ctx
         .emit(
             Some(&node.id),
-            EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+            EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
                 task_id: task.id.clone(),
                 phase: Phase::Post,
                 results: to_results(&post_runs),
-            }),
+            })),
         )
         .await?;
     let scope = scope_check(task_worktree, &task.scope, staged, supervision).await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::ScopeChecked(ScopeCheckedPayload {
+        EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {
             task_id: Some(task.id.clone()),
             diff: scope.diff.clone(),
             violations: scope.violations.clone(),
-        }),
+        })),
     )
     .await?;
 

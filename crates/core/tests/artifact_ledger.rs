@@ -9,6 +9,7 @@ use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventBody,
     EventPayload, RunPausedPayload, StoredEvent,
 };
+use yunta_core::events::{ArtifactEvent, RunEvent};
 use yunta_core::{sha256_hex, ArtifactKind, ContentHash, NodeId, RunId};
 
 fn hash(content: &str) -> ContentHash {
@@ -29,11 +30,11 @@ fn accepted(seq: u64, node: Option<&str>, artifact: ArtifactId, content: &str) -
     event(
         seq,
         node,
-        EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+        EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
             artifact,
             content_hash: hash(content),
             origin: ArtifactOrigin::Submitted,
-        }),
+        })),
     )
 }
 
@@ -51,11 +52,11 @@ fn written(seq: u64, node: &str, path: &str, kind: Option<ArtifactKind>) -> Stor
     event(
         seq,
         Some(node),
-        EventPayload::ArtifactWritten(ArtifactWrittenPayload {
+        EventPayload::Artifacts(ArtifactEvent::Written(ArtifactWrittenPayload {
             path: path.into(),
             content_hash: hash(path),
             artifact_kind: kind,
-        }),
+        })),
     )
 }
 
@@ -199,9 +200,9 @@ fn an_event_about_something_else_leaves_the_fold_unmoved() {
     ledger.apply(
         None,
         1u64.into(),
-        &EventPayload::RunPaused(RunPausedPayload {
+        &EventPayload::Run(RunEvent::Paused(RunPausedPayload {
             reason: "gate waiting".to_string(),
-        }),
+        })),
     );
     assert_eq!(ledger.every().count(), 0);
 }

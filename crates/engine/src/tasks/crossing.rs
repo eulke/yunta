@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use yunta_core::events::{EventPayload, StoredEvent, TaskStatus};
+use yunta_core::events::{EventPayload, StoredEvent, TaskEvent, TaskStatus};
 use yunta_core::{CommitSha, RunId, TaskId, TasksFile};
 
 use crate::process::Supervision;
@@ -49,7 +49,7 @@ pub(crate) fn standing_of(run: &RunId, events: &[StoredEvent]) -> Result<Standin
     // log's, and only for the tasks replay leaves `done`.
     let mut placed: BTreeMap<TaskId, Option<CommitSha>> = BTreeMap::new();
     for event in events {
-        if let Some(EventPayload::TaskStatusChanged(p)) = event.payload() {
+        if let Some(EventPayload::Tasks(TaskEvent::StatusChanged(p))) = event.payload() {
             if p.new_status == TaskStatus::Done {
                 placed.insert(p.task_id.clone(), p.commit.clone());
             }
@@ -148,7 +148,6 @@ async fn has_commit(
 mod tests {
     use std::path::Path;
 
-    use yunta_core::events::{StoredEvent, TaskStatus};
     use yunta_core::{CommitSha, RunId, Task, TaskId};
     use yunta_testkit::{git, git_output, init_repo, tasks_document, INITIAL_BRANCH};
 

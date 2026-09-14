@@ -11,6 +11,7 @@
 //! whole session. The tools move it inside: a refusal comes back as an
 //! answer, and the session fixes it in the same breath.
 
+use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, SessionEvent};
 use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, SubmissionOutcome};
 use yunta_core::ArtifactKind;
 use yunta_engine::{NodeState, RunTerminal};
@@ -58,7 +59,7 @@ fn submitted(bench: &Bench) -> Vec<(String, bool)> {
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::ArtifactSubmitted(p)) => Some((
+            Some(EventPayload::Artifacts(ArtifactEvent::Submitted(p))) => Some((
                 p.name.clone(),
                 matches!(p.outcome, SubmissionOutcome::Accepted { .. }),
             )),
@@ -72,7 +73,7 @@ fn refusals(bench: &Bench) -> Vec<yunta_core::diagnostic::Report> {
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::ArtifactSubmitted(p)) => match &p.outcome {
+            Some(EventPayload::Artifacts(ArtifactEvent::Submitted(p))) => match &p.outcome {
                 SubmissionOutcome::Refused { report } => Some(report.clone()),
                 SubmissionOutcome::Accepted { .. } => None,
             },
@@ -321,7 +322,7 @@ sessions:
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::ArtifactSubmitted(p)) => match &p.outcome {
+            Some(EventPayload::Artifacts(ArtifactEvent::Submitted(p))) => match &p.outcome {
                 SubmissionOutcome::Accepted { content_hash } => Some(content_hash.to_string()),
                 SubmissionOutcome::Refused { .. } => None,
             },
@@ -353,7 +354,7 @@ sessions:
         .iter()
         .rev()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::NodeFailed(p)) => Some(p.retryable),
+            Some(EventPayload::Node(NodeEvent::Failed(p))) => Some(p.retryable),
             _ => None,
         })
         .expect("the node failed");
@@ -497,7 +498,7 @@ sessions:
         .events()
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::FindingRefused(p)) => Some(p.report.clone()),
+            Some(EventPayload::Findings(FindingEvent::Refused(p))) => Some(p.report.clone()),
             _ => None,
         })
         .expect("the refusal is on the log");
@@ -648,7 +649,7 @@ sessions:
         .events()
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::FindingWithdrawn(p)) => Some(p.reason.clone()),
+            Some(EventPayload::Findings(FindingEvent::Withdrawn(p))) => Some(p.reason.clone()),
             _ => None,
         })
         .expect("the withdrawal is on the log");
@@ -709,7 +710,9 @@ sessions:
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::FindingRefused(p)) => Some(format!("{:?}", p.operation)),
+            Some(EventPayload::Findings(FindingEvent::Refused(p))) => {
+                Some(format!("{:?}", p.operation))
+            }
             _ => None,
         })
         .collect();
@@ -751,7 +754,7 @@ sessions:
         .events()
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::FindingRefused(p)) => Some(p.report.clone()),
+            Some(EventPayload::Findings(FindingEvent::Refused(p))) => Some(p.report.clone()),
             _ => None,
         })
         .expect("the refusal is on the log");
@@ -816,7 +819,7 @@ sessions:
     let degraded = events
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::CapabilityDegraded(p))
+            Some(EventPayload::Session(SessionEvent::CapabilityDegraded(p)))
                 if p.capability == yunta_core::Capability::RunTools =>
             {
                 Some(p.clone())

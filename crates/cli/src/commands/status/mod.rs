@@ -25,6 +25,7 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::load_yaml;
 use crate::render::{indent, NodeDisplay, INDENT};
+use yunta_core::events::NodeEvent;
 
 pub fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -402,7 +403,7 @@ fn node_diagnostics(
             continue;
         };
         match event.payload() {
-            Some(EventPayload::NodeFailed(p)) => match &p.failure {
+            Some(EventPayload::Node(NodeEvent::Failed(p))) => match &p.failure {
                 Failure::Artifacts { artifacts } => {
                     latest.insert(
                         node_id.to_string(),
@@ -416,7 +417,7 @@ fn node_diagnostics(
                 }
             },
             // A node that started again has left its last failure behind.
-            Some(EventPayload::NodeStarted(_)) => {
+            Some(EventPayload::Node(NodeEvent::Started(_))) => {
                 latest.remove(node_id.as_str());
             }
             _ => {}

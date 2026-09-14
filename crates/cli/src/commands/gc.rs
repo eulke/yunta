@@ -29,6 +29,7 @@ use yunta_core::{Isolation, Manifest, RunId};
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
 use crate::project::Project;
+use yunta_core::events::RunEvent;
 
 pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -69,7 +70,7 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
             || events.iter().any(|e| {
                 matches!(
                     e.payload(),
-                    Some(yunta_core::events::EventPayload::RunFinished(_))
+                    Some(yunta_core::events::EventPayload::Run(RunEvent::Finished(_)))
                 )
             });
         if !is_terminal {

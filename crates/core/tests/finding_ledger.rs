@@ -4,6 +4,7 @@
 
 use proptest::prelude::*;
 use yunta_core::events::findings::{FindingLedger, Slot};
+use yunta_core::events::FindingEvent;
 use yunta_core::events::{
     EventBody, EventPayload, Finding, FindingPostedPayload, FindingSeverity, FindingUpdatedPayload,
     FindingWithdrawnPayload, StoredEvent,
@@ -35,9 +36,9 @@ fn posted(seq: u64, node: &str, id: &str, title: &str) -> StoredEvent {
     event(
         seq,
         node,
-        EventPayload::FindingPosted(FindingPostedPayload {
+        EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
             finding: finding(id, title),
-        }),
+        })),
     )
 }
 
@@ -45,9 +46,9 @@ fn updated(seq: u64, node: &str, id: &str, title: &str) -> StoredEvent {
     event(
         seq,
         node,
-        EventPayload::FindingUpdated(FindingUpdatedPayload {
+        EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
             finding: finding(id, title),
-        }),
+        })),
     )
 }
 
@@ -55,10 +56,10 @@ fn withdrawn(seq: u64, node: &str, id: &str) -> StoredEvent {
     event(
         seq,
         node,
-        EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+        EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
             id: FindingId::try_from(id.to_string()).expect("a well-formed id"),
             reason: "no longer stands".to_string(),
-        }),
+        })),
     )
 }
 
@@ -156,18 +157,18 @@ fn a_finding_the_engine_posts_about_the_run_stands_like_any_other() {
         event(
             1,
             "review",
-            EventPayload::FindingPosted(FindingPostedPayload {
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: finding("a", "a node's own"),
-            }),
+            })),
         ),
         StoredEvent {
             node_id: None,
             ..event(
                 2,
                 "unused",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("distill-push", "the run could not push"),
-                }),
+                })),
             )
         },
     ];

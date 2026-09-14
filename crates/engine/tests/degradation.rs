@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use yunta_core::events::FindingEvent;
 use yunta_core::events::{EventPayload, Finding, StoredEvent};
 use yunta_core::port::Adapter;
 use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
@@ -131,7 +132,7 @@ impl Bench {
 /// record of a degradation, so a test asserts one is present by id.
 fn finding(events: &[StoredEvent], id: &str) -> Option<Finding> {
     events.iter().find_map(|event| match event.payload() {
-        Some(EventPayload::FindingPosted(p)) if p.finding.id.as_str() == id => {
+        Some(EventPayload::Findings(FindingEvent::Posted(p))) if p.finding.id.as_str() == id => {
             Some(p.finding.clone())
         }
         _ => None,

@@ -10,6 +10,7 @@ use crate::task_cycle::{run_task, AttemptEnv, ScopeGovernance, TaskCycleReport};
 use crate::worktree::prepare_worktree;
 
 use crate::run::{RunCtx, RunError};
+use yunta_core::events::{ScopeEvent, TaskEvent};
 
 /// How many times this task has already been dispatched `Running` in the
 /// log — 1-indexed, so the first dispatch is attempt 1. Used only to keep
@@ -22,7 +23,7 @@ pub(super) fn attempt_number(events: &[StoredEvent], task_id: &yunta_core::TaskI
         .filter(|event| {
             matches!(
                 event.payload(),
-                Some(EventPayload::TaskStatusChanged(p))
+                Some(EventPayload::Tasks(TaskEvent::StatusChanged(p)))
                     if p.task_id == *task_id && p.new_status == TaskStatus::Running
             )
         })
@@ -37,7 +38,7 @@ fn granted_paths_for(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> Ve
     events
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::ScopeExpansionGranted(p)) if &p.task_id == task_id => {
+            Some(EventPayload::Scope(ScopeEvent::Granted(p))) if &p.task_id == task_id => {
                 Some(p.paths.iter().cloned())
             }
             _ => None,
@@ -106,7 +107,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         .find(|event| {
             matches!(
                 event.payload(),
-                Some(EventPayload::TaskRegistered(p)) if p.task_id == task.id
+                Some(EventPayload::Tasks(TaskEvent::Registered(p))) if p.task_id == task.id
             )
         })
         .map(|event| event.seq)
@@ -118,12 +119,12 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         })?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
             task_id: task.id.clone(),
             new_status: TaskStatus::Running,
             caused_by: registered_seq,
             commit: None,
-        }),
+        })),
     )
     .await?;
 

@@ -9,6 +9,7 @@ use crate::runner::resolve_runner;
 use super::node_close::fail;
 use super::step::Step;
 use super::{RunCtx, RunError};
+use yunta_core::events::{NodeEvent, SessionEvent};
 
 /// Resolves the node's runner or fails the node; on success emits
 /// `runner_resolved` and hands back the request pieces.
@@ -79,11 +80,11 @@ pub(super) async fn resolve_node_runner(
             }
             ctx.emit(
                 Some(&node.id),
-                EventPayload::RunnerResolved(RunnerResolvedPayload {
+                EventPayload::Node(NodeEvent::RunnerResolved(RunnerResolvedPayload {
                     runner: resolved.runner.clone(),
                     chosen: chosen.clone(),
                     discarded: resolved.discarded.clone(),
-                }),
+                })),
             )
             .await?;
             Ok(Step::Value(chosen))
@@ -277,13 +278,16 @@ pub(super) async fn report_declarative_network(
     {
         ctx.emit(
             Some(&node.id),
-            EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
-                capability: yunta_core::Capability::NetworkIsolation,
-                adapter: adapter_id.clone(),
-                policy_applied: "declarative-only — the adapter declares no network isolation; \
+            EventPayload::Session(SessionEvent::CapabilityDegraded(
+                yunta_core::events::CapabilityDegradedPayload {
+                    capability: yunta_core::Capability::NetworkIsolation,
+                    adapter: adapter_id.clone(),
+                    policy_applied:
+                        "declarative-only — the adapter declares no network isolation; \
                                  `network: false` is recorded for policy and audit, not enforced"
-                    .to_string(),
-            }),
+                            .to_string(),
+                },
+            )),
         )
         .await?;
     }

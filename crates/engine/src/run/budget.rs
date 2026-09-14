@@ -15,6 +15,7 @@ use yunta_core::events::{EventPayload, Fact, GateResolvedPayload, GateWaitingPay
 
 use super::{RunCtx, RunError};
 use crate::reserved::{offers, ReservedOption};
+use yunta_core::events::GateEvent;
 
 /// What the invocation does after the human (or their absence) weighs in.
 pub enum BudgetDecision {
@@ -40,11 +41,11 @@ pub async fn escalate(
     match ctx.ask_human(&escalation).await? {
         Some(choice) => {
             let continues = ReservedOption::of(&choice.option) == Some(ReservedOption::Continue);
-            ctx.emit(node_id, EventPayload::GateWaiting(escalation))
+            ctx.emit(node_id, EventPayload::Gates(GateEvent::Waiting(escalation)))
                 .await?;
             ctx.emit(
                 node_id,
-                EventPayload::GateResolved(GateResolvedPayload::Chosen(choice)),
+                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(choice))),
             )
             .await?;
             if continues {

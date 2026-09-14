@@ -18,7 +18,8 @@
 
 use std::collections::BTreeMap;
 
-use super::{EventPayload, Finding, StoredEvent};
+use crate::events::FindingEvent;
+use crate::events::{EventPayload, Finding, StoredEvent};
 use crate::ids::{FindingId, NodeId};
 
 /// A finding as the run holds it now, and which node holds it — `None`
@@ -76,7 +77,7 @@ impl FindingLedger {
     pub fn apply(&mut self, node: Option<&NodeId>, payload: &EventPayload) {
         let node = node.cloned();
         match payload {
-            EventPayload::FindingPosted(p) => {
+            EventPayload::Findings(FindingEvent::Posted(p)) => {
                 let key = (node, p.finding.id.clone());
                 match self.slots.get(&key) {
                     Some(Slot::Withdrawn { .. }) | Some(Slot::Live(_)) => {}
@@ -86,13 +87,13 @@ impl FindingLedger {
                     }
                 }
             }
-            EventPayload::FindingUpdated(p) => {
+            EventPayload::Findings(FindingEvent::Updated(p)) => {
                 let key = (node, p.finding.id.clone());
                 if matches!(self.slots.get(&key), Some(Slot::Live(_))) {
                     self.slots.insert(key, Slot::Live(p.finding.clone()));
                 }
             }
-            EventPayload::FindingWithdrawn(p) => {
+            EventPayload::Findings(FindingEvent::Withdrawn(p)) => {
                 let key = (node, p.id.clone());
                 if matches!(self.slots.get(&key), Some(Slot::Live(_))) {
                     self.slots.insert(

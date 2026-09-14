@@ -14,6 +14,7 @@ use yunta_core::AdapterError;
 use yunta_storage::StorageError;
 
 use super::DispatchOutcome;
+use yunta_core::events::SessionEvent;
 
 /// Everything about *how* one node's sessions open, resolved
 /// once by the engine and threaded through the cycle: the mounted
@@ -125,14 +126,16 @@ pub enum DispatchError {
 /// next to the moment it happened instead of one failed close away,
 /// where the only visible symptom is a document nobody delivered.
 fn run_tools_unreachable(adapter: &yunta_core::AdapterId) -> EventPayload {
-    EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
-        capability: yunta_core::Capability::RunTools,
-        adapter: adapter.clone(),
-        policy_applied: "the session runs on — its per-run tool server is mounted and the \
+    EventPayload::Session(SessionEvent::CapabilityDegraded(
+        yunta_core::events::CapabilityDegradedPayload {
+            capability: yunta_core::Capability::RunTools,
+            adapter: adapter.clone(),
+            policy_applied: "the session runs on — its per-run tool server is mounted and the \
                          session holds none of its tools, so this node ends owing every \
                          document it declares"
-            .to_string(),
-    })
+                .to_string(),
+        },
+    ))
 }
 
 /// The only shape of a note the log ever carries: its size and
@@ -302,12 +305,14 @@ async fn apply_agent_event(
         AgentEvent::SessionOpened { session_id, model } => {
             emit_audit(
                 audit,
-                EventPayload::AgentSessionOpened(yunta_core::events::AgentSessionOpenedPayload {
-                    session_id,
-                    agent: requested_agent.clone(),
-                    model,
-                    capabilities: adapter.capabilities(),
-                }),
+                EventPayload::Session(SessionEvent::Opened(
+                    yunta_core::events::AgentSessionOpenedPayload {
+                        session_id,
+                        agent: requested_agent.clone(),
+                        model,
+                        capabilities: adapter.capabilities(),
+                    },
+                )),
             )
             .await
             .map_err(DispatchError::Audit)?;
@@ -325,15 +330,17 @@ async fn apply_agent_event(
         } => {
             emit_audit(
                 audit,
-                EventPayload::AgentMessage(yunta_core::events::AgentMessagePayload {
-                    message_type: yunta_core::events::AgentMessageType::ToolUse,
-                    tool_name: Some(name),
-                    target_digest: Some(target_digest),
-                    input_tokens: None,
-                    output_tokens: None,
-                    cached_input_tokens: None,
-                    text: None,
-                }),
+                EventPayload::Session(SessionEvent::Message(
+                    yunta_core::events::AgentMessagePayload {
+                        message_type: yunta_core::events::AgentMessageType::ToolUse,
+                        tool_name: Some(name),
+                        target_digest: Some(target_digest),
+                        input_tokens: None,
+                        output_tokens: None,
+                        cached_input_tokens: None,
+                        text: None,
+                    },
+                )),
             )
             .await
             .map_err(DispatchError::Audit)?;
@@ -341,18 +348,20 @@ async fn apply_agent_event(
         AgentEvent::Note { text } => {
             emit_audit(
                 audit,
-                EventPayload::AgentMessage(yunta_core::events::AgentMessagePayload {
-                    message_type: yunta_core::events::AgentMessageType::Note,
-                    tool_name: None,
-                    target_digest: None,
-                    input_tokens: None,
-                    output_tokens: None,
-                    cached_input_tokens: None,
-                    // A mechanical size+digest summary, never the content —
-                    // the log must not be able to carry a secret the note
-                    // contained.
-                    text: Some(note_summary(&text)),
-                }),
+                EventPayload::Session(SessionEvent::Message(
+                    yunta_core::events::AgentMessagePayload {
+                        message_type: yunta_core::events::AgentMessageType::Note,
+                        tool_name: None,
+                        target_digest: None,
+                        input_tokens: None,
+                        output_tokens: None,
+                        cached_input_tokens: None,
+                        // A mechanical size+digest summary, never the content —
+                        // the log must not be able to carry a secret the note
+                        // contained.
+                        text: Some(note_summary(&text)),
+                    },
+                )),
             )
             .await
             .map_err(DispatchError::Audit)?;
@@ -364,15 +373,17 @@ async fn apply_agent_event(
         } => {
             emit_audit(
                 audit,
-                EventPayload::AgentMessage(yunta_core::events::AgentMessagePayload {
-                    message_type: yunta_core::events::AgentMessageType::Usage,
-                    tool_name: None,
-                    target_digest: None,
-                    input_tokens: Some(input_tokens),
-                    output_tokens: Some(output_tokens),
-                    cached_input_tokens,
-                    text: None,
-                }),
+                EventPayload::Session(SessionEvent::Message(
+                    yunta_core::events::AgentMessagePayload {
+                        message_type: yunta_core::events::AgentMessageType::Usage,
+                        tool_name: None,
+                        target_digest: None,
+                        input_tokens: Some(input_tokens),
+                        output_tokens: Some(output_tokens),
+                        cached_input_tokens,
+                        text: None,
+                    },
+                )),
             )
             .await
             .map_err(DispatchError::Audit)?;

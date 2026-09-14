@@ -16,6 +16,7 @@ use super::error::ContextResolveError;
 use super::EXTERNAL_CALL_TIMEOUT;
 use crate::run::node_exec::template_vars;
 use crate::run::{RunCtx, RunError};
+use yunta_core::events::{FindingEvent, NodeEvent};
 
 pub(super) async fn resolve_files(
     ctx: &RunCtx<'_>,
@@ -169,7 +170,7 @@ pub(super) async fn resolve_run_events(
         None => events,
         Some(yunta_core::RunEventsFilter::Failed) => events
             .into_iter()
-            .filter(|e| matches!(e.payload(), Some(EventPayload::NodeFailed(_))))
+            .filter(|e| matches!(e.payload(), Some(EventPayload::Node(NodeEvent::Failed(_)))))
             .collect(),
         // History, not state: a session that mounts events wants what
         // happened, and a finding that was rewritten or taken back is
@@ -181,9 +182,9 @@ pub(super) async fn resolve_run_events(
                 matches!(
                     e.payload(),
                     Some(
-                        EventPayload::FindingPosted(_)
-                            | EventPayload::FindingUpdated(_)
-                            | EventPayload::FindingWithdrawn(_)
+                        EventPayload::Findings(FindingEvent::Posted(_))
+                            | EventPayload::Findings(FindingEvent::Updated(_))
+                            | EventPayload::Findings(FindingEvent::Withdrawn(_))
                     )
                 )
             })

@@ -19,6 +19,7 @@ use yunta_core::events::{
     ArtifactId, EventBody, EventPayload, Failure, NodeFailedPayload, RunFinishedPayload,
     RunMetrics, StoredEvent, TerminalState, TokenUsage,
 };
+use yunta_core::events::{NodeEvent, RunEvent};
 use yunta_core::port::Adapter;
 use yunta_core::{AdapterId, ArtifactKind, ConfigLayer, NodeId, RunId, Workflow};
 use yunta_engine::{
@@ -569,10 +570,8 @@ fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Rece
             seq: 1_u64.into(),
             timestamp: yunta_core::Clock::now(&FixedClock),
             node_id: Some(NodeId::from(node)),
-            body: EventBody::Known(EventPayload::NodeFailed(NodeFailedPayload::new(
-                failure,
-                false,
-                TokenUsage::default(),
+            body: EventBody::Known(EventPayload::Node(NodeEvent::Failed(
+                NodeFailedPayload::new(failure, false, TokenUsage::default()),
             ))),
         },
         StoredEvent {
@@ -580,13 +579,13 @@ fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Rece
             seq: 2_u64.into(),
             timestamp: yunta_core::Clock::now(&FixedClock),
             node_id: None,
-            body: EventBody::Known(EventPayload::RunFinished(RunFinishedPayload {
+            body: EventBody::Known(EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
                 terminal_state: TerminalState::Failed,
                 metrics: RunMetrics {
                     cptv: None,
                     tokens: TokenUsage::default(),
                 },
-            })),
+            }))),
         },
     ];
 

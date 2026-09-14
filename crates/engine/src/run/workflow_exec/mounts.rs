@@ -24,6 +24,7 @@ use yunta_core::{ArtifactRefId, MountSpec, NodeKind, RunId};
 use super::runs_root;
 use crate::run::promote::birth_artifact;
 use crate::run::{read_manifest, BirthArtifact, RunCtx};
+use yunta_core::events::ChildEvent;
 
 /// Why the parent's node fails instead of giving birth to the child, in
 /// the two shapes a node failure has.
@@ -137,7 +138,9 @@ async fn resolve_one(
     let source_run = match target.map(|candidate| &candidate.kind) {
         Some(NodeKind::Workflow { .. }) => {
             let child = events.iter().rev().find_map(|e| match e.payload() {
-                Some(EventPayload::ChildRunFinished(p)) if e.node_id.as_ref() == Some(&m.node) => {
+                Some(EventPayload::Children(ChildEvent::Finished(p)))
+                    if e.node_id.as_ref() == Some(&m.node) =>
+                {
                     Some(p.child_run_id.clone())
                 }
                 _ => None,

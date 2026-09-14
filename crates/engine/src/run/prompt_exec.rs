@@ -14,6 +14,7 @@ use super::node_exec::{cancelled_end, open_staging, render_or_fail, session_prof
 use super::runner_resolve::{open_run_tools, report_declarative_network, resolve_node_runner};
 use super::step::Step;
 use super::{RunCtx, RunError};
+use yunta_core::events::{NodeEvent, SessionEvent};
 
 /// The node's prompt text: frozen file content from the manifest when the
 /// workflow declared `{file: ...}`, the inline string otherwise — never a
@@ -79,11 +80,13 @@ async fn resume_target(
         return Ok(None);
     }
     let degraded = |policy_applied: &str| {
-        EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
-            capability: yunta_core::Capability::ResumeSession,
-            adapter: adapter_id.clone(),
-            policy_applied: policy_applied.to_string(),
-        })
+        EventPayload::Session(SessionEvent::CapabilityDegraded(
+            yunta_core::events::CapabilityDegradedPayload {
+                capability: yunta_core::Capability::ResumeSession,
+                adapter: adapter_id.clone(),
+                policy_applied: policy_applied.to_string(),
+            },
+        ))
     };
     match orphaned_session(&ctx.load_events().await?, &node.id) {
         OrphanedSession::Open(session_id) => {
@@ -155,13 +158,15 @@ pub(super) async fn execute_prompt(
     {
         ctx.emit(
             Some(&node.id),
-            EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
-                capability: yunta_core::Capability::Skills,
-                adapter: chosen.adapter.clone(),
-                policy_applied: "skills not mounted — the adapter declares no native \
+            EventPayload::Session(SessionEvent::CapabilityDegraded(
+                yunta_core::events::CapabilityDegradedPayload {
+                    capability: yunta_core::Capability::Skills,
+                    adapter: chosen.adapter.clone(),
+                    policy_applied: "skills not mounted — the adapter declares no native \
                                  mechanism; the session runs without them"
-                    .to_string(),
-            }),
+                        .to_string(),
+                },
+            )),
         )
         .await?;
         Vec::new()
@@ -178,13 +183,13 @@ pub(super) async fn execute_prompt(
             if let Some(policy_applied) = resolution.degraded {
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::CapabilityDegraded(
+                    EventPayload::Session(SessionEvent::CapabilityDegraded(
                         yunta_core::events::CapabilityDegradedPayload {
                             capability: yunta_core::Capability::RunTools,
                             adapter: chosen.adapter.clone(),
                             policy_applied,
                         },
-                    ),
+                    )),
                 )
                 .await?;
             }
@@ -301,7 +306,7 @@ fn orphaned_session(
         .enumerate()
         .filter(|(_, e)| {
             e.node_id.as_ref() == Some(node_id)
-                && matches!(e.payload(), Some(EventPayload::NodeStarted(_)))
+                && matches!(e.payload(), Some(EventPayload::Node(NodeEvent::Started(_))))
         })
         .map(|(i, _)| i)
         .collect();
@@ -319,7 +324,10 @@ fn orphaned_session(
     let had_verdict = window.iter().filter(mine).any(|e| {
         matches!(
             e.payload(),
-            Some(EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_))
+            Some(
+                EventPayload::Node(NodeEvent::Finished(_))
+                    | EventPayload::Node(NodeEvent::Failed(_))
+            )
         )
     });
     if had_verdict {
@@ -330,7 +338,7 @@ fn orphaned_session(
         .filter(mine)
         .rev()
         .find_map(|e| match e.payload() {
-            Some(EventPayload::AgentSessionOpened(p)) => Some(p.session_id.clone()),
+            Some(EventPayload::Session(SessionEvent::Opened(p))) => Some(p.session_id.clone()),
             _ => None,
         }) {
         Some(session_id) => OrphanedSession::Open(session_id),

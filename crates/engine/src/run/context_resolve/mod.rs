@@ -76,6 +76,7 @@ use sources::{
     materialize, resolve_artifact, resolve_command, resolve_files, resolve_node_output,
     resolve_run_events, resolve_tasks,
 };
+use yunta_core::events::NodeEvent;
 
 pub(super) use sources::write_node_output;
 
@@ -267,11 +268,11 @@ async fn assembled(
 
     ctx.emit(
         Some(&node.id),
-        EventPayload::ContextAssembled(ContextAssembledPayload {
+        EventPayload::Node(NodeEvent::ContextAssembled(ContextAssembledPayload {
             task_id: task_id.cloned(),
             sources,
             segment_hashes,
-        }),
+        })),
     )
     .await
     .map_err(|source| ContextResolveError::Io {

@@ -15,11 +15,15 @@ use yunta_core::{Manifest, ModeName, NodeId, NodeKind, OptionId, RunId, Seq, Wor
 
 use super::schedule::{self, ScheduleStep};
 use crate::reserved::{offers, ReservedOption};
+use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
 
 /// Whether an event is the run-level `run_paused` marker — the one predicate
 /// the resolve-gate path reads a parked run's log by.
 fn is_run_paused(event: &StoredEvent) -> bool {
-    matches!(event.payload(), Some(EventPayload::RunPaused(_)))
+    matches!(
+        event.payload(),
+        Some(EventPayload::Run(RunEvent::Paused(_)))
+    )
 }
 
 /// The escalation object for a node whose re-routes are exhausted:
@@ -157,7 +161,7 @@ pub fn current_escalation(
 
 fn current_mode_name(events: &[StoredEvent]) -> Option<ModeName> {
     match events.first().and_then(StoredEvent::payload) {
-        Some(EventPayload::RunCreated(p)) => Some(p.mode.clone()),
+        Some(EventPayload::Run(RunEvent::Created(p))) => Some(p.mode.clone()),
         _ => None,
     }
 }
@@ -224,7 +228,7 @@ pub async fn resolve_gate(
             EventDraft {
                 run_id: run_id.clone(),
                 node_id: Some(node.clone()),
-                payload: EventPayload::GateWaiting(escalation),
+                payload: EventPayload::Gates(GateEvent::Waiting(escalation)),
             },
             clock.now(),
         )
@@ -234,7 +238,7 @@ pub async fn resolve_gate(
             EventDraft {
                 run_id: run_id.clone(),
                 node_id: Some(node),
-                payload: EventPayload::GateResolved(resolution),
+                payload: EventPayload::Gates(GateEvent::Resolved(resolution)),
             },
             clock.now(),
         )
@@ -265,13 +269,15 @@ pub(crate) fn pre_seeded_resolution(
     let mut blocker: Option<Seq> = None;
     for event in events {
         match event.payload() {
-            Some(EventPayload::GateResolved(p)) if event.node_id.as_ref() == Some(node) => {
+            Some(EventPayload::Gates(GateEvent::Resolved(p)))
+                if event.node_id.as_ref() == Some(node) =>
+            {
                 latest = Some((event.seq, p.clone()));
             }
             Some(
-                EventPayload::NodeFailed(_)
-                | EventPayload::NodeRerouted(_)
-                | EventPayload::NodeFinished(_),
+                EventPayload::Node(NodeEvent::Failed(_))
+                | EventPayload::Node(NodeEvent::Rerouted(_))
+                | EventPayload::Node(NodeEvent::Finished(_)),
             ) if event.node_id.as_ref() == Some(node) => {
                 blocker = blocker.max(Some(event.seq));
             }

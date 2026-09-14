@@ -35,6 +35,7 @@ use yunta_core::events::{EventPayload, FindingSeverity, StoredEvent};
 use yunta_core::{DistillArtifact, Isolation, ModeName, OnFinishStep};
 
 use super::{RunCtx, RunError};
+use yunta_core::events::NodeEvent;
 
 /// `provenance.yaml`'s whole document — serialized from structs so the
 /// field order is fixed and the same inputs always give the same bytes.
@@ -90,7 +91,7 @@ fn verification(events: &[StoredEvent]) -> ProvenanceVerification {
         reused: 0,
     };
     for event in events {
-        if let Some(EventPayload::CriteriaChecked(p)) = event.payload() {
+        if let Some(EventPayload::Node(NodeEvent::CriteriaChecked(p))) = event.payload() {
             for result in &p.results {
                 criteria.executed += 1;
                 if result.exit_code == 0 {
@@ -313,6 +314,7 @@ mod tests {
         CriteriaCheckedPayload, CriterionResult, EventBody, Finding, FindingPostedPayload,
         FindingUpdatedPayload, FindingWithdrawnPayload, Phase,
     };
+    use yunta_core::events::{FindingEvent, NodeEvent};
 
     use super::*;
 
@@ -343,33 +345,33 @@ mod tests {
             event(
                 1,
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f1", FindingSeverity::Minor),
-                }),
+                })),
             ),
             event(
                 2,
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f2", FindingSeverity::Major),
-                }),
+                })),
             ),
             // `f1` turns out to block: it counts once, at the severity it
             // carries now.
             event(
                 3,
                 "review",
-                EventPayload::FindingUpdated(FindingUpdatedPayload {
+                EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
                     finding: finding("f1", FindingSeverity::Blocking),
-                }),
+                })),
             ),
             event(
                 4,
                 "review",
-                EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+                EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
                     id: "f2".into(),
                     reason: "the criterion covers it".to_string(),
-                }),
+                })),
             ),
         ];
 
@@ -388,7 +390,7 @@ mod tests {
         let events = vec![event(
             1,
             "build",
-            EventPayload::CriteriaChecked(CriteriaCheckedPayload {
+            EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
                 task_id: "t1".into(),
                 phase: Phase::Post,
                 results: vec![
@@ -407,7 +409,7 @@ mod tests {
                         duration_ms: None,
                     },
                 ],
-            }),
+            })),
         )];
 
         let criteria = verification(&events).criteria;

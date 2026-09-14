@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::thread;
 
+use yunta_core::events::RunEvent;
 use yunta_core::events::{EventBody, EventDraft, EventPayload, EventShapeError, RunPausedPayload};
 use yunta_core::{RunId, Seq};
 use yunta_storage::{AsyncStorage, ChainVerification, Purge, Storage, StorageError};
@@ -31,7 +32,7 @@ fn append_then_read_round_trips() {
     assert_eq!(events.len(), 2);
     assert_eq!(events[1].seq.get(), 2);
     match events[1].payload() {
-        Some(EventPayload::RunPaused(p)) => assert_eq!(p.reason, "budget exceeded"),
+        Some(EventPayload::Run(RunEvent::Paused(p))) => assert_eq!(p.reason, "budget exceeded"),
         other => panic!("expected RunPaused, got {other:?}"),
     }
 }
@@ -443,10 +444,11 @@ fn a_second_connection_appends_interleaved_with_the_first_and_seq_stays_monotoni
         .append(&created_draft("run-reopen"), &yunta_core::SystemClock)
         .unwrap();
     let mut event = created_draft("run-reopen");
-    event.payload =
-        yunta_core::events::EventPayload::RunPaused(yunta_core::events::RunPausedPayload {
+    event.payload = yunta_core::events::EventPayload::Run(RunEvent::Paused(
+        yunta_core::events::RunPausedPayload {
             reason: "from the second handle".to_string(),
-        });
+        },
+    ));
     let seq2 = second.append(&event, &yunta_core::SystemClock).unwrap();
 
     assert_eq!((seq1.get(), seq2.get()), (1, 2));
@@ -454,7 +456,7 @@ fn a_second_connection_appends_interleaved_with_the_first_and_seq_stays_monotoni
     assert_eq!(events.len(), 2);
     assert!(matches!(
         events[1].payload(),
-        Some(yunta_core::events::EventPayload::RunPaused(_))
+        Some(yunta_core::events::EventPayload::Run(RunEvent::Paused(_)))
     ));
 }
 
@@ -464,7 +466,7 @@ fn created_draft(run_id: &str) -> EventDraft {
     EventDraft {
         run_id: RunId::from(run_id),
         node_id: None,
-        payload: EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
+        payload: EventPayload::Run(RunEvent::Created(yunta_core::events::RunCreatedPayload {
             manifest_hash: yunta_core::sha256_hex(b"abc123manifest"),
             inputs: Default::default(),
             mode: "default".into(),
@@ -472,7 +474,7 @@ fn created_draft(run_id: &str) -> EventDraft {
             yunta_schema: None,
             base_branch: "main".to_string(),
             base_commit: "deadbeef".into(),
-        }),
+        })),
     }
 }
 
@@ -480,9 +482,9 @@ fn paused_draft(run_id: &str, reason: &str) -> EventDraft {
     EventDraft {
         run_id: RunId::from(run_id),
         node_id: None,
-        payload: EventPayload::RunPaused(RunPausedPayload {
+        payload: EventPayload::Run(RunEvent::Paused(RunPausedPayload {
             reason: reason.to_string(),
-        }),
+        })),
     }
 }
 
@@ -505,7 +507,7 @@ fn a_draft_is_stamped_by_the_injected_clock_and_gets_the_next_seq() {
     assert_eq!(events[1].seq, second);
     assert_eq!(events[1].timestamp, instant);
     match events[1].payload() {
-        Some(EventPayload::RunPaused(p)) => assert_eq!(p.reason, "budget"),
+        Some(EventPayload::Run(RunEvent::Paused(p))) => assert_eq!(p.reason, "budget"),
         other => panic!("expected run_paused, got {other:?}"),
     }
 }

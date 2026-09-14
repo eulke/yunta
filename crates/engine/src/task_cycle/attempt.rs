@@ -14,6 +14,7 @@ use super::session::{dispatch_session, DispatchError, SessionObserver, SessionSe
 use super::{AttemptRecord, DispatchOutcome, TaskCycleError, TaskOutcome};
 use crate::process::Supervision;
 use crate::scope::scope_check;
+use yunta_core::events::SessionEvent;
 
 /// Everything one attempt of [`run_task`] reads: the per-cycle context that
 /// never changes between attempts, so an attempt takes just this and its
@@ -231,11 +232,15 @@ async fn open_and_dispatch(
                     observer
                         .emit_session_event(
                             obs_node,
-                            EventPayload::CapabilityDegraded(CapabilityDegradedPayload {
-                                capability: Capability::RunTools,
-                                adapter: adapter.id().clone(),
-                                policy_applied: format!("the attempt runs without run tools: {e}"),
-                            }),
+                            EventPayload::Session(SessionEvent::CapabilityDegraded(
+                                CapabilityDegradedPayload {
+                                    capability: Capability::RunTools,
+                                    adapter: adapter.id().clone(),
+                                    policy_applied: format!(
+                                        "the attempt runs without run tools: {e}"
+                                    ),
+                                },
+                            )),
                         )
                         .await
                         .map_err(|source| TaskCycleError::Audit {

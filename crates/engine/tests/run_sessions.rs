@@ -15,6 +15,7 @@ use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
+use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, ScopeEvent, SessionEvent};
 
 #[tokio::test]
 async fn a_session_leaves_agent_session_opened_in_the_log_with_its_session_id() {
@@ -30,7 +31,7 @@ sessions:
     let opened = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::AgentSessionOpened(p)) => {
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::Opened(p))) => {
                 Some((e.node_id.clone(), p.clone()))
             }
             _ => None,
@@ -62,7 +63,7 @@ sessions:
     let messages: Vec<&yunta_core::events::AgentMessagePayload> = events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::AgentMessage(p)) => Some(p),
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::Message(p))) => Some(p),
             _ => None,
         })
         .collect();
@@ -180,7 +181,9 @@ sessions:
     let degraded = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) => Some(p),
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(
+                p,
+            ))) => Some(p),
             _ => None,
         })
         .expect("the degradation must be an event, never silence");
@@ -340,7 +343,9 @@ sessions:
     let finding = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::FindingPosted(p)) => Some(&p.finding),
+            Some(yunta_core::events::EventPayload::Findings(FindingEvent::Posted(p))) => {
+                Some(&p.finding)
+            }
             _ => None,
         })
         .expect("the missing path must become a finding, never be lost");
@@ -708,7 +713,9 @@ nodes:
         .filter(|e| {
             matches!(
                 e.payload(),
-                Some(yunta_core::events::EventPayload::ScopeExpansionRequested(_))
+                Some(yunta_core::events::EventPayload::Scope(
+                    ScopeEvent::Requested(_)
+                ))
             )
         })
         .count();
@@ -717,7 +724,9 @@ nodes:
         .filter(|e| {
             matches!(
                 e.payload(),
-                Some(yunta_core::events::EventPayload::ScopeExpansionGranted(_))
+                Some(yunta_core::events::EventPayload::Scope(
+                    ScopeEvent::Granted(_)
+                ))
             )
         })
         .count();
@@ -777,12 +786,12 @@ nodes:
             &yunta_core::events::EventDraft {
                 run_id: bench.run_id.clone(),
                 node_id: Some("ghost".into()),
-                payload: yunta_core::events::EventPayload::NodeFinished(
+                payload: yunta_core::events::EventPayload::Node(NodeEvent::Finished(
                     yunta_core::events::NodeFinishedPayload {
                         outcome: "??".to_string(),
                         tokens_used: yunta_core::events::TokenUsage::default(),
                     },
-                ),
+                )),
             },
             &yunta_core::SystemClock,
         )
@@ -858,7 +867,7 @@ sessions:
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == yunta_core::Capability::ResumeSession
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p))) if p.capability == yunta_core::Capability::ResumeSession
         )),
         "a successful resume degrades nothing"
     );
@@ -883,7 +892,7 @@ sessions:
     assert!(
         events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == yunta_core::Capability::ResumeSession
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p))) if p.capability == yunta_core::Capability::ResumeSession
                     && p.policy_applied.contains("restart_node")
         )),
         "degrading to a fresh session must be an event, never a silence"
@@ -910,7 +919,7 @@ sessions:
     assert!(
         events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p)) if p.capability == yunta_core::Capability::ResumeSession
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p))) if p.capability == yunta_core::Capability::ResumeSession
                     && p.policy_applied.contains("no session")
         )),
         "a crash before the session opened restarts WITH an explicit event"
@@ -932,7 +941,9 @@ sessions:
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     assert!(!events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::CapabilityDegraded(_))
+        Some(yunta_core::events::EventPayload::Session(
+            SessionEvent::CapabilityDegraded(_)
+        ))
     )));
 }
 
@@ -985,7 +996,7 @@ sessions:
     let accepted: Vec<String> = events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::ArtifactAccepted(p)) => {
+            Some(yunta_core::events::EventPayload::Artifacts(ArtifactEvent::Accepted(p))) => {
                 Some(p.artifact.to_string())
             }
             _ => None,
@@ -1060,11 +1071,9 @@ sessions:
     let degraded = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p))
-                if p.capability == yunta_core::Capability::NetworkIsolation =>
-            {
-                Some(p)
-            }
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(
+                p,
+            ))) if p.capability == yunta_core::Capability::NetworkIsolation => Some(p),
             _ => None,
         })
         .expect("network: false the adapter cannot enforce must be an event, never silence");
@@ -1092,7 +1101,7 @@ sessions:
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p))
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p)))
                 if p.capability == yunta_core::Capability::NetworkIsolation
         )),
         "an unset network policy is not a degradation"
@@ -1118,7 +1127,7 @@ sessions:
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::CapabilityDegraded(p))
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::CapabilityDegraded(p)))
                 if p.capability == yunta_core::Capability::NetworkIsolation
         )),
         "an adapter that declares network isolation leaves nothing to degrade"

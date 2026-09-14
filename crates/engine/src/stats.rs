@@ -47,6 +47,7 @@ use yunta_core::events::{EventPayload, StoredEvent, SubmissionOutcome, TaskStatu
 use yunta_core::{Node, NodeId, RunnerName, Workflow};
 
 use crate::replay::{derive, unknown_kind_counts, RunState, UnknownKindCount};
+use yunta_core::events::{ArtifactEvent, FindingEvent, GateEvent, NodeEvent, RunEvent};
 
 /// One node's contribution to a run's stats — declaration order (`parallel`
 /// children flattened in place, same convention `crate::progress` uses).
@@ -314,7 +315,7 @@ fn measured_until(
     let finished = events
         .iter()
         .rev()
-        .any(|e| matches!(e.payload(), Some(EventPayload::RunFinished(_))));
+        .any(|e| matches!(e.payload(), Some(EventPayload::Run(RunEvent::Finished(_)))));
     match observed_at {
         Some(now) if !finished => Some(now),
         _ => events.last().map(|e| e.timestamp),
@@ -451,15 +452,15 @@ fn walk_attempts(events: &[StoredEvent]) -> AttemptWalk {
     let mut walk = AttemptWalk::default();
     for event in events {
         match event.payload() {
-            Some(EventPayload::NodeStarted(p)) => {
+            Some(EventPayload::Node(NodeEvent::Started(p))) => {
                 if let Some(node_id) = &event.node_id {
                     walk.start_attempt(node_id, event.timestamp, p.attempt);
                 }
             }
-            Some(EventPayload::NodeFinished(p)) => {
+            Some(EventPayload::Node(NodeEvent::Finished(p))) => {
                 walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used);
             }
-            Some(EventPayload::NodeFailed(p)) => {
+            Some(EventPayload::Node(NodeEvent::Failed(p))) => {
                 walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used);
             }
             // A node that asked closed its attempt there: the session is
@@ -467,10 +468,10 @@ fn walk_attempts(events: &[StoredEvent]) -> AttemptWalk {
             // `node_finished` that lands after the answer closes
             // nothing more — its own `close_attempt` finds no open
             // attempt and adds the zero it carries.
-            Some(EventPayload::QuestionsAsked(p)) => {
+            Some(EventPayload::Gates(GateEvent::QuestionsAsked(p))) => {
                 walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used);
             }
-            Some(EventPayload::RunnerResolved(p)) => {
+            Some(EventPayload::Node(NodeEvent::RunnerResolved(p))) => {
                 if let Some(node_id) = &event.node_id {
                     walk.runner.insert(node_id.clone(), p.runner.clone());
                 }
@@ -506,7 +507,7 @@ impl Activity {
         for event in events {
             let node = event.node_id.as_ref();
             match event.payload() {
-                Some(EventPayload::ArtifactSubmitted(p)) => count(
+                Some(EventPayload::Artifacts(ArtifactEvent::Submitted(p))) => count(
                     &mut activity.submissions,
                     &mut activity.submissions_by_node,
                     node,
@@ -515,16 +516,16 @@ impl Activity {
                         SubmissionOutcome::Refused { .. } => |s: &mut Submissions| &mut s.refused,
                     },
                 ),
-                Some(EventPayload::FindingPosted(_)) => {
+                Some(EventPayload::Findings(FindingEvent::Posted(_))) => {
                     activity.count_finding(node, |f| &mut f.posted)
                 }
-                Some(EventPayload::FindingUpdated(_)) => {
+                Some(EventPayload::Findings(FindingEvent::Updated(_))) => {
                     activity.count_finding(node, |f| &mut f.updated)
                 }
-                Some(EventPayload::FindingWithdrawn(_)) => {
+                Some(EventPayload::Findings(FindingEvent::Withdrawn(_))) => {
                     activity.count_finding(node, |f| &mut f.withdrawn)
                 }
-                Some(EventPayload::FindingRefused(_)) => {
+                Some(EventPayload::Findings(FindingEvent::Refused(_))) => {
                     activity.count_finding(node, |f| &mut f.refused)
                 }
                 _ => {}

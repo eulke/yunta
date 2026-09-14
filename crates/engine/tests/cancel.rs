@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use yunta_adapters::MockAdapter;
 use yunta_core::events::EventPayload;
+use yunta_core::events::NodeEvent;
 use yunta_core::port::Adapter;
 use yunta_core::{AdapterId, ConfigLayer, Manifest, Workflow};
 use yunta_engine::{
@@ -89,7 +90,12 @@ async fn cancel_once_started(bench: &Bench, token: &CancellationToken) {
             .events_for_run(&bench.run_id)
             .expect("read events")
             .iter()
-            .any(|event| matches!(event.payload(), Some(EventPayload::NodeStarted(_))));
+            .any(|event| {
+                matches!(
+                    event.payload(),
+                    Some(EventPayload::Node(NodeEvent::Started(_)))
+                )
+            });
         if started {
             break;
         }

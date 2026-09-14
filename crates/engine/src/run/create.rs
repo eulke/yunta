@@ -14,6 +14,7 @@ use crate::run_log::RunLog;
 use crate::tasks::Provenance;
 
 use super::RunError;
+use yunta_core::events::RunEvent;
 
 /// How a run comes by an artifact before any of its nodes runs: a
 /// document one of its `inputs:` named, or what another run — a
@@ -201,7 +202,7 @@ pub async fn create_run(
     let log = RunLog::new(storage, run_id, clock);
     log.record(
         None,
-        EventPayload::RunCreated(RunCreatedPayload {
+        EventPayload::Run(RunEvent::Created(RunCreatedPayload {
             manifest_hash: manifest.manifest_hash(),
             // Every declared input as the manifest froze it — provided
             // or defaulted, already validated: what the run used.
@@ -224,7 +225,7 @@ pub async fn create_run(
             ),
             base_branch: manifest.base_branch.clone(),
             base_commit: manifest.base_commit.clone(),
-        }),
+        })),
     )
     .await?;
 

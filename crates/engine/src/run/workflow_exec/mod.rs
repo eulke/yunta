@@ -57,6 +57,7 @@ use super::node_close::{close_node, fail, fail_with, ChildRun, Close};
 use super::node_exec::{cancelled_end, template_vars, NodeEnd};
 use super::CreateRunParams;
 use super::{RunCtx, RunError, RunTerminal};
+use yunta_core::events::ChildEvent;
 
 /// Where this parent's runs live — the parent's own run.dir sits inside
 /// it, so no configuration lookup can ever disagree with where the
@@ -133,7 +134,7 @@ pub(super) async fn execute_workflow(
         .iter()
         .filter(|e| e.node_id.as_ref() == Some(&node.id))
         .filter_map(|e| match e.payload() {
-            Some(EventPayload::ChildRunCreated(p)) => Some(p.child_run_id.clone()),
+            Some(EventPayload::Children(ChildEvent::Created(p))) => Some(p.child_run_id.clone()),
             _ => None,
         })
         .collect();
@@ -141,7 +142,7 @@ pub(super) async fn execute_workflow(
         .iter()
         .filter(|e| e.node_id.as_ref() == Some(&node.id))
         .filter_map(|e| match e.payload() {
-            Some(EventPayload::ChildRunFinished(p)) => Some(p.child_run_id.clone()),
+            Some(EventPayload::Children(ChildEvent::Finished(p))) => Some(p.child_run_id.clone()),
             _ => None,
         })
         .collect();
@@ -371,10 +372,10 @@ pub(super) async fn execute_workflow(
     born.extend(documents);
     ctx.emit(
         Some(&node.id),
-        EventPayload::ChildRunCreated(ChildRunCreatedPayload {
+        EventPayload::Children(ChildEvent::Created(ChildRunCreatedPayload {
             child_run_id: child_id.clone(),
             child_workflow_hash: child_manifest.workflow_hash.clone(),
-        }),
+        })),
     )
     .await?;
 
@@ -552,12 +553,12 @@ async fn drive_child(
             RunTerminal::Finished => {
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::ChildRunFinished(ChildRunFinishedPayload {
+                    EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload {
                         child_run_id: current_id.clone(),
                         child_workflow_hash: current_manifest.workflow_hash.clone(),
                         terminal_state: TerminalState::Done,
                         tokens: report.state.total_tokens,
-                    }),
+                    })),
                 )
                 .await?;
                 // Only a child that reached `Done` hands anything over.
@@ -587,12 +588,12 @@ async fn drive_child(
                 // becomes the node's next linked child.
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::ChildRunFinished(ChildRunFinishedPayload {
+                    EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload {
                         child_run_id: current_id.clone(),
                         child_workflow_hash: current_manifest.workflow_hash.clone(),
                         terminal_state: TerminalState::Promoted,
                         tokens: report.state.total_tokens,
-                    }),
+                    })),
                 )
                 .await?;
                 let successor = match super::promote::create_promotion_successor(
@@ -633,10 +634,10 @@ async fn drive_child(
                 };
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::ChildRunCreated(ChildRunCreatedPayload {
+                    EventPayload::Children(ChildEvent::Created(ChildRunCreatedPayload {
                         child_run_id: successor.run_id.clone(),
                         child_workflow_hash: successor.manifest.workflow_hash.clone(),
-                    }),
+                    })),
                 )
                 .await?;
                 current_id = successor.run_id;
@@ -650,12 +651,12 @@ async fn drive_child(
                 // its spend, and the diagnostic names the child.
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::ChildRunFinished(ChildRunFinishedPayload {
+                    EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload {
                         child_run_id: current_id.clone(),
                         child_workflow_hash: current_manifest.workflow_hash.clone(),
                         terminal_state: TerminalState::Failed,
                         tokens: report.state.total_tokens,
-                    }),
+                    })),
                 )
                 .await?;
                 // The child's reason keeps its own lines under this

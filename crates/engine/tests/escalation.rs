@@ -128,7 +128,9 @@ async fn reconstructs_an_exhausted_reroute_escalation_with_retry_and_abort() {
     // whole point is that `current_escalation` rebuilds it without one.
     assert!(!events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::GateWaiting(_))
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(
+            _
+        )))
     )));
 
     let (node_id, escalation) = current_escalation(&manifest, &events)
@@ -163,7 +165,9 @@ async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
 
     assert!(!events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::GateWaiting(_))
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(
+            _
+        )))
     )));
 
     let (node_id, escalation) = current_escalation(&manifest, &events)
@@ -194,6 +198,7 @@ nodes:
 // --- resolve_gate writes ONLY the decision; the engine
 // consumes it on wake through its one existing consequence path.
 
+use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
 use yunta_engine::{resolve_gate, ResolveGateError, RunState};
 
 struct GateBench {
@@ -333,7 +338,10 @@ async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
     // resolve_gate writes ONLY the decision pair — the reroute
     // consequence is the engine's to apply, not this function's.
     assert_eq!(
-        bench.count(|p| matches!(p, yunta_core::events::EventPayload::NodeRerouted(_))),
+        bench.count(|p| matches!(
+            p,
+            yunta_core::events::EventPayload::Node(NodeEvent::Rerouted(_))
+        )),
         1,
         "only the run's own automatic reroute is on the log before the resume"
     );
@@ -346,11 +354,17 @@ async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
     ));
     // The consuming engine never re-emits the recorded pair.
     assert_eq!(
-        bench.count(|p| matches!(p, yunta_core::events::EventPayload::GateWaiting(_))),
+        bench.count(|p| matches!(
+            p,
+            yunta_core::events::EventPayload::Gates(GateEvent::Waiting(_))
+        )),
         1
     );
     assert_eq!(
-        bench.count(|p| matches!(p, yunta_core::events::EventPayload::GateResolved(_))),
+        bench.count(|p| matches!(
+            p,
+            yunta_core::events::EventPayload::Gates(GateEvent::Resolved(_))
+        )),
         1
     );
 }
@@ -463,11 +477,13 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
     let events = storage.events_for_run(&run_id).unwrap();
     assert!(events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::PromotionSignaled(_))
+        Some(yunta_core::events::EventPayload::Run(
+            RunEvent::PromotionSignaled(_)
+        ))
     )));
     assert!(events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::RunFinished(p)) if p.terminal_state == yunta_core::events::TerminalState::Promoted
+        Some(yunta_core::events::EventPayload::Run(RunEvent::Finished(p))) if p.terminal_state == yunta_core::events::TerminalState::Promoted
     )));
 }
 
@@ -511,11 +527,17 @@ async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume(
     assert!(bench.worktree.join("shipped.txt").exists());
     // One recorded pair — the consuming engine never re-emits it.
     assert_eq!(
-        bench.count(|p| matches!(p, yunta_core::events::EventPayload::GateWaiting(_))),
+        bench.count(|p| matches!(
+            p,
+            yunta_core::events::EventPayload::Gates(GateEvent::Waiting(_))
+        )),
         1
     );
     assert_eq!(
-        bench.count(|p| matches!(p, yunta_core::events::EventPayload::GateResolved(_))),
+        bench.count(|p| matches!(
+            p,
+            yunta_core::events::EventPayload::Gates(GateEvent::Resolved(_))
+        )),
         1
     );
 }
@@ -561,7 +583,10 @@ async fn a_pre_seeded_abort_is_consumed_exactly_once() {
         "a stale abort must not be re-applied: {reason}"
     );
     assert_eq!(
-        bench.count(|p| matches!(p, yunta_core::events::EventPayload::GateResolved(_))),
+        bench.count(|p| matches!(
+            p,
+            yunta_core::events::EventPayload::Gates(GateEvent::Resolved(_))
+        )),
         1
     );
 }
@@ -652,7 +677,10 @@ async fn resolve_gate_rejects_an_option_not_on_the_menu() {
     }
     // A refusal is a no-op on the log.
     assert_eq!(
-        bench.count(|p| matches!(p, yunta_core::events::EventPayload::GateResolved(_))),
+        bench.count(|p| matches!(
+            p,
+            yunta_core::events::EventPayload::Gates(GateEvent::Resolved(_))
+        )),
         0
     );
 }

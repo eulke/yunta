@@ -32,6 +32,7 @@ use super::node_exec::template_vars;
 use super::step::{GateRender, Step};
 use super::{RunCtx, RunError};
 use crate::reserved::{offers, ReservedOption};
+use yunta_core::events::{FindingEvent, GateEvent, NodeEvent};
 
 /// What a dispatch call decided — the caller (`run/mod.rs`'s own loop)
 /// either keeps going (events already emitted) or pauses and returns.
@@ -114,12 +115,12 @@ pub(super) async fn publish_gate(
 
     ctx.emit(
         Some(&node.id),
-        EventPayload::GateWaiting(GateWaitingPayload {
+        EventPayload::Gates(GateEvent::Waiting(GateWaitingPayload {
             summary,
             evidence: vec![Fact::labelled("published at", published.url.clone())].into(),
             options: Vec::new(),
             external_ref: Some(encode_ref(&published)),
-        }),
+        })),
     )
     .await?;
     pause(ctx, format!("waiting on external gate: {}", published.url)).await?;
@@ -177,18 +178,18 @@ async fn resolve_approved(
     emit_started(ctx, node).await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::GateResolved(GateResolvedPayload::Approved {
+        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
             by: by.clone(),
             sha: approved_sha.clone(),
-        }),
+        })),
     )
     .await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::NodeFinished(NodeFinishedPayload {
+        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
             outcome,
             tokens_used: TokenUsage::default(),
-        }),
+        })),
     )
     .await?;
     write_progress(ctx).await?;
@@ -217,15 +218,15 @@ async fn resolve_from_poll(
             emit_started(ctx, node).await?;
             ctx.emit(
                 Some(&node.id),
-                EventPayload::GateResolved(GateResolvedPayload::ChangesRequested {
+                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::ChangesRequested {
                     by: by.clone(),
-                }),
+                })),
             )
             .await?;
             for (i, comment) in comments.iter().enumerate() {
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::FindingPosted(FindingPostedPayload {
+                    EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                         finding: Finding {
                             id: FindingId::try_from(format!("{}-review-{i}", node.id))?,
                             severity: FindingSeverity::Major,
@@ -237,7 +238,7 @@ async fn resolve_from_poll(
                             detail: comment.body.clone(),
                             proposed_criterion: None,
                         },
-                    }),
+                    })),
                 )
                 .await?;
             }
@@ -257,7 +258,7 @@ async fn resolve_from_poll(
             emit_started(ctx, node).await?;
             ctx.emit(
                 Some(&node.id),
-                EventPayload::GateResolved(GateResolvedPayload::Closed),
+                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Closed)),
             )
             .await?;
             fail(
@@ -353,11 +354,10 @@ fn last_approved_sha(
     node_id: &yunta_core::NodeId,
 ) -> Option<CommitSha> {
     events.iter().rev().find_map(|e| match e.payload() {
-        Some(EventPayload::GateResolved(GateResolvedPayload::Approved { sha, .. }))
-            if e.node_id.as_ref() == Some(node_id) =>
-        {
-            Some(sha.clone())
-        }
+        Some(EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
+            sha,
+            ..
+        }))) if e.node_id.as_ref() == Some(node_id) => Some(sha.clone()),
         _ => None,
     })
 }
@@ -367,7 +367,7 @@ fn last_external_ref(
     node_id: &yunta_core::NodeId,
 ) -> Option<String> {
     events.iter().rev().find_map(|e| match e.payload() {
-        Some(EventPayload::GateWaiting(p)) if e.node_id.as_ref() == Some(node_id) => {
+        Some(EventPayload::Gates(GateEvent::Waiting(p))) if e.node_id.as_ref() == Some(node_id) => {
             p.external_ref.clone()
         }
         _ => None,
@@ -429,11 +429,16 @@ pub(super) async fn resolve_internal_gate(
         // interaction, pause the run, leave the node stateless so a
         // resume re-asks if the human changes their mind.
         if !already_recorded {
-            ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
-                .await?;
             ctx.emit(
                 Some(&node.id),
-                EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
+                EventPayload::Gates(GateEvent::Waiting(escalation)),
+            )
+            .await?;
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
+                    choice.clone(),
+                ))),
             )
             .await?;
         }
@@ -447,11 +452,16 @@ pub(super) async fn resolve_internal_gate(
 
     emit_started(ctx, node).await?;
     if !already_recorded {
-        ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
-            .await?;
         ctx.emit(
             Some(&node.id),
-            EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
+            EventPayload::Gates(GateEvent::Waiting(escalation)),
+        )
+        .await?;
+        ctx.emit(
+            Some(&node.id),
+            EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
+                choice.clone(),
+            ))),
         )
         .await?;
     }
@@ -472,25 +482,27 @@ pub(super) async fn resolve_internal_gate(
             .await?;
             ctx.emit(
                 Some(&node.id),
-                EventPayload::NodeRerouted(yunta_core::events::NodeReroutedPayload {
-                    to_node: target.clone(),
-                    cause: format!("gate `{}` chose `{chosen}`", node.id),
-                    // A gate choice is a routing decision, not a bounded
-                    // retry: it has no attempt or cap to report.
-                    attempt: None,
-                    max_reroutes: None,
-                    origin: yunta_core::events::RerouteOrigin::GateChoice,
-                }),
+                EventPayload::Node(NodeEvent::Rerouted(
+                    yunta_core::events::NodeReroutedPayload {
+                        to_node: target.clone(),
+                        cause: format!("gate `{}` chose `{chosen}`", node.id),
+                        // A gate choice is a routing decision, not a bounded
+                        // retry: it has no attempt or cap to report.
+                        attempt: None,
+                        max_reroutes: None,
+                        origin: yunta_core::events::RerouteOrigin::GateChoice,
+                    },
+                )),
             )
             .await?;
         }
         None => {
             ctx.emit(
                 Some(&node.id),
-                EventPayload::NodeFinished(NodeFinishedPayload {
+                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
                     outcome: chosen.to_string(),
                     tokens_used: TokenUsage::default(),
-                }),
+                })),
             )
             .await?;
             write_progress(ctx).await?;
@@ -505,13 +517,13 @@ async fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
         .iter()
         .filter(|e| {
             e.node_id.as_ref() == Some(&node.id)
-                && matches!(e.payload(), Some(EventPayload::NodeStarted(_)))
+                && matches!(e.payload(), Some(EventPayload::Node(NodeEvent::Started(_))))
         })
         .count() as u32
         + 1;
     ctx.emit(
         Some(&node.id),
-        EventPayload::NodeStarted(NodeStartedPayload { attempt }),
+        EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt })),
     )
     .await?;
     Ok(())
@@ -556,21 +568,26 @@ async fn degrade_to_console(
         return Ok(GateStep::StillWaiting { reason });
     };
 
-    ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
-        .await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
+        EventPayload::Gates(GateEvent::Waiting(escalation)),
+    )
+    .await?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
+            choice.clone(),
+        ))),
     )
     .await?;
     emit_started(ctx, node).await?;
     if ReservedOption::of(&choice.option) == Some(ReservedOption::Approve) {
         ctx.emit(
             Some(&node.id),
-            EventPayload::NodeFinished(NodeFinishedPayload {
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
                 outcome: format!("approved from the console by {}", choice.by),
                 tokens_used: TokenUsage::default(),
-            }),
+            })),
         )
         .await?;
         write_progress(ctx).await?;

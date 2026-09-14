@@ -24,6 +24,7 @@ use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
+use yunta_core::events::{ArtifactEvent, NodeEvent, RunEvent};
 
 /// One node the engine finds interrupted with no terminal event, whose
 /// policy is to pause rather than guess — so every invocation of this run
@@ -126,7 +127,7 @@ async fn paused_run() -> Paused {
             &EventDraft {
                 run_id: bench.run_id.clone(),
                 node_id: Some("only".into()),
-                payload: EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+                payload: EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
             },
             &SystemClock,
         )
@@ -146,7 +147,7 @@ fn resumes(bench: &Bench) -> usize {
     bench
         .events()
         .iter()
-        .filter(|e| matches!(e.payload(), Some(EventPayload::RunResumed(_))))
+        .filter(|e| matches!(e.payload(), Some(EventPayload::Run(RunEvent::Resumed(_)))))
         .count()
 }
 
@@ -264,11 +265,11 @@ async fn a_run_whose_log_predates_the_object_store_resumes_and_says_what_it_coul
             &EventDraft {
                 run_id: paused.bench.run_id.clone(),
                 node_id: Some("only".into()),
-                payload: EventPayload::ArtifactWritten(ArtifactWrittenPayload {
+                payload: EventPayload::Artifacts(ArtifactEvent::Written(ArtifactWrittenPayload {
                     path: PathBuf::from("artifacts/legacy.md"),
                     content_hash: sha256_hex(b"bytes this run never stored"),
                     artifact_kind: None,
-                }),
+                })),
             },
             &SystemClock,
         )

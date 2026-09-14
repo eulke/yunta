@@ -25,6 +25,7 @@ use crate::worktree::{RunWorktree, WorktreeIntegrity};
 
 use super::schedule::{self, ScheduleStep};
 use super::{gate_exec, steps, RunCtx, RunEnv, RunError, RunReport, RunTerminal};
+use yunta_core::events::RunEvent;
 
 /// Records the `run_paused` a post-crash `yunta cancel` writes when it
 /// finds the engine already dead. The CLI never builds an `EventDraft`
@@ -34,9 +35,9 @@ use super::{gate_exec, steps, RunCtx, RunEnv, RunError, RunReport, RunTerminal};
 /// stops a run (the scheduler's [`record_pause`], a crash's
 /// [`record_pause_after_crash`]) writes the same event.
 fn run_paused(reason: &str) -> EventPayload {
-    EventPayload::RunPaused(RunPausedPayload {
+    EventPayload::Run(RunEvent::Paused(RunPausedPayload {
         reason: reason.to_string(),
-    })
+    }))
 }
 
 pub async fn record_pause_after_crash(
@@ -212,7 +213,7 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     if view
         .events
         .iter()
-        .any(|e| matches!(e.payload(), Some(EventPayload::RunFinished(_))))
+        .any(|e| matches!(e.payload(), Some(EventPayload::Run(RunEvent::Finished(_)))))
     {
         // Re-executing a finished run is a no-op, not an error — the log
         // already has its ending.
@@ -355,10 +356,10 @@ async fn record_resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError>
     };
     ctx.emit(
         None,
-        EventPayload::RunResumed(RunResumedPayload {
+        EventPayload::Run(RunEvent::Resumed(RunResumedPayload {
             resume_policy_applied,
             policies,
-        }),
+        })),
     )
     .await?;
     Ok(())

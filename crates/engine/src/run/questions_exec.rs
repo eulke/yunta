@@ -19,6 +19,7 @@ use crate::answers::{AnswersError, Reply};
 use crate::artifacts::{describe, RunArtifacts};
 
 use super::{RunCtx, RunError};
+use yunta_core::events::GateEvent;
 
 /// What the ask round produced: the answers are on the log, or a reason
 /// to pause — no surface, or a reply the questions refuse, each citing
@@ -121,8 +122,8 @@ fn pending(
             continue;
         }
         match event.payload() {
-            Some(EventPayload::QuestionsAsked(p)) => asked = Some(p.clone()),
-            Some(EventPayload::QuestionsAnswered(_)) => asked = None,
+            Some(EventPayload::Gates(GateEvent::QuestionsAsked(p))) => asked = Some(p.clone()),
+            Some(EventPayload::Gates(GateEvent::QuestionsAnswered(_))) => asked = None,
             _ => {}
         }
     }

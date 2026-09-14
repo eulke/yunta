@@ -9,6 +9,7 @@
 //! missing from a live view.
 
 use yunta_core::events::EventPayload;
+use yunta_core::events::{ChildEvent, FindingEvent, RunEvent, SessionEvent};
 use yunta_core::{RunId, Seq};
 use yunta_engine::RunTerminal;
 use yunta_testkit::{Bench, RecordingObserver};
@@ -109,7 +110,12 @@ async fn a_session_audit_event_reaches_the_observer() {
     let opened: Vec<_> = recorder
         .frames()
         .into_iter()
-        .filter(|frame| matches!(frame.payload, EventPayload::AgentSessionOpened(_)))
+        .filter(|frame| {
+            matches!(
+                frame.payload,
+                EventPayload::Session(SessionEvent::Opened(_))
+            )
+        })
         .collect();
     assert_eq!(
         opened.len(),
@@ -148,7 +154,7 @@ async fn an_agent_posted_finding_reaches_the_observer() {
         .frames()
         .into_iter()
         .filter_map(|frame| match (&frame.payload, &frame.node_id) {
-            (EventPayload::FindingPosted(p), Some(node)) => {
+            (EventPayload::Findings(FindingEvent::Posted(p)), Some(node)) => {
                 Some((node.to_string(), p.finding.id.to_string()))
             }
             _ => None,
@@ -193,7 +199,7 @@ async fn a_child_run_reports_under_its_own_run_id() {
     let child_id = frames
         .iter()
         .find_map(|frame| match &frame.payload {
-            EventPayload::ChildRunCreated(p) => Some(p.child_run_id.clone()),
+            EventPayload::Children(ChildEvent::Created(p)) => Some(p.child_run_id.clone()),
             _ => None,
         })
         .expect("the parent records the child run it gives birth to");
@@ -212,13 +218,18 @@ async fn a_child_run_reports_under_its_own_run_id() {
         recorder
             .for_run(&child_id)
             .iter()
-            .any(|frame| matches!(frame.payload, EventPayload::RunFinished(_))),
+            .any(|frame| matches!(frame.payload, EventPayload::Run(RunEvent::Finished(_)))),
         "the child's frames must reach the same observer, under the child's run id"
     );
 
     let link_at = frames
         .iter()
-        .position(|frame| matches!(frame.payload, EventPayload::ChildRunCreated(_)))
+        .position(|frame| {
+            matches!(
+                frame.payload,
+                EventPayload::Children(ChildEvent::Created(_))
+            )
+        })
         .expect("the link frame");
     let first_child_at = frames
         .iter()

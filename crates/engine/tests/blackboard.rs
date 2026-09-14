@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use yunta_adapters::MockAdapter;
 use yunta_core::events::{EventBody, EventPayload};
+use yunta_core::events::{FindingEvent, SessionEvent};
 use yunta_core::port::Adapter;
 use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
@@ -114,7 +115,9 @@ impl Bench {
             .into_iter()
             .filter(|e| e.node_id.as_ref().map(|n| n.as_str()) == Some(node))
             .filter_map(|e| match e.payload() {
-                Some(EventPayload::FindingPosted(p)) => Some(p.finding.id.to_string()),
+                Some(EventPayload::Findings(FindingEvent::Posted(p))) => {
+                    Some(p.finding.id.to_string())
+                }
                 _ => None,
             })
             .collect()
@@ -300,7 +303,10 @@ sessions:
         .events_for_run(&bench.run_id)
         .unwrap()
         .iter()
-        .any(|e| matches!(e.payload(), Some(EventPayload::CapabilityDegraded(_)))));
+        .any(|e| matches!(
+            e.payload(),
+            Some(EventPayload::Session(SessionEvent::CapabilityDegraded(_)))
+        )));
 }
 
 #[tokio::test]
@@ -378,9 +384,11 @@ fn consolidate_blackboard_is_invariant_under_event_shuffling() {
         seq: seq.into(),
         timestamp: chrono::Utc::now(),
         node_id: Some(node.into()),
-        body: EventBody::Known(EventPayload::FindingPosted(FindingPostedPayload {
-            finding: finding(id),
-        })),
+        body: EventBody::Known(EventPayload::Findings(FindingEvent::Posted(
+            FindingPostedPayload {
+                finding: finding(id),
+            },
+        ))),
     };
     let members = vec!["a".into(), "b".into()];
     let forward = vec![
@@ -424,28 +432,28 @@ fn group_log() -> Vec<yunta_core::events::StoredEvent> {
     vec![
         event(
             1,
-            EventPayload::FindingPosted(FindingPostedPayload {
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: finding("f1", "taken back"),
-            }),
+            })),
         ),
         event(
             2,
-            EventPayload::FindingPosted(FindingPostedPayload {
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: finding("f2", "first wording"),
-            }),
+            })),
         ),
         event(
             3,
-            EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+            EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
                 id: "f1".into(),
                 reason: "it was the harness, not the code".to_string(),
-            }),
+            })),
         ),
         event(
             4,
-            EventPayload::FindingUpdated(FindingUpdatedPayload {
+            EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
                 finding: finding("f2", "last wording"),
-            }),
+            })),
         ),
     ]
 }

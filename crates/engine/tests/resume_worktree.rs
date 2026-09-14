@@ -25,6 +25,7 @@ use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
+use yunta_core::events::{NodeEvent, RunEvent};
 
 /// One node the engine finds interrupted with no terminal event, whose
 /// policy is to pause rather than guess — so every invocation of this run
@@ -134,7 +135,7 @@ async fn paused_run(isolation: Isolation) -> Paused {
             &EventDraft {
                 run_id: bench.run_id.clone(),
                 node_id: Some("only".into()),
-                payload: EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+                payload: EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
             },
             &SystemClock,
         )
@@ -153,7 +154,7 @@ fn resumes(bench: &Bench) -> usize {
     bench
         .events()
         .iter()
-        .filter(|e| matches!(e.payload(), Some(EventPayload::RunResumed(_))))
+        .filter(|e| matches!(e.payload(), Some(EventPayload::Run(RunEvent::Resumed(_)))))
         .count()
 }
 

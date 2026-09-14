@@ -25,6 +25,7 @@ use crate::artifacts::{accept, VerifiedArtifact};
 
 use super::session::{RunToolError, SessionTools};
 use super::verdicts::{failure_heading, numbered, read_as, submission_refusal};
+use yunta_core::events::ArtifactEvent;
 
 impl SessionTools {
     /// The verdict this node's close will reach, while the session can
@@ -161,11 +162,13 @@ impl SessionTools {
                 })
             }
         };
-        self.append(EventPayload::ArtifactSubmitted(ArtifactSubmittedPayload {
-            name: name.clone(),
-            artifact_kind: kind,
-            outcome,
-        }))
+        self.append(EventPayload::Artifacts(ArtifactEvent::Submitted(
+            ArtifactSubmittedPayload {
+                name: name.clone(),
+                artifact_kind: kind,
+                outcome,
+            },
+        )))
         .await?;
         if let Some(verified) = accepted {
             accept(

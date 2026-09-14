@@ -19,6 +19,7 @@ use super::lines::Lines;
 use super::region::Region;
 use super::turns::{Standby, Standing};
 use super::SurfaceEnv;
+use yunta_core::events::{ChildEvent, RunEvent};
 
 /// How often the surface redraws on its own. The durations it shows are
 /// counted in whole seconds, so a beat of one second is exactly as often
@@ -349,10 +350,12 @@ fn succeeds(events: &[StoredEvent], run_id: &RunId) -> bool {
     let mut promoted = false;
     for event in events {
         match event.payload() {
-            Some(EventPayload::RunFinished(p)) => {
+            Some(EventPayload::Run(RunEvent::Finished(p))) => {
                 promoted = p.terminal_state == TerminalState::Promoted;
             }
-            Some(EventPayload::ChildRunCreated(p)) if &p.child_run_id == run_id => return false,
+            Some(EventPayload::Children(ChildEvent::Created(p))) if &p.child_run_id == run_id => {
+                return false
+            }
             _ => {}
         }
     }
@@ -397,6 +400,7 @@ pub(super) async fn paint(mut painter: Painter, mut beats: Receiver<Beat>, stand
 
 #[cfg(test)]
 mod tests {
+    use yunta_core::events::{ChildEvent, RunEvent};
     use yunta_core::events::{
         ChildRunCreatedPayload, EventBody, NodeStartedPayload, RunFinishedPayload, RunMetrics,
         TokenUsage,
@@ -405,6 +409,7 @@ mod tests {
     use yunta_testkit_core::FixedClock;
 
     use super::*;
+    use yunta_core::events::NodeEvent;
 
     const DRAWN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
     const OTHER: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P6");
@@ -420,24 +425,24 @@ mod tests {
     }
 
     fn started() -> EventPayload {
-        EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 })
+        EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 }))
     }
 
     fn closed(terminal: TerminalState) -> EventPayload {
-        EventPayload::RunFinished(RunFinishedPayload {
+        EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
             terminal_state: terminal,
             metrics: RunMetrics {
                 cptv: None,
                 tokens: TokenUsage::default(),
             },
-        })
+        }))
     }
 
     fn bore(child: &RunId) -> EventPayload {
-        EventPayload::ChildRunCreated(ChildRunCreatedPayload {
+        EventPayload::Children(ChildEvent::Created(ChildRunCreatedPayload {
             child_run_id: child.clone(),
             child_workflow_hash: ContentHash::sha256(b"child"),
-        })
+        }))
     }
 
     #[test]

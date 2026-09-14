@@ -16,6 +16,7 @@ use yunta_core::{Answer, AnswersFile, ContentHash, NodeId, QuestionsFile, Respon
 
 use crate::artifacts::{accept, answers_artifact, AcceptError};
 use crate::run_log::RunLog;
+use yunta_core::events::GateEvent;
 
 /// One surface's reply, as the engine records it.
 #[derive(Debug, Clone, PartialEq)]
@@ -81,11 +82,11 @@ pub async fn record(
     let accepted = write(log, run_dir, node, &file, ArtifactOrigin::Answered).await?;
     log.record(
         Some(node),
-        EventPayload::QuestionsAnswered(QuestionsAnsweredPayload {
+        EventPayload::Gates(GateEvent::QuestionsAnswered(QuestionsAnsweredPayload {
             answers_hash: accepted.answers_hash.clone(),
             channel: reply.channel,
             responder: reply.responder,
-        }),
+        })),
     )
     .await
     .map_err(|source| {

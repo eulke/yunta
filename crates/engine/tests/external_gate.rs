@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 
 use yunta_adapters::{MockForge, MockForgeState};
+use yunta_core::events::{FindingEvent, GateEvent, NodeEvent};
 use yunta_core::port::Adapter;
 use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
 use yunta_engine::{
@@ -196,7 +197,7 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let resolved = events.iter().find_map(|e| match e.payload() {
-        Some(yunta_core::events::EventPayload::GateResolved(p)) => Some(p),
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Resolved(p))) => Some(p),
         _ => None,
     });
     let Some(yunta_core::events::GateResolvedPayload::Approved { by, .. }) = resolved else {
@@ -247,7 +248,9 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
             e.node_id.as_ref().map(|id| id.as_str()) == Some("approve")
                 && matches!(
                     e.payload(),
-                    Some(yunta_core::events::EventPayload::NodeStarted(_))
+                    Some(yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                        _
+                    )))
                 )
         })
         .count();
@@ -298,7 +301,9 @@ async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let finding = events.iter().find_map(|e| match e.payload() {
-        Some(yunta_core::events::EventPayload::FindingPosted(p)) => Some(&p.finding),
+        Some(yunta_core::events::EventPayload::Findings(FindingEvent::Posted(p))) => {
+            Some(&p.finding)
+        }
         _ => None,
     });
     assert_eq!(
@@ -327,7 +332,7 @@ async fn a_merged_pr_resolves_the_gate_as_approved_by_the_merger() {
     let resolved = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::GateResolved(p)) => Some(p),
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Resolved(p))) => Some(p),
             _ => None,
         })
         .expect("the gate resolves");
@@ -373,7 +378,9 @@ async fn a_merged_gate_stays_resolved_on_later_wakes() {
             e.node_id.as_ref().map(|id| id.as_str()) == Some("approve")
                 && matches!(
                     e.payload(),
-                    Some(yunta_core::events::EventPayload::GateResolved(_))
+                    Some(yunta_core::events::EventPayload::Gates(
+                        GateEvent::Resolved(_)
+                    ))
                 )
         })
         .count();
@@ -418,7 +425,9 @@ async fn with_no_forge_the_gate_degrades_to_console_and_never_publishes() {
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::GateWaiting(_))
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(
+                _
+            )))
         )),
         "an unresolved degraded gate must not be recorded as published"
     );

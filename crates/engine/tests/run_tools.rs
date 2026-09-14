@@ -11,6 +11,7 @@ use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::ServiceExt;
 use serde_json::json;
 use yunta_core::events::{EventDraft, EventPayload};
+use yunta_core::events::{FindingEvent, RunEvent, TaskEvent};
 use yunta_core::{NodeId, RunId, TaskId, Workflow};
 use yunta_engine::{open_session_listener, RunToolsHost, RunToolsSession};
 use yunta_storage::Storage;
@@ -76,15 +77,17 @@ impl Bench {
                 &EventDraft {
                     run_id: run_id.clone(),
                     node_id: None,
-                    payload: EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
-                        manifest_hash: yunta_core::sha256_hex(b"test-manifest"),
-                        inputs: Default::default(),
-                        mode: "default".into(),
-                        promoted_from: None,
-                        yunta_schema: None,
-                        base_branch: "main".to_string(),
-                        base_commit: "deadbeef".into(),
-                    }),
+                    payload: EventPayload::Run(RunEvent::Created(
+                        yunta_core::events::RunCreatedPayload {
+                            manifest_hash: yunta_core::sha256_hex(b"test-manifest"),
+                            inputs: Default::default(),
+                            mode: "default".into(),
+                            promoted_from: None,
+                            yunta_schema: None,
+                            base_branch: "main".to_string(),
+                            base_commit: "deadbeef".into(),
+                        },
+                    )),
                 },
                 &yunta_core::SystemClock,
             )
@@ -155,7 +158,7 @@ impl Bench {
                 &EventDraft {
                     run_id: self.run_id.clone(),
                     node_id: Some(NodeId::from(node)),
-                    payload: EventPayload::FindingPosted(
+                    payload: EventPayload::Findings(FindingEvent::Posted(
                         yunta_core::events::FindingPostedPayload {
                             finding: yunta_core::events::Finding {
                                 id: id.into(),
@@ -166,7 +169,7 @@ impl Bench {
                                 proposed_criterion: None,
                             },
                         },
-                    ),
+                    )),
                 },
                 &yunta_core::SystemClock,
             )
@@ -180,7 +183,9 @@ impl Bench {
             .into_iter()
             .filter(|e| e.node_id.as_ref().map(|n| n.as_str()) == Some(node))
             .filter_map(|e| match e.payload() {
-                Some(EventPayload::FindingPosted(p)) => Some(p.finding.id.to_string()),
+                Some(EventPayload::Findings(FindingEvent::Posted(p))) => {
+                    Some(p.finding.id.to_string())
+                }
                 _ => None,
             })
             .collect()
@@ -315,7 +320,7 @@ async fn a_tool_written_event_carries_the_runs_injected_clock() {
         .find(|e| {
             matches!(
                 e.payload(),
-                Some(EventPayload::FindingPosted(p)) if p.finding.id.as_str() == "clocked"
+                Some(EventPayload::Findings(FindingEvent::Posted(p))) if p.finding.id.as_str() == "clocked"
             )
         })
         .expect("the finding is on the log");
@@ -415,12 +420,14 @@ async fn task_status_reflects_the_task_state_derived_from_the_log() {
             &EventDraft {
                 run_id: bench.run_id.clone(),
                 node_id: Some(NodeId::from("implement")),
-                payload: EventPayload::TaskRegistered(yunta_core::events::TaskRegisteredPayload {
-                    task_id: TaskId::from("T001"),
-                    criteria: Vec::new(),
-                    scope: Vec::new(),
-                    depends_on: Vec::new(),
-                }),
+                payload: EventPayload::Tasks(TaskEvent::Registered(
+                    yunta_core::events::TaskRegisteredPayload {
+                        task_id: TaskId::from("T001"),
+                        criteria: Vec::new(),
+                        scope: Vec::new(),
+                        depends_on: Vec::new(),
+                    },
+                )),
             },
             &yunta_core::SystemClock,
         )

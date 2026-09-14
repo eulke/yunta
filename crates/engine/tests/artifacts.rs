@@ -9,6 +9,7 @@
 use std::path::Path;
 
 use yunta_core::diagnostic::{ArtifactFailure, FileProblem};
+use yunta_core::events::ArtifactEvent;
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, EventBody, EventPayload, StoredEvent,
 };
@@ -72,11 +73,13 @@ fn accepted(run_dir: &Path, node: &str, kind: ArtifactKind, content: &str) -> St
         seq: 1.into(),
         timestamp: chrono::Utc::now(),
         node_id: Some(node.into()),
-        body: EventBody::Known(EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
-            artifact: ArtifactId::Interpreted { kind },
-            content_hash,
-            origin: ArtifactOrigin::Submitted,
-        })),
+        body: EventBody::Known(EventPayload::Artifacts(ArtifactEvent::Accepted(
+            ArtifactAcceptedPayload {
+                artifact: ArtifactId::Interpreted { kind },
+                content_hash,
+                origin: ArtifactOrigin::Submitted,
+            },
+        ))),
     }
 }
 

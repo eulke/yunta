@@ -132,6 +132,7 @@ mod tests {
     use yunta_testkit::{init_repo, RecordingObserver};
 
     use super::*;
+    use yunta_core::events::RunEvent;
 
     struct AlwaysPromote;
 
@@ -273,7 +274,7 @@ nodes:
         // promoted_from back to the exact parent run_id.
         let successor_events = storage.events_for_run(&final_id).unwrap();
         let created = successor_events.iter().find_map(|e| match e.payload() {
-            Some(EventPayload::RunCreated(p)) => Some(p),
+            Some(EventPayload::Run(RunEvent::Created(p))) => Some(p),
             _ => None,
         });
         assert_eq!(created.unwrap().promoted_from, Some(run_id.clone()));
@@ -283,9 +284,10 @@ nodes:
         // level (promotion.rs), reconfirmed here as the visible half of
         // "cadena auditada en ambos logs".
         let parent_events = storage.events_for_run(&run_id).unwrap();
-        assert!(parent_events
-            .iter()
-            .any(|e| matches!(e.payload(), Some(EventPayload::PromotionSignaled(_)))));
+        assert!(parent_events.iter().any(|e| matches!(
+            e.payload(),
+            Some(EventPayload::Run(RunEvent::PromotionSignaled(_)))
+        )));
 
         // The artifact the parent's log holds landed in the successor's
         // own dir, with no producer of the successor's behind it.
@@ -310,7 +312,7 @@ nodes:
             recorder
                 .for_run(&final_id)
                 .iter()
-                .any(|frame| matches!(frame.payload, EventPayload::RunFinished(_))),
+                .any(|frame| matches!(frame.payload, EventPayload::Run(RunEvent::Finished(_)))),
             "the successor's frames must reach the same observer: `drive_promotions` hands \
              `PromotionEnv.observer` to each `RunEnv` it builds. Got frames for: {:?}",
             recorder

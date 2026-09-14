@@ -5,6 +5,7 @@ use yunta_testkit::{Bench, ScriptedInteraction};
 
 mod common;
 use common::*;
+use yunta_core::events::{GateEvent, ScopeEvent, TaskEvent};
 
 #[tokio::test]
 async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_implicit_expansion()
@@ -45,7 +46,7 @@ async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_i
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::ScopeExpansionRequested(p)) if p.task_id.as_str() == "task-s"
+            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Requested(p))) if p.task_id.as_str() == "task-s"
         )),
         "no scope_expansion_* event may fire when the agent never wrote a request"
     );
@@ -88,7 +89,7 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
     let denied = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::ScopeExpansionDenied(p))
+            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Denied(p)))
                 if p.task_id.as_str() == "task-p" =>
             {
                 Some(p)
@@ -145,7 +146,7 @@ async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterio
     let denied = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::ScopeExpansionDenied(p))
+            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Denied(p)))
                 if p.task_id.as_str() == "task-d" =>
             {
                 Some(p)
@@ -253,7 +254,7 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
         let requested = events
             .iter()
             .find_map(|e| match e.payload() {
-                Some(yunta_core::events::EventPayload::ScopeExpansionRequested(p))
+                Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Requested(p)))
                     if p.task_id.as_str() == "task-g" =>
                 {
                     Some(p.clone())
@@ -324,7 +325,7 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     let granted = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::ScopeExpansionGranted(p))
+            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Granted(p)))
                 if p.task_id.as_str() == "task-h" =>
             {
                 Some(p)
@@ -345,13 +346,13 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     // other gate: waiting + resolved, together.
     assert!(events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::GateWaiting(p)) if p.summary.contains("task-h")
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(p))) if p.summary.contains("task-h")
     )));
     assert!(events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::GateResolved(
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Resolved(
             yunta_core::events::GateResolvedPayload::Chosen(choice)
-        )) if choice.option == "grant"
+        ))) if choice.option == "grant"
     )));
 }
 
@@ -391,7 +392,7 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
     let denied = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::ScopeExpansionDenied(p))
+            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Denied(p)))
                 if p.task_id.as_str() == "task-n" =>
             {
                 Some(p)
@@ -448,7 +449,9 @@ async fn an_ask_mode_request_with_no_surface_still_pauses_exactly_as_before() {
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::GateWaiting(_))
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(
+                _
+            )))
         )),
         "an unresolved escalation must not be recorded as a published gate"
     );
@@ -536,7 +539,7 @@ nodes:
         events
             .iter()
             .filter_map(|e| match e.payload() {
-                Some(yunta_core::events::EventPayload::TaskStatusChanged(p))
+                Some(yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(p)))
                     if p.task_id.as_str() == task =>
                 {
                     Some(p.new_status)
@@ -570,7 +573,7 @@ nodes:
     let registered_count = events
         .iter()
         .filter(|e| {
-            matches!(e.payload(), Some(yunta_core::events::EventPayload::TaskRegistered(p)) if p.task_id.as_str() == "task-c")
+            matches!(e.payload(), Some(yunta_core::events::EventPayload::Tasks(TaskEvent::Registered(p))) if p.task_id.as_str() == "task-c")
         })
         .count();
     assert_eq!(
@@ -673,7 +676,7 @@ nodes:
         events
             .iter()
             .filter_map(|e| match e.payload() {
-                Some(yunta_core::events::EventPayload::TaskStatusChanged(p))
+                Some(yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(p)))
                     if p.task_id.as_str() == task =>
                 {
                     Some(p.new_status)
@@ -738,7 +741,7 @@ nodes:
     let placed: Vec<Option<yunta_core::CommitSha>> = events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::TaskStatusChanged(p))
+            Some(yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(p)))
                 if p.new_status == yunta_core::events::TaskStatus::Done =>
             {
                 Some(p.commit.clone())

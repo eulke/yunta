@@ -16,6 +16,7 @@ use yunta_core::events::{
     RunFinishedPayload, RunMetrics, StoredEvent, TaskRegisteredPayload, TaskStatus,
     TaskStatusChangedPayload, TerminalState, TokenUsage,
 };
+use yunta_core::events::{NodeEvent, RunEvent, SessionEvent, TaskEvent};
 use yunta_core::{Node, NodeKind, Workflow};
 use yunta_engine::{
     compute_run_stats, compute_run_stats_at, derive, last_event_age, live_total_tokens,
@@ -97,7 +98,7 @@ fn started(index: u64, offset_secs: i64, node_id: &str, attempt: u32) -> StoredE
         index,
         offset_secs,
         Some(node_id),
-        EventPayload::NodeStarted(NodeStartedPayload { attempt }),
+        EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt })),
     )
 }
 
@@ -106,10 +107,10 @@ fn finished(index: u64, offset_secs: i64, node_id: &str, tokens_used: TokenUsage
         index,
         offset_secs,
         Some(node_id),
-        EventPayload::NodeFinished(NodeFinishedPayload {
+        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
             outcome: "ok".to_string(),
             tokens_used,
-        }),
+        })),
     )
 }
 
@@ -118,7 +119,7 @@ fn usage(index: u64, offset_secs: i64, node_id: &str, input: u64, output: u64) -
         index,
         offset_secs,
         Some(node_id),
-        EventPayload::AgentMessage(AgentMessagePayload {
+        EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
             message_type: AgentMessageType::Usage,
             tool_name: None,
             target_digest: None,
@@ -126,7 +127,7 @@ fn usage(index: u64, offset_secs: i64, node_id: &str, input: u64, output: u64) -
             output_tokens: Some(output),
             cached_input_tokens: None,
             text: None,
-        }),
+        })),
     )
 }
 
@@ -135,7 +136,7 @@ fn tool_use(index: u64, offset_secs: i64, node_id: &str, tool: &str, digest: &st
         index,
         offset_secs,
         Some(node_id),
-        EventPayload::AgentMessage(AgentMessagePayload {
+        EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
             message_type: AgentMessageType::ToolUse,
             tool_name: Some(tool.to_string()),
             target_digest: Some(digest.to_string()),
@@ -143,7 +144,7 @@ fn tool_use(index: u64, offset_secs: i64, node_id: &str, tool: &str, digest: &st
             output_tokens: None,
             cached_input_tokens: None,
             text: None,
-        }),
+        })),
     )
 }
 
@@ -152,12 +153,12 @@ fn session_opened(index: u64, offset_secs: i64, node_id: &str, session: &str) ->
         index,
         offset_secs,
         Some(node_id),
-        EventPayload::AgentSessionOpened(AgentSessionOpenedPayload {
+        EventPayload::Session(SessionEvent::Opened(AgentSessionOpenedPayload {
             session_id: session.into(),
             agent: Some("reviewer".into()),
             model: Some("mock-model".into()),
             capabilities: Capabilities::default(),
-        }),
+        })),
     )
 }
 
@@ -208,11 +209,11 @@ fn a_second_attempt_reports_its_own_elapsed_on_top_of_the_first() {
             1,
             10,
             Some("build"),
-            EventPayload::NodeFailed(NodeFailedPayload::new(
+            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 Failure::message("criteria still red".to_string()),
                 true,
                 tokens(10, 5),
-            )),
+            ))),
         ),
         started(2, 20, "build", 2),
     ];
@@ -270,13 +271,13 @@ fn a_finished_run_stops_its_clock_at_its_last_event() {
         6,
         110,
         None,
-        EventPayload::RunFinished(RunFinishedPayload {
+        EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
             terminal_state: TerminalState::Done,
             metrics: RunMetrics {
                 cptv: None,
                 tokens: tokens(100, 50),
             },
-        }),
+        })),
     ));
 
     let stats = compute_run_stats_at(&workflow(&["build"]), &events, at(9_000));
@@ -303,34 +304,34 @@ fn each_loop_nodes_tasks_keep_the_node_that_registered_them() {
             2,
             1,
             Some("review-a"),
-            EventPayload::TaskRegistered(TaskRegisteredPayload {
+            EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
                 task_id: "t1".into(),
                 criteria: Vec::new(),
                 scope: Vec::new(),
                 depends_on: Vec::new(),
-            }),
+            })),
         ),
         event(
             3,
             1,
             Some("review-b"),
-            EventPayload::TaskRegistered(TaskRegisteredPayload {
+            EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
                 task_id: "t2".into(),
                 criteria: Vec::new(),
                 scope: Vec::new(),
                 depends_on: Vec::new(),
-            }),
+            })),
         ),
         event(
             4,
             2,
             Some("review-b"),
-            EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+            EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
                 task_id: "t2".into(),
                 new_status: TaskStatus::Running,
                 caused_by: 4.into(),
                 commit: None,
-            }),
+            })),
         ),
     ];
 
@@ -346,12 +347,12 @@ fn a_task_no_event_attributes_to_a_node_has_no_owner() {
         0,
         0,
         None,
-        EventPayload::TaskRegistered(TaskRegisteredPayload {
+        EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
             task_id: "t1".into(),
             criteria: Vec::new(),
             scope: Vec::new(),
             depends_on: Vec::new(),
-        }),
+        })),
     )];
 
     let state = derive(&events);
@@ -475,11 +476,11 @@ fn a_new_attempt_counts_only_its_own_usage_over_the_closed_one() {
             2,
             10,
             Some("build"),
-            EventPayload::NodeFailed(NodeFailedPayload::new(
+            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 Failure::message("criteria still red".to_string()),
                 true,
                 tokens(10, 0),
-            )),
+            ))),
         ),
         started(3, 20, "build", 2),
         usage(4, 25, "build", 7, 0),
@@ -514,7 +515,7 @@ fn usage_no_node_owns_is_left_out_of_the_live_total() {
         0,
         0,
         None,
-        EventPayload::AgentMessage(AgentMessagePayload {
+        EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
             message_type: AgentMessageType::Usage,
             tool_name: None,
             target_digest: None,
@@ -522,7 +523,7 @@ fn usage_no_node_owns_is_left_out_of_the_live_total() {
             output_tokens: Some(7),
             cached_input_tokens: None,
             text: None,
-        }),
+        })),
     )];
     assert_eq!(live_total_tokens(&events), TokenUsage::default());
 }

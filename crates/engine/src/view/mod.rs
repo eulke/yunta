@@ -38,6 +38,7 @@ use crate::runner::ResolvedRunner;
 use crate::stats::stats_observed_at;
 
 use node::Reading;
+use yunta_core::events::{ChildEvent, NodeEvent, SessionEvent};
 
 pub use node::{NodeFrame, NodeStanding, Reroute};
 pub use phase::{RunPhase, WaitingOn};
@@ -286,7 +287,7 @@ fn walk_log(events: &[StoredEvent]) -> Walk {
     let mut walk = Walk::default();
     for event in events {
         match event.payload() {
-            Some(EventPayload::RunnerResolved(p)) => {
+            Some(EventPayload::Node(NodeEvent::RunnerResolved(p))) => {
                 if let Some(node) = &event.node_id {
                     walk.runner.insert(
                         node.clone(),
@@ -298,26 +299,28 @@ fn walk_log(events: &[StoredEvent]) -> Walk {
                     );
                 }
             }
-            Some(EventPayload::NodeRerouted(p)) => {
+            Some(EventPayload::Node(NodeEvent::Rerouted(p))) => {
                 walk.reroutes += 1;
                 if let Some(node) = &event.node_id {
                     walk.reroute
                         .insert(node.clone(), Reroute::of(p, event.timestamp));
                 }
             }
-            Some(EventPayload::ChildRunCreated(p)) => walk.children.push(ChildLink {
+            Some(EventPayload::Children(ChildEvent::Created(p))) => walk.children.push(ChildLink {
                 run_id: p.child_run_id.clone(),
                 node: event.node_id.clone(),
                 terminal: None,
             }),
-            Some(EventPayload::ChildRunFinished(p)) => walk.close_child(p, event),
-            Some(EventPayload::CapabilityDegraded(p)) => walk.degraded.push(Degradation {
-                capability: p.capability,
-                adapter: p.adapter.clone(),
-                policy: p.policy_applied.clone(),
-                node: event.node_id.clone(),
-                at: event.timestamp,
-            }),
+            Some(EventPayload::Children(ChildEvent::Finished(p))) => walk.close_child(p, event),
+            Some(EventPayload::Session(SessionEvent::CapabilityDegraded(p))) => {
+                walk.degraded.push(Degradation {
+                    capability: p.capability,
+                    adapter: p.adapter.clone(),
+                    policy: p.policy_applied.clone(),
+                    node: event.node_id.clone(),
+                    at: event.timestamp,
+                })
+            }
             _ => {}
         }
     }

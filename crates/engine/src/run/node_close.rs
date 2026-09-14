@@ -23,6 +23,7 @@ use super::hooks_exec::{effective_hooks, run_hook, HookRun};
 use super::node_artifacts::{acquire_from_child, asked, derive_findings, record_artifacts};
 use super::node_exec::{render_artifact_names, NodeEnd};
 use super::{RunCtx, RunError};
+use yunta_core::events::{GateEvent, NodeEvent};
 
 /// The child run a `kind: workflow` node closes on: what it produced is
 /// what that node produced, and the run's log is where that is stated.
@@ -170,8 +171,11 @@ pub(super) async fn close_node(
         Some((questions_hash, questions)) => {
             match QuestionsAskedPayload::new(questions_hash, questions, tokens) {
                 Some(payload) => {
-                    ctx.emit(Some(&node.id), EventPayload::QuestionsAsked(payload))
-                        .await?;
+                    ctx.emit(
+                        Some(&node.id),
+                        EventPayload::Gates(GateEvent::QuestionsAsked(payload)),
+                    )
+                    .await?;
                     write_progress(ctx).await?;
                     Ok(NodeEnd::Asked)
                 }
@@ -207,10 +211,10 @@ pub(super) async fn finish_node(
 ) -> Result<NodeEnd, RunError> {
     ctx.emit(
         Some(&node.id),
-        EventPayload::NodeFinished(NodeFinishedPayload {
+        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
             outcome: outcome.into(),
             tokens_used: tokens,
-        }),
+        })),
     )
     .await?;
     write_progress(ctx).await?;
@@ -238,11 +242,13 @@ async fn scope_violation(
     let result = scope_check(ctx.worktree, scope, staged, ctx.root_supervision()).await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::ScopeChecked(yunta_core::events::ScopeCheckedPayload {
-            task_id: None,
-            diff: result.diff.clone(),
-            violations: result.violations.clone(),
-        }),
+        EventPayload::Node(NodeEvent::ScopeChecked(
+            yunta_core::events::ScopeCheckedPayload {
+                task_id: None,
+                diff: result.diff.clone(),
+                violations: result.violations.clone(),
+            },
+        )),
     )
     .await?;
     if result.violations.is_empty() {
@@ -311,7 +317,9 @@ pub(super) async fn fail_with(
 ) -> Result<NodeEnd, RunError> {
     ctx.emit(
         Some(&node.id),
-        EventPayload::NodeFailed(NodeFailedPayload::new(failure, retryable, tokens)),
+        EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+            failure, retryable, tokens,
+        ))),
     )
     .await?;
     Ok(NodeEnd::Failed)

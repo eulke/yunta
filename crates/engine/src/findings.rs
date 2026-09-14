@@ -32,6 +32,7 @@ mod tests {
     };
 
     use super::*;
+    use yunta_core::events::FindingEvent;
 
     fn event(seq: u64, node: &str, payload: EventPayload) -> StoredEvent {
         StoredEvent {
@@ -60,19 +61,19 @@ mod tests {
             event(
                 1,
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f1", "Scope expansion denied", "tasks/T001"),
-                }),
+                })),
             ),
             event(
                 2,
                 "review",
-                EventPayload::FindingUpdated(FindingUpdatedPayload {
+                EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
                     finding: Finding {
                         detail: "the denial was narrowed to one file".to_string(),
                         ..finding("f1", "Scope expansion narrowed", "tasks/T001")
                     },
-                }),
+                })),
             ),
         ];
 
@@ -88,25 +89,25 @@ mod tests {
             event(
                 1,
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f1", "Scope expansion denied", "tasks/T001"),
-                }),
+                })),
             ),
             event(
                 2,
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f2", "Missing rollback", "tasks/T001"),
-                }),
+                })),
             ),
             // `f1` now says what `f2` says: they are one complaint about
             // one place, and `f1` was posted first.
             event(
                 3,
                 "review",
-                EventPayload::FindingUpdated(FindingUpdatedPayload {
+                EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
                     finding: finding("f1", "missing  ROLLBACK", "tasks/T001"),
-                }),
+                })),
             ),
         ];
 
@@ -121,24 +122,24 @@ mod tests {
             event(
                 1,
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f1", "Scope expansion denied", "tasks/T001"),
-                }),
+                })),
             ),
             event(
                 2,
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f2", "Missing rollback", "tasks/T002"),
-                }),
+                })),
             ),
             event(
                 3,
                 "review",
-                EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+                EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
                     id: "f1".into(),
                     reason: "the scope was approved after all".to_string(),
-                }),
+                })),
             ),
         ];
 
@@ -153,24 +154,24 @@ mod tests {
             event(
                 1,
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f1", "Scope expansion denied", "tasks/T001"),
-                }),
+                })),
             ),
             event(
                 2,
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f2", "scope  expansion DENIED", "tasks/T001"),
-                }),
+                })),
             ),
             event(
                 3,
                 "review",
-                EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+                EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
                     id: "f1".into(),
                     reason: "posted against the wrong task".to_string(),
-                }),
+                })),
             ),
         ];
 

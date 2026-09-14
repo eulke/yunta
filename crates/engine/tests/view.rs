@@ -17,6 +17,9 @@ use yunta_core::events::{
     RunResumedPayload, RunnerResolvedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
     TaskStatusChangedPayload, TerminalState, TokenUsage, UnknownEvent,
 };
+use yunta_core::events::{
+    ArtifactEvent, ChildEvent, GateEvent, NodeEvent, RunEvent, SessionEvent, TaskEvent,
+};
 use yunta_core::{
     AgentName, Capability, CommitSha, ContentHash, ModeName, NodeId, NodeKind, RunnerCandidate,
     TaskId, Workflow,
@@ -88,7 +91,7 @@ fn frame(workflow: &Workflow, events: &[StoredEvent], now_secs: i64) -> RunFrame
 }
 
 fn created(mode: &str) -> EventPayload {
-    EventPayload::RunCreated(RunCreatedPayload {
+    EventPayload::Run(RunEvent::Created(RunCreatedPayload {
         manifest_hash: ContentHash::sha256(b"manifest"),
         inputs: BTreeMap::new(),
         mode: mode.into(),
@@ -96,11 +99,11 @@ fn created(mode: &str) -> EventPayload {
         yunta_schema: None,
         base_branch: "main".to_string(),
         base_commit: CommitSha::from("abc1234"),
-    })
+    }))
 }
 
 fn started(attempt: u32) -> EventPayload {
-    EventPayload::NodeStarted(NodeStartedPayload { attempt })
+    EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt }))
 }
 
 fn tokens(input: u64, output: u64) -> TokenUsage {
@@ -112,59 +115,59 @@ fn tokens(input: u64, output: u64) -> TokenUsage {
 }
 
 fn finished() -> EventPayload {
-    EventPayload::NodeFinished(NodeFinishedPayload {
+    EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
         outcome: "ok".to_string(),
         tokens_used: tokens(10, 5),
-    })
+    }))
 }
 
 fn failed(outcome: &str) -> EventPayload {
-    EventPayload::NodeFailed(NodeFailedPayload::new(
+    EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
         Failure::message(outcome.to_string()),
         true,
         tokens(7, 3),
-    ))
+    )))
 }
 
 fn rerouted(to: &str) -> EventPayload {
-    EventPayload::NodeRerouted(NodeReroutedPayload {
+    EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload {
         to_node: to.into(),
         cause: "criteria still red".to_string(),
         attempt: Some(1),
         max_reroutes: Some(2),
         origin: RerouteOrigin::OnFailure,
-    })
+    }))
 }
 
 fn registered(task: &str) -> EventPayload {
-    EventPayload::TaskRegistered(TaskRegisteredPayload {
+    EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
         task_id: task.into(),
         criteria: Vec::new(),
         scope: Vec::new(),
         depends_on: Vec::new(),
-    })
+    }))
 }
 
 fn task_now(task: &str, new_status: TaskStatus) -> EventPayload {
-    EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+    EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
         task_id: task.into(),
         new_status,
         caused_by: 1.into(),
         commit: None,
-    })
+    }))
 }
 
 fn session_opened(session: &str) -> EventPayload {
-    EventPayload::AgentSessionOpened(AgentSessionOpenedPayload {
+    EventPayload::Session(SessionEvent::Opened(AgentSessionOpenedPayload {
         session_id: session.into(),
         agent: Some("builder".into()),
         model: Some("mock-model".into()),
         capabilities: Capabilities::default(),
-    })
+    }))
 }
 
 fn tool_use(tool: &str) -> EventPayload {
-    EventPayload::AgentMessage(AgentMessagePayload {
+    EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
         message_type: AgentMessageType::ToolUse,
         tool_name: Some(tool.to_string()),
         target_digest: None,
@@ -172,27 +175,27 @@ fn tool_use(tool: &str) -> EventPayload {
         output_tokens: None,
         cached_input_tokens: None,
         text: None,
-    })
+    }))
 }
 
 /// A node parked on a person, as `gate_waiting` records it.
 fn gate_waiting(external_ref: Option<&str>) -> EventPayload {
-    EventPayload::GateWaiting(GateWaitingPayload {
+    EventPayload::Gates(GateEvent::Waiting(GateWaitingPayload {
         summary: "answer before going on".to_string(),
         evidence: Evidence::none(),
         options: Vec::new(),
         external_ref: external_ref.map(str::to_string),
-    })
+    }))
 }
 
 fn run_finished(terminal_state: TerminalState) -> EventPayload {
-    EventPayload::RunFinished(RunFinishedPayload {
+    EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
         terminal_state,
         metrics: RunMetrics {
             cptv: None,
             tokens: tokens(10, 5),
         },
-    })
+    }))
 }
 
 /// Every bucket of `counter`, so a movement between two of them is read
@@ -515,13 +518,15 @@ fn a_node_carries_every_artifact_it_produced_in_log_order() {
     // An acceptance is what makes an artifact a fact of the log; the
     // file the engine writes from it is a view of the store.
     let produced = |name: &str| {
-        EventPayload::ArtifactAccepted(yunta_core::events::ArtifactAcceptedPayload {
-            artifact: ArtifactId::Opaque {
-                name: name.to_string(),
+        EventPayload::Artifacts(ArtifactEvent::Accepted(
+            yunta_core::events::ArtifactAcceptedPayload {
+                artifact: ArtifactId::Opaque {
+                    name: name.to_string(),
+                },
+                content_hash: ContentHash::sha256(name.as_bytes()),
+                origin: yunta_core::events::ArtifactOrigin::Ingested,
             },
-            content_hash: ContentHash::sha256(name.as_bytes()),
-            origin: yunta_core::events::ArtifactOrigin::Ingested,
-        })
+        ))
     };
     let events = log(vec![
         (0, None, created("standard")),
@@ -568,7 +573,7 @@ fn a_runner_that_fell_back_carries_the_candidates_it_passed_over() {
         (
             2,
             Some("build"),
-            EventPayload::RunnerResolved(RunnerResolvedPayload {
+            EventPayload::Node(NodeEvent::RunnerResolved(RunnerResolvedPayload {
                 runner: "implementer".into(),
                 chosen: RunnerCandidate {
                     adapter: "mock".into(),
@@ -583,7 +588,7 @@ fn a_runner_that_fell_back_carries_the_candidates_it_passed_over() {
                     },
                     reason: "adapter `absent` is not installed".to_string(),
                 }],
-            }),
+            })),
         ),
     ]);
 
@@ -608,7 +613,7 @@ fn a_runner_that_fell_back_carries_the_candidates_it_passed_over() {
 #[test]
 fn the_run_total_carries_the_work_in_flight_and_a_node_carries_its_closed_attempts() {
     let workflow = chain();
-    let usage = EventPayload::AgentMessage(AgentMessagePayload {
+    let usage = EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
         message_type: AgentMessageType::Usage,
         tool_name: None,
         target_digest: None,
@@ -616,7 +621,7 @@ fn the_run_total_carries_the_work_in_flight_and_a_node_carries_its_closed_attemp
         output_tokens: Some(50),
         cached_input_tokens: None,
         text: None,
-    });
+    }));
     let events = log(vec![
         (0, None, created("standard")),
         (1, Some("build"), started(1)),
@@ -691,11 +696,13 @@ fn a_degraded_capability_is_carried_with_what_happened_instead() {
         (
             2,
             Some("build"),
-            EventPayload::CapabilityDegraded(CapabilityDegradedPayload {
-                capability: Capability::ResumeSession,
-                adapter: "mock".into(),
-                policy_applied: "restart_node".to_string(),
-            }),
+            EventPayload::Session(SessionEvent::CapabilityDegraded(
+                CapabilityDegradedPayload {
+                    capability: Capability::ResumeSession,
+                    adapter: "mock".into(),
+                    policy_applied: "restart_node".to_string(),
+                },
+            )),
         ),
     ]);
 
@@ -781,20 +788,20 @@ nodes:
         (
             2,
             Some("sub"),
-            EventPayload::ChildRunCreated(ChildRunCreatedPayload {
+            EventPayload::Children(ChildEvent::Created(ChildRunCreatedPayload {
                 child_run_id: "run-child".into(),
                 child_workflow_hash: hash.clone(),
-            }),
+            })),
         ),
         (
             3,
             Some("sub"),
-            EventPayload::ChildRunFinished(ChildRunFinishedPayload {
+            EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload {
                 child_run_id: "run-child".into(),
                 child_workflow_hash: hash,
                 terminal_state: TerminalState::Done,
                 tokens: tokens(40, 20),
-            }),
+            })),
         ),
     ]);
 
@@ -836,12 +843,12 @@ nodes:
         (
             2,
             Some("sub"),
-            EventPayload::ChildRunFinished(ChildRunFinishedPayload {
+            EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload {
                 child_run_id: "run-child".into(),
                 child_workflow_hash: ContentHash::sha256(b"child workflow"),
                 terminal_state: TerminalState::Failed,
                 tokens: tokens(40, 20),
-            }),
+            })),
         ),
     ]);
 
@@ -899,19 +906,19 @@ nodes:
         (
             2,
             Some("approve"),
-            EventPayload::GateWaiting(GateWaitingPayload {
+            EventPayload::Gates(GateEvent::Waiting(GateWaitingPayload {
                 summary: "approve the plan".to_string(),
                 evidence: vec![Fact::bare("the plan")].into(),
                 options: Vec::new(),
                 external_ref: Some("https://forge/pr/1".to_string()),
-            }),
+            })),
         ),
         (
             3,
             None,
-            EventPayload::RunPaused(RunPausedPayload {
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload {
                 reason: "waiting on external gate: https://forge/pr/1".to_string(),
-            }),
+            })),
         ),
     ]);
 
@@ -944,9 +951,9 @@ fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
         (
             3,
             None,
-            EventPayload::RunPaused(RunPausedPayload {
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload {
                 reason: asked.to_string(),
-            }),
+            })),
         ),
     ]);
 
@@ -975,17 +982,17 @@ fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
         (
             3,
             None,
-            EventPayload::RunPaused(RunPausedPayload {
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload {
                 reason: "token budget exceeded".to_string(),
-            }),
+            })),
         ),
         (
             4,
             None,
-            EventPayload::RunResumed(RunResumedPayload {
+            EventPayload::Run(RunEvent::Resumed(RunResumedPayload {
                 resume_policy_applied: None,
                 policies: Vec::new(),
-            }),
+            })),
         ),
         (5, Some("build"), started(1)),
     ]);
@@ -1012,9 +1019,9 @@ fn a_paused_run_with_no_parked_node_names_the_reason_the_log_recorded() {
         (
             3,
             None,
-            EventPayload::RunPaused(RunPausedPayload {
+            EventPayload::Run(RunEvent::Paused(RunPausedPayload {
                 reason: "token budget exceeded".to_string(),
-            }),
+            })),
         ),
     ]);
 
@@ -1056,11 +1063,11 @@ fn a_promoted_run_names_the_mode_its_signal_suggested() {
         (
             3,
             None,
-            EventPayload::PromotionSignaled(PromotionSignaledPayload {
+            EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload {
                 reason: "re-routes exhausted".to_string(),
                 evidence: vec![Fact::bare("criteria still red")].into(),
                 suggested_mode: "full".into(),
-            }),
+            })),
         ),
         (4, None, run_finished(TerminalState::Promoted)),
     ]);

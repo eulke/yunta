@@ -24,6 +24,7 @@ use yunta_engine::NodeState;
 use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{note, warn, CliError, Outcome};
+use yunta_core::events::RunEvent;
 
 /// How long the engine gets to react to the SIGINT before the escalation
 /// — generous next to the engine's own 200ms interrupt grace, because a
@@ -49,7 +50,7 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     let has_terminal_run_event = events.iter().any(|e| {
         matches!(
             e.payload(),
-            Some(EventPayload::RunFinished(_) | EventPayload::RunPaused(_))
+            Some(EventPayload::Run(RunEvent::Finished(_)) | EventPayload::Run(RunEvent::Paused(_)))
         )
     });
 
@@ -102,7 +103,10 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
             let terminal = events.iter().any(|e| {
                 matches!(
                     e.payload(),
-                    Some(EventPayload::RunFinished(_) | EventPayload::RunPaused(_))
+                    Some(
+                        EventPayload::Run(RunEvent::Finished(_))
+                            | EventPayload::Run(RunEvent::Paused(_))
+                    )
                 )
             });
             if terminal {

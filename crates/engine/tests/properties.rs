@@ -17,6 +17,7 @@ use yunta_core::events::{
     NodeFinishedPayload, NodeStartedPayload, RunPausedPayload, StoredEvent, TaskRegisteredPayload,
     TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
+use yunta_core::events::{ArtifactEvent, FindingEvent, GateEvent, NodeEvent, RunEvent, TaskEvent};
 use yunta_core::ArtifactKind;
 use yunta_engine::{derive, ArtifactIntegrity, ObjectStore};
 
@@ -61,38 +62,42 @@ fn task_id() -> impl Strategy<Value = &'static str> {
 
 fn payload() -> impl Strategy<Value = EventPayload> {
     prop_oneof![
-        (1u32..4).prop_map(|attempt| EventPayload::NodeStarted(NodeStartedPayload { attempt })),
-        ("[a-z]{0,6}", tokens()).prop_map(|(outcome, tokens_used)| EventPayload::NodeFinished(
-            NodeFinishedPayload {
+        (1u32..4).prop_map(
+            |attempt| EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt }))
+        ),
+        ("[a-z]{0,6}", tokens()).prop_map(|(outcome, tokens_used)| EventPayload::Node(
+            NodeEvent::Finished(NodeFinishedPayload {
                 outcome,
                 tokens_used,
-            }
+            })
         )),
         ("[a-z]{0,6}", tokens(), any::<bool>()).prop_map(|(outcome, tokens_used, retryable)| {
-            EventPayload::NodeFailed(NodeFailedPayload::new(
+            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 Failure::message(outcome),
                 retryable,
                 tokens_used,
-            ))
+            )))
         }),
-        task_id().prop_map(|id| EventPayload::TaskRegistered(TaskRegisteredPayload {
-            task_id: id.into(),
-            criteria: Vec::new(),
-            scope: Vec::new(),
-            depends_on: Vec::new(),
-        })),
+        task_id().prop_map(|id| EventPayload::Tasks(TaskEvent::Registered(
+            TaskRegisteredPayload {
+                task_id: id.into(),
+                criteria: Vec::new(),
+                scope: Vec::new(),
+                depends_on: Vec::new(),
+            }
+        ))),
         (task_id(), task_status(), any::<bool>()).prop_map(|(id, new_status, placed)| {
-            EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
+            EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload {
                 task_id: id.into(),
                 new_status,
                 caused_by: 1u64.into(),
                 // Both shapes a status has on the wire: one naming where
                 // the work landed, and one from a log that never did.
                 commit: placed.then(|| "deadbeef".into()),
-            })
+            }))
         }),
         (severity(), "[a-z]{0,6}", "[a-z]{0,6}").prop_map(|(severity, title, location)| {
-            EventPayload::FindingPosted(FindingPostedPayload {
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: Finding {
                     id: "f1".into(),
                     severity,
@@ -101,31 +106,34 @@ fn payload() -> impl Strategy<Value = EventPayload> {
                     detail: "d".to_string(),
                     proposed_criterion: None,
                 },
-            })
+            }))
         }),
         (artifact_id(), "[a-z]{1,4}").prop_map(|(artifact, content)| {
-            EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
                 artifact,
                 content_hash: yunta_core::sha256_hex(content.as_bytes()),
                 origin: ArtifactOrigin::Submitted,
-            })
+            }))
         }),
-        "[a-z ]{0,10}".prop_map(|reason| EventPayload::RunPaused(RunPausedPayload { reason })),
-        ("[a-z]{1,4}", tokens()).prop_map(|(content, tokens_used)| EventPayload::QuestionsAsked(
-            yunta_core::events::QuestionsAskedPayload::new(
-                yunta_core::sha256_hex(content.as_bytes()),
-                vec!["q1".into()],
-                tokens_used,
+        "[a-z ]{0,10}"
+            .prop_map(|reason| EventPayload::Run(RunEvent::Paused(RunPausedPayload { reason }))),
+        ("[a-z]{1,4}", tokens()).prop_map(|(content, tokens_used)| EventPayload::Gates(
+            GateEvent::QuestionsAsked(
+                yunta_core::events::QuestionsAskedPayload::new(
+                    yunta_core::sha256_hex(content.as_bytes()),
+                    vec!["q1".into()],
+                    tokens_used,
+                )
+                .expect("one question is a question")
             )
-            .expect("one question is a question")
         )),
-        "[a-z]{1,4}".prop_map(|content| EventPayload::QuestionsAnswered(
+        "[a-z]{1,4}".prop_map(|content| EventPayload::Gates(GateEvent::QuestionsAnswered(
             yunta_core::events::QuestionsAnsweredPayload {
                 answers_hash: yunta_core::sha256_hex(content.as_bytes()),
                 channel: yunta_core::events::Channel::Tty,
                 responder: None,
             }
-        )),
+        ))),
     ]
 }
 
@@ -198,23 +206,23 @@ fn a_questions_round() -> Vec<StoredEvent> {
         event(
             0,
             Some("grill"),
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 })),
         ),
         event(
             1,
             Some("grill"),
-            EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
                 artifact: ArtifactId::Interpreted {
                     kind: ArtifactKind::Questions,
                 },
                 content_hash: questions.clone(),
                 origin: ArtifactOrigin::Submitted,
-            }),
+            })),
         ),
         event(
             2,
             Some("grill"),
-            EventPayload::QuestionsAsked(
+            EventPayload::Gates(GateEvent::QuestionsAsked(
                 yunta_core::events::QuestionsAskedPayload::new(
                     questions,
                     vec!["q1".into()],
@@ -225,35 +233,37 @@ fn a_questions_round() -> Vec<StoredEvent> {
                     },
                 )
                 .expect("one question is a question"),
-            ),
+            )),
         ),
         event(
             3,
             Some("grill"),
-            EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
                 artifact: ArtifactId::Opaque {
                     name: "questions.answers.yaml".to_string(),
                 },
                 content_hash: answers.clone(),
                 origin: ArtifactOrigin::Answered,
-            }),
+            })),
         ),
         event(
             4,
             Some("grill"),
-            EventPayload::QuestionsAnswered(yunta_core::events::QuestionsAnsweredPayload {
-                answers_hash: answers,
-                channel: yunta_core::events::Channel::Tty,
-                responder: None,
-            }),
+            EventPayload::Gates(GateEvent::QuestionsAnswered(
+                yunta_core::events::QuestionsAnsweredPayload {
+                    answers_hash: answers,
+                    channel: yunta_core::events::Channel::Tty,
+                    responder: None,
+                },
+            )),
         ),
         event(
             5,
             Some("grill"),
-            EventPayload::NodeFinished(NodeFinishedPayload {
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
                 outcome: "questions answered".to_string(),
                 tokens_used: yunta_core::events::TokenUsage::default(),
-            }),
+            })),
         ),
     ]
 }
@@ -352,7 +362,7 @@ proptest! {
         let accepted: std::collections::BTreeSet<_> = log
             .iter()
             .filter_map(|event| match event.payload() {
-                Some(EventPayload::ArtifactAccepted(p)) => {
+                Some(EventPayload::Artifacts(ArtifactEvent::Accepted(p))) => {
                     Some((event.node_id.clone(), p.artifact.clone()))
                 }
                 _ => None,
@@ -426,22 +436,22 @@ proptest! {
             log.push(event(
                 log.len(),
                 *node,
-                EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
+                EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload {
                     artifact: artifact.clone(),
                     content_hash,
                     origin: ArtifactOrigin::Submitted,
-                }),
+                })),
             ));
         }
         for name in &older {
             log.push(event(
                 log.len(),
                 Some("a"),
-                EventPayload::ArtifactWritten(ArtifactWrittenPayload {
+                EventPayload::Artifacts(ArtifactEvent::Written(ArtifactWrittenPayload {
                     path: std::path::PathBuf::from(format!("artifacts/{name}.md")),
                     content_hash: yunta_core::sha256_hex(name.as_bytes()),
                     artifact_kind: None,
-                }),
+                })),
             ));
         }
 

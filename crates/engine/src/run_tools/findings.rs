@@ -22,6 +22,7 @@ use yunta_core::{ArtifactKind, FindingEntry, FindingId, FindingsFile, Withdrawal
 
 use super::session::{RunToolError, SessionTools};
 use super::verdicts::refusal;
+use yunta_core::events::FindingEvent;
 
 impl SessionTools {
     pub(super) async fn post_finding(
@@ -30,9 +31,11 @@ impl SessionTools {
     ) -> Result<String, RunToolError> {
         let entry = self.vetted(FindingOperation::Post, args).await?;
         let id = entry.id.clone();
-        self.append(EventPayload::FindingPosted(FindingPostedPayload {
-            finding: Finding::from(entry),
-        }))
+        self.append(EventPayload::Findings(FindingEvent::Posted(
+            FindingPostedPayload {
+                finding: Finding::from(entry),
+            },
+        )))
         .await?;
         Ok(format!("finding `{id}` recorded"))
     }
@@ -43,9 +46,11 @@ impl SessionTools {
     ) -> Result<String, RunToolError> {
         let entry = self.vetted(FindingOperation::Update, args).await?;
         let id = entry.id.clone();
-        self.append(EventPayload::FindingUpdated(FindingUpdatedPayload {
-            finding: Finding::from(entry),
-        }))
+        self.append(EventPayload::Findings(FindingEvent::Updated(
+            FindingUpdatedPayload {
+                finding: Finding::from(entry),
+            },
+        )))
         .await?;
         Ok(format!("finding `{id}` updated"))
     }
@@ -71,10 +76,12 @@ impl SessionTools {
             let report = Report::new(document, broken);
             return Err(self.refuse(operation, Some(id), report).await);
         }
-        self.append(EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
-            id: id.clone(),
-            reason: withdrawal.reason,
-        }))
+        self.append(EventPayload::Findings(FindingEvent::Withdrawn(
+            FindingWithdrawnPayload {
+                id: id.clone(),
+                reason: withdrawal.reason,
+            },
+        )))
         .await?;
         Ok(format!("finding `{id}` withdrawn"))
     }
@@ -185,11 +192,13 @@ impl SessionTools {
     ) -> RunToolError {
         let text = refusal(operation, &report);
         match self
-            .append(EventPayload::FindingRefused(FindingRefusedPayload {
-                operation,
-                id,
-                report,
-            }))
+            .append(EventPayload::Findings(FindingEvent::Refused(
+                FindingRefusedPayload {
+                    operation,
+                    id,
+                    report,
+                },
+            )))
             .await
         {
             Ok(()) => RunToolError::Refused { text },

@@ -27,6 +27,7 @@ use yunta_core::{DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt
 
 use crate::modes::dependencies_in_mode;
 use crate::replay::{derive, NodeState, RunState};
+use yunta_core::events::{GateEvent, NodeEvent};
 
 /// The mode immediately after `mode_name` in `modes:`'s own declaration
 /// order — the *only* direction promotion ever moves (going back to an
@@ -183,7 +184,7 @@ fn is_external_gate(node: &Node) -> bool {
 /// this for after confirming otherwise.
 fn last_external_ref(events: &[StoredEvent], node_id: &NodeId) -> Option<String> {
     events.iter().rev().find_map(|e| match e.payload() {
-        Some(EventPayload::GateWaiting(p)) if e.node_id.as_ref() == Some(node_id) => {
+        Some(EventPayload::Gates(GateEvent::Waiting(p))) if e.node_id.as_ref() == Some(node_id) => {
             p.external_ref.clone()
         }
         _ => None,
@@ -287,10 +288,14 @@ pub fn next_step(
         };
         let entry = history.entry(node_id.clone()).or_default();
         match event.payload() {
-            Some(EventPayload::NodeStarted(_)) => entry.starts += 1,
-            Some(EventPayload::NodeFailed(_)) => entry.last_failed_seq = Some(event.seq),
-            Some(EventPayload::NodeFinished(_)) => entry.last_finished_seq = Some(event.seq),
-            Some(EventPayload::NodeRerouted(p)) => {
+            Some(EventPayload::Node(NodeEvent::Started(_))) => entry.starts += 1,
+            Some(EventPayload::Node(NodeEvent::Failed(_))) => {
+                entry.last_failed_seq = Some(event.seq)
+            }
+            Some(EventPayload::Node(NodeEvent::Finished(_))) => {
+                entry.last_finished_seq = Some(event.seq)
+            }
+            Some(EventPayload::Node(NodeEvent::Rerouted(p))) => {
                 entry.reroutes += 1;
                 entry.last_reroute = Some((event.seq, p.to_node.clone()));
             }

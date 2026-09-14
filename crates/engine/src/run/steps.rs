@@ -17,6 +17,7 @@ use super::{
     budget, escalation, find_node, gate_exec, node_close, node_exec, pause, questions_exec,
     schedule, RunCtx, RunError, RunReport, RunTerminal,
 };
+use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
 
 /// A corrupt log is exactly the one you most want exported — each event
 /// serializes on its own, so a broken *sequence* doesn't stop the forensic
@@ -42,13 +43,13 @@ pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<Run
     let state = ctx.run_view().await?.state;
     ctx.emit(
         None,
-        EventPayload::RunFinished(RunFinishedPayload {
+        EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
             terminal_state: TerminalState::Done,
             metrics: RunMetrics {
                 cptv: cptv(&state),
                 tokens: state.total_tokens,
             },
-        }),
+        })),
     )
     .await?;
     ctx.export_events_jsonl().await?;
@@ -116,13 +117,13 @@ pub(super) async fn run_failed(ctx: &RunCtx<'_>, reason: String) -> Result<RunRe
     let state = ctx.run_view().await?.state;
     ctx.emit(
         None,
-        EventPayload::RunFinished(RunFinishedPayload {
+        EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
             terminal_state: TerminalState::Failed,
             metrics: RunMetrics {
                 cptv: cptv(&state),
                 tokens: state.total_tokens,
             },
-        }),
+        })),
     )
     .await?;
     ctx.export_events_jsonl().await?;
@@ -144,13 +145,13 @@ pub(super) async fn reroute(
 ) -> Result<(), RunError> {
     ctx.emit(
         Some(&from),
-        EventPayload::NodeRerouted(NodeReroutedPayload {
+        EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload {
             to_node: to,
             cause,
             attempt: Some(attempt),
             max_reroutes: Some(max_reroutes),
             origin: RerouteOrigin::OnFailure,
-        }),
+        })),
     )
     .await?;
     Ok(())
@@ -198,11 +199,16 @@ pub(super) async fn gate_exhausted(
         return Ok(Some(pause(ctx, escalation.sentence()).await?));
     };
     if !already_recorded {
-        ctx.emit(Some(&node), EventPayload::GateWaiting(escalation))
-            .await?;
         ctx.emit(
             Some(&node),
-            EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
+            EventPayload::Gates(GateEvent::Waiting(escalation)),
+        )
+        .await?;
+        ctx.emit(
+            Some(&node),
+            EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
+                choice.clone(),
+            ))),
         )
         .await?;
     }
@@ -210,13 +216,13 @@ pub(super) async fn gate_exhausted(
     if chosen == Some(ReservedOption::Retry) {
         ctx.emit(
             Some(&node),
-            EventPayload::NodeRerouted(NodeReroutedPayload {
+            EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload {
                 to_node: goto,
                 cause,
                 attempt: Some(max_reroutes + 1),
                 max_reroutes: Some(max_reroutes),
                 origin: RerouteOrigin::OnFailure,
-            }),
+            })),
         )
         .await?;
         Ok(None)
@@ -234,14 +240,14 @@ pub(super) async fn gate_exhausted(
         let evidence: Evidence = vec![Fact::bare(cause)].into();
         ctx.emit(
             None,
-            EventPayload::PromotionSignaled(PromotionSignaledPayload {
+            EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload {
                 reason: yunta_core::text::aside(
                     format!("node `{node}` exhausted its re-routes to `{goto}`"),
                     &evidence.one_line(),
                 ),
                 evidence,
                 suggested_mode: next_mode.clone(),
-            }),
+            })),
         )
         .await?;
         // A promotion is a real close — the short attempt's knowledge is
@@ -276,13 +282,13 @@ pub(super) async fn gate_exhausted(
         let state = derive(&events_for_close);
         ctx.emit(
             None,
-            EventPayload::RunFinished(RunFinishedPayload {
+            EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
                 terminal_state: TerminalState::Promoted,
                 metrics: RunMetrics {
                     cptv: cptv(&state),
                     tokens: state.total_tokens,
                 },
-            }),
+            })),
         )
         .await?;
         ctx.export_events_jsonl().await?;

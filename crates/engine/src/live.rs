@@ -30,6 +30,7 @@ use yunta_core::events::{
 use yunta_core::{AgentName, ModelName, NodeId, SessionId};
 
 use crate::replay::{derive, RunState};
+use yunta_core::events::{GateEvent, NodeEvent, SessionEvent};
 
 /// When the attempt a node is running now began: the timestamp of its
 /// last `node_started` with no `node_finished`/`node_failed` after it.
@@ -41,8 +42,11 @@ pub fn running_since(events: &[StoredEvent], node: &NodeId) -> Option<DateTime<U
         .rev()
         .filter(|event| event.node_id.as_ref() == Some(node))
         .find_map(|event| match event.payload() {
-            Some(EventPayload::NodeStarted(_)) => Some(Some(event.timestamp)),
-            Some(EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_)) => Some(None),
+            Some(EventPayload::Node(NodeEvent::Started(_))) => Some(Some(event.timestamp)),
+            Some(
+                EventPayload::Node(NodeEvent::Finished(_))
+                | EventPayload::Node(NodeEvent::Failed(_)),
+            ) => Some(None),
             _ => None,
         })
         .flatten()
@@ -91,7 +95,7 @@ pub struct OpenSession {
 pub fn open_sessions(events: &[StoredEvent], node: &NodeId) -> Vec<OpenSession> {
     since_last_terminal(events, node)
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::AgentSessionOpened(p)) => Some(OpenSession {
+            Some(EventPayload::Session(SessionEvent::Opened(p))) => Some(OpenSession {
                 session_id: p.session_id.clone(),
                 agent: p.agent.clone(),
                 model: p.model.clone(),
@@ -126,7 +130,9 @@ pub struct ToolCall {
 pub fn recent_tool_calls(events: &[StoredEvent], node: &NodeId, limit: usize) -> Vec<ToolCall> {
     let mut calls: Vec<ToolCall> = since_last_terminal(events, node)
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::AgentMessage(p)) if p.message_type == AgentMessageType::ToolUse => {
+            Some(EventPayload::Session(SessionEvent::Message(p)))
+                if p.message_type == AgentMessageType::ToolUse =>
+            {
                 Some(ToolCall {
                     tool_name: p.tool_name.clone(),
                     target_digest: p.target_digest.clone(),
@@ -152,7 +158,10 @@ fn since_last_terminal<'a>(
         event.node_id.as_ref() == Some(node)
             && matches!(
                 event.payload(),
-                Some(EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_))
+                Some(
+                    EventPayload::Node(NodeEvent::Finished(_))
+                        | EventPayload::Node(NodeEvent::Failed(_))
+                )
             )
     });
     events
@@ -205,7 +214,7 @@ fn in_flight_tokens(events: &[StoredEvent]) -> TokenUsage {
             continue;
         };
         match event.payload() {
-            Some(EventPayload::NodeStarted(_)) => {
+            Some(EventPayload::Node(NodeEvent::Started(_))) => {
                 open.insert(node_id, TokenUsage::default());
             }
             // A node that asked is no longer in flight: its session
@@ -213,13 +222,15 @@ fn in_flight_tokens(events: &[StoredEvent]) -> TokenUsage {
             // the derived total already holds. Counting it here too
             // would double it for as long as the node waits.
             Some(
-                EventPayload::NodeFinished(_)
-                | EventPayload::NodeFailed(_)
-                | EventPayload::QuestionsAsked(_),
+                EventPayload::Node(NodeEvent::Finished(_))
+                | EventPayload::Node(NodeEvent::Failed(_))
+                | EventPayload::Gates(GateEvent::QuestionsAsked(_)),
             ) => {
                 open.remove(node_id);
             }
-            Some(EventPayload::AgentMessage(p)) if p.message_type == AgentMessageType::Usage => {
+            Some(EventPayload::Session(SessionEvent::Message(p)))
+                if p.message_type == AgentMessageType::Usage =>
+            {
                 // Usage a node reports before its own `node_started`
                 // has no attempt to belong to: a node's accounting opens
                 // at its start, and replay rejects a terminal that had

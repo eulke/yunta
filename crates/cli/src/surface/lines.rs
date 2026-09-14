@@ -19,6 +19,10 @@ use yunta_core::text::{aside, detailed, one_line};
 use crate::render::format_duration;
 
 use super::{view, write_line};
+use yunta_core::events::{
+    ArtifactEvent, ChildEvent, FindingEvent, GateEvent, NodeEvent, RunEvent, ScopeEvent,
+    SessionEvent, TaskEvent,
+};
 
 /// One line per event, written as the event arrives.
 pub(super) struct Lines {
@@ -81,43 +85,55 @@ fn counted_problems(n: usize) -> String {
 
 fn detail(payload: &EventPayload) -> Option<String> {
     match payload {
-        EventPayload::RunCreated(p) => Some(format!("mode `{}` off {}", p.mode, p.base_branch)),
-        EventPayload::RunnerResolved(p) => Some(format!(
+        EventPayload::Run(RunEvent::Created(p)) => {
+            Some(format!("mode `{}` off {}", p.mode, p.base_branch))
+        }
+        EventPayload::Node(NodeEvent::RunnerResolved(p)) => Some(format!(
             "{} on {}/{}",
             p.runner, p.chosen.adapter, p.chosen.model
         )),
-        EventPayload::NodeStarted(p) => Some(format!("attempt {}", p.attempt)),
-        EventPayload::AgentMessage(p) => p
+        EventPayload::Node(NodeEvent::Started(p)) => Some(format!("attempt {}", p.attempt)),
+        EventPayload::Session(SessionEvent::Message(p)) => p
             .tool_name
             .as_ref()
             .map(|tool| format!("{:?} {tool}", p.message_type)),
-        EventPayload::ArtifactWritten(p) => Some(p.path.display().to_string()),
-        EventPayload::TaskRegistered(p) => Some(p.task_id.to_string()),
-        EventPayload::TaskStatusChanged(p) => Some(format!("{} is {:?}", p.task_id, p.new_status)),
-        EventPayload::CriteriaChecked(p) => Some(format!(
+        EventPayload::Artifacts(ArtifactEvent::Written(p)) => Some(p.path.display().to_string()),
+        EventPayload::Tasks(TaskEvent::Registered(p)) => Some(p.task_id.to_string()),
+        EventPayload::Tasks(TaskEvent::StatusChanged(p)) => {
+            Some(format!("{} is {:?}", p.task_id, p.new_status))
+        }
+        EventPayload::Node(NodeEvent::CriteriaChecked(p)) => Some(format!(
             "{} {:?}: {} criteria",
             p.task_id,
             p.phase,
             p.results.len()
         )),
-        EventPayload::ScopeChecked(p) => {
+        EventPayload::Node(NodeEvent::ScopeChecked(p)) => {
             Some(format!("{} path(s) out of scope", p.violations.len()))
         }
-        EventPayload::NodeFinished(p) => Some(p.outcome.clone()),
-        EventPayload::NodeFailed(p) => Some(p.failure.to_string()),
-        EventPayload::HookExecuted(p) => Some(format!("{:?} exit {}", p.phase, p.exit_code)),
-        EventPayload::NodeRerouted(p) => Some(detailed(format!("to `{}`", p.to_node), &p.cause)),
-        EventPayload::GateWaiting(p) => Some(p.summary.clone()),
-        EventPayload::GateResolved(p) => Some(resolution(p)),
-        EventPayload::LoopIteration(p) => Some(format!("iteration {}", p.iteration)),
+        EventPayload::Node(NodeEvent::Finished(p)) => Some(p.outcome.clone()),
+        EventPayload::Node(NodeEvent::Failed(p)) => Some(p.failure.to_string()),
+        EventPayload::Node(NodeEvent::HookExecuted(p)) => {
+            Some(format!("{:?} exit {}", p.phase, p.exit_code))
+        }
+        EventPayload::Node(NodeEvent::Rerouted(p)) => {
+            Some(detailed(format!("to `{}`", p.to_node), &p.cause))
+        }
+        EventPayload::Gates(GateEvent::Waiting(p)) => Some(p.summary.clone()),
+        EventPayload::Gates(GateEvent::Resolved(p)) => Some(resolution(p)),
+        EventPayload::Children(ChildEvent::LoopIteration(p)) => {
+            Some(format!("iteration {}", p.iteration))
+        }
         // What a session did to a finding after posting it, and what
         // the engine answered when it refused the call.
-        EventPayload::FindingUpdated(p) => Some(detailed(
+        EventPayload::Findings(FindingEvent::Updated(p)) => Some(detailed(
             format!("{:?}", p.finding.severity),
             &p.finding.title,
         )),
-        EventPayload::FindingWithdrawn(p) => Some(detailed(format!("`{}`", p.id), &p.reason)),
-        EventPayload::FindingRefused(p) => Some(detailed(
+        EventPayload::Findings(FindingEvent::Withdrawn(p)) => {
+            Some(detailed(format!("`{}`", p.id), &p.reason))
+        }
+        EventPayload::Findings(FindingEvent::Refused(p)) => Some(detailed(
             match &p.id {
                 Some(id) => format!("{:?} `{id}`", p.operation),
                 None => format!("{:?}", p.operation),
@@ -126,36 +142,38 @@ fn detail(payload: &EventPayload) -> Option<String> {
         )),
         // A document a session offered as a whole, and whether the
         // engine took it.
-        EventPayload::ArtifactSubmitted(p) => Some(detailed(
+        EventPayload::Artifacts(ArtifactEvent::Submitted(p)) => Some(detailed(
             format!("{:?} {}", p.artifact_kind, p.name),
             match &p.outcome {
                 yunta_core::events::SubmissionOutcome::Accepted { .. } => "accepted",
                 yunta_core::events::SubmissionOutcome::Refused { .. } => "refused",
             },
         )),
-        EventPayload::ArtifactAccepted(p) => Some(format!("{}", p.artifact)),
-        EventPayload::FindingPosted(p) => Some(detailed(
+        EventPayload::Artifacts(ArtifactEvent::Accepted(p)) => Some(format!("{}", p.artifact)),
+        EventPayload::Findings(FindingEvent::Posted(p)) => Some(detailed(
             format!("{:?}", p.finding.severity),
             &p.finding.title,
         )),
-        EventPayload::PromotionSignaled(p) => {
+        EventPayload::Run(RunEvent::PromotionSignaled(p)) => {
             Some(detailed(format!("to `{}`", p.suggested_mode), &p.reason))
         }
-        EventPayload::ChildRunCreated(p) => Some(p.child_run_id.to_string()),
-        EventPayload::ChildRunFinished(p) => Some(format!(
+        EventPayload::Children(ChildEvent::Created(p)) => Some(p.child_run_id.to_string()),
+        EventPayload::Children(ChildEvent::Finished(p)) => Some(format!(
             "{} {}",
             p.child_run_id,
             view::closed_as(p.terminal_state)
         )),
-        EventPayload::CapabilityDegraded(p) => Some(detailed(
+        EventPayload::Session(SessionEvent::CapabilityDegraded(p)) => Some(detailed(
             format!("{:?} on {}", p.capability, p.adapter),
             &p.policy_applied,
         )),
-        EventPayload::RunPaused(p) => Some(p.reason.clone()),
-        EventPayload::RunFinished(p) => Some(view::closed_as(p.terminal_state).to_string()),
+        EventPayload::Run(RunEvent::Paused(p)) => Some(p.reason.clone()),
+        EventPayload::Run(RunEvent::Finished(p)) => {
+            Some(view::closed_as(p.terminal_state).to_string())
+        }
         // A node that asked: what it asked, so a reader knows what the
         // run is waiting on without opening the document.
-        EventPayload::QuestionsAsked(p) => Some(format!(
+        EventPayload::Gates(GateEvent::QuestionsAsked(p)) => Some(format!(
             "asked {} question(s): {}",
             p.questions.len(),
             p.questions
@@ -164,14 +182,14 @@ fn detail(payload: &EventPayload) -> Option<String> {
                 .collect::<Vec<_>>()
                 .join(", ")
         )),
-        EventPayload::BaselineCaptured(_)
-        | EventPayload::AgentSessionOpened(_)
-        | EventPayload::ContextAssembled(_)
-        | EventPayload::ScopeExpansionRequested(_)
-        | EventPayload::ScopeExpansionGranted(_)
-        | EventPayload::ScopeExpansionDenied(_)
-        | EventPayload::QuestionsAnswered(_)
-        | EventPayload::RunResumed(_) => None,
+        EventPayload::Node(NodeEvent::BaselineCaptured(_))
+        | EventPayload::Session(SessionEvent::Opened(_))
+        | EventPayload::Node(NodeEvent::ContextAssembled(_))
+        | EventPayload::Scope(ScopeEvent::Requested(_))
+        | EventPayload::Scope(ScopeEvent::Granted(_))
+        | EventPayload::Scope(ScopeEvent::Denied(_))
+        | EventPayload::Gates(GateEvent::QuestionsAnswered(_))
+        | EventPayload::Run(RunEvent::Resumed(_)) => None,
     }
 }
 
@@ -198,6 +216,7 @@ mod tests {
         FindingSeverity, NodeFinishedPayload, NodeReroutedPayload, PromotionSignaledPayload,
         RerouteOrigin, RunPausedPayload, StoredEvent, TokenUsage,
     };
+    use yunta_core::events::{FindingEvent, NodeEvent, RunEvent, SessionEvent};
     use yunta_core::Capability;
 
     use super::{detail, Lines};
@@ -226,13 +245,13 @@ mod tests {
     /// invocation: nothing guarantees the free text on a payload says
     /// anything, and a line built for it must not promise that it does.
     fn rerouted(cause: &str) -> EventPayload {
-        EventPayload::NodeRerouted(NodeReroutedPayload {
+        EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload {
             to_node: "fix-lint".into(),
             cause: cause.to_string(),
             attempt: None,
             max_reroutes: None,
             origin: RerouteOrigin::GateChoice,
-        })
+        }))
     }
 
     #[test]
@@ -250,17 +269,17 @@ mod tests {
 
     #[test]
     fn a_promotion_with_no_reason_recorded_reads_as_the_mode_alone() {
-        let payload = EventPayload::PromotionSignaled(PromotionSignaledPayload {
+        let payload = EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload {
             reason: String::new(),
             evidence: Evidence::none(),
             suggested_mode: "ship".into(),
-        });
+        }));
         assert_eq!(detail(&payload).as_deref(), Some("to `ship`"));
     }
 
     #[test]
     fn a_finding_with_no_title_reads_as_its_severity_alone() {
-        let payload = EventPayload::FindingPosted(FindingPostedPayload {
+        let payload = EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
             finding: Finding {
                 id: "f1".into(),
                 severity: FindingSeverity::Minor,
@@ -269,15 +288,15 @@ mod tests {
                 detail: String::new(),
                 proposed_criterion: None,
             },
-        });
+        }));
         assert_eq!(detail(&payload).as_deref(), Some("Minor"));
     }
 
     #[test]
     fn a_pause_with_no_reason_recorded_leaves_the_line_at_its_kind() {
-        let line = line_for(EventPayload::RunPaused(RunPausedPayload {
+        let line = line_for(EventPayload::Run(RunEvent::Paused(RunPausedPayload {
             reason: "   ".to_string(),
-        }));
+        })));
         assert_eq!(
             line, "[0s] run_paused",
             "no dash promises what is not there"
@@ -286,28 +305,32 @@ mod tests {
 
     #[test]
     fn a_pause_that_recorded_a_reason_says_it_on_one_line() {
-        let line = line_for(EventPayload::RunPaused(RunPausedPayload {
+        let line = line_for(EventPayload::Run(RunEvent::Paused(RunPausedPayload {
             reason: "budget\n  reached".to_string(),
-        }));
+        })));
         assert_eq!(line, "[0s] run_paused — budget reached");
     }
 
     #[test]
     fn a_node_that_finished_saying_nothing_leaves_the_line_at_its_kind() {
-        let line = line_for(EventPayload::NodeFinished(NodeFinishedPayload {
-            outcome: String::new(),
-            tokens_used: TokenUsage::default(),
-        }));
+        let line = line_for(EventPayload::Node(NodeEvent::Finished(
+            NodeFinishedPayload {
+                outcome: String::new(),
+                tokens_used: TokenUsage::default(),
+            },
+        )));
         assert_eq!(line, "[0s] node_finished");
     }
 
     #[test]
     fn a_degraded_capability_with_no_policy_recorded_reads_as_what_was_missing() {
-        let payload = EventPayload::CapabilityDegraded(CapabilityDegradedPayload {
-            capability: Capability::RunTools,
-            adapter: "codex".into(),
-            policy_applied: String::new(),
-        });
+        let payload = EventPayload::Session(SessionEvent::CapabilityDegraded(
+            CapabilityDegradedPayload {
+                capability: Capability::RunTools,
+                adapter: "codex".into(),
+                policy_applied: String::new(),
+            },
+        ));
         assert_eq!(detail(&payload).as_deref(), Some("RunTools on codex"));
     }
 }

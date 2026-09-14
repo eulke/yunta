@@ -20,7 +20,10 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use super::{ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventPayload, StoredEvent};
+use crate::events::ArtifactEvent;
+use crate::events::{
+    ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventPayload, StoredEvent,
+};
 use crate::hash::ContentHash;
 use crate::ids::{NodeId, Seq};
 use crate::workflow::{ArtifactKind, ARTIFACTS_DIR};
@@ -84,12 +87,12 @@ impl ArtifactLedger {
         payload: &EventPayload,
     ) -> Option<&ArtifactRef> {
         let (artifact, content_hash, origin) = match payload {
-            EventPayload::ArtifactAccepted(accepted) => (
+            EventPayload::Artifacts(ArtifactEvent::Accepted(accepted)) => (
                 accepted.artifact.clone(),
                 accepted.content_hash.clone(),
                 accepted.origin.clone(),
             ),
-            EventPayload::ArtifactWritten(written) => (
+            EventPayload::Artifacts(ArtifactEvent::Written(written)) => (
                 legacy_identity(written),
                 written.content_hash.clone(),
                 ArtifactOrigin::Legacy,

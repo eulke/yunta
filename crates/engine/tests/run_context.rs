@@ -5,6 +5,7 @@ use yunta_testkit::{Bench, MOCK_CONFIG};
 
 mod common;
 use common::*;
+use yunta_core::events::NodeEvent;
 
 #[tokio::test]
 async fn a_files_source_resolves_a_literal_path_and_is_replayable() {
@@ -661,7 +662,7 @@ nodes:
                 .is_some_and(|id| id.as_str() == "implement")
         })
         .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::ContextAssembled(p)) => Some(
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::ContextAssembled(p))) => Some(
                 p.task_id
                     .as_ref()
                     .map(|t| t.to_string())
@@ -787,7 +788,9 @@ nodes:
         e.node_id.as_ref().is_some_and(|id| id.as_str() == "write")
             && matches!(
                 e.payload(),
-                Some(yunta_core::events::EventPayload::ContextAssembled(_))
+                Some(yunta_core::events::EventPayload::Node(
+                    NodeEvent::ContextAssembled(_)
+                ))
             )
     });
     assert!(

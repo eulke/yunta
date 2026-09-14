@@ -18,6 +18,7 @@ use yunta_testkit_core::FixedClock;
 
 mod common;
 use common::*;
+use yunta_core::events::{ArtifactEvent, GateEvent, NodeEvent};
 
 /// One node that asks, and the node after it that reads the answers —
 /// the shape `packs/fragua` has once `grill` stops owing a brief.
@@ -107,7 +108,7 @@ async fn a_node_that_asks_records_questions_asked_and_no_terminal_event() {
         .events()
         .iter()
         .find_map(|e| match e.payload() {
-            Some(EventPayload::QuestionsAsked(p)) => Some(p.clone()),
+            Some(EventPayload::Gates(GateEvent::QuestionsAsked(p))) => Some(p.clone()),
             _ => None,
         })
         .expect("questions_asked must be on the log");
@@ -152,28 +153,34 @@ async fn a_node_failed_after_a_questions_artifact_derives_failed_not_waiting() {
             &bench.run_id,
             1,
             "grill",
-            EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload { attempt: 1 }),
+            EventPayload::Node(NodeEvent::Started(yunta_core::events::NodeStartedPayload {
+                attempt: 1,
+            })),
         ),
         yunta_testkit::stored_for(
             &bench.run_id,
             2,
             "grill",
-            EventPayload::ArtifactAccepted(yunta_core::events::ArtifactAcceptedPayload {
-                artifact: yunta_core::events::ArtifactId::Interpreted {
-                    kind: yunta_core::ArtifactKind::Questions,
+            EventPayload::Artifacts(ArtifactEvent::Accepted(
+                yunta_core::events::ArtifactAcceptedPayload {
+                    artifact: yunta_core::events::ArtifactId::Interpreted {
+                        kind: yunta_core::ArtifactKind::Questions,
+                    },
+                    content_hash: yunta_core::sha256_hex(b"questions"),
+                    origin: yunta_core::events::ArtifactOrigin::Submitted,
                 },
-                content_hash: yunta_core::sha256_hex(b"questions"),
-                origin: yunta_core::events::ArtifactOrigin::Submitted,
-            }),
+            )),
         ),
         yunta_testkit::stored_for(
             &bench.run_id,
             3,
             "grill",
-            EventPayload::NodeFailed(yunta_core::events::NodeFailedPayload::new(
-                yunta_core::events::Failure::message("scope violated: 1 file(s) outside"),
-                false,
-                Default::default(),
+            EventPayload::Node(NodeEvent::Failed(
+                yunta_core::events::NodeFailedPayload::new(
+                    yunta_core::events::Failure::message("scope violated: 1 file(s) outside"),
+                    false,
+                    Default::default(),
+                ),
             )),
         ),
     ];
@@ -362,7 +369,12 @@ async fn an_answered_node_owed_its_finish_is_finished_on_resume_without_a_sessio
     let full = bench.events();
     let cut = full
         .iter()
-        .position(|e| matches!(e.payload(), Some(EventPayload::QuestionsAnswered(_))))
+        .position(|e| {
+            matches!(
+                e.payload(),
+                Some(EventPayload::Gates(GateEvent::QuestionsAnswered(_)))
+            )
+        })
         .expect("the answer is on the log")
         + 1;
     let state = derive(&full[..cut]);
@@ -491,7 +503,9 @@ async fn the_node_that_follows_reads_the_questions_and_the_answers_of_the_node_t
         .events()
         .iter()
         .find_map(|e| match (e.node_id.as_ref(), e.payload()) {
-            (Some(id), Some(EventPayload::ContextAssembled(p))) if id.as_str() == "brief" => {
+            (Some(id), Some(EventPayload::Node(NodeEvent::ContextAssembled(p))))
+                if id.as_str() == "brief" =>
+            {
                 Some(p.clone())
             }
             _ => None,

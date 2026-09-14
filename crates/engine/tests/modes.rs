@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use yunta_adapters::MockAdapter;
+use yunta_core::events::NodeEvent;
 use yunta_core::port::Adapter;
 use yunta_core::{AdapterId, ConfigLayer, ModeName, RunId, Workflow};
 use yunta_engine::{
@@ -283,10 +284,10 @@ async fn a_dependent_of_an_excluded_node_waits_for_that_nodes_own_dependencies()
         .unwrap();
     use yunta_core::events::EventPayload;
     let start_finished = seq_of(&events, "start", |p| {
-        matches!(p, EventPayload::NodeFinished(_))
+        matches!(p, EventPayload::Node(NodeEvent::Finished(_)))
     });
     let ship_started = seq_of(&events, "ship", |p| {
-        matches!(p, EventPayload::NodeStarted(_))
+        matches!(p, EventPayload::Node(NodeEvent::Started(_)))
     });
     assert!(
         start_finished < ship_started,
