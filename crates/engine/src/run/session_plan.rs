@@ -47,7 +47,7 @@ pub(crate) async fn resolve_setup(
     Ok(Ok(SessionSetup {
         skills,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
-        env: SessionSetup::secrets_env(&ctx.manifest.config),
+        env: SessionSetup::secrets_env(&ctx.manifest.config, ctx.secrets.as_deref()),
         run_tools,
         run_dir: ctx.run_dir.to_path_buf(),
         node: node.id.clone(),

@@ -349,6 +349,7 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let report = execute_run(RunEnv {
@@ -366,6 +367,7 @@ nodes:
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -761,7 +763,7 @@ struct BirthBench {
 }
 
 impl BirthBench {
-    fn new() -> Self {
+    async fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
         let worktree = root.path().join("worktree");
         std::fs::create_dir_all(&worktree).unwrap();
@@ -778,6 +780,7 @@ impl BirthBench {
             &worktree,
             &HashMap::new(),
         )
+        .await
         .unwrap()
         .manifest;
         BirthBench {
@@ -813,7 +816,7 @@ impl BirthBench {
 
 #[tokio::test]
 async fn create_run_refuses_an_existing_run_dir() {
-    let bench = BirthBench::new();
+    let bench = BirthBench::new().await;
     let run_id = RunId::from("run-once");
     bench.create(&run_id, &[]).await.unwrap();
 
@@ -831,7 +834,7 @@ async fn create_run_refuses_an_existing_run_dir() {
 
 #[tokio::test]
 async fn a_run_born_holding_artifacts_names_each_one_after_run_created() {
-    let bench = BirthBench::new();
+    let bench = BirthBench::new().await;
     let run_id = RunId::from("run-with-brief");
     let from = RunId::from("run-predecessor");
     let artifacts = vec![yunta_engine::BirthArtifact {
@@ -913,6 +916,7 @@ nodes:
         &bench.worktree,
         &provided,
     )
+    .await
     .unwrap()
     .manifest;
     create_run(
@@ -983,6 +987,7 @@ nodes:
         &bench.worktree,
         &provided,
     )
+    .await
     .unwrap();
     create_run(
         CreateRunParams {
@@ -1078,6 +1083,7 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let run_dir = create_run(
@@ -1125,6 +1131,7 @@ nodes:
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -1262,7 +1269,7 @@ fn tasks_document(yaml: &str) -> (yunta_core::TasksFile, Vec<u8>) {
 
 #[tokio::test]
 async fn a_run_inheriting_a_tasks_document_from_a_log_that_does_not_replay_is_never_created() {
-    let bench = BirthBench::new();
+    let bench = BirthBench::new().await;
     let source = RunId::from("run-unreadable-source");
     // A status about a task nobody registered: a log replay stops at.
     let planted = yunta_testkit::SourceLog::open(&bench.storage, &source);
@@ -1331,6 +1338,7 @@ async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stu
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let run_dir = create_run(
@@ -1352,7 +1360,10 @@ async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stu
     // A document the run holds and never said what to do about — the
     // one shape that reaches a loop with no registration behind it.
     let (_document, bytes) = tasks_document(ONE_TASK);
-    let content_hash = yunta_engine::ObjectStore::at(&run_dir).put(&bytes).unwrap();
+    let content_hash = yunta_engine::ObjectStore::at(&run_dir)
+        .put(&bytes)
+        .await
+        .unwrap();
     bench
         .storage
         .append(
@@ -1397,6 +1408,7 @@ async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stu
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await

@@ -134,7 +134,7 @@ struct Resolved<'a> {
 /// child's ledger is asked for. The child may hold more — those are that
 /// run's business and stay there — and it must hold these, because a
 /// node cannot finish owing what it declared.
-fn resolve_from_child<'a>(
+async fn resolve_from_child<'a>(
     node: &Node,
     produces: &'a [ArtifactSpec],
     held: &RunArtifacts<'_>,
@@ -155,7 +155,7 @@ fn resolve_from_child<'a>(
             });
             continue;
         };
-        let bytes = match held.bytes(found) {
+        let bytes = match held.bytes(found).await {
             Ok(bytes) => bytes,
             Err(source) => return Err(NotAcquired::Unreachable { artifact, source }),
         };
@@ -213,7 +213,7 @@ pub(super) async fn acquire_from_child(
         }));
     };
     let held = RunArtifacts::of(child.run_dir, &events);
-    let resolved = match resolve_from_child(node, &artifacts.produces, &held, child.id) {
+    let resolved = match resolve_from_child(node, &artifacts.produces, &held, child.id).await {
         Ok(resolved) => resolved,
         Err(problem) => return Ok(Err(problem)),
     };

@@ -176,7 +176,7 @@ impl ServerHandler for SessionTools {
             }
             "yunta_get_blackboard" => self.get_blackboard().await,
             "yunta_task_status" => self.task_status().await,
-            "yunta_request_scope_expansion" => self.request_scope_expansion(args),
+            "yunta_request_scope_expansion" => self.request_scope_expansion(args).await,
             // A submission tool names its own kind, so the name that
             // matched is the kind that answers it.
             other => match ArtifactKind::from_submit_tool(other) {

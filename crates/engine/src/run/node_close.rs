@@ -151,7 +151,8 @@ pub(super) async fn close_node(
     let (verified, standing) = match &acquired {
         Some(acquired) => (acquired.verified.as_slice(), Some(&acquired.standing)),
         None => {
-            own = match close_artifacts(node, ctx.run_dir, &ctx.load_events().await?, ceiling) {
+            own = match close_artifacts(node, ctx.run_dir, &ctx.load_events().await?, ceiling).await
+            {
                 Ok(verified) => verified,
                 Err(failures) => {
                     return fail_with(ctx, node, Failure::artifacts(failures), false, tokens).await
@@ -284,10 +285,12 @@ pub(super) async fn fail(
 pub(super) async fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     let events = ctx.load_events().await?;
     let markdown = crate::progress::render_progress(&ctx.manifest.workflow, &events);
-    std::fs::write(ctx.run_dir.join("progress.md"), markdown).map_err(|source| RunError::Io {
-        context: "write progress.md".to_string(),
-        source,
-    })
+    tokio::fs::write(ctx.run_dir.join("progress.md"), markdown)
+        .await
+        .map_err(|source| RunError::Io {
+            context: "write progress.md".to_string(),
+            source,
+        })
 }
 
 /// Fails a node with a failure the engine states in one sentence — a

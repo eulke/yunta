@@ -3,6 +3,8 @@
 
 use std::path::PathBuf;
 
+use crate::Secret;
+
 /// Rewrites `path` in place when it starts with `~`: `~` alone becomes
 /// `home`, `~/rest` becomes `home/rest`; `~user/...` is refused.
 pub(super) fn expand_path(
@@ -106,5 +108,29 @@ mod env_tests {
     #[test]
     fn neither_known_is_none() {
         assert_eq!(user_state_root(&Env::default()), None);
+    }
+}
+
+/// Where a secret's value comes from.
+///
+/// The config names the variables; the values live only in the process
+/// environment of whatever spawned the run, and only the shell that
+/// started it may read them. The engine asks here instead, so a test
+/// hands it a value it chose and a run can never take one nobody
+/// declared.
+pub trait SecretSource: Send + Sync {
+    /// The value bound to `name`, or `None` when nothing is.
+    fn get(&self, name: &str) -> Option<Secret<String>>;
+}
+
+/// The real environment of the process the CLI runs in — the one
+/// implementation that reads it, so every other module is handed values
+/// rather than reaching for them.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProcessSecrets;
+
+impl SecretSource for ProcessSecrets {
+    fn get(&self, name: &str) -> Option<Secret<String>> {
+        std::env::var(name).ok().map(Secret::from)
     }
 }

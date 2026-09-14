@@ -79,6 +79,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let run_dir = create_run(
@@ -115,6 +116,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -143,6 +145,7 @@ async fn resuming_a_run_paused_on_unanswered_questions_replays_the_same_pause_wi
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -276,6 +279,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let run_dir = create_run(
@@ -313,6 +317,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -351,6 +356,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await

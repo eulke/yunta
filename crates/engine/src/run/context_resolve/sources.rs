@@ -38,12 +38,14 @@ pub(super) async fn resolve_files(
         } else {
             ctx.worktree.join(&rendered)
         };
-        let bytes = std::fs::read(&path).map_err(|source| ContextResolveError::Io {
-            node: node.id.clone(),
-            source_id: source_id.to_string(),
-            action: format!("read `{}`", path.display()),
-            source,
-        })?;
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|source| ContextResolveError::Io {
+                node: node.id.clone(),
+                source_id: source_id.to_string(),
+                action: format!("read `{}`", path.display()),
+                source,
+            })?;
         out.extend_from_slice(format!("# {rendered}\n").as_bytes());
         out.extend_from_slice(&bytes);
         out.push(b'\n');
@@ -137,15 +139,17 @@ pub(super) async fn resolve_artifact(
     let found = held
         .held(&wanted, artifact.node.as_ref())
         .ok_or_else(missing)?;
-    held.bytes(found).map_err(|source| ContextResolveError::Io {
-        node: node.id.clone(),
-        source_id: source_id.to_string(),
-        action: format!(
-            "read the artifact `{}` the run holds",
-            crate::artifacts::describe(found)
-        ),
-        source: std::io::Error::other(source.to_string()),
-    })
+    held.bytes(found)
+        .await
+        .map_err(|source| ContextResolveError::Io {
+            node: node.id.clone(),
+            source_id: source_id.to_string(),
+            action: format!(
+                "read the artifact `{}` the run holds",
+                crate::artifacts::describe(found)
+            ),
+            source: std::io::Error::other(source.to_string()),
+        })
 }
 
 pub(super) async fn resolve_run_events(
@@ -235,11 +239,13 @@ pub(super) async fn resolve_node_output(
     params: &yunta_core::NodeOutputParams,
 ) -> Result<Vec<u8>, ContextResolveError> {
     let path = node_output_path(ctx.run_dir, &params.node);
-    std::fs::read(&path).map_err(|_| ContextResolveError::MissingNodeOutput {
-        node: node.id.clone(),
-        source_id: source_id.to_string(),
-        referenced: params.node.clone(),
-    })
+    tokio::fs::read(&path)
+        .await
+        .map_err(|_| ContextResolveError::MissingNodeOutput {
+            node: node.id.clone(),
+            source_id: source_id.to_string(),
+            referenced: params.node.clone(),
+        })
 }
 
 fn node_output_path(run_dir: &Path, node_id: &NodeId) -> PathBuf {
@@ -252,7 +258,7 @@ fn node_output_path(run_dir: &Path, node_id: &NodeId) -> PathBuf {
 /// exits — called regardless of exit status, since a *failing*
 /// node's output is exactly what a corrective node's `node-output`
 /// context wants to read.
-pub(in crate::run) fn write_node_output(
+pub(in crate::run) async fn write_node_output(
     run_dir: &Path,
     node_id: &NodeId,
     stdout: &[u8],
@@ -260,10 +266,12 @@ pub(in crate::run) fn write_node_output(
 ) -> Result<(), RunError> {
     let path = node_output_path(run_dir, node_id);
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|source| RunError::Io {
-            context: format!("create node-output directory for `{node_id}`"),
-            source,
-        })?;
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|source| RunError::Io {
+                context: format!("create node-output directory for `{node_id}`"),
+                source,
+            })?;
     }
     let mut content = Vec::new();
     content.extend_from_slice(b"stdout:\n");
@@ -271,10 +279,12 @@ pub(in crate::run) fn write_node_output(
     content.extend_from_slice(b"\n\nstderr:\n");
     content.extend_from_slice(stderr);
     content.push(b'\n');
-    std::fs::write(&path, content).map_err(|source| RunError::Io {
-        context: format!("write captured output for node `{node_id}`"),
-        source,
-    })
+    tokio::fs::write(&path, content)
+        .await
+        .map_err(|source| RunError::Io {
+            context: format!("write captured output for node `{node_id}`"),
+            source,
+        })
 }
 
 /// Puts a resolved source's bytes where the run keeps every artifact's
@@ -284,12 +294,12 @@ pub(in crate::run) fn write_node_output(
 /// are both content the run must be able to hand back exactly as it
 /// recorded it, and one content-addressed store answers for both. What
 /// `context_assembled` carries is that hash.
-pub(super) fn materialize(
+pub(super) async fn materialize(
     run_dir: &Path,
     content: &[u8],
 ) -> std::io::Result<(PathBuf, ContentHash)> {
     let store = ObjectStore::at(run_dir);
-    let hash = store.put(content)?;
+    let hash = store.put(content).await?;
     let path = store.path_of(&hash);
     Ok((path, hash))
 }

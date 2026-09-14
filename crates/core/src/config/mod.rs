@@ -26,7 +26,7 @@ use crate::workflow::OnInterrupt;
 use env::expand_path;
 use merge::merge;
 
-pub use env::{user_state_root, Env, HomeExpansionError};
+pub use env::{user_state_root, Env, HomeExpansionError, ProcessSecrets, SecretSource};
 pub use permissions::{
     permission_layer_conflicts, CommandPermissions, NetworkPermissions, PackExecutorPolicy,
     PackPermissions, PermissionsConfig, PublisherPermissions,

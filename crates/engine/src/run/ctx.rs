@@ -81,6 +81,9 @@ pub(crate) struct RunCtx<'a> {
     /// caller: the user state root the user knowledge layer resolves
     /// against, and the variables layered onto every subprocess.
     pub ambient: Option<&'a yunta_core::Env>,
+    /// Where a declared secret's value comes from. `None` reaches no
+    /// secret at all, which is what a run declaring none needs.
+    pub secrets: Option<std::sync::Arc<dyn yunta_core::SecretSource>>,
     /// The invocation's display surface, fed by every append this
     /// context makes as the event lands — on the ctx so a `kind:
     /// workflow` node hands the same one down to its child run, whose
@@ -104,6 +107,7 @@ impl RunCtx<'_> {
                 .ambient
                 .map(|ambient| ambient.subprocess_vars.as_slice())
                 .unwrap_or(&[]),
+            clock: Some(self.clock.as_ref()),
         }
     }
 

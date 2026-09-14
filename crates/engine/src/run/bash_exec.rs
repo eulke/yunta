@@ -61,7 +61,8 @@ pub(super) async fn execute_bash(
         &node.id,
         &stdout_bytes,
         &stderr_bytes,
-    )?;
+    )
+    .await?;
 
     if status.success() {
         close_node(ctx, node, Close::new("exit 0", TokenUsage::default())).await

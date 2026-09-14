@@ -149,10 +149,12 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
         .join(".yunta/knowledge/distilled")
         .join(&ctx.manifest.workflow.name)
         .join(ctx.run_id.as_str());
-    std::fs::create_dir_all(&dest_dir).map_err(|source| RunError::Io {
-        context: format!("create `{}`", dest_dir.display()),
-        source,
-    })?;
+    tokio::fs::create_dir_all(&dest_dir)
+        .await
+        .map_err(|source| RunError::Io {
+            context: format!("create `{}`", dest_dir.display()),
+            source,
+        })?;
 
     // What the run holds, so the distillate is the bytes the log names
     // and its provenance carries that same hash — never a second reading
@@ -168,18 +170,22 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
         let name = wanted.view_name();
         match held.held(&wanted, Some(&declaration.node)) {
             Some(artifact) => {
-                let bytes = held.bytes(artifact)?;
+                let bytes = held.bytes(artifact).await?;
                 let dest = dest_dir.join(&name);
                 if let Some(parent) = dest.parent() {
-                    std::fs::create_dir_all(parent).map_err(|source| RunError::Io {
-                        context: format!("create `{}`", parent.display()),
+                    tokio::fs::create_dir_all(parent)
+                        .await
+                        .map_err(|source| RunError::Io {
+                            context: format!("create `{}`", parent.display()),
+                            source,
+                        })?;
+                }
+                tokio::fs::write(&dest, &bytes)
+                    .await
+                    .map_err(|source| RunError::Io {
+                        context: format!("write `{}`", dest.display()),
                         source,
                     })?;
-                }
-                std::fs::write(&dest, &bytes).map_err(|source| RunError::Io {
-                    context: format!("write `{}`", dest.display()),
-                    source,
-                })?;
                 artifacts.push(ProvenanceArtifact {
                     name,
                     content_hash: Some(format!("sha256:{}", artifact.content_hash)),
@@ -226,10 +232,12 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
         diagnostic: format!("failed to serialize distill provenance: {e}"),
     })?;
     let provenance_path = dest_dir.join("provenance.yaml");
-    std::fs::write(&provenance_path, yaml).map_err(|source| RunError::Io {
-        context: format!("write `{}`", provenance_path.display()),
-        source,
-    })?;
+    tokio::fs::write(&provenance_path, yaml)
+        .await
+        .map_err(|source| RunError::Io {
+            context: format!("write `{}`", provenance_path.display()),
+            source,
+        })?;
 
     if ctx.manifest.isolation == Isolation::Worktree {
         commit_and_maybe_push(ctx).await?;

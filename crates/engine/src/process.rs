@@ -15,7 +15,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use yunta_core::process::signal::{signal_group, Signal, SignalError};
-use yunta_core::Pid;
+use yunta_core::{Clock, Pid};
 
 use crate::process_registry::{self, ProcessRegistry};
 
@@ -32,6 +32,18 @@ pub struct Supervision<'a> {
     /// than read from a mutated process. Empty leaves the child's
     /// environment inherited unchanged.
     pub env: &'a [(String, String)],
+    /// What tells the time, for the one thing supervision does with it:
+    /// judging whether a lock's holder is still the process that took
+    /// it. `None` reads the process clock, which is what a call outside
+    /// any run — `yunta init`, a CLI probe — has.
+    pub clock: Option<&'a dyn Clock>,
+}
+
+impl<'a> Supervision<'a> {
+    /// The clock this supervision tells the time by.
+    pub fn clock(&self) -> &dyn Clock {
+        self.clock.unwrap_or(&yunta_core::SystemClock)
+    }
 }
 
 impl Supervision<'_> {
@@ -48,6 +60,7 @@ impl fmt::Debug for Supervision<'_> {
             .field("registered", &self.registry.is_some())
             .field("cancellable", &self.cancel.is_some())
             .field("env_vars", &self.env.len())
+            .field("clocked", &self.clock.is_some())
             .finish()
     }
 }

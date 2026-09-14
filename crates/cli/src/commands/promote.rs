@@ -106,6 +106,7 @@ pub(crate) async fn drive_promotions(
             cancel: env.cancel,
             adapter_override: None,
             ambient: Some(&ambient),
+            secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
             observer: env.observer.clone(),
         })
         .await
@@ -192,6 +193,7 @@ nodes:
 
         let workflow: Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
         let manifest = build_manifest(&workflow, &project.config, &cwd, &cwd, &HashMap::new())
+            .await
             .unwrap()
             .manifest;
 
@@ -238,6 +240,7 @@ nodes:
             cancel: None,
             adapter_override: None,
             ambient: None,
+            secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
             observer: Some(recorder.clone()),
         })
         .await

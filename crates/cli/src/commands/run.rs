@@ -197,7 +197,7 @@ async fn runnable(
         Some(_) => HashMap::new(),
         None => runnable_adapters(ctx, &workflow, adapter).await?,
     };
-    let frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs)?;
+    let frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs).await?;
     Ok((frozen, adapters))
 }
 
@@ -307,7 +307,7 @@ fn resolve_and_check(ctx: &Context, workflow_path: &Path) -> Result<(PathBuf, Wo
 /// absolute — `resume`/`status`/`gc` read these back from any directory,
 /// so a relative root (a relative `paths.*` or `YUNTA_HOME`) is refused
 /// here, naming it, rather than silently rooted at the invocation's cwd.
-fn build_frozen_manifest(
+async fn build_frozen_manifest(
     ctx: &Context,
     workflow: &Workflow,
     workflow_path: &Path,
@@ -321,7 +321,8 @@ fn build_frozen_manifest(
         workflow_dir,
         &ctx.cwd,
         &provided_inputs,
-    )?;
+    )
+    .await?;
     frozen.manifest.paths = Some(yunta_core::FrozenPaths::new(
         ctx.project.runs_root.clone(),
         ctx.project.worktrees_root.clone(),

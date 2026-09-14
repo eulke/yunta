@@ -480,6 +480,7 @@ async fn scope_expansion_request_round_trips_through_the_real_consumer() {
     // existing post-attempt evaluation consumes — proven by parsing it
     // with the real consumer, not a mirror type.
     let request = yunta_engine::scope_expansion::load_request(bench._root.path())
+        .await
         .unwrap()
         .expect("the request file must exist and parse");
     assert_eq!(request.paths, vec!["src/session/store.rs"]);
@@ -660,6 +661,7 @@ async fn a_check_before_the_document_is_handed_over_says_what_the_close_would() 
     let (_, text) = call(&client, "yunta_check_artifact", json!({"name": "tasks"})).await;
 
     let close = yunta_engine::close_artifacts(&plan_node(), &bench.run_dir, &[], None)
+        .await
         .expect_err("the close owes the document nobody handed over");
     assert!(
         text.contains(&close[0].to_string()),

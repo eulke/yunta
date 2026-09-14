@@ -82,7 +82,7 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         )));
     };
 
-    if liveness(registry.engine_pid) == Liveness::Alive {
+    if engine_is_alive(&registry) == Liveness::Alive {
         // Case 1 — the engine handles the rest itself.
         println!(
             "run {run_id}: signalling the live engine (pid {})",
@@ -152,6 +152,29 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         registry.process_groups.len()
     );
     Ok(Outcome::Success)
+}
+
+/// Whether the engine the registry names is still that engine.
+///
+/// A live pid is not enough. The engine may have died and the host may
+/// have handed its number to something else entirely — signalling that
+/// would interrupt a process that has nothing to do with this run. The
+/// registry wrote down when the engine started, so the answer is the
+/// same one the isolation lock asks of its own holder.
+fn engine_is_alive(registry: &yunta_engine::EngineProcessFile) -> Liveness {
+    let Ok(started_at) = registry.started_at.parse::<chrono::DateTime<chrono::Utc>>() else {
+        // A registry written before the engine recorded its own start,
+        // or one whose stamp no longer parses: the pid is all there is,
+        // and a live one is taken at its word.
+        return liveness(registry.engine_pid);
+    };
+    yunta_engine::lock::holder_state(
+        &yunta_engine::lock::LockOwner {
+            pid: registry.engine_pid,
+            started_at,
+        },
+        &yunta_engine::lock::SystemProbe,
+    )
 }
 
 /// SIGKILL to every process group the engine registered. A group that is

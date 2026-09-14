@@ -106,6 +106,7 @@ impl Bench {
         let workflow: Workflow = serde_norway::from_str(parent_yaml).unwrap();
         let config: ConfigLayer = serde_norway::from_str(config_yaml).unwrap();
         let manifest = build_manifest(&workflow, &config, &self.worktree, &self.worktree, inputs)
+            .await
             .unwrap()
             .manifest;
         create_run(
@@ -164,6 +165,7 @@ impl Bench {
             cancel: None,
             adapter_override: None,
             ambient: None,
+            secrets: None,
             observer: None,
         })
         .await

@@ -130,6 +130,7 @@ async fn run_with_config(
 
     let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
     let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
+        .await
         .unwrap()
         .manifest;
     let run_dir = create_run(
@@ -167,6 +168,7 @@ async fn run_with_config(
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await

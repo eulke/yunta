@@ -51,7 +51,10 @@ impl SessionTools {
         }
         let events = self.events().await?;
         let held = crate::artifacts::RunArtifacts::of(&self.host.run_dir, &events);
-        let verdicts: Vec<String> = specs.iter().map(|spec| self.verdict(spec, &held)).collect();
+        let mut verdicts: Vec<String> = Vec::with_capacity(specs.len());
+        for spec in &specs {
+            verdicts.push(self.verdict(spec, &held).await);
+        }
         Ok(verdicts.join("\n\n"))
     }
 
@@ -65,15 +68,22 @@ impl SessionTools {
     /// the close reaches, through these same two functions — which is
     /// what keeps the verdict a session can still act on and the verdict
     /// that decides the node one answer.
-    fn verdict(&self, spec: &ArtifactSpec, held: &crate::artifacts::RunArtifacts<'_>) -> String {
+    async fn verdict(
+        &self,
+        spec: &ArtifactSpec,
+        held: &crate::artifacts::RunArtifacts<'_>,
+    ) -> String {
         let verified = match spec.kind() {
-            Some(_) => crate::artifacts::held_document(&self.node, spec, held),
-            None => crate::artifacts::verify_one(
-                &self.node,
-                spec,
-                &self.host.run_dir,
-                self.host.max_artifact_bytes,
-            ),
+            Some(_) => crate::artifacts::held_document(&self.node, spec, held).await,
+            None => {
+                crate::artifacts::verify_one(
+                    &self.node,
+                    spec,
+                    &self.host.run_dir,
+                    self.host.max_artifact_bytes,
+                )
+                .await
+            }
         };
         render_verdict(&spec.to_string(), verified)
     }

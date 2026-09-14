@@ -303,7 +303,7 @@ async fn verify_before_waking(
     ctx: &RunCtx<'_>,
     view: &RunView,
 ) -> Result<ArtifactIntegrity, RunError> {
-    let artifacts = ArtifactIntegrity::of(ctx.run_dir, &view.events);
+    let artifacts = ArtifactIntegrity::of(ctx.run_dir, &view.events).await;
     if let Some(diagnostic) = artifacts.diagnostic(ctx.run_id) {
         return Err(steps::broken(ctx, diagnostic).await);
     }
@@ -367,6 +367,7 @@ fn build_ctx(
         cancel,
         adapter_override,
         ambient,
+        secrets,
         observer,
     } = env;
     let root_cancel = cancel.cloned().unwrap_or_default();
@@ -404,6 +405,7 @@ fn build_ctx(
         forge,
         depth,
         ambient,
+        secrets,
         observer,
         // One host per execute_run invocation, shared by every session
         // listener; each of them reads and writes through the host's own

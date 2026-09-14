@@ -50,12 +50,15 @@ pub(super) async fn resolve_mcp(
 
     let auth_header = match &server.auth_env {
         Some(var) => Some(
-            std::env::var(var).map_err(|_| ContextResolveError::MissingAuthEnv {
-                node: node.id.clone(),
-                source_id: source_id.to_string(),
-                server: params.server.clone(),
-                var: var.clone(),
-            })?,
+            ctx.secrets
+                .as_deref()
+                .and_then(|secrets| secrets.get(var))
+                .ok_or_else(|| ContextResolveError::MissingAuthEnv {
+                    node: node.id.clone(),
+                    source_id: source_id.to_string(),
+                    server: params.server.clone(),
+                    var: var.clone(),
+                })?,
         ),
         None => None,
     };
@@ -99,14 +102,16 @@ pub(in crate::run) enum McpQueryError {
 /// Connects, calls the `query` tool once, and disconnects — isolated from
 /// `resolve_mcp` so the rmcp plumbing meets `ContextResolveError` as one
 /// typed cause.
+/// The bearer stays wrapped until the transport takes it: it is handed
+/// to one config field and never to a log, a message or a `Debug`.
 async fn call_mcp_query(
     url: String,
-    auth_header: Option<String>,
+    auth_header: Option<yunta_core::Secret<String>>,
     query: String,
 ) -> Result<String, McpQueryError> {
     let mut config = StreamableHttpClientTransportConfig::with_uri(url);
     if let Some(token) = auth_header {
-        config = config.auth_header(token);
+        config = config.auth_header(token.expose().to_string());
     }
     let transport = StreamableHttpClientTransport::with_client(reqwest::Client::default(), config);
     let client =

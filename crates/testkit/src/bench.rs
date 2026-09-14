@@ -264,6 +264,7 @@ impl Bench {
             &self.worktree,
             &HashMap::new(),
         )
+        .await
         .expect("build manifest")
         .manifest;
 
@@ -313,6 +314,7 @@ impl Bench {
             cancel: None,
             adapter_override: None,
             ambient: self.ambient.as_ref(),
+            secrets: None,
             observer: self.observer.clone(),
         })
         .await

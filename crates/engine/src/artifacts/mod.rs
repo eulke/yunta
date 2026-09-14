@@ -122,10 +122,13 @@ pub(crate) async fn accept(
 ) -> Result<ArtifactRef, AcceptError> {
     let store = ObjectStore::at(run_dir);
     let name = artifact.view_name();
-    let content_hash = store.put(bytes).map_err(|source| AcceptError::Store {
-        name: name.clone(),
-        source,
-    })?;
+    let content_hash = store
+        .put(bytes)
+        .await
+        .map_err(|source| AcceptError::Store {
+            name: name.clone(),
+            source,
+        })?;
     let seq = log
         .record(
             producer,
@@ -142,6 +145,7 @@ pub(crate) async fn accept(
         })?;
     store
         .project(producer, &name, &content_hash)
+        .await
         .map_err(|source| AcceptError::Project { name, source })?;
     Ok(ArtifactRef {
         producer: producer.cloned(),
@@ -189,8 +193,8 @@ impl<'a> RunArtifacts<'a> {
     }
 
     /// The bytes `held` names, verified against its hash.
-    pub(crate) fn bytes(&self, held: &ArtifactRef) -> Result<Vec<u8>, ObjectError> {
-        self.store.get(&held.content_hash)
+    pub(crate) async fn bytes(&self, held: &ArtifactRef) -> Result<Vec<u8>, ObjectError> {
+        self.store.get(&held.content_hash).await
     }
 }
 

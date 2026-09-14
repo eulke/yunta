@@ -154,7 +154,8 @@ pub(super) async fn execute_node(
                     &node.id,
                     consolidated.as_bytes(),
                     &[],
-                )?;
+                )
+                .await?;
             }
             end
         }

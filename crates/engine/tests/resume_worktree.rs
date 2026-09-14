@@ -68,6 +68,7 @@ impl Paused {
             cancel: None,
             adapter_override: None,
             ambient: None,
+            secrets: None,
             observer: None,
         })
         .await
@@ -106,6 +107,7 @@ async fn paused_run(isolation: Isolation) -> Paused {
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     assert_eq!(

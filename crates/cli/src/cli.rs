@@ -367,7 +367,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             format,
         } => graph::graph(&workflow, run.as_ref(), format),
         Command::Test { dir } => commands::test::test(dir.as_deref()).await,
-        Command::Verify { run_id } => commands::verify::verify(&run_id),
+        Command::Verify { run_id } => commands::verify::verify(&run_id).await,
         Command::Receipt { run_id, json } => commands::receipt::receipt(&run_id, json),
         Command::Pack { action } => match action {
             PackAction::Add {

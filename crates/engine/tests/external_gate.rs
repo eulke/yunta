@@ -94,6 +94,7 @@ impl Bench {
             &worktree,
             &HashMap::new(),
         )
+        .await
         .unwrap()
         .manifest;
         let run_dir = create_run(
@@ -145,6 +146,7 @@ impl Bench {
             cancel: None,
             adapter_override: None,
             ambient: None,
+            secrets: None,
             observer: None,
         })
         .await

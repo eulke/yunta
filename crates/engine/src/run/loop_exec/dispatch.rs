@@ -121,6 +121,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
             budget: ctx.session_budget().await?,
             memo: &ctx.memo,
             registry: ctx.process_registry.as_ref(),
+            clock: Some(ctx.clock.as_ref()),
         },
         ScopeGovernance {
             permissions: ctx.manifest.config.permissions.as_ref(),

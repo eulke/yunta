@@ -86,6 +86,7 @@ outcome: { type: completed, summary: "wrote it" }
             budget: Budget::default(),
             memo: &memo,
             registry: None,
+            clock: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -142,6 +143,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
             budget: Budget::default(),
             memo: &memo,
             registry: None,
+            clock: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -184,6 +186,7 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
             budget: Budget::default(),
             memo: &memo,
             registry: None,
+            clock: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -238,6 +241,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
             budget: Budget::default(),
             memo: &memo,
             registry: None,
+            clock: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -301,6 +305,7 @@ outcome: { type: completed, summary: "done" }
             budget: Budget::default(),
             memo: &memo,
             registry: None,
+            clock: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -359,6 +364,7 @@ sessions:
             budget: Budget::default(),
             memo: &memo,
             registry: None,
+            clock: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -413,6 +419,7 @@ sessions:
             budget: Budget::default(),
             memo: &memo,
             registry: None,
+            clock: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -464,6 +471,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
             budget: Budget::default(),
             memo: &memo,
             registry: None,
+            clock: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -606,6 +614,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
                 budget,
                 memo: &memo,
                 registry: None,
+                clock: None,
             },
             ScopeGovernance {
                 permissions: None,
@@ -670,6 +679,7 @@ outcome: { type: completed, summary: "should never be reached" }
             budget,
             memo: &memo,
             registry: None,
+            clock: None,
         },
         ScopeGovernance {
             permissions: None,
@@ -860,6 +870,7 @@ outcome: { type: completed, summary: "wrote it" }
             budget: Budget::default(),
             memo: &memo,
             registry: None,
+            clock: None,
         },
         ScopeGovernance {
             permissions: None,

@@ -136,7 +136,7 @@ pub struct ResolvedInputs {
 /// against — the run's original checkout, since this runs before any
 /// worktree exists (isolation is a property of the run, not of resolving
 /// its inputs).
-pub fn resolve_inputs(
+pub async fn resolve_inputs(
     specs: &BTreeMap<String, InputSpec>,
     provided: &HashMap<String, String>,
     base_dir: &Path,
@@ -163,7 +163,7 @@ pub fn resolve_inputs(
                 None => return Err(InputsError::Missing { name: name.clone() }),
             },
         };
-        let value = match validate(name, spec, &raw, base_dir)? {
+        let value = match validate(name, spec, &raw, base_dir).await? {
             Resolved::Value(value) => value,
             Resolved::Document(document) => {
                 // The frozen value is the document itself, not the file
@@ -191,25 +191,27 @@ enum Resolved {
 /// Existence, readability and content are three separate answers on
 /// purpose: the first two are about the file a person typed, the third
 /// about what they wrote in it, and only the third is a report.
-fn read_document(
+async fn read_document(
     name: &str,
     kind: ArtifactKind,
     raw: &str,
     base_dir: &Path,
 ) -> Result<BirthArtifact, InputsError> {
     let path = base_dir.join(raw);
-    if !path.exists() {
+    if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
         return Err(InputsError::PathNotFound {
             name: name.to_string(),
             path: raw.to_string(),
         });
     }
-    let bytes = std::fs::read(&path).map_err(|source| InputsError::DocumentUnreadable {
-        name: name.to_string(),
-        path: raw.to_string(),
-        label: kind.label(),
-        detail: source.to_string(),
-    })?;
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|source| InputsError::DocumentUnreadable {
+            name: name.to_string(),
+            path: raw.to_string(),
+            label: kind.label(),
+            detail: source.to_string(),
+        })?;
     let canonical = crate::artifacts::canonical_document(kind, &bytes, raw).map_err(|report| {
         InputsError::DocumentRefused {
             name: name.to_string(),
@@ -247,7 +249,7 @@ fn format_number(value: f64) -> String {
 }
 
 /// One input's raw text held to everything its type demands.
-fn validate(
+async fn validate(
     name: &str,
     spec: &InputSpec,
     raw: &str,
@@ -295,7 +297,9 @@ fn validate(
         // takes from it is the document, and the value follows from
         // that.
         InputSpec::Document { kind, .. } => {
-            return read_document(name, *kind, raw, base_dir).map(Resolved::Document)
+            return read_document(name, *kind, raw, base_dir)
+                .await
+                .map(Resolved::Document)
         }
     };
     Ok(Resolved::Value(value))

@@ -38,7 +38,7 @@ impl SessionTools {
             .map_err(|source| RunToolError::Render { source })
     }
 
-    pub(super) fn request_scope_expansion(
+    pub(super) async fn request_scope_expansion(
         &self,
         args: serde_json::Map<String, Value>,
     ) -> Result<String, RunToolError> {
@@ -57,15 +57,17 @@ impl SessionTools {
         let path = self
             .cwd
             .join(crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE);
-        if path.exists() {
+        if tokio::fs::try_exists(&path).await.unwrap_or(false) {
             return Err(RunToolError::RequestPending);
         }
         let yaml = yunta_core::yaml::to_string(&request)
             .map_err(|source| RunToolError::Yaml { source })?;
-        std::fs::write(&path, yaml).map_err(|source| RunToolError::Write {
-            path: path.clone(),
-            source,
-        })?;
+        tokio::fs::write(&path, yaml)
+            .await
+            .map_err(|source| RunToolError::Write {
+                path: path.clone(),
+                source,
+            })?;
         Ok(
             "request recorded — it is evaluated when this attempt ends (the engine \
              or a person decides; a denial becomes a finding); re-attempt the work after"

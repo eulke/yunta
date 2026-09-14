@@ -258,7 +258,7 @@ async fn prepare_loop<'a>(
     };
 
     let view = ctx.run_view().await?;
-    let Some(held) = load_registered_tasks(ctx, &view.events)? else {
+    let Some(held) = load_registered_tasks(ctx, &view.events).await? else {
         let end = fail(
             ctx,
             node,
@@ -365,7 +365,7 @@ struct HeldTasks {
 /// finds its tasks whatever became of the `artifacts/` view. `None` when
 /// the run holds no tasks document at all — no node produced one, no
 /// input named one, and nothing was handed over.
-fn load_registered_tasks(
+async fn load_registered_tasks(
     ctx: &RunCtx<'_>,
     events: &[StoredEvent],
 ) -> Result<Option<HeldTasks>, RunError> {
@@ -378,7 +378,7 @@ fn load_registered_tasks(
     else {
         return Ok(None);
     };
-    let bytes = held.bytes(&registered)?;
+    let bytes = held.bytes(&registered).await?;
     let describe = crate::artifacts::describe(&registered);
     // The same door `close_artifacts` reads a tasks document through, so
     // a document that stops being readable between the node that wrote

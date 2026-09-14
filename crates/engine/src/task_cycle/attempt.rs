@@ -274,12 +274,13 @@ async fn evaluate_scope_expansion(
         supervision,
         ..
     } = params;
-    let Some(expansion_request) = crate::scope_expansion::load_request(cwd).map_err(|source| {
-        TaskCycleError::ScopeExpansion {
-            task: task.id.clone(),
-            source,
-        }
-    })?
+    let Some(expansion_request) =
+        crate::scope_expansion::load_request(cwd)
+            .await
+            .map_err(|source| TaskCycleError::ScopeExpansion {
+                task: task.id.clone(),
+                source,
+            })?
     else {
         return Ok(None);
     };

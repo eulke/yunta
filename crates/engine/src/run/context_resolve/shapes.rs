@@ -27,7 +27,7 @@ pub(super) const SHAPE_KIND: &str = "artifact-shape";
 /// identical in every session of this node and sits inside the
 /// byte-stable prefix a provider's cache reuses rather than disturbing
 /// it.
-pub(super) fn mount_artifact_shapes(
+pub(super) async fn mount_artifact_shapes(
     ctx: &RunCtx<'_>,
     node: &Node,
     blocks: &mut Vec<String>,
@@ -37,12 +37,14 @@ pub(super) fn mount_artifact_shapes(
     for (source_id, content) in artifact_shapes(node) {
         let bytes = content.into_bytes();
         let (path, content_hash) =
-            materialize(ctx.run_dir, &bytes).map_err(|source| ContextResolveError::Io {
-                node: node.id.clone(),
-                source_id: source_id.clone(),
-                action: "materialize an artifact shape".to_string(),
-                source,
-            })?;
+            materialize(ctx.run_dir, &bytes)
+                .await
+                .map_err(|source| ContextResolveError::Io {
+                    node: node.id.clone(),
+                    source_id: source_id.clone(),
+                    action: "materialize an artifact shape".to_string(),
+                    source,
+                })?;
         blocks.push(render_block(
             &source_id,
             SHAPE_KIND,

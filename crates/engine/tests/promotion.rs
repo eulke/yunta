@@ -143,6 +143,7 @@ async fn run_planted(
     let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
     let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
+        .await
         .unwrap()
         .manifest;
     let born: Vec<yunta_engine::BirthArtifact> = planted
@@ -235,6 +236,7 @@ async fn run_planted(
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await

@@ -225,6 +225,9 @@ pub struct AttemptEnv<'a> {
     pub memo: &'a Memo,
     /// Where every criterion's process registers for the run.
     pub registry: Option<&'a crate::process_registry::ProcessRegistry>,
+    /// What tells the time inside the cycle: a lock's holder is judged
+    /// against it, never against the process clock.
+    pub clock: Option<&'a dyn yunta_core::Clock>,
 }
 
 /// Runs a task through the full cycle: pre-check once, then
@@ -261,11 +264,13 @@ pub async fn run_task(
         budget,
         memo,
         registry,
+        clock,
     } = env;
     let supervision = Supervision {
         registry,
         cancel: Some(cancel),
         env: &[],
+        clock,
     };
     let ScopeGovernance {
         permissions,

@@ -70,7 +70,7 @@ pub struct FrozenRun {
 /// nowhere else for a relative path to mean. A `document` input is read
 /// and held to its kind here, before the base commit is even asked for,
 /// so a document nobody can use costs no worktree and no baseline.
-pub fn build_manifest(
+pub async fn build_manifest(
     workflow: &Workflow,
     config: &ConfigLayer,
     workflow_dir: &Path,
@@ -81,12 +81,12 @@ pub fn build_manifest(
     expand_runner_fanout(&mut workflow);
     expand_implicit_dependencies(&mut workflow);
 
-    let resolved = resolve_inputs(&workflow.inputs, provided_inputs, repo)?;
+    let resolved = resolve_inputs(&workflow.inputs, provided_inputs, repo).await?;
     let inputs = resolved.values;
 
     let mut prompts = BTreeMap::new();
     for node in workflow.iter_nodes() {
-        freeze_prompt(node, workflow_dir, &mut prompts)?;
+        freeze_prompt(node, workflow_dir, &mut prompts).await?;
     }
 
     let base_commit: CommitSha =
@@ -117,7 +117,7 @@ pub fn build_manifest(
         // library callers (tests) on the fallback-to-current-config
         // path, which is also the tolerant reading of old manifests.
         paths: None,
-        pack: pack_provenance(repo, workflow_dir),
+        pack: pack_provenance(repo, workflow_dir).await,
     };
     Ok(FrozenRun {
         manifest,
@@ -136,7 +136,7 @@ pub fn build_manifest(
 /// existing without a readable `pack.yaml`) that this function has no
 /// better answer for than omitting provenance rather than failing the
 /// run.
-fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackProvenance> {
+async fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackProvenance> {
     let crate::catalog::WorkflowOrigin::Pack {
         publisher,
         pack_name,
@@ -148,10 +148,13 @@ fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackP
         .join(".yunta/packs")
         .join(publisher.as_str())
         .join(pack_name.as_str());
-    let manifest_text = std::fs::read_to_string(pack_dir.join("pack.yaml")).ok()?;
+    let manifest_text = tokio::fs::read_to_string(pack_dir.join("pack.yaml"))
+        .await
+        .ok()?;
     let manifest: yunta_core::PackManifest = yunta_core::yaml::parse(&manifest_text).ok()?;
 
-    let commit = std::fs::read_to_string(repo.join(".yunta/yunta.lock"))
+    let commit = tokio::fs::read_to_string(repo.join(".yunta/yunta.lock"))
+        .await
         .ok()
         .and_then(|text| yunta_core::yaml::parse::<yunta_core::PackLock>(&text).ok())
         .and_then(|lock| {
@@ -280,7 +283,7 @@ fn expand_implicit_dependencies_in(node: &mut Node) {
 /// child's `prompt: {file: ...}` needs the same freeze-at-creation
 /// guarantee as a top-level node's, since it's dispatched
 /// through the identical `execute_node`.
-fn freeze_prompt(
+async fn freeze_prompt(
     node: &Node,
     workflow_dir: &Path,
     prompts: &mut BTreeMap<NodeId, String>,
@@ -288,13 +291,13 @@ fn freeze_prompt(
     if let NodeKind::Prompt { prompt } | NodeKind::Loop { prompt, .. } = &node.kind {
         if let PromptSource::File(path) = prompt {
             let full_path = workflow_dir.join(path);
-            let content = std::fs::read_to_string(&full_path).map_err(|source| {
-                ManifestError::PromptFile {
+            let content = tokio::fs::read_to_string(&full_path)
+                .await
+                .map_err(|source| ManifestError::PromptFile {
                     node: node.id.clone(),
                     path: full_path.clone(),
                     source,
-                }
-            })?;
+                })?;
             prompts.insert(node.id.clone(), content);
         }
     }

@@ -73,6 +73,7 @@ impl Bench {
             &self.worktree,
             &HashMap::new(),
         )
+        .await
         .unwrap()
         .manifest;
 
@@ -112,6 +113,7 @@ impl Bench {
             cancel: None,
             adapter_override: None,
             ambient: None,
+            secrets: None,
             observer: None,
         })
         .await

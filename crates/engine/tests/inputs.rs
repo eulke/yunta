@@ -22,25 +22,31 @@ fn specs(yaml: &str) -> BTreeMap<String, InputSpec> {
     workflow.inputs
 }
 
-#[test]
-fn a_missing_optional_input_resolves_to_its_default() {
+#[tokio::test]
+async fn a_missing_optional_input_resolves_to_its_default() {
     let specs = specs("inputs:\n  greeting:\n    type: string\n    default: hello\n");
-    let resolved = resolve_inputs(&specs, &HashMap::new(), std::path::Path::new(".")).unwrap();
+    let resolved = resolve_inputs(&specs, &HashMap::new(), std::path::Path::new("."))
+        .await
+        .unwrap();
     assert_eq!(resolved.values["greeting"], "hello");
 }
 
-#[test]
-fn a_provided_value_overrides_the_default() {
+#[tokio::test]
+async fn a_provided_value_overrides_the_default() {
     let specs = specs("inputs:\n  greeting:\n    type: string\n    default: hello\n");
     let provided = HashMap::from([("greeting".to_string(), "hola".to_string())]);
-    let resolved = resolve_inputs(&specs, &provided, std::path::Path::new(".")).unwrap();
+    let resolved = resolve_inputs(&specs, &provided, std::path::Path::new("."))
+        .await
+        .unwrap();
     assert_eq!(resolved.values["greeting"], "hola");
 }
 
-#[test]
-fn a_required_input_with_no_value_fails_naming_it() {
+#[tokio::test]
+async fn a_required_input_with_no_value_fails_naming_it() {
     let specs = specs("inputs:\n  idea:\n    type: string\n    required: true\n");
-    let err = resolve_inputs(&specs, &HashMap::new(), std::path::Path::new(".")).unwrap_err();
+    let err = resolve_inputs(&specs, &HashMap::new(), std::path::Path::new("."))
+        .await
+        .unwrap_err();
     assert_eq!(
         err,
         InputsError::Missing {
@@ -49,11 +55,13 @@ fn a_required_input_with_no_value_fails_naming_it() {
     );
 }
 
-#[test]
-fn an_undeclared_provided_input_is_an_error() {
+#[tokio::test]
+async fn an_undeclared_provided_input_is_an_error() {
     let specs = specs("inputs: {}\n");
     let provided = HashMap::from([("ghost".to_string(), "x".to_string())]);
-    let err = resolve_inputs(&specs, &provided, std::path::Path::new(".")).unwrap_err();
+    let err = resolve_inputs(&specs, &provided, std::path::Path::new("."))
+        .await
+        .unwrap_err();
     assert_eq!(
         err,
         InputsError::Unknown {
@@ -63,14 +71,14 @@ fn an_undeclared_provided_input_is_an_error() {
     );
 }
 
-#[test]
-fn nan_is_rejected() {
+#[tokio::test]
+async fn nan_is_rejected() {
     let specs = specs("inputs:\n  n:\n    type: number\n");
     for raw in ["NaN", "nan", "inf", "-inf", "infinity", "+Infinity"] {
         let provided = HashMap::from([("n".to_string(), raw.to_string())]);
         assert!(
             matches!(
-                resolve_inputs(&specs, &provided, std::path::Path::new(".")),
+                resolve_inputs(&specs, &provided, std::path::Path::new(".")).await,
                 Err(InputsError::InvalidNumber { .. })
             ),
             "`{raw}` is not a finite number"
@@ -78,15 +86,17 @@ fn nan_is_rejected() {
     }
 }
 
-#[test]
-fn every_unknown_input_is_named_in_order() {
+#[tokio::test]
+async fn every_unknown_input_is_named_in_order() {
     let specs = specs("inputs:\n  idea:\n    type: string\n    default: x\n");
     let provided = HashMap::from([
         ("zeta".to_string(), "1".to_string()),
         ("alpha".to_string(), "2".to_string()),
         ("idea".to_string(), "3".to_string()),
     ]);
-    let err = resolve_inputs(&specs, &provided, std::path::Path::new(".")).unwrap_err();
+    let err = resolve_inputs(&specs, &provided, std::path::Path::new("."))
+        .await
+        .unwrap_err();
     assert_eq!(
         err,
         InputsError::Unknown {
@@ -101,51 +111,55 @@ fn every_unknown_input_is_named_in_order() {
     );
 }
 
-#[test]
-fn a_number_input_parses_and_enforces_min_and_max() {
+#[tokio::test]
+async fn a_number_input_parses_and_enforces_min_and_max() {
     let specs = specs("inputs:\n  n:\n    type: number\n    min: 1\n    max: 10\n");
 
     let low = HashMap::from([("n".to_string(), "0".to_string())]);
     assert!(matches!(
-        resolve_inputs(&specs, &low, std::path::Path::new(".")),
+        resolve_inputs(&specs, &low, std::path::Path::new(".")).await,
         Err(InputsError::BelowMin { .. })
     ));
 
     let high = HashMap::from([("n".to_string(), "11".to_string())]);
     assert!(matches!(
-        resolve_inputs(&specs, &high, std::path::Path::new(".")),
+        resolve_inputs(&specs, &high, std::path::Path::new(".")).await,
         Err(InputsError::AboveMax { .. })
     ));
 
     let not_a_number = HashMap::from([("n".to_string(), "banana".to_string())]);
     assert!(matches!(
-        resolve_inputs(&specs, &not_a_number, std::path::Path::new(".")),
+        resolve_inputs(&specs, &not_a_number, std::path::Path::new(".")).await,
         Err(InputsError::InvalidNumber { .. })
     ));
 
     let ok = HashMap::from([("n".to_string(), "5".to_string())]);
     assert_eq!(
         resolve_inputs(&specs, &ok, std::path::Path::new("."))
+            .await
             .unwrap()
             .values["n"],
         "5"
     );
 }
 
-#[test]
-fn an_integer_default_renders_without_a_trailing_decimal() {
+#[tokio::test]
+async fn an_integer_default_renders_without_a_trailing_decimal() {
     let specs = specs("inputs:\n  max_tasks:\n    type: number\n    default: 40\n");
-    let resolved = resolve_inputs(&specs, &HashMap::new(), std::path::Path::new(".")).unwrap();
+    let resolved = resolve_inputs(&specs, &HashMap::new(), std::path::Path::new("."))
+        .await
+        .unwrap();
     assert_eq!(resolved.values["max_tasks"], "40");
 }
 
-#[test]
-fn a_boolean_input_only_accepts_true_or_false() {
+#[tokio::test]
+async fn a_boolean_input_only_accepts_true_or_false() {
     let specs = specs("inputs:\n  dry_run:\n    type: boolean\n    default: false\n");
 
     let ok = HashMap::from([("dry_run".to_string(), "true".to_string())]);
     assert_eq!(
         resolve_inputs(&specs, &ok, std::path::Path::new("."))
+            .await
             .unwrap()
             .values["dry_run"],
         "true"
@@ -153,13 +167,13 @@ fn a_boolean_input_only_accepts_true_or_false() {
 
     let bad = HashMap::from([("dry_run".to_string(), "yes".to_string())]);
     assert!(matches!(
-        resolve_inputs(&specs, &bad, std::path::Path::new(".")),
+        resolve_inputs(&specs, &bad, std::path::Path::new(".")).await,
         Err(InputsError::InvalidBoolean { .. })
     ));
 }
 
-#[test]
-fn an_enum_input_only_accepts_a_declared_value() {
+#[tokio::test]
+async fn an_enum_input_only_accepts_a_declared_value() {
     let specs = specs(
         "inputs:\n  severity_floor:\n    type: enum\n    values: [blocking, major, minor]\n    default: major\n",
     );
@@ -167,6 +181,7 @@ fn an_enum_input_only_accepts_a_declared_value() {
     let ok = HashMap::from([("severity_floor".to_string(), "blocking".to_string())]);
     assert_eq!(
         resolve_inputs(&specs, &ok, std::path::Path::new("."))
+            .await
             .unwrap()
             .values["severity_floor"],
         "blocking"
@@ -174,40 +189,41 @@ fn an_enum_input_only_accepts_a_declared_value() {
 
     let bad = HashMap::from([("severity_floor".to_string(), "catastrophic".to_string())]);
     assert!(matches!(
-        resolve_inputs(&specs, &bad, std::path::Path::new(".")),
+        resolve_inputs(&specs, &bad, std::path::Path::new(".")).await,
         Err(InputsError::NotInEnum { .. })
     ));
 }
 
-#[test]
-fn a_string_input_enforces_min_length_and_pattern() {
+#[tokio::test]
+async fn a_string_input_enforces_min_length_and_pattern() {
     let specs = specs(
         "inputs:\n  branch:\n    type: string\n    min_length: 3\n    pattern: \"^[a-z-]+$\"\n    default: main\n",
     );
 
     let too_short = HashMap::from([("branch".to_string(), "ab".to_string())]);
     assert!(matches!(
-        resolve_inputs(&specs, &too_short, std::path::Path::new(".")),
+        resolve_inputs(&specs, &too_short, std::path::Path::new(".")).await,
         Err(InputsError::TooShort { .. })
     ));
 
     let bad_pattern = HashMap::from([("branch".to_string(), "Not-Valid".to_string())]);
     assert!(matches!(
-        resolve_inputs(&specs, &bad_pattern, std::path::Path::new(".")),
+        resolve_inputs(&specs, &bad_pattern, std::path::Path::new(".")).await,
         Err(InputsError::PatternMismatch { .. })
     ));
 
     let ok = HashMap::from([("branch".to_string(), "feature-x".to_string())]);
     assert_eq!(
         resolve_inputs(&specs, &ok, std::path::Path::new("."))
+            .await
             .unwrap()
             .values["branch"],
         "feature-x"
     );
 }
 
-#[test]
-fn a_path_input_validates_existence_against_the_given_base_dir() {
+#[tokio::test]
+async fn a_path_input_validates_existence_against_the_given_base_dir() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("CHANGELOG.md"), "").unwrap();
 
@@ -215,19 +231,22 @@ fn a_path_input_validates_existence_against_the_given_base_dir() {
 
     let missing = HashMap::from([("changelog".to_string(), "NOPE.md".to_string())]);
     assert!(matches!(
-        resolve_inputs(&specs, &missing, dir.path()),
+        resolve_inputs(&specs, &missing, dir.path()).await,
         Err(InputsError::PathNotFound { .. })
     ));
 
     let present = HashMap::from([("changelog".to_string(), "CHANGELOG.md".to_string())]);
     assert_eq!(
-        resolve_inputs(&specs, &present, dir.path()).unwrap().values["changelog"],
+        resolve_inputs(&specs, &present, dir.path())
+            .await
+            .unwrap()
+            .values["changelog"],
         "CHANGELOG.md"
     );
 }
 
-#[test]
-fn a_document_input_validates_existence_against_the_given_base_dir() {
+#[tokio::test]
+async fn a_document_input_validates_existence_against_the_given_base_dir() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("plan.yaml"), "tasks: []\n").unwrap();
 
@@ -235,7 +254,7 @@ fn a_document_input_validates_existence_against_the_given_base_dir() {
 
     let missing = HashMap::from([("plan".to_string(), "NOPE.yaml".to_string())]);
     assert!(matches!(
-        resolve_inputs(&specs, &missing, dir.path()),
+        resolve_inputs(&specs, &missing, dir.path()).await,
         Err(InputsError::PathNotFound { .. })
     ));
 
@@ -244,6 +263,7 @@ fn a_document_input_validates_existence_against_the_given_base_dir() {
         &HashMap::from([("plan".to_string(), "plan.yaml".to_string())]),
         dir.path()
     )
+    .await
     .is_ok());
 }
 
@@ -266,13 +286,14 @@ fn given(name: &str, value: &str) -> HashMap<String, String> {
     HashMap::from([(name.to_string(), value.to_string())])
 }
 
-#[test]
-fn a_document_input_becomes_an_artifact_the_run_is_born_holding() {
+#[tokio::test]
+async fn a_document_input_becomes_an_artifact_the_run_is_born_holding() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("plan.yaml"), HAND_WRITTEN_TASKS).unwrap();
 
-    let resolved =
-        resolve_inputs(&document_specs(), &given("tasks", "plan.yaml"), dir.path()).unwrap();
+    let resolved = resolve_inputs(&document_specs(), &given("tasks", "plan.yaml"), dir.path())
+        .await
+        .unwrap();
 
     let [document] = &resolved.documents[..] else {
         panic!("one document entered the run: {:?}", resolved.documents);
@@ -306,13 +327,14 @@ fn a_document_input_becomes_an_artifact_the_run_is_born_holding() {
     );
 }
 
-#[test]
-fn a_document_input_freezes_the_identity_of_the_document_never_the_path() {
+#[tokio::test]
+async fn a_document_input_freezes_the_identity_of_the_document_never_the_path() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("plan.yaml"), HAND_WRITTEN_TASKS).unwrap();
 
-    let resolved =
-        resolve_inputs(&document_specs(), &given("tasks", "plan.yaml"), dir.path()).unwrap();
+    let resolved = resolve_inputs(&document_specs(), &given("tasks", "plan.yaml"), dir.path())
+        .await
+        .unwrap();
 
     assert_eq!(
         resolved.values["tasks"],
@@ -325,8 +347,8 @@ fn a_document_input_freezes_the_identity_of_the_document_never_the_path() {
     );
 }
 
-#[test]
-fn a_document_input_that_breaks_its_kind_s_rules_is_refused_with_every_problem_named() {
+#[tokio::test]
+async fn a_document_input_that_breaks_its_kind_s_rules_is_refused_with_every_problem_named() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("plan.yaml"),
@@ -345,8 +367,9 @@ tasks:
     )
     .unwrap();
 
-    let error =
-        resolve_inputs(&document_specs(), &given("tasks", "plan.yaml"), dir.path()).unwrap_err();
+    let error = resolve_inputs(&document_specs(), &given("tasks", "plan.yaml"), dir.path())
+        .await
+        .unwrap_err();
 
     let InputsError::DocumentRefused { name, report } = &error else {
         panic!("a document that breaks its rules is refused as one: {error:?}");
@@ -364,13 +387,14 @@ tasks:
     );
 }
 
-#[test]
-fn a_document_input_that_is_not_its_kind_at_all_is_refused_naming_the_path_inside_it() {
+#[tokio::test]
+async fn a_document_input_that_is_not_its_kind_at_all_is_refused_naming_the_path_inside_it() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("plan.yaml"), "tasks:\n  - id: 1\n").unwrap();
 
-    let error =
-        resolve_inputs(&document_specs(), &given("tasks", "plan.yaml"), dir.path()).unwrap_err();
+    let error = resolve_inputs(&document_specs(), &given("tasks", "plan.yaml"), dir.path())
+        .await
+        .unwrap_err();
 
     let InputsError::DocumentRefused { report, .. } = &error else {
         panic!("a document whose shape is wrong is refused as one: {error:?}");
@@ -382,13 +406,14 @@ fn a_document_input_that_is_not_its_kind_at_all_is_refused_naming_the_path_insid
     );
 }
 
-#[test]
-fn a_document_input_that_cannot_be_read_as_a_file_says_so() {
+#[tokio::test]
+async fn a_document_input_that_cannot_be_read_as_a_file_says_so() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("plan.yaml")).unwrap();
 
-    let error =
-        resolve_inputs(&document_specs(), &given("tasks", "plan.yaml"), dir.path()).unwrap_err();
+    let error = resolve_inputs(&document_specs(), &given("tasks", "plan.yaml"), dir.path())
+        .await
+        .unwrap_err();
 
     assert!(
         matches!(&error, InputsError::DocumentUnreadable { name, .. } if name == "tasks"),

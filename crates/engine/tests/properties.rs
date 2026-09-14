@@ -10,6 +10,17 @@
 //! properties must hold over arbitrary logs, not just tidy ones.
 
 use proptest::prelude::*;
+
+/// Drives an async call to completion on a runtime of its own — what
+/// a property body, which is synchronous by construction, has instead
+/// of an `await`.
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime for one property case")
+        .block_on(future)
+}
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventBody,
@@ -436,7 +447,7 @@ proptest! {
         let store = ObjectStore::at(run.path());
         let mut log: Vec<StoredEvent> = Vec::new();
         for (node, artifact, content) in &accepted {
-            let content_hash = store.put(content.as_bytes()).expect("store the bytes");
+            let content_hash = block_on(store.put(content.as_bytes())).expect("store the bytes");
             log.push(event(
                 log.len(),
                 *node,
@@ -460,7 +471,7 @@ proptest! {
         }
 
         let before = derive(&log);
-        let integrity = ArtifactIntegrity::of(run.path(), &log);
+        let integrity = block_on(ArtifactIntegrity::of(run.path(), &log));
 
         prop_assert!(integrity.faults.is_empty(), "{:?}", integrity.faults);
         prop_assert_eq!(integrity.diagnostic(&RUN.into()), None);

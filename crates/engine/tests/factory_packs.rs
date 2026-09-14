@@ -112,6 +112,7 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
     let workflow_dir = Path::new(workflow_path).parent().unwrap();
     let inputs = HashMap::from([("idea".to_string(), "add dark mode".to_string())]);
     let manifest = build_manifest(&workflow, &config, workflow_dir, &worktree, &inputs)
+        .await
         .unwrap()
         .manifest;
 
@@ -203,6 +204,7 @@ sessions:
         cancel: None,
         adapter_override: None,
         ambient: Some(&ambient),
+        secrets: None,
         observer: None,
     })
     .await

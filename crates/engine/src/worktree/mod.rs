@@ -32,7 +32,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 use yunta_core::process::signal::Liveness;
-use yunta_core::{CommitSha, InvalidId, Isolation, Pid, SystemClock};
+use yunta_core::{CommitSha, InvalidId, Isolation, Pid};
 
 use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
 
@@ -164,14 +164,16 @@ pub async fn prepare_worktree(
     match isolation {
         Isolation::Worktree => {
             if let Some(parent) = worktree_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|source| WorktreeError::Io {
-                    action: "create the worktrees directory".to_string(),
-                    path: parent.to_path_buf(),
-                    source,
-                })?;
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|source| WorktreeError::Io {
+                        action: "create the worktrees directory".to_string(),
+                        path: parent.to_path_buf(),
+                        source,
+                    })?;
             }
             let common_dir = common_git_dir(repo, supervision).await?;
-            let _mutation_lock = lock_worktree_mutations(&common_dir).await?;
+            let _mutation_lock = lock_worktree_mutations(&common_dir, supervision.clock()).await?;
             run_git(
                 repo,
                 &[
@@ -217,13 +219,15 @@ pub async fn hand_over_worktree(
         Isolation::Worktree => Ok(()),
         Isolation::None => {
             let lock_path = lock_path(repo, supervision).await?;
-            lock::hand_over(&lock_path, pid, &SystemClock).map_err(|source| WorktreeError::Io {
-                action: "hand over the isolation lock".to_string(),
-                path: lock_path,
-                source: match source {
-                    LockError::Io { source, .. } => source,
-                    other => std::io::Error::other(other.to_string()),
-                },
+            lock::hand_over(&lock_path, pid, &SystemProbe, supervision.clock()).map_err(|source| {
+                WorktreeError::Io {
+                    action: "hand over the isolation lock".to_string(),
+                    path: lock_path,
+                    source: match source {
+                        LockError::Io { source, .. } => source,
+                        other => std::io::Error::other(other.to_string()),
+                    },
+                }
             })
         }
     }
@@ -241,7 +245,7 @@ pub async fn release_worktree(
         Isolation::Worktree => Ok(()),
         Isolation::None => {
             let lock_path = lock_path(repo, supervision).await?;
-            match std::fs::remove_file(&lock_path) {
+            match tokio::fs::remove_file(&lock_path).await {
                 Ok(()) => Ok(()),
                 Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(source) => Err(WorktreeError::Io {
@@ -295,7 +299,8 @@ pub async fn cleanup_worktree(
 
     // Removal rewrites the same `.git/worktrees/` metadata an
     // `add` scans — same lock, same reasoning.
-    let _mutation_lock = lock_worktree_mutations(Path::new(common_dir.trim())).await?;
+    let _mutation_lock =
+        lock_worktree_mutations(Path::new(common_dir.trim()), supervision.clock()).await?;
     run_git(
         &main_repo,
         &[
@@ -375,6 +380,9 @@ struct WorktreeMutationGuard {
 
 impl Drop for WorktreeMutationGuard {
     fn drop(&mut self) {
+        // blocking: a `Drop` has no `await` to give, and removing one
+        // lock file is a single syscall. Doing it here is what makes an
+        // early `?` unable to leak the lock.
         let _ = std::fs::remove_file(&self.lock_path);
     }
 }
@@ -396,13 +404,14 @@ impl Drop for WorktreeMutationGuard {
 /// leaves one behind.
 async fn lock_worktree_mutations(
     common_dir: &Path,
+    clock: &dyn yunta_core::Clock,
 ) -> Result<WorktreeMutationGuard, WorktreeError> {
     let lock_path = common_dir.join("yunta-worktree.lock");
     let contention = Contention::Wait {
         patience: MUTATION_LOCK_TIMEOUT,
         poll: MUTATION_LOCK_POLL,
     };
-    match lock::acquire(&lock_path, contention, &SystemProbe, &SystemClock).await {
+    match lock::acquire(&lock_path, contention, &SystemProbe, clock).await {
         Ok(Acquired::Fresh) => Ok(WorktreeMutationGuard { lock_path }),
         Ok(Acquired::Stolen { dead }) => {
             // Taking over a dead holder's lock is the protocol working as
@@ -450,7 +459,14 @@ async fn lock(
     supervision: Supervision<'_>,
 ) -> Result<WorktreePrepared, WorktreeError> {
     let lock_path = lock_path(repo, supervision).await?;
-    match lock::acquire(&lock_path, Contention::Refuse, &SystemProbe, &SystemClock).await {
+    match lock::acquire(
+        &lock_path,
+        Contention::Refuse,
+        &SystemProbe,
+        supervision.clock(),
+    )
+    .await
+    {
         Ok(Acquired::Fresh) => Ok(WorktreePrepared::Ready),
         Ok(Acquired::Stolen { dead }) => {
             Ok(WorktreePrepared::StoleStaleLock { dead_pid: dead.pid })

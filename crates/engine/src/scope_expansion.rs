@@ -107,29 +107,33 @@ pub struct ScopeExpansionRequest {
 /// aside. Consumption also gives "one request per attempt" its only real
 /// enforcement: a second `load_request` against the same worktree sees
 /// nothing left to read.
-pub fn load_request(
+pub async fn load_request(
     task_worktree: &Path,
 ) -> Result<Option<ScopeExpansionRequest>, ScopeExpansionError> {
     let path = task_worktree.join(SCOPE_EXPANSION_REQUEST_FILE);
     if !path.exists() {
         return Ok(None);
     }
-    let bytes = std::fs::read(&path).map_err(|source| ScopeExpansionError::Read {
-        path: path.display().to_string(),
-        detail: source.to_string(),
-    })?;
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|source| ScopeExpansionError::Read {
+            path: path.display().to_string(),
+            detail: source.to_string(),
+        })?;
     let request =
         yunta_core::yaml::parse_bytes(&bytes).map_err(|e| ScopeExpansionError::Malformed {
             path: path.display().to_string(),
             detail: e.to_string(),
         })?;
-    std::fs::remove_file(&path).map_err(|source| ScopeExpansionError::Io {
-        action: format!(
-            "remove consumed scope expansion request `{}`",
-            path.display()
-        ),
-        source,
-    })?;
+    tokio::fs::remove_file(&path)
+        .await
+        .map_err(|source| ScopeExpansionError::Io {
+            action: format!(
+                "remove consumed scope expansion request `{}`",
+                path.display()
+            ),
+            source,
+        })?;
     Ok(Some(request))
 }
 

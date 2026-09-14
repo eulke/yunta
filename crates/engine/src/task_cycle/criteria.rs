@@ -110,7 +110,7 @@ async fn tree_hash(
 
     let mut untracked_fingerprint = String::new();
     for path in untracked.lines() {
-        let bytes = std::fs::read(cwd.join(path)).unwrap_or_default();
+        let bytes = tokio::fs::read(cwd.join(path)).await.unwrap_or_default();
         untracked_fingerprint.push_str(path);
         untracked_fingerprint.push(':');
         untracked_fingerprint.push_str(yunta_core::sha256_hex(&bytes).as_str());

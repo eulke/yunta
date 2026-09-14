@@ -47,6 +47,7 @@ async fn paused_manifest_and_events(
     let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
     let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
+        .await
         .unwrap()
         .manifest;
     let run_dir = create_run(
@@ -84,6 +85,7 @@ async fn paused_manifest_and_events(
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -235,6 +237,7 @@ impl GateBench {
         let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
         let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
         let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
+            .await
             .unwrap()
             .manifest;
         let run_dir = create_run(
@@ -285,6 +288,7 @@ impl GateBench {
             cancel: None,
             adapter_override: None,
             ambient: None,
+            secrets: None,
             observer: None,
         })
         .await
@@ -402,6 +406,7 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
     let workflow: Workflow = serde_norway::from_str(PROMOTABLE_WORKFLOW).unwrap();
     let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
+        .await
         .unwrap()
         .manifest;
     let run_dir = create_run(
@@ -444,6 +449,7 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
             cancel: None,
             adapter_override: None,
             ambient: None,
+            secrets: None,
             observer: None,
         })
         .await

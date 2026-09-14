@@ -89,11 +89,13 @@ pub enum ManifestReadError {
 }
 
 /// Reads a run's frozen manifest back from its `manifest.yaml`.
-pub fn read_manifest(path: &Path) -> Result<Manifest, ManifestReadError> {
-    let text = std::fs::read_to_string(path).map_err(|source| ManifestReadError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
+pub async fn read_manifest(path: &Path) -> Result<Manifest, ManifestReadError> {
+    let text = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|source| ManifestReadError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
     yunta_core::yaml::parse(&text).map_err(|source| ManifestReadError::Parse {
         path: path.to_path_buf(),
         source,
@@ -278,6 +280,12 @@ pub struct RunEnv<'a> {
     /// variables layered onto every subprocess. `None` means no user layer
     /// and no injected variables — the shape most tests want.
     pub ambient: Option<&'a yunta_core::Env>,
+    /// Where the values of the variables `secrets:` names come from. The
+    /// config names them; only the shell that started the run may read
+    /// their values, so the engine asks here and never the process.
+    /// `None` is a run that can reach no secret at all — what a test
+    /// starts from, and what a run declaring none needs.
+    pub secrets: Option<Arc<dyn yunta_core::SecretSource>>,
     /// Where every event this invocation appends is mirrored as it is
     /// written — this run's, its `kind: workflow` children's and its
     /// promotion successors' alike. Display only: it derives nothing and

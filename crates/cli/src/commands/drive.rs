@@ -117,6 +117,7 @@ pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
         cancel: Some(&root_cancel),
         adapter_override: env.adapter_override.as_ref(),
         ambient: Some(&ambient),
+        secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
         observer: watching.observer.clone(),
     })
     .await

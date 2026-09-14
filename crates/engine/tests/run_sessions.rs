@@ -291,6 +291,7 @@ sessions:
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let run_dir = create_run(
@@ -326,6 +327,7 @@ sessions:
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -426,6 +428,7 @@ sessions:
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let second_id = RunId::from("run-test-2");
@@ -462,6 +465,7 @@ sessions:
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -763,6 +767,7 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let run_dir = create_run(
@@ -813,6 +818,7 @@ nodes:
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await;

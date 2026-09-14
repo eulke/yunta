@@ -80,6 +80,7 @@ async fn cancellation_kills_the_tree_and_drains_the_pipes() {
             registry: None,
             cancel: Some(&cancel),
             env: &[],
+            clock: None,
         },
     )
     .await
@@ -155,6 +156,7 @@ async fn a_cancelled_run_kills_the_git_it_spawned() {
         registry: None,
         cancel: Some(&cancel),
         env: &env,
+        clock: None,
     };
 
     let waiting = started.clone();

@@ -56,7 +56,7 @@ fn org_pack_worktree(root: &Path) -> std::path::PathBuf {
     worktree
 }
 
-fn build(worktree: &Path, inputs: &HashMap<String, String>) -> yunta_core::Manifest {
+async fn build(worktree: &Path, inputs: &HashMap<String, String>) -> yunta_core::Manifest {
     let workflow_yaml = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../core/tests/fixtures/promote-knowledge.yaml"
@@ -65,6 +65,7 @@ fn build(worktree: &Path, inputs: &HashMap<String, String>) -> yunta_core::Manif
     let workflow: Workflow = serde_norway::from_str(&workflow_yaml).unwrap();
     let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     build_manifest(&workflow, &config, worktree, worktree, inputs)
+        .await
         .unwrap()
         .manifest
 }
@@ -90,7 +91,7 @@ async fn an_approved_gate_publishes_the_new_version() {
         ("candidates".to_string(), "candidates.md".to_string()),
         ("new_version".to_string(), "1.1.0".to_string()),
     ]);
-    let manifest = build(&worktree, &inputs);
+    let manifest = build(&worktree, &inputs).await;
 
     let run_id = RunId::from("run-promote");
     let runs_root = root.path().join("runs");
@@ -147,6 +148,7 @@ sessions:
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -180,7 +182,7 @@ async fn an_unresolved_gate_never_publishes_anything() {
         ("candidates".to_string(), "candidates.md".to_string()),
         ("new_version".to_string(), "1.1.0".to_string()),
     ]);
-    let manifest = build(&worktree, &inputs);
+    let manifest = build(&worktree, &inputs).await;
 
     let run_id = RunId::from("run-promote-unresolved");
     let runs_root = root.path().join("runs");
@@ -236,6 +238,7 @@ sessions:
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await

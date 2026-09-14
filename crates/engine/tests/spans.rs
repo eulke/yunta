@@ -76,6 +76,7 @@ async fn node_execution_runs_inside_a_span_carrying_run_id_and_node_id() {
     .unwrap();
     let config: ConfigLayer = serde_norway::from_str("runners: {}\n").unwrap();
     let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
+        .await
         .unwrap()
         .manifest;
     let run_dir = create_run(
@@ -109,6 +110,7 @@ async fn node_execution_runs_inside_a_span_carrying_run_id_and_node_id() {
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -138,4 +140,69 @@ async fn node_execution_runs_inside_a_span_carrying_run_id_and_node_id() {
                 && fields.get("run_id").map(String::as_str) == Some("run-spans")),
         "the run itself has a run_id span"
     );
+}
+
+/// A gate and a questions node are the two places a run stops for a
+/// person, and the two an operator reaches for first when one is stuck.
+/// Each executes inside its own span naming which run and which node.
+///
+/// Two runs, because each of these parks its own run: a workflow with
+/// both would only ever reach the first.
+#[tokio::test]
+async fn every_gate_and_questions_node_carries_a_node_span() {
+    let capture = SpanCapture::default();
+    let _guard =
+        tracing::subscriber::set_default(tracing_subscriber::registry().with(capture.clone()));
+
+    let asking = r#"
+name: asks
+nodes:
+  - id: ask
+    kind: prompt
+    runner: executor
+    prompt: "Ask what you need to know before continuing."
+    artifacts:
+      produces: [questions]
+"#;
+    let asked = r#"
+capabilities: { run_tools: true }
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_questions
+        arguments:
+          document:
+            questions:
+              - id: q1
+                text: "Which environment?"
+                answer_type: text
+                required: true
+    outcome: { type: completed, summary: "asked" }
+"#;
+    yunta_testkit::Bench::new().run(asking, asked).await;
+
+    let gating = r#"
+name: gates
+nodes:
+  - id: approve
+    kind: gate
+    assignee: lead
+"#;
+    yunta_testkit::Bench::new()
+        .run(gating, "sessions: []\n")
+        .await;
+
+    let spans = capture.0.lock().unwrap();
+    let recorded: Vec<&str> = spans.iter().map(|(name, _)| name.as_str()).collect();
+    for name in ["execute_ask", "resolve_internal_gate"] {
+        let span = spans
+            .iter()
+            .find(|(seen, _)| seen == name)
+            .unwrap_or_else(|| panic!("`{name}` runs inside a span of its own: {recorded:?}"));
+        assert!(
+            span.1.contains_key("run_id") && span.1.contains_key("node_id"),
+            "`{name}`'s span names the run and the node: {:?}",
+            span.1
+        );
+    }
 }

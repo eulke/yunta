@@ -157,7 +157,7 @@ pub(super) async fn execute_workflow(
             .await;
         }
     };
-    let text = match std::fs::read_to_string(&resolved.path) {
+    let text = match tokio::fs::read_to_string(&resolved.path).await {
         Ok(text) => text,
         Err(e) => {
             return fail(
@@ -281,7 +281,9 @@ pub(super) async fn execute_workflow(
         &workflows_dir,
         ctx.worktree,
         &provided,
-    ) {
+    )
+    .await
+    {
         Ok(frozen) => frozen,
         Err(e) => {
             return fail(
@@ -415,7 +417,7 @@ async fn resume_child(
 ) -> Result<NodeEnd, RunError> {
     let child_run_dir = runs_root(ctx).join(child_id.as_str());
     let manifest_path = child_run_dir.join("manifest.yaml");
-    let child_manifest: Manifest = match super::read_manifest(&manifest_path) {
+    let child_manifest: Manifest = match super::read_manifest(&manifest_path).await {
         Ok(manifest) => manifest,
         Err(error) => {
             return fail(
@@ -527,6 +529,7 @@ async fn drive_child(
                     cancel: Some(cancel),
                     adapter_override: ctx.adapter_override,
                     ambient: ctx.ambient,
+                    secrets: ctx.secrets.clone(),
                     // One observer serves the whole invocation, this
                     // child included: its frames name the child's own
                     // run_id, because the child emits through its own

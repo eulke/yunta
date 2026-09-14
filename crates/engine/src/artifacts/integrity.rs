@@ -58,7 +58,7 @@ impl ArtifactIntegrity {
     ///
     /// Total: an artifact ends up in exactly one of the three counts, so
     /// the result accounts for every acceptance the log carries.
-    pub fn of(run_dir: &Path, events: &[StoredEvent]) -> Self {
+    pub async fn of(run_dir: &Path, events: &[StoredEvent]) -> Self {
         let artifacts = RunArtifacts::of(run_dir, events);
         let mut integrity = ArtifactIntegrity::default();
         for held in artifacts.ledger().every() {
@@ -66,7 +66,7 @@ impl ArtifactIntegrity {
                 integrity.unverifiable += 1;
                 continue;
             }
-            match artifacts.bytes(held) {
+            match artifacts.bytes(held).await {
                 Ok(_) => integrity.verified += 1,
                 Err(error) => integrity.faults.push(ArtifactFault {
                     artifact: describe(held),

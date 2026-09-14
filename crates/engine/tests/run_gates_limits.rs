@@ -230,6 +230,7 @@ async fn a_surface_answer_off_the_menu_breaks_the_run_instead_of_deciding() {
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let run_dir = create_run(
@@ -265,6 +266,7 @@ async fn a_surface_answer_off_the_menu_breaks_the_run_instead_of_deciding() {
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -307,6 +309,7 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let run_dir = create_run(
@@ -378,6 +381,7 @@ async fn crash_between_gate_start_and_resolution_resumes_by_asking_again() {
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -473,6 +477,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let run_dir = create_run(
@@ -510,6 +515,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -548,6 +554,7 @@ async fn an_internal_gate_with_no_surface_pauses_and_a_resume_re_asks() {
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -695,6 +702,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let run_dir = create_run(
@@ -731,6 +739,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -756,6 +765,7 @@ async fn budget_authorization_is_per_invocation_a_resume_asks_again() {
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await

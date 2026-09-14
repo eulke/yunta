@@ -41,6 +41,7 @@ pub(super) enum GateStep {
     Resolved,
 }
 
+#[tracing::instrument(skip_all, fields(run_id = %ctx.run_id, node_id = %node.id))]
 pub(super) async fn publish_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -90,7 +91,7 @@ pub(super) async fn publish_gate(
             .await?;
             return Ok(GateStep::Resolved);
         };
-        artifacts.push((wanted.view_name(), held.bytes(artifact)?));
+        artifacts.push((wanted.view_name(), held.bytes(artifact).await?));
     }
 
     let summary = format!(
@@ -133,6 +134,7 @@ pub(super) async fn publish_gate(
     }))
 }
 
+#[tracing::instrument(skip_all, fields(run_id = %ctx.run_id, node_id = %node.id))]
 pub(super) async fn poll_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -360,6 +362,7 @@ pub(super) async fn recheck_approved_gates(
 /// as every other escalation). No surface → `Waiting`, with
 /// nothing recorded, so a resume re-asks (the same rule every
 /// unresolved question follows).
+#[tracing::instrument(skip_all, fields(run_id = %ctx.run_id, node_id = %node.id))]
 pub(super) async fn resolve_internal_gate(
     ctx: &RunCtx<'_>,
     node: &Node,

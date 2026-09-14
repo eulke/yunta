@@ -85,18 +85,21 @@ impl SessionSetup {
         }
     }
 
-    /// The env a session may see: declared names, present values.
+    /// The env a session may see: the names the config declares, bound
+    /// to whatever `source` has for them. A name nothing binds simply
+    /// does not reach the session — a secret the run cannot produce is
+    /// absent, never empty.
     pub fn secrets_env(
         config: &yunta_core::ConfigLayer,
+        source: Option<&dyn yunta_core::SecretSource>,
     ) -> std::collections::HashMap<String, yunta_core::Secret<String>> {
+        let Some(source) = source else {
+            return std::collections::HashMap::new();
+        };
         config
             .secrets
             .iter()
-            .filter_map(|name| {
-                std::env::var(name)
-                    .ok()
-                    .map(|value| (name.clone(), yunta_core::Secret::from(value)))
-            })
+            .filter_map(|name| source.get(name).map(|value| (name.clone(), value)))
             .collect()
     }
 }

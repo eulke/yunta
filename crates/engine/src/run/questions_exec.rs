@@ -30,6 +30,7 @@ pub(super) enum AskOutcome {
     Pause { reason: PauseReason },
 }
 
+#[tracing::instrument(skip_all, fields(run_id = %ctx.run_id, node_id = %node.id))]
 pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutcome, RunError> {
     let events = ctx.load_events().await?;
     let asked = pending(&events, node).ok_or_else(|| RunError::Broken {
@@ -67,7 +68,7 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
             ),
         });
     }
-    let bytes = held.bytes(found).map_err(|source| RunError::Broken {
+    let bytes = held.bytes(found).await.map_err(|source| RunError::Broken {
         diagnostic: format!("cannot read the questions of node `{}`: {source}", node.id),
     })?;
     // The same door `close_artifacts` reads a questions file through:

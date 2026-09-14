@@ -337,6 +337,7 @@ impl Bench {
             &self.worktree,
             &HashMap::new(),
         )
+        .await
         .unwrap()
         .manifest;
         let run_dir = create_run(
@@ -374,6 +375,7 @@ impl Bench {
             cancel: None,
             adapter_override: None,
             ambient: None,
+            secrets: None,
             observer: None,
         })
         .await
@@ -453,6 +455,7 @@ nodes:
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let run_dir = create_run(
@@ -486,6 +489,7 @@ nodes:
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await
@@ -550,7 +554,7 @@ fn the_receipt_counts_artifact_problems_by_their_stable_code() {
 /// fails on an artifact leaves its run paused, and a receipt certifies
 /// closed work only. What is under test is the derivation from
 /// `node_failed`, and that is exactly what the log carries.
-fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Receipt {
+async fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Receipt {
     let bench = Bench::new();
     let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
     let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
@@ -561,6 +565,7 @@ fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Rece
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
 
@@ -604,8 +609,8 @@ fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Rece
 /// fails on the artifact itself, and the receipt counts that like any
 /// other artifact failure — by its stable code, with no document kind,
 /// because nothing ever read a document.
-#[test]
-fn the_receipt_counts_an_artifact_no_run_holds_as_an_artifact_failure() {
+#[tokio::test]
+async fn the_receipt_counts_an_artifact_no_run_holds_as_an_artifact_failure() {
     let receipt = receipt_of_failure(
         r#"
 name: unheld-fixture
@@ -621,7 +626,8 @@ nodes:
             producer: None,
             artifact: ArtifactId::of("report.md", None),
         }]),
-    );
+    )
+    .await;
 
     assert_eq!(
         receipt.diagnostics,
@@ -641,8 +647,8 @@ nodes:
 /// A session node that ended owing the document it declared fails on the
 /// artifact itself too: the receipt counts it by its own code, under no
 /// kind, because nothing ever read a document either.
-#[test]
-fn the_receipt_counts_a_document_nobody_handed_over_as_an_artifact_failure() {
+#[tokio::test]
+async fn the_receipt_counts_a_document_nobody_handed_over_as_an_artifact_failure() {
     let receipt = receipt_of_failure(
         r#"
 name: undelivered-fixture
@@ -659,7 +665,8 @@ nodes:
             node: NodeId::from("plan"),
             artifact: ArtifactId::of("plan.yaml", Some(ArtifactKind::Tasks)),
         }]),
-    );
+    )
+    .await;
 
     assert_eq!(
         receipt.diagnostics,

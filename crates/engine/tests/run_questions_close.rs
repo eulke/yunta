@@ -316,6 +316,7 @@ async fn an_answered_node_owed_its_finish_is_finished_on_resume_without_a_sessio
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let run_dir = create_run(
@@ -359,6 +360,7 @@ async fn an_answered_node_owed_its_finish_is_finished_on_resume_without_a_sessio
         cancel: None,
         adapter_override: None,
         ambient: None,
+        secrets: None,
         observer: None,
     })
     .await

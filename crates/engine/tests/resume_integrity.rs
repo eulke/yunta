@@ -70,6 +70,7 @@ impl Paused {
             cancel: None,
             adapter_override: None,
             ambient: None,
+            secrets: None,
             observer: None,
         })
         .await
@@ -93,6 +94,7 @@ async fn paused_run() -> Paused {
         &bench.worktree,
         &HashMap::new(),
     )
+    .await
     .unwrap()
     .manifest;
     let run_dir = create_run(

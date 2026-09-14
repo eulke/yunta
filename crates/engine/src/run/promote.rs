@@ -122,7 +122,7 @@ pub async fn create_promotion_successor(
     // artifact keeps the identity and the producer it had there.
     let predecessor_events = storage.events_for_run(predecessor_id.clone()).await?;
     let inherited =
-        read_inherited_artifacts(predecessor_run_dir, predecessor_id, &predecessor_events)?;
+        read_inherited_artifacts(predecessor_run_dir, predecessor_id, &predecessor_events).await?;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &successor_id,
@@ -156,7 +156,7 @@ pub async fn create_promotion_successor(
 /// for is not an artifact and reaches no successor. Each inherited
 /// artifact keeps the identity and the producer the predecessor held it
 /// under, because the identity is all a run needs to answer for it.
-fn read_inherited_artifacts(
+async fn read_inherited_artifacts(
     from_run_dir: &Path,
     from_run: &RunId,
     from_events: &[StoredEvent],
@@ -166,7 +166,7 @@ fn read_inherited_artifacts(
     for artifact in held.ledger().every() {
         inherited.push(birth_artifact(
             artifact.artifact.clone(),
-            held.bytes(artifact)?,
+            held.bytes(artifact).await?,
             from_run,
             artifact,
         ));
