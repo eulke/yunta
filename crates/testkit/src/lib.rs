@@ -26,7 +26,7 @@ mod terminal;
 mod wait;
 
 pub use bench::{Bench, MOCK_CONFIG};
-pub use bin::{run_id_from, run_yunta, stderr, stdout};
+pub use bin::{hermetic, run_id_from, run_yunta, stderr, stdout};
 pub use capture::Captured;
 pub use checkout::Checkout;
 pub use clock::{AtClock, FixedClock, FIXED_NOW};

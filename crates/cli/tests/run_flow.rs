@@ -2888,3 +2888,60 @@ fn tilde_in_storage_path_resolves_under_home() {
         "no literal `~` directory beside the repository"
     );
 }
+
+#[test]
+fn a_run_under_test_reads_no_org_config_from_the_host() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    // What the machine running the suite would hand the binary: an org
+    // layer is a ceiling the layers under it can only narrow, so one
+    // here decides what every run may do.
+    let hostile = root.path().join("host-org.yaml");
+    write(
+        &hostile,
+        "permissions:\n  commands:\n    deny: [\"echo *\"]\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: bash-only
+nodes:
+  - id: greet
+    kind: bash
+    run: "echo hello > made.txt"
+"#,
+    );
+
+    let refused = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+        .args(["run", "wf.yaml"])
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home)
+        .env("YUNTA_ORG_CONFIG", &hostile)
+        .output()
+        .expect("failed to run the yunta binary");
+    assert!(
+        !refused.status.success(),
+        "the org layer decides what a run may do: {}",
+        String::from_utf8_lossy(&refused.stderr),
+    );
+
+    // The same environment, under the harness: what the run reads is
+    // the harness's own empty org layer, not the machine's.
+    let mut under_test = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    under_test.env("YUNTA_ORG_CONFIG", &hostile);
+    yunta_testkit::hermetic(&mut under_test, &repo, &home);
+    let output = under_test
+        .args(["run", "wf.yaml"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("failed to run the yunta binary");
+    assert!(
+        output.status.success(),
+        "a run under test reads no org config from the host: {}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+}

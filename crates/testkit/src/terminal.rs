@@ -29,11 +29,6 @@ const HIDE_CURSOR: &str = "\u{1b}[?25l";
 const SHOW_CURSOR: &str = "\u{1b}[?25h";
 const CLEAR_ROW: &str = "\u{1b}[2K";
 
-/// What the run is told its terminal is: one that draws text and colour
-/// like any other, so what a test measures is what the run's own rules
-/// chose rather than what the machine running the suite declares.
-const TERM: &str = "xterm-256color";
-
 /// A run under a terminal of a stated size.
 ///
 /// The size is stated rather than inherited so a list, a region row and
@@ -75,17 +70,10 @@ impl Terminal {
                 .unwrap_or_else(|e| panic!("the pty's {what} end: {e}"))
                 .into()
         };
-        let child = Command::new(bin)
+        let mut command = Command::new(bin);
+        crate::bin::hermetic(&mut command, dir, home);
+        let child = command
             .args(args)
-            .current_dir(dir)
-            .env("YUNTA_HOME", home)
-            // The run reads both of these to decide what it may draw, so
-            // they are stated here rather than inherited: a suite run
-            // under `NO_COLOR`, or under a terminal calling itself dumb,
-            // would otherwise measure the append-only downgrade where the
-            // test asked for a terminal.
-            .env("TERM", TERM)
-            .env_remove("NO_COLOR")
             .stdin(slave("stdin"))
             .stdout(slave("stdout"))
             .stderr(slave("stderr"))

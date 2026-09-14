@@ -3,16 +3,41 @@
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
+/// What a terminal a test asks for calls itself.
+pub(crate) const TERM: &str = "xterm-256color";
+
+/// Puts `cmd` in the world a test means to measure, rather than
+/// whichever one the suite happens to run on.
+///
+/// The binary reads an org config from a fixed system path unless it is
+/// pointed elsewhere, so a machine that has one would decide what a
+/// test sees: the org layer is a ceiling the lower layers can only
+/// narrow, so one on the host silently changes what every run may do.
+/// `home` gets an empty one instead. `USER` names the author of what the
+/// run commits, and the two terminal variables decide what it may draw
+/// — all three inherited would make the same suite measure differently
+/// on two machines.
+pub fn hermetic(cmd: &mut Command, dir: &Path, home: &Path) {
+    std::fs::create_dir_all(home).expect("the test's own home");
+    let org_config = home.join("org.yaml");
+    std::fs::write(&org_config, "").expect("an empty org config under the test's home");
+    cmd.current_dir(dir)
+        .env("YUNTA_HOME", home)
+        .env("YUNTA_ORG_CONFIG", &org_config)
+        .env("USER", "yunta-test")
+        .env("TERM", TERM)
+        .env_remove("NO_COLOR");
+}
+
 /// Runs the compiled `yunta` binary at `bin` in `dir` with `YUNTA_HOME`
 /// pointed at `home` and stdin closed, returning its captured output. Use
 /// the [`yunta_in!`](crate::yunta_in) macro rather than calling this
 /// directly — it fills in the binary path from the calling crate's
 /// `CARGO_BIN_EXE_yunta`.
 pub fn run_yunta(bin: &Path, dir: &Path, home: &Path, args: &[&str]) -> Output {
-    Command::new(bin)
-        .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
+    let mut cmd = Command::new(bin);
+    hermetic(&mut cmd, dir, home);
+    cmd.args(args)
         .stdin(Stdio::null())
         .output()
         .expect("failed to run the yunta binary")

@@ -362,7 +362,14 @@ pub(crate) fn render_artifact_names(
                 // and this is where it is first known: a name checked
                 // as written says nothing about what its variables
                 // stand for.
-                let _ = name;
+                yunta_core::ArtifactName::parse(name).map_err(|problem| {
+                    ArtifactNamesError::Name {
+                        said: match problem {
+                            yunta_core::diagnostic::Problem::Parse { message, .. } => message,
+                            yunta_core::diagnostic::Problem::Rule { detail, .. } => detail,
+                        },
+                    }
+                })?;
             }
         }
     }
