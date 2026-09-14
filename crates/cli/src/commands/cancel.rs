@@ -63,23 +63,37 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         .project
         .run_dir(run_id.as_str())
         .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
-    let Some(registry) = yunta_engine::read_registry(&run_dir) else {
+    let registry = match yunta_engine::read_registry(&run_dir) {
+        yunta_engine::Registry::Read(registry) => registry.doc,
+        // A registry that will not read is not a registry that was
+        // never written: the person is told which of the two it is,
+        // because only one of them is a broken file on their disk.
+        yunta_engine::Registry::Corrupt(error) => {
+            return Err(CliError::msg(format!(
+                "run `{run_id}`: its `engine.json` is there and this binary cannot read it \
+                 ({}) — `{}` recovers the run once its process has stopped.",
+                describe(&error),
+                advice::resume(run_id)
+            )))
+        }
         // Case 3 — no channel. Legacy fallback behavior, now the
         // exception rather than the rule.
-        let has_live_node = state
-            .nodes
-            .values()
-            .any(|record| matches!(record.state, Some(NodeState::Running { .. })));
-        if !has_live_node {
-            println!("run {run_id}: no node in progress — nothing to cancel");
-            return Ok(Outcome::Success);
+        yunta_engine::Registry::Absent => {
+            let has_live_node = state
+                .nodes
+                .values()
+                .any(|record| matches!(record.state, Some(NodeState::Running { .. })));
+            if !has_live_node {
+                println!("run {run_id}: no node in progress — nothing to cancel");
+                return Ok(Outcome::Success);
+            }
+            return Err(CliError::msg(format!(
+                "run `{run_id}` has a node in progress but no `engine.json` to signal \
+                 through — the engine that ran it predates this build, or its scratch \
+                 directory is gone. `{}` recovers the run once its process has stopped.",
+                advice::resume(run_id)
+            )));
         }
-        return Err(CliError::msg(format!(
-            "run `{run_id}` has a node in progress but no `engine.json` to signal \
-             through — the engine that ran it predates this build, or its scratch directory \
-             is gone. `{}` recovers the run once its process has stopped.",
-            advice::resume(run_id)
-        )));
     };
 
     if engine_is_alive(&registry) == Liveness::Alive {
@@ -163,6 +177,8 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
 fn engine_is_alive(registry: &yunta_engine::EngineProcessFile) -> Liveness {
     yunta_engine::lock::holder_state(
         &yunta_engine::lock::LockOwner {
+            schema_version:
+                <yunta_engine::lock::LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
             pid: registry.engine_pid,
             started_at: registry.started_at,
         },

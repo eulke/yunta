@@ -22,8 +22,8 @@ use yunta_engine::{NodeState, RunPhase, WaitingOn};
 
 use crate::commands::advice;
 use crate::context::Context;
+use crate::error::note;
 use crate::error::{CliError, Outcome};
-use crate::load_yaml;
 use crate::render::{indent, NodeDisplay, INDENT};
 use yunta_core::events::NodeEvent;
 
@@ -45,7 +45,19 @@ pub fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
         .run_dir(run_id.as_str())
         .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
     let manifest_path = yunta_engine::run_dir::manifest_path(&manifest_path);
-    let manifest: Manifest = load_yaml(&manifest_path, "run manifest")?;
+    let manifest = crate::load_manifest(&manifest_path)?;
+    // What this binary did not understand in a file a later one wrote:
+    // said, because a reader acting on a manifest whose newer half is
+    // invisible to them should know that is what they are doing.
+    if !manifest.unknown.is_empty() {
+        note(format!(
+            "this run's manifest carries {} this binary does not know: {} — a newer yunta \
+             wrote it, and what it recorded there is not read here",
+            yunta_core::text::counted(manifest.unknown.len(), "key"),
+            manifest.unknown_keys().join(", ")
+        ));
+    }
+    let manifest = manifest.doc;
 
     let now = ctx.clock.now();
     if json {

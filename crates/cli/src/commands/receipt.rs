@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{Manifest, RunId};
+use yunta_core::RunId;
 use yunta_engine::{
     build_receipt, render_receipt_json, render_receipt_markdown, EventChainStatus, Receipt,
 };
@@ -59,10 +59,7 @@ fn gathered(ctx: &Context, run_id: &RunId) -> Result<(PathBuf, Receipt), CliErro
         .project
         .run_dir(run_id.as_str())
         .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
-    let manifest: Manifest = crate::load_yaml(
-        &yunta_engine::run_dir::manifest_path(&run_dir),
-        "run manifest",
-    )?;
+    let manifest = crate::load_manifest(&yunta_engine::run_dir::manifest_path(&run_dir))?.doc;
 
     let chain = match storage.verify_chain(run_id)? {
         ChainVerification::Intact { events } => EventChainStatus::Intact { events },

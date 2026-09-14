@@ -82,23 +82,32 @@ pub enum ManifestReadError {
         #[source]
         source: std::io::Error,
     },
-    #[error("`{path}` is not a manifest")]
+    #[error("cannot read the manifest at `{path}`")]
     Parse {
         path: PathBuf,
         #[source]
-        source: yunta_core::yaml::YamlError,
+        source: yunta_core::persisted::PersistedError,
     },
 }
 
-/// Reads a run's frozen manifest back from its `manifest.yaml`.
-pub async fn read_manifest(path: &Path) -> Result<Manifest, ManifestReadError> {
-    let text = tokio::fs::read_to_string(path)
+/// Reads a run's frozen manifest back from its `manifest.yaml`, keeping
+/// whatever a newer binary wrote beside what this one knows.
+///
+/// A manifest stamped with a schema this binary does not read is
+/// refused naming both versions — a run interpreted under a shape its
+/// own creator did not write is a run whose history means something
+/// else. Everything below that reads, and what this binary did not
+/// understand comes back on the document for a caller to report.
+pub async fn read_manifest(
+    path: &Path,
+) -> Result<yunta_core::persisted::PersistedDoc<Manifest>, ManifestReadError> {
+    let bytes = tokio::fs::read(path)
         .await
         .map_err(|source| ManifestReadError::Io {
             path: path.to_path_buf(),
             source,
         })?;
-    yunta_core::yaml::parse(&text).map_err(|source| ManifestReadError::Parse {
+    yunta_core::persisted::PersistedDoc::read(&bytes).map_err(|source| ManifestReadError::Parse {
         path: path.to_path_buf(),
         source,
     })

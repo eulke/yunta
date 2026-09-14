@@ -184,3 +184,38 @@ async fn a_cancelled_run_kills_the_git_it_spawned() {
         "the git this run spawned outlived the run's cancellation: {error}"
     );
 }
+
+#[test]
+fn a_corrupt_registry_is_reported_as_corrupt_not_absent() {
+    // An `engine.json` that is there and will not read is a fact about
+    // this run: a reader told it was absent would conclude the engine
+    // never wrote one, which is a different thing to do about it.
+    let run_dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(run_dir.path().join("scratch")).unwrap();
+    std::fs::write(
+        yunta_engine::registry_path(run_dir.path()),
+        "{ this is not a registry",
+    )
+    .unwrap();
+
+    match yunta_engine::read_registry(run_dir.path()) {
+        yunta_engine::Registry::Corrupt(error) => {
+            let said = yunta_core::describe(&error);
+            assert!(
+                said.contains("process registry"),
+                "the refusal names what the file was meant to be: {said}"
+            );
+        }
+        yunta_engine::Registry::Absent => {
+            panic!("a file that is there is not absent")
+        }
+        yunta_engine::Registry::Read(_) => panic!("that is not a registry"),
+    }
+
+    // And a run with no registry at all still reads as absent.
+    let empty = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        yunta_engine::read_registry(empty.path()),
+        yunta_engine::Registry::Absent
+    ));
+}

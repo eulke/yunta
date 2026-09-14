@@ -16,6 +16,7 @@ mod capture;
 mod clock;
 mod ids;
 mod kinds;
+pub mod persisted;
 
 pub use capture::Captured;
 pub use clock::{AtClock, FixedClock, FIXED_NOW};

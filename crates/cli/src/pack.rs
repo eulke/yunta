@@ -333,13 +333,13 @@ pub fn lock_path(cwd: &Path) -> PathBuf {
 
 pub fn load_lock(cwd: &Path) -> Result<PackLock, PackError> {
     let path = lock_path(cwd);
-    match std::fs::read_to_string(&path) {
-        Ok(contents) => {
-            yunta_core::yaml::parse(&contents).map_err(|e| PackError::InvalidManifest {
+    match std::fs::read(&path) {
+        Ok(bytes) => yunta_core::persisted::PersistedDoc::<PackLock>::read(&bytes)
+            .map(|lock| lock.doc)
+            .map_err(|e| PackError::InvalidManifest {
                 path,
-                detail: e.to_string(),
-            })
-        }
+                detail: yunta_core::describe(&e),
+            }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(PackLock::default()),
         Err(source) => Err(PackError::Read { path, source }),
     }
@@ -353,9 +353,11 @@ pub fn save_lock(cwd: &Path, lock: &PackLock) -> Result<(), PackError> {
             source,
         })?;
     }
-    let yaml = yunta_core::yaml::to_string(lock).map_err(|e| PackError::Manifest {
-        detail: format!("cannot serialize yunta.lock: {e}"),
-    })?;
+    let yaml = yunta_core::persisted::PersistedDoc::of(lock.clone())
+        .write()
+        .map_err(|e| PackError::Manifest {
+            detail: format!("cannot serialize yunta.lock: {}", yunta_core::describe(&e)),
+        })?;
     // Written beside the lock and renamed over it: a reader never sees
     // a half-written file, and a failed write leaves the old lock intact.
     let staging = path.with_extension("lock.tmp");

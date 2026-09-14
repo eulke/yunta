@@ -124,6 +124,27 @@ A pack manifest names the runners it needs under `requires.runners`. The
 accepts `role`, the field's former name, so a log written under it still
 replays. `stats --json` and the JSON receipt name the same value `runner`.
 
+## What this system writes down
+
+Five files outlive the command that wrote them: a run's frozen manifest, the pack
+lock, a run's process registry, the isolation lock and the receipt. Each carries
+`schema_version`, and each is read the same way.
+
+A file stamped with a schema this binary does not know is refused, naming what it
+found and what this binary reads — a manifest interpreted under a shape its own
+creator did not write is a run whose history would mean something else. A file
+stamped lower, or carrying no version at all because it predates one, reads as it
+is: every field this binary needs is either there or optional.
+
+A key this binary does not know is kept rather than dropped, and written back
+when the file is rewritten — so an older binary that reads a file a newer one
+wrote does not silently delete what the newer one recorded. A reader that wants
+to say what it did not understand can name those keys; `yunta status` does.
+
+The receipt is the exception to being read back: nothing reads a `receipt.json`,
+because `yunta receipt` derives it from the log every time. Its `schema_version`
+is for whoever consumes the file outside yunta, who has no log to derive it from.
+
 ## The event log
 
 The engine hands storage a draft — what happened, in which run, for which

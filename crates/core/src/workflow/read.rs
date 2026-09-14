@@ -26,7 +26,7 @@ use crate::glob::might_overlap;
 use crate::{ContextSpec, ModeInclude, Node, NodeId, NodeKind, Workflow};
 
 /// Every rule a workflow is held to by the file alone, stated for
-/// whoever writes one — the same list [`check`] enforces, read the
+/// whoever writes one — the same list [`read`] enforces, read the
 /// other way round.
 pub const RULES: &[crate::diagnostic::Rule] = &[
     crate::diagnostic::Rule {

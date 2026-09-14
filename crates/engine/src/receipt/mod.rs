@@ -109,6 +109,8 @@ pub enum EventChainStatus {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Receipt {
+    /// Version of this document's own schema.
+    pub schema_version: u32,
     pub run_id: RunId,
     pub workflow: WorkflowName,
     pub mode: ModeName,
@@ -145,6 +147,19 @@ pub struct DiagnosticCount {
     pub kind: Option<DocumentKind>,
     pub code: DiagnosticCode,
     pub occurrences: usize,
+}
+
+impl Receipt {
+    /// Version of the receipt's own schema, stamped on every one this
+    /// binary writes.
+    ///
+    /// Not a [`Persisted`](yunta_core::persisted::Persisted) document:
+    /// nothing reads a receipt back — `yunta receipt` derives it from
+    /// the log every time — so it has no tolerant reader to be. The
+    /// version is for whoever consumes `receipt.json` outside yunta,
+    /// who has no log to derive it from and needs to know what shape
+    /// they were handed.
+    pub const SCHEMA_VERSION: u32 = 1;
 }
 
 impl std::fmt::Display for DiagnosticCount {
@@ -265,6 +280,7 @@ pub fn build_receipt(
         .count();
 
     Ok(Receipt {
+        schema_version: Receipt::SCHEMA_VERSION,
         run_id: run_id.clone(),
         workflow: manifest.workflow.name.clone(),
         mode: yunta_core::events::run_mode(events),

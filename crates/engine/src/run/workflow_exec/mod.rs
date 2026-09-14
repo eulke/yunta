@@ -409,7 +409,7 @@ async fn resume_child(
     let child_run_dir = runs_root(ctx).join(child_id.as_str());
     let manifest_path = crate::run_dir::manifest_path(&child_run_dir);
     let child_manifest: Manifest = match super::read_manifest(&manifest_path).await {
-        Ok(manifest) => manifest,
+        Ok(manifest) => manifest.doc,
         Err(error) => {
             return fail(
                 ctx,

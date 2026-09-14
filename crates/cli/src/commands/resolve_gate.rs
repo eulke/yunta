@@ -11,11 +11,10 @@
 //! for the run's own duration.
 
 use yunta_core::events::HumanChoice;
-use yunta_core::{Manifest, OptionId, Responder, RunId};
+use yunta_core::{OptionId, Responder, RunId};
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::load_yaml;
 
 pub async fn resolve_gate(
     run_id: &RunId,
@@ -30,10 +29,7 @@ pub async fn resolve_gate(
             ctx.project.runs_root.display()
         )));
     };
-    let manifest: Manifest = load_yaml(
-        &yunta_engine::run_dir::manifest_path(&run_dir),
-        "run manifest",
-    )?;
+    let manifest = crate::load_manifest(&yunta_engine::run_dir::manifest_path(&run_dir))?.doc;
 
     let storage = ctx.async_storage().await?;
 

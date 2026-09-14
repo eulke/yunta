@@ -91,6 +91,19 @@ fn drive(cli: cli::Cli) -> Result<Outcome, CliError> {
 
 /// Reads and parses a YAML file into `T`, naming what it was reading and
 /// where when it can't — the one loader every command reaches for.
+/// The run manifest at `path`, read through the one door every
+/// persisted document goes through — so a manifest from a newer binary
+/// is refused naming both versions, and a key this one does not know
+/// comes back on the document instead of being dropped.
+pub(crate) fn load_manifest(
+    path: &Path,
+) -> Result<yunta_core::persisted::PersistedDoc<yunta_core::Manifest>, CliError> {
+    let bytes = std::fs::read(path)
+        .map_err(|source| CliError::io("read run manifest at", path.display(), source))?;
+    yunta_core::persisted::PersistedDoc::read(&bytes)
+        .map_err(|error| CliError::msg(yunta_core::describe(&error)))
+}
+
 /// The workflow at `path`, read through the one door that holds it to
 /// its own rules — never the bare parser, which would hand back a graph
 /// nobody checked.

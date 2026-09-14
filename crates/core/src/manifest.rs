@@ -147,6 +147,14 @@ pub struct Manifest {
     pub pack: Option<PackProvenance>,
 }
 
+impl crate::persisted::Persisted for Manifest {
+    /// 2 since `paths` and `pack` joined it. A manifest stamped lower
+    /// is read as it is: the two fields are optional and a run born
+    /// without them still resumes.
+    const SCHEMA_VERSION: u32 = 2;
+    const NAME: &'static str = "run manifest";
+}
+
 impl Manifest {
     /// Hash of the whole frozen manifest — the value `run_created`
     /// records, and what the storage derives the event hash chain's

@@ -167,6 +167,14 @@ pub struct PackLock {
     pub packs: BTreeMap<PackRef, PackLockEntry>,
 }
 
+impl crate::persisted::Persisted for PackLock {
+    /// 1 from the first version that stamps one. A lock written before
+    /// this reads as 0, which is older than this binary and therefore
+    /// readable — which is what tolerance means here.
+    const SCHEMA_VERSION: u32 = 1;
+    const NAME: &'static str = "pack lock";
+}
+
 /// A manifest field whose value would reach outside the pack once it
 /// is vendored under `.yunta/packs/<publisher>/<name>/`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

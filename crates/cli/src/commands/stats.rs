@@ -62,7 +62,7 @@ fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
         .run_dir(run_id.as_str())
         .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
     let manifest_path = yunta_engine::run_dir::manifest_path(&manifest_path);
-    let manifest: Manifest = crate::load_yaml(&manifest_path, "run manifest")?;
+    let manifest = crate::load_manifest(&manifest_path)?.doc;
 
     let run_stats = compute_run_stats(&manifest.workflow, &events);
     let mode = yunta_core::events::run_mode(&events);

@@ -17,12 +17,25 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
+use yunta_core::persisted::Persisted;
 use yunta_core::{Pid, RelativePath};
+
+impl Persisted for EngineProcessFile {
+    const SCHEMA_VERSION: u32 = 1;
+    const NAME: &'static str = "process registry";
+    // `engine.json` — the name is what a person opening it reads, and a
+    // separate process parsing it at a crash should not need a YAML
+    // reader to.
+    const ENCODING: yunta_core::persisted::Encoding = yunta_core::persisted::Encoding::Json;
+}
 
 /// The file's whole content — small enough that every mutation rewrites
 /// it atomically (tempfile + rename) rather than patching in place.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EngineProcessFile {
+    /// Version of this file's own schema.
+    #[serde(default)]
+    pub schema_version: u32,
     /// The `yunta` process driving the run — signal it first (`yunta
     /// cancel` sends SIGINT here while it's alive, so the engine's own
     /// interrupt→kill path does the exterminating).
@@ -52,6 +65,7 @@ impl ProcessRegistry {
         started_at: DateTime<Utc>,
     ) -> std::io::Result<ProcessRegistry> {
         let state = EngineProcessFile {
+            schema_version: <EngineProcessFile as Persisted>::SCHEMA_VERSION,
             engine_pid,
             started_at,
             process_groups: Vec::new(),
@@ -109,7 +123,9 @@ impl ProcessRegistry {
 
     fn persist(&self) -> std::io::Result<()> {
         let state = lock(&self.state);
-        let json = serde_json::to_string_pretty(&*state).map_err(std::io::Error::other)?;
+        let json = yunta_core::persisted::PersistedDoc::of(state.clone())
+            .write()
+            .map_err(std::io::Error::other)?;
         drop(state);
         let tmp = self.path.with_extension("json.tmp");
         std::fs::write(&tmp, json)?;
@@ -200,12 +216,30 @@ pub fn registry_file() -> RelativePath {
 /// The registry's file name under the run's scratch.
 const REGISTRY_NAME: &str = "engine.json";
 
-/// Reads a run's registry, if one exists and parses — `None` covers
-/// both "no live engine ever wrote one" and "unreadable", because the
-/// caller's fallback is the same: work from the event log alone.
-pub fn read_registry(run_dir: &Path) -> Option<EngineProcessFile> {
-    let bytes = std::fs::read(registry_path(run_dir)).ok()?;
-    serde_json::from_slice(&bytes).ok()
+/// A run's registry, as this binary reads it.
+///
+/// Three answers, not two: no registry at all is a run no live engine
+/// ever wrote one for, a registry that reads is what it says, and a
+/// registry that does not read is a fact about this run worth saying —
+/// a caller that reported it as absent would be telling a person the
+/// engine was never there.
+pub enum Registry {
+    /// No registry: nothing wrote one, or a terminal deleted it.
+    Absent,
+    /// The registry, and whatever a newer binary wrote beside it.
+    Read(Box<yunta_core::persisted::PersistedDoc<EngineProcessFile>>),
+    /// A registry this binary cannot make sense of.
+    Corrupt(yunta_core::persisted::PersistedError),
+}
+
+pub fn read_registry(run_dir: &Path) -> Registry {
+    let Ok(bytes) = std::fs::read(registry_path(run_dir)) else {
+        return Registry::Absent;
+    };
+    match yunta_core::persisted::PersistedDoc::read(&bytes) {
+        Ok(registry) => Registry::Read(Box::new(registry)),
+        Err(error) => Registry::Corrupt(error),
+    }
 }
 
 /// The pid of a spawned child, or `None` once it has been reaped.

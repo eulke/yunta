@@ -46,8 +46,17 @@ impl OwnerProbe for SystemProbe {
 /// was taken is not the one that took it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LockOwner {
+    /// Version of this file's own schema.
+    #[serde(default)]
+    pub schema_version: u32,
     pub pid: Pid,
     pub started_at: DateTime<Utc>,
+}
+
+impl yunta_core::persisted::Persisted for LockOwner {
+    const SCHEMA_VERSION: u32 = 1;
+    const NAME: &'static str = "isolation lock";
+    const ENCODING: yunta_core::persisted::Encoding = yunta_core::persisted::Encoding::Json;
 }
 
 /// What to do while another process holds the lock.
@@ -128,10 +137,12 @@ pub fn hand_over(
         source,
     };
     let record = LockOwner {
+        schema_version: <LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
         pid,
         started_at: taken_at(pid, probe, clock),
     };
-    let json = serde_json::to_string(&record)
+    let json = yunta_core::persisted::PersistedDoc::of(record)
+        .write()
         .map_err(|e| io("encode the holder of", std::io::Error::other(e)))?;
     // blocking: `hand_over` names a file's owner before the process it
     // names exists, on the caller's own thread and outside any run.
@@ -170,12 +181,14 @@ pub async fn acquire(
             Ok(mut file) => {
                 let pid = Pid::current();
                 let record = LockOwner {
+                    schema_version: <LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
                     pid,
                     started_at: taken_at(pid, probe, clock),
                 };
-                let json = serde_json::to_string(&record)
+                let json = yunta_core::persisted::PersistedDoc::of(record)
+                    .write()
                     .map_err(|e| io("encode the holder of", std::io::Error::other(e)))?;
-                file.write_all(json.as_bytes())
+                file.write_all(&json)
                     .map_err(|source| io("write the holder of", source))?;
                 return Ok(match stolen_from {
                     Some(dead) => Acquired::Stolen { dead },
@@ -186,7 +199,10 @@ pub async fn acquire(
                 let owner: Option<LockOwner> = tokio::fs::read(lock_path)
                     .await
                     .ok()
-                    .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+                    .and_then(|bytes| {
+                        yunta_core::persisted::PersistedDoc::<LockOwner>::read(&bytes).ok()
+                    })
+                    .map(|owner| owner.doc);
                 let liveness = owner.as_ref().map(|owner| holder_state(owner, probe));
                 if let (Some(owner), Some(Liveness::Dead)) = (&owner, liveness) {
                     // Remove, then retry: the atomic `create_new` above
@@ -303,6 +319,7 @@ mod taken_at_tests {
         let pid = Pid::current();
         let table = Table(Some(at(2020)));
         let owner = LockOwner {
+            schema_version: <LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
             pid,
             started_at: taken_at(pid, &table, &Frozen(at(2000))),
         };
@@ -322,6 +339,7 @@ mod taken_at_tests {
         let pid = Pid::current();
         let blind = Table(None);
         let owner = LockOwner {
+            schema_version: <LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
             pid,
             started_at: taken_at(pid, &blind, &Frozen(at(2000))),
         };
@@ -335,6 +353,7 @@ mod taken_at_tests {
     fn a_pid_reused_by_a_later_process_reads_as_gone() {
         let pid = Pid::current();
         let owner = LockOwner {
+            schema_version: <LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
             pid,
             started_at: at(2020),
         };

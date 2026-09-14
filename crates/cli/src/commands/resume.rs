@@ -20,7 +20,6 @@ use yunta_core::{AdapterId, Isolation, Manifest, RunId};
 use crate::commands::drive::{drive, Driving, Prepared};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::load_yaml;
 
 /// A run this invocation is about to pick up, as its own frozen manifest
 /// describes it: where its state lives, what it runs on, and the tree it
@@ -46,10 +45,7 @@ fn parked(ctx: &Context, run_id: &RunId) -> Result<Parked, CliError> {
             ctx.project.runs_root.display()
         )));
     };
-    let manifest: Manifest = load_yaml(
-        &yunta_engine::run_dir::manifest_path(&run_dir),
-        "run manifest",
-    )?;
+    let manifest = crate::load_manifest(&yunta_engine::run_dir::manifest_path(&run_dir))?.doc;
     let adapters = super::real_adapters(&manifest.config);
     super::refuse_unrunnable(&manifest.workflow, &adapters)?;
     let worktree = match manifest.isolation {

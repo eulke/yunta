@@ -37,6 +37,7 @@ mod inputs;
 mod manifest;
 mod nonempty;
 mod pack;
+pub mod persisted;
 pub mod policy;
 pub mod port;
 pub mod process;

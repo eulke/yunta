@@ -280,8 +280,9 @@ async fn tool_workflow_status(
         .run_dir(run_id.as_str())
         .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()));
     let manifest_path = yunta_engine::run_dir::manifest_path(&manifest_path);
-    let manifest: Manifest =
-        crate::load_yaml(&manifest_path, "run manifest").map_err(|e| e.to_string())?;
+    let manifest: Manifest = crate::load_manifest(&manifest_path)
+        .map_err(|e| e.to_string())?
+        .doc;
     // The same versioned DTO `yunta status --json` prints, serialized to
     // the tool result rather than to stdout, and read at this server's
     // own injected clock.

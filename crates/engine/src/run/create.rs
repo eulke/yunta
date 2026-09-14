@@ -188,11 +188,13 @@ pub async fn create_run(
     }
 
     let manifest_path = crate::run_dir::manifest_path(&run_dir);
-    let yaml = yunta_core::yaml::to_string(manifest).map_err(|e| RunError::ManifestWrite {
-        path: manifest_path.clone(),
-        detail: e.to_string(),
-    })?;
-    tokio::fs::write(&manifest_path, yaml)
+    let bytes = yunta_core::persisted::PersistedDoc::of(manifest.clone())
+        .write()
+        .map_err(|e| RunError::ManifestWrite {
+            path: manifest_path.clone(),
+            detail: e.to_string(),
+        })?;
+    tokio::fs::write(&manifest_path, bytes)
         .await
         .map_err(|source| RunError::Io {
             context: format!("write `{}`", manifest_path.display()),

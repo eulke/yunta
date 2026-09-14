@@ -16,7 +16,6 @@ use crate::inputs::{resolve_inputs, InputsError};
 use crate::run::BirthArtifact;
 
 /// Version of the manifest's own schema.
-const MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Error)]
 pub enum ManifestError {
@@ -99,7 +98,7 @@ pub async fn build_manifest(
     let base_branch = git_line(repo, &["rev-parse", "--abbrev-ref", "HEAD"])?;
 
     let manifest = Manifest {
-        schema_version: MANIFEST_SCHEMA_VERSION,
+        schema_version: <Manifest as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
         yunta_version: env!("CARGO_PKG_VERSION").to_string(),
         workflow_hash: content_hash(&workflow),
         config_hash: content_hash(config),

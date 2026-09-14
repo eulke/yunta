@@ -481,3 +481,78 @@ nodes:
         other => panic!("got {other:?}"),
     }
 }
+
+// --- reading a manifest a later binary wrote ---------------------------
+
+#[tokio::test]
+async fn a_manifest_from_a_newer_writer_is_read_and_its_unknown_keys_are_named() {
+    // A manifest of a version this binary reads, carrying a key it does
+    // not know: the run is interpretable, and what could not be
+    // understood is a fact the reader can state rather than something
+    // quietly dropped.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("manifest.yaml");
+    let manifest = frozen_manifest().await;
+    let mut text = String::from_utf8(
+        yunta_core::persisted::PersistedDoc::of(manifest.clone())
+            .write()
+            .unwrap(),
+    )
+    .unwrap();
+    text.push_str("something_a_later_binary_records: 7\n");
+    std::fs::write(&path, &text).unwrap();
+
+    let read = yunta_engine::read_manifest(&path)
+        .await
+        .expect("a manifest of a version this binary reads");
+    assert_eq!(read.doc.workflow.name, manifest.workflow.name);
+    assert_eq!(read.unknown_keys(), ["something_a_later_binary_records"]);
+}
+
+#[tokio::test]
+async fn a_manifest_the_binary_cannot_read_says_which_version_it_supports() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("manifest.yaml");
+    let supported = <yunta_core::Manifest as yunta_core::persisted::Persisted>::SCHEMA_VERSION;
+    let text = String::from_utf8(
+        yunta_core::persisted::PersistedDoc::of(frozen_manifest().await)
+            .write()
+            .unwrap(),
+    )
+    .unwrap()
+    .replace(
+        &format!("schema_version: {supported}"),
+        &format!("schema_version: {}", supported + 1),
+    );
+    std::fs::write(&path, text).unwrap();
+
+    let error = yunta_engine::read_manifest(&path)
+        .await
+        .expect_err("a manifest from a binary that knows more than this one");
+    let said = yunta_core::describe(&error);
+    assert!(said.contains(&(supported + 1).to_string()), "{said}");
+    assert!(said.contains(&supported.to_string()), "{said}");
+    assert!(
+        said.contains("upgrade yunta"),
+        "what to do about it: {said}"
+    );
+}
+
+/// A manifest as `build_manifest` freezes one, for the tests above that
+/// are about reading a manifest rather than about building it.
+async fn frozen_manifest() -> yunta_core::Manifest {
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let workflow: Workflow = serde_norway::from_str(WORKFLOW).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
+    build_manifest(
+        &workflow,
+        &config,
+        repo.path(),
+        repo.path(),
+        &HashMap::new(),
+    )
+    .await
+    .unwrap()
+    .manifest
+}
