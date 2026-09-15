@@ -471,10 +471,10 @@ fn the_listing_puts_a_waiting_run_above_a_running_one() {
 
     // A run that is still going: its node holds the worktree open until
     // this test hands it `go.txt`.
-    let mut running = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    let mut running = command
         .args(["run", "holds-open.yaml"])
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())

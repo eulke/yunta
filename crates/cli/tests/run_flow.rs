@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use yunta_core::process::signal::{liveness, signal_group, signal_process, Liveness, Signal};
 use yunta_core::Pid;
 use yunta_testkit::{
-    git, init_repo, run_id_from, stderr, stdout, wait_for, wait_until, write, yunta_at, yunta_in,
-    Checkout,
+    git, hermetic, init_repo, run_id_from, stderr, stdout, wait_for, wait_until, write, yunta_at,
+    yunta_in, Checkout,
 };
 
 fn claude_code_stub() -> PathBuf {
@@ -1072,10 +1072,10 @@ nodes:
 "#,
     );
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    hermetic(&mut command, &repo, &home);
+    let output = command
         .args(["run", "wf.yaml"])
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home)
         .stdin(std::process::Stdio::null())
         .output()
         .expect("failed to run the yunta binary");
@@ -1127,10 +1127,10 @@ nodes:
 
     // Outside the repo: `isolation: none` demands a clean tree.
     let progress_log = root.path().join("progress.log");
-    let mut run = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    hermetic(&mut command, &repo, &home);
+    let mut run = command
         .args(["run", "wf.yaml"])
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home)
         .stdout(std::process::Stdio::piped())
         .stderr(std::fs::File::create(&progress_log).unwrap())
         .spawn()
@@ -1371,10 +1371,10 @@ nodes:
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "fixtures"]);
 
-    let yunta = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    hermetic(&mut command, &repo, &home);
+    let yunta = command
         .args(["run", "wf.yaml"])
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -1433,10 +1433,10 @@ fn marker_written(marker: &Path) -> bool {
 /// Spawns `yunta run` detached and waits until the given file is written —
 /// the bash node's own signal that it is really running.
 fn spawn_run_until(repo: &Path, home: &Path, marker: &Path) -> std::process::Child {
-    let child = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    hermetic(&mut command, repo, home);
+    let child = command
         .args(["run", "wf.yaml"])
-        .current_dir(repo)
-        .env("YUNTA_HOME", home)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -1633,10 +1633,10 @@ nodes:
     );
 
     // Crash the engine mid-node (the node blocks until go.txt exists).
-    let mut yunta = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    hermetic(&mut command, &repo, &home);
+    let mut yunta = command
         .args(["run", "wf.yaml"])
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -2318,10 +2318,10 @@ nodes:
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "fixtures"]);
 
-    let launcher = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    hermetic(&mut command, &repo, &home);
+    let launcher = command
         .args(["run", "wf.yaml", "--detach"])
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .process_group(0)
@@ -2778,10 +2778,10 @@ secrets: [CLAUDE_STUB_ARGS_FILE, CODEX_STUB_ARGS_FILE]
     git(&repo, &["add", ".claude-stub-lines.jsonl"]);
     git(&repo, &["commit", "-q", "-m", "stub fixture"]);
 
-    let run = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    hermetic(&mut command, &repo, &home);
+    let run = command
         .args(["run", "wf.yaml", "--adapter", "claude-code"])
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home)
         .env("CLAUDE_STUB_ARGS_FILE", &claude_args)
         .env("CODEX_STUB_ARGS_FILE", &codex_args)
         .output()

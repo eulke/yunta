@@ -1,5 +1,6 @@
 //! Running the compiled `yunta` binary and reading its output.
 
+use std::ffi::OsStr;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -23,21 +24,63 @@ pub(crate) const TERM: &str = "xterm-256color";
 /// and a developer's global or system git config decides the branch a
 /// fresh repository starts on, who authors a commit, and whether a hook
 /// fires. Both are pointed at files under `home`, which are empty.
-pub fn hermetic(cmd: &mut Command, dir: &Path, home: &Path) {
+pub fn hermetic<C: Spawning>(cmd: &mut C, dir: &Path, home: &Path) {
     std::fs::create_dir_all(home).expect("the test's own home");
     let org_config = home.join("org.yaml");
     std::fs::write(&org_config, "").expect("an empty org config under the test's home");
     let git_config = home.join("gitconfig");
     std::fs::write(&git_config, "").expect("an empty git config under the test's home");
-    cmd.current_dir(dir)
-        .env("YUNTA_HOME", home)
-        .env("YUNTA_ORG_CONFIG", &org_config)
-        .env("HOME", home)
-        .env("USER", "yunta-test")
-        .env("TERM", TERM)
-        .env("GIT_CONFIG_GLOBAL", &git_config)
-        .env("GIT_CONFIG_SYSTEM", &git_config)
-        .env_remove("NO_COLOR");
+    cmd.runs_in(dir);
+    for (name, value) in [
+        ("YUNTA_HOME", home.as_os_str()),
+        ("YUNTA_ORG_CONFIG", org_config.as_os_str()),
+        ("HOME", home.as_os_str()),
+        ("USER", OsStr::new("yunta-test")),
+        ("TERM", OsStr::new(TERM)),
+        ("GIT_CONFIG_GLOBAL", git_config.as_os_str()),
+        ("GIT_CONFIG_SYSTEM", git_config.as_os_str()),
+    ] {
+        cmd.carries(name, value);
+    }
+    cmd.drops("NO_COLOR");
+}
+
+/// What [`hermetic`] needs of a command, so a test that spawns the
+/// binary through tokio is pinned exactly like one that spawns it
+/// through the standard library — two ways to start the same process
+/// cannot mean two environments.
+pub trait Spawning {
+    fn runs_in(&mut self, dir: &Path);
+    fn carries(&mut self, name: &str, value: &OsStr);
+    fn drops(&mut self, name: &str);
+}
+
+impl Spawning for Command {
+    fn runs_in(&mut self, dir: &Path) {
+        self.current_dir(dir);
+    }
+
+    fn carries(&mut self, name: &str, value: &OsStr) {
+        self.env(name, value);
+    }
+
+    fn drops(&mut self, name: &str) {
+        self.env_remove(name);
+    }
+}
+
+impl Spawning for tokio::process::Command {
+    fn runs_in(&mut self, dir: &Path) {
+        self.current_dir(dir);
+    }
+
+    fn carries(&mut self, name: &str, value: &OsStr) {
+        self.env(name, value);
+    }
+
+    fn drops(&mut self, name: &str) {
+        self.env_remove(name);
+    }
 }
 
 /// Runs the compiled `yunta` binary at `bin` in `dir` with `YUNTA_HOME`

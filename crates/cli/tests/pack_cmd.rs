@@ -300,10 +300,10 @@ fn write_pack_with_executor_and_tests(dir: &Path) {
 }
 
 fn yunta_with_marker(dir: &Path, home: &Path, marker_dir: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, dir, home);
+    command
         .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
         .env("YUNTA_TEST_MARKER_DIR", marker_dir)
         .output()
         .expect("failed to run the yunta binary")

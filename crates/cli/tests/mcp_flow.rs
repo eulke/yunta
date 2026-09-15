@@ -53,10 +53,8 @@ nodes:
     git(&repo, &["commit", "-q", "-m", "catalog"]);
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    command
-        .arg("mcp")
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home);
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
     let transport = TokioChildProcess::new(command).unwrap();
     let client = ().serve(transport).await.unwrap();
 
@@ -173,13 +171,8 @@ nodes:
 
     // Paused with `yunta run` directly (no MCP involved yet) — proves
     // resolve_gate answers a run that some *other* process created.
-    let run = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(["run", "wf.yaml"])
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home)
-        .output()
-        .unwrap();
-    let run_id = String::from_utf8_lossy(&run.stdout)
+    let run = yunta_testkit::yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    let run_id = yunta_testkit::stdout(&run)
         .lines()
         .find_map(|line| {
             line.strip_prefix("run ")
@@ -189,10 +182,8 @@ nodes:
         .expect("run id in output");
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    command
-        .arg("mcp")
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home);
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
     let transport = TokioChildProcess::new(command).unwrap();
     let client = ().serve(transport).await.unwrap();
 
@@ -296,10 +287,8 @@ nodes:
     git(&repo, &["commit", "-q", "-m", "catalog"]);
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    command
-        .arg("mcp")
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home);
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
     let transport = TokioChildProcess::new(command).unwrap();
     let mcp_pid = transport.id().expect("child process must have a pid");
     let client = ().serve(transport).await.unwrap();
@@ -328,10 +317,8 @@ nodes:
     // A brand new MCP session, sharing nothing with the killed one,
     // confirms the run kept going and eventually finished.
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    command
-        .arg("mcp")
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home);
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
     let transport = TokioChildProcess::new(command).unwrap();
     let fresh_client = ().serve(transport).await.unwrap();
 
@@ -413,10 +400,8 @@ async fn workflow_status_returns_versioned_json() {
     git(&repo, &["commit", "-q", "-m", "catalog"]);
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    command
-        .arg("mcp")
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home);
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
     let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
 
     let run = client
@@ -479,10 +464,8 @@ async fn run_workflow_accepts_pack_names() {
     );
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    command
-        .arg("mcp")
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home);
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
     let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
 
     // A `publisher/name` names a vendored pack's workflow, resolved the
@@ -568,10 +551,8 @@ async fn finished_detached_runs_leave_no_zombie() {
     git(&repo, &["commit", "-q", "-m", "catalog"]);
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    command
-        .arg("mcp")
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home);
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
     let transport = TokioChildProcess::new(command).unwrap();
     let mcp_pid = transport.id().expect("the mcp server has a pid");
     let client = ().serve(transport).await.unwrap();
@@ -645,10 +626,8 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
     );
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    command
-        .arg("mcp")
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home);
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
     let transport = TokioChildProcess::new(command).unwrap();
     let client = ().serve(transport).await.unwrap();
 
@@ -709,10 +688,8 @@ async fn an_unknown_kind_reads_the_same_at_both_doors() {
     );
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    command
-        .arg("mcp")
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home);
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
     let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
     let result = client
         .call_tool(
@@ -771,10 +748,10 @@ struct RawStdio {
 
 impl RawStdio {
     fn spawn(cwd: &Path, home: &Path) -> Self {
-        let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+        yunta_testkit::hermetic(&mut command, cwd, home);
+        let mut child = command
             .arg("mcp")
-            .current_dir(cwd)
-            .env("YUNTA_HOME", home)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .spawn()
@@ -920,10 +897,8 @@ async fn a_run_id_that_is_not_an_id_is_refused_by_the_rule_it_breaks() {
     let home = root.path().join("state");
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    command
-        .arg("mcp")
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home);
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
     let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
 
     for tool in ["workflow_status", "resume_run", "resolve_gate"] {
@@ -987,10 +962,8 @@ async fn a_hand_off_that_cannot_be_spawned_names_the_resume_it_never_started() {
     std::fs::remove_dir_all(home.join("runs").join(&run_id).join("scratch")).unwrap();
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    command
-        .arg("mcp")
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home);
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
     let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
     let result = client
         .call_tool(
@@ -1056,10 +1029,8 @@ async fn an_mcp_client_answering_a_running_run_gets_the_advice_a_person_gets() {
 
     // The client's answer: a tool result, from the control plane.
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    command
-        .arg("mcp")
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home);
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
     let transport = TokioChildProcess::new(command).unwrap();
     let client = ().serve(transport).await.unwrap();
     let answered = client
@@ -1150,10 +1121,8 @@ async fn answer_questions_pre_seeds_the_answer_and_resume_finishes_the_node() {
     let run_id = run_id_from(&run);
 
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    command
-        .arg("mcp")
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home);
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
     let transport = TokioChildProcess::new(command).unwrap();
     let client = ().serve(transport).await.unwrap();
 

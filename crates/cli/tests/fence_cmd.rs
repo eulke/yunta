@@ -14,7 +14,9 @@ fn writing(path: &str) -> String {
 
 /// Runs the hook with `fence` in its environment and the call on stdin.
 fn hook(worktree: &Path, fence: Option<&Fence>, stdin: &str) -> std::process::Output {
+    let away = tempfile::tempdir().expect("a directory for this test's home");
     let mut command = Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, away.path(), &away.path().join("state"));
     command
         .args(["fence", "claude-code"])
         .env_remove(yunta_core::fence::ENV_VAR)

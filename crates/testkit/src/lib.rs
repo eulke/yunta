@@ -28,7 +28,7 @@ mod tools;
 mod wait;
 
 pub use bench::{Bench, MOCK_CONFIG};
-pub use bin::{hermetic, run_id_from, run_yunta, stderr, stdout};
+pub use bin::{hermetic, run_id_from, run_yunta, stderr, stdout, Spawning};
 pub use checkout::Checkout;
 pub use events::{
     accepted, status_changed_carrying, task_registered, task_status_changed, SourceLog,
