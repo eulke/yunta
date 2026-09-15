@@ -51,11 +51,33 @@ pub enum Phase {
     Post,
 }
 
+impl Phase {
+    /// The word this phase is called by, as the log spells it — the one
+    /// place it is named, so a diagnostic and a surface cannot call the
+    /// same phase two things.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Phase::Pre => "pre",
+            Phase::Post => "post",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HookPhase {
     Before,
     After,
+}
+
+impl HookPhase {
+    /// The word this phase is called by, as the log spells it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HookPhase::Before => "before",
+            HookPhase::After => "after",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

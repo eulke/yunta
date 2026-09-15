@@ -23,6 +23,17 @@ impl FindingSeverity {
     /// by a test, so a diagnostic listing the ladder cannot list a
     /// different one from the parser accepting it.
     pub const NAMES: [&'static str; 4] = ["blocking", "major", "minor", "note"];
+
+    /// This severity's own rung of that ladder — the one place it is
+    /// named, so a document, a diagnostic and a surface spell it alike.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FindingSeverity::Blocking => "blocking",
+            FindingSeverity::Major => "major",
+            FindingSeverity::Minor => "minor",
+            FindingSeverity::Note => "note",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -65,6 +76,17 @@ pub enum FindingOperation {
     Post,
     Update,
     Withdraw,
+}
+
+impl FindingOperation {
+    /// The word this call is named by, as the log spells it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FindingOperation::Post => "post",
+            FindingOperation::Update => "update",
+            FindingOperation::Withdraw => "withdraw",
+        }
+    }
 }
 
 /// A finding a session offered and the engine did not take, with every

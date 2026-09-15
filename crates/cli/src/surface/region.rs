@@ -104,10 +104,6 @@ impl Region {
         }
         self.counters
             .set_message(self.fit(&view::counter_line(frame)));
-        // Last, so the region a graduating line is written above already
-        // shows the work it left: a node is never both in the region and
-        // in the scrollback at once.
-        self.graduate(frame);
     }
 
     /// Writes one diagnostic into the terminal's history above the
@@ -120,12 +116,6 @@ impl Region {
     /// takes without anything redrawing over it.
     pub(super) fn note(&mut self, line: &str) {
         self.above.write(&[line.to_string()]);
-    }
-
-    /// Forgets which nodes have graduated — what a promotion successor
-    /// needs, since it is a run of its own whose node ids are its own.
-    pub(super) fn restart(&mut self) {
-        self.above.restart();
     }
 
     /// Takes the region off the terminal, leaving everything above it
@@ -153,20 +143,16 @@ impl Region {
         self.multi.set_draw_target(ProgressDrawTarget::hidden());
     }
 
-    /// Sends every node that stopped working since the last redraw up
-    /// into the history above, in the workflow's own declaration order.
-    fn graduate(&mut self, frame: &RunFrame) {
-        let leaving = self
-            .above
-            .leaving(view::settled_nodes(frame), view::working_nodes(frame));
-        let lines: Vec<String> = frame
-            .nodes
-            .iter()
-            .filter(|node| leaving.contains(&node.id))
-            .flat_map(|node| view::graduation(frame, node, self.glyphs))
-            .map(|line| self.fit(&line))
-            .collect();
-        self.above.write(&lines);
+    /// Writes one moment's rows into the terminal's history above the
+    /// region.
+    ///
+    /// Which moments reach here is the chronicle's to say, not this
+    /// surface's: it lays out what it is handed. The rows are cut to
+    /// the terminal like the region's own, because a wrapped one would
+    /// cost the region the row count it redraws by.
+    pub(super) fn record(&mut self, rows: &[String]) {
+        let rows: Vec<String> = rows.iter().map(|row| self.fit(row)).collect();
+        self.above.write(&rows);
     }
 
     /// Grows or shrinks the body to `rows` rows, keeping the demand line

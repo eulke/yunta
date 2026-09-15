@@ -1,12 +1,13 @@
 //! What a person sees while a run happens.
 //!
-//! Three surfaces over one model. Every one of them presents the same
-//! [`RunFrame`](yunta_engine::RunFrame) — a derived snapshot of the run,
-//! pure in its own log — and they differ only in how it is delivered: a
-//! single line and an exit code, one append-only line per event, or a
-//! pinned region of plain text that redraws in place. A reader moving
-//! between them meets the same facts in the same words, because there is
-//! one derivation and one vocabulary behind all three.
+//! Three surfaces over two derivations and one vocabulary. The engine
+//! derives from the log where each thing stands
+//! ([`RunFrame`](yunta_engine::RunFrame)) and what happened, in order
+//! ([`yunta_engine::chronicle`]); this module's own `chronicle` chooses
+//! a moment's words once; each surface only lays them out. The region
+//! draws what is open, the history above it keeps what closed or asked,
+//! and the append-only surface writes every moment. A reader moving
+//! between them meets the same facts in the same words.
 //!
 //! **The events come from the engine, not from the log.** The engine
 //! hands every append to the observer in the moment it writes it
@@ -15,7 +16,9 @@
 //! the surface holds is the cache of one invocation, and every hole in it
 //! is closed by reading the log.
 
+mod chronicle;
 mod closing;
+mod draw;
 mod feed;
 mod fold;
 mod lines;

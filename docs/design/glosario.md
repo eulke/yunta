@@ -133,6 +133,30 @@ derivación, la herencia entre nodos, la destilación y las estadísticas — co
 eventos por hallazgo, un segundo pliegue es una segunda respuesta.
 _Evitar_: findings vigentes, lista final.
 
+## Lo que el log deriva
+
+**Frame**:
+Dónde está cada cosa del run ahora mismo, derivado del log: qué nodos trabajan,
+en qué estado quedó cada uno, cuántas tareas cerraron, qué hijos nacieron. Es
+una foto, y se vuelve a sacar entera cada vez que algo cambia.
+_Evitar_: snapshot, estado de la UI, progreso.
+
+**Crónica**:
+Qué pasó, en orden, derivada del mismo log y con los mismos tipos que el frame:
+un **momento** por evento. Lo que el frame dice que un nodo *es*, un momento
+dice que *se volvió*. Es pura y monótona en el log — la crónica de un prefijo
+es un prefijo de la crónica — así que un lector que sigue el run en vivo ve lo
+mismo, en el mismo orden, que uno que lo lee terminado.
+_Evitar_: historial, feed de eventos, timeline.
+
+**Momento**:
+Una cosa que pasó, ubicada: cuándo, a qué nodo, y qué. Se lee contra el estado
+*de ese instante*, nunca contra el del final — el tiempo que un intento trabajó
+y los hijos que arrastró son los que tenía ahí. Un nodo que cierra dos veces son
+dos momentos.
+_Evitar_: línea, entrada del log, evento — un evento es lo persistido; un
+momento es cómo se lee.
+
 ## Documentos y su lectura
 
 **Documento**:

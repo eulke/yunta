@@ -13,12 +13,12 @@ use yunta_core::{Clock, Manifest, RunId};
 use yunta_engine::{run_frame, PriorEstimation};
 use yunta_storage::AsyncStorage;
 
+pub(super) use super::draw::Draw;
 use super::feed::Beat;
 use super::fold::Folded;
-use super::lines::Lines;
-use super::region::Region;
 use super::turns::{Standby, Standing};
 use super::SurfaceEnv;
+use crate::render::Glyphs;
 use yunta_core::events::{ChildEvent, RunEvent};
 
 /// How often the surface redraws on its own. The durations it shows are
@@ -30,12 +30,6 @@ const REDRAW_INTERVAL: Duration = Duration::from_secs(1);
 /// a burst that fits in it is folded together and drawn once instead of
 /// redrawing the region for every event in it.
 const BATCH: usize = super::QUEUE_DEPTH;
-
-/// Where the folded run goes.
-pub(super) enum Draw {
-    Lines(Lines),
-    Live(Box<Region>),
-}
 
 /// One invocation's drawing state: the run it is on, what it has of that
 /// run's log, and the surface it puts it on.
@@ -63,8 +57,12 @@ pub(super) struct Painter {
     /// stands when it comes back, and the lines it owes are counted
     /// rather than queued.
     standing: Standing,
-    /// How many settled events have gone out as lines.
+    /// How many settled moments have gone out. By the chronicle's own
+    /// invariant — one moment per event — this is also how many events
+    /// are behind them.
     written: usize,
+    /// The glyph set every moment this painter puts out is marked with.
+    glyphs: Glyphs,
     /// The diagnostics raised while the terminal was somebody else's,
     /// in the order they were raised. A line a person is owed is not a
     /// repaint: it waits rather than being dropped.
@@ -86,6 +84,7 @@ impl Painter {
             stale_gap: false,
             standing: Standing::Drawing,
             written: 0,
+            glyphs: env.glyphs,
             held: Vec::new(),
         };
         painter.attach_to(seed);
@@ -123,9 +122,9 @@ impl Painter {
         self.write_settled();
     }
 
-    /// Writes a line for every event settled since the last one went
-    /// out — what the append-only surface owes each of them, in the
-    /// log's own order.
+    /// Puts every moment settled since the last one went out onto the
+    /// surface, in the log's own order — one derivation, and each
+    /// surface only lays it out.
     ///
     /// Nothing goes out while the painter is stood down: a line printed
     /// under an open prompt lands on the rows a person is reading, and
@@ -139,14 +138,14 @@ impl Painter {
             folded,
             draw,
             written,
+            glyphs,
             ..
         } = self;
-        if let Draw::Lines(lines) = draw {
-            for event in folded.settled().iter().skip(*written) {
-                lines.event(event);
-            }
+        let moments = yunta_engine::chronicle(folded.settled());
+        for moment in moments.iter().skip(*written) {
+            draw.record(moment, *glyphs);
         }
-        *written = folded.settled().len();
+        *written = moments.len();
     }
 
     /// Takes one diagnostic the run raised while it is being drawn.
@@ -262,9 +261,6 @@ impl Painter {
         self.folded = Folded::default();
         self.stale_gap = false;
         self.written = 0;
-        if let Draw::Live(region) = &mut self.draw {
-            region.restart();
-        }
         self.reread().await;
         self.redraw();
     }

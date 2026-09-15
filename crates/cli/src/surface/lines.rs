@@ -1,37 +1,29 @@
-//! The append-only surface: one line per event, nothing redrawn.
+//! The append-only surface: one line per moment of the run, nothing
+//! redrawn.
 //!
-//! This is what a pipe, a CI log, `TERM=dumb` and a screen reader get,
-//! and it is the same content the pinned region carries — laid out for a
-//! reader who arrives after the fact instead of one watching. Every line
-//! opens with the run's elapsed time at that event, so a log read back
-//! hours later still says where the time went.
+//! This is what a pipe, a CI log, `TERM=dumb` and a screen reader get.
+//! It writes the same chronicle a watched terminal keeps above its
+//! region, in the same words — it keeps every moment where a terminal
+//! keeps what closed something, and lays each out for a reader who
+//! arrives after the fact instead of one watching. Every line opens
+//! with the run's elapsed time at that moment, so a log read back hours
+//! later still says where the time went.
 //!
 //! Its first line names the downgrade. A surface that quietly did less
 //! than it can would be the silent degradation the contract's invariant
 //! I11 forbids, so the reason travels with the change.
 
 use std::io::Write;
-use yunta_core::fence::Coverage;
 
-use chrono::{DateTime, Utc};
-use yunta_core::events::{EventPayload, GateResolvedPayload, StoredEvent};
-use yunta_core::text::{aside, detailed, one_line};
+use yunta_engine::Moment;
 
-use crate::render::format_duration;
+use crate::render::{format_duration, Glyphs};
 
-use super::{view, write_line};
-use yunta_core::events::{
-    ArtifactEvent, ChildEvent, FindingEvent, GateEvent, NodeEvent, RunEvent, ScopeEvent,
-    SessionEvent, TaskEvent,
-};
+use super::{chronicle, write_line};
 
 /// One line per event, written as the event arrives.
 pub(super) struct Lines {
     out: Box<dyn Write + Send>,
-    /// The first event's instant — what every line's elapsed counts from.
-    /// `None` until the first line, because a run with no event has no
-    /// clock to start.
-    opened: Option<DateTime<Utc>>,
 }
 
 impl Lines {
@@ -42,7 +34,7 @@ impl Lines {
             &mut out,
             &format!("live view off ({reason}): one line per event"),
         );
-        Self { out, opened: None }
+        Self { out }
     }
 
     /// Writes one diagnostic the run raised, as its own line.
@@ -54,301 +46,22 @@ impl Lines {
         write_line(&mut self.out, line);
     }
 
-    /// Writes `event`'s line.
-    pub(super) fn event(&mut self, event: &StoredEvent) {
-        let opened = *self.opened.get_or_insert(event.timestamp);
-        let elapsed = (event.timestamp - opened).to_std().unwrap_or_default();
-        let mut line = format!("[{}] {}", format_duration(elapsed), event.body.kind_name());
-        if let Some(node) = &event.node_id {
-            line.push_str(&format!(" on `{node}`"));
-        }
-        let detail = event.payload().and_then(detail).unwrap_or_default();
-        write_line(&mut self.out, &aside(line, &one_line(&detail)));
-    }
-}
-
-/// What one event carries beyond its kind and its node: the fact a reader
-/// scanning the log acts on.
-///
-/// `None` where the kind says everything it has to say — the event still
-/// gets its line, because a kind this binary cannot detail is still an
-/// event that happened, and one it does not know at all still has a name.
-///
-/// A payload whose free text is empty — a log a writer left a blank
-/// `cause` or `reason` on — is named by what the line already knows, and
-/// never by a separator with nothing behind it: a kind whose whole
-/// detail is that field answers `None`, and one that joins the field to
-/// a headline drops the colon.
-fn detail(payload: &EventPayload) -> Option<String> {
-    match payload {
-        EventPayload::Run(RunEvent::Created(p)) => {
-            Some(format!("mode `{}` off {}", p.mode, p.base_branch))
-        }
-        EventPayload::Node(NodeEvent::RunnerResolved(p)) => Some(format!(
-            "{} on {}/{}",
-            p.runner, p.chosen.adapter, p.chosen.model
-        )),
-        EventPayload::Node(NodeEvent::Started(p)) => Some(format!("attempt {}", p.attempt)),
-        EventPayload::Session(SessionEvent::Message(p)) => p
-            .tool_name
-            .as_ref()
-            .map(|tool| format!("{:?} {tool}", p.message_type)),
-        EventPayload::Artifacts(ArtifactEvent::Written(p)) => Some(p.path.display().to_string()),
-        EventPayload::Tasks(TaskEvent::Registered(p)) => Some(p.task_id.to_string()),
-        EventPayload::Tasks(TaskEvent::StatusChanged(p)) => {
-            Some(format!("{} is {:?}", p.task_id, p.new_status))
-        }
-        EventPayload::Node(NodeEvent::CriteriaChecked(p)) => Some(format!(
-            "{} {:?}: {} criteria",
-            p.task_id,
-            p.phase,
-            p.results.len()
-        )),
-        EventPayload::Node(NodeEvent::ScopeChecked(p)) => Some(format!(
-            "{} out of scope",
-            yunta_core::text::counted(p.violations.len(), "path")
-        )),
-        EventPayload::Node(NodeEvent::Finished(p)) => Some(p.outcome.clone()),
-        EventPayload::Node(NodeEvent::Failed(p)) => Some(p.failure.to_string()),
-        EventPayload::Node(NodeEvent::HookExecuted(p)) => {
-            Some(format!("{:?} exit {}", p.phase, p.exit_code))
-        }
-        EventPayload::Node(NodeEvent::Rerouted(p)) => {
-            Some(detailed(format!("to `{}`", p.to_node), &p.cause))
-        }
-        EventPayload::Gates(GateEvent::Waiting(p)) => Some(p.summary().to_string()),
-        EventPayload::Gates(GateEvent::Resolved(p)) => Some(resolution(p)),
-        EventPayload::Children(ChildEvent::LoopIteration(p)) => {
-            Some(format!("iteration {}", p.iteration))
-        }
-        // What a session did to a finding after posting it, and what
-        // the engine answered when it refused the call.
-        EventPayload::Findings(FindingEvent::Updated(p)) => Some(detailed(
-            format!("{:?}", p.finding.severity),
-            &p.finding.title,
-        )),
-        EventPayload::Findings(FindingEvent::Withdrawn(p)) => {
-            Some(detailed(format!("`{}`", p.id), &p.reason))
-        }
-        EventPayload::Findings(FindingEvent::Refused(p)) => Some(detailed(
-            match &p.id {
-                Some(id) => format!("{:?} `{id}`", p.operation),
-                None => format!("{:?}", p.operation),
-            },
-            &yunta_core::text::counted(p.report.diagnostics.len(), "problem"),
-        )),
-        // A document a session offered as a whole, and whether the
-        // engine took it.
-        EventPayload::Artifacts(ArtifactEvent::Submitted(p)) => Some(detailed(
-            format!("{:?} {}", p.artifact_kind, p.name),
-            match &p.outcome {
-                yunta_core::events::SubmissionOutcome::Accepted { .. } => "accepted",
-                yunta_core::events::SubmissionOutcome::Refused { .. } => "refused",
-            },
-        )),
-        EventPayload::Artifacts(ArtifactEvent::Accepted(p)) => Some(format!("{}", p.artifact)),
-        EventPayload::Findings(FindingEvent::Posted(p)) => Some(detailed(
-            format!("{:?}", p.finding.severity),
-            &p.finding.title,
-        )),
-        EventPayload::Run(RunEvent::PromotionSignaled(p)) => {
-            Some(detailed(format!("to `{}`", p.suggested_mode), &p.reason))
-        }
-        EventPayload::Children(ChildEvent::Created(p)) => Some(p.child_run_id.to_string()),
-        EventPayload::Children(ChildEvent::Finished(p)) => Some(format!(
-            "{} {}",
-            p.child_run_id,
-            view::closed_as(p.terminal_state)
-        )),
-        EventPayload::Session(SessionEvent::CapabilityDegraded(p)) => Some(detailed(
-            format!("{} on {}", p.capability.as_str(), p.adapter),
-            p.policy_applied(),
-        )),
-        // A write that did not happen, and what it would have touched.
-        EventPayload::Session(SessionEvent::WriteRefused(p)) => {
-            Some(format!("write refused: {}", p.target.sentence()))
-        }
-        EventPayload::Run(RunEvent::Paused(p)) => Some(p.reason().to_string()),
-        EventPayload::Run(RunEvent::Finished(p)) => {
-            Some(view::closed_as(p.terminal_state).to_string())
-        }
-        // A node that asked: what it asked, so a reader knows what the
-        // run is waiting on without opening the document.
-        EventPayload::Gates(GateEvent::QuestionsAsked(p)) => Some(format!(
-            "asked {}: {}",
-            yunta_core::text::counted(p.questions.len(), "question"),
-            p.questions
-                .iter()
-                .map(|id| id.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-        // How much of the session the adapter's fence covered — what
-        // says whether a write that reaches the diff should have been
-        // possible at all.
-        EventPayload::Session(SessionEvent::Opened(p)) => p.fence.as_ref().map(fence_covered),
-        EventPayload::Node(NodeEvent::BaselineCaptured(_))
-        | EventPayload::Node(NodeEvent::ContextAssembled(_))
-        | EventPayload::Scope(ScopeEvent::Requested(_))
-        | EventPayload::Scope(ScopeEvent::Granted(_))
-        | EventPayload::Scope(ScopeEvent::Denied(_))
-        | EventPayload::Gates(GateEvent::QuestionsAnswered(_))
-        | EventPayload::Run(RunEvent::Resumed(_)) => None,
-    }
-}
-
-/// What a session's fence covered, in one phrase.
-fn fence_covered(coverage: &Coverage) -> String {
-    match coverage {
-        Coverage::Exact => "fence exact".to_string(),
-        Coverage::WidenedToRoots { roots } => {
-            format!(
-                "fence widened to {}",
-                yunta_core::text::counted(roots.len(), "root")
-            )
-        }
-        Coverage::ToolsOnly => "fence on tool calls".to_string(),
-    }
-}
-
-/// How a gate was settled: who settled it and what they said, in each of
-/// the shapes the persisted object spells.
-fn resolution(payload: &GateResolvedPayload) -> String {
-    match payload {
-        GateResolvedPayload::Chosen(choice) => {
-            format!("`{}` chosen by {}", choice.option, choice.by)
-        }
-        GateResolvedPayload::Approved { by, sha } => format!("approved by {by} over {sha}"),
-        GateResolvedPayload::ChangesRequested { by } => format!("changes requested by {by}"),
-        GateResolvedPayload::Closed => "closed without merging".to_string(),
-        GateResolvedPayload::Unrecognized(_) => {
-            "settled in a shape this binary does not name".to_string()
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use yunta_core::events::{
-        EventPayload, Evidence, Failure, Finding, FindingPostedPayload, FindingSeverity,
-        NodeFinishedPayload, NodeReroutedPayload, PromotionSignaledPayload, RerouteCause,
-        RerouteOrigin, RunPausedPayload, StoredEvent, TokenUsage,
-    };
-    use yunta_core::events::{FindingEvent, NodeEvent, RunEvent};
-
-    use super::{detail, Lines};
-
-    /// The line one event writes, as a reader meets it: the surface's
-    /// own output, not the private field it is built from.
-    fn line_for(payload: EventPayload) -> String {
-        let captured = yunta_testkit_core::Captured::default();
-        let mut lines = Lines::open(Box::new(captured.clone()), "a test is reading");
-        lines.event(&StoredEvent {
-            seq: yunta_core::Seq::from(1),
-            run_id: "01JQ0000000000000000000000".into(),
-            node_id: None,
-            timestamp: yunta_core::Clock::now(&yunta_testkit_core::FixedClock),
-            body: yunta_core::events::EventBody::Known(payload),
-        });
-        captured
-            .text()
-            .lines()
-            .last()
-            .unwrap_or_default()
-            .to_string()
-    }
-
-    /// A log this binary reads back was written by some other
-    /// invocation: nothing guarantees the free text on a payload says
-    /// anything, and a line built for it must not promise that it does.
-    fn rerouted(cause: &str) -> EventPayload {
-        EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
-            "fix-lint".into(),
-            RerouteCause(Failure::message(cause)),
-            RerouteOrigin::GateChoice,
-            None,
-            None,
-        )))
-    }
-
-    #[test]
-    fn a_reroute_with_a_cause_reads_as_the_target_and_the_cause() {
-        assert_eq!(
-            detail(&rerouted("exit 1")).as_deref(),
-            Some("to `fix-lint`: exit 1")
+    /// Writes `moment`'s line: the run's own clock, the mark the
+    /// moment carries, and the words for it.
+    ///
+    /// Every moment, not only the ones a watched terminal keeps: a
+    /// reader who arrives after the fact has no region to have watched,
+    /// so the log is all there is and it is all written.
+    pub(super) fn moment(&mut self, moment: &Moment, glyphs: Glyphs) {
+        let said = chronicle::say(moment);
+        let mark = said
+            .word
+            .map(|word| format!("{} ", glyphs.state(word)))
+            .unwrap_or_default();
+        write_line(
+            &mut self.out,
+            &format!("[{}] {mark}{}", format_duration(moment.elapsed), said.text),
         );
-    }
-
-    #[test]
-    fn a_reroute_with_no_cause_recorded_reads_as_the_target_alone() {
-        assert_eq!(detail(&rerouted("")).as_deref(), Some("to `fix-lint`"));
-    }
-
-    #[test]
-    fn a_promotion_with_no_reason_recorded_reads_as_the_mode_alone() {
-        let payload = EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload {
-            reason: String::new(),
-            evidence: Evidence::none(),
-            suggested_mode: "ship".into(),
-        }));
-        assert_eq!(detail(&payload).as_deref(), Some("to `ship`"));
-    }
-
-    #[test]
-    fn a_finding_with_no_title_reads_as_its_severity_alone() {
-        let payload = EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
-            finding: Finding {
-                id: "f1".into(),
-                severity: FindingSeverity::Minor,
-                title: String::new(),
-                location: "src/lib.rs".into(),
-                detail: String::new(),
-                proposed_criterion: None,
-            },
-        }));
-        assert_eq!(detail(&payload).as_deref(), Some("Minor"));
-    }
-
-    #[test]
-    fn a_pause_with_no_reason_recorded_leaves_the_line_at_its_kind() {
-        let line = line_for(EventPayload::Run(RunEvent::Paused(
-            RunPausedPayload::recorded("   ".to_string()),
-        )));
-        assert_eq!(
-            line, "[0s] run_paused",
-            "no dash promises what is not there"
-        );
-    }
-
-    #[test]
-    fn a_pause_that_recorded_a_reason_says_it_on_one_line() {
-        let line = line_for(EventPayload::Run(RunEvent::Paused(
-            RunPausedPayload::recorded("budget\n  reached".to_string()),
-        )));
-        assert_eq!(line, "[0s] run_paused — budget reached");
-    }
-
-    #[test]
-    fn a_node_that_finished_saying_nothing_leaves_the_line_at_its_kind() {
-        let line = line_for(EventPayload::Node(NodeEvent::Finished(
-            NodeFinishedPayload::new(String::new(), TokenUsage::default()),
-        )));
-        assert_eq!(line, "[0s] node_finished");
-    }
-
-    /// A log written before the engine named its fallbacks carries an
-    /// empty `policy_applied`. The line states what was missing and
-    /// claims nothing about what was done instead.
-    #[test]
-    fn a_degraded_capability_with_no_policy_recorded_reads_as_what_was_missing() {
-        let payload: EventPayload = serde_json::from_value(serde_json::json!({
-            "kind": "capability_degraded",
-            "capability": "run_tools",
-            "adapter": "codex",
-            "policy_applied": "",
-        }))
-        .expect("the wire form of a degradation with no policy");
-        assert_eq!(detail(&payload).as_deref(), Some("run_tools on codex"));
     }
 }
 
@@ -367,7 +80,7 @@ mod pause_reason_tests {
 
     use crate::commands::advice;
 
-    use super::{detail, EventPayload};
+    use super::super::chronicle;
 
     /// One of every reason a run parks on. The `match` is what keeps it
     /// complete: a new variant stops compiling here until it is listed.
@@ -468,8 +181,17 @@ mod pause_reason_tests {
             let payload = RunPausedPayload::new(&reason);
             assert_eq!(payload.reason(), sentence);
 
-            let chronicle = detail(&EventPayload::Run(RunEvent::Paused(payload.clone())));
-            assert_eq!(chronicle.as_deref(), Some(sentence.as_str()));
+            let said = chronicle::say(&yunta_testkit::moment(
+                None,
+                yunta_engine::Happening::Run((&RunEvent::Paused(payload.clone())).into()),
+            ));
+            assert_eq!(
+                said.text,
+                yunta_core::text::aside(
+                    "run",
+                    &yunta_core::text::one_line(&format!("paused — {sentence}"))
+                )
+            );
 
             let waiting = WaitingOn::Run {
                 reason: payload.reason().to_string(),

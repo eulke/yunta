@@ -139,11 +139,44 @@ fn without_a_terminal_line_one_names_the_downgrade_and_nothing_redraws() {
         "nothing redraws where there is nothing to redraw on: {progress:?}"
     );
     assert!(
-        progress.lines().any(|line| line.contains("node_started")
-            && line.contains("`touch`")
-            && line.starts_with('[')),
-        "one line per event, each carrying the run's elapsed time: {progress}"
+        progress
+            .lines()
+            .any(|line| line.contains("touch — running") && line.starts_with('[')),
+        "one line per moment, in the words a watched terminal uses, each \
+         carrying the run's elapsed time: {progress}"
     );
+}
+
+#[test]
+fn a_run_read_back_from_a_pipe_says_what_a_watched_terminal_kept() {
+    // One chronicle, two layouts: a reader who followed the run on a
+    // terminal and a reader who read it out of a pipe met the same
+    // sentences. The terminal keeps what closed something; the pipe
+    // writes every moment, that one included, word for word.
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = project(root.path(), TWO_NODES);
+
+    let piped = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert!(piped.status.success(), "{}", stderr(&piped));
+    let written = stderr(&piped);
+
+    let watched = tempfile::tempdir().unwrap();
+    let (watched_repo, watched_home) = project(watched.path(), TWO_NODES);
+    let mut terminal = yunta_on_terminal!(&watched_repo, &watched_home, &["run", "wf.yaml"]);
+    let drawn = terminal.ended();
+    assert!(terminal.ran_to_the_end(), "{drawn}");
+
+    // What a settled node left above the region is a sentence the pipe
+    // wrote too — the elapsed column and the mark are layout, and the
+    // words under them are the same words.
+    for node in ["touch", "verify"] {
+        let kept = format!("{node} — finished");
+        assert!(
+            drawn.contains(&kept),
+            "the terminal kept `{kept}`:\n{drawn}"
+        );
+        assert!(written.contains(&kept), "and the pipe wrote it:\n{written}");
+    }
 }
 
 #[test]

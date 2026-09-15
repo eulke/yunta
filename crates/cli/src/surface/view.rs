@@ -286,59 +286,6 @@ pub(super) fn working(frame: &RunFrame) -> Vec<&NodeFrame> {
         .collect()
 }
 
-/// The rows a node leaves behind when it stops working: its final state
-/// and what that state carries, with the children it bore under it.
-///
-/// The children come with it because they leave the region with it. A
-/// node in the region carries its own tree; a node that graduated
-/// carries it into the scrollback, where the run's composition stays
-/// readable after the node that composed it is gone.
-pub(super) fn graduation(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> Vec<String> {
-    let state = standing(node);
-    let elapsed = node
-        .elapsed
-        .map(|elapsed| format!(" · {}", format_duration(elapsed)))
-        .unwrap_or_default();
-    let mut rows = vec![format!(
-        "{} {} — {}{elapsed}",
-        glyphs.state(state.word),
-        node.id,
-        state.label()
-    )];
-    let detail = indent(DETAIL_DEPTH);
-    rows.extend(
-        children_of(frame, &node.id)
-            .into_iter()
-            .map(|child| format!("{detail}{}", child_row(child, glyphs))),
-    );
-    rows
-}
-
-/// The ids of the nodes at work — what the history has to forget,
-/// because a node back at work will stop again and owes a line for it.
-pub(super) fn working_nodes(frame: &RunFrame) -> Vec<&NodeId> {
-    working(frame).into_iter().map(|node| &node.id).collect()
-}
-
-/// Every node that has stopped working, by id — what a surface compares
-/// against to find the ones it has not seen stop yet.
-pub(super) fn settled_nodes(frame: &RunFrame) -> Vec<&NodeId> {
-    frame
-        .nodes
-        .iter()
-        .filter(|node| {
-            matches!(
-                node.state,
-                NodeStanding::Reached(
-                    yunta_engine::NodeState::Finished { .. }
-                        | yunta_engine::NodeState::Failed { .. }
-                )
-            )
-        })
-        .map(|node| &node.id)
-        .collect()
-}
-
 /// Names in a row, separated so a reader's eye stops between them.
 fn join(names: impl Iterator<Item = String>) -> String {
     names.collect::<Vec<_>>().join(", ")

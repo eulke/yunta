@@ -28,6 +28,16 @@ pub enum Channel {
     Mcp,
 }
 
+impl Channel {
+    /// The word this channel is named by, as the log spells it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Channel::Tty => "tty",
+            Channel::Mcp => "mcp",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GateWaitingPayload {
     /// The claim: what happened, in the words of whoever escalated.

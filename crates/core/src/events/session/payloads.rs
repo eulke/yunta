@@ -95,6 +95,18 @@ pub enum AgentMessageType {
     Note,
 }
 
+impl AgentMessageType {
+    /// The word this kind of message is called by, as the log spells
+    /// it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AgentMessageType::ToolUse => "tool use",
+            AgentMessageType::Usage => "usage",
+            AgentMessageType::Note => "note",
+        }
+    }
+}
+
 /// What a tool call acted on, as the log may carry it.
 ///
 /// A tool's argument is the session's own text: a path, a shell command,

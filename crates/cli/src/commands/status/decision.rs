@@ -79,7 +79,7 @@ pub(crate) fn block(
     }
     out.push_str(&layout.section("answer it with"));
     out.push_str(&verbatim(2, &advice::resolve_gate(run_id)));
-    out.push_str(&layout.aside());
+    out.push_str(&layout.advice());
     out
 }
 
@@ -136,7 +136,7 @@ impl Layout {
 
     /// The heading over a group of parts. A trailer has no room for one:
     /// the options are the only list under it, and the command is the
-    /// last line before the aside.
+    /// last line before the advice.
     fn section(self, label: &str) -> String {
         match self {
             Layout::Page => verbatim(1, &format!("{label}:")),
@@ -161,10 +161,14 @@ impl Layout {
     }
 
     /// What a reader can walk away and do, on the block that closes a
-    /// run out: a person who has just watched their terminal stop is the
+    /// run out. Named for what it says, not for the shape it is laid
+    /// out in: `yunta_core::text::aside` is the shape every sentence in
+    /// this binary takes, and a method of the same name here would read
+    /// as that shape rather than as this content.
+    /// a person who has just watched their terminal stop is the
     /// one who needs telling that nothing is holding the answer open. A
     /// page nobody is waiting in front of does not.
-    fn aside(self) -> String {
+    fn advice(self) -> String {
         match self {
             Layout::Page => String::new(),
             Layout::Trailer => verbatim(
@@ -346,7 +350,7 @@ mod tests {
         }
         assert!(
             !page.contains("close this terminal"),
-            "a page nobody is waiting in front of carries no aside: {page}"
+            "a page nobody is waiting in front of carries no advice: {page}"
         );
     }
 
