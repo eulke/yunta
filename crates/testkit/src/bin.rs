@@ -13,19 +13,30 @@ pub(crate) const TERM: &str = "xterm-256color";
 /// pointed elsewhere, so a machine that has one would decide what a
 /// test sees: the org layer is a ceiling the lower layers can only
 /// narrow, so one on the host silently changes what every run may do.
-/// `home` gets an empty one instead. `USER` names the author of what the
-/// run commits, and the two terminal variables decide what it may draw
-/// — all three inherited would make the same suite measure differently
-/// on two machines.
+/// `home` gets an empty one instead, and `HOME` points there too, so
+/// nothing reaches the developer's own `~/.yunta`. `USER` names the
+/// author of what the run commits, and the two terminal variables
+/// decide what it may draw — all inherited would make the same suite
+/// measure differently on two machines.
+///
+/// Git is pinned the same way and for the same reason: a run commits,
+/// and a developer's global or system git config decides the branch a
+/// fresh repository starts on, who authors a commit, and whether a hook
+/// fires. Both are pointed at files under `home`, which are empty.
 pub fn hermetic(cmd: &mut Command, dir: &Path, home: &Path) {
     std::fs::create_dir_all(home).expect("the test's own home");
     let org_config = home.join("org.yaml");
     std::fs::write(&org_config, "").expect("an empty org config under the test's home");
+    let git_config = home.join("gitconfig");
+    std::fs::write(&git_config, "").expect("an empty git config under the test's home");
     cmd.current_dir(dir)
         .env("YUNTA_HOME", home)
         .env("YUNTA_ORG_CONFIG", &org_config)
+        .env("HOME", home)
         .env("USER", "yunta-test")
         .env("TERM", TERM)
+        .env("GIT_CONFIG_GLOBAL", &git_config)
+        .env("GIT_CONFIG_SYSTEM", &git_config)
         .env_remove("NO_COLOR");
 }
 

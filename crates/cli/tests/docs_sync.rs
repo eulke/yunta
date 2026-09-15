@@ -6,20 +6,25 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+use yunta_testkit::{stderr, stdout, write, yunta_at, yunta_in, Checkout};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn yunta() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_yunta"))
+/// A directory the binary runs from and a home of its own beside it, so
+/// no invocation in this file reads the developer's `~/.yunta`, the
+/// repository's own config or a global git config.
+fn elsewhere() -> tempfile::TempDir {
+    tempfile::tempdir().unwrap()
 }
 
 /// The subcommands `yunta --help` lists under `Commands:`.
 fn subcommands_from_help() -> BTreeSet<String> {
-    let out = yunta().arg("--help").output().unwrap();
-    let text = String::from_utf8_lossy(&out.stdout);
+    let away = elsewhere();
+    let out = yunta_in!(away.path(), &away.path().join("home"), &["--help"]);
+    let text = stdout(&out);
     let mut names = BTreeSet::new();
     let mut in_commands = false;
     for line in text.lines() {
@@ -100,13 +105,10 @@ fn has_top_level_key(text: &str, key: &str) -> bool {
         .any(|line| line.starts_with(key) && line[key.len()..].starts_with(':'))
 }
 
-/// A project every documented workflow can be checked in: the roles the
-/// examples name, bound to the mock.
-fn check_project() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".yunta")).unwrap();
-    std::fs::write(
-        dir.path().join(".yunta/config.yaml"),
+/// A project every documented workflow can be checked in: the runners
+/// the examples name, bound to the mock.
+fn check_project() -> Checkout {
+    Checkout::new().config(
         "runners:\n\
          \x20 executor: [{ adapter: mock, model: m }]\n\
          \x20 planner: [{ adapter: mock, model: m }]\n\
@@ -114,42 +116,22 @@ fn check_project() -> tempfile::TempDir {
          \x20 reviewer: [{ adapter: mock, model: m }]\n\
          \x20 reviewer-alt: [{ adapter: mock, model: m }]\n",
     )
-    .unwrap();
-    dir
 }
 
-fn check_passes(project: &Path, workflow_text: &str, origin: &str) {
-    let path = project.join("example.yaml");
-    std::fs::write(&path, workflow_text).unwrap();
-    let out = yunta()
-        .args(["check", path.to_str().unwrap()])
-        .current_dir(project)
-        .output()
-        .unwrap();
+fn check_passes(project: &Checkout, workflow_text: &str, origin: &str) {
+    write(&project.repo.join("example.yaml"), workflow_text);
+    let out = yunta_at!(project, &["check", "example.yaml"]);
     assert!(
         out.status.success(),
         "{origin}: `yunta check` refused the documented workflow:\n{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
+        stdout(&out),
+        stderr(&out)
     );
 }
 
 /// A documented case runs through `yunta test` in a project that
 /// provides the workflow and fixture it names.
 fn case_runs(case_text: &str, origin: &str) {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path();
-    let init = |args: &[&str]| {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(root)
-            .status()
-            .unwrap();
-        assert!(status.success());
-    };
-    init(&["init", "-q"]);
-    init(&["config", "user.email", "docs@localhost"]);
-    init(&["config", "user.name", "docs"]);
     let workflow = case_text
         .lines()
         .find_map(|line| line.strip_prefix("workflow:"))
@@ -160,30 +142,22 @@ fn case_runs(case_text: &str, origin: &str) {
         .find_map(|line| line.strip_prefix("fixture:"))
         .map(str::trim)
         .unwrap_or_else(|| panic!("{origin}: a case names its fixture"));
-    std::fs::create_dir_all(root.join(".yunta/workflows")).unwrap();
-    std::fs::write(
-        root.join(".yunta/workflows")
-            .join(format!("{workflow}.yaml")),
-        format!("name: {workflow}\nnodes:\n  - {{ id: only, kind: bash, run: \"true\" }}\n"),
-    )
-    .unwrap();
-    let fixture_path = root.join(".yunta/tests").join(fixture);
-    std::fs::create_dir_all(fixture_path.parent().unwrap()).unwrap();
-    std::fs::write(&fixture_path, "sessions: []\n").unwrap();
-    std::fs::write(root.join(".yunta/tests/documented.yaml"), case_text).unwrap();
-    init(&["add", "."]);
-    init(&["commit", "-q", "-m", "documented case"]);
-    let out = yunta()
-        .arg("test")
-        .current_dir(root)
-        .env("YUNTA_HOME", root.join("state"))
-        .output()
-        .unwrap();
+
+    let project = Checkout::new()
+        .file(
+            &format!(".yunta/workflows/{workflow}.yaml"),
+            &format!("name: {workflow}\nnodes:\n  - {{ id: only, kind: bash, run: \"true\" }}\n"),
+        )
+        .file(&format!(".yunta/tests/{fixture}"), "sessions: []\n")
+        .file(".yunta/tests/documented.yaml", case_text)
+        .committed();
+
+    let out = yunta_at!(project, &["test"]);
     assert!(
         out.status.success(),
         "{origin}: the documented case does not run:\n{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
+        stdout(&out),
+        stderr(&out)
     );
 }
 
@@ -220,7 +194,7 @@ fn every_yaml_example_in_the_docs_is_one_the_binary_accepts() {
             seen += 1;
             let text = &block.text;
             if has_top_level_key(text, "nodes") {
-                check_passes(project.path(), text, &block.origin);
+                check_passes(&project, text, &block.origin);
             } else if has_top_level_key(text, "publisher") {
                 let manifest: yunta_core::PackManifest = yunta_core::yaml::parse(text)
                     .unwrap_or_else(|e| panic!("{}: {e}", block.origin));
@@ -233,7 +207,7 @@ fn every_yaml_example_in_the_docs_is_one_the_binary_accepts() {
                 let embedded = format!(
                     "name: fragment\n{text}nodes:\n  - {{ id: only, kind: bash, run: \"true\" }}\n"
                 );
-                check_passes(project.path(), &embedded, &block.origin);
+                check_passes(&project, &embedded, &block.origin);
             } else {
                 let _: yunta_core::ConfigLayer = yunta_core::yaml::parse(text)
                     .unwrap_or_else(|e| panic!("{}: not a config layer: {e}", block.origin));

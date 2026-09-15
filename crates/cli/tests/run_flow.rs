@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use yunta_core::process::signal::{liveness, signal_group, signal_process, Liveness, Signal};
 use yunta_core::Pid;
 use yunta_testkit::{
-    git, init_repo, run_id_from, stderr, stdout, wait_for, wait_until, write, yunta_in,
+    git, init_repo, run_id_from, stderr, stdout, wait_for, wait_until, write, yunta_at, yunta_in,
+    Checkout,
 };
 
 fn claude_code_stub() -> PathBuf {
@@ -2863,97 +2864,66 @@ fn adapter_mock_with_fixture_runs() {
 #[test]
 fn tilde_in_storage_path_resolves_under_home() {
     let root = tempfile::tempdir().unwrap();
-    let repo = root.path().join("repo");
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    let home = root.path().join("home");
-    std::fs::create_dir_all(&home).unwrap();
+    let checkout = Checkout::under(root.path())
+        .without_yunta_home()
+        .config(
+            "storage: { path: ~/state/yunta.db }\npaths: { runs: ~/state/runs, worktrees: ~/state/worktrees }\n",
+        )
+        .workflow(
+            "wf",
+            "name: tilde\nnodes:\n  - id: touch\n    kind: bash\n    run: \"true\"\n",
+        );
 
-    write(
-        &repo.join(".yunta/config.yaml"),
-        "storage: { path: ~/state/yunta.db }\npaths: { runs: ~/state/runs, worktrees: ~/state/worktrees }\n",
-    );
-    write(
-        &repo.join("wf.yaml"),
-        "name: tilde\nnodes:\n  - id: touch\n    kind: bash\n    run: \"true\"\n",
-    );
-    let run = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(["run", "wf.yaml"])
-        .current_dir(&repo)
-        .env("HOME", &home)
-        .env_remove("YUNTA_HOME")
-        .output()
-        .unwrap();
+    let run = yunta_at!(checkout, &["run", "wf.yaml"]);
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
         stdout(&run),
-        String::from_utf8_lossy(&run.stderr)
+        stderr(&run)
     );
     assert!(
-        home.join("state/yunta.db").exists(),
+        checkout.home.join("state/yunta.db").exists(),
         "the event log lives under the home"
     );
     assert!(
-        !repo.join("~").exists(),
+        !checkout.repo.join("~").exists(),
         "no literal `~` directory beside the repository"
     );
 }
 
 #[test]
 fn a_run_under_test_reads_no_org_config_from_the_host() {
-    let root = tempfile::tempdir().unwrap();
-    let repo = root.path().join("repo");
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    let home = root.path().join("state");
-
     // What the machine running the suite would hand the binary: an org
     // layer is a ceiling the layers under it can only narrow, so one
     // here decides what every run may do.
-    let hostile = root.path().join("host-org.yaml");
-    write(
-        &hostile,
-        "permissions:\n  commands:\n    deny: [\"echo *\"]\n",
-    );
-    write(
-        &repo.join("wf.yaml"),
-        r#"
+    const HOSTILE: &str = "permissions:\n  commands:\n    deny: [\"echo *\"]\n";
+    const WORKFLOW: &str = r#"
 name: bash-only
 nodes:
   - id: greet
     kind: bash
     run: "echo hello > made.txt"
-"#,
-    );
+"#;
 
-    let refused = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
-        .args(["run", "wf.yaml"])
-        .current_dir(&repo)
-        .env("YUNTA_HOME", &home)
-        .env("YUNTA_ORG_CONFIG", &hostile)
-        .output()
-        .expect("failed to run the yunta binary");
+    let root = tempfile::tempdir().unwrap();
+    let hostile = Checkout::under(&root.path().join("hostile"))
+        .with_org_config(HOSTILE)
+        .workflow("wf", WORKFLOW);
+    let refused = yunta_at!(hostile, &["run", "wf.yaml"]);
     assert!(
         !refused.status.success(),
         "the org layer decides what a run may do: {}",
-        String::from_utf8_lossy(&refused.stderr),
+        stderr(&refused),
     );
 
-    // The same environment, under the harness: what the run reads is
-    // the harness's own empty org layer, not the machine's.
-    let mut under_test = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
-    under_test.env("YUNTA_ORG_CONFIG", &hostile);
-    yunta_testkit::hermetic(&mut under_test, &repo, &home);
-    let output = under_test
-        .args(["run", "wf.yaml"])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .expect("failed to run the yunta binary");
+    // The same workflow under the harness, which hands every run an org
+    // layer of its own: what it reads is empty, not the machine's.
+    let under_test = Checkout::under(&root.path().join("under-test")).workflow("wf", WORKFLOW);
+    let output = yunta_at!(under_test, &["run", "wf.yaml"]);
     assert!(
         output.status.success(),
         "a run under test reads no org config from the host: {}",
-        String::from_utf8_lossy(&output.stderr),
+        stderr(&output),
     );
 }
 

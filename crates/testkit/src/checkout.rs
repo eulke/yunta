@@ -1,6 +1,7 @@
 //! `Checkout` — the world a test that drives the compiled binary runs in.
 
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
 
 use tempfile::TempDir;
 
@@ -24,6 +25,15 @@ pub struct Checkout {
     pub repo: PathBuf,
     /// The state root run directories are created under.
     pub home: PathBuf,
+    /// Whether the binary is told where its state root is. A run that
+    /// is not told puts it under the home it was given, which is the
+    /// thing one test measures.
+    told_its_home: bool,
+    /// The org layer the binary reads. An org layer is a ceiling the
+    /// layers under it can only narrow, so it is empty unless a test
+    /// hands one over — a test that inherited the machine's would
+    /// measure the machine.
+    org_config: String,
 }
 
 impl Checkout {
@@ -49,7 +59,51 @@ impl Checkout {
             _root: None,
             repo,
             home: root.join("state"),
+            told_its_home: true,
+            org_config: String::new(),
         }
+    }
+
+    /// Leaves the binary without a `YUNTA_HOME`, so where its state root
+    /// lands is what the run decides from the home it was given — what
+    /// a test about that default measures.
+    pub fn without_yunta_home(mut self) -> Self {
+        self.told_its_home = false;
+        self
+    }
+
+    /// Hands the binary an org layer, the ceiling every lower layer can
+    /// only narrow — for a test about what that ceiling refuses.
+    pub fn with_org_config(mut self, yaml: &str) -> Self {
+        self.org_config = yaml.to_string();
+        self
+    }
+
+    /// The command that runs the compiled binary at `bin` in this
+    /// checkout: hermetic, and then whatever this checkout says about
+    /// its home and its org layer. Use the
+    /// [`yunta_at!`](crate::yunta_at) macro rather than calling this
+    /// directly — it fills in the binary path from the calling crate's
+    /// `CARGO_BIN_EXE_yunta`.
+    pub fn command(&self, bin: &Path) -> Command {
+        let mut command = Command::new(bin);
+        crate::bin::hermetic(&mut command, &self.repo, &self.home);
+        if !self.told_its_home {
+            command.env_remove("YUNTA_HOME");
+        }
+        if !self.org_config.is_empty() {
+            write(&self.home.join("org.yaml"), &self.org_config);
+        }
+        command
+    }
+
+    /// Runs the binary and answers with what it wrote, stdin closed.
+    pub fn run(&self, bin: &Path, args: &[&str]) -> Output {
+        self.command(bin)
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .expect("failed to run the yunta binary")
     }
 
     /// Declares `isolation: none`, which keeps every node's work in this

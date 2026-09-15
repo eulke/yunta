@@ -40,6 +40,19 @@ pub use tasks::tasks_document;
 pub use terminal::{runs_root, Terminal};
 pub use wait::{wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};
 
+/// Runs the `yunta` binary in a [`Checkout`], with whatever that
+/// checkout says about its state root and its org layer:
+/// `yunta_at!(checkout, &["run", "wf.yaml"])`. The binary path comes from
+/// `CARGO_BIN_EXE_yunta`, which Cargo sets only for the tests of the
+/// crate that builds the binary — so `env!` is expanded here, at the call
+/// site, where that variable exists.
+#[macro_export]
+macro_rules! yunta_at {
+    ($checkout:expr, $args:expr) => {
+        $checkout.run(::std::path::Path::new(env!("CARGO_BIN_EXE_yunta")), $args)
+    };
+}
+
 /// Runs the `yunta` binary from an integration test: `yunta_in!(dir, home,
 /// &["run", "wf.yaml"])`. The binary path comes from `CARGO_BIN_EXE_yunta`,
 /// which Cargo sets only for the tests of the crate that builds the binary
