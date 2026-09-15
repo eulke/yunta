@@ -119,6 +119,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
             max_retries: ctx.max_task_retries,
             budget: ctx.session_budget().await?,
             memo: &ctx.memo,
+            history: &state.tasks,
             registry: ctx.process_registry.as_ref(),
             clock: Some(ctx.clock.as_ref()),
         },

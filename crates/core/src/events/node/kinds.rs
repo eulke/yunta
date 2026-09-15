@@ -61,7 +61,10 @@ impl NodeEvent {
             Self::BaselineCaptured(_) => true,
             Self::Started(_) => false,
             Self::ContextAssembled(_) => true,
-            Self::CriteriaChecked(_) => true,
+            // What a criterion cost is the tasks' own history: the
+            // order the next pre-check runs its commands in is derived
+            // from it.
+            Self::CriteriaChecked(_) => false,
             Self::ScopeChecked(_) => true,
             Self::Finished(_) => false,
             Self::Failed(_) => false,

@@ -92,7 +92,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 exit_code: 1,
                 r#type: None,
                 reused: false,
-                duration_ms: None,
+                duration_ms: Some(4_200),
             }],
         })),
         EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::done(

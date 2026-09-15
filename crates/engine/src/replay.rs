@@ -182,6 +182,7 @@ impl RunState {
             EventPayload::Node(e) => {
                 self.node_lifecycle(e, event)?;
                 self.nodes.apply(e, &meta);
+                self.tasks.apply_criteria(e);
             }
             EventPayload::Session(e) => {
                 self.nodes.apply_session(e, &meta);

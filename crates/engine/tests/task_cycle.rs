@@ -1,12 +1,17 @@
 use yunta_adapters::MockAdapter;
+use yunta_core::events::{
+    CriteriaCheckedPayload, CriterionResult, EventPayload, NodeEvent, Phase, TaskLedger,
+};
 use yunta_core::port::{Budget, PermissionProfile};
 use yunta_core::Criterion;
 use yunta_core::Task;
 use yunta_engine::process::Supervision;
+use yunta_engine::scope_expansion::GrantLedger;
 use yunta_engine::{
     run_task, AttemptEnv, DispatchOutcome, Memo, PreCheckOutcome, ScopeGovernance, TaskOutcome,
 };
 use yunta_testkit::init_repo;
+use yunta_testkit_core::Log;
 
 /// The setup a task session of node `build` runs under: the mock
 /// runner every fixture here answers as, and nothing else.
@@ -39,6 +44,54 @@ fn guard(cmd: &str) -> Criterion {
     Criterion {
         cmd: cmd.to_string(),
         r#type: Some(yunta_core::events::CriterionType::Guard),
+    }
+}
+
+/// A log that priced nothing: every criterion sorts as a command with
+/// no history, so a pre-check meets them in declared order.
+fn unpriced() -> TaskLedger {
+    TaskLedger::default()
+}
+
+/// The tasks fold a run derives from a log whose one pre-check timed
+/// each command at the durations `entries` names.
+fn priced(entries: &[(&str, &[u64])]) -> TaskLedger {
+    let results = entries
+        .iter()
+        .flat_map(|(cmd, durations)| {
+            durations.iter().map(|&duration_ms| CriterionResult {
+                cmd: (*cmd).to_string(),
+                exit_code: 1,
+                r#type: None,
+                reused: false,
+                duration_ms: Some(duration_ms),
+            })
+        })
+        .collect();
+    let events = Log::for_run("run-priced")
+        .node(
+            "build",
+            EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
+                task_id: "T1".into(),
+                phase: Phase::Pre,
+                results,
+            })),
+        )
+        .build();
+    yunta_engine::derive(&events).tasks
+}
+
+/// The governance a cycle test runs under when governance is not what
+/// it is about: no permissions model, the edit rung of the ladder, no
+/// scope expansion, and a ledger that has granted nothing.
+fn ungoverned(grants: &GrantLedger) -> ScopeGovernance<'_> {
+    ScopeGovernance {
+        permissions: None,
+        profile: PermissionProfile::Edit,
+        scope_expansion: None,
+        max_expansion_files: 5,
+        grants,
+        already_granted_paths: &[],
     }
 }
 
@@ -85,17 +138,11 @@ outcome: { type: completed, summary: "wrote it" }
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
+            history: &unpriced(),
             registry: None,
             clock: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(),
@@ -142,17 +189,11 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
             max_retries: 0,
             budget: Budget::default(),
             memo: &memo,
+            history: &unpriced(),
             registry: None,
             clock: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(),
@@ -185,17 +226,11 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
+            history: &unpriced(),
             registry: None,
             clock: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(),
@@ -240,17 +275,11 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
+            history: &unpriced(),
             registry: None,
             clock: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(),
@@ -304,17 +333,11 @@ outcome: { type: completed, summary: "done" }
             max_retries: 0,
             budget: Budget::default(),
             memo: &memo,
+            history: &unpriced(),
             registry: None,
             clock: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(),
@@ -363,17 +386,11 @@ sessions:
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
+            history: &unpriced(),
             registry: None,
             clock: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(),
@@ -418,17 +435,11 @@ sessions:
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
+            history: &unpriced(),
             registry: None,
             clock: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(),
@@ -470,17 +481,11 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
             max_retries: 0,
             budget: Budget::default(),
             memo: &memo,
+            history: &unpriced(),
             registry: None,
             clock: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(),
@@ -503,9 +508,10 @@ async fn pre_check_and_post_check_run_every_criterion() {
         vec![cmd("test -f a.txt"), cmd("test -f b.txt")],
     );
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
-        .await
-        .unwrap();
+    let (runs, outcome) =
+        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), Supervision::none())
+            .await
+            .unwrap();
     assert_eq!(runs.len(), 2);
     assert_eq!(outcome, PreCheckOutcome::Red);
 }
@@ -530,12 +536,12 @@ async fn a_criterion_is_reused_when_the_tree_and_config_havent_changed_since_the
     );
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
-    let (first, _) = yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
+    let (first, _) = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), Supervision::none())
         .await
         .unwrap();
     assert!(!first[0].reused, "the first check must actually execute");
 
-    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
+    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), Supervision::none())
         .await
         .unwrap();
     assert!(
@@ -566,14 +572,14 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
     );
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
-    yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
+    yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), Supervision::none())
         .await
         .unwrap();
     // Dirty the repo's own tree — the next check must see a different
     // tree_hash (the marker file lives outside it and doesn't count).
     std::fs::write(repo.join("new-file.txt"), "changed").unwrap();
 
-    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, Supervision::none())
+    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), Supervision::none())
         .await
         .unwrap();
     assert!(
@@ -613,17 +619,11 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
                 max_retries: 0,
                 budget,
                 memo: &memo,
+                history: &unpriced(),
                 registry: None,
                 clock: None,
             },
-            ScopeGovernance {
-                permissions: None,
-                profile: PermissionProfile::Edit,
-                scope_expansion: None,
-                max_expansion_files: 5,
-                grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-                already_granted_paths: &[],
-            },
+            ungoverned(&GrantLedger::new(0)),
             None,
             &tokio_util::sync::CancellationToken::new(),
             &bare_setup(),
@@ -678,17 +678,11 @@ outcome: { type: completed, summary: "should never be reached" }
             max_retries: 0,
             budget,
             memo: &memo,
+            history: &unpriced(),
             registry: None,
             clock: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(),
@@ -704,48 +698,49 @@ outcome: { type: completed, summary: "should never be reached" }
     }
 }
 
-// --- learned criterion ordering by historical duration ----------------
+// --- criterion ordering by the duration the log recorded ---------------
 
 #[tokio::test]
-async fn pre_check_orders_criteria_by_learned_median_duration() {
+async fn pre_check_orders_criteria_by_the_median_duration_the_log_recorded() {
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-    // The duration is the subject under test here: one criterion genuinely
-    // takes longer to run than the other, so the learned median has a real
-    // difference to sort by.
-    let slow = "sleep 0.2; test -f never.txt";
-    let fast = "test -f never.txt";
-    let t = task("T1", &["**"], vec![cmd(slow), cmd(fast)]);
+    let costly = "test -f never.txt";
+    let cheap = "test -f also-never.txt";
+    let t = task("T1", &["**"], vec![cmd(costly), cmd(cheap)]);
 
-    // First pass: no history — declared order, real durations recorded.
-    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
-        .await
-        .unwrap();
+    // A log that priced nothing: declared order, and this pass records
+    // what each command cost.
+    let (runs, outcome) =
+        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), Supervision::none())
+            .await
+            .unwrap();
     assert_eq!(outcome, PreCheckOutcome::Red);
-    assert_eq!(runs[0].cmd, slow);
-    assert_eq!(runs[1].cmd, fast);
+    assert_eq!(runs[0].cmd, costly);
+    assert_eq!(runs[1].cmd, cheap);
     assert!(
         runs.iter().all(|run| run.duration_ms.is_some()),
         "executed criteria must record their duration: {runs:?}"
     );
 
-    // The tree changes (no memo reuse), and the learned medians reorder:
-    // the historically-fast criterion now runs first to fail fast.
+    // The tree changes (no memo reuse), and the medians the log holds
+    // reorder the pass: the cheap command runs first to fail fast.
     std::fs::write(dir.path().join("changed.txt"), "x").unwrap();
-    let (runs, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
-        .await
-        .unwrap();
+    let history = priced(&[(costly, &[400, 600]), (cheap, &[5, 7])]);
+    let (runs, outcome) =
+        yunta_engine::pre_check(&t, dir.path(), &memo, &history, Supervision::none())
+            .await
+            .unwrap();
     assert_eq!(
         outcome,
         PreCheckOutcome::Red,
         "ordering never alters the verdict"
     );
     assert_eq!(
-        runs[0].cmd, fast,
-        "learned order must put the fast criterion first"
+        runs[0].cmd, cheap,
+        "the order the log priced must put the cheap criterion first"
     );
-    assert_eq!(runs[1].cmd, slow);
+    assert_eq!(runs[1].cmd, costly);
 }
 
 #[tokio::test]
@@ -755,17 +750,19 @@ async fn reused_criteria_carry_no_duration() {
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
     let t = task("T1", &["**"], vec![cmd("test -f never.txt")]);
 
-    let (runs, _) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
-        .await
-        .unwrap();
+    let (runs, _) =
+        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), Supervision::none())
+            .await
+            .unwrap();
     assert!(!runs[0].reused);
     assert!(runs[0].duration_ms.is_some());
 
     // Same tree: the memo answers, and a reused result has no duration
     // of its own (nothing ran).
-    let (runs, _) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
-        .await
-        .unwrap();
+    let (runs, _) =
+        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), Supervision::none())
+            .await
+            .unwrap();
     assert!(runs[0].reused);
     assert!(runs[0].duration_ms.is_none());
 }
@@ -790,9 +787,10 @@ async fn criterion_declaration_order_never_alters_the_pre_check_verdict() {
     for (i, permutation) in permutations.drain(..).enumerate() {
         let memo = Memo::new(yunta_core::sha256_hex(format!("config-{i}").as_bytes()));
         let t = task("T1", &["**"], permutation);
-        let (_, outcome) = yunta_engine::pre_check(&t, dir.path(), &memo, Supervision::none())
-            .await
-            .unwrap();
+        let (_, outcome) =
+            yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), Supervision::none())
+                .await
+                .unwrap();
         verdicts.push(outcome);
     }
     assert!(
@@ -869,17 +867,11 @@ outcome: { type: completed, summary: "wrote it" }
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
+            history: &unpriced(),
             registry: None,
             clock: None,
         },
-        ScopeGovernance {
-            permissions: None,
-            profile: PermissionProfile::Edit,
-            scope_expansion: None,
-            max_expansion_files: 5,
-            grants: &yunta_engine::scope_expansion::GrantLedger::new(0),
-            already_granted_paths: &[],
-        },
+        ungoverned(&GrantLedger::new(0)),
         Some((&observer as &dyn yunta_engine::SessionObserver, &node)),
         &tokio_util::sync::CancellationToken::new(),
         &bare_setup(),

@@ -18,7 +18,7 @@ use yunta_core::ScopeGlob;
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::TokenUsage;
+use yunta_core::events::{TaskLedger, TokenUsage};
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::{AdapterError, Task, TaskId};
 use yunta_storage::StorageError;
@@ -231,6 +231,10 @@ pub struct AttemptEnv<'a> {
     pub max_retries: u32,
     pub budget: Budget,
     pub memo: &'a Memo,
+    /// The run's tasks, as its log leaves them — what the pre-check
+    /// reads to run the cheap criteria before the expensive ones,
+    /// derived from the same log every wake derives its state from.
+    pub history: &'a TaskLedger,
     /// Where every criterion's process registers for the run.
     pub registry: Option<&'a crate::process_registry::ProcessRegistry>,
     /// What tells the time inside the cycle: a lock's holder is judged
@@ -271,6 +275,7 @@ pub async fn run_task(
         max_retries,
         budget,
         memo,
+        history,
         registry,
         clock,
     } = env;
@@ -318,7 +323,7 @@ pub async fn run_task(
         });
     }
 
-    let (pre_runs, pre_outcome) = pre_check(task, cwd, memo, supervision).await?;
+    let (pre_runs, pre_outcome) = pre_check(task, cwd, memo, history, supervision).await?;
 
     // The pre-check validates the criteria before any work: a non-guard that
     // already passes, or a guard already red, means the criteria are wrong,

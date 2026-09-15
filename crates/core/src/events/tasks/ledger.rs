@@ -3,13 +3,14 @@
 //! Five places used to walk the task events with their own rule: one for
 //! the status, one for the attempt number, one for the commit a `done`
 //! landed at, one to find the registration a status change is caused by.
-//! Every surface that asks what a task is doing reads it here rather
-//! than walking those two kinds itself — a second fold is a second
-//! answer.
+//! Every surface that asks what a task is doing — or what the criteria
+//! it is checked against cost — reads it here rather than walking the
+//! kinds itself: a second fold is a second answer.
 
 use std::collections::BTreeMap;
 
 use crate::events::meta::EventMeta;
+use crate::events::node::kinds::NodeEvent;
 use crate::events::tasks::kinds::TaskEvent;
 use crate::events::TaskStatus;
 use crate::hash::CommitSha;
@@ -36,10 +37,15 @@ pub struct TaskRecord {
     pub commit: Option<CommitSha>,
 }
 
-/// Every task's record, by id.
+/// Every task's record, by id, and what the criteria they were checked
+/// against cost.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TaskLedger {
     per_task: BTreeMap<TaskId, TaskRecord>,
+    /// What each criterion command cost, keyed by the command itself:
+    /// the cost belongs to the command, not to the task that named it,
+    /// so one suite guarding twenty tasks has one history.
+    per_criterion: BTreeMap<String, Vec<u64>>,
 }
 
 impl TaskLedger {
@@ -97,6 +103,51 @@ impl TaskLedger {
             .values()
             .filter(|record| matches!(record.status, TaskStatus::Done))
             .count()
+    }
+
+    /// Every wall-clock duration the log records for the criterion
+    /// command `cmd`, in the order the run measured them.
+    ///
+    /// What a command costs is the only thing an execution order can be
+    /// learned from, and the log is where it lives: a wake reads what
+    /// the wakes before it measured instead of measuring again. A
+    /// command the log never timed reads as empty — one no task
+    /// declares, and one every check answered out of an invocation's
+    /// result cache without running it.
+    pub fn criterion_durations(&self, cmd: &str) -> &[u64] {
+        self.per_criterion.get(cmd).map_or(&[], Vec::as_slice)
+    }
+
+    /// Folds one node-domain event into what it says about the tasks: a
+    /// `criteria_checked` prices every criterion it actually ran, and
+    /// that price outlives the invocation that paid it.
+    pub fn apply_criteria(&mut self, event: &NodeEvent) {
+        match event {
+            NodeEvent::CriteriaChecked(p) => {
+                for result in &p.results {
+                    // A reused result timed nothing — the invocation
+                    // answered it from its own cache — so what the
+                    // command costs stays what its executions measured.
+                    if let Some(duration_ms) = result.duration_ms {
+                        self.per_criterion
+                            .entry(result.cmd.clone())
+                            .or_default()
+                            .push(duration_ms);
+                    }
+                }
+            }
+            // What a node resolved, started, assembled, hooked, closed
+            // or re-routed prices no command.
+            NodeEvent::RunnerResolved(_)
+            | NodeEvent::BaselineCaptured(_)
+            | NodeEvent::Started(_)
+            | NodeEvent::ContextAssembled(_)
+            | NodeEvent::ScopeChecked(_)
+            | NodeEvent::Finished(_)
+            | NodeEvent::Failed(_)
+            | NodeEvent::HookExecuted(_)
+            | NodeEvent::Rerouted(_) => {}
+        }
     }
 
     /// Folds one task-domain event. A status change for a task nothing
