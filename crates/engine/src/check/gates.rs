@@ -185,6 +185,7 @@ pub(crate) fn check_no_questions_in_parallel(
     }
 }
 
+/// A `parallel` group holds no gate and no group of its own.
 pub(crate) fn check_no_gate_in_parallel(
     nodes: &[Node],
     parent_group: Option<&Node>,
@@ -194,6 +195,12 @@ pub(crate) fn check_no_gate_in_parallel(
         if let Some(group) = parent_group {
             if matches!(node.kind, NodeKind::Gate { .. }) {
                 errors.push(CheckError::GateInsideParallel {
+                    node: node.id.clone(),
+                    group: group.id.clone(),
+                });
+            }
+            if matches!(node.kind, NodeKind::Parallel { .. }) {
+                errors.push(CheckError::ParallelInsideParallel {
                     node: node.id.clone(),
                     group: group.id.clone(),
                 });

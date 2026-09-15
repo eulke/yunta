@@ -13,7 +13,7 @@ use yunta_engine::{ChildLink, Counter, NodeFrame, NodeStanding, RunFrame};
 use yunta_core::{NodeId, RunId};
 
 use crate::commands::advice;
-use crate::render::{format_duration, indent, Glyphs, NodeDisplay, StateWord};
+use crate::render::{format_duration, indent, Glyphs, NodeDisplay, StateWord, CHILD_DEPTH};
 
 /// How deep a node's detail sits under the node's own row, in steps of
 /// [`indent`] — the step every surface here shares, so the detail lines
@@ -67,8 +67,14 @@ pub(super) fn answer_command(run_id: &RunId, answerable: bool) -> String {
 /// is measured, it grows while the node says nothing, and it is the one
 /// signal that can tell a busy node from a stuck one.
 pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> Vec<String> {
-    let detail = indent(DETAIL_DEPTH);
-    let mut rows = vec![headline(node, glyphs)];
+    // A `parallel` group's children sit one step under the group, the
+    // same step a child run sits under the node that bore it.
+    let under = match node.group {
+        Some(_) => indent(CHILD_DEPTH),
+        None => String::new(),
+    };
+    let detail = format!("{under}{}", indent(DETAIL_DEPTH));
+    let mut rows = vec![format!("{under}{}", headline(node, glyphs))];
     if !node.running_tasks.is_empty() {
         rows.push(format!(
             "{detail}tasks running: {}",
@@ -179,7 +185,7 @@ pub(super) fn closed_as(state: TerminalState) -> &'static str {
 /// with the adapter and model behind it, how long it has been working,
 /// and how long ago it last said anything.
 fn headline(node: &NodeFrame, glyphs: Glyphs) -> String {
-    let state = standing(node);
+    let state = NodeDisplay::standing(&node.state);
     let mut row = format!(
         "{} {} {}",
         glyphs.state(state.word),
@@ -215,15 +221,6 @@ fn recent_calls(node: &NodeFrame) -> String {
             .clone()
             .unwrap_or_else(|| "(unnamed tool)".to_string())
     }))
-}
-
-/// Where a node stands, in the vocabulary every surface says it in.
-fn standing(node: &NodeFrame) -> NodeDisplay {
-    match &node.state {
-        NodeStanding::Skipped => NodeDisplay::skipped(),
-        NodeStanding::ToGo => NodeDisplay::of(None),
-        NodeStanding::Reached(state) => NodeDisplay::of(Some(state)),
-    }
 }
 
 /// The counters, at both levels the contract names: the DAG's nodes and
@@ -319,6 +316,27 @@ mod tests {
             children,
             ..run_frame(&RUN)
         }
+    }
+
+    /// A `parallel` group's children sit one step under the group,
+    /// exactly where a child run sits under the node that bore it.
+    #[test]
+    fn the_live_view_indents_a_groups_children_under_it() {
+        let frame = run_frame(&RUN);
+        let group = yunta_testkit::node_frame(&NodeId::from("review"), NodeStanding::ToGo);
+        let mut child = yunta_testkit::node_frame(&NodeId::from("review-a"), NodeStanding::ToGo);
+        child.group = Some(group.id.clone());
+
+        let top = node_rows(&frame, &group, Glyphs::Ascii);
+        let under = node_rows(&frame, &child, Glyphs::Ascii);
+        assert!(
+            !top[0].starts_with(' '),
+            "a top-level node starts at the margin: {top:?}"
+        );
+        assert!(
+            under[0].starts_with(&indent(CHILD_DEPTH)) && !under[0].starts_with(&indent(2)),
+            "its children sit exactly one step under it: {under:?}"
+        );
     }
 
     #[test]

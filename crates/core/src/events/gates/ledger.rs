@@ -27,13 +27,6 @@ pub struct QuestionRound {
     pub answered_at: Option<Seq>,
 }
 
-impl QuestionRound {
-    /// Whether this round is still waiting for an answer.
-    pub fn pending(&self) -> bool {
-        self.answered.is_none()
-    }
-}
-
 /// What the log says about one node's gates.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GateRecord {
@@ -86,12 +79,6 @@ impl GateLedger {
         let (resolution, at) = record.resolved.last()?;
         let waiting_after = record.waiting.as_ref().is_some_and(|(_, seq)| seq > at);
         (!waiting_after).then_some(resolution)
-    }
-
-    /// The questions `node` asked and nobody has answered.
-    pub fn pending_questions(&self, node: &NodeId) -> Option<&QuestionsAskedPayload> {
-        let round = self.per_node.get(node)?.rounds.last()?;
-        round.pending().then_some(&round.asked)
     }
 
     /// Whether `node`'s latest round was answered. Its close already ran

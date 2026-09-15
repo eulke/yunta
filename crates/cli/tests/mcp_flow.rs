@@ -1175,9 +1175,11 @@ async fn answer_questions_pre_seeds_the_answer_and_resume_finishes_the_node() {
                 let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
                 let document: Value = serde_json::from_slice(&status.stdout).unwrap_or_default();
                 document["outcome"] == "finished"
-                    && document["nodes"]["ask"]
-                        .as_str()
-                        .is_some_and(|state| state.starts_with("finished"))
+                    && document["nodes"].as_array().is_some_and(|nodes| {
+                        nodes
+                            .iter()
+                            .any(|node| node["id"] == "ask" && node["state"] == "finished")
+                    })
             }
         },
         || {

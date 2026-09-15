@@ -8,7 +8,7 @@
 //! [`RunWord`] is the same thing for the run as a whole: what its
 //! derived phase is called, wherever a surface says it.
 
-use yunta_engine::{NodeState, RunPhase};
+use yunta_engine::{NodeStanding, NodeState, NodeWait, RunPhase};
 
 /// The cells the short word gets in a column of them. Four, the width of
 /// the longest of the six.
@@ -107,10 +107,25 @@ impl NodeDisplay {
                 Some(NodeState::Running { attempt }) => Some(format!("attempt {attempt}")),
                 Some(NodeState::Finished { outcome, .. }) => detail(outcome),
                 Some(NodeState::Failed { failure, .. }) => detail(&failure.to_string()),
-                Some(NodeState::Waiting { external_ref }) => {
-                    external_ref.as_deref().and_then(detail)
-                }
+                Some(NodeState::Waiting { on }) => match on {
+                    NodeWait::Gate { external_ref } => external_ref.as_deref().and_then(detail),
+                    // The one sentence for a node that asked: the same
+                    // bytes the chronicle and the run's pause use.
+                    NodeWait::Questions { asked } => {
+                        detail(&yunta_core::text::asked_questions(asked.as_slice()))
+                    }
+                },
             },
+        }
+    }
+
+    /// Where a node of a frame stands, in the vocabulary every surface
+    /// says it in: the one entry a surface reading a `RunFrame` uses.
+    pub(crate) fn standing(standing: &NodeStanding) -> Self {
+        match standing {
+            NodeStanding::Skipped => Self::skipped(),
+            NodeStanding::ToGo => Self::of(None),
+            NodeStanding::Reached(state) => Self::of(Some(state)),
         }
     }
 
@@ -184,18 +199,41 @@ mod tests {
     fn a_state_with_nothing_to_qualify_it_is_the_word_alone() {
         assert_eq!(NodeDisplay::of(None).label(), "never ran");
         assert_eq!(NodeDisplay::skipped().label(), "skipped");
-        let waiting = NodeState::Waiting { external_ref: None };
+        let waiting = NodeState::Waiting {
+            on: NodeWait::Gate { external_ref: None },
+        };
         assert_eq!(NodeDisplay::of(Some(&waiting)).label(), "waiting");
     }
 
     #[test]
     fn a_waiting_node_reads_as_the_handle_it_waits_on() {
         let waiting = NodeState::Waiting {
-            external_ref: Some("https://forge/pr/7".to_string()),
+            on: NodeWait::Gate {
+                external_ref: Some("https://forge/pr/7".to_string()),
+            },
         };
         assert_eq!(
             NodeDisplay::of(Some(&waiting)).label(),
             "waiting — https://forge/pr/7"
+        );
+    }
+
+    /// A node that asked says what it asked, in the one sentence every
+    /// surface says it with.
+    #[test]
+    fn a_waiting_node_that_asked_names_its_questions() {
+        let waiting = NodeState::Waiting {
+            on: NodeWait::Questions {
+                asked: yunta_core::NonEmpty::new(vec![
+                    yunta_core::QuestionId::from("q-scope"),
+                    yunta_core::QuestionId::from("q-api"),
+                ])
+                .expect("a node that asked, asked something"),
+            },
+        };
+        assert_eq!(
+            NodeDisplay::of(Some(&waiting)).label(),
+            "waiting — asked 2 questions: `q-scope`, `q-api`"
         );
     }
 }
@@ -297,6 +335,14 @@ impl RunWord {
 }
 
 /// One spelling on the wire too: a document carries the word.
+/// A node's word travels as the word a reader sees, never as a variant
+/// name: one vocabulary for the page and for the document.
+impl serde::Serialize for StateWord {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.word())
+    }
+}
+
 impl serde::Serialize for RunWord {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(self.word())

@@ -16,7 +16,7 @@
 //! is ever one that run's own menu does not offer.
 
 use yunta_core::RunId;
-use yunta_engine::{RunPhase, WaitingOn};
+use yunta_engine::{NodeWait, RunPhase, WaitingOn};
 
 /// What a run is parked on, or `None` for a run nobody has to touch —
 /// the one answer that decides whether a surface says anything about a
@@ -43,11 +43,13 @@ pub(crate) fn parked(phase: &RunPhase) -> Option<&WaitingOn> {
 /// its own reason instead, collapsed onto that line.
 pub(crate) fn parked_on(on: &WaitingOn) -> String {
     match on {
-        WaitingOn::Node {
-            node, external_ref, ..
-        } => match external_ref {
-            Some(handle) => format!("node `{node}`, published at {handle}"),
-            None => format!("node `{node}`"),
+        WaitingOn::Node { node, on, .. } => match on {
+            NodeWait::Gate {
+                external_ref: Some(handle),
+            } => format!("node `{node}`, published at {handle}"),
+            NodeWait::Gate { external_ref: None } | NodeWait::Questions { .. } => {
+                format!("node `{node}`")
+            }
         },
         WaitingOn::Run { reason } => yunta_core::text::one_line(reason),
     }

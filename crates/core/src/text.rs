@@ -119,6 +119,29 @@ pub fn counted(n: usize, noun: &str) -> String {
     }
 }
 
+/// Identifiers as a reader sees a list of them, each in its own
+/// backticks — the one joiner every sentence about a set of ids uses.
+pub fn listed<'a>(ids: impl IntoIterator<Item = &'a str>) -> String {
+    ids.into_iter()
+        .map(|id| format!("`{id}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The one sentence for questions awaiting an answer: `asked 2
+/// questions: `q-scope`, `q-api``.
+///
+/// Every surface that says a node asked says it with these bytes — the
+/// chronicle, the node's own label, the reason a run parked — so a
+/// reader never meets the same fact spelled two ways.
+pub fn asked_questions(asked: &[crate::QuestionId]) -> String {
+    format!(
+        "asked {}: {}",
+        counted(asked.len(), "question"),
+        listed(asked.iter().map(crate::QuestionId::as_str))
+    )
+}
+
 /// The block `spec-tasks.md` §4 fixes: a heading naming what was read
 /// and how many problems it has, then one indented line per problem.
 ///

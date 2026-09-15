@@ -278,7 +278,7 @@ mod tests {
                 RunPhase::Waiting {
                     on: WaitingOn::Node {
                         node: NodeId::from_static("plan"),
-                        external_ref: None,
+                        on: yunta_engine::NodeWait::Gate { external_ref: None },
                         reason: None,
                     },
                 },
@@ -346,7 +346,7 @@ mod tests {
                     RunPhase::Waiting {
                         on: WaitingOn::Node {
                             node: NodeId::from_static(PARKED),
-                            external_ref: None,
+                            on: yunta_engine::NodeWait::Gate { external_ref: None },
                             reason: None,
                         },
                     },

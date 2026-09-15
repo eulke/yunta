@@ -25,6 +25,7 @@ use yunta_core::{
     AgentName, Capability, CommitSha, ContentHash, ModeName, NodeId, NodeKind, RunnerCandidate,
     TaskId, Workflow,
 };
+use yunta_engine::NodeWait;
 use yunta_engine::{
     run_frame, Counter, NodeStanding, NodeState, Percentiles, PriorEstimation, RunFrame, RunPhase,
     WaitingOn,
@@ -955,7 +956,9 @@ nodes:
         RunPhase::Waiting {
             on: WaitingOn::Node {
                 node: "approve".into(),
-                external_ref: Some("https://forge/pr/1".to_string()),
+                on: NodeWait::Gate {
+                    external_ref: Some("https://forge/pr/1".to_string())
+                },
                 reason: Some("waiting on external gate: https://forge/pr/1".to_string()),
             }
         }
@@ -970,7 +973,7 @@ fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
     // surface that had to read the log again for it could print a
     // sentence the frame beside it does not agree with.
     let workflow = chain();
-    let asked = "node `plan` asked 1 question(s) awaiting an answer: what changed?";
+    let asked = "node `plan` asked 1 question: `what-changed`";
     let events = log(vec![
         (0, None, created("standard")),
         (1, Some("plan"), started(1)),
@@ -989,7 +992,7 @@ fn a_parked_node_carries_the_sentence_its_own_pause_recorded() {
         RunPhase::Waiting {
             on: WaitingOn::Node {
                 node: "plan".into(),
-                external_ref: None,
+                on: NodeWait::Gate { external_ref: None },
                 reason: Some(asked.to_string()),
             }
         }
@@ -1029,7 +1032,7 @@ fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
         RunPhase::Waiting {
             on: WaitingOn::Node {
                 node: "plan".into(),
-                external_ref: None,
+                on: NodeWait::Gate { external_ref: None },
                 reason: None,
             }
         }

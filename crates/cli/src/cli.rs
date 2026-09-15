@@ -155,9 +155,11 @@ enum Command {
     /// Renders a workflow's DAG as Mermaid or DOT (`--format`) —
     /// optionally annotated with a run's derived state.
     Graph {
-        /// Path to the workflow YAML file.
-        workflow: PathBuf,
-        /// Annotate each node with its derived state from this run.
+        /// Path to the workflow YAML file, or a catalog name. Omitted
+        /// with `--run`, which draws the workflow that run froze.
+        workflow: Option<PathBuf>,
+        /// Draw the workflow this run froze, each node annotated with
+        /// the state its own log derives.
         #[arg(long)]
         run: Option<RunId>,
         /// Diagram language: `mermaid` (default) or `dot`.
@@ -377,7 +379,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             workflow,
             run,
             format,
-        } => graph::graph(&workflow, run.as_ref(), format),
+        } => graph::graph(workflow.as_deref(), run.as_ref(), format).await,
         Command::Test { dir } => commands::test::test(dir.as_deref()).await,
         Command::Verify { run_id } => commands::verify::verify(&run_id).await,
         Command::Receipt { run_id, json } => commands::receipt::receipt(&run_id, json).await,

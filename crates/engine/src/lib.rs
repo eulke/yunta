@@ -104,7 +104,7 @@ pub use live::{
     OpenSession, ToolCall,
 };
 pub use manifest::{build_manifest, FrozenRun, ManifestError};
-pub use modes::{dependencies_in_mode, mode_included_nodes};
+pub use modes::dependencies_in_mode;
 pub use observer::{Observed, RunObserver};
 pub use pack_audit::{
     audit_pack, NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit,
@@ -122,7 +122,7 @@ pub use receipt::{
     ScopeSummary,
 };
 pub use replay::{
-    dedup_findings, derive, unknown_kind_counts, NodeState, RunState, UnknownKindCount,
+    dedup_findings, derive, unknown_kind_counts, NodeState, NodeWait, RunState, UnknownKindCount,
 };
 pub use run::schedule::{decide, Decision, Policy as SchedulingPolicy};
 pub use run::{

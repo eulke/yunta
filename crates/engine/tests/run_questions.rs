@@ -25,10 +25,7 @@ async fn a_questions_artifact_pauses_the_run_after_its_own_session_already_close
 
     match &terminal {
         RunTerminal::Paused { reason } => {
-            assert_eq!(
-                *reason,
-                "node `ask` asked 2 question(s) awaiting an answer: `q1`, `q2`"
-            );
+            assert_eq!(*reason, "node `ask` asked 2 questions: `q1`, `q2`");
         }
         other => panic!("expected the run to pause on unanswered questions, got {other:?}"),
     }

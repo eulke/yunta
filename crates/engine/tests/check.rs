@@ -2003,3 +2003,48 @@ fn a_fan_out_is_refused_only_when_no_candidate_can_do_it() {
     let neither_can = check_against(&wf, &config, &|_| Some(yunta_core::Capabilities::default()));
     assert_eq!(neither_can.len(), 1, "{neither_can:?}");
 }
+
+/// A group inside a group. Every surface draws a group's children one
+/// step under it and the scheduler pairs each node with the group that
+/// holds it — both are exact at one level and false at two (D179).
+#[test]
+fn a_parallel_inside_a_parallel_is_refused() {
+    let nested = r#"
+name: nested
+nodes:
+  - id: outer
+    kind: parallel
+    nodes:
+      - id: inner
+        kind: parallel
+        nodes:
+          - { id: work, kind: bash, run: "true" }
+"#;
+    let wf: Workflow = serde_norway::from_str(nested).unwrap();
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::ParallelInsideParallel { node, group }
+                if node.as_str() == "inner" && group.as_str() == "outer"
+        )),
+        "got: {errors:?}"
+    );
+
+    let flat = r#"
+name: flat
+nodes:
+  - id: outer
+    kind: parallel
+    nodes:
+      - { id: a, kind: bash, run: "true" }
+      - { id: b, kind: bash, run: "true" }
+"#;
+    let wf: Workflow = serde_norway::from_str(flat).unwrap();
+    assert!(
+        !check(&wf, &ConfigLayer::default())
+            .iter()
+            .any(|e| matches!(e, CheckError::ParallelInsideParallel { .. })),
+        "one level of grouping is what the whole surface is exact about"
+    );
+}

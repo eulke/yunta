@@ -405,9 +405,7 @@ fn the_menu_a_person_reads_is_the_menu_a_program_reads() {
         "a fact that names itself carries no label invented for it: {state:#}"
     );
 
-    // Additive: the document a reader already parses is untouched —
-    // same version, same fields, one more of them.
-    assert_eq!(state["schema_version"], 4, "{state:#}");
+    assert_eq!(state["schema_version"], 5, "{state:#}");
     assert!(
         state["summary"]
             .as_str()
@@ -415,7 +413,12 @@ fn the_menu_a_person_reads_is_the_menu_a_program_reads() {
             .contains("paused — node `lint` failed"),
         "{state:#}"
     );
-    assert!(state["nodes"]["lint"].is_string(), "{state:#}");
+    assert!(
+        state["nodes"]
+            .as_array()
+            .is_some_and(|nodes| nodes.iter().any(|node| node["id"] == "lint")),
+        "{state:#}"
+    );
 }
 
 #[test]
@@ -579,7 +582,7 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
         "the summary counts the parked node and names it: {text}"
     );
     assert!(
-        text.contains("node `ask` asked 1 question(s) awaiting an answer: `summary`"),
+        text.contains("node `ask` asked 1 question: `summary`"),
         "the page names the question still unanswered, not only the node: {text}"
     );
     assert!(

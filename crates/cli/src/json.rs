@@ -18,11 +18,11 @@ use chrono::{DateTime, Utc};
 
 use yunta_core::events::{ArtifactId, EventPayload, Failure, NodeEvent, StoredEvent};
 use yunta_core::{ArtifactFailure, Diagnostic, FileProblem, Manifest, NodeId, RunId};
-use yunta_engine::{RunPhase, WaitingOn};
+use yunta_engine::{NodeFrame, NodeStanding, NodeWait, RunPhase, WaitingOn};
 
 use crate::commands::status::{decision, progress, task_status_label};
 use crate::error::{CliError, Outcome};
-use crate::render::state::RunWord;
+use crate::render::state::{RunWord, StateWord};
 use crate::render::NodeDisplay;
 
 /// The version stamped on every machine-readable document this CLI emits.
@@ -32,7 +32,7 @@ use crate::render::NodeDisplay;
 /// One number covers every `--json` document together, so a bump earned
 /// by one of them re-stamps all of them: a document whose own shape did
 /// not change still carries the new number.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// Serializes a DTO as pretty JSON to stdout — the one place a `--json`
 /// command prints its document, reporting a serialization failure as the
@@ -84,7 +84,12 @@ pub(crate) struct RunDocument {
     /// carrying any of them is work nobody has accepted, and the count
     /// is what says so to a reader with only this document.
     blocking_findings: usize,
-    nodes: BTreeMap<String, String>,
+    /// Every node the run's frozen workflow declares, in declaration
+    /// order, each `parallel` group followed by its own children — the
+    /// same list, in the same order, that `status` prints and that
+    /// `graph --run` draws. A list, not a map: the order is a fact
+    /// about the workflow, and a map cannot carry one.
+    nodes: Vec<NodeJson>,
     tasks: BTreeMap<String, &'static str>,
     /// Why each failed node failed, in the form a program can act on
     /// rather than parse back out of a sentence: one entry per declared
@@ -130,11 +135,7 @@ impl RunDocument {
             reason: reason(&frame.phase),
             budget_warning: None,
             blocking_findings: frame.blocking_findings,
-            nodes: state
-                .nodes
-                .iter()
-                .map(|(id, node)| (id.to_string(), NodeDisplay::of(node.state.as_ref()).label()))
-                .collect(),
+            nodes: frame.nodes.iter().map(NodeJson::of).collect(),
             tasks: state
                 .tasks
                 .iter()
@@ -204,6 +205,71 @@ fn parked_decision(
     ))
 }
 
+/// One node of the run's frozen workflow, as the document carries it.
+///
+/// The word and its detail are the two halves every surface shows, so a
+/// reader of this document and a reader of `status` are told the same
+/// thing about the same node.
+#[derive(serde::Serialize)]
+pub(crate) struct NodeJson {
+    id: String,
+    state: StateWord,
+    /// What qualifies the word — the outcome, the failure, the attempt
+    /// running, the questions it asked. Absent when the word says all
+    /// there is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+    /// The enclosing `parallel` group, absent for a top-level node.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    group: Option<String>,
+    /// What this node waits on, for a node that is waiting.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    waiting_on: Option<NodeWaitJson>,
+}
+
+impl NodeJson {
+    fn of(node: &NodeFrame) -> Self {
+        let display = NodeDisplay::standing(&node.state);
+        NodeJson {
+            id: node.id.to_string(),
+            state: display.word,
+            detail: display.modifier.clone(),
+            group: node.group.as_ref().map(ToString::to_string),
+            waiting_on: match &node.state {
+                NodeStanding::Reached(state) => state.waiting_on().map(NodeWaitJson::of),
+                _ => None,
+            },
+        }
+    }
+}
+
+/// What one waiting node waits on — the same vocabulary the run-level
+/// `waiting_on` uses, so the document says "waiting" one way.
+#[derive(serde::Serialize)]
+#[serde(tag = "on", rename_all = "snake_case")]
+pub(crate) enum NodeWaitJson {
+    Gate {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        external_ref: Option<String>,
+    },
+    Questions {
+        asked: Vec<String>,
+    },
+}
+
+impl NodeWaitJson {
+    fn of(on: &NodeWait) -> Self {
+        match on {
+            NodeWait::Gate { external_ref } => NodeWaitJson::Gate {
+                external_ref: external_ref.clone(),
+            },
+            NodeWait::Questions { asked } => NodeWaitJson::Questions {
+                asked: asked.as_slice().iter().map(ToString::to_string).collect(),
+            },
+        }
+    }
+}
+
 /// What a waiting run is waiting on.
 ///
 /// Tagged by `on`, so a reader matches on the shape instead of
@@ -217,9 +283,10 @@ pub(crate) enum WaitingOnJson {
     /// is the first in the workflow's declaration order.
     Node {
         node: String,
-        /// The forge's own handle for a published gate.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        external_ref: Option<String>,
+        /// What that node waits on, in the same shape a node of
+        /// `nodes` carries.
+        #[serde(flatten)]
+        waiting: NodeWaitJson,
         /// What the run's standing pause recorded, absent for a node
         /// parked while the run itself keeps moving.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -237,13 +304,9 @@ impl WaitingOnJson {
             return None;
         };
         Some(match on {
-            WaitingOn::Node {
-                node,
-                external_ref,
-                reason,
-            } => WaitingOnJson::Node {
+            WaitingOn::Node { node, on, reason } => WaitingOnJson::Node {
                 node: node.to_string(),
-                external_ref: external_ref.clone(),
+                waiting: NodeWaitJson::of(on),
                 reason: reason.clone(),
             },
             WaitingOn::Run { reason } => WaitingOnJson::Run {

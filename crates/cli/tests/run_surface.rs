@@ -11,7 +11,7 @@
 use std::path::Path;
 
 use yunta_testkit::{
-    git, run_id_from, stderr, stdout, write, yunta_in, yunta_on_terminal, Checkout,
+    git, run_id_from, stderr, stdout, write, yunta_in, yunta_on_terminal, Checkout, Terminal,
 };
 
 /// A repo with `wf.yaml` written and committed, and the state root to run
@@ -670,4 +670,77 @@ fn a_run_that_finished_holding_blocking_findings_is_not_a_success() {
         .unwrap_or_else(|e| panic!("status --json emits JSON: {e}"));
     assert_eq!(document["outcome"], "finished", "{document:#}");
     assert_eq!(document["blocking_findings"], 1, "{document:#}");
+}
+
+/// A `parallel` group holding the run open with its two children
+/// working: the region is on the terminal, drawn from the frame.
+const GROUPED: &str = r#"
+name: grouped
+nodes:
+  - id: sweep
+    kind: parallel
+    nodes:
+      - { id: sweep-a, kind: bash, scope: ["a/**"], run: "sleep 30" }
+      - { id: sweep-b, kind: bash, scope: ["b/**"], run: "sleep 30" }
+"#;
+
+/// The rows of the last painting that carried every one of `headlines`.
+///
+/// A painting goes out as one run of text between escape sequences, each
+/// row padded to the terminal's full width, so cutting that run into
+/// widths gives back the rows a reader was looking at — leading spaces
+/// and all.
+fn painted_rows(drawn: &str, headlines: &[String]) -> Vec<String> {
+    let painting = drawn
+        .split('\u{1b}')
+        .filter_map(|chunk| chunk.find(char::is_alphabetic).map(|end| &chunk[end + 1..]))
+        .rfind(|text| headlines.iter().all(|headline| text.contains(headline)))
+        .unwrap_or_else(|| panic!("one painting carrying {headlines:?}:\n{drawn}"));
+    painting
+        .chars()
+        .collect::<Vec<char>>()
+        .chunks(usize::from(Terminal::COLUMNS))
+        .map(|row| row.iter().collect())
+        .collect()
+}
+
+#[test]
+fn the_live_view_indents_a_groups_children_under_it() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = project(root.path(), GROUPED);
+    let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
+
+    // Both children, because the region draws a node once it is working
+    // and the two start in whichever order the scheduler reaches them:
+    // one of them alone is a painting the other is missing from.
+    for child in ["sweep-a", "sweep-b"] {
+        terminal.wait_for(child, "the region never drew the group's children");
+    }
+    let drawn = terminal.drawn();
+    let headline = |id: &str| format!("> run {id} ·");
+    let rows = painted_rows(&drawn, &["sweep", "sweep-a", "sweep-b"].map(headline));
+    let depth = |id: &str| {
+        let row = rows
+            .iter()
+            .find(|row| row.trim_start().starts_with(&headline(id)))
+            .unwrap_or_else(|| panic!("`{id}` has a row of its own:\n{rows:#?}"));
+        row.len() - row.trim_start().len()
+    };
+
+    assert!(
+        depth("sweep-a") > depth("sweep"),
+        "a group's children sit under the group:\n{rows:#?}"
+    );
+    assert_eq!(
+        depth("sweep-a"),
+        depth("sweep-b"),
+        "and level with each other:\n{rows:#?}"
+    );
+
+    terminal.interrupt();
+    assert!(
+        !terminal.ran_to_the_end(),
+        "a run stopped by a person is not a success:\n{}",
+        terminal.ended()
+    );
 }

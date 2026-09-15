@@ -115,9 +115,9 @@ pub enum Channel { Tty, Mcp }   // existe, sin cambios (D167); `Pr` llega con A-
 pub struct GateRecord { waiting: Option<(Escalation, Seq)>, resolved: Vec<(GateResolvedPayload, Seq)>, external_ref: Option<String>, approved_sha: Option<CommitSha>, rounds: Vec<QuestionRound> }
 pub struct QuestionRound { pub asked: (QuestionsAskedPayload, Seq), pub answered: Option<(QuestionsAnsweredPayload, Seq)> }
 impl GateLedger {
-    pub fn pending_questions(&self, node: &NodeId) -> Option<&QuestionsAskedPayload>;   // la última ronda sin respuesta
     pub fn answered_unfinished(&self, node: &NodeId) -> bool;                            // respondida después del último node_started y sin terminal después
 }
+// lo que un nodo preguntó y nadie respondió se lee de su estado, `NodeState::Waiting { on: NodeWait::Questions { asked } }` (M30), no de un segundo pliegue
 // W-11, hasta 2-03: RunState { …, pub answered_unfinished: BTreeSet<NodeId> } derivado en replay.rs::apply
 
 // crates/core/src/events/gates/happening.rs (M19, 5-05)
@@ -128,7 +128,7 @@ pub enum Happening { Escalated(Escalation), Resolved(GateResolvedPayload), Asked
 
 | evento | estado del nodo | además |
 |---|---|---|
-| `questions_asked` sobre `Running` | `Waiting { external_ref: None }`, guardando el estado previo como `gate_waiting` | `total_tokens += tokens_used`; cierra la contabilidad del intento |
+| `questions_asked` sobre `Running` | `Waiting { on: NodeWait::Questions { asked } }`, guardando el estado previo como `gate_waiting` | `total_tokens += tokens_used`; cierra la contabilidad del intento |
 | `questions_asked` sobre otro estado | `ReplayError::AskedWithoutStart { seq, node }` | |
 | `questions_answered` sobre `Waiting` | restaura el estado previo (`Running`); `answered_unfinished` gana el nodo | |
 | `questions_answered` sobre otro estado | `ReplayError::AnsweredWithoutAsk { seq, node }` | |
@@ -410,7 +410,7 @@ corre de punta a punta. Bajo §0.10 el contador de `format!` que construye
 
 **Espera a su fase:** `NonEmpty` y `QuestionsAsked::new` como constructor de
 dominio, `finish_node` absorbiendo `gate_exec.rs:188,490,570` (2-02, M03);
-`GateRecord.rounds`, `pending_questions`, `answered_unfinished` en `GateLedger`
+`GateRecord.rounds` y `answered_unfinished` en `GateLedger`
 (2-03, M04); `apply` exhaustivo por dominio (2-04, M05);
 `PauseReason::{Questions, AnswersRefused}` (3-01, M06); `waiting_step` y
 `answered_step` en `decide` (3-02, M07); `#[instrument]` en `execute_ask`
@@ -427,8 +427,8 @@ kind y sus dos reglas (4-02, M12); `text::counted` en la frase (4-03, M13);
 - **M03**: gana `QuestionsAsked::new(questions_hash, NonEmpty<QuestionId>, TokenUsage)`
   en `gates/payloads.rs`; la lista de emisores de `NodeFinished` pierde
   `questions_exec.rs:160` y dice "`node_close::finish_node`, único emisor".
-- **M04**: `GateRecord` gana `rounds: Vec<QuestionRound>`; `GateLedger::{pending_questions,
-  answered_unfinished}`; la fila "`questions_exec.rs:106-120` (attempt) pasa a
+- **M04**: `GateRecord` gana `rounds: Vec<QuestionRound>`; `GateLedger::answered_unfinished`;
+  la fila "`questions_exec.rs:106-120` (attempt) pasa a
   leer `NodeLedger`" se borra: la ronda no cuenta intentos; `NodeRecord.tokens_closed`
   suma `questions_asked.tokens_used`.
 - **M06**: `PauseReason` gana `Questions { node, pending }` y `AnswersRefused

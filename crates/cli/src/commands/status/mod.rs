@@ -16,13 +16,13 @@ pub(crate) mod progress;
 use yunta_core::events::{Failure, StoredEvent, TaskStatus};
 use yunta_core::Clock;
 use yunta_core::{Manifest, NodeId, RunId};
-use yunta_engine::{NodeState, RunPhase};
+use yunta_engine::{NodeState, RunFrame, RunPhase};
 
 use crate::commands::advice;
 use crate::context::Context;
 use crate::error::note;
 use crate::error::{CliError, Outcome};
-use crate::render::{indent, NodeDisplay, INDENT};
+use crate::render::{indent, NodeDisplay, CHILD_DEPTH, INDENT};
 
 pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -49,23 +49,35 @@ pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     }
 
     let frame = progress::frame(run_id, &manifest, &events, now);
+    let state = yunta_engine::derive(&events);
     println!("run {run_id}: {}", progress::summary(&frame));
-    print_derived(&yunta_engine::derive(&events));
+    print_derived(&frame, &state);
     print_decision(run_id, &manifest, &events, &frame.phase);
     Ok(Outcome::Success)
 }
 
-/// The detail under the summary: every node and every task by its own
-/// derived state, what each failure names, and what the run has spent.
-fn print_derived(state: &yunta_engine::RunState) {
-    if !state.nodes.is_empty() {
+/// The detail under the summary: every node the run's frozen workflow
+/// declares and every task the log registered, what each failure names,
+/// and what the run has spent.
+///
+/// The nodes come from the frame — declaration order, each `parallel`
+/// group followed by its own children, the ones this mode leaves out
+/// among them and labelled `skipped`. One derivation for the whole
+/// page: the same list, in the same order, the live view draws.
+fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState) {
+    if !frame.nodes.is_empty() {
         println!("nodes:");
-        let mut nodes: Vec<_> = state.nodes.iter().collect();
-        nodes.sort_by(|a, b| a.0.cmp(b.0));
-        for (id, node) in nodes {
+        for node in &frame.nodes {
+            // A group's children sit one step under it, exactly as the
+            // live view and the chronicle place what belongs to a node.
+            let under = match node.group {
+                Some(_) => indent(1 + CHILD_DEPTH),
+                None => INDENT.to_string(),
+            };
             println!(
-                "{INDENT}{id}: {}",
-                NodeDisplay::of(node.state.as_ref()).label()
+                "{under}{}: {}",
+                node.id,
+                NodeDisplay::standing(&node.state).label()
             );
         }
     }
@@ -79,7 +91,7 @@ fn print_derived(state: &yunta_engine::RunState) {
         }
     }
 
-    print_failures(state);
+    print_failures(frame, state);
 
     println!(
         "tokens: {} in / {} out",
@@ -118,12 +130,12 @@ fn print_decision(run_id: &RunId, manifest: &Manifest, events: &[StoredEvent], p
 /// person opens to find out what went wrong unable to say. A node that
 /// failed on two artifacts says which problem came from which, because
 /// the log records each document's problems with the document.
-fn print_failures(state: &yunta_engine::RunState) {
-    let mut failed: Vec<(&NodeId, &Failure)> = state
+fn print_failures(frame: &RunFrame, state: &yunta_engine::RunState) {
+    let failed: Vec<(&NodeId, &Failure)> = frame
         .nodes
         .iter()
-        .filter_map(|(id, record)| match &record.state {
-            Some(NodeState::Failed { failure, .. }) => Some((id, failure)),
+        .filter_map(|node| match state.nodes.state(&node.id) {
+            Some(NodeState::Failed { failure, .. }) => Some((&node.id, failure)),
             _ => None,
         })
         .filter(|(_, failure)| match failure {
@@ -134,7 +146,6 @@ fn print_failures(state: &yunta_engine::RunState) {
     if failed.is_empty() {
         return;
     }
-    failed.sort_by(|a, b| a.0.cmp(b.0));
     println!("failures:");
     // A document's problems hang under the node that named it, which is
     // itself one step under the heading.

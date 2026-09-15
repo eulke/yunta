@@ -9,7 +9,7 @@
 
 use yunta_core::events::EventShapeError;
 use yunta_core::events::*;
-use yunta_core::{Capability, NonEmpty, RunId};
+use yunta_core::{Capability, NonEmpty, QuestionId, RunId};
 use yunta_testkit_core::all_kinds;
 
 /// A compile-time guard for [`all_kinds`], not a runtime check. The match has
@@ -588,4 +588,49 @@ fn a_baseline_captured_written_without_an_origin_reads_as_measured() {
 
     assert_eq!(read.origin, BaselineOrigin::Measured);
     assert_eq!(read.command, "cargo test");
+}
+
+/// What a node waits on is a fact about the node, and the two waits are
+/// not the same fact: a gate has a handle, a node that asked has the
+/// questions nobody answered.
+#[test]
+fn a_node_that_asked_waits_on_its_questions_in_its_own_state() {
+    let asked = NonEmpty::new(vec![QuestionId::from("q-scope"), QuestionId::from("q-api")])
+        .expect("a node that asked, asked something");
+    let waiting = NodeState::Waiting {
+        on: NodeWait::Questions {
+            asked: asked.clone(),
+        },
+    };
+    let Some(NodeWait::Questions { asked: held }) = waiting.waiting_on() else {
+        panic!("a node that asked says what it asked: {waiting:?}");
+    };
+    assert_eq!(held, &asked);
+
+    let gate = NodeState::Waiting {
+        on: NodeWait::Gate {
+            external_ref: Some("https://forge/pr/1".to_string()),
+        },
+    };
+    assert_ne!(
+        gate, waiting,
+        "a published gate and an unanswered question are two different waits"
+    );
+}
+
+/// The one sentence every surface says a node's unanswered questions
+/// with — the node's own label, the run's pause, the chronicle.
+#[test]
+fn questions_awaiting_an_answer_are_said_one_way() {
+    assert_eq!(
+        yunta_core::text::asked_questions(&[QuestionId::from("q-scope")]),
+        "asked 1 question: `q-scope`"
+    );
+    assert_eq!(
+        yunta_core::text::asked_questions(&[
+            QuestionId::from("q-scope"),
+            QuestionId::from("q-api")
+        ]),
+        "asked 2 questions: `q-scope`, `q-api`"
+    );
 }

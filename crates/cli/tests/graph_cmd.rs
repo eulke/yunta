@@ -97,7 +97,7 @@ nodes:
         })
         .expect("run id in output");
 
-    let output = yunta_in!(&repo, &home, &["graph", "wf.yaml", "--run", &run_id]);
+    let output = yunta_in!(&repo, &home, &["graph", "--run", &run_id]);
     assert!(
         output.status.success(),
         "stdout: {}\nstderr: {}",
@@ -197,7 +197,7 @@ fn labels_are_escaped() {
     // it did, its `"`/`<`/`>` would break the syntax.
     let raw = "a\"b<c>d&e";
 
-    let mermaid = yunta_in!(&repo, &home, &["graph", "wf.yaml", "--run", &run_id]);
+    let mermaid = yunta_in!(&repo, &home, &["graph", "--run", &run_id]);
     assert!(
         mermaid.status.success(),
         "stderr: {}",
@@ -218,7 +218,7 @@ fn labels_are_escaped() {
     let dot = yunta_in!(
         &repo,
         &home,
-        &["graph", "wf.yaml", "--run", &run_id, "--format", "dot"]
+        &["graph", "--run", &run_id, "--format", "dot"]
     );
     assert!(
         dot.status.success(),
@@ -295,7 +295,7 @@ nodes:
     let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--mode", "quick"]);
     let run_id = run_id_from(&run);
 
-    let output = yunta_in!(&repo, &home, &["graph", "wf.yaml", "--run", &run_id]);
+    let output = yunta_in!(&repo, &home, &["graph", "--run", &run_id]);
     assert!(
         output.status.success(),
         "stderr: {}",
@@ -305,4 +305,76 @@ nodes:
     assert!(text.contains("first: failed"), "got: {text}");
     assert!(text.contains("blocked: never ran"), "got: {text}");
     assert!(text.contains("excluded: skipped"), "got: {text}");
+}
+
+/// `--run` draws the workflow that run froze, not the file beside it,
+/// and a `parallel` group is one box with its children inside.
+#[test]
+fn graph_with_a_run_id_draws_the_runs_frozen_workflow_with_its_groups_as_subgraphs() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: grouped
+nodes:
+  - id: review
+    kind: parallel
+    nodes:
+      - { id: review-a, kind: bash, run: "true" }
+      - { id: review-b, kind: bash, run: "true" }
+"#,
+    );
+    let run_id = run_id_from(&yunta_in!(&repo, &home, &["run", "wf.yaml"]));
+
+    // The file says something else by now; the diagram is of the run.
+    write(
+        &repo.join("wf.yaml"),
+        "name: grouped\nnodes:\n  - { id: elsewhere, kind: bash, run: \"true\" }\n",
+    );
+
+    let text = stdout(&yunta_in!(&repo, &home, &["graph", "--run", &run_id]));
+    assert!(
+        text.contains("subgraph review[\"review:"),
+        "the group is one box: {text}"
+    );
+    assert!(
+        text.contains("    review-a[\"review-a:") && text.contains("    review-b[\"review-b:"),
+        "its children are inside it: {text}"
+    );
+    assert!(
+        !text.contains("elsewhere"),
+        "the run's own frozen workflow, not the file beside it: {text}"
+    );
+}
+
+/// One source, always: naming a file and a run at once is two answers
+/// to the same question.
+#[test]
+fn graph_refuses_a_workflow_and_a_run_at_once() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(&repo.join("wf.yaml"), WORKFLOW);
+    let run_id = run_id_from(&yunta_in!(&repo, &home, &["run", "wf.yaml"]));
+
+    let output = yunta_in!(&repo, &home, &["graph", "wf.yaml", "--run", &run_id]);
+    assert!(!output.status.success());
+    let refusal = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(
+        refusal.contains("draws one workflow") && refusal.contains("Drop one of the two"),
+        "the refusal names both sources and what to do: {refusal}"
+    );
+
+    let output = yunta_in!(&repo, &home, &["graph"]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("needs a workflow"),
+        "and naming neither is refused the same way"
+    );
 }

@@ -76,7 +76,9 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
         matches!(
             state.nodes.state("approve"),
             Some(NodeState::Waiting {
-                external_ref: Some(_)
+                on: yunta_engine::NodeWait::Gate {
+                    external_ref: Some(_)
+                }
             })
         ),
         "a published unresolved gate must derive Waiting with its PR ref, got {:?}",

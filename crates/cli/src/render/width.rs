@@ -27,6 +27,12 @@ pub(crate) const INDENT: &str = "  ";
 /// the blocks that are *indented*.
 pub(crate) const INDENT_WIDTH: usize = INDENT.len();
 
+/// How deep a thing that belongs to a node sits under it: a child run
+/// under the node that bore it, a `parallel` group's children under the
+/// group. One step, fixed by D179 — a surface that indented one of them
+/// further would say they belong to different things.
+pub(crate) const CHILD_DEPTH: usize = 1;
+
 /// `depth` steps of [`INDENT`], for a caller that places a line at a
 /// known depth rather than under the line above it.
 pub(crate) fn indent(depth: usize) -> String {

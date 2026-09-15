@@ -58,34 +58,49 @@ pub(super) fn read_as(verified: &crate::artifacts::VerifiedArtifact) -> String {
     use crate::artifacts::ArtifactContent;
     match &verified.content {
         ArtifactContent::Opaque => "Verified by existence and content hash.".to_string(),
-        ArtifactContent::Tasks(tasks) => format!(
-            "{} task(s) registered: {}",
+        ArtifactContent::Tasks(tasks) => counted_names(
             tasks.tasks.len(),
-            names(tasks.tasks.iter().map(|t| t.id.to_string()))
+            "task",
+            "registered",
+            tasks.tasks.iter().map(|t| t.id.to_string()),
         ),
-        ArtifactContent::Findings(findings) => format!(
-            "{} finding(s) posted: {}",
+        ArtifactContent::Findings(findings) => counted_names(
             findings.len(),
-            names(findings.iter().map(|f| f.id.to_string()))
+            "finding",
+            "posted",
+            findings.iter().map(|f| f.id.to_string()),
         ),
-        ArtifactContent::Questions(questions) => format!(
-            "{} question(s) to answer: {}",
+        ArtifactContent::Questions(questions) => counted_names(
             questions.len(),
-            names(questions.iter().map(|q| q.id.to_string()))
+            "question",
+            "to answer",
+            questions.iter().map(|q| q.id.to_string()),
         ),
-        ArtifactContent::Answers(answers) => format!(
-            "{} question(s) answered: {}",
+        ArtifactContent::Answers(answers) => counted_names(
             answers.len(),
-            names(answers.iter().map(|answer| answer.id.to_string()))
+            "question",
+            "answered",
+            answers.iter().map(|answer| answer.id.to_string()),
         ),
     }
 }
 
-fn names(ids: impl Iterator<Item = String>) -> String {
-    let ids: Vec<String> = ids.map(|id| format!("`{id}`")).collect();
-    if ids.is_empty() {
-        "none".to_string()
-    } else {
-        ids.join(", ")
-    }
+/// `2 questions to answer: `q-a`, `q-b`` — how many of what, what
+/// happened to them, and which ones, through the workspace's one
+/// counter and its one joiner.
+fn counted_names(
+    how_many: usize,
+    noun: &str,
+    happened: &str,
+    ids: impl Iterator<Item = String>,
+) -> String {
+    let ids: Vec<String> = ids.collect();
+    let listed = match ids.is_empty() {
+        true => "none".to_string(),
+        false => yunta_core::text::listed(ids.iter().map(String::as_str)),
+    };
+    format!(
+        "{} {happened}: {listed}",
+        yunta_core::text::counted(how_many, noun)
+    )
 }

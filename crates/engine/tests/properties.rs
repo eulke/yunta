@@ -366,7 +366,9 @@ fn every_cut_of_a_questions_round_derives_what_a_resume_acts_on() {
         assert!(
             matches!(
                 at(k).nodes.state(&grill),
-                Some(yunta_engine::NodeState::Waiting { external_ref: None })
+                Some(yunta_engine::NodeState::Waiting {
+                    on: yunta_engine::NodeWait::Questions { .. }
+                })
             ),
             "waiting on its questions at {k}: {:?}",
             at(k).nodes.state(&grill)

@@ -31,12 +31,12 @@ use yunta_core::events::{
     GateResolvedPayload, GrantLedger, NodeEvent, NodeLedger, RunLedger, StoredEvent, TaskLedger,
     TokenUsage,
 };
-use yunta_core::{NodeId, Seq, TaskId};
+use yunta_core::{NodeId, NonEmpty, Seq, TaskId};
 
 /// Re-exported where it has always been read from: the node states this
 /// module derives are `yunta_core::events`' to define now, and every
 /// caller keeps naming them here.
-pub use yunta_core::events::NodeState;
+pub use yunta_core::events::{NodeState, NodeWait};
 
 /// Every fold of a run's log, in one value.
 ///
@@ -295,7 +295,9 @@ impl RunState {
                 self.nodes.set_state(
                     &node,
                     Some(NodeState::Waiting {
-                        external_ref: p.external_ref().map(str::to_string),
+                        on: NodeWait::Gate {
+                            external_ref: p.external_ref().map(str::to_string),
+                        },
                     }),
                 );
             }
@@ -316,14 +318,29 @@ impl RunState {
                         node,
                     });
                 }
+                // A `questions_asked` with no ids is not a wait: its
+                // constructor refuses one, so a log that holds it came
+                // from somewhere else. The node stays as it was and the
+                // event is named, which is what a production fold owes
+                // instead of a panic.
+                let Some(asked) = NonEmpty::new(p.questions.clone()) else {
+                    return Err(ReplayError::AskedNothing {
+                        seq: stored.seq,
+                        node,
+                    });
+                };
                 // The attempt's accounting closes here: the session that
                 // asked is done, and no reader counts it again while the
                 // node waits.
                 self.nodes.add_closed_tokens(&node, p.tokens_used);
                 self.pre_gate
                     .insert(node.clone(), self.nodes.state(&node).cloned());
-                self.nodes
-                    .set_state(&node, Some(NodeState::Waiting { external_ref: None }));
+                self.nodes.set_state(
+                    &node,
+                    Some(NodeState::Waiting {
+                        on: NodeWait::Questions { asked },
+                    }),
+                );
             }
             GateEvent::QuestionsAnswered(_) => {
                 if !matches!(self.nodes.state(&node), Some(NodeState::Waiting { .. })) {
@@ -450,6 +467,8 @@ pub enum ReplayError {
     AskedWithoutStart { seq: Seq, node: NodeId },
     #[error("seq {seq}: node `{node}` got questions_answered without a matching questions_asked")]
     AnsweredWithoutAsk { seq: Seq, node: NodeId },
+    #[error("seq {seq}: node `{node}` got questions_asked naming no question to answer")]
+    AskedNothing { seq: Seq, node: NodeId },
     #[error("seq {seq}: task `{task}` got task_status_changed without a prior task_registered")]
     StatusWithoutTask { seq: Seq, task: TaskId },
 }

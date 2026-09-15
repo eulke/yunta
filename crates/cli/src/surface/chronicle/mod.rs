@@ -19,11 +19,8 @@ use yunta_core::text::{aside, one_line};
 use yunta_engine::{Happening, Moment};
 
 use super::view;
-use crate::render::{indent, Glyphs, StateWord};
+use crate::render::{indent, Glyphs, StateWord, CHILD_DEPTH};
 use words::carried;
-
-/// How deep a child sits under the node that bore it.
-const CHILD_DEPTH: usize = 1;
 
 /// One moment as a surface says it, before any layout decides where it
 /// goes.

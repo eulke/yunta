@@ -525,7 +525,7 @@ async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
     assert!(!is_error, "got: {text}");
     assert!(text.contains("tasks — ok"), "{text}");
     assert!(
-        text.contains("1 task(s) registered: `t1`"),
+        text.contains("1 task registered: `t1`"),
         "the session sees its meaning survived, not only its syntax: {text}"
     );
 }
@@ -579,7 +579,7 @@ async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() 
     assert!(!is_error, "got: {text}");
     assert!(text.contains("tasks — ok"), "{text}");
     assert!(
-        text.contains("1 task(s) registered: `t1`"),
+        text.contains("1 task registered: `t1`"),
         "the verdict is about the document the run holds: {text}"
     );
 }

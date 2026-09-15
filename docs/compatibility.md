@@ -194,7 +194,8 @@ A report names the document it is about: its `path`, and its `kind` — one of t
 artifact kinds, or `workflow` for the file a run is created from. A workflow is
 read the same way every other document is, so a graph that breaks its own rules —
 an id declared twice, a reference that reaches nothing, two `parallel` children
-that can touch the same files, a mode that leaves the graph unable to run —
+that can touch the same files, a `parallel` group inside another, a mode that
+leaves the graph unable to run —
 reaches a reader as the same report a tasks document does. A diagnostic's subject,
 under `of`, names the entry the problem is about; for a workflow that is `node`.
 
@@ -277,7 +278,7 @@ that group is ordered by run id alone.
 
 ## The JSON surfaces
 
-`stats --json`, `status --json` and `run --json` carry `schema_version: 4`. The
+`stats --json`, `status --json` and `run --json` carry `schema_version: 5`. The
 three share one stamp, so all of them carry the new number even though only the
 run document changed shape.
 
@@ -351,10 +352,24 @@ Absent otherwise, and always absent from `resume --json`: the estimation belongs
 to whoever *creates* a run.
 
 `status --json` carries `waiting_on` for a parked run, tagged by `on`:
-`{"on": "node", "node", "external_ref"?, "reason"?}` when a node is parked on a
-person, `{"on": "run", "reason"}` when the run itself stopped. `summary` says the
-same thing inside a sentence that also carries the run's counters; this is the
-pause on its own.
+`{"on": "gate", "node", "external_ref"?, "reason"?}` when a node is parked on a
+gate, `{"on": "questions", "node", "asked": [...], "reason"?}` when it is parked
+on questions nobody answered, and `{"on": "run", "reason"}` when the run itself
+stopped. `summary` says the same thing inside a sentence that also carries the
+run's counters; this is the pause on its own.
+
+`status --json` carries `nodes` as a **list**, in the order the run's frozen
+workflow declares them, each `parallel` group followed by its own children —
+the same list, in the same order, that `status` prints and that `graph --run`
+draws. Every declared node is in it, the ones this run's mode leaves out
+included and marked `skipped`; a node the log never mentioned is in it too,
+because a document that left it out could not say whether the run is still on
+its way there or never going. Each entry is `{id, state, detail?, group?,
+waiting_on?}`: `state` is the word every text surface prints for a node, `detail`
+is what qualifies it, `group` names the enclosing `parallel` group, and
+`waiting_on` carries the wait in the same shape the run-level one uses.
+`tasks` and `diagnostics` stay maps: a reader indexes those by id, and they
+carry no order of their own.
 
 A parked run's `decision.evidence` is a list of the facts the engine attached,
 each `{label?, value}` — the escalation as the log holds it, not the lines a

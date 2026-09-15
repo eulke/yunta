@@ -226,3 +226,49 @@ fn a_run_born_holding_a_baseline_is_never_told_to_measure() {
         "a run born holding its lineage's measurement owes nothing"
     );
 }
+
+/// What the node waits on decides what the run does about it, never
+/// what kind of node it is: a gate node whose own questions are
+/// unanswered is asked again, not republished.
+#[test]
+fn a_node_waiting_on_questions_is_never_taken_for_a_gate() {
+    let workflow: Workflow = yunta_core::yaml::parse(
+        r#"
+name: asking
+nodes:
+  - id: ask
+    kind: prompt
+    runner: executor
+    prompt: "ask"
+    artifacts: { produces: [questions] }
+"#,
+    )
+    .expect("the test workflow parses");
+
+    let asked = log(vec![
+        (None, created()),
+        (
+            Some("ask"),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        ),
+        (
+            Some("ask"),
+            EventPayload::Gates(yunta_core::events::GateEvent::QuestionsAsked(
+                yunta_core::events::QuestionsAskedPayload::new(
+                    ContentHash::sha256(b"questions"),
+                    vec!["scope".into()],
+                    TokenUsage::default(),
+                )
+                .expect("a node that asked, asked something"),
+            )),
+        ),
+    ]);
+
+    assert_eq!(
+        decide(&workflow, &derive(&asked), &policy()),
+        Decision::AskQuestions {
+            node: NodeId::from("ask")
+        },
+        "a wait on questions is a wait on questions, whatever the node is"
+    );
+}

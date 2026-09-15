@@ -30,7 +30,7 @@
 
 use std::collections::HashSet;
 
-use yunta_core::events::{PauseReason, RerouteCause, ResumePolicy};
+use yunta_core::events::{NodeWait, PauseReason, RerouteCause, ResumePolicy};
 use yunta_core::{DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, Workflow};
 
 use crate::modes::dependencies_in_mode;
@@ -410,40 +410,43 @@ fn gate_step(board: &Board<'_>) -> Option<Decision> {
 }
 
 /// Nodes the log derives as `waiting` — a human's move next, one at a
-/// time: a published gate polls its forge, a node with declared
-/// questions asks them, and anything else `Waiting` (only reachable
-/// through a crash inside the tiny window between a paired
-/// waiting/resolved emission) restarts like any orphan would.
+/// time: a published gate polls its forge, a node that asked asks
+/// again, and anything else `Waiting` (only reachable through a crash
+/// inside the tiny window between a paired waiting/resolved emission)
+/// restarts like any orphan would.
+///
+/// What the node waits on decides, never what kind of node it is: a
+/// node waiting on its own questions is never taken for a gate, however
+/// it is declared.
 fn waiting_step(board: &Board<'_>) -> Option<Decision> {
     for node in board.nodes.iter().copied() {
-        let Some(NodeState::Waiting { external_ref }) = board.state.nodes.state(&node.id) else {
+        let Some(NodeState::Waiting { on }) = board.state.nodes.state(&node.id) else {
             continue;
         };
-        if is_gate(node) {
+        match on {
             // A gate waiting with no recorded handle is republished
             // (external) or asked again (internal) rather than stuck.
-            return Some(match (external_ref, is_external_gate(node)) {
-                (Some(external_ref), _) => Decision::PollGate {
+            // Whether it is external is a property of the declaration.
+            NodeWait::Gate { external_ref } => {
+                return Some(match (external_ref, is_external_gate(node)) {
+                    (Some(external_ref), _) => Decision::PollGate {
+                        node: node.id.clone(),
+                        external_ref: external_ref.clone(),
+                    },
+                    (None, true) => Decision::PublishGate {
+                        node: node.id.clone(),
+                    },
+                    (None, false) => Decision::ResolveInternalGate {
+                        node: node.id.clone(),
+                    },
+                });
+            }
+            NodeWait::Questions { .. } => {
+                return Some(Decision::AskQuestions {
                     node: node.id.clone(),
-                    external_ref: external_ref.clone(),
-                },
-                (None, true) => Decision::PublishGate {
-                    node: node.id.clone(),
-                },
-                (None, false) => Decision::ResolveInternalGate {
-                    node: node.id.clone(),
-                },
-            });
+                });
+            }
         }
-        if node.asks() {
-            return Some(Decision::AskQuestions {
-                node: node.id.clone(),
-            });
-        }
-        return Some(Decision::Execute(vec![(
-            node.id.clone(),
-            board.next_attempt(&node.id),
-        )]));
     }
     None
 }

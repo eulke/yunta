@@ -156,12 +156,6 @@ pub enum PauseReason {
 /// limit has the same two ways past it whichever limit it was.
 const PAST_THE_CAP: &str = "resume with an interactive surface to continue past the cap or abort";
 
-/// Identifiers as a reader sees a list of them, each in its own
-/// backticks. `sep` closes one pair and opens the next.
-fn listed<'a>(ids: impl IntoIterator<Item = &'a str>) -> String {
-    ids.into_iter().collect::<Vec<_>>().join("`, `")
-}
-
 impl std::fmt::Display for PauseReason {
     /// The one line a reader sees for a parked run. Every surface — the
     /// listing's row, the status heading, the line a resume echoes —
@@ -183,18 +177,18 @@ impl std::fmt::Display for PauseReason {
             PauseReason::ExternalGate { url } => write!(f, "waiting on external gate: {url}"),
             PauseReason::UncertainOrphans(nodes) => write!(
                 f,
-                "node(s) `{}` were running with no terminal event when the engine last \
+                "node(s) {} were running with no terminal event when the engine last \
                  stopped — `on_interrupt: fail_if_uncertain` refuses to guess whether they \
                  finished; verify manually before resuming",
-                listed(nodes.iter().map(NodeId::as_str))
+                crate::text::listed(nodes.iter().map(NodeId::as_str))
             ),
             PauseReason::NodeFailed { node, failure } => {
                 write!(f, "node `{node}` failed: {failure}")
             }
             PauseReason::Blocked { node, on } => write!(
                 f,
-                "no node is runnable: `{node}` waits on `{}`, which this run left unresolved",
-                listed(on.iter().map(NodeId::as_str))
+                "no node is runnable: `{node}` waits on {}, which this run left unresolved",
+                crate::text::listed(on.iter().map(NodeId::as_str))
             ),
             PauseReason::GateAborted { node, free_text } => f.write_str(&crate::text::detailed(
                 format!("node `{node}`'s gate was resolved to abort"),
@@ -205,9 +199,8 @@ impl std::fmt::Display for PauseReason {
             }
             PauseReason::Questions { node, pending } => write!(
                 f,
-                "node `{node}` asked {} question(s) awaiting an answer: `{}`",
-                pending.len(),
-                listed(pending.as_slice().iter().map(QuestionId::as_str))
+                "node `{node}` {}",
+                crate::text::asked_questions(pending.as_slice())
             ),
             PauseReason::AnswersRefused { node, report } => {
                 write!(f, "node `{node}`'s answers were refused: {report}")

@@ -16,8 +16,8 @@ use crate::events::meta::EventMeta;
 use crate::events::node::kinds::NodeEvent;
 use crate::events::node::payloads::{DiscardedCandidate, NodeReroutedPayload, RerouteOrigin};
 use crate::events::{Failure, TokenUsage};
-use crate::ids::{NodeId, RunnerName, Seq};
-use crate::RunnerCandidate;
+use crate::ids::{NodeId, QuestionId, RunnerName, Seq};
+use crate::{NonEmpty, RunnerCandidate};
 
 /// One node's derived lifecycle state. An enum, not booleans: there is
 /// no combination of flags to get wrong.
@@ -40,14 +40,37 @@ pub enum NodeState {
         /// attempt at this node.
         retryable: bool,
     },
-    /// Waiting on a human — a published, unresolved gate (`gate_waiting`
-    /// with no `gate_resolved` after it), or a node that asked
-    /// (`questions_asked` with no `questions_answered` after it).
-    /// `external_ref` is the forge's handle (a PR URL) for external
-    /// gates, `None` for everything else.
+    /// Waiting on a human, and on what.
     Waiting {
-        external_ref: Option<String>,
+        on: NodeWait,
     },
+}
+
+/// What a waiting node waits on.
+///
+/// A gate's kind — internal or external — is a property of the
+/// declaration, never of the wait: the scheduler reads it from the
+/// workflow, and the state says only whether a handle was recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeWait {
+    /// A published, unresolved gate (`gate_waiting` with no
+    /// `gate_resolved` after it). `external_ref` is the forge's handle
+    /// (a PR URL) once one is recorded, `None` for an internal gate.
+    Gate { external_ref: Option<String> },
+    /// The questions the node asked and nobody answered
+    /// (`questions_asked` with no `questions_answered` after it).
+    Questions { asked: NonEmpty<QuestionId> },
+}
+
+impl NodeState {
+    /// What this node waits on, for a reader that has a state and wants
+    /// the wait without matching the whole enum.
+    pub fn waiting_on(&self) -> Option<&NodeWait> {
+        match self {
+            NodeState::Waiting { on } => Some(on),
+            _ => None,
+        }
+    }
 }
 
 /// A re-route as `node_rerouted` recorded it, on the node it left.

@@ -59,8 +59,8 @@ nodes:
     );
     let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(state["summary"], "2/2 nodes · 0 reroutes · finished");
-    assert_eq!(state["nodes"]["touch"], "finished — exit 0");
-    assert_eq!(state["nodes"]["verify"], "finished — exit 0");
+    assert_eq!(node_of(&state, "touch"), finished_node("touch"));
+    assert_eq!(node_of(&state, "verify"), finished_node("verify"));
 
     // Resuming a finished run is a clean no-op.
     let resume = yunta_in!(&repo, &home, &["resume", &run_id]);
@@ -2075,9 +2075,25 @@ nodes:
     let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
     let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(
-        state["nodes"]["verify"], "failed — exit 1",
+        node_of(&state, "verify"),
+        serde_json::json!({"id": "verify", "state": "failed", "detail": "exit 1"}),
         "a command that said nothing is quoted with nothing promised: {state:#}"
     );
+}
+
+/// The entry `nodes` carries for `id` — a list now, in the order the
+/// workflow declares its nodes.
+fn node_of(document: &serde_json::Value, id: &str) -> serde_json::Value {
+    document["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.iter().find(|node| node["id"] == id))
+        .cloned()
+        .unwrap_or_else(|| panic!("`{id}` is one of the run's nodes: {document:#}"))
+}
+
+/// The entry a bash node that exited cleanly renders as.
+fn finished_node(id: &str) -> serde_json::Value {
+    serde_json::json!({"id": id, "state": "finished", "detail": "exit 0"})
 }
 
 // --- `yunta run --detach` ------------------------------------------------

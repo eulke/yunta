@@ -1,19 +1,26 @@
-//! `yunta graph <workflow> [--run <id>] [--format mermaid|dot]`: pure
+//! `yunta graph <workflow> | --run <id> [--format mermaid|dot]`: pure
 //! derivation of the DAG — `depends_on` edges, `on_failure.goto`
-//! re-route edges visually differentiated (dashed) from them, and,
-//! given `--run`, every node annotated with the state that run's event
-//! log derives for it (`yunta_engine::derive`). No agent involved in
+//! re-route edges visually differentiated (dashed) from them, each
+//! `parallel` group drawn with its children inside it, and, given
+//! `--run`, every node annotated with the state that run's event log
+//! derives for it (`yunta_engine::derive`). No agent involved in
 //! producing the graph itself, same shape as `status`.
+//!
+//! Exactly one source (D179): a path or a catalog name reads the
+//! workflow off disk, `--run` draws the one that run froze into its
+//! manifest. Naming both is refused — a run's diagram is of the run,
+//! and the file beside it may say something else by now.
 
 use std::collections::HashMap;
 use std::path::Path;
 
-use yunta_core::{NodeId, RunId, Workflow};
+use yunta_core::{Clock, NodeId, RunId, Workflow};
 
 use crate::commands::{check_or_refuse, resolve_workflow_ref};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::render::NodeDisplay;
+use yunta_engine::RunFrame;
 
 type Labels = HashMap<NodeId, String>;
 
@@ -24,23 +31,46 @@ pub enum GraphFormat {
     Dot,
 }
 
-pub fn graph(
-    workflow_path: &Path,
+pub async fn graph(
+    workflow_path: Option<&Path>,
     run_id: Option<&RunId>,
     format: GraphFormat,
 ) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
 
-    // A bare catalog name resolves the same way `check` and `run` resolve
-    // it — `graph review` works without spelling out the path.
-    let workflow_path = resolve_workflow_ref(&ctx.cwd, workflow_path)?;
-    let workflow = crate::load_workflow(&workflow_path)?;
-
-    check_or_refuse(&ctx.cwd, &workflow, &ctx.project.config, &workflow_path)?;
-
-    let labels = match run_id {
-        Some(run_id) => Some(derive_labels(&ctx, run_id, &workflow)?),
-        None => None,
+    let (workflow, labels) = match (workflow_path, run_id) {
+        (Some(path), None) => {
+            // A bare catalog name resolves the same way `check` and
+            // `run` resolve it — `graph review` works without spelling
+            // out the path.
+            let path = resolve_workflow_ref(&ctx.cwd, path)?;
+            let workflow = crate::load_workflow(&path)?;
+            check_or_refuse(&ctx.cwd, &workflow, &ctx.project.config, &path)?;
+            (workflow, None)
+        }
+        (None, Some(run_id)) => {
+            let open = ctx.open_run(run_id).await?;
+            let manifest = open.manifest.doc;
+            let frame = crate::commands::status::progress::frame(
+                run_id,
+                &manifest,
+                &open.events,
+                ctx.clock.now(),
+            );
+            (manifest.workflow, derived_labels(&frame))
+        }
+        (Some(_), Some(_)) => {
+            return Err(CliError::msg(
+                "`graph` draws one workflow: a path or a catalog name reads it off disk, \
+                 `--run <id>` draws the one that run froze. Drop one of the two.",
+            ))
+        }
+        (None, None) => {
+            return Err(CliError::msg(
+                "`graph` needs a workflow: name one, or pass `--run <id>` to draw the one \
+                 that run froze.",
+            ))
+        }
     };
 
     let rendered = match format {
@@ -56,33 +86,19 @@ pub fn graph(
 /// `status` and every other surface take the same words from.
 ///
 /// Every node gets one, not only the ones the log mentions: a diagram
-/// that leaves a node bare says nothing about whether the run has yet to
-/// reach it or is never going to. A node this run's mode excludes is
-/// skipped, a node the mode includes and the log has nothing for never
-/// ran, and the two are different answers to the same question.
-fn derive_labels(ctx: &Context, run_id: &RunId, workflow: &Workflow) -> Result<Labels, CliError> {
-    let events = ctx.storage()?.events_for_run(run_id)?;
-    if events.is_empty() {
-        return Err(CliError::RunNotFound {
-            id: run_id.clone(),
-            roots: ctx.run_roots(),
-        });
-    }
-
-    let state = yunta_engine::derive(&events);
-    let mode = yunta_core::events::run_mode(&events);
-    let included = yunta_engine::mode_included_nodes(workflow, &mode);
-    Ok(workflow
-        .nodes
-        .iter()
-        .map(|node| {
-            let display = match &included {
-                Some(included) if !included.contains(&node.id) => NodeDisplay::skipped(),
-                _ => NodeDisplay::of(state.nodes.state(&node.id)),
-            };
-            (node.id.clone(), display.label())
-        })
-        .collect())
+/// that leaves a node bare says nothing about whether the run has yet
+/// to reach it or is never going to. The frame is where they come
+/// from, so the diagram, the page and the document say the same word
+/// about the same node — a node this run's mode leaves out included,
+/// and labelled `skipped`.
+fn derived_labels(frame: &RunFrame) -> Option<Labels> {
+    Some(
+        frame
+            .nodes
+            .iter()
+            .map(|node| (node.id.clone(), NodeDisplay::standing(&node.state).label()))
+            .collect(),
+    )
 }
 
 /// Renders the workflow's DAG as a Mermaid `graph TD`: one declaration per
@@ -93,20 +109,38 @@ fn render_mermaid(workflow: &Workflow, labels: Option<&Labels>) -> String {
     let mut out = String::from("graph TD\n");
 
     for node in &workflow.nodes {
-        let label = match labels.and_then(|labels| labels.get(&node.id)) {
-            Some(state) => format!("{}: {}", node.id, state),
-            None => node.id.to_string(),
+        let declared = |node: &yunta_core::Node, indent: &str| {
+            format!(
+                "{indent}{}[\"{}\"]\n",
+                node.id,
+                escape_mermaid(&labelled(node, labels))
+            )
         };
-        out.push_str(&format!("  {}[\"{}\"]\n", node.id, escape_mermaid(&label)));
+        match children_of(node) {
+            // A group and its children are one unit, and a diagram that
+            // drew them side by side would say they are not.
+            Some(children) => {
+                out.push_str(&format!(
+                    "  subgraph {}[\"{}\"]\n",
+                    node.id,
+                    escape_mermaid(&labelled(node, labels))
+                ));
+                for child in children {
+                    out.push_str(&declared(child, "    "));
+                }
+                out.push_str("  end\n");
+            }
+            None => out.push_str(&declared(node, "  ")),
+        }
     }
 
-    for node in &workflow.nodes {
+    for node in workflow.iter_nodes() {
         for dep in &node.depends_on {
             out.push_str(&format!("  {dep} --> {}\n", node.id));
         }
     }
 
-    for node in &workflow.nodes {
+    for node in workflow.iter_nodes() {
         if let Some(on_failure) = &node.on_failure {
             out.push_str(&format!("  {} -.-> {}\n", node.id, on_failure.goto));
         }
@@ -115,22 +149,54 @@ fn render_mermaid(workflow: &Workflow, labels: Option<&Labels>) -> String {
     out
 }
 
+/// A `parallel` group's children, `None` for every other node.
+fn children_of(node: &yunta_core::Node) -> Option<&[yunta_core::Node]> {
+    match &node.kind {
+        yunta_core::NodeKind::Parallel { nodes, .. } => Some(nodes),
+        _ => None,
+    }
+}
+
+/// What the diagram writes inside a node: its id, and the state a run's
+/// log derives for it when there is a run.
+fn labelled(node: &yunta_core::Node, labels: Option<&Labels>) -> String {
+    match labels.and_then(|labels| labels.get(&node.id)) {
+        Some(state) => format!("{}: {}", node.id, state),
+        None => node.id.to_string(),
+    }
+}
+
 /// The same DAG as Graphviz DOT: `depends_on` edges solid,
 /// `on_failure.goto` edges dashed, node labels quoted.
 fn render_dot(workflow: &Workflow, labels: Option<&Labels>) -> String {
     let mut out = String::from("digraph workflow {\n  rankdir=TB;\n");
-    for node in &workflow.nodes {
-        let text = match labels.and_then(|labels| labels.get(&node.id)) {
-            Some(state) => format!("{}: {}", node.id, state),
-            None => node.id.to_string(),
-        };
-        out.push_str(&format!(
-            "  \"{}\" [label=\"{}\"];\n",
+    let declared = |node: &yunta_core::Node, indent: &str| {
+        format!(
+            "{indent}\"{}\" [label=\"{}\"];\n",
             escape_dot(node.id.as_str()),
-            escape_dot(&text)
-        ));
-    }
+            escape_dot(&labelled(node, labels))
+        )
+    };
     for node in &workflow.nodes {
+        match children_of(node) {
+            Some(children) => {
+                out.push_str(&format!(
+                    "  subgraph cluster_{} {{\n",
+                    escape_dot(node.id.as_str())
+                ));
+                out.push_str(&format!(
+                    "    label=\"{}\";\n",
+                    escape_dot(&labelled(node, labels))
+                ));
+                for child in children {
+                    out.push_str(&declared(child, "    "));
+                }
+                out.push_str("  }\n");
+            }
+            None => out.push_str(&declared(node, "  ")),
+        }
+    }
+    for node in workflow.iter_nodes() {
         for dep in &node.depends_on {
             out.push_str(&format!(
                 "  \"{}\" -> \"{}\";\n",
@@ -139,7 +205,7 @@ fn render_dot(workflow: &Workflow, labels: Option<&Labels>) -> String {
             ));
         }
     }
-    for node in &workflow.nodes {
+    for node in workflow.iter_nodes() {
         if let Some(on_failure) = &node.on_failure {
             out.push_str(&format!(
                 "  \"{}\" -> \"{}\" [style=dashed];\n",

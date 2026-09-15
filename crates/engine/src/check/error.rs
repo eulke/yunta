@@ -211,6 +211,14 @@ pub enum CheckError {
     #[error("node `{node}`: `kind: gate` can't be a `parallel` child (group `{group}`)")]
     GateInsideParallel { node: NodeId, group: NodeId },
 
+    /// A group inside a group. Every surface draws a group's children
+    /// one step under it, and the scheduler pairs each node with the
+    /// group that holds it — both are exact at one level and false at
+    /// two. Nesting arrives the day somebody asks for it, with the
+    /// design it needs (D179).
+    #[error("node `{node}`: `kind: parallel` can't be a `parallel` child (group `{group}`)")]
+    ParallelInsideParallel { node: NodeId, group: NodeId },
+
     /// A node that asks ends when it asks: its answers are the next
     /// node's context, so nothing it declares beside `questions` could
     /// be written after them.

@@ -12,7 +12,7 @@
 use yunta_core::events::{Failure, StoredEvent, TerminalState};
 use yunta_core::{ModeName, NodeId, Workflow};
 
-use crate::replay::{NodeState, RunState};
+use crate::replay::{NodeState, NodeWait, RunState};
 use yunta_core::events::RunPhaseRaw;
 
 /// Where the run as a whole stands, derived from the log alone.
@@ -81,7 +81,9 @@ pub enum WaitingOn {
     /// only because one pause stops the whole run.
     Node {
         node: NodeId,
-        external_ref: Option<String>,
+        /// What the node waits on — one vocabulary for the wait in the
+        /// run and in the node.
+        on: NodeWait,
         reason: Option<String>,
     },
     /// The run itself paused, with the reason `run_paused` recorded — an
@@ -154,9 +156,9 @@ fn waiting_node(workflow: &Workflow, state: &RunState, reason: Option<&str>) -> 
     workflow
         .iter_nodes()
         .find_map(|node| match state.nodes.state(&node.id) {
-            Some(NodeState::Waiting { external_ref }) => Some(WaitingOn::Node {
+            Some(NodeState::Waiting { on }) => Some(WaitingOn::Node {
                 node: node.id.clone(),
-                external_ref: external_ref.clone(),
+                on: on.clone(),
                 reason: reason.map(str::to_string),
             }),
             _ => None,

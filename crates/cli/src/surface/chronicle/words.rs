@@ -12,7 +12,8 @@ use yunta_core::events::{
 };
 use yunta_core::fence::Coverage;
 use yunta_core::text::{detailed, one_line};
-use yunta_engine::Happening;
+use yunta_core::NonEmpty;
+use yunta_engine::{Happening, NodeState, NodeWait};
 
 use super::super::view;
 use crate::render::{format_duration, NodeDisplay, StateWord};
@@ -237,17 +238,21 @@ fn gate_words(happening: &gates::happening::Happening) -> (Option<StateWord>, St
     match happening {
         H::Escalated(payload) => (Some(StateWord::Wait), payload.summary().to_string()),
         H::Resolved(payload) => (Some(StateWord::Done), resolution(payload)),
+        // The node's own label, so the chronicle and `status` say a
+        // node that asked with the same bytes by construction.
         H::Asked { questions } => (
             Some(StateWord::Wait),
-            format!(
-                "waiting — asked {}: {}",
-                yunta_core::text::counted(questions.len(), "question"),
-                questions
-                    .iter()
-                    .map(|id| id.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+            match NonEmpty::new(questions.clone()) {
+                Some(asked) => NodeDisplay::of(Some(&NodeState::Waiting {
+                    on: NodeWait::Questions { asked },
+                }))
+                .label(),
+                // A `questions_asked` naming nothing is a log this
+                // binary never wrote — its constructor refuses one — so
+                // the chronicle says what it has rather than a list it
+                // would be inventing.
+                None => StateWord::Wait.word().to_string(),
+            },
         ),
         H::Answered { channel, responder } => (
             Some(StateWord::Done),
