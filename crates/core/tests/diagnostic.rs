@@ -1,5 +1,5 @@
 //! A diagnostic names what is wrong in the vocabulary of the document,
-//! and a report renders every one of them the way `spec-ledger.md` §4
+//! and a report renders every one of them the way `spec-tasks.md` §4
 //! fixes it. Nothing a deserializer says about its own internals
 //! reaches either rendering.
 

@@ -28,7 +28,7 @@ are valid there. A mistyped key never silently becomes a default.
 - **`loop`** — drives a tasks document (`until: all_tasks_complete`, plus a `prompt:`
   each dispatched task session gets). One mechanically-verified session per `ready`
   task; `concurrency: N` runs up to `N` tasks from the current batch at once (default
-  `1`, sequential). See the [tasks schema](design/spec-ledger.md) for what a task looks
+  `1`, sequential). See the [tasks schema](design/spec-tasks.md) for what a task looks
   like — an earlier `prompt` node produces it as a `kind: tasks` artifact, or
   you write one by hand while you're still designing the workflow. The loop works
   from whichever tasks document the run holds, however it came by one: produced
@@ -325,7 +325,7 @@ retrofitting once wall-clock or noisy criteria become a problem.
 
 ### Criteria granularity
 
-A task's `criteria` (see the [tasks schema](design/spec-ledger.md#21-criteria)) run
+A task's `criteria` (see the [tasks schema](design/spec-tasks.md#21-criteria)) run
 red-before-green: the pre-check proves the criterion *can* fail before the task
 starts. Keep each task's own criteria narrow and cheap — the specific test or check
 that task's change is supposed to flip, not the whole suite. Re-running the entire

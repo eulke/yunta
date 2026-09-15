@@ -1,8 +1,9 @@
-//! The user documentation is verified against the binary: the README's
-//! command table names exactly the subcommands `yunta --help` lists, and
+//! The documentation is verified against the binary: the README's
+//! command table names exactly the subcommands `yunta --help` lists,
 //! every YAML example in `docs/` and the README parses — and, for a
 //! workflow, passes `yunta check` — so a reader never copies something
-//! the binary refuses.
+//! the binary refuses, and the tasks spec states every rule the engine
+//! holds a tasks document to.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -217,5 +218,104 @@ fn every_yaml_example_in_the_docs_is_one_the_binary_accepts() {
     assert!(
         seen >= 8,
         "the docs carry their YAML examples ({seen} found)"
+    );
+}
+
+/// The body of a top-level section, from its heading to the next one.
+fn section(text: &str, heading: &str) -> String {
+    let mut body = String::new();
+    let mut inside = false;
+    for line in text.lines() {
+        if line.starts_with("## ") {
+            if inside {
+                break;
+            }
+            inside = line.starts_with(heading);
+            continue;
+        }
+        if inside {
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    body
+}
+
+fn is_numbered(line: &str) -> bool {
+    line.split_once(". ")
+        .is_some_and(|(number, _)| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The numbered items of a section, each with its continuation lines —
+/// the indented ones that follow it, up to the blank line that ends it.
+fn numbered_items(body: &str) -> Vec<String> {
+    let mut items: Vec<String> = Vec::new();
+    let mut open = false;
+    for line in body.lines() {
+        if is_numbered(line) {
+            items.push(line.to_string());
+            open = true;
+        } else if open && line.starts_with(char::is_whitespace) && !line.trim().is_empty() {
+            let item = items.last_mut().expect("a continuation follows an item");
+            item.push(' ');
+            item.push_str(line.trim());
+        } else {
+            open = false;
+        }
+    }
+    items
+}
+
+/// The rule codes `text` names in backticks, in the spelling the engine
+/// publishes them by.
+fn rule_codes_named(text: &str) -> Vec<String> {
+    text.split('`')
+        .skip(1)
+        .step_by(2)
+        .filter(|span| {
+            yunta_core::diagnostic::RuleCode::ALL
+                .iter()
+                .any(|code| code.as_str() == *span)
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// The rules of the tasks document are published before it is written —
+/// the same list the contract hands a session — so the spec that states
+/// them and the engine that enforces them are one list read twice. A rule
+/// the spec leaves out is one a writer meets for the first time as a
+/// failure.
+#[test]
+fn the_tasks_spec_states_every_rule_the_engine_publishes() {
+    let spec = repo_root().join("docs/design/spec-tasks.md");
+    let text = std::fs::read_to_string(&spec).unwrap();
+    let items = numbered_items(&section(&text, "## 3."));
+    let stated: BTreeSet<String> = items
+        .iter()
+        .map(|item| {
+            let named = rule_codes_named(item);
+            assert_eq!(
+                named.len(),
+                1,
+                "every item of §3 names the one rule code it states, in backticks: {item}"
+            );
+            named[0].clone()
+        })
+        .collect();
+
+    let published: BTreeSet<String> = <yunta_core::TasksFile as yunta_core::shape::Document>::RULES
+        .iter()
+        .map(|rule| rule.code.as_str().to_string())
+        .collect();
+
+    assert_eq!(
+        stated, published,
+        "§3 of the tasks spec (left) and the rules the engine publishes (right) disagree"
+    );
+    assert_eq!(
+        items.len(),
+        published.len(),
+        "§3 states one item per published rule"
     );
 }

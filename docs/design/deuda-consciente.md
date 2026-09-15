@@ -2,9 +2,12 @@
 
 Lo deliberadamente no resuelto. Regla: **nada de esta lista se resuelve
 implícitamente durante la implementación**: cada ítem requiere una decisión
-explícita registrada en el registro de decisiones antes de codearse. Los
-identificadores (A-01…) son **estables**: no se renumeran al cerrarse un ítem, para
-que las referencias desde los ADRs nunca se rompan.
+explícita registrada en el registro de decisiones antes de codearse. La lista lleva
+además lo construido y todavía no verificado contra el sistema real que describe,
+donde lo que cierra el ítem es una corrida y no una decisión; cada entrada dice cuál
+de las dos la resuelve. Los identificadores (A-01…) son **estables**: no se
+renumeran al cerrarse un ítem, para que las referencias desde los ADRs nunca se
+rompan.
 
 ## Abiertos
 
@@ -93,6 +96,36 @@ por el otro canal es el ítem 5-06.
 **A-15 · Fuentes de contexto provistas por executors.** `ContextSpec` es una
 enum cerrada de ocho fuentes. Lo resolvería un extension point con contrato
 propio (entrada, salida, hash de lo materializado) y su ADR (D167).
+
+**A-16 · Viaje en el tiempo: `yunta replay` y `yunta diff`.** RFC-0003 §2 promete
+reconstruir lo que cualquier agente tenía delante en cualquier instante: `yunta
+replay <run> --at <seq>` rinde el estado del run, el contexto montado y la evidencia
+disponible en ese punto, y `yunta diff <run-a> <run-b>` reporta, entre dos corridas
+del mismo workflow, el primer punto de divergencia y qué contexto difería. D55 las
+registra como capacidades de producto post-v1 temprano y fija no recortar nada de esa
+persistencia "por eficiencia", para no cerrar la puerta. Es deuda porque la data está
+entera y ningún comando la lee de vuelta: el log está secuenciado y encadenado por
+hash, cada `context_assembled` guarda el hash de cada segmento de contexto
+(spec-events §5.8, D42) —el insumo directo del diff—, y el binario no tiene
+subcomando `replay` ni `diff`. Lo resolvería la superficie de reconstrucción sobre
+ese log: un comando que rinda estado, contexto y evidencia a un `seq` dado, y otro
+que compare los hashes de segmento de dos corridas y nombre el primer segmento que
+difiere.
+
+**A-17 · Verificación en vivo de adapters, forja y MCP.** Los adapters `codex` y
+`claude-code`, la forja de GitHub, `yunta mcp` montado en un cliente real, el MCP
+por-run con un agente real y `pack add` contra un host remoto están construidos
+contra documentación y ejemplos reales, sin una corrida contra el sistema que
+describen (`status.md`). Los dos cercos son parte de eso: qué parte del stderr del
+hook de Claude Code llega al `tool_result` del stream, y con qué marca `codex` un
+proceso que su sandbox denegó. Es deuda porque lo único que confirma el contrato de
+un sistema ajeno es una corrida contra él: hasta que ocurra, el comportamiento que el
+adapter espera es el documentado y no el medido. La resuelve la checklist de
+`smoke-checklist.md`, que describe cada corrida y su protocolo —cada divergencia se
+corrige en su propia tarea, con el test de regresión que la hubiera atrapado, y el
+resultado de cada corrida se registra en `status.md`—; pide binarios autenticados y
+un token con repo descartable. No espera una decisión: espera credenciales y una
+sesión.
 
 ## Riesgos conocidos
 

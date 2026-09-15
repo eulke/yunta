@@ -1,10 +1,8 @@
 # Spec — Schema del documento de tareas
 
 **Estado:** normativo v0.1 · **Alcance:** schema formal del artifact `kind: tasks`,
-sus reglas de validación y sus errores. Se escribe antes del código que lo parsea,
-por la misma razón que la spec de payloads de eventos precede a los tipos de Rust
-del event log — es el formato con el que se le da trabajo al sistema, y va a
-escribirse a mano desde el primer día.
+sus reglas de validación y sus errores. Es el formato con el que se le da trabajo
+al sistema, y una persona lo escribe a mano.
 
 ## 1. Estructura
 
@@ -31,7 +29,7 @@ en el event log.
 
 | Campo | Tipo | Obligatorio | Notas |
 |---|---|---|---|
-| `id` | string `^[A-Za-z][A-Za-z0-9_-]*$` | sí | único en el documento. **Sin patrón impuesto**: `T001` es convención, no regla — un id descriptivo (`graph-cmd`) sobrevive mejor a un re-plan que un número de orden. |
+| `id` | string `^[A-Za-z][A-Za-z0-9_-]*$` | sí | el patrón es condición de lectura: lo verifica el tipo que lee el documento, así que un `id` que no lo cumple llega como problema de lectura y no como una de las reglas de §3, que exige la unicidad (`duplicate-id`). **Sin convención impuesta**: `T001` es convención, no regla — un id descriptivo (`graph-cmd`) sobrevive mejor a un re-plan que un número de orden. |
 | `title` | string no vacío | sí | qué se hace, en una línea |
 | `scope` | lista de globs, ≥1 | sí | qué puede tocar la tarea |
 | `criteria` | lista de objetos, ≥1 | sí | ver la tabla de `criteria[]` más abajo |
@@ -52,23 +50,32 @@ estar en rojo antes del trabajo, y el pre-check pierde sentido.
 
 ## 3. Validación al registrar
 
-El engine rechaza el documento completo — y falla el nodo que lo produjo — si:
+Nueve reglas, cada una con su código estable: el mismo con el que el engine la
+publica junto a la forma del documento, con el que la nombra el diagnóstico cuando
+se rompe y con el que un reporte la cuenta. El engine rechaza el documento
+completo — y falla el nodo que lo produjo — si alguna no se cumple:
 
-1. Un `id` se repite, o no cumple el patrón.
-2. Un `depends_on` referencia un id inexistente.
-3. El grafo de `depends_on` tiene ciclos — detectados por el mismo recorrido que
-   `check` corre sobre el grafo de nodos del workflow: un solo detector para los dos
-   grafos, que reporta el ciclo como el camino que lo cierra.
-4. Dos tareas sin dependencia entre sí declaran scopes que se solapan (impediría
-   correr esas tareas en paralelo y hace ambiguo el diff).
-5. Una tarea no tiene criterios, o todos son `guard`.
-6. `manual_review: true` sin `justification`.
-7. Un campo obligatorio falta o está vacío.
+1. `duplicate-id` — cada `id` se declara una sola vez en el documento.
+2. `empty-title` — `title` dice qué hace la tarea, en una línea no vacía.
+3. `empty-scope` — `scope` lista al menos un glob: los únicos paths que la tarea
+   puede tocar.
+4. `no-criteria` — toda tarea declara al menos un criterio.
+5. `all-criteria-are-guards` — al menos un criterio no es `guard`, así que algo
+   tiene que poder fallar antes del trabajo y pasar después.
+6. `unknown-dependency` — `depends_on` nombra solo ids que este documento declara.
+7. `dependency-cycle` — `depends_on` no forma ciclos. Los detecta el mismo
+   recorrido que `check` corre sobre el grafo de nodos del workflow: un solo
+   detector para los dos grafos, que reporta el ciclo como el camino que lo cierra.
+8. `overlapping-scope` — dos tareas sin dependencia entre sí declaran scopes
+   disjuntos; un solapamiento impide correrlas en paralelo y vuelve ambiguo el
+   diff, así que o se separan los scopes o se declara la dependencia.
+9. `manual-review-without-justification` — `manual_review: true` lleva una
+   `justification` no vacía, y los criterios de la tarea siguen valiendo.
 
 Estas reglas corren como parte de la lectura del documento, no como un paso aparte
 que un llamador pueda saltear: quien obtiene un documento de tareas obtiene uno que las cumple.
 Y se publican antes de que el documento se escriba: la lista que las aplica es la
-misma que el contrato le entrega a la sesión, así que ninguna de estas siete llega
+misma que el contrato le entrega a la sesión, así que ninguna de las nueve llega
 por primera vez como un fallo (D143).
 
 Lo que el engine **no** valida acá: que los comandos existan o sean correctos — eso
@@ -103,10 +110,10 @@ corrige una vez, no siete veces.
 tasks:
   - id: context-sources
     title: "ContextSource trait with files, command and artifact builtins"
-    scope: ["crates/engine/src/context/**"]
+    scope: ["crates/engine/src/run/context_resolve/**"]
     criteria:
-      - cmd: "cargo test -p yunta-engine context::"
-      - cmd: "! grep -rn 'todo!()' crates/engine/src/context/"
+      - cmd: "cargo test -p yunta-engine --test run_context"
+      - cmd: "! grep -rn 'todo!()' crates/engine/src/run/context_resolve/"
       - cmd: "cargo clippy --workspace -- -D warnings"
         type: guard
     notes: "Materializar el contenido efectivo en objects/<hash>; fuente caída = nodo failed."
@@ -114,9 +121,9 @@ tasks:
   - id: context-assembly
     title: "Stable-first context assembly with per-segment hashes"
     depends_on: [context-sources]
-    scope: ["crates/engine/src/context/**", "crates/core/src/events.rs"]
+    scope: ["crates/engine/src/run/context_resolve/**", "crates/core/src/events/node/**"]
     criteria:
-      - cmd: "cargo test -p yunta-engine --test context_stability"
+      - cmd: "cargo test -p yunta-engine --test properties"
       - cmd: "cargo clippy --workspace -- -D warnings"
         type: guard
     notes: "Property test: dos rehidrataciones con distinto estado volátil comparten prefijo byte-idéntico."

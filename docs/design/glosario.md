@@ -141,6 +141,16 @@ en qué estado quedó cada uno, cuántas tareas cerraron, qué hijos nacieron. E
 una foto, y se vuelve a sacar entera cada vez que algo cambia.
 _Evitar_: snapshot, estado de la UI, progreso.
 
+**Standing** (`NodeStanding`):
+Dónde está parado cada nodo que el workflow declara, en una sola respuesta para
+los tres casos que el DAG congelado y el log producen juntos: afuera, porque el
+modo del run lo deja fuera y no corre; incluido y sin empezar; o alcanzado, con
+el estado que el log derivó para él. El estado de un nodo responde solo por los
+nodos que el log tocó; el standing responde por todos, así que ninguna
+superficie tiene que leer una ausencia para saber si un nodo no corre o todavía
+no arrancó.
+_Evitar_: estado del nodo, pendiente, nodo sin estado.
+
 **Crónica**:
 Qué pasó, en orden, derivada del mismo log y con los mismos tipos que el frame:
 un **momento** por evento. Lo que el frame dice que un nodo *es*, un momento
@@ -156,6 +166,26 @@ y los hijos que arrastró son los que tenía ahí. Un nodo que cierra dos veces 
 dos momentos.
 _Evitar_: línea, entrada del log, evento — un evento es lo persistido; un
 momento es cómo se lee.
+
+## Gates
+
+**Escalación** (`Escalation`):
+Lo que un gate publica cuando detiene el run: la afirmación de quien escala, la
+evidencia contra la que se audita —hechos que el engine adjunta derecho del
+log— y un menú de opciones que no puede estar vacío. Es la única forma en que
+nace un `gate_waiting`: el corte entre la afirmación y la evidencia se decide
+en un solo lugar, una afirmación que repite un hecho del registro se rechaza al
+construirla, y un menú vacío —una escalación que rechaza toda respuesta que
+recibe— es imposible por tipo.
+_Evitar_: pregunta del gate, pedido de ayuda, pausa.
+
+**Tradeoff** (`GateOption.tradeoff`):
+Qué cuesta tomar una opción del menú, escrito por quien escribió la opción y
+obligatorio en el tipo: toda opción que amplía el trabajo declara contra qué lo
+cambia, y elegirla autoriza esa ampliación (D50). Viaja con la opción y se
+muestra como la línea debajo de su etiqueta, así que quien decide lee el costo
+donde elige.
+_Evitar_: nota de la opción, advertencia, consecuencia.
 
 ## Documentos y su lectura
 
@@ -274,7 +304,7 @@ _Evitar_: span, línea y columna, ruta del parser (`tasks[0].criteria[1]`).
 **Bloque de problemas**:
 El formato único con el que un reporte se muestra a una persona: un
 encabezado que nombra qué se leyó y cuántos problemas tiene, y una línea
-indentada por problema (spec-ledger §4). Vive en un solo lugar, que no sabe
+indentada por problema (spec-tasks §4). Vive en un solo lugar, que no sabe
 nada de diagnósticos, y de ahí salen también los errores del CLI.
 _Evitar_: formateo por superficie, redacción por lector.
 
@@ -293,7 +323,9 @@ la aplican (D143).
 
 **Exigencia** (`demand`) — lo que una regla pide, en el vocabulario de quien escribe
 el documento. Es la lectura *previa* de la regla: viaja en el contrato antes de que
-se escriba nada. La lectura *posterior* es el diagnóstico, con el valor concreto.
+se escriba nada. La lectura *posterior* es el diagnóstico, con el valor concreto. No
+confundir con la **línea de exigencia**, que es la fila donde una superficie dice si
+el run necesita a alguien.
 
 **Contrato** — lo que una puerta le entrega a quien tiene que escribir un documento:
 el ejemplo publicado más las exigencias de todas sus reglas. `shape::contract(kind)`
@@ -312,3 +344,24 @@ run ya tiene. Llama a las mismas dos funciones que el cierre, así que su respue
 la del nodo no pueden diferir —incluido «nadie lo entregó»— (D146, D156, D157). Es
 consultiva: el cierre sigue siendo el único juez.
 
+## La frontera y la superficie
+
+**Puerto** (`yunta_core::port`):
+Lo que el engine llama y lo que le responde: el puerto de sesión, el CLI de
+agente que un adapter maneja, y el puerto de forja, el pull request sobre el
+que se decide un gate externo. Los dos viven en core, así que el engine depende
+de la interfaz y nunca de una implementación de ella, y el compilador sostiene
+esa frontera (D165).
+_Evitar_: interfaz del adapter, capa de integración, puerto de red.
+
+**Línea de exigencia** (`view::demand_line`):
+La línea que contesta "¿este run me necesita?": o no necesita a nadie, o algo
+lo necesita y ahí está el comando que lo mueve, con aquello sobre lo que está
+parado. Se produce en toda fase, incluso las que no necesitan a nadie, porque
+una línea que aparece solo cuando hay algo que decir vuelve ambigua su
+ausencia; el comando va adelante, así que una fila cortada al ancho de la
+terminal pierde el sujeto y nunca lo que hay que correr. Las mismas frases
+llegan al bloque que cierra el run, a `yunta status`, al JSON y al diagnóstico
+del comando que no pudo terminar su trabajo. No confundir con **Exigencia**,
+que es lo que una regla le pide a quien escribe un documento.
+_Evitar_: barra de estado, sugerencia, mensaje de la vista.

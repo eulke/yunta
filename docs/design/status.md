@@ -4,9 +4,9 @@ Lo que sigue abierto y necesita una sesión o una decisión. Lo cerrado no se re
 
 ## Abierto
 
-### Verificación en vivo
+### Verificación en vivo (A-17)
 
-Los adapters `codex` y `claude-code`, la forja de GitHub, `yunta mcp` montado en un cliente real, el MCP por-run con un agente real y `pack add` contra un host remoto están construidos contra documentación y ejemplos reales, sin corrida en vivo. Los dos cercos son parte de eso: qué parte del stderr del hook de Claude Code llega al `tool_result` del stream, y con qué marca `codex` un proceso que su sandbox denegó, son lo que la corrida en vivo confirma. La [checklist](smoke-checklist.md) describe cada corrida y su protocolo de corrección: cada divergencia es una tarea propia con test de regresión. Requiere binarios autenticados y un token con repo descartable.
+Los adapters `codex` y `claude-code`, la forja de GitHub, `yunta mcp` montado en un cliente real, el MCP por-run con un agente real y `pack add` contra un host remoto están construidos contra documentación y ejemplos reales, sin corrida en vivo. Los dos cercos son parte de eso: qué parte del stderr del hook de Claude Code llega al `tool_result` del stream, y con qué marca `codex` un proceso que su sandbox denegó, son lo que la corrida en vivo confirma. La [checklist](smoke-checklist.md) describe cada corrida y su protocolo de corrección: cada divergencia es una tarea propia con test de regresión. Requiere binarios autenticados y un token con repo descartable, y por eso se enumera como **A-17** en [`deuda-consciente.md`](deuda-consciente.md): lo cierra una corrida, no una decisión.
 
 ### Distribución pública
 
