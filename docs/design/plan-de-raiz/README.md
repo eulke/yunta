@@ -754,7 +754,7 @@ como segunda superficie, la nomenclatura de tests, la forma del ratchet.
 
 ## 9. Correcciones documentales que los tests de M23 van a exigir
 
-Contrato: 6 tools MCP en §6.4; `{document}` en §6.4; `finished` en §3.2;
+Contrato: los 7 tools de control en §6.4; `{document}` en §6.4; `finished` en §3.2;
 §5.3 sin `free_text`/`default_on_timeout` como campos y con `external_ref`;
 §5.4 con la clave real del memo y la cache por invocación; §9 sin fuentes por
 executor (o P3); §2 sin `baseline/` (o P3); §12 sin `ledger` del hijo.
@@ -762,20 +762,20 @@ spec-events: `commit` en §5.11, `paths` en §5.14, `external_ref` y el modelo
 de `gate_resolved` con `sha` en §5.18, `model` opcional en §5.5, sin
 `[inferido]`, artifacts fuera de §5.21.x, sin "precede a los tipos".
 spec-adapter: 8 capacidades, tabla de degradación completa, `SessionRequest`
-real, `pgid()`, `AdapterId`, §6 verdadero por adapter, O1–O6 sin duplicar.
+real, `pgid()`, `AdapterId`, §6 verdadero por adapter, O1–O7 sin duplicar.
 spec-ledger → spec-tasks: 9 reglas, regla 1 en su capa, ejemplo con path
 real, sin "se escribe antes del código". referencia-schema: `2000000`,
-`50000000`, `32000`, `baseline.suite` igual al fixture. compatibility: 8
+`50000000`, `32000`, `baseline.suite` igual al fixture. compatibility: 9
 schemas, todos los códigos de artifact. adrs: D132 "tasks document", D139
-"ocho", D152 `Revisada por D157`, D03 con reviser, D140/D144 `Revisada por
-D156`, D06 sin `plugin`, D37 sin `subagente`. rfc-0002 `M14` → A-06;
+"nueve", D152 `Revisada por D157`, D02/D03/D05/D07/D46/D147 con reviser,
+D140/D144 `Revisada por D156`, D06 sin `plugin`, D37 sin `subagente`. rfc-0002 `M14` → A-06;
 rfc-0003 `deuda ⑪` → A-05. README: `graph <workflow> [--run <id>]`, `list`
 sin "modes". concepts: `waiting` incluye preguntas. Rustdoc:
 `session.rs:3-10`, `sections.rs:133-168`, `declarations.rs:9`,
 `process_registry.rs:3`, `mcp.rs:1-2`, `cli.rs:141-145`, `replay.rs:1-8`,
 `lib.rs:4,6`, `project.rs:46`, `create.rs:113`, `criteria.rs:25`,
 `worktree/mod.rs:75`, `Task.id`. Comentarios de dev-dep: `storage/Cargo.toml`
-(fixed clock), `cli/Cargo.toml` (`nix`). 19 tests sin `//!`.
+(fixed clock), `cli/Cargo.toml` (`nix`). Todo test sin `//!`.
 
 ---
 
@@ -836,9 +836,9 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | 6-03 | `hermetic()`; `Checkout::without_yunta_home`; `SeqIdSource` por bench; `sleep`→`wait_until_async`; los armados a mano por `Checkout` (M24 I-12) | 6-01 | cerrado (`4657188`, `0c6f70d`, `300b099`) |
 | 6-04 | cuatro propiedades sobre generador completo; `an_ask_answered_after_any_crash_point_derives_one_finished_node` (M26) | 2-01 | cerrado (`1e63961`) |
 | 6-05 | ratchet: 11 contadores nuevos sobre `src`+`tests`; `[workspace.lints]`; CI `workflow_call`, macOS, glob de packs, timeouts, `--release`; CONTRIBUTING | — | cerrado (`8bddf80`, `487aecb`) |
-| 7-01 | `docs_sync` recorre `docs/design/` y ata los conjuntos cerrados (§2 M23); `the_reference_config_parses_and_its_workflows_check` | 2-01, 3-04 | pendiente |
+| 7-01 | `docs_sync` recorre `docs/design/` y ata los conjuntos cerrados (§2 M23); `the_reference_config_parses_and_its_workflows_check` | 2-01, 3-04 | cerrado (`988e3ec`) |
 | 7-02 | ADR por archivo, índice generado, recíprocos | 0-01 | cerrado (`6c43345`) |
-| 7-03 | correcciones de §9 | 7-01 | pendiente |
+| 7-03 | correcciones de §9 | 7-01 | cerrado (`988e3ec`, `2f11e6c`) |
 | 7-04 | glosario; deuda: `yunta replay/diff` (rfc-0003 §2) y la verificación en vivo (status.md) entran como A-16/A-17 con ids estables; `spec-tasks.md` | 7-03 | cerrado (`a9249a4`) |
 | 7-05 | baseline eager en `create_run` (M24, D167) con su test | 3-05 | cerrado (`d1f59fc`) |
 | 7-06 | orden de criterios aprendido del log desde `TaskLedger` (M24, D167) con su test | 2-03 | cerrado (`419387e`) |
@@ -964,6 +964,12 @@ uno están en el commit que lo escribió.
 | L-97 | 7-07 | El barrido del inventario de M24 da once de trece cerradas, y las dos que faltan no tienen ítem abierto que las construya: **I-08** (`NodeFrame.group` se escribe y no lo lee nadie) y **I-09** (`members_of` no existe; el host sigue con el `HashMap` cuya mitad-valor nadie usa y `node_exec` sigue recalculando los miembros). Las filas que las cargaban —5-05 y 2-03— dicen `cerrado` | I-09 se construye acá, porque la fila 2-03 la reclama y no está: el host publica `members_of(&NodeId) -> &[NodeId]`, que responde igual al grupo cuando cierra y a un miembro mientras corre, y el join deja de armar su propia lista. I-08 queda abierta y dicha: depende de **L-67**, que espera decisión humana sobre si el modificador de `NodeDisplay` y el agrupado de `status` van a un ítem nuevo de fase 5 o a fase 7. El inventario se reporta como once cerradas, una construida acá y una esperando esa decisión | fila 7-07 (§10); M24 I-08, I-09; L-67; filas 2-03 y 5-05 (§10) |
 | L-98 | 7-07 | Al sacarle los dos campos, la tarea `review-contrast` de `tasks/shape.yaml` queda siendo un título de juicio («Check the dark palette reads at AA contrast») verificado por `test -f src/theme/tokens.css` — publicado en el ejemplo que un autor copia, en el mismo commit cuyo spec dice que eso no es una tarea y que un criterio falso es lo que el pre-check en rojo existe para rechazar | la entrada entera sale, no sólo sus cuatro líneas: §0.15 «Reemplazado» nombra también «el párrafo que lo describía», y esa tarea existía para describir el par retirado. Nada depende de ella —el ejemplo sigue escribiendo toda clave que el tipo acepta—. Si se prefiere conservarla sin los dos campos, es un parche de cuatro líneas | fila 7-07 (§10); §0.15 |
 | L-99 | 6-04 | La corrección de L-84 dejó un agujero: preguntaba por la retirada con `FindingLedger::status(node, id)`, que exige un `NodeId`, y un finding de nivel de run no tiene nodo. El generador emite entradas sin nodo a propósito, así que un finding sin nodo retirado no podía satisfacer la condición nunca. Proptest lo encontró y persistió la semilla | la propiedad lee el log, que es de lo que habla: el único evento que el prefijo agregó es lo único que pudo sacar un finding, así que compara contra él. No hace falta abrir `status` a un nodo opcional —esa frontera existe para que las tools de un nodo no alcancen los findings que el engine postea sobre el run—. La semilla queda en `properties.proptest-regressions`, de modo que el caso que lo encontró lo sigue vigilando | fila 6-04 (§10); `core/src/events/findings/ledger.rs` |
+| L-100 | 7-01 | Los nueve tests de 7-01 no pueden estar verdes sin las correcciones documentales que §10 asigna a 7-03, y 7-03 depende de 7-01. O el ítem cierra con el workspace en rojo —lo prohíbe §0.6— o alguien decide de qué lado va cada corrección | 7-01 trae los nueve tests **y exactamente las correcciones que esos tests exigen**, cada una en el commit de su test: rojo sobre el documento sin corregir, verde con la corrección. Es lo que la fila dice («ata los conjuntos cerrados»), mantiene honesto el rojo primero, y le deja a 7-03 un alcance real y separable —lo que §9 pide y ningún test ata: `[inferido]`, rustdoc, ADRs, rfc, README, concepts, compatibility—. Las dos mitades se hicieron en paralelo sobre archivos disjuntos | filas 7-01, 7-03 (§10); M23; §0.6 |
+| L-101 | 7-01 | Tres conjuntos cerrados que M23 manda comparar no los publica ningún tipo: `CheckBuiltin` no tiene `ALL`, `ContextSpec::KEYS` es privada, e `InputSpec` es un enum sin lista. El test o los escribe a mano —que es la copia que M23 viene a borrar— o los lee de otro lado. Además `tool_definitions()` es una función privada de un crate sin librería, y el plan escribe `RunTool::ALL` donde el tipo publica `RunTool::all()` | los tres se leen del schema publicado en `crates/core/schemas/workflow.json`, que `xtask schema --check` mantiene atado a los tipos: la cadena tipo → schema → documento es la que el plan ya dibuja, y no agrega nada que el plan no nombre. La lista de tools de control la lee un `yunta mcp` arrancado de verdad, por su propio `tools/list`: compara el Contrato contra lo que el binario sirve, sin mover código para comodidad de un test. Queda dicho que el plan escribe `ALL` y el tipo publica `all()` | fila 7-01 (§10); M23 §Tests; §Un lugar |
+| L-102 | 7-01 | La columna de obligatoriedad de las tablas de spec-events pasa a ser contrato: el test la lee, así que su vocabulario queda congelado, y una celda que restringe una fila a un kind tiene que nombrarlo exacto —por eso «solo en `denied`» pasó a «solo en `scope_expansion_denied`»—. Lo mismo vale para §5.15, cuya fila nombraba `failure`, un campo conceptual que ningún payload tiene | se congela, y se lee como M23 lo escribe («nombre y `Option`»): un campo es opcional si y sólo si su schema admite `null`. Eso mueve `depends_on` y `origin` a obligatorios —no son `Option`, tienen `default`— y deja `tokens` y `policies` obligatorios. La alternativa, leer la columna como prosa, deja el test comparando contra una opinión | fila 7-01 (§10); M23 §Tests; `crates/core/schemas/events.json` |
+| L-103 | 7-03 | Cuatro cuentas de §9 estaban desactualizadas en la misma dirección: «6 tools MCP» (son 7), «compatibility: 8 schemas» y D139 «ocho» (son 9), «O1–O6 sin duplicar» (la sección tiene siete obligaciones), «19 tests sin `//!`» (eran 16 al tocar el árbol) | §9 se corrige a lo que el árbol tiene, y la última pasa de instantánea a regla: «todo test sin `//!`», porque un número congelado en un commit viejo vuelve a mentir al siguiente. La línea de `adrs` gana las cinco decisiones que L-87 encontró además de D03. No se agrega un contador nuevo al ratchet por esto: la lista de M22 está cerrada y 6-05 ya cerró | §9; fila 7-03 (§10); L-87 |
+| L-104 | 7-03 | Dos correcciones de §9 no eran de comentario sino de dependencia: `storage/Cargo.toml` describía un uso de `yunta-testkit` que no tiene —sus tests sólo alcanzan `yunta-testkit-core`, y `yunta-testkit` depende de `yunta-storage`, así que era además un ciclo de dev-dep—, y el `nix` de las dev-dependencies del CLI no lo usa ningún test desde que la pty vive en el arnés | salen las dos dependencias, no sólo sus comentarios: §Sin basura dice que lo reemplazado se borra en el mismo commit que lo dejó sin uso. El `nix` normal del CLI se queda: `ask/mod.rs` usa `nix::sys::termios`. §9 pedía corregir el comentario; corregirlo y dejar la dependencia habría sido describir con precisión algo que sobra | §9; fila 7-03 (§10); §Sin basura, con criterio |
+| L-105 | 7-03 | §9 manda «D152 `Revisada por D157`», y la nota de D152 dice «Retirada por D157». Las otras tres decisiones retiradas dicen todas «Retirada por», y desde 7-02 la reciprocidad se verifica sobre el front-matter, no sobre la prosa: el índice ya renderiza «Revisada por D157» a partir de `revised_by: [D157]` | la prosa queda como está. L-86 fijó que una retirada es una revisión más una posición —`status: retired` más `revised_by`—, así que lo que §9 pide está satisfecho en la superficie que lleva la reciprocidad, y cambiar sólo el cuerpo de D152 la volvería la rara entre cuatro. Queda dicho porque §9 lo pide literal y no se hizo literal; es una edición de dos palabras si se decide lo contrario | §9; fila 7-03 (§10); L-86 |
 
 ---
 
