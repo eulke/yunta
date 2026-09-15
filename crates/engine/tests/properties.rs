@@ -674,15 +674,33 @@ proptest! {
     }
 
     /// `derive` is monotonic by prefix: as the log grows, tokens only
-    /// accumulate, tasks and nodes once seen stay seen, and findings only
-    /// pile up — a longer prefix never un-does what a shorter one derived.
+    /// accumulate, tasks and nodes once seen stay seen, and a finding
+    /// leaves the set that stands only by being withdrawn — a longer
+    /// prefix never un-does what a shorter one derived.
     #[test]
     fn derive_is_prefix_monotonic(log in log()) {
         let mut prev = derive(&[]);
         for k in 1..=log.len() {
             let cur = derive(&log[..k]);
             prop_assert!(cur.total_tokens().total() >= prev.total_tokens().total());
-            prop_assert!(cur.effective_findings().len() >= prev.effective_findings().len());
+            for posted in prev.findings.effective() {
+                let stands = cur
+                    .findings
+                    .effective()
+                    .iter()
+                    .any(|now| now.node == posted.node && now.finding.id == posted.finding.id);
+                let withdrawn = posted.node.as_ref().is_some_and(|node| {
+                    matches!(
+                        cur.findings.status(node, &posted.finding.id),
+                        Some(yunta_core::events::findings::Slot::Withdrawn { .. })
+                    )
+                });
+                prop_assert!(
+                    stands || withdrawn,
+                    "finding {} left the set without a withdrawal",
+                    posted.finding.id
+                );
+            }
             for id in prev.tasks.iter().map(|(id, _)| id) {
                 prop_assert!(cur.tasks.contains(id), "task {id} disappeared");
             }
