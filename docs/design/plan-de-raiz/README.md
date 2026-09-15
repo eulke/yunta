@@ -415,9 +415,10 @@ en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
   grupo; `nodes` como lista bajo `schema_version: 5`; `graph` con una sola
   fuente; un `parallel` no anida otro; D179. Fase 8.
 - **M31 · Una sesión que muere dice por qué.** `SERVER_NAME = "yunta-run"`,
-  `AgentSession::exit`, `Failure::SessionDied`, `DispatchOutcome::Crashed {
-  exit }`, `BlockedCause::SessionDied` para el ciclo de tareas, `doctor
-  --session` por runner, los stubs en `testkit-core`; D180. Fase 8.
+  `AgentSession::exit` que mata antes de recoger, `SessionEnd` cerrado,
+  el stderr redactado, `Failure::SessionDied` por los dos caminos que
+  abren sesiones, `doctor --session` por binding, los stubs en
+  `testkit-core`; D180. Fase 8.
 
 ---
 
@@ -877,11 +878,11 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | 7-05 | baseline eager en `create_run` (M24, D167) con su test | 3-05 | cerrado (`d1f59fc`) |
 | 7-06 | orden de criterios aprendido del log desde `TaskLedger` (M24, D167) con su test | 2-03 | cerrado (`419387e`) |
 | 7-07 | el inventario de M24: `manual_review` y `justification` se retiran con D174 (I-02); lo que se construye cierra en el ítem de su mecanismo | 7-04 | cerrado (`cb8c531`); I-08 queda en L-67 |
-| 8-01 | M27: `Supervision` con token y reloj, un solo reloj por nacimiento; `create_run`, `build_manifest`, `RunEnv` y `AttemptEnv` la exigen; `Interrupt` en dos etapas (D181) inyectado en `Context`, `supervision`/`teardown`; `PromotionEnv { ctx }`; `RunError::Cancelled`; `Owner`; `Supervision::none` y la pareja sincrónica de git se borran | — | pendiente |
+| 8-01 | M27: `Supervision` con token y reloj, un solo reloj por nacimiento; `create_run`, `build_manifest`, `RunEnv` y `AttemptEnv` la exigen; `Interrupt` en dos etapas (D181) inyectado en `Context`, `supervision`/`teardown`; `PromotionEnv { ctx }`; `RunError::Cancelled`; `Owner`; `Supervision::none` y la pareja sincrónica de git se borran | 8-02 | pendiente |
 | 8-02 | M28: `RunEvent::BaselineCaptured` en `RunLedger`; `Decision::MeasureBaseline` y `steps::measure_baseline`; todo run nace teniendo la medición de la raíz; `RunLedger::woken`; `baseline_compare` por `Memo`; `BaselineNeverCompared`; D176; L-107 | — | pendiente |
 | 8-03 | M29: `Status` con revisores, rechazado en `parse`; «Retirada por» en el índice; `Surprise`/`surprises`; `TaskOutcome::Blocked { cause: BlockedCause }`; Contrato §5.2/§5.4 | — | pendiente |
 | 8-04 | M30: `NodeState::Waiting { on: NodeWait }`; `text::{listed, asked_questions}`; `status`, `--json`, `graph --run` por el frame; `nodes` como lista, `schema_version: 5`; `graph` con una sola fuente; `ParallelInsideParallel`; D179 | — | pendiente |
-| 8-05 | M31: `yunta-run`; `AgentSession::exit`; `Failure::SessionDied` y `BlockedCause::SessionDied`; `doctor --session` por runner; stubs en `testkit-core`; D180 | 8-03, 8-04 | pendiente |
+| 8-05 | M31: `yunta-run`; `AgentSession::exit` que mata antes de recoger; `SessionEnd`; stderr redactado; `Failure::SessionDied` por prompt y por `loop`; `doctor --session` por binding; stubs en `testkit-core`; D180 | 8-01, 8-03 | pendiente |
 
 Ya cerrado en esta rama, antes del plan: merge de `main` con la costura del
 observer en `RunLog` (`6fe9ccc`), `Evidence` como hechos etiquetados

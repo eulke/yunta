@@ -1109,6 +1109,8 @@ impl Interrupt {
     /// Installs the SIGINT stream synchronously — `tokio::signal::unix::signal(SignalKind::interrupt())` — so the handler exists when `Context::load` returns, and spawns the listener that trips the stages.
     pub(crate) fn ctrl_c() -> std::io::Result<Self>;
     pub(crate) fn never() -> Self;
+    /// The same two tokens for a `Context` derived from this one — a sandbox, a request the server handles — with no listener of its own: only the root installs the stream.
+    pub(crate) fn shared(&self) -> Self;      // los dos `CancellationToken` clonados, `listener: None`
     pub(crate) fn stop(&self) -> &CancellationToken;
     pub(crate) fn abort(&self) -> &CancellationToken;
 }
@@ -1116,7 +1118,7 @@ impl Interrupt {
 pub struct Context { /* … */ pub env: yunta_core::Env /* `process_env()` una vez, en `resolve_in` */, interrupt: Interrupt }
 impl Context {
     pub fn load() -> Result<Self, CliError>;                                          // `Interrupt::ctrl_c()?`
-    pub fn resolve_in(cwd: PathBuf, interrupt: Interrupt) -> Result<Self, CliError>;   // `yunta mcp` pasa la suya por pedido; `sandboxed` comparte la del padre
+    pub fn resolve_in(cwd: PathBuf, interrupt: Interrupt) -> Result<Self, CliError>;   // `Context::sandboxed` y los seis `resolve_in` de `mcp.rs` (:299,:308,:354,:381,:408,:425) arman el suyo con `self.interrupt.shared()`; el listener vive en el `Context` que `load` devolvió
     /// The token the work of this invocation answers to: the first Ctrl-C.
     pub fn cancellation(&self) -> &CancellationToken;
     /// The supervision the work runs under: no registry, the first stage, this invocation's env and clock.
@@ -1135,8 +1137,8 @@ impl Context {
 // cli/src/commands/run.rs:355,384; run/detach.rs:154 — `ctx.supervision()`; detach.rs:145 — `ctx.teardown()`
 // cli/src/commands/pack.rs::{add, update} — construyen `Context::load()`; `pack.rs::{clone_pack, head_commit, current_branch, run_git}` toman `Supervision<'_>`
 // cli/src/commands/init.rs:90,98 y test/mod.rs:201 — `git::output`/`git::success` con `ctx.supervision()`
-// cli/src/commands/mcp.rs — el servidor observa `ctx.cancel()`: un SIGINT cancela lo que está naciendo y cierra el servidor, como hoy lo cerraba el proceso
-// cli/src/commands/test/case.rs:191,313 — `cancel: ctx.cancel()`
+// cli/src/commands/mcp.rs — el servidor observa `ctx.cancellation()`: un SIGINT cancela lo que está naciendo y cierra el servidor, como hoy lo cerraba el proceso
+// cli/src/commands/test/case.rs:151,191,313 — `Interrupt::shared` para el `Context` del sandbox y `cancel: ctx.cancellation()`
 
 // testkit-core/src/owner.rs (nuevo)
 /// What a test's subprocesses answer to: a token the test may trip and the fixed clock — the supervision outside any run, owned so the borrows have somewhere to live.
@@ -1196,7 +1198,7 @@ verde: el log del padre termina en `run_paused` y el hijo no tiene
 (grep sobre `crates/engine/src` por `Command::new("git")` fuera de `git.rs`,
 rojo por la pareja sincrónica); `cli/src/interrupt.rs` (unit):
 `a_fired_interrupt_cancels_the_contexts_token` (una fuente falsa, disparada,
-y `ctx.cancel().is_cancelled()`); `cli/tests/run_flow.rs`:
+y `ctx.cancellation().is_cancelled()`); `cli/tests/run_flow.rs`:
 `an_interrupt_while_the_worktree_is_being_prepared_kills_the_git_and_frees_the_lock`
 (el stub `git` del testkit en el `PATH` del comando —`Checkout::with_stubs`—
 delega en el git real salvo en `worktree add`, donde publica su pid por
@@ -1221,7 +1223,12 @@ segundo aborta lo que detenerlo todavía sostiene y devuelve la señal al
 proceso—, el mismo «interrupt, then kill» que el repo ya aplica a las
 sesiones (L-108).
 
-**Encastre.** M10: `spawn_governed` se conserva; `Supervision` es el
+**Encastre.** Dos formas de una cancelación, cada una donde corresponde:
+un nacimiento la devuelve a su llamador como `RunError::Cancelled` —no
+tiene log propio todavía—, y un paso de un run vivo devuelve `Ok(())` sin
+evento, porque la vuelta siguiente del loop ve el token disparado y escribe
+`run_paused` (M28, `steps::measure_baseline`). M10: `spawn_governed` se
+conserva; `Supervision` es el
 `Shell` de M10 en la forma que 3-05 le dio, ahora sin `Option` en token y
 reloj. M28: la suite del baseline corre bajo `RunCtx::root_supervision`
 porque la mide `execute_run`, no el nacimiento. M20: `Bench` ya llevaba
@@ -1294,7 +1301,7 @@ pub enum BaselineOrigin { #[default] Measured, Inherited { run: RunId } }   // `
 impl RunLedger {
     /// The measurement this run holds — its own, or the one it was born holding. `None` for a lineage whose root declared no suite.
     pub fn baseline(&self) -> Option<&BaselineCapturedPayload>;
-    /// Whether an invocation already woke this run: it measured, paused, resumed or started a node. What separates a first wake from a resume — a birth writes any number of events.
+    /// Whether an invocation already woke this run: the log has a pause, a resume, a node start, or a `baseline_captured { origin: measured }`. What separates a first wake from a resume — a birth writes any number of events, the measurement a run is born holding among them.
     pub fn woken(&self) -> bool;
 }
 pub enum run::happening::Happening { /* … */ BaselineCaptured(BaselineOrigin) }   // words.rs:101: `baseline measured` | `baseline inherited from run <root>`
@@ -1305,7 +1312,7 @@ pub struct Policy { /* … */ pub baseline_suite: Option<String> }     // Policy
 pub enum Decision { /* … */ MeasureBaseline { suite: String }, /* … */ }
 //   decide(): antes de cualquier `Execute`, `policy.baseline_suite` es `Some` y `state.run.baseline()` es `None` → `MeasureBaseline`; un run que nació teniéndola o que ya midió nunca la ve
 // engine/src/run/steps.rs — ejecutar es la cáscara
-/// Measures the suite the scheduler decided this run owes, under the run's own supervision: keeps its output under `baseline/`, records `baseline_captured { origin: measured }`. A suite the cancellation stops records nothing; the loop's next step pauses the run.
+/// Measures the suite the scheduler decided this run owes, under the run's own supervision: keeps its output under `baseline/`, records `baseline_captured { origin: measured }`. A suite the cancellation stops records nothing and answers `Ok(())` — a step is not a node, so there is no `cancelled_end` to write; the loop's next turn sees the token fired and pauses the run.
 pub(super) async fn measure_baseline(ctx: &RunCtx<'_>, suite: String) -> Result<(), RunError>;   // exec.rs:128 gana el brazo `Decision::MeasureBaseline { suite } => steps::measure_baseline(&ctx, suite).await?`
 // engine/src/run/exec.rs:214-218 — `if view.state.run.woken() { resume(&ctx, &view).await?; }` reemplaza `events.len() > 1`
 
@@ -1410,6 +1417,7 @@ en `baseline.suite`, dos despertares, una medición),
 `engine.json` liste el grupo de la suite, y recién entonces el token);
 `engine/tests/workflow_compose.rs`:
 `a_child_is_born_holding_the_roots_measurement` (rojo: hoy mide de nuevo),
+`a_child_born_holding_a_baseline_is_not_resumed_on_its_first_wake`,
 `a_grandchild_names_the_root_and_not_its_parent`,
 `a_childs_baseline_compare_sees_a_regression_its_parent_made` (rojo: hoy
 el hijo mide sobre el árbol roto y pasa), `a_lineage_measures_once`
@@ -1493,8 +1501,9 @@ pub fn surprises(task: &Task, runs: &[CriterionRun]) -> Vec<Surprise>;
 /// Why a task stopped without being done. One type for the two answers the cycle gives today and the one M31 adds.
 pub enum BlockedCause { PreCheck(NonEmpty<Surprise>), Unmet { attempts: u32 } }
 pub enum TaskOutcome { Done, Blocked { cause: BlockedCause }, Interrupted, /* … */ }
-//   `pre_check` devuelve `Vec<CriterionRun>` como `post_check`; `PreCheckOutcome` se borra; `run_task` (mod.rs:328-340) bloquea con `BlockedCause::PreCheck(NonEmpty::from_vec(surprises(task, &pre_runs)))`
-//   y `mod.rs:400-405` con `BlockedCause::Unmet { attempts }`, la frase que hoy arma un `format!`;
+//   `pre_check` devuelve `Vec<CriterionRun>` como `post_check` y `PreCheckOutcome` se borra; `run_task` (mod.rs:328-340) hace
+//   `match NonEmpty::new(surprises(task, &pre_runs)) { Some(found) => bloquea con BlockedCause::PreCheck(found), None => sigue al intento }`
+//   —`NonEmpty::new` devuelve `Option` (`core/src/nonempty.rs:20`) y el caso vacío es el normal— y `mod.rs:400-405` bloquea con `BlockedCause::Unmet { attempts }`, la frase que hoy arma un `format!`;
 //   la oración se produce una vez, por `Display` de `BlockedCause` y de `Surprise` —«criterion `true` already passes before any work — the criteria need fixing, not the task» / «guard `false` is already red before any work started»—,
 //   una línea por sorpresa, donde se escribe la causa del `task_status_changed` (loop_exec/integrate.rs:111-122) y donde `status` la muestra; ningún `reason:` se arma con `format!` (M22).
 ```
@@ -1613,8 +1622,11 @@ pub enum NodeState { /* … */ Waiting { on: NodeWait } }
 pub enum NodeWait {
     /// A published, unresolved gate; `external_ref` is the forge's handle once recorded.
     Gate { external_ref: Option<String> },
-    /// The questions the node asked and nobody answered — `QuestionsAskedPayload.questions`, never empty.
+    /// The questions the node asked and nobody answered.
     Questions { asked: NonEmpty<QuestionId> },
+    //   `QuestionsAskedPayload.questions` es un `Vec` en el wire (`gates/payloads.rs:358`) y su constructor es el que lo hace no vacío, así que un
+    //   `questions_asked` sin ids —de un escritor viejo o ajeno— no es una espera: `replay::apply` deja el nodo como estaba y
+    //   `RunState.broken` nombra el evento, la degradación explícita que un pliegue de producción debe en vez de un pánico
 }
 // engine/src/replay.rs:276 → `Waiting { on: NodeWait::Gate { external_ref } }`; :305 → `Waiting { on: NodeWait::Questions { asked } }`
 // engine/src/run/schedule.rs:386-417 — `waiting_step` decide sobre `on`: `Questions { .. }` no es un gate y nunca llega a `PublishGate`/`PollGate`; `Gate { external_ref }` sigue eligiendo por `is_external_gate(node)`, que es de la declaración
@@ -1672,13 +1684,18 @@ chronicle/mod.rs, chronicle/words.rs, closing.rs}`,
 `cli/tests/{status_cmd.rs, parked_runs.rs:410,418,545-590, graph_cmd.rs,
 run_flow.rs:62-63,2078, mcp_flow.rs:1176-1180, console_interaction.rs}`,
 `cli/src/commands/mcp.rs:303-316` y `drive.rs:468` (consumidores del
-documento), y el plan: `preguntas.md:252-254` (el modificador sale del
-estado, no de `NodeFrame.asked`), `cronica.md:225-226` (`--json` y la tool
+documento), y el plan: `preguntas.md:118,131,252-254,413,430` (el
+modificador sale del estado; `pending_questions` sale de la firma de
+`GateLedger` y la fila de derivación pasa a `Waiting { on:
+NodeWait::Questions { asked } }`), `mecanismos.md` M04 `:192,:205` (la
+misma firma y la cláusula de `questions_exec.rs`), `cronica.md:225-226` (`--json` y la tool
 `workflow_status` cambian de forma), `README.md` §11 L-97 y §10 filas 5-05
 y 7-07 (I-08 cierra acá). Borra: la exportación de `mode_included_nodes`,
 el `format!` de `words.rs:237-245`, `chronicle/mod.rs:26`,
 `GateLedger::pending_questions`, `QuestionRound::pending`, el `listed`
-privado de `payloads.rs:122`. `frames.rs`, `NodeFrame` y `StateWord::of` no
+privado de `payloads.rs:122`. La clasificación de §0.15 de las dos
+primeras es «reemplazado»: no tienen llamador, y lo que `questions_exec` y
+`NodeDisplay` leen en su lugar es el estado del nodo. `frames.rs`, `NodeFrame` y `StateWord::of` no
 cambian; `NodeState` no aparece en `core/schemas/events.json`, así que no
 hay schema que regenerar.
 
@@ -1738,10 +1755,14 @@ stdio`. El stderr que lo dice se drena a `tracing::debug!`
 (`engine/src/run/prompt_exec.rs:222-231`, `task_cycle/session.rs:289`) sin
 código de salida; en un nodo `kind: loop` ni eso: el intento guarda
 `dispatch: Crashed` en `AttemptRecord` (`task_cycle/attempt.rs:137-146`) y
-nadie lo lee, así que la tarea termina «criteria still red or scope
-violated after N attempt(s)» (`task_cycle/mod.rs:400-405`) y la muerte no
-llega a ningún lado. `probe()` de codex corre `--version`
-(`adapters/src/codex/mod.rs:263-271`), así que `doctor` dice sano, y
+nadie lo lee, la tarea bloquea con una frase (`task_cycle/mod.rs:400-405`)
+que `integrate.rs:175-182` empuja a `state.blocked_reasons: Vec<String>`
+(`loop_exec/mod.rs:220`) y `loop_exec/mod.rs:78-86` concatena en un
+`Failure::message` no reintentable. `probe()` de codex corre `--version`
+(`adapters/src/codex/mod.rs:263-271`), así que `doctor` dice sano —y
+`doctor` sólo conoce adapters (`cli/src/commands/doctor.rs:29-63`), nunca
+las candidaturas que un runner nombra (`core/src/config/mod.rs:54`:
+`BTreeMap<RunnerName, Vec<RunnerCandidate>>`)—, y
 `docs/troubleshooting.md:40-44` promete que «a healthy `doctor` means a run
 won't fail on setup for that adapter». Evidencia: L-106 (§11); AD-D25,
 EN-D36, EN-D38, CLI-D32 (§12).
@@ -1749,14 +1770,19 @@ EN-D36, EN-D38, CLI-D32 (§12).
 **Regla.** El servidor per-run tiene nombre propio, `yunta-run`, distinto
 del control plane que un usuario registra con el nombre que quiera. Una
 sesión que termina sin evento terminal dice cómo salió su proceso y qué
-escribió último en stderr, y ese hecho tipado llega al log por los dos
-caminos que abren sesiones —el nodo de prompt y el ciclo de tareas— y de
-ahí a `status`, a `--json` y a la crónica. El proceso se interroga sólo
-cuando murió sin decir nada: una sesión que terminó su turno no paga nada.
-`yunta doctor --session` abre una sesión real por runner sano por el mismo
-camino que un workflow y reporta cada una con esa misma evidencia; gasta un
-prompt por runner, por eso es opt-in, y `doctor` sin la bandera dice qué
-garantiza y qué no.
+escribió último en stderr, y ese hecho tipado llega al `node_failed` de los
+dos caminos que abren sesiones —el nodo de prompt y el nodo `loop`— y de
+ahí a `status`, a `--json` y a la crónica. Interrogar a un proceso es
+matarlo primero: `exit()` mata el grupo, cierra las cañerías y recoge la
+salida, en ese orden, de modo que la espera está acotada por construcción y
+ninguna sesión sobrevive a su run. Se pregunta sólo a la sesión cuyo stream
+terminó sin decir nada. Lo que el hijo escribió en stderr entra al log
+redactado: el entorno del hijo es donde este sistema pone sus secretos.
+`yunta doctor --session` abre una sesión real por binding —adapter, modelo
+y agente— que algún runner nombre, no por nombre de runner, porque una
+sesión ejercita un binding y el que un runner tiene de reserva vale lo que
+el primero; gasta un prompt por binding, por eso es opt-in, y `doctor` sin
+la bandera dice qué garantiza y qué no.
 
 **Firmas.**
 
@@ -1765,87 +1791,114 @@ garantiza y qué no.
 impl RunToolsEndpoint { pub const SERVER_NAME: &'static str = "yunta-run"; }   // claude_code/mod.rs:49,161 y parse.rs:136, codex/mod.rs:185 lo siguen sin cambio de texto
 pub trait AgentSession {
     /* … */
-    /// How the process ended, asked only of a session whose stream ended without a terminal event: the status it exited with and the last lines it wrote to stderr. Reaps the child and takes the tail the drain collected; a session with no process of its own answers `None`.
+    /// How the process ended, asked only of a session whose stream ended without a terminal event. The session is over by the time it is asked, so the group dies first and the status is collected after: the wait is bounded by construction and nothing outlives the run. A session with no process of its own answers `None`.
     async fn exit(&mut self) -> Option<SessionExit> { None }     // el mock hereda el default
 }
-// core/src/events/failure.rs — el hecho es del log, así que el tipo vive con los hechos y el puerto lo usa
-pub struct SessionExit { pub code: Option<i32>, pub signal: Option<i32>, pub stderr_tail: Vec<String> }   // Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug, como sus vecinos
-pub struct SessionDeath { pub adapter: AdapterId, pub exit: Option<SessionExit> }
-pub enum Failure { Artifacts { artifacts: Vec<ArtifactFailure> }, SessionDied { died: SessionDeath }, Message { outcome: String } }   // untagged; `died` es el discriminador, antes de `Message`
-impl Failure { pub fn session_died(adapter: AdapterId, exit: Option<SessionExit>) -> Self; }
-//   Display: una línea «session `codex` exited with code 2 before any terminal event — url is not supported for stdio» (la última línea del tail);
-//   `Failure::failures()` gana el brazo vacío; `status` lista el tail entero bajo el nodo, un bloque más de `print_failures`; `--json` publica `session_deaths`, aditivo, y `node_diagnostics` gana su brazo
-// core/src/process/subprocess.rs
+// core/src/process/subprocess.rs — `SubprocessSession::exit`: `kill_group()` → `close_pipes()` → `child.wait()` → `reaped = true`, el mismo orden que `kill()` (:268-278), que es lo que conserva la invariante de `Drop` (:287-296): `kill_group` es un no-op una vez reaped (:236-241)
 /// How many stderr lines a session keeps for its exit (D180).
 pub const STDERR_TAIL_LINES: usize = 20;
-//   el drain guarda las últimas STDERR_TAIL_LINES en un `Mutex<VecDeque<String>>` compartido; `exit()` hace `wait()` al child (`reaped = true`), aborta el drain y devuelve lo que la cola tiene: nada espera a un nieto que dejó stderr abierto
+/// A stderr line as the log keeps it: every value this session's `env` carried replaced by `[redacted]`, the promise `Secret`'s own `Debug` makes and `RunToolsEndpoint` states for its token.
+fn redacted(line: String, secrets: &[Secret<String>]) -> String;
+//   el drenaje guarda las últimas `STDERR_TAIL_LINES` líneas redactadas en un `Mutex<VecDeque<String>>` compartido; el cierre captura los valores de `launch.env` (`:77-79`) junto a la cola
+
+// core/src/events/failure.rs — el hecho es del log, así que vive con los hechos y el puerto lo usa
+/// How the process ended: the status it exited with, or the signal that ended it. A stored `type` this build does not know reads back as `Unknown`, the tolerance every persisted union here gives.
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SessionEnd { Code { code: i32 }, Signal { signal: i32 }, #[serde(other)] Unknown }
+pub struct SessionExit { pub end: SessionEnd, pub stderr_tail: Vec<String> }
+pub struct SessionDeath { pub adapter: AdapterId, pub exit: Option<SessionExit> }
+pub enum Failure { Artifacts { artifacts: Vec<ArtifactFailure> }, SessionDied { died: SessionDeath }, Message { outcome: String } }   // untagged; `died` es el discriminador, un campo como `artifacts`, antes de `Message`
+impl Failure { pub fn session_died(adapter: AdapterId, exit: Option<SessionExit>) -> Self; }
+//   `Display` dice cada forma que el tipo admite, porque la ausencia se nombra: con salida y con cola, «session `codex` exited with code 2 before any terminal event — url is not supported for stdio» (la última línea);
+//   con señal, «…was killed by signal 9 before any terminal event»; con la cola vacía, la oración sin el guión; sin salida —una sesión sin proceso propio, el mock—, «session `mock` ended without a terminal event».
+//   `Failure::failures()` gana el brazo vacío. §8 conserva `Failure` y `node_close::fail_with`: este ítem los generaliza —un constructor y un brazo más, el mismo `fail_with`— y no los reimplementa.
+//   `receipt/mod.rs:216-224` cuenta artifacts que no cerraron: una sesión muerta no nombra ninguno y no entra en esa cuenta; el `let-else` queda dicho en su rustdoc en vez de ser un descarte accidental.
 
 // engine/src/task_cycle/mod.rs — los dos caminos dicen la muerte
 pub enum DispatchOutcome { /* … */ Crashed { exit: Option<SessionExit> }, /* … */ }
-pub enum BlockedCause { PreCheck(NonEmpty<Surprise>), SessionDied(SessionDeath), Unmet { attempts: u32 } }   // `Surprise` es de M29
-pub enum TaskOutcome { Done, Blocked { cause: BlockedCause }, Interrupted, /* … */ }
-//   session.rs:289 — `match terminal { Some(outcome) => outcome, None => Crashed { exit: session.exit().await } }`: sólo se pregunta al que murió;
+pub enum BlockedCause { PreCheck(NonEmpty<Surprise>), SessionDied(SessionDeath), Unmet { attempts: u32 } }   // `PreCheck` y `Unmet` son de M29
+//   session.rs:287-291 — `match terminal { Some(outcome) => outcome, None => DispatchOutcome::Crashed { exit: session.exit().await } }`: sólo se pregunta al que murió;
 //   prompt_exec.rs:223 — `fail_with(ctx, node, Failure::session_died(adapter.id().clone(), exit), true, tokens)`;
-//   task_cycle/mod.rs:400-405 — un intento que murió bloquea la tarea con `SessionDied`, y `loop_exec/integrate.rs:111-122` escribe la causa por `Display` de `BlockedCause`
+//   task_cycle/mod.rs:400-405 — un intento que murió bloquea la tarea con `BlockedCause::SessionDied`
+// engine/src/run/loop_exec/{integrate.rs, mod.rs} — la causa deja de ser texto antes de llegar al log
+//   `integrate.rs:175-182` empuja `(TaskId, BlockedCause)` y `mod.rs:220` lo guarda tipado; `mod.rs:78-86` cierra el nodo con
+//   `Failure::session_died(..)` de la primera tarea cuya causa es una muerte —el hecho accionable— y con `Failure::message` cuando ninguna lo es,
+//   `retryable: true` en el primer caso, como el camino de prompt, y `false` en el segundo, como hoy; la oración sigue nombrando cada tarea bloqueada por `Display` de `BlockedCause`
 
-// cli/src/cli.rs
+// cli/src/cli.rs:138-140 — la ayuda de `Doctor` dice qué chequea sin la bandera y qué agrega con ella
 Doctor {
-    /// Also opens one real session per healthy runner `runners:` names — the smallest run there is, through the same machinery a workflow uses, run tools mounted — and reports how each ended. Spends one prompt per runner.
+    /// Also opens one real session per binding any runner names — the smallest run there is, through the same machinery a workflow uses, run tools mounted — and reports how each ended. Spends one prompt per binding.
     #[arg(long)] session: bool,
 }
 // cli/src/commands/doctor.rs
 pub async fn doctor(session: bool) -> Result<Outcome, CliError>;
-/// The run `--session` drives for one runner: a single `kind: prompt` node on it, `prompt: "Reply with exactly: ok"`, no artifacts. One run per runner, so a runner whose CLI dies is reported as itself and not as the refusal of a batch.
-async fn session_probe(ctx: &Context, runner: &RunnerName) -> SessionProbe;
-//   corre en el sandbox de `yunta test` (`Context::sandboxed`) con los adapters reales y el `Env` de la invocación, escribiendo el workflow de un nodo en el catálogo del sandbox y pasando por `runnable` → `create_run_from` → `drive::execute`;
-//   sólo para los runners cuyo adapter ya probó sano, porque `probe_or_refuse` rechaza la invocación entera y eso es lo que `doctor` reporta por su cuenta.
-//   Reporte: `planner (claude-code/claude-opus-4-8): ok — 812 tokens` | `executor (codex/gpt-5-codex): session died — exit 2: url is not supported for stdio`; `Outcome::Reported` si alguna murió o algún adapter probó enfermo.
+/// One probe run per distinct binding (`adapter`/`model`/`agent`) any runner names, whichever runners reach it: a session exercises the binding, and one a runner falls back to is worth as much as its first. Only bindings whose adapter already probed healthy; the rest the plain `doctor` reports.
+async fn session_probe(ctx: &Context, candidate: &RunnerCandidate, named_by: &[RunnerName]) -> SessionProbe;
+//   `claude-code/claude-sonnet-4-6 (executor, reviewer): ok — 812 tokens`
+//   `codex/gpt-5-codex (planner fallback, reviewer-alt): session died — exit 2: url is not supported for stdio`
+/// The context a probe run drives in: `yunta test`'s sandbox over this project's real config with `baseline:` removed — a probe asks whether a session opens, never what the tree measured.
+fn probe_context(ctx: &Context, checkout: &SandboxedCheckout) -> Context;
+//   un run por binding, no un run con un nodo por binding, porque `probe_or_refuse` rechaza la invocación entera: así el que muere se reporta como él mismo. `Outcome::Reported` si alguno murió o algún adapter probó enfermo.
+// cli/src/commands/test/mod.rs — el armado del sandbox deja de ser privado de `run_case`
+/// A checkout of its own for a run that must not touch the project: a temp root, its worktree seeded from `.yunta`, a git repo, and the context rooted there.
+pub(crate) fn sandboxed_checkout(cwd: &Path) -> Result<SandboxedCheckout, CliError>;   // lo que `case.rs:135-151` arma hoy con `copy_dir_all` (:176) e `init_git` (:193), que pasan a `pub(crate)`
+// cli/src/json.rs — la muerte va donde ya está el nodo: `NodeJson` (8-04) gana
+//   `#[serde(skip_serializing_if = "Option::is_none")] session_death: Option<SessionDeathJson>`, aditivo, y `SCHEMA_VERSION` queda en el 5 que 8-04 fijó.
+//   `diagnostics` no gana entrada —una muerte no nombra artifact, igual que una frase (`node_diagnostics` :368-372)— y su rustdoc (:88-94) sigue siendo verdad.
+// cli/src/commands/status/mod.rs — `print_failures` gana el bloque: el nodo, cómo salió, y cada línea de la cola
 
-// testkit-core/src/stubs.rs (nuevo) — el crate que adapters y cli pueden compartir (`yunta-testkit` depende de `yunta-adapters`, así que los stubs no pueden vivir ahí)
+// testkit-core/src/stubs.rs (nuevo) — el crate que adapters y cli comparten (`yunta-testkit` depende de `yunta-adapters`, así que los stubs no pueden vivir ahí)
 /// The stub CLIs the adapter and CLI tests drive, by absolute path. Each honours `<NAME>_STUB_EXIT` and `<NAME>_STUB_STDERR`: what to exit with, and the lines to write to stderr before exiting.
 pub fn codex() -> PathBuf;
 pub fn claude_code() -> PathBuf;
-// testkit-core/src/adapter.rs:41-49 — junto a `drain`, `drain_for_exit(session) -> (Vec<AgentEvent>, Option<SessionExit>)`: devuelve lo que la sesión dijo y cómo salió, sin que el test escriba un segundo drenaje
+// testkit-core/src/adapter.rs:41-49 — junto a `drain`, `drain_for_exit(session) -> (Vec<AgentEvent>, Option<SessionExit>)`: lo que la sesión dijo y cómo salió, sin que el test escriba un segundo drenaje
 ```
 
 **Decisión.** D180 revisa D147 (el nombre) y fija `STDERR_TAIL_LINES`: el
-servidor per-run se llama `yunta-run`; una sesión que muere falla con
-`SessionDied` por los dos caminos que abren sesiones; `doctor --session`
-abre una sesión real por runner sano, una por runner. D147 queda
-`revised_by: [D178, D180]`. Docs: `docs/adapters.md` (§doctor gana
-`--session`; los dos servidores y sus nombres), `docs/compatibility.md`
-§The MCP servers (los nombra), §The JSON surfaces (`session_deaths` y qué
-publica `diagnostics` para un nodo cuya sesión murió) y §What isn't covered
-(qué chequea `doctor`), `docs/troubleshooting.md:40-44` (qué garantiza
-`doctor` sin `--session` y qué sólo con ella) y su entrada «session died»,
-README tabla de comandos, spec-events §5.15 (la falla toma **tres** formas;
-la fila nombra `died`), spec-adapter O2 (`:217-219`: el engine registra la
-muerte con su salida, no sintetiza una frase) y su `exit` en el trait,
+servidor per-run se llama `yunta-run`; `exit()` mata antes de recoger; la
+muerte llega tipada por los dos caminos que abren sesiones; el stderr entra
+redactado; `doctor --session` abre una sesión por binding sano, una por
+binding. D147 queda `revised_by: [D178, D180]`. Docs: `docs/adapters.md`
+(§doctor gana `--session`; los dos servidores y sus nombres),
+`docs/compatibility.md` §The MCP servers (los nombra), §The JSON surfaces
+(`session_death` en el nodo, y que `diagnostics` no gana entrada) y §What
+isn't covered (qué chequea `doctor`), `docs/troubleshooting.md:40-44` (qué
+garantiza `doctor` sin `--session` y qué sólo con ella) y su entrada
+«session died», README tabla de comandos, spec-events §5.15 (la falla toma
+**tres** formas; la fila nombra `died` y el párrafo «una de dos formas»
+pasa a tres), spec-adapter O2 (`:217-219`: el engine registra la muerte con
+su salida, no sintetiza una frase) y el `exit` del trait,
 `contrato-del-run.md:356` (lo mismo), `mecanismos.md` M01 (`SERVER_NAME`
 con su valor nuevo).
 
 **Archivos.** Nuevo: `testkit-core/src/stubs.rs`, `testkit-core/stubs/{codex_stub.sh,
 claude_code_stub.sh}` (mudados desde `adapters/tests/fixtures/`, con la
-variable de stderr), `docs/design/adr/D180-*.md` (registrado con el plan).
-Modifica: `core/src/port/session.rs` (`SERVER_NAME`, `exit`, el rustdoc de
-`events` `:308-310`, el re-export de `port/mod.rs:17-20`),
-`core/src/process/subprocess.rs`, `core/src/events/failure.rs` (`:3-8,18-23,57-62`),
-`core/schemas/events.json`, `engine/src/task_cycle/{mod.rs, session.rs,
-attempt.rs}`, `engine/src/run/{prompt_exec.rs, loop_exec/integrate.rs}`,
-`engine/tests/task_cycle.rs:504`, `adapters/tests/{codex.rs,
-claude_code.rs}` enteros (cada uno resuelve el stub por `stub_path()` y lo
-nombra en su doc de módulo; las fixtures `codex.rs:195` y
-`claude_code.rs:828` dicen `yunta` donde el CLI real dirá `yunta-run`),
-`testkit-core/src/{lib.rs, adapter.rs}`, `cli/src/{cli.rs, json.rs}`,
-`cli/src/commands/{doctor.rs, status/mod.rs}`,
-`cli/tests/pack_requires_doctor_cmd.rs` (los casos de `doctor` viven donde
-ya viven), `docs/adapters.md`, `docs/compatibility.md`,
-`docs/troubleshooting.md`, `README.md`, `docs/design/{spec-events.md,
-spec-adapter.md, contrato-del-run.md}`, `mecanismos.md` M01. Borra:
-`adapters/tests/fixtures/*_stub.sh`.
+variable de stderr). Modifica: `core/src/port/session.rs` (`SERVER_NAME`,
+`exit`, el rustdoc de `events` `:308-310`, el re-export de
+`port/mod.rs:17-20`), `core/src/process/subprocess.rs`
+(`:171-174,226-241,268-278,287-296`), `core/src/events/failure.rs`
+(`:3-8,18-23,24-32,57-62`), `core/schemas/events.json`,
+`engine/src/task_cycle/{mod.rs, session.rs, attempt.rs}`,
+`engine/src/run/{prompt_exec.rs, node_close.rs:335-350,
+loop_exec/integrate.rs:172-186, loop_exec/mod.rs:78-86,220}`,
+`engine/src/receipt/mod.rs:216-224`, `engine/tests/task_cycle.rs:504`,
+`adapters/tests/{codex.rs, claude_code.rs}` enteros (cada uno resuelve el
+stub por `stub_path()` y lo nombra en su doc de módulo; las fixtures
+`codex.rs:195` y `claude_code.rs:828` dicen `yunta` donde el CLI real dirá
+`yunta-run`), `testkit-core/src/{lib.rs, adapter.rs}`, `cli/src/{cli.rs,
+json.rs}`, `cli/src/commands/{doctor.rs, status/mod.rs, test/mod.rs,
+test/case.rs}`, `cli/tests/pack_requires_doctor_cmd.rs` (los casos de
+`doctor` viven donde ya viven), `docs/adapters.md`,
+`docs/compatibility.md`, `docs/troubleshooting.md`, `README.md`,
+`docs/design/{spec-events.md, spec-adapter.md, contrato-del-run.md}`,
+`docs/design/adr/D180-*.md` (la forma de `Failure::SessionDied`),
+`mecanismos.md` M01. Borra: `adapters/tests/fixtures/*_stub.sh`.
 
-**Prerequisitos.** 8-03 (`BlockedCause` extiende el `Blocked` tipado que
-M29 construye) y 8-04 (`print_failures` y `RunDocument` ya sobre el frame).
+**Prerequisitos.** 8-01 (`Context` con su `Interrupt` y el camino que
+`drive::execute` recorre: `doctor --session` construye un `Context` y
+maneja un run) y 8-03 (`BlockedCause`, que este ítem extiende). 8-04 no es
+prerequisito sino orden: `print_failures` y `NodeJson` cambian allá
+primero.
 
 **Tests.** `adapters/tests/codex.rs`:
 `the_per_run_server_never_shares_the_control_planes_name` (rojo: los args
@@ -1853,29 +1906,44 @@ dicen `mcp_servers.yunta.`; verde: `mcp_servers.yunta-run.url` y ningún
 `mcp_servers.yunta.`), `a_session_that_dies_before_its_first_event_reports_its_exit_and_its_last_stderr_lines`
 (rojo: el trait no tiene `exit`; el stub escribe la línea por
 `CODEX_STUB_STDERR` y sale con 2, y el test lee la salida por
-`drain_for_exit`); `adapters/tests/claude_code.rs`: el allow-rule y el
-prefijo dicen `yunta-run`, y una sesión que terminó su turno no se
-interroga (`a_session_that_finished_its_turn_is_never_asked_how_it_exited`);
-`core/tests/events.rs`: `a_node_failed_by_a_dead_session_round_trips_with_its_exit`;
-`engine/tests/run_sessions.rs`: `a_node_whose_session_died_fails_naming_the_adapter_and_the_exit`;
-`engine/tests/task_cycle.rs`: `a_task_whose_session_died_blocks_naming_the_exit`
-(rojo: hoy dice «criteria still red»); `cli/tests/status_cmd.rs`:
-`status_prints_the_stderr_a_dead_session_left`,
-`status_json_publishes_a_session_death_with_its_exit`;
+`drain_for_exit`), `a_dead_sessions_stderr_tail_never_carries_a_value_from_its_env`
+(el stub escribe el token que su entorno lleva; la cola dice `[redacted]`),
+`a_dead_sessions_process_group_is_gone_once_its_exit_is_collected` (el
+stub deja un nieto vivo; tras `exit()` el grupo está `Liveness::Dead`);
+`adapters/tests/claude_code.rs`: el allow-rule y el prefijo dicen
+`yunta-run`; `engine/tests/run_sessions.rs`:
+`a_node_whose_session_died_fails_naming_the_adapter_and_the_exit` y
+`a_session_that_finished_its_turn_is_never_asked_how_it_exited` (sobre una
+sesión del mock que registra si se la interrogó: la regla es del engine);
+`core/tests/events.rs`: `a_node_failed_by_a_dead_session_round_trips_with_its_exit`
+y `a_session_end_this_build_does_not_know_reads_back_as_unknown`;
+`engine/tests/task_cycle.rs`: `a_task_whose_session_died_blocks_naming_the_exit`;
+`engine/tests/run.rs`: `a_loop_node_whose_session_died_fails_naming_the_adapter_and_the_exit`
+(rojo: hoy dice «no task is ready and not all are done»);
+`cli/tests/status_cmd.rs`: `status_prints_the_stderr_a_dead_session_left`,
+`status_json_publishes_a_session_death_on_its_node`;
 `cli/tests/pack_requires_doctor_cmd.rs`:
-`doctor_session_reports_a_runner_whose_cli_dies_at_startup_with_its_stderr`,
-`doctor_session_reports_a_runner_whose_cli_answers`,
-`doctor_without_session_opens_none` (los stubs del testkit nombrados por
-`binary:` en la config del sandbox, sin tocar `PATH`).
+`doctor_session_reports_a_binding_whose_cli_dies_at_startup_with_its_stderr`,
+`doctor_session_names_every_runner_that_reaches_a_binding`,
+`doctor_session_never_measures_the_projects_baseline`,
+`doctor_without_session_opens_none` (los stubs de `testkit-core` nombrados
+por `binary:` en la config del sandbox, sin tocar `PATH`).
 
 **Cierra.** AD-D25, EN-D36, EN-D38, CLI-D32; L-106.
 
 **Encastre.** M01: `SERVER_NAME` sigue siendo el único nombre y los
 adapters lo siguen. M06: el hecho es tipado y la prosa se produce en el
-borde, en `Failure::Display`. M08: `doctor --session` abre sesiones por
-`open_session`, la única puerta, porque corre un run. M18: un solo camino
-de ejecución —el de `yunta test`— con adapters reales. M20: los stubs y el
-helper que los drena viven en `testkit-core`, el crate que adapters y cli
-comparten. M22: `STDERR_TAIL_LINES` cita D180. M19: la crónica dice el
-`Failure` como a cualquier otro. M29: `BlockedCause` reúne lo que bloquea
-una tarea en un tipo; D178 y D180 revisan D147 en ese orden.
+borde, en `Failure::Display`; `BlockedCause::Display` dice la tarea y
+delega la muerte en ella. M08: `doctor --session` abre sesiones por
+`open_session`, la única puerta, porque corre un run. M10/M27: `exit()`
+mata el grupo como todo lo que este repo gobierna, y por eso no necesita un
+umbral nuevo. M11/§Secreto: el stderr entra redactado, que es lo que
+`RunToolsEndpoint` promete de su token. M18: un solo camino de ejecución
+—el de `yunta test`, con su armado de sandbox ahora compartido— con
+adapters reales. M20: los stubs y el helper que los drena viven en
+`testkit-core`, el crate que adapters y cli comparten. M22:
+`STDERR_TAIL_LINES` cita D180. M19: la crónica dice el `Failure` como a
+cualquier otro. M28: el run de una prueba no mide baseline, porque su
+veredicto no es sobre el árbol. M29: `BlockedCause` reúne lo que bloquea
+una tarea; D178 y D180 revisan D147 en ese orden. §8: `Failure` y
+`node_close::fail_with` se generalizan, nunca se reimplementan.
