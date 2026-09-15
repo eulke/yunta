@@ -27,7 +27,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | uno de los 36 nombres de este documento, con su sufijo `_vN` si no es la v1 |
+| `kind` | string | uno de los 38 nombres de este documento, con su sufijo `_vN` si no es la v1 |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
 
@@ -115,7 +115,7 @@ atribuidos al adapter: `agent_session_opened` y
 Si esta lectura no es la intención original, es exactamente el tipo de cosa a
 corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
-## 5. Los 36 tipos de evento, campo por campo
+## 5. Los 38 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -167,7 +167,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 |---|---|---|---|
 | `session_id` | `SessionId` (opaco) | sí | persiste para `resume` |
 | `agent` | `Option<String>` | no | agente nombrado del adapter, si se pidió (`agent:`) |
-| `model` | string | sí | modelo efectivamente usado |
+| `model` | `Option<ModelName>` | no | el modelo que el CLI reportó para la sesión; ausente cuando no reportó ninguno — nunca el pedido |
 | `capabilities` | `Capabilities` (`fence`: `none \| tool_calls \| filesystem`; el resto bools: resume_session, permission_profiles, custom_agents, usage_reporting, skills, run_tools, network_isolation) | sí | snapshot de capacidades del adapter en ese momento — constantes tras construcción. Un log viejo lleva `edit_hooks` en vez de `fence`, y el lector lo lee como `none` |
 | `fence` | `Coverage` (`{"coverage": "exact"}` · `{"coverage": "widened_to_roots", "roots": [...]}` · `{"coverage": "tools_only"}`) | no | cuánto del canal de escritura cercó realmente la sesión, derivado de lo que el adapter construyó; ausente cuando no construyó ninguno. El nivel viaja una vez, en `capabilities.fence` |
 
@@ -216,7 +216,7 @@ registra.
 | `task_id` | string (mismo patrón de id que en el schema del documento de tareas) | sí | — |
 | `criteria` | lista de `{cmd, type?}` | sí | copia congelada del documento de tareas |
 | `scope` | lista de globs | sí | — |
-| `depends_on` | lista de `task_id` | no | default vacío |
+| `depends_on` | lista de `task_id` | sí (puede ser vacía) | vacía cuando la tarea no depende de ninguna |
 
 ### 5.10 `criteria_checked` — engine
 **Fuente:** task_id, fase pre/post, exit code por criterio, ejecutado o reutilizado de caché
@@ -228,13 +228,14 @@ registra.
 | `results` | lista de `{cmd, exit_code, type?, reused: bool, duration_ms?}` | sí | `reused=true` cuando la memoización (fuera de alcance de una implementación completa, salvo lo mínimo necesario) sirvió el resultado sin re-ejecutar; `duration_ms` es el costo observado de la ejecución — ausente en `reused=true` y en eventos emitidos antes de que este campo se agregara |
 
 ### 5.11 `task_status_changed` — engine
-**Fuente:** task_id, estado nuevo, evento que lo justifica
+**Fuente:** task_id, estado nuevo, evento que lo justifica, commit donde aterrizó el trabajo
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `task_id` | string | sí | — |
 | `new_status` | enum `pending \| ready \| running \| done \| blocked \| failed` [inferido, valores exactos a confirmar contra la implementación del scheduler] | sí | solo el engine emite este evento — ningún agente tiene vía para marcarlo |
 | `caused_by` | referencia a `seq` de otro evento | sí | el evento (p. ej. `criteria_checked`) que justifica la transición |
+| `commit` | `Option<CommitSha>` | no | dónde aterrizó el trabajo de la tarea, en un `done` y en ningún otro estado: el commit que el árbol del run llevaba tras integrarlo. Es lo que vuelve a un `done` respondible desde otro run — un árbol desciende de ese commit o no tiene el trabajo |
 
 ### 5.12 `scope_checked` — engine
 **Fuente:** task_id/node_id, diff observado, violaciones
@@ -265,7 +266,8 @@ registra.
 | `decided_by` | enum `rule \| person` + identificador | sí | — |
 | `mode` | enum `rules \| ask \| deny` | sí | modo vigente en el momento de la decisión |
 | `count_this_run` | `u32` | sí | para el cap `max_per_run` |
-| `denial_reason` | `Option<string>` | solo en `denied` | toda denegación produce además un `finding_posted` — no lo reemplaza, lo acompaña |
+| `paths` | lista de globs | solo en `scope_expansion_granted` | los paths exactos que la concesión autorizó: el scope efectivo de un intento posterior se deriva del log sin volver a aparear la concesión con el pedido que la precedió. Un log escrito antes del campo lo lee vacío |
+| `denial_reason` | `Option<string>` | solo en `scope_expansion_denied` | toda denegación produce además un `finding_posted` — no lo reemplaza, lo acompaña |
 
 ### 5.15 `node_finished` / `node_failed` — engine
 **Fuente:** resultado, tokens, ¿reintentable?
@@ -273,11 +275,11 @@ registra.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `outcome` [inferido] | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter | solo en `node_finished` | el outcome del agente es telemetría, esto es el veredicto |
-| `failure` | `{outcome}` \| `{artifacts}` | solo en `node_failed` | por qué falló, como dato; ver abajo |
+| `outcome` / `artifacts` | frase \| lista de artifacts que no cerraron | solo en `node_failed` | por qué falló, como dato: uno de los dos, plano sobre el payload; ver abajo |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage` |
 | `retryable` | `bool` | solo en `node_failed` | guía la política de reintento; lo fija quien gobierna el presupuesto, de modo que un intento terminal nunca se registra como reintentable |
 
-**La falla es dato, no prosa.** `failure` toma una de dos formas, planas sobre el
+**La falla es dato, no prosa.** La falla toma una de dos formas, planas sobre el
 payload: `outcome: <frase>`, una falla que el engine enuncia en una oración, o
 `artifacts: [...]`, un elemento por artifact declarado que no cerró. Cada elemento
 es una de cuatro: el archivo — `path` y uno de `artifact-missing`, `artifact-empty`,
@@ -310,7 +312,7 @@ de lectura de §3.1 del Contrato aplicada a este campo.
 |---|---|---|---|
 | `to_node` | `NodeId` | sí | destino — el nodo que reruteó es el `node_id` del envelope |
 | `cause` | string | sí | — |
-| `origin` | enum `on_failure \| gate_choice` | no (default `on_failure`) | qué mecanismo reruteó; logs viejos sin el campo leen `on_failure` |
+| `origin` | enum `on_failure \| gate_choice` | sí | qué mecanismo reruteó; un log viejo sin el campo lo lee como `on_failure` |
 | `attempt` | `Option<u32>` | solo en `on_failure` | N de `max_reroutes` (M); ausente en una elección de gate, que no es un reintento |
 | `max_reroutes` | `Option<u32>` | solo en `on_failure` | — |
 
@@ -322,9 +324,11 @@ de lectura de §3.1 del Contrato aplicada a este campo.
 | `summary` | string | solo en `gate_waiting` | objeto de escalación |
 | `evidence` | lista de `{label?, value}` | solo en `gate_waiting` | la adjunta el engine desde el log; nunca prosa generada por agente. Un hecho que se nombra solo (`exit 1`) no lleva `label`. Un log anterior a la estructura trae un string y se lee como el único hecho sin etiqueta que siempre fue |
 | `options` | lista de `{id, label, tradeoff}` | solo en `gate_waiting` | `tradeoff` es obligatorio por opción |
+| `external_ref` | `Option<string>` | solo en `gate_waiting` | la referencia propia del forge para este gate: la URL del pull request (Contrato §5.6); ausente en la escalación interna, que no sale del run |
 | `chosen_option` | `Option<string>` | solo en `gate_resolved` | — |
 | `resolved_by` | `Option<string>` | solo en `gate_resolved` | usuario o identificador de quien resolvió |
-| `free_text` | `Option<string>` | no | siempre disponible como canal |
+| `approved_sha` | `Option<CommitSha>` | solo en `gate_resolved` | el commit que cubre la aprobación del forge: contra él se compara la cabeza del pull request para decidir si la aprobación sigue en pie |
+| `free_text` | `Option<string>` | solo en `gate_resolved` | siempre disponible como canal para quien resuelve |
 
 ### 5.19 `questions_asked` / `questions_answered` — engine
 **Fuente:** node_id; hash e ids del documento `questions` y tokens de la sesión que

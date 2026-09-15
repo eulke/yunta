@@ -67,7 +67,7 @@ Tipos: `string`, `number`, `boolean`, `enum`, `path`, `document`. `required` y `
 `description` no es decorativa: es lo que `list_workflows` le muestra a un agente cliente y lo que `--help` muestra a una persona. Un catálogo sin descripciones es una lista de nombres sin sentido.
 Reglas: todo se valida **al crear el run, antes del primer token**; los defaults se resuelven en ese momento y quedan congelados en el manifest (resolverlos por nodo introduciría estado no determinista); y `yunta check` verifica que todo `{{inputs.x}}` de los templates refiera a un input declarado.
 # 3. Modelo de eventos
-El event log es append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`. El estado actual no se guarda: se **deriva** por replay del log (snapshots solo como optimización, jamás como fuente de verdad). Los 36 tipos de evento (30 filas; varias agrupan variantes emparentadas):
+El event log es append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`. El estado actual no se guarda: se **deriva** por replay del log (snapshots solo como optimización, jamás como fuente de verdad). Los 38 tipos de evento (31 filas; varias agrupan variantes emparentadas):
 | Evento | Emisor | Payload relevante |
 |---|---|---|
 | `run_created` | engine | manifest hash, inputs, modo, `promoted_from?` |
@@ -99,6 +99,7 @@ El event log es append-only: `(run_id, seq, timestamp, node_id?, kind, payload_j
 | `promotion_signaled` | engine | razón, evidencia, modo sugerido |
 | `child_run_created` / `child_run_finished` | engine | node_id, child run_id, `workflow_hash` del hijo, estado terminal |
 | `capability_degraded` | engine | capacidad, adapter, política aplicada |
+| `write_refused` | adapter | sesión que la rechazó, y el path que la escritura nombraba (§6) |
 | `run_paused` / `run_resumed` / `run_finished` | engine | razón / estado terminal, métricas |
 
 Dos decisiones incorporadas al modelo. Primera: `agent_session_opened` es obligatorio para los adapters y transporta el session_id — es lo que hace posible reanudar conversaciones (§8.1). Segunda: el uso de tokens viaja en eventos, así que los presupuestos (`limits.*`) se evalúan en el engine contra el log, nunca contra el autorreporte del agente.
@@ -320,7 +321,7 @@ Integrarlos significaría mantener un adapter por gestor, cada uno con su autent
 
 ### Superficie de control (`yunta mcp`)
 
-Tools: `list_workflows`, `run_workflow`, `resume_run`, `resolve_gate`, `workflow_status`. **Ninguna bloquea por la duración del run.** `run_workflow` crea el run y retorna de inmediato con `run_id` — internamente dispara `yunta run --detach`, un proceso **desacoplado** de la sesión MCP que sigue vivo aunque el cliente MCP cierre: un run nunca depende de la vida de ningún proceso en particular (§1), y `yunta mcp` en sí mismo no es un daemon (§6) — si `run_workflow` bloqueara o el run muriera con la sesión, sería un daemon disfrazado mientras dura el run. El agente cliente hace seguimiento del progreso llamando `workflow_status(run_id)` — **pull, sin notificaciones push**, mismo modelo que los gates externos (§5.6). `resolve_gate` y las respuestas a `kind: questions` (§4.1) son llamadas de control independientes, no parte de la sesión que creó el run.
+Tools: `document_shape`, `list_workflows`, `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`, `answer_questions`. **Ninguna bloquea por la duración del run.** `run_workflow` crea el run y retorna de inmediato con `run_id` — internamente dispara `yunta run --detach`, un proceso **desacoplado** de la sesión MCP que sigue vivo aunque el cliente MCP cierre: un run nunca depende de la vida de ningún proceso en particular (§1), y `yunta mcp` en sí mismo no es un daemon (§6) — si `run_workflow` bloqueara o el run muriera con la sesión, sería un daemon disfrazado mientras dura el run. El agente cliente hace seguimiento del progreso llamando `workflow_status(run_id)` — **pull, sin notificaciones push**, mismo modelo que los gates externos (§5.6). `document_shape` devuelve la forma exacta de un documento que Yunta lee y valida, con un ejemplo completo y cada campo anotado: es la única puerta por la que un cliente aprende el formato antes de escribirlo, y la validación es estricta. `resolve_gate` y `answer_questions` —las respuestas a `kind: questions` (§4.1)— son llamadas de control independientes, no parte de la sesión que creó el run.
 
 ### MCP por-run
 

@@ -353,6 +353,7 @@ que siempre está al día.
     runner: reviewer
     agent: security-auditor
     permissions: read-only
+    prompt: "Auditá los cambios y reportá cada hallazgo de seguridad."
   ```
 
   En workflows compartidos, preferir el agente en los candidatos del runner

@@ -17,6 +17,7 @@
 mod bench;
 mod bin;
 mod checkout;
+mod corpus;
 mod events;
 mod frames;
 mod interaction;
@@ -30,6 +31,11 @@ mod wait;
 pub use bench::{Bench, MOCK_CONFIG};
 pub use bin::{hermetic, run_id_from, run_yunta, stderr, stdout, Spawning};
 pub use checkout::Checkout;
+pub use corpus::{
+    backticked, bullets, fenced_blocks, field_tables, fixed_consts, has_top_level_key, json_schema,
+    markdown_files, names_after, number_before, numbered_items, rule_codes_named, section,
+    sentence_after, struct_fields, table_rows, tagged_variants, Block,
+};
 pub use events::{
     accepted, status_changed_carrying, task_registered, task_status_changed, SourceLog,
 };
