@@ -1174,7 +1174,8 @@ fn a_missing_composition_reference_is_a_check_error() {
         &ConfigLayer::default(),
         root.path(),
         &yunta_engine::WorkflowOrigin::Repo,
-    );
+    )
+    .errors;
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -1197,7 +1198,8 @@ fn a_composition_cycle_is_a_check_error_naming_the_chain() {
         &ConfigLayer::default(),
         root.path(),
         &yunta_engine::WorkflowOrigin::Repo,
-    );
+    )
+    .errors;
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -1221,7 +1223,8 @@ fn composition_deeper_than_the_limit_is_a_check_error() {
         &config,
         root.path(),
         &yunta_engine::WorkflowOrigin::Repo,
-    );
+    )
+    .errors;
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -1241,6 +1244,7 @@ fn composition_deeper_than_the_limit_is_a_check_error() {
         root.path(),
         &yunta_engine::WorkflowOrigin::Repo
     )
+    .errors
     .is_empty());
 }
 
@@ -1254,7 +1258,67 @@ fn a_healthy_composition_graph_passes_check_workflow_refs() {
         root.path(),
         &yunta_engine::WorkflowOrigin::Repo
     )
+    .errors
     .is_empty());
+}
+
+/// A suite is measured on every run under this config. A workflow that
+/// never compares against it pays for a measurement nothing reads, and
+/// only the walk can say so — `check` reads no files, so it cannot see
+/// what the composed workflows do.
+#[test]
+fn a_suite_nothing_compares_is_a_warning() {
+    let root = catalog_root(&[("a", LEAF)]);
+    let wf: Workflow = serde_norway::from_str(&uses("parent", "a")).unwrap();
+    let config: ConfigLayer = serde_norway::from_str("baseline: { suite: \"make test\" }").unwrap();
+    let warnings = yunta_engine::check_workflow_refs(
+        &wf,
+        &config,
+        root.path(),
+        &yunta_engine::WorkflowOrigin::Repo,
+    )
+    .warnings;
+    assert!(
+        warnings.iter().any(|w| matches!(
+            w,
+            CheckWarning::BaselineNeverCompared { suite } if suite == "make test"
+        )),
+        "got: {warnings:?}"
+    );
+
+    // No suite, nothing to read: no warning either way.
+    assert!(yunta_engine::check_workflow_refs(
+        &wf,
+        &ConfigLayer::default(),
+        root.path(),
+        &yunta_engine::WorkflowOrigin::Repo
+    )
+    .warnings
+    .is_empty());
+}
+
+/// The measurement is the lineage's, so a comparison anywhere in the
+/// composition reads it — including one the entry workflow only reaches
+/// through a `use:`.
+#[test]
+fn a_suite_a_composed_workflow_compares_is_not() {
+    let root = catalog_root(&[(
+        "a",
+        "name: a\nnodes:\n  - { id: no-regressions, kind: check, builtin: baseline_compare }\n",
+    )]);
+    let wf: Workflow = serde_norway::from_str(&uses("parent", "a")).unwrap();
+    let config: ConfigLayer = serde_norway::from_str("baseline: { suite: \"make test\" }").unwrap();
+    assert!(
+        yunta_engine::check_workflow_refs(
+            &wf,
+            &config,
+            root.path(),
+            &yunta_engine::WorkflowOrigin::Repo,
+        )
+        .warnings
+        .is_empty(),
+        "the child compares against the measurement its parent's run took"
+    );
 }
 
 // --- `context:` allowed on loops ------------------------------------------------

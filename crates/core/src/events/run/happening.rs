@@ -1,6 +1,6 @@
 //! What a run-level event says happened, read as a person reads it.
 
-use crate::events::{Evidence, ResumePolicy, RunEvent, TerminalState, TokenUsage};
+use crate::events::{BaselineOrigin, Evidence, ResumePolicy, RunEvent, TerminalState, TokenUsage};
 use crate::ModeName;
 
 /// One thing that happened to the run itself.
@@ -22,6 +22,9 @@ pub enum Happening {
     Resumed {
         policies: Vec<ResumePolicy>,
     },
+    /// Whose measurement the run holds, and so whether this run ran the
+    /// suite or was born holding what its lineage's root ran.
+    BaselineCaptured(BaselineOrigin),
     Closed {
         terminal: TerminalState,
         tokens: TokenUsage,
@@ -50,6 +53,7 @@ impl From<&RunEvent> for Happening {
                 terminal: p.terminal_state,
                 tokens: p.metrics.tokens,
             },
+            RunEvent::BaselineCaptured(p) => Happening::BaselineCaptured(p.origin.clone()),
             RunEvent::PromotionSignaled(p) => Happening::PromotionSignaled {
                 to: p.suggested_mode.clone(),
                 reason: p.reason.clone(),

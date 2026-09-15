@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 
 use crate::events::meta::EventMeta;
 use crate::events::run::kinds::RunEvent;
-use crate::events::{Evidence, TerminalState, TokenUsage};
+use crate::events::{BaselineCapturedPayload, BaselineOrigin, Evidence, TerminalState, TokenUsage};
 use crate::ids::{ModeName, Seq};
 
 /// Where the run stands, as its own events say — without reference to
@@ -51,9 +51,34 @@ pub struct RunLedger {
     /// closed reports nothing here; the running total is the node
     /// ledger's.
     closed_tokens: Option<TokenUsage>,
+    /// The measurement this run holds: its own, or the one it was born
+    /// holding. `None` for a lineage whose root declared no suite.
+    baseline: Option<BaselineCapturedPayload>,
+    /// Whether an invocation has woken this run. A birth writes any
+    /// number of events — what the run is, what it holds, the
+    /// measurement it was handed — and none of them is a wake.
+    woken: bool,
 }
 
 impl RunLedger {
+    /// The measurement this run holds — its own, or the one it was born
+    /// holding. `None` for a lineage whose root declared no suite.
+    pub fn baseline(&self) -> Option<&BaselineCapturedPayload> {
+        self.baseline.as_ref()
+    }
+
+    /// Whether the run's own events say an invocation woke it: a
+    /// pause, a resume, or a measurement this run took. A birth writes
+    /// run events too — what the run is, the measurement it was handed
+    /// — and none of them is a wake.
+    ///
+    /// The whole-log answer is `RunState::woken`, which reads this
+    /// beside the nodes an invocation that died without pausing left
+    /// behind.
+    pub fn woken(&self) -> bool {
+        self.woken
+    }
+
     /// Where the run stands.
     pub fn phase(&self) -> &RunPhaseRaw {
         &self.phase
@@ -113,10 +138,12 @@ impl RunLedger {
                 self.mode = p.mode.clone();
             }
             RunEvent::Paused(p) => {
+                self.woken = true;
                 self.phase = RunPhaseRaw::Paused;
                 self.paused = Some((p.reason().to_string(), meta.seq));
             }
             RunEvent::Resumed(_) => {
+                self.woken = true;
                 self.phase = RunPhaseRaw::Open;
                 self.resumed_after = Some(meta.seq);
             }
@@ -124,6 +151,12 @@ impl RunLedger {
                 self.phase = RunPhaseRaw::Closed;
                 self.closed = Some((p.terminal_state, meta.seq));
                 self.closed_tokens = Some(p.metrics.tokens);
+            }
+            RunEvent::BaselineCaptured(p) => {
+                // Measuring is something an invocation does; being born
+                // holding a measurement is not.
+                self.woken |= p.origin == BaselineOrigin::Measured;
+                self.baseline = Some(p.clone());
             }
             RunEvent::PromotionSignaled(p) => {
                 self.promotion = Some(Promotion {

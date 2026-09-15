@@ -179,3 +179,31 @@ fn the_error_block_counts_what_it_lists_and_pluralises_it() {
         "the count is known, so the plural is not hedged: {refusal}"
     );
 }
+
+#[test]
+fn check_warns_about_a_suite_nothing_compares() {
+    let project = Checkout::new()
+        .file(
+            "workflow.yaml",
+            r#"
+name: fixture
+nodes:
+  - id: lint
+    kind: bash
+    run: "true"
+"#,
+        )
+        .file("config.yaml", "baseline:\n  suite: \"make test\"\n");
+
+    let output = yunta_at!(
+        project,
+        &["check", "workflow.yaml", "--config", "config.yaml"]
+    );
+    assert!(output.status.success(), "a warning never refuses the run");
+    let said = format!("{}{}", stdout(&output), stderr(&output));
+    assert!(
+        said.contains("config declares `baseline.suite` (`make test`)")
+            && said.contains("nothing reads the measurement"),
+        "check says the suite would be measured and never read: {said}"
+    );
+}

@@ -22,7 +22,7 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
     match payload {
         EventPayload::Run(RunEvent::Created(_))
         | EventPayload::Node(NodeEvent::RunnerResolved(_))
-        | EventPayload::Node(NodeEvent::BaselineCaptured(_))
+        | EventPayload::Run(RunEvent::BaselineCaptured(_))
         | EventPayload::Node(NodeEvent::Started(_))
         | EventPayload::Session(SessionEvent::Opened(_))
         | EventPayload::Session(SessionEvent::Message(_))
@@ -547,4 +547,45 @@ fn an_old_log_without_a_fence_level_reads_as_none() {
 
     assert_eq!(read.fence, yunta_core::FenceLevel::None);
     assert!(read.resume_session, "what it did say still reads");
+}
+
+/// The measurement is the run's, not a node's: `RunLedger` folds it, so
+/// it is state a reader derives rather than a note beside it.
+#[test]
+fn baseline_captured_is_a_run_kind_that_moves_the_ledger() {
+    assert!(RunEvent::KINDS.contains(&"baseline_captured"));
+    assert!(
+        !NodeEvent::KINDS.contains(&"baseline_captured"),
+        "one domain owns a kind"
+    );
+
+    let event = RunEvent::BaselineCaptured(BaselineCapturedPayload {
+        command: "cargo test".to_string(),
+        results: BaselineResults {
+            exit_code: 0,
+            summary: "ok".to_string(),
+        },
+        hash: yunta_core::sha256_hex(b"ok"),
+        origin: BaselineOrigin::Measured,
+    });
+    assert_eq!(event.kind_name(), "baseline_captured");
+    assert!(
+        !event.is_audit(),
+        "what a run holds is derived from this, so a ledger folds it"
+    );
+}
+
+/// A log written before a lineage could hand a measurement down carries
+/// no `origin`, and every measurement on it is one the run took itself.
+#[test]
+fn a_baseline_captured_written_without_an_origin_reads_as_measured() {
+    let old = serde_json::json!({
+        "command": "cargo test",
+        "results": { "exit_code": 0, "summary": "ok" },
+        "hash": yunta_core::sha256_hex(b"ok").as_str(),
+    });
+    let read: BaselineCapturedPayload = serde_json::from_value(old).unwrap();
+
+    assert_eq!(read.origin, BaselineOrigin::Measured);
+    assert_eq!(read.command, "cargo test");
 }

@@ -60,6 +60,7 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
             hash: yunta_core::sha256_hex(b"make test"),
             compared: 2,
             regressions: 0,
+            origin: yunta_core::events::BaselineOrigin::Measured,
         }),
         scope: ScopeSummary {
             files_touched: 4,
@@ -187,6 +188,31 @@ fn baseline_absent_never_invents_a_zero_regression_line() {
     assert_eq!(
         render_receipt_markdown(&receipt),
         EXPECTED_MARKDOWN_NO_BASELINE
+    );
+}
+
+/// A run of a lineage compares against a measurement another run took,
+/// and its receipt says which one — so a reader of the child's receipt
+/// can open the output the comparisons are against.
+#[test]
+fn the_receipt_names_the_run_that_measured_an_inherited_baseline() {
+    let mut receipt = sample_receipt(EventChainStatus::Intact { events: 10 });
+    receipt.baseline = Some(BaselineSummary {
+        suite: "make test".to_string(),
+        hash: yunta_core::sha256_hex(b"make test"),
+        compared: 2,
+        regressions: 0,
+        origin: yunta_core::events::BaselineOrigin::Inherited {
+            run: RunId::from("run-2026-08-21-0001"),
+        },
+    });
+    assert!(
+        render_receipt_markdown(&receipt).contains(
+            "0 regression(s) vs baseline across 2 comparison(s) (suite `make test`, \
+             hash `22cc66aa7d26`, measured by run run-2026-08-21-0001)"
+        ),
+        "{}",
+        render_receipt_markdown(&receipt)
     );
 }
 

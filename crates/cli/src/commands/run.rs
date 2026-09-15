@@ -392,6 +392,9 @@ pub(super) async fn create_run_from(
             // The run is born holding every document its `inputs:`
             // named, accepted right after `run_created`.
             artifacts: &frozen.documents,
+            // A run a caller starts is the root of its lineage: it
+            // measures on its first wake, if its config names a suite.
+            baseline: None,
         },
         storage,
         &ctx.clock,

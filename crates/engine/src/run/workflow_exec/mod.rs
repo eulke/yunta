@@ -378,6 +378,10 @@ pub(super) async fn execute_workflow(
             worktree: &child_tree,
             promoted_from: None,
             artifacts: &born,
+            // The lineage measures once: the child is born holding what
+            // its root measured, so its comparisons see what its parent
+            // did to the tree.
+            baseline: crate::run::baseline::inherited(ctx.run_id, &state).as_ref(),
         },
         ctx.storage,
         ctx.clock.as_ref(),

@@ -7,8 +7,8 @@
 //! formats a domain type with `Debug`.
 
 use yunta_core::events::{
-    artifacts, children, findings, gates, node, run, scope, session, tasks, GateResolvedPayload,
-    TaskStatus,
+    artifacts, children, findings, gates, node, run, scope, session, tasks, BaselineOrigin,
+    GateResolvedPayload, TaskStatus,
 };
 use yunta_core::fence::Coverage;
 use yunta_core::text::{detailed, one_line};
@@ -49,6 +49,12 @@ fn run_words(happening: &run::happening::Happening) -> String {
                 "resumed — {} settled",
                 yunta_core::text::counted(n, "orphan")
             ),
+        },
+        H::BaselineCaptured(origin) => match origin {
+            BaselineOrigin::Measured => "baseline measured".to_string(),
+            BaselineOrigin::Inherited { run } => {
+                format!("baseline inherited from run {run}")
+            }
         },
         H::Closed { terminal, .. } => view::closed_as(*terminal).to_string(),
         H::PromotionSignaled { to, reason, .. } => {
@@ -98,7 +104,6 @@ fn node_words(happening: &node::happening::Happening) -> (Option<StateWord>, Str
                 yunta_core::text::counted(*violations, "path")
             ),
         ),
-        H::BaselineCaptured => (None, "baseline captured".to_string()),
     }
 }
 

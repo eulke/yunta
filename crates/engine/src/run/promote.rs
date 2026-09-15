@@ -132,6 +132,15 @@ pub async fn create_promotion_successor(
             worktree: &worktree,
             promoted_from: Some(predecessor_id),
             artifacts: &inherited,
+            // A promotion is the invocation carrying on, so the
+            // successor compares against what the lineage measured
+            // before any of it ran — never against the tree its
+            // predecessor already worked.
+            baseline: crate::run::baseline::inherited(
+                predecessor_id,
+                &crate::replay::derive(&predecessor_events),
+            )
+            .as_ref(),
         },
         storage,
         clock,

@@ -139,7 +139,6 @@ impl TaskLedger {
             // What a node resolved, started, assembled, hooked, closed
             // or re-routed prices no command.
             NodeEvent::RunnerResolved(_)
-            | NodeEvent::BaselineCaptured(_)
             | NodeEvent::Started(_)
             | NodeEvent::ContextAssembled(_)
             | NodeEvent::ScopeChecked(_)

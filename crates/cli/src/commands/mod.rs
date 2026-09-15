@@ -361,9 +361,11 @@ pub(crate) fn check_or_refuse(
     // directory — the same `.yunta/workflows/` a run's children resolve
     // against at birth.
     let origin = yunta_engine::origin_of(cwd, workflow_path);
-    errors.extend(yunta_engine::check_workflow_refs(
-        workflow, config, cwd, &origin,
-    ));
+    let refs = yunta_engine::check_workflow_refs(workflow, config, cwd, &origin);
+    for warning in &refs.warnings {
+        warn(warning);
+    }
+    errors.extend(refs.errors);
     if errors.is_empty() {
         return Ok(());
     }

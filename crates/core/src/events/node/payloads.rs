@@ -115,19 +115,6 @@ pub struct RunnerResolvedPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct BaselineCapturedPayload {
-    pub command: String,
-    pub results: BaselineResults,
-    pub hash: ContentHash,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct BaselineResults {
-    pub exit_code: i32,
-    pub summary: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeStartedPayload {
     pub attempt: u32,
 }

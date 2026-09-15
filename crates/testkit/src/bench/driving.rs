@@ -265,6 +265,10 @@ impl Bench {
                 worktree: &self.worktree,
                 promoted_from: None,
                 artifacts: &artifacts,
+                // A run a caller starts is the root of its lineage: it
+                // measures on its first wake, if its config names a
+                // suite.
+                baseline: None,
             },
             &self.storage.async_handle(),
             self.clock.as_ref(),

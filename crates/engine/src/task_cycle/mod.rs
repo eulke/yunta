@@ -27,7 +27,7 @@ use crate::process::Supervision;
 use crate::scope::{ScopeCheckError, ScopeCheckResult};
 use attempt::{run_one_attempt, AttemptParams, AttemptStep};
 
-pub use criteria::{post_check, pre_check, Memo};
+pub use criteria::{post_check, pre_check, Memo, Memoized};
 pub(crate) use session::dispatch_session;
 pub(crate) use session::Dispatched;
 pub use session::{DispatchError, RunToolsNeed, SessionObserver, SessionSetup};
@@ -66,6 +66,14 @@ pub enum TaskCycleError {
         task: TaskId,
         #[source]
         source: crate::scope_expansion::ScopeExpansionError,
+    },
+    /// A memoized command a caller ran that belongs to no task — a
+    /// `baseline_compare` asking the same suite the criteria ask.
+    #[error("failed to run `{cmd}`")]
+    MemoizedCommand {
+        cmd: String,
+        #[source]
+        source: crate::process::SpawnError,
     },
     #[error(
         "failed to compute the working tree's hash for memoization: {}",

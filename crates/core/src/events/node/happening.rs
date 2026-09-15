@@ -37,7 +37,6 @@ pub enum Happening {
     ScopeChecked {
         violations: usize,
     },
-    BaselineCaptured,
 }
 
 impl Happening {
@@ -92,7 +91,6 @@ impl Happening {
             NodeEvent::ScopeChecked(p) => Happening::ScopeChecked {
                 violations: p.violations.len(),
             },
-            NodeEvent::BaselineCaptured(_) => Happening::BaselineCaptured,
         }
     }
 }
@@ -117,8 +115,7 @@ fn said(event: &NodeEvent) -> NodeState {
         | NodeEvent::HookExecuted(_)
         | NodeEvent::ContextAssembled(_)
         | NodeEvent::CriteriaChecked(_)
-        | NodeEvent::ScopeChecked(_)
-        | NodeEvent::BaselineCaptured(_) => NodeState::Running { attempt: 1 },
+        | NodeEvent::ScopeChecked(_) => NodeState::Running { attempt: 1 },
     }
 }
 

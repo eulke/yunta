@@ -350,8 +350,7 @@ impl NodeLedger {
             NodeEvent::HookExecuted(_)
             | NodeEvent::ContextAssembled(_)
             | NodeEvent::CriteriaChecked(_)
-            | NodeEvent::ScopeChecked(_)
-            | NodeEvent::BaselineCaptured(_) => {}
+            | NodeEvent::ScopeChecked(_) => {}
         }
     }
 

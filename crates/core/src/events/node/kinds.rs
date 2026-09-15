@@ -6,7 +6,6 @@ use super::payloads::*;
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeEvent {
     RunnerResolved(RunnerResolvedPayload),
-    BaselineCaptured(BaselineCapturedPayload),
     Started(NodeStartedPayload),
     ContextAssembled(ContextAssembledPayload),
     CriteriaChecked(CriteriaCheckedPayload),
@@ -21,7 +20,6 @@ impl NodeEvent {
     /// Every kind this domain declares, as persisted.
     pub const KINDS: &'static [&'static str] = &[
         "runner_resolved",
-        "baseline_captured",
         "node_started",
         "context_assembled",
         "criteria_checked",
@@ -36,7 +34,6 @@ impl NodeEvent {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::RunnerResolved(_) => "runner_resolved",
-            Self::BaselineCaptured(_) => "baseline_captured",
             Self::Started(_) => "node_started",
             Self::ContextAssembled(_) => "context_assembled",
             Self::CriteriaChecked(_) => "criteria_checked",
@@ -58,7 +55,6 @@ impl NodeEvent {
     pub fn is_audit(&self) -> bool {
         match self {
             Self::RunnerResolved(_) => false,
-            Self::BaselineCaptured(_) => true,
             Self::Started(_) => false,
             Self::ContextAssembled(_) => true,
             // What a criterion cost is the tasks' own history: the

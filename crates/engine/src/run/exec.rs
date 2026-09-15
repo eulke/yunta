@@ -23,7 +23,7 @@ use crate::task_cycle::Memo;
 use crate::worktree::{RunWorktree, WorktreeIntegrity};
 
 use super::schedule::{self, Decision};
-use super::{gate_exec, steps, RunCtx, RunEnv, RunError, RunReport, RunTerminal};
+use super::{baseline, gate_exec, steps, RunCtx, RunEnv, RunError, RunReport, RunTerminal};
 use yunta_core::events::RunEvent;
 use yunta_core::{Location, RelativePath};
 
@@ -84,14 +84,19 @@ async fn record_pause(ctx: &RunCtx<'_>, reason: &PauseReason) -> Result<(), RunE
 /// built context, the loop's own handle on the root cancellation, the
 /// frozen mode, and the policy every decision reads. `Finished`
 /// short-circuits a run whose log already ends.
+/// Both sides boxed: a run starts once, so the allocation is nothing
+/// beside carrying either side's weight in every move of the other.
 enum Startup<'a> {
-    Finished(RunReport),
-    Ready {
-        ctx: RunCtx<'a>,
-        root_cancel: CancellationToken,
-        mode_name: ModeName,
-        policy: schedule::Policy,
-    },
+    Finished(Box<RunReport>),
+    Ready(Box<Ready<'a>>),
+}
+
+/// Everything the loop needs, for a run that has one to do.
+struct Ready<'a> {
+    ctx: RunCtx<'a>,
+    root_cancel: CancellationToken,
+    mode_name: ModeName,
+    policy: schedule::Policy,
 }
 
 /// [`execute_run`] with an explicit composition depth:
@@ -103,14 +108,14 @@ pub(crate) async fn execute_run_at_depth(
     env: RunEnv<'_>,
     depth: u32,
 ) -> Result<RunReport, RunError> {
-    let (ctx, root_cancel, mode_name, policy) = match start(env, depth).await? {
-        Startup::Finished(report) => return Ok(report),
-        Startup::Ready {
-            ctx,
-            root_cancel,
-            mode_name,
-            policy,
-        } => (ctx, root_cancel, mode_name, policy),
+    let Ready {
+        ctx,
+        root_cancel,
+        mode_name,
+        policy,
+    } = match start(env, depth).await? {
+        Startup::Finished(report) => return Ok(*report),
+        Startup::Ready(ready) => *ready,
     };
 
     loop {
@@ -127,6 +132,7 @@ pub(crate) async fn execute_run_at_depth(
         let state = crate::replay::derive(&events);
         match schedule::decide(&ctx.manifest.workflow, &state, &policy) {
             Decision::Broken { diagnostic } => return Err(steps::broken(&ctx, diagnostic).await),
+            Decision::MeasureBaseline { suite } => baseline::measure(&ctx, suite).await?,
             Decision::Finish => return steps::run_finished(&ctx, &mode_name).await,
             Decision::Pause { reason } => return pause(&ctx, reason).await,
             Decision::Fail { reason } => return steps::run_failed(&ctx, reason).await,
@@ -206,14 +212,16 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     {
         // Re-executing a finished run is a no-op, not an error — the log
         // already has its ending.
-        return Ok(Startup::Finished(RunReport {
+        return Ok(Startup::Finished(Box::new(RunReport {
             terminal: RunTerminal::Finished,
             state: view.state,
-        }));
+        })));
     }
-    if view.events.len() > 1 {
-        // Anything beyond run_created means a previous invocation worked
-        // on this run — this one is a resume.
+    if view.state.woken() {
+        // An invocation already worked on this run — this one is a
+        // resume. A birth writes as many events as the run was born
+        // holding, so what separates the two is what the log says
+        // happened, never how much of it there is.
         resume(&ctx, &view).await?;
     }
 
@@ -246,12 +254,12 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     // already follows.
     let mode_name = yunta_core::events::run_mode(&view.events);
     let policy = schedule::Policy::of(ctx.manifest, &mode_name);
-    Ok(Startup::Ready {
+    Ok(Startup::Ready(Box::new(Ready {
         ctx,
         root_cancel,
         mode_name,
         policy,
-    })
+    })))
 }
 
 /// Wakes a run that already has history: verifies that the run is still

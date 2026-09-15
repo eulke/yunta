@@ -28,6 +28,45 @@ pub enum TerminalState {
 
 // --- Per-kind payloads ------------------------------------------------
 
+/// What the suite a run's lineage declared did on the tree the run
+/// opens on, and whose measurement it is.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct BaselineCapturedPayload {
+    pub command: String,
+    pub results: BaselineResults,
+    pub hash: ContentHash,
+    /// Whose measurement this is. A log written before the field reads
+    /// [`BaselineOrigin::Measured`], which is what such a log meant.
+    #[serde(default)]
+    pub origin: BaselineOrigin,
+}
+
+/// What the suite reported: the code it exited with, and the tail a
+/// reader sees without opening what the measuring run kept.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct BaselineResults {
+    pub exit_code: i32,
+    pub summary: String,
+}
+
+/// Who took the measurement a run holds: this run, or the root of the
+/// lineage it was born into.
+///
+/// A lineage measures once. A run born of another — a `kind: workflow`
+/// child, a promotion successor — is born holding the root's
+/// measurement, so every comparison anywhere in the lineage answers the
+/// same question: what worked before the invocation started.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum BaselineOrigin {
+    /// This run ran the suite itself, on its first wake.
+    #[default]
+    Measured,
+    /// The run was born holding it; `run` is the root that measured,
+    /// never the parent it was handed down through.
+    Inherited { run: RunId },
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunCreatedPayload {
     pub manifest_hash: ContentHash,

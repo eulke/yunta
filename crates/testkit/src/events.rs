@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use yunta_core::events::artifacts::ArtifactRef;
-use yunta_core::events::{ArtifactEvent, RunEvent, TaskEvent};
+use yunta_core::events::{ArtifactEvent, BaselineCapturedPayload, RunEvent, TaskEvent};
 use yunta_core::events::{
     EventDraft, EventPayload, RunCreatedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
     TaskStatusChangedPayload,
@@ -26,6 +26,19 @@ pub fn accepted(events: &[StoredEvent]) -> Vec<ArtifactRef> {
                 origin: p.origin.clone(),
                 seq: event.seq,
             }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every `baseline_captured` on `events`, in log order — one entry per
+/// event, so a test sees whether a run measured, was born holding a
+/// measurement, or did both.
+pub fn baselines(events: &[StoredEvent]) -> Vec<BaselineCapturedPayload> {
+    events
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Run(RunEvent::BaselineCaptured(payload))) => Some(payload.clone()),
             _ => None,
         })
         .collect()

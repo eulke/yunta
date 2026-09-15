@@ -10,12 +10,17 @@ pub enum RunEvent {
     Paused(RunPausedPayload),
     Resumed(RunResumedPayload),
     Finished(RunFinishedPayload),
+    /// What the suite the run's lineage declared did on the tree the
+    /// run opens on — measured by this run on its first wake, or held
+    /// from birth because a run of the same lineage measured it.
+    BaselineCaptured(BaselineCapturedPayload),
 }
 
 impl RunEvent {
     /// Every kind this domain declares, as persisted.
     pub const KINDS: &'static [&'static str] = &[
         "run_created",
+        "baseline_captured",
         "promotion_signaled",
         "run_paused",
         "run_resumed",
@@ -30,6 +35,7 @@ impl RunEvent {
             Self::Paused(_) => "run_paused",
             Self::Resumed(_) => "run_resumed",
             Self::Finished(_) => "run_finished",
+            Self::BaselineCaptured(_) => "baseline_captured",
         }
     }
 
@@ -47,6 +53,7 @@ impl RunEvent {
             Self::Paused(_) => false,
             Self::Resumed(_) => false,
             Self::Finished(_) => false,
+            Self::BaselineCaptured(_) => false,
         }
     }
 

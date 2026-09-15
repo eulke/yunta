@@ -12,7 +12,9 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use yunta_core::diagnostic::{ArtifactFailure, DiagnosticCode, DocumentKind};
-use yunta_core::events::{EventPayload, Failure, Phase, StoredEvent, TerminalState, TokenUsage};
+use yunta_core::events::{
+    BaselineOrigin, EventPayload, Failure, Phase, StoredEvent, TerminalState, TokenUsage,
+};
 use yunta_core::ContentHash;
 use yunta_core::{
     AdapterId, CheckBuiltin, Manifest, ModeName, ModelName, NodeId, NodeKind, RunId, RunnerName,
@@ -66,10 +68,13 @@ pub struct CriteriaSummary {
 pub struct BaselineSummary {
     pub suite: String,
     pub hash: ContentHash,
-    /// `baseline_compare` nodes that ran against the capture the run
-    /// took when it was created.
+    /// `baseline_compare` nodes that ran against the measurement this
+    /// run holds.
     pub compared: usize,
     pub regressions: usize,
+    /// Who took the measurement: this run, or the root of the lineage it
+    /// was born into.
+    pub origin: BaselineOrigin,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -332,7 +337,7 @@ fn criteria_summary(events: &[StoredEvent]) -> CriteriaSummary {
 }
 
 fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<BaselineSummary> {
-    // A run captures its baseline whenever its config names a suite,
+    // A run holds a measurement whenever its lineage declared a suite,
     // so what decides whether the run *looked* is the workflow: with no
     // `baseline_compare` in it there is no comparison to report, and a
     // "0 regressions" line would be about nothing.
@@ -345,14 +350,10 @@ fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<Basel
     if compares.is_empty() {
         return None;
     }
-    let captured = events.iter().find_map(|e| match e.payload() {
-        Some(EventPayload::Node(NodeEvent::BaselineCaptured(p))) => Some(p),
-        _ => None,
-    })?;
-
-    // Read from the event kind and each node's derived state, never
+    // Read from the run's own fold and each node's derived state, never
     // from a node's outcome text.
     let state = derive(events);
+    let captured = state.run.baseline()?;
     let mut compared = 0usize;
     let mut regressions = 0usize;
     for node in compares {
@@ -371,6 +372,7 @@ fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<Basel
         hash: captured.hash.clone(),
         compared,
         regressions,
+        origin: captured.origin.clone(),
     })
 }
 

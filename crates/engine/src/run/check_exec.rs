@@ -2,20 +2,17 @@
 //! parse or compare, never touch an agent — is distinct enough from
 //! bash/prompt/parallel dispatch to stand on its own, and the one way
 //! the engine runs a verification command of its own lives here, for the
-//! checks and for the baseline a run captures when it is created.
+//! checks and for the baseline a run's lineage measures.
 
 use std::path::Path;
 
-use yunta_core::events::{
-    BaselineCapturedPayload, EventPayload, FindingSeverity, StoredEvent, TokenUsage,
-};
+use yunta_core::events::{FindingSeverity, TokenUsage};
 use yunta_core::{CheckBuiltin, Node};
 
 use super::node_close::{close_node, fail, Close};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
-use yunta_core::events::NodeEvent;
 
 /// `kind: check`: the engine evaluates its own data,
 /// never a person — no session, no tokens spent. Each builtin's config
@@ -73,46 +70,52 @@ pub(super) async fn run_command(
     }
 }
 
-/// `baseline_compare`: re-runs the suite the run captured when it was
-/// created and fails if something that passed then stops passing. Every
-/// such node compares — the capture is the run's, taken before any node
-/// of it ran, so the first comparison covers the work before it like any
-/// later one.
+/// `baseline_compare`: re-runs the suite this run's lineage measured and
+/// fails if something that passed then stops passing. Every such node
+/// compares against that one measurement — taken before any node of the
+/// lineage ran — so the first comparison covers the work before it like
+/// any later one, a parent's included.
 ///
-/// The suite is the captured one, read off the log rather than resolved
-/// from config again: what the comparison is against is what actually
-/// ran.
+/// The suite is the measured one, read off the run's own fold rather
+/// than resolved from config again: what the comparison is against is
+/// what actually ran.
 async fn execute_baseline_compare(
     ctx: &RunCtx<'_>,
     node: &Node,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    let Some(captured) = captured_baseline(&ctx.load_events().await?) else {
+    let held = ctx.run_view().await?.state.run.baseline().cloned();
+    let Some(captured) = held else {
         return fail(
             ctx,
             node,
-            "check `baseline_compare` has nothing to compare against: a run captures its \
-             baseline when it is created, and this one captured none — declare \
-             `baseline.suite` in config"
+            "check `baseline_compare` has nothing to compare against: this run holds no \
+             baseline because its lineage's root declared none — declare `baseline.suite` \
+             in config"
                 .to_string(),
             false,
         )
         .await;
     };
 
-    let output = match run_command(ctx.supervision(cancel), ctx.worktree, &captured.command).await?
-    {
-        CommandRun::Done(output) => output,
-        CommandRun::Cancelled => return super::node_exec::cancelled_end(ctx, node).await,
-    };
+    // The same memo the criteria use: two comparisons of one suite on a
+    // tree nothing changed in between run it once, and the second says
+    // so rather than paying for an answer this invocation already has.
+    let ran = ctx
+        .memo
+        .exit_code(&captured.command, ctx.worktree, ctx.supervision(cancel))
+        .await?;
+    if cancel.is_cancelled() {
+        return super::node_exec::cancelled_end(ctx, node).await;
+    }
 
-    if captured.results.exit_code == 0 && output.exit_code != 0 {
+    if captured.results.exit_code == 0 && ran.exit_code != 0 {
         fail(
             ctx,
             node,
             format!(
                 "regression: `{}` passed at baseline (exit 0) but now exits {}",
-                captured.command, output.exit_code
+                captured.command, ran.exit_code
             ),
             false,
         )
@@ -121,23 +124,23 @@ async fn execute_baseline_compare(
         close_node(
             ctx,
             node,
-            Close::new(
-                format!("no regression vs baseline (exit {})", output.exit_code),
-                TokenUsage::default(),
-            ),
+            Close::new(no_regression(&ran), TokenUsage::default()),
         )
         .await
     }
 }
 
-/// What the run captured when it was created — `None` for a run whose
-/// config named no suite to capture, which is the only way a log carries
-/// none.
-fn captured_baseline(events: &[StoredEvent]) -> Option<BaselineCapturedPayload> {
-    events.iter().find_map(|event| match event.payload() {
-        Some(EventPayload::Node(NodeEvent::BaselineCaptured(payload))) => Some(payload.clone()),
-        _ => None,
-    })
+/// What a comparison that found no regression closes with: the suite's
+/// exit code, and where the answer came from when this invocation
+/// already had it.
+fn no_regression(ran: &crate::task_cycle::Memoized) -> String {
+    match ran.reused {
+        false => format!("no regression vs baseline (exit {})", ran.exit_code),
+        true => format!(
+            "no regression vs baseline (exit {}, reused: same tree since an earlier compare)",
+            ran.exit_code
+        ),
+    }
 }
 
 /// `coverage_gate`: `coverage.cmd`'s stdout must contain a bare

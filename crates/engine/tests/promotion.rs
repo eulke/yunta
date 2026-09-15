@@ -10,10 +10,10 @@
 //! the parent-side half of the chain.
 
 use yunta_core::events::EventPayload;
-use yunta_core::events::{FindingEvent, RunEvent, TaskEvent};
+use yunta_core::events::{BaselineOrigin, FindingEvent, RunEvent, TaskEvent};
 use yunta_core::ModeName;
 use yunta_engine::{BirthArtifact, BirthOrigin, HumanInteraction, RunReport, RunTerminal};
-use yunta_testkit::{Bench, ScriptedInteraction};
+use yunta_testkit::{baselines, Bench, ScriptedInteraction};
 use yunta_testkit_core::{FixedClock, Log, SeqIdSource};
 
 /// The fixture every run of this suite is driven on: no session is
@@ -307,6 +307,106 @@ async fn a_promoting_run_with_no_findings_writes_no_inherited_file() {
     );
 }
 
+/// `create_promotion_successor` with everything this suite's world
+/// fixes: the `full` mode every test promotes into, the bench's roots,
+/// its clock and the ids the successor is minted from. Creating a
+/// successor is the CLI's job, never `execute_run`'s, so every test
+/// here does it by hand — through this one door.
+async fn successor_of(
+    predecessor: yunta_engine::Predecessor<'_>,
+    bench: &Bench,
+    ids: &SeqIdSource,
+) -> yunta_engine::PromotionSuccessor {
+    let repo = predecessor.worktree.to_path_buf();
+    yunta_engine::create_promotion_successor(
+        predecessor,
+        &repo,
+        &ModeName::from("full"),
+        yunta_engine::RunRoots {
+            runs: &bench.runs_root,
+            worktrees: &bench.runs_root.parent().unwrap().join("worktrees"),
+        },
+        yunta_engine::CallerInfra {
+            storage: &bench.storage.async_handle(),
+            clock: &FixedClock,
+            ids,
+            supervision: yunta_engine::process::Supervision::none(),
+        },
+    )
+    .await
+    .expect("the successor is created")
+}
+
+/// The run `bench` drove, as the predecessor of a promotion.
+fn predecessor_of<'a>(
+    bench: &'a Bench,
+    manifest: &'a yunta_core::Manifest,
+    run_dir: &'a std::path::Path,
+) -> yunta_engine::Predecessor<'a> {
+    yunta_engine::Predecessor {
+        id: &bench.run_id,
+        manifest,
+        worktree: &bench.worktree,
+        run_dir,
+    }
+}
+
+/// The config every baseline test of this suite runs under: a suite
+/// that passes on the tree the bench stands up.
+const CONFIG_WITH_BASELINE: &str = "\
+runners:
+  planner:
+    - { adapter: mock, model: mock-model }
+  executor:
+    - { adapter: mock, model: mock-model }
+baseline:
+  suite: \"cat marker.txt\"
+";
+
+/// A promotion is the invocation carrying on: the successor asks the
+/// same question about the same tree its predecessor started from, so it
+/// is born holding that measurement instead of taking one of the tree
+/// its predecessor already worked.
+#[tokio::test]
+async fn a_successor_is_born_holding_its_predecessors_measurement() {
+    let bench = Bench::new().in_mode("quick");
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+    let interaction = ScriptedInteraction::choose("promote");
+    let RunReport { terminal, .. } = bench
+        .run_full(
+            PROMOTABLE_WORKFLOW,
+            NO_SESSIONS,
+            CONFIG_WITH_BASELINE,
+            &interaction,
+        )
+        .await;
+    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
+    let measured = baselines(&bench.events());
+
+    let manifest = bench.manifest();
+    let run_dir = bench.run_dir();
+    let ids = SeqIdSource::new("minted");
+    let successor = successor_of(predecessor_of(&bench, &manifest, &run_dir), &bench, &ids).await;
+
+    let held = baselines(&bench.storage.events_for_run(&successor.run_id).unwrap());
+    assert_eq!(held.len(), 1, "the successor is born holding a measurement");
+    assert_eq!(
+        held[0].origin,
+        BaselineOrigin::Inherited {
+            run: bench.run_id.clone()
+        },
+        "and the origin names the run that took it"
+    );
+    assert_eq!(held[0].command, measured[0].command);
+    assert_eq!(held[0].hash, measured[0].hash);
+    assert!(
+        !yunta_engine::run_dir::baseline_capture(&successor.run_dir).exists(),
+        "the bytes stay with the run that measured"
+    );
+}
+
 #[tokio::test]
 async fn a_successor_is_born_naming_every_artifact_it_inherits() {
     let interaction = ScriptedInteraction::choose("promote");
@@ -318,28 +418,7 @@ async fn a_successor_is_born_naming_every_artifact_it_inherits() {
     let manifest = bench.manifest();
     let run_dir = bench.run_dir();
     let ids = SeqIdSource::new("minted");
-    let successor = yunta_engine::create_promotion_successor(
-        yunta_engine::Predecessor {
-            id: &bench.run_id,
-            manifest: &manifest,
-            worktree: &bench.worktree,
-            run_dir: &run_dir,
-        },
-        &bench.worktree,
-        &ModeName::from("full"),
-        yunta_engine::RunRoots {
-            runs: &bench.runs_root,
-            worktrees: &bench.runs_root.parent().unwrap().join("worktrees"),
-        },
-        yunta_engine::CallerInfra {
-            storage: &bench.storage.async_handle(),
-            clock: &FixedClock,
-            ids: &ids,
-            supervision: yunta_engine::process::Supervision::none(),
-        },
-    )
-    .await
-    .expect("the successor is created");
+    let successor = successor_of(predecessor_of(&bench, &manifest, &run_dir), &bench, &ids).await;
 
     let events = bench.storage.events_for_run(&successor.run_id).unwrap();
     assert!(
@@ -403,28 +482,7 @@ async fn a_successor_inherits_what_the_log_holds_and_not_a_stray_file() {
     std::fs::write(run_dir.join("artifacts/stray.md"), "nobody declared this\n").unwrap();
 
     let ids = SeqIdSource::new("minted");
-    let successor = yunta_engine::create_promotion_successor(
-        yunta_engine::Predecessor {
-            id: &bench.run_id,
-            manifest: &manifest,
-            worktree: &bench.worktree,
-            run_dir: &run_dir,
-        },
-        &bench.worktree,
-        &ModeName::from("full"),
-        yunta_engine::RunRoots {
-            runs: &bench.runs_root,
-            worktrees: &bench.runs_root.parent().unwrap().join("worktrees"),
-        },
-        yunta_engine::CallerInfra {
-            storage: &bench.storage.async_handle(),
-            clock: &FixedClock,
-            ids: &ids,
-            supervision: yunta_engine::process::Supervision::none(),
-        },
-    )
-    .await
-    .expect("the successor is created");
+    let successor = successor_of(predecessor_of(&bench, &manifest, &run_dir), &bench, &ids).await;
 
     let events = bench.storage.events_for_run(&successor.run_id).unwrap();
     let inherited = yunta_testkit::accepted(&events);
@@ -499,28 +557,7 @@ async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_d
     let manifest = bench.manifest();
     let run_dir = bench.run_dir();
     let ids = SeqIdSource::new("minted");
-    let successor = yunta_engine::create_promotion_successor(
-        yunta_engine::Predecessor {
-            id: &bench.run_id,
-            manifest: &manifest,
-            worktree: &bench.worktree,
-            run_dir: &run_dir,
-        },
-        &bench.worktree,
-        &ModeName::from("full"),
-        yunta_engine::RunRoots {
-            runs: &bench.runs_root,
-            worktrees: &bench.runs_root.parent().unwrap().join("worktrees"),
-        },
-        yunta_engine::CallerInfra {
-            storage: &bench.storage.async_handle(),
-            clock: &FixedClock,
-            ids: &ids,
-            supervision: yunta_engine::process::Supervision::none(),
-        },
-    )
-    .await
-    .expect("the successor is created");
+    let successor = successor_of(predecessor_of(&bench, &manifest, &run_dir), &bench, &ids).await;
 
     let events = bench.storage.events_for_run(&successor.run_id).unwrap();
     let inherited = yunta_testkit::accepted(&events);
@@ -601,59 +638,26 @@ async fn a_done_that_crossed_keeps_the_commit_it_names_so_it_crosses_again() {
     )
     .await;
     assert!(matches!(terminal, RunTerminal::Promoted { .. }));
-    let worktrees = bench.runs_root.parent().unwrap().join("worktrees");
 
     let manifest = bench.manifest();
     let run_dir = bench.run_dir();
     let ids = SeqIdSource::new("minted");
-    let first = yunta_engine::create_promotion_successor(
-        yunta_engine::Predecessor {
-            id: &bench.run_id,
-            manifest: &manifest,
-            worktree: &bench.worktree,
-            run_dir: &run_dir,
-        },
-        &bench.worktree,
-        &ModeName::from("full"),
-        yunta_engine::RunRoots {
-            runs: &bench.runs_root,
-            worktrees: &worktrees,
-        },
-        yunta_engine::CallerInfra {
-            storage: &bench.storage.async_handle(),
-            clock: &FixedClock,
-            ids: &ids,
-            supervision: yunta_engine::process::Supervision::none(),
-        },
-    )
-    .await
-    .expect("the first successor is created");
+    let first = successor_of(predecessor_of(&bench, &manifest, &run_dir), &bench, &ids).await;
 
     // The second link of the chain: the run the first successor was
     // born as is itself promoted, and what it says about T001 is only
     // what it was born saying.
-    let second = yunta_engine::create_promotion_successor(
+    let second = successor_of(
         yunta_engine::Predecessor {
             id: &first.run_id,
             manifest: &first.manifest,
             worktree: &first.worktree,
             run_dir: &first.run_dir,
         },
-        &first.worktree,
-        &ModeName::from("full"),
-        yunta_engine::RunRoots {
-            runs: &bench.runs_root,
-            worktrees: &worktrees,
-        },
-        yunta_engine::CallerInfra {
-            storage: &bench.storage.async_handle(),
-            clock: &FixedClock,
-            ids: &ids,
-            supervision: yunta_engine::process::Supervision::none(),
-        },
+        &bench,
+        &ids,
     )
-    .await
-    .expect("the second successor is created");
+    .await;
 
     let landed = done_at(
         &bench.storage.events_for_run(&first.run_id).unwrap(),
@@ -756,28 +760,7 @@ async fn a_promotion_successor_is_stamped_by_the_run_clock() {
     let manifest = bench.manifest();
     let run_dir = bench.run_dir();
     let ids = SeqIdSource::new("minted");
-    let successor = yunta_engine::create_promotion_successor(
-        yunta_engine::Predecessor {
-            id: &bench.run_id,
-            manifest: &manifest,
-            worktree: &bench.worktree,
-            run_dir: &run_dir,
-        },
-        &bench.worktree,
-        &ModeName::from("full"),
-        yunta_engine::RunRoots {
-            runs: &bench.runs_root,
-            worktrees: &bench.runs_root.parent().unwrap().join("worktrees"),
-        },
-        yunta_engine::CallerInfra {
-            storage: &bench.storage.async_handle(),
-            clock: &FixedClock,
-            ids: &ids,
-            supervision: yunta_engine::process::Supervision::none(),
-        },
-    )
-    .await
-    .expect("the successor is created");
+    let successor = successor_of(predecessor_of(&bench, &manifest, &run_dir), &bench, &ids).await;
 
     let events = bench.storage.events_for_run(&successor.run_id).unwrap();
     let born = events.first().expect("the successor's own birth");

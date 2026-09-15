@@ -44,18 +44,22 @@ pub fn task_worktrees(run_dir: &Path) -> PathBuf {
     run_dir.join("task-worktrees")
 }
 
-/// The run's baseline: the snapshot of its suite, taken on the tree the
-/// run opens on. Absent from a run whose config names no suite.
+/// The run's baseline: what its suite wrote on the tree the run woke
+/// on. Only a run that measured has one — a run born holding its
+/// lineage's measurement reads the bytes under the run its origin
+/// names, and a lineage whose root declared no suite has none at all.
 pub(crate) fn baseline_dir(run_dir: &Path) -> PathBuf {
     run_dir.join("baseline")
 }
 
-/// Everything the run's baseline suite wrote when the run was created.
+/// Everything the baseline suite wrote on the run's first wake.
 ///
 /// The log states what the suite did — its command, its exit code, a
 /// summary and the hash of all of it — and the bytes that hash names sit
 /// here, so a reader of a comparison against the baseline can read the
-/// output it is against and not only its summary.
+/// output it is against and not only its summary. Every comparison in
+/// the lineage names this one file: a descendant's log carries the fact
+/// and the run that holds the bytes.
 pub fn baseline_capture(run_dir: &Path) -> PathBuf {
     baseline_dir(run_dir).join("suite.out")
 }

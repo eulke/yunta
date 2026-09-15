@@ -71,6 +71,28 @@ pub struct RunState {
 }
 
 impl RunState {
+    /// Whether an invocation already woke this run.
+    ///
+    /// A birth writes as many events as the run was born holding — what
+    /// the run is, the artifacts and tasks it starts with, the
+    /// measurement its lineage handed it — and none of them is a wake.
+    /// A wake leaves a pause, a resume or a measurement this run took;
+    /// an invocation that died without writing its pause leaves only
+    /// the nodes it started. What separates a first wake from a resume
+    /// is what the log says happened, never how much of it there is.
+    ///
+    /// It reads more than one ledger because the question is about the
+    /// whole log: each ledger answers for its own kinds, and this is
+    /// the one place that reads them together.
+    pub fn woken(&self) -> bool {
+        self.run.woken()
+            || !self.nodes.is_empty()
+            // A log replay stopped on holds an event a birth never
+            // writes; something worked on this run, whatever else is
+            // true of what it left behind.
+            || self.broken.is_some()
+    }
+
     /// What the whole run has spent: every node's closed attempts, what
     /// is in flight, and every child run's own total.
     pub fn total_tokens(&self) -> TokenUsage {
@@ -247,8 +269,7 @@ impl RunState {
             | NodeEvent::HookExecuted(_)
             | NodeEvent::ContextAssembled(_)
             | NodeEvent::CriteriaChecked(_)
-            | NodeEvent::ScopeChecked(_)
-            | NodeEvent::BaselineCaptured(_) => {}
+            | NodeEvent::ScopeChecked(_) => {}
         }
         Ok(())
     }

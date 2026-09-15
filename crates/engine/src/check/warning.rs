@@ -38,4 +38,16 @@ pub enum CheckWarning {
          in the DAG — put a gate ahead of the push, or push to `{{{{run.branch}}}}`"
     )]
     PushToBaseWithoutGate { node: NodeId, branch: String },
+
+    /// A suite nobody reads. The measurement runs before the first node
+    /// of the run whatever the workflow does with it, so a config that
+    /// names one and a composition that never compares is minutes spent
+    /// on an answer no check asks for.
+    #[error(
+        "config declares `baseline.suite` (`{suite}`) and no node of this workflow or of the \
+         workflows it composes is a `baseline_compare`: run on its own, this workflow measures \
+         the suite before its first node and nothing reads the measurement — add the check, or \
+         drop the suite"
+    )]
+    BaselineNeverCompared { suite: String },
 }

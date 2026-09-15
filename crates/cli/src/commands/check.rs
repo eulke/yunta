@@ -49,10 +49,12 @@ pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<O
     // under `cwd` (`.yunta/workflows/`), then packs — the same catalog a
     // run's children resolve against at birth.
     let origin = yunta_engine::origin_of(&cwd, &workflow_path);
-    errors.extend(yunta_engine::check_workflow_refs(
-        &workflow, &config, &cwd, &origin,
-    ));
+    let refs = yunta_engine::check_workflow_refs(&workflow, &config, &cwd, &origin);
+    errors.extend(refs.errors);
     for warning in &yunta_engine::check_warnings(&workflow, &config) {
+        warn(warning);
+    }
+    for warning in &refs.warnings {
         warn(warning);
     }
 

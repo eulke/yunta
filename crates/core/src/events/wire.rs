@@ -85,7 +85,7 @@ impl From<EventPayloadWire> for EventPayload {
         match wire {
             W::RunCreated(p) => Self::Run(RunEvent::Created(p)),
             W::RunnerResolved(p) => Self::Node(NodeEvent::RunnerResolved(p)),
-            W::BaselineCaptured(p) => Self::Node(NodeEvent::BaselineCaptured(p)),
+            W::BaselineCaptured(p) => Self::Run(RunEvent::BaselineCaptured(p)),
             W::NodeStarted(p) => Self::Node(NodeEvent::Started(p)),
             W::AgentSessionOpened(p) => Self::Session(SessionEvent::Opened(p)),
             W::AgentMessage(p) => Self::Session(SessionEvent::Message(p)),
@@ -131,7 +131,7 @@ impl From<EventPayload> for EventPayloadWire {
         match payload {
             EventPayload::Run(RunEvent::Created(p)) => W::RunCreated(p),
             EventPayload::Node(NodeEvent::RunnerResolved(p)) => W::RunnerResolved(p),
-            EventPayload::Node(NodeEvent::BaselineCaptured(p)) => W::BaselineCaptured(p),
+            EventPayload::Run(RunEvent::BaselineCaptured(p)) => W::BaselineCaptured(p),
             EventPayload::Node(NodeEvent::Started(p)) => W::NodeStarted(p),
             EventPayload::Session(SessionEvent::Opened(p)) => W::AgentSessionOpened(p),
             EventPayload::Session(SessionEvent::Message(p)) => W::AgentMessage(p),

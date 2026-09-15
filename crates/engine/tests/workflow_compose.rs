@@ -10,11 +10,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use yunta_core::diagnostic::ArtifactFailure;
-use yunta_core::events::{ArtifactId, EventPayload, StoredEvent, TerminalState};
+use yunta_core::events::{
+    ArtifactId, BaselineOrigin, EventPayload, NodeEvent, StoredEvent, TerminalState,
+};
 use yunta_core::events::{ChildEvent, FindingEvent, RunEvent, TaskEvent};
 use yunta_core::{ContentHash, Manifest, NodeId, RunId, Workflow};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
-use yunta_testkit::{git, write, ApproveEverything, Bench, ScriptedInteraction};
+use yunta_testkit::{
+    baselines, git, on_a_deep_stack, write, ApproveEverything, Bench, ScriptedInteraction,
+};
 
 /// Every `(child_run_id, child_workflow_hash)` a parent recorded, in
 /// log order.
@@ -78,6 +82,18 @@ fn child_trees(runs_root: &Path) -> PathBuf {
 }
 
 const EMPTY_FIXTURE: &str = "sessions: []\n";
+
+/// The `runners:` every mock-backed run resolves against, plus a suite
+/// for the lineage to measure.
+const CONFIG_WITH_BASELINE: &str = "\
+runners:
+  planner:
+    - { adapter: mock, model: mock-model }
+  executor:
+    - { adapter: mock, model: mock-model }
+baseline:
+  suite: \"cat marker.txt\"
+";
 
 // --- The child is a complete, linked run -------------------------------------
 
@@ -1519,5 +1535,252 @@ nodes:
             .join("shipped.txt")
             .exists(),
         "the successor's own mode ran past the loop it had nothing left to do"
+    );
+}
+
+/// A lineage measures once. What a child compares against is what worked
+/// before the invocation started — including, therefore, whatever its
+/// parent has already done to the tree.
+#[tokio::test]
+async fn a_child_is_born_holding_the_roots_measurement() {
+    let bench = Bench::with_run_id("run-parent-baseline").with_workflow(
+        "child-wf",
+        r#"
+name: child-wf
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#,
+    );
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: child-wf
+"#;
+
+    let RunReport { terminal, .. } = bench
+        .run_with_config(parent, EMPTY_FIXTURE, CONFIG_WITH_BASELINE)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let parent_events = bench.events();
+    let parent_measured = baselines(&parent_events);
+    assert_eq!(parent_measured.len(), 1, "the root measures once");
+    assert_eq!(parent_measured[0].origin, BaselineOrigin::Measured);
+
+    let (child_id, _) = children_created(&parent_events)[0].clone();
+    let child_held = baselines(&bench.storage.events_for_run(&child_id).unwrap());
+    assert_eq!(
+        child_held.len(),
+        1,
+        "the child holds the measurement and takes none of its own"
+    );
+    assert_eq!(
+        child_held[0].origin,
+        BaselineOrigin::Inherited {
+            run: "run-parent-baseline".into()
+        },
+        "the origin names the run that measured"
+    );
+    assert_eq!(child_held[0].hash, parent_measured[0].hash);
+    assert_eq!(child_held[0].command, parent_measured[0].command);
+}
+
+/// A run born holding a measurement has not been woken: its first wake
+/// is a first wake, not a resume of a history it does not have.
+#[tokio::test]
+async fn a_child_born_holding_a_baseline_is_not_resumed_on_its_first_wake() {
+    let bench = Bench::with_run_id("run-parent-notresumed").with_workflow(
+        "child-wf",
+        r#"
+name: child-wf
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#,
+    );
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: child-wf
+"#;
+    bench
+        .run_with_config(parent, EMPTY_FIXTURE, CONFIG_WITH_BASELINE)
+        .await;
+
+    let (child_id, _) = children_created(&bench.events())[0].clone();
+    let child_events = bench.storage.events_for_run(&child_id).unwrap();
+    assert!(
+        child_events.iter().all(|event| !matches!(
+            event.payload(),
+            Some(EventPayload::Run(RunEvent::Resumed(_)))
+        )),
+        "a birth writes what the run was born holding, and none of it is a wake: {child_events:#?}"
+    );
+}
+
+/// The root is the root, however deep the lineage goes: a grandchild
+/// names the run that measured, never the parent it was handed down
+/// through.
+#[test]
+fn a_grandchild_names_the_root_and_not_its_parent() {
+    on_a_deep_stack(|| async {
+        let bench = Bench::with_run_id("run-root-baseline")
+            .with_workflow(
+                "middle-wf",
+                r#"
+name: middle-wf
+nodes:
+  - id: inner
+    kind: workflow
+    use: leaf-wf
+"#,
+            )
+            .with_workflow(
+                "leaf-wf",
+                r#"
+name: leaf-wf
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#,
+            );
+        tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+            .await
+            .unwrap();
+        let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: middle-wf
+"#;
+
+        bench
+            .run_with_config(parent, EMPTY_FIXTURE, CONFIG_WITH_BASELINE)
+            .await;
+
+        let (middle_id, _) = children_created(&bench.events())[0].clone();
+        let middle_events = bench.storage.events_for_run(&middle_id).unwrap();
+        let (leaf_id, _) = children_created(&middle_events)[0].clone();
+        let leaf_held = baselines(&bench.storage.events_for_run(&leaf_id).unwrap());
+
+        assert_eq!(
+            leaf_held[0].origin,
+            BaselineOrigin::Inherited {
+                run: "run-root-baseline".into()
+            },
+            "the root measured; the middle run only handed it down"
+        );
+    });
+}
+
+/// The point of a lineage-wide measurement: a child's comparison sees
+/// what its parent broke, because both ask the same question.
+#[tokio::test]
+async fn a_childs_baseline_compare_sees_a_regression_its_parent_made() {
+    let bench = Bench::with_run_id("run-parent-regression").with_workflow(
+        "child-wf",
+        r#"
+name: child-wf
+nodes:
+  - id: compare
+    kind: check
+    builtin: baseline_compare
+"#,
+    );
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+    // The parent breaks what the suite reads, in the tree its child
+    // shares, before the child is born.
+    let parent = r#"
+name: parent
+nodes:
+  - id: break
+    kind: bash
+    run: "rm marker.txt"
+  - id: feat
+    kind: workflow
+    use: child-wf
+    isolation: inherit
+    depends_on: [break]
+"#;
+
+    let RunReport { terminal, .. } = bench
+        .run_with_config(parent, EMPTY_FIXTURE, CONFIG_WITH_BASELINE)
+        .await;
+
+    let (child_id, _) = children_created(&bench.events())[0].clone();
+    let child_events = bench.storage.events_for_run(&child_id).unwrap();
+    let failed = child_events.iter().any(|event| {
+        matches!(
+            event.payload(),
+            Some(EventPayload::Node(NodeEvent::Failed(_)))
+        )
+    });
+    assert!(
+        failed,
+        "the child compares against what worked before the invocation, so its parent's \
+         breakage is a regression it sees: {child_events:#?}"
+    );
+    assert_ne!(terminal, RunTerminal::Finished);
+}
+
+/// The suite is the root's to run: a lineage pays for it once, however
+/// many runs it is made of.
+#[tokio::test]
+async fn a_lineage_measures_once() {
+    let bench = Bench::with_run_id("run-lineage-once").with_workflow(
+        "child-wf",
+        r#"
+name: child-wf
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#,
+    );
+    let suite_runs = bench
+        .worktree
+        .parent()
+        .expect("the worktree sits in the bench's world")
+        .join("suite-runs");
+    let config = format!(
+        "{}baseline:\n  suite: \"echo . >> {}\"\n",
+        yunta_testkit::MOCK_CONFIG,
+        suite_runs.display()
+    );
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: child-wf
+"#;
+
+    let RunReport { terminal, .. } = bench.run_with_config(parent, EMPTY_FIXTURE, &config).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let ran = tokio::fs::read_to_string(&suite_runs)
+        .await
+        .expect("the root ran the suite");
+    assert_eq!(
+        ran.lines().count(),
+        1,
+        "the root measured; the child was born holding what it measured"
     );
 }

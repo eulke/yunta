@@ -53,6 +53,50 @@ impl Memo {
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.insert(key, exit_code);
     }
+
+    /// The exit code of `cmd` on `cwd` as this invocation already knows
+    /// it, or by running it now: what a criterion and a
+    /// `baseline_compare` share, so a suite two comparisons ask about
+    /// runs once while the tree stands still.
+    pub(crate) async fn exit_code(
+        &self,
+        cmd: &str,
+        cwd: &Path,
+        supervision: Supervision<'_>,
+    ) -> Result<Memoized, TaskCycleError> {
+        let tree_hash = tree_hash(cwd, supervision).await?;
+        if let Some(exit_code) = self.get(cmd, &tree_hash) {
+            return Ok(Memoized {
+                exit_code,
+                reused: true,
+            });
+        }
+        let command = GovernedCommand::shell(cwd, cmd)
+            .stdout(Capture::Inherit)
+            .stderr(Capture::Inherit);
+        let exit_code = match spawn_governed(command, supervision)
+            .await
+            .map_err(|source| TaskCycleError::MemoizedCommand {
+                cmd: cmd.to_string(),
+                source,
+            })? {
+            Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
+            Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
+        };
+        self.put(cmd, &tree_hash, exit_code);
+        Ok(Memoized {
+            exit_code,
+            reused: false,
+        })
+    }
+}
+
+/// What a memoized command answered, and whether this invocation had to
+/// run it to find out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Memoized {
+    pub exit_code: i32,
+    pub reused: bool,
 }
 
 /// A fingerprint of `cwd`'s current content: the commit it's on,

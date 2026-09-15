@@ -33,13 +33,14 @@ pub fn all_kinds() -> Vec<EventPayload> {
             },
             discarded: vec![],
         })),
-        EventPayload::Node(NodeEvent::BaselineCaptured(BaselineCapturedPayload {
+        EventPayload::Run(RunEvent::BaselineCaptured(BaselineCapturedPayload {
             command: "cargo test --workspace".to_string(),
             results: BaselineResults {
                 exit_code: 0,
                 summary: "12 passed".to_string(),
             },
             hash: yunta_core::sha256_hex(b"sha256:def"),
+            origin: BaselineOrigin::Measured,
         })),
         EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
         EventPayload::Session(SessionEvent::Opened(AgentSessionOpenedPayload {

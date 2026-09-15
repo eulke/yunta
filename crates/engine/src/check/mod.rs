@@ -36,7 +36,7 @@ mod scopes;
 mod warning;
 
 pub use error::CheckError;
-pub use refs::check_workflow_refs;
+pub use refs::{check_workflow_refs, RefsCheck};
 pub use warning::CheckWarning;
 
 // One home for what every family reads: the workspace types, the

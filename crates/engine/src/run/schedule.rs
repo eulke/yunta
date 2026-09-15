@@ -58,6 +58,12 @@ pub fn next_mode_after(workflow: &Workflow, mode_name: &ModeName) -> Option<Mode
 /// loop iteration.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decision {
+    /// The run owes its lineage's measurement, and none of its nodes
+    /// has run: what worked before the invocation started is measured
+    /// on the tree the run opens on, once, before anything changes it.
+    MeasureBaseline {
+        suite: String,
+    },
     /// One or more independently-ready nodes to execute concurrently —
     /// `(node, attempt)` pairs, in workflow declaration order.
     Execute(Vec<(NodeId, u32)>),
@@ -239,6 +245,9 @@ pub struct Policy {
     /// The nodes this run's mode includes; `None` when it declares no
     /// modes and every node is in.
     pub mode_nodes: Option<HashSet<NodeId>>,
+    /// The suite this run's lineage measures, from `baseline.suite`;
+    /// `None` when the config names none and nothing is measured.
+    pub baseline_suite: Option<String>,
 }
 
 impl Policy {
@@ -252,6 +261,11 @@ impl Policy {
             on_interrupt: manifest.config.resolved_on_interrupt(),
             on_failure: manifest.config.resolved_on_failure(),
             mode_nodes: crate::modes::mode_included_nodes(&manifest.workflow, mode_name),
+            baseline_suite: manifest
+                .config
+                .baseline
+                .as_ref()
+                .map(|baseline| baseline.suite.clone()),
         }
     }
 }
@@ -349,12 +363,29 @@ pub fn decide(workflow: &Workflow, state: &RunState, policy: &Policy) -> Decisio
         };
     }
     let board = Board::of(workflow, state, policy);
-    gate_step(&board)
+    baseline_step(&board)
+        .or_else(|| gate_step(&board))
         .or_else(|| waiting_step(&board))
         .or_else(|| answered_step(&board))
         .or_else(|| orphan_step(&board))
         .or_else(|| failure_step(&board))
         .unwrap_or_else(|| ready_batch(&board))
+}
+
+/// What the run owes before anything of its own runs: the measurement
+/// its lineage declared and does not hold. A run born holding one — a
+/// `kind: workflow` child, a promotion successor — never reaches here,
+/// because the measurement is already on its log.
+fn baseline_step(board: &Board<'_>) -> Option<Decision> {
+    let suite = board.policy.baseline_suite.as_ref()?;
+    board
+        .state
+        .run
+        .baseline()
+        .is_none()
+        .then(|| Decision::MeasureBaseline {
+            suite: suite.clone(),
+        })
 }
 
 /// A `Running` gate node is never a crash orphan (`on_interrupt` is

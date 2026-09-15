@@ -453,6 +453,7 @@
       ]
     },
     "BaselineCapturedPayload": {
+      "description": "What the suite a run's lineage declared did on the tree the run\nopens on, and whose measurement it is.",
       "type": "object",
       "properties": {
         "command": {
@@ -460,6 +461,13 @@
         },
         "hash": {
           "$ref": "#/$defs/ContentHash"
+        },
+        "origin": {
+          "description": "Whose measurement this is. A log written before the field reads\n[`BaselineOrigin::Measured`], which is what such a log meant.",
+          "$ref": "#/$defs/BaselineOrigin",
+          "default": {
+            "type": "measured"
+          }
         },
         "results": {
           "$ref": "#/$defs/BaselineResults"
@@ -471,7 +479,43 @@
         "hash"
       ]
     },
+    "BaselineOrigin": {
+      "description": "Who took the measurement a run holds: this run, or the root of the\nlineage it was born into.\n\nA lineage measures once. A run born of another — a `kind: workflow`\nchild, a promotion successor — is born holding the root's\nmeasurement, so every comparison anywhere in the lineage answers the\nsame question: what worked before the invocation started.",
+      "oneOf": [
+        {
+          "description": "This run ran the suite itself, on its first wake.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "measured"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "The run was born holding it; `run` is the root that measured,\nnever the parent it was handed down through.",
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/RunId"
+            },
+            "type": {
+              "type": "string",
+              "const": "inherited"
+            }
+          },
+          "required": [
+            "type",
+            "run"
+          ]
+        }
+      ]
+    },
     "BaselineResults": {
+      "description": "What the suite reported: the code it exited with, and the tail a\nreader sees without opening what the measuring run kept.",
       "type": "object",
       "properties": {
         "exit_code": {

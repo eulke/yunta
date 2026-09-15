@@ -18,6 +18,7 @@
 //! `distill.rs`; the close sequence is distill → `run_finished` →
 //! export → cleanup.
 
+pub mod baseline;
 mod bash_exec;
 mod budget;
 pub(crate) mod capability;
@@ -63,6 +64,7 @@ use crate::observer::RunObserver;
 use crate::replay::RunState;
 use crate::scope::ScopeCheckError;
 use crate::task_cycle::TaskCycleError;
+pub use baseline::BirthBaseline;
 pub use budget::session_token_budget;
 pub use create::{create_run, BirthArtifact, BirthOrigin, CreateRunParams};
 pub(crate) use ctx::RunCtx;

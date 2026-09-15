@@ -227,6 +227,7 @@ nodes:
                 worktree: &worktree,
                 promoted_from: None,
                 artifacts: &[],
+                baseline: None,
             },
             &storage.async_handle(),
             &SystemClock,

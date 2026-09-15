@@ -23,6 +23,7 @@ mod frames;
 mod interaction;
 mod observer;
 mod repo;
+mod stack;
 mod tasks;
 mod terminal;
 mod tools;
@@ -37,12 +38,13 @@ pub use corpus::{
     sentence_after, struct_fields, table_rows, tagged_variants, Block,
 };
 pub use events::{
-    accepted, status_changed_carrying, task_registered, task_status_changed, SourceLog,
+    accepted, baselines, status_changed_carrying, task_registered, task_status_changed, SourceLog,
 };
 pub use frames::{child_link, moment, node_frame, run_frame};
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use observer::{Frame, RecordingObserver};
 pub use repo::{git, git_output, init_repo, write, INITIAL_BRANCH};
+pub use stack::on_a_deep_stack;
 pub use tasks::tasks_document;
 pub use terminal::{runs_root, Terminal};
 pub use tools::ToolsHost;

@@ -7,7 +7,7 @@
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::EventPayload;
-use yunta_core::events::NodeEvent;
+use yunta_core::events::{NodeEvent, RunEvent};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{wait_until_async, Bench};
 
@@ -85,4 +85,79 @@ async fn cancel_then_resume_finishes_the_run() {
     let bench = bench.with_cancel(CancellationToken::new());
     let RunReport { terminal, .. } = bench.wake_on_fixture(COMPLETING_FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished);
+}
+
+/// The lineage's measurement is a step the run owns, so `yunta cancel`
+/// reaches it: the suite dies with the rest of the tree, the log holds
+/// no measurement, and the next wake takes it from the top.
+#[tokio::test]
+async fn a_suite_the_cancellation_stops_leaves_no_measurement_and_the_run_pauses() {
+    let token = CancellationToken::new();
+    let bench = Bench::new().with_cancel(token.clone());
+    // A suite that ends only when something kills it — the shape of a
+    // measurement a person interrupts.
+    let config = "\
+runners:
+  planner:
+    - { adapter: mock, model: mock-model }
+  executor:
+    - { adapter: mock, model: mock-model }
+baseline:
+  suite: \"sleep 3600\"
+";
+    let workflow = "\
+name: measure-me
+nodes:
+  - id: work
+    kind: bash
+    run: \"true\"
+";
+
+    let (report, ()) = tokio::join!(
+        bench.run_with_config(workflow, "sessions: []", config),
+        cancel_once_the_suite_is_registered(&bench, &token)
+    );
+
+    let RunReport { terminal, .. } = report;
+    match terminal {
+        RunTerminal::Paused { reason } => assert_eq!(reason, "cancelled by user"),
+        other => panic!("a cancelled run must pause, got {other:?}"),
+    }
+    assert!(
+        bench.events().iter().all(|event| !matches!(
+            event.payload(),
+            Some(EventPayload::Run(RunEvent::BaselineCaptured(_)))
+        )),
+        "a suite nobody let finish measured nothing: {:#?}",
+        bench.events()
+    );
+    assert!(
+        bench.events().iter().all(|event| !matches!(
+            event.payload(),
+            Some(EventPayload::Node(NodeEvent::Started(_)))
+        )),
+        "and no node ran before the measurement the run still owes"
+    );
+}
+
+/// Fires `token` once the run's registry lists the suite's process
+/// group: the suite is the only thing this run has spawned, so the
+/// registry naming a group is the suite being under way.
+async fn cancel_once_the_suite_is_registered(bench: &Bench, token: &CancellationToken) {
+    let run_dir = bench.run_dir();
+    wait_until_async(
+        || {
+            let run_dir = run_dir.clone();
+            async move {
+                matches!(
+                    yunta_engine::read_registry(&run_dir),
+                    yunta_engine::Registry::Read(registry)
+                        if !registry.doc.process_groups.is_empty()
+                )
+            }
+        },
+        || "the suite never registered a process group".to_string(),
+    )
+    .await;
+    token.cancel();
 }

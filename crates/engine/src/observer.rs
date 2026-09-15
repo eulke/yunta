@@ -18,9 +18,11 @@
 //! is lost by any of them:
 //!
 //! - `create_run` writes the run's birth — `run_created`, what the run
-//!   is born holding, and the baseline it captures — before an
-//!   execution context, and so an observer, exists at all; a caller that
-//!   draws the run reads those events as its seed.
+//!   is born holding, the measurement of its lineage's root among it —
+//!   before an execution context, and so an observer, exists at all; a
+//!   caller that draws the run reads those events as its seed. The
+//!   measurement a run takes itself is a step of its own execution and
+//!   goes through that door like every other event.
 //! - `resolve_gate` and `record_pause_after_crash` append to storage
 //!   directly, and only ever to a run *this* process is not executing:
 //!   a parked one another process left behind, or one whose engine

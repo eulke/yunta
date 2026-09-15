@@ -150,8 +150,9 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `command` | string | sí | `baseline.suite` resuelto de config |
-| `results` [inferido] | `{exit_code, summary}` | sí | resultado crudo de correr la suite una vez al abrir el run |
+| `results` [inferido] | `{exit_code, summary}` | sí | resultado crudo de correr la suite una vez, en el primer despertar del run que la mide |
 | `hash` | string | sí | hash del resultado, insumo de `baseline_compare` |
+| `origin` | `{type: measured}` \| `{type: inherited, run}` | sí | de quién es la medición: `measured`, este run la tomó; `inherited`, nació teniéndola y `run` nombra a la raíz del linaje que la midió. Un log sin el campo se lee `measured` |
 
 ### 5.4 `node_started` — engine
 **Fuente:** node_id, intento N

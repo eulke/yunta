@@ -5,21 +5,16 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use yunta_core::events::{
-    ArtifactId, BaselineCapturedPayload, BaselineResults, EventPayload, RecordedOrigin,
-    RunCreatedPayload,
-};
+use yunta_core::events::{ArtifactId, EventPayload, RecordedOrigin, RunCreatedPayload};
 use yunta_core::{Clock, CommitSha, InputName, Manifest, ModeName, NodeId, RunId, TaskId};
 use yunta_storage::AsyncStorage;
 
 use crate::artifacts::accept;
-use crate::process::Supervision;
 use crate::run_log::RunLog;
 use crate::tasks::Provenance;
 
-use super::check_exec::{run_command, CommandRun};
 use super::RunError;
-use yunta_core::events::{NodeEvent, RunEvent};
+use yunta_core::events::RunEvent;
 
 /// How a run comes by an artifact before any of its nodes runs: a
 /// document one of its `inputs:` named, or what another run — a
@@ -94,6 +89,11 @@ pub struct CreateRunParams<'a> {
     /// `run_created` — a run that exists in the log names every one of
     /// them.
     pub artifacts: &'a [BirthArtifact],
+    /// The measurement of the lineage this run is born into: the root's,
+    /// named by the run that took it. `None` for a run that starts a
+    /// lineage — it measures on its first wake, if its config names a
+    /// suite.
+    pub baseline: Option<&'a super::BirthBaseline>,
 }
 
 /// Creates the run's anatomy: run.dir with `artifacts/` and
@@ -132,6 +132,7 @@ pub async fn create_run(
         worktree,
         promoted_from,
         artifacts,
+        baseline,
     } = params;
     if *mode != ModeName::default() {
         match &manifest.workflow.modes {
@@ -243,88 +244,19 @@ pub async fn create_run(
 
     register_birth_documents(&log, &run_dir, artifacts, &documents).await?;
 
-    // Last, and on the tree the run opens on: what already worked is
-    // measured before any node of the run can change it.
-    if let Some(baseline) = &manifest.config.baseline {
-        capture_baseline(&log, &run_dir, worktree, &baseline.suite).await?;
+    // Last: the measurement of the lineage this run is born into, if
+    // it was born into one. What its own tree did is not a birth fact —
+    // measuring is something an invocation does, and no invocation has
+    // woken this run.
+    if let Some(baseline) = baseline {
+        log.record(
+            None,
+            EventPayload::Run(RunEvent::BaselineCaptured(baseline.captured())),
+        )
+        .await?;
     }
 
     Ok(run_dir)
-}
-
-/// Captures the run's baseline: the suite `baseline.suite` names runs on
-/// `worktree`, everything it wrote is kept under `baseline/`, and
-/// `baseline_captured` states the command, the exit code, a summary and
-/// the hash of the output.
-///
-/// The fact is the run's and carries no node: the measurement is taken
-/// before any node of the run runs, and every `baseline_compare`
-/// compares against this one reading.
-///
-/// The suite is bounded by the invocation that asked for it, like the
-/// git a birth already asks about the tree: a run under construction
-/// carries no process registry and no cancellation of its own, so the
-/// call that started the suite is the only thing that reaches it.
-async fn capture_baseline(
-    log: &RunLog<'_>,
-    run_dir: &Path,
-    worktree: &Path,
-    suite: &str,
-) -> Result<(), RunError> {
-    let output = match run_command(Supervision::none(), worktree, suite).await? {
-        CommandRun::Done(output) => output,
-        CommandRun::Cancelled => {
-            return Err(RunError::Broken {
-                diagnostic: format!(
-                    "the baseline suite `{suite}` stopped before it finished, so there is \
-                     nothing for this run's `baseline_compare` checks to compare against"
-                ),
-            });
-        }
-    };
-
-    keep_capture(run_dir, output.stdout.as_bytes()).await?;
-
-    log.record(
-        None,
-        EventPayload::Node(NodeEvent::BaselineCaptured(BaselineCapturedPayload {
-            command: suite.to_string(),
-            results: BaselineResults {
-                exit_code: output.exit_code,
-                summary: output
-                    .stdout
-                    .lines()
-                    .rev()
-                    .take(5)
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            },
-            hash: yunta_core::sha256_hex(output.stdout.as_bytes()),
-        })),
-    )
-    .await?;
-    Ok(())
-}
-
-/// Keeps everything the baseline suite wrote under the run's
-/// `baseline/`, which the hash on `baseline_captured` names. The
-/// directory belongs to the capture, so a run with no suite to capture
-/// has none.
-async fn keep_capture(run_dir: &Path, output: &[u8]) -> Result<(), RunError> {
-    let dir = crate::run_dir::baseline_dir(run_dir);
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|source| RunError::Io {
-            context: format!("create run directory `{}`", dir.display()),
-            source,
-        })?;
-    let capture = crate::run_dir::baseline_capture(run_dir);
-    tokio::fs::write(&capture, output)
-        .await
-        .map_err(|source| RunError::Io {
-            context: format!("write `{}`", capture.display()),
-            source,
-        })
 }
 
 /// One birth artifact that is a tasks document: what it says, and what
