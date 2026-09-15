@@ -10,17 +10,26 @@
 //! only ever go down — the day one does, the baseline moves with it in the
 //! same change.
 //!
+//! Beside them it counts the rules this repository states about itself:
+//! the words it retired, the tense its texts are written in, the sites
+//! that own a capability ([`sites`]), the shape of a test, and a
+//! threshold with no decision behind it. A rule nothing measures is a
+//! rule a change is free to break.
+//!
 //! Counting is line-based (a line matching the pattern), the same measure
 //! the rebuild's own acceptance commands used, so a contributor and CI see
 //! the same number `grep -c` would.
 
 mod prose;
 mod shape;
+mod sites;
+mod thresholds;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use shape::{functions_over, has_inner_space_run, production_only, strip_noise};
+use shape::{functions_over, has_inner_space_run, production_only, strip_noise, sync_fs_in_async};
+use thresholds::numeric_consts_without_decision;
 
 /// Where the committed baseline lives, next to this crate.
 fn baseline_path() -> PathBuf {
@@ -59,17 +68,30 @@ fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 /// The `src` directory of every crate under `crates/`.
-fn crate_src_dirs() -> Vec<PathBuf> {
-    crate_subdirs("src")
+fn crate_src_dirs(root: &Path) -> Vec<PathBuf> {
+    crate_subdirs(root, "src")
 }
 
 /// The `tests` directory of every crate under `crates/`.
-fn crate_test_dirs() -> Vec<PathBuf> {
-    crate_subdirs("tests")
+fn crate_test_dirs(root: &Path) -> Vec<PathBuf> {
+    crate_subdirs(root, "tests")
 }
 
-fn crate_subdirs(name: &str) -> Vec<PathBuf> {
-    let crates = workspace_root().join("crates");
+/// The files the ratchet reads about code: the sources of every crate and
+/// the tests that drive them. One corpus, so two counters naming the same
+/// pattern never disagree about where they looked.
+pub(super) fn ratchet_corpus(root: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = crate_src_dirs(root)
+        .iter()
+        .chain(crate_test_dirs(root).iter())
+        .flat_map(|dir| rs_files(dir))
+        .collect();
+    files.sort();
+    files
+}
+
+fn crate_subdirs(root: &Path, name: &str) -> Vec<PathBuf> {
+    let crates = root.join("crates");
     let mut dirs = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&crates) {
         for entry in entries.flatten() {
@@ -94,15 +116,16 @@ fn count_lines(files: &[PathBuf], matches: impl Fn(&str) -> bool) -> usize {
 
 /// Every counter, by name, computed fresh from the tree.
 fn measure() -> BTreeMap<String, usize> {
-    let src_files: Vec<PathBuf> = crate_src_dirs()
+    let root = workspace_root();
+    let src_files: Vec<PathBuf> = crate_src_dirs(&root)
         .iter()
         .flat_map(|dir| rs_files(dir))
         .collect();
-    let tests: Vec<PathBuf> = crate_test_dirs()
+    let tests: Vec<PathBuf> = crate_test_dirs(&root)
         .iter()
         .flat_map(|dir| rs_files(dir))
         .collect();
-    let cli_src = rs_files(&workspace_root().join("crates/cli/src"));
+    let cli_src = rs_files(&root.join("crates/cli/src"));
 
     // Production text (unit-test modules blanked) for the counters the audit
     // measured outside tests.
@@ -146,32 +169,6 @@ fn measure() -> BTreeMap<String, usize> {
             })
             .count(),
     );
-    // The wall clock is read in exactly one place — `SystemClock`.
-    counts.insert(
-        "utc_now_outside_clock".to_string(),
-        count_lines(
-            &src_files
-                .iter()
-                .filter(|p| !p.ends_with("clock.rs"))
-                .cloned()
-                .collect::<Vec<_>>(),
-            |line| line.contains("Utc::now"),
-        ),
-    );
-    // Git runs from one module per crate that needs it — the engine's and
-    // the test harness's, never scattered. Counted by file, so a third site
-    // is what trips it.
-    counts.insert(
-        "git_command_new_files".to_string(),
-        src_files
-            .iter()
-            .filter(|path| {
-                std::fs::read_to_string(path)
-                    .map(|text| text.contains("Command::new(\"git\")"))
-                    .unwrap_or(false)
-            })
-            .count(),
-    );
     // The CLI has one error translator; `main` maps the exit code.
     counts.insert(
         "exit_failure_in_cli".to_string(),
@@ -201,13 +198,12 @@ fn measure() -> BTreeMap<String, usize> {
     // and one that moves nothing says `is_audit`.
     counts.insert(
         "wildcard_in_ledger_apply".to_string(),
-        wildcards_in_folds(&workspace_root()),
+        wildcards_in_folds(&root),
     );
 
     // A word this repository retired still naming the thing it retired it
     // for, and a text that describes a plan or a past instead of what the
     // repository does. Both read prose, over a corpus wider than `.rs`.
-    let root = workspace_root();
     counts.insert(
         "banned_vocabulary".to_string(),
         prose::banned_vocabulary(&root),
@@ -224,7 +220,77 @@ fn measure() -> BTreeMap<String, usize> {
             .count(),
     );
 
+    // The shape of a test, the thread an async body holds, the threshold
+    // with no decision behind it, and every capability written outside the
+    // site that owns it. Each of these is a function of the tree alone.
+    for (name, count) in COUNTERS.iter().chain(sites::COUNTERS) {
+        counts.insert((*name).to_string(), count(&root));
+    }
+
     counts
+}
+
+/// The counters that read the corpus of code and nothing else, beside the
+/// ones [`sites`] declares.
+const COUNTERS: &[sites::Counter] = &[
+    ("sync_fs_in_async", count_sync_fs_in_async),
+    ("test_files_over_500_lines", count_test_files_over_500_lines),
+    ("test_fns_over_50_lines", count_test_fns_over_50_lines),
+    ("numeric_const_without_adr", count_numeric_const_without_adr),
+];
+
+/// A synchronous file call inside an async body: it holds the thread the
+/// runtime gave the task until the disk answers.
+fn count_sync_fs_in_async(root: &Path) -> usize {
+    ratchet_corpus(root)
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|text| sync_fs_in_async(&text))
+        .sum()
+}
+
+/// A test file past the budget a source file has. What a reader scrolls
+/// to understand a failure is the test as well as the code it drives.
+fn count_test_files_over_500_lines(root: &Path) -> usize {
+    test_files(root)
+        .iter()
+        .filter(|path| {
+            std::fs::read_to_string(path)
+                .map(|text| text.lines().count() > 500)
+                .unwrap_or(false)
+        })
+        .count()
+}
+
+/// A test function past the budget a production function has. A test that
+/// long names more than one behaviour, and a failure in it says which
+/// line broke rather than which promise.
+fn count_test_fns_over_50_lines(root: &Path) -> usize {
+    test_files(root)
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|text| functions_over(&text, 50))
+        .sum()
+}
+
+/// A threshold with no decision behind it, over `src`, which is where
+/// D170 states the rule: a number a test writes is read beside the
+/// assertion it serves, while a number the code carries governs what the
+/// binary does to somebody's run.
+fn count_numeric_const_without_adr(root: &Path) -> usize {
+    crate_src_dirs(root)
+        .iter()
+        .flat_map(|dir| rs_files(dir))
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|text| numeric_consts_without_decision(&text))
+        .sum()
+}
+
+fn test_files(root: &Path) -> Vec<PathBuf> {
+    crate_test_dirs(root)
+        .iter()
+        .flat_map(|dir| rs_files(dir))
+        .collect()
 }
 
 fn render(counts: &BTreeMap<String, usize>) -> String {
@@ -352,5 +418,20 @@ mod tests {
                  so a change is free to raise it"
             );
         }
+    }
+
+    #[test]
+    fn the_baseline_holds_a_number_for_every_counter_the_ratchet_measures() {
+        let counts = measure();
+        let baseline = parse_baseline(
+            &std::fs::read_to_string(baseline_path()).expect("the baseline is committed"),
+        );
+        let measured: Vec<&String> = counts.keys().collect();
+        let held: Vec<&String> = baseline.keys().collect();
+        assert_eq!(
+            measured, held,
+            "a counter enters with the number it measures when it lands — one with no line in \
+             the baseline gates nothing, and a line with no counter gates a pattern nobody reads"
+        );
     }
 }

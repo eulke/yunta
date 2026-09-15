@@ -32,17 +32,7 @@ pub fn production_only(text: &str) -> String {
 /// so a `{` in a string never opens a phantom module.
 pub fn test_mod_mask(text: &str) -> Vec<bool> {
     let lines: Vec<&str> = text.lines().collect();
-    let blanked = {
-        let mut in_block = false;
-        lines
-            .iter()
-            .map(|line| {
-                let (out, next) = strip_noise(line, in_block);
-                in_block = next;
-                out
-            })
-            .collect::<Vec<_>>()
-    };
+    let blanked = blanked_lines(text);
     let mut mask = vec![false; lines.len()];
     let mut i = 0;
     while i < lines.len() {
@@ -133,18 +123,55 @@ pub fn has_inner_space_run(line: &str) -> bool {
 /// heuristic, not a parser: it only ever gates *growth* against a baseline,
 /// so an occasional miscount is stable and harmless.
 pub fn functions_over(source: &str, max: usize) -> usize {
-    let blanked: Vec<String> = {
-        let mut in_block = false;
-        source
-            .lines()
-            .map(|line| {
-                let (out, next) = strip_noise(line, in_block);
-                in_block = next;
-                out
-            })
-            .collect()
-    };
-    let mut over = 0;
+    bodies(&blanked_lines(source))
+        .iter()
+        .filter(|body| body.lines() > max)
+        .count()
+}
+
+/// Lines calling `std::fs::` inside the body of an `async fn`.
+///
+/// A synchronous file call blocks the thread the runtime gave the task:
+/// every other task sharing that thread waits for the disk, and nothing
+/// in the code says so. Disk work inside an async body goes
+/// through the async API or through `spawn_blocking`.
+pub fn sync_fs_in_async(source: &str) -> usize {
+    let lines: Vec<&str> = source.lines().collect();
+    let blanked = blanked_lines(source);
+    bodies(&blanked)
+        .iter()
+        .filter(|body| blanked[body.header].contains("async fn"))
+        .map(|body| {
+            lines
+                .iter()
+                .skip(body.open + 1)
+                .take(body.lines())
+                .filter(|line| line.contains("std::fs::"))
+                .count()
+        })
+        .sum()
+}
+
+/// The span of a function body: the line its `fn` header opens, the line
+/// its body's `{` opens, and the line its matching `}` closes.
+struct Body {
+    header: usize,
+    open: usize,
+    close: usize,
+}
+
+impl Body {
+    /// How many lines a reader scrolls between the braces.
+    fn lines(&self) -> usize {
+        self.close.saturating_sub(self.open + 1)
+    }
+}
+
+/// Every function body in `blanked`, in source order. A function nested
+/// inside another is part of the body that holds it, so each span is
+/// reported once, by its outermost function.
+fn bodies(blanked: &[String]) -> Vec<Body> {
+    let mut out = Vec::new();
     let mut i = 0;
     while i < blanked.len() {
         // A function header is a line whose code contains `fn <name>(`.
@@ -165,8 +192,7 @@ pub fn functions_over(source: &str, max: usize) -> usize {
             }
             if opened {
                 let mut depth = 0i32;
-                let open_line = j;
-                let mut close_line = j;
+                let mut close = j;
                 'body: for (k, line) in blanked.iter().enumerate().skip(j) {
                     for ch in line.chars() {
                         if ch == '{' {
@@ -174,23 +200,38 @@ pub fn functions_over(source: &str, max: usize) -> usize {
                         } else if ch == '}' {
                             depth -= 1;
                             if depth == 0 {
-                                close_line = k;
+                                close = k;
                                 break 'body;
                             }
                         }
                     }
                 }
-                let body_lines = close_line.saturating_sub(open_line + 1);
-                if body_lines > max {
-                    over += 1;
-                }
-                i = close_line + 1;
+                out.push(Body {
+                    header: i,
+                    open: j,
+                    close,
+                });
+                i = close + 1;
                 continue;
             }
         }
         i += 1;
     }
-    over
+    out
+}
+
+/// Every line of `source` with its string literals and comments blanked,
+/// so only structural braces survive.
+fn blanked_lines(source: &str) -> Vec<String> {
+    let mut in_block = false;
+    source
+        .lines()
+        .map(|line| {
+            let (out, next) = strip_noise(line, in_block);
+            in_block = next;
+            out
+        })
+        .collect()
 }
 
 /// The column where a `fn` keyword introduces a function, or `None`. Only a
@@ -336,6 +377,19 @@ mod tests {
         let source =
             "fn a() -> &'static str {\n    \"} not a brace {\"\n}\ntrait T { fn m(&self); }\n";
         assert_eq!(functions_over(source, 0), 1);
+    }
+
+    #[test]
+    fn sync_fs_counts_only_the_calls_inside_an_async_body() {
+        let source = "\
+async fn reads() {
+    let text = std::fs::read_to_string(path);
+}
+fn also_reads() {
+    let text = std::fs::read_to_string(path);
+}
+";
+        assert_eq!(sync_fs_in_async(source), 1);
     }
 
     #[test]
