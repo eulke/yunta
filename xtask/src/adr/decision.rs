@@ -10,59 +10,96 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use yunta_core::yaml::Value;
+use yunta_core::NonEmpty;
 
 /// One decision, as its file declares itself.
+///
+/// `revised_by` is folded into [`Status`] at parse time: a decision's
+/// standing and who changed it are one fact, and a type that let them
+/// disagree is what let D147 stand `revised` by nobody while a commit
+/// amended its body.
 #[derive(Debug)]
 pub struct Decision {
     pub number: u32,
     pub title: String,
     pub status: Status,
     pub revises: Vec<u32>,
-    pub revised_by: Vec<u32>,
     pub file: String,
 }
 
-/// How a decision stands today.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// How a decision stands today, and — when it no longer stands as
+/// written — who said so.
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Status {
-    /// In force as written.
+    /// In force as written, revised by nobody.
     Accepted,
     /// A later decision changed part of what it decided; the note in
-    /// its body says which part.
-    Revised,
+    /// its body says which part, and `by` names every decision that
+    /// changed it.
+    Revised { by: NonEmpty<u32> },
     /// A later decision withdrew it; what it decided no longer holds.
-    Retired,
+    Retired { by: NonEmpty<u32> },
 }
 
 impl Status {
-    /// Every status a decision may declare. A register whose words are
-    /// open is a register nobody can fold: these three are the whole
+    /// Every word a `status:` may say. A register whose words are open
+    /// is a register nobody can fold: these three are the whole
     /// vocabulary, and a file that says anything else is refused.
-    const ALL: [Status; 3] = [Status::Accepted, Status::Revised, Status::Retired];
+    const WORDS: [&'static str; 3] = ["accepted", "revised", "retired"];
 
     /// How the front-matter and the index spell it.
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Status::Accepted => "accepted",
-            Status::Revised => "revised",
-            Status::Retired => "retired",
+            Status::Revised { .. } => "revised",
+            Status::Retired { .. } => "retired",
         }
     }
 
-    fn read(text: &str, file: &str) -> Result<Status, String> {
-        Status::ALL
-            .into_iter()
-            .find(|status| status.as_str() == text)
-            .ok_or_else(|| {
-                let known: Vec<String> = Status::ALL
+    /// The status `text` names, holding `revised_by`. A word that needs
+    /// a reviser and has none, or an `accepted` that names one, is a
+    /// file saying two things.
+    fn read(text: &str, revised_by: Vec<u32>, file: &str) -> Result<Status, String> {
+        let named = || {
+            revised_by
+                .iter()
+                .map(|number| name(*number))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        match (text, NonEmpty::new(revised_by.clone())) {
+            ("accepted", None) => Ok(Status::Accepted),
+            ("accepted", Some(_)) => Err(format!(
+                "{file}: `status` is `accepted` and `revised_by` names {} — a decision in \
+                 force as written is revised by nobody",
+                named()
+            )),
+            ("revised", Some(by)) => Ok(Status::Revised { by }),
+            ("retired", Some(by)) => Ok(Status::Retired { by }),
+            ("revised" | "retired", None) => Err(format!(
+                "{file}: `status` is `{text}` and `revised_by` names no decision — what \
+                 changed it is a decision, and it says which"
+            )),
+            (other, _) => Err(format!(
+                "{file}: `status` is one of {}, and says `{other}`",
+                Status::WORDS
                     .iter()
-                    .map(|status| format!("`{}`", status.as_str()))
-                    .collect();
-                format!(
-                    "{file}: `status` is one of {}, and says `{text}`",
-                    known.join(", ")
-                )
-            })
+                    .map(|word| format!("`{word}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        }
+    }
+}
+
+impl Decision {
+    /// The decisions that revised this one — empty for one in force as
+    /// written. What reciprocity and the index read.
+    pub fn revisers(&self) -> &[u32] {
+        match &self.status {
+            Status::Accepted => &[],
+            Status::Revised { by } | Status::Retired { by } => by.as_slice(),
+        }
     }
 }
 
@@ -154,9 +191,12 @@ impl Decision {
         Ok(Decision {
             number,
             title: text(field("title"), "title", file)?,
-            status: Status::read(&text(field("status"), "status", file)?, file)?,
+            status: Status::read(
+                &text(field("status"), "status", file)?,
+                numbers(field("revised_by"), "revised_by", file)?,
+                file,
+            )?,
             revises: numbers(field("revises"), "revises", file)?,
-            revised_by: numbers(field("revised_by"), "revised_by", file)?,
             file: file.to_string(),
         })
     }
@@ -214,7 +254,7 @@ pub fn reciprocals(decisions: &BTreeMap<u32, Decision>) -> Result<(), String> {
                         decision.file
                     ))
                 }
-                Some(other) if !other.revised_by.contains(&decision.number) => {
+                Some(other) if !other.revisers().contains(&decision.number) => {
                     return Err(format!(
                         "{}: {here} says it revises {there}, and {there} does not say so back",
                         decision.file
@@ -223,7 +263,7 @@ pub fn reciprocals(decisions: &BTreeMap<u32, Decision>) -> Result<(), String> {
                 Some(_) => {}
             }
         }
-        for reviser in &decision.revised_by {
+        for reviser in decision.revisers() {
             let there = name(*reviser);
             match decisions.get(reviser) {
                 None => {
@@ -273,9 +313,11 @@ mod tests {
         Decision {
             number,
             title: format!("La decisión {number}"),
-            status: Status::Accepted,
+            status: match NonEmpty::new(revised_by.to_vec()) {
+                None => Status::Accepted,
+                Some(by) => Status::Revised { by },
+            },
             revises: revises.to_vec(),
-            revised_by: revised_by.to_vec(),
             file: format!("{}-una-decision.md", name(number)),
         }
     }
@@ -290,6 +332,37 @@ mod tests {
              revises: {revises}\nrevised_by: {revised_by}\n---\n\n# Una decisión\n",
             name(number)
         )
+    }
+
+    /// The status and the revisers are one fact, so a file cannot say
+    /// two things: an `accepted` decision has no reviser, and a
+    /// `revised` or `retired` one has at least one — the case that let
+    /// D147 stand revised by nobody while a commit amended its body.
+    #[test]
+    fn a_status_that_disagrees_with_its_revisers_is_refused() {
+        for (status, revised_by) in [("revised", "[]"), ("retired", "[]")] {
+            let refused = Decision::parse("D06-un-slug.md", &file(6, status, "[]", revised_by))
+                .expect_err("a revision with no reviser says nothing about who revised it");
+            assert!(
+                refused.contains("D06") && refused.contains(status),
+                "{refused}"
+            );
+        }
+        let refused = Decision::parse("D06-un-slug.md", &file(6, "accepted", "[]", "[D178]"))
+            .expect_err("a decision in force as written has no reviser");
+        assert!(
+            refused.contains("D06") && refused.contains("D178"),
+            "{refused}"
+        );
+
+        for (status, revised_by) in [
+            ("accepted", "[]"),
+            ("revised", "[D178]"),
+            ("retired", "[D157]"),
+        ] {
+            Decision::parse("D06-un-slug.md", &file(6, status, "[]", revised_by))
+                .unwrap_or_else(|refused| panic!("a file that agrees with itself: {refused}"));
+        }
     }
 
     #[test]
@@ -334,8 +407,12 @@ mod tests {
             refused.contains("`accepted`, `revised`, `retired`") && refused.contains("proposed"),
             "{refused}"
         );
-        for status in [Status::Accepted, Status::Revised, Status::Retired] {
-            Decision::parse("D06-un-slug.md", &file(6, status.as_str(), "[]", "[]"))
+        for (word, revised_by) in [
+            ("accepted", "[]"),
+            ("revised", "[D178]"),
+            ("retired", "[D157]"),
+        ] {
+            Decision::parse("D06-un-slug.md", &file(6, word, "[]", revised_by))
                 .expect("every status of the set is read");
         }
     }

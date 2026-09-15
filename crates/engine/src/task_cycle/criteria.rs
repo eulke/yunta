@@ -10,7 +10,7 @@ use yunta_core::events::{CriterionType, TaskLedger};
 use yunta_core::Criterion;
 use yunta_core::{ContentHash, Task, TaskId};
 
-use super::{CriterionRun, PreCheckOutcome, TaskCycleError};
+use super::{CriterionRun, TaskCycleError};
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
 
 /// Per-invocation memoization cache: a criterion's result is reused
@@ -239,30 +239,13 @@ pub async fn pre_check(
     memo: &Memo,
     history: &TaskLedger,
     supervision: Supervision<'_>,
-) -> Result<(Vec<CriterionRun>, PreCheckOutcome), TaskCycleError> {
+) -> Result<Vec<CriterionRun>, TaskCycleError> {
     let mut ordered: Vec<&Criterion> = task.criteria.iter().collect();
     // Stable sort: criteria the log never priced (u64::MAX key) keep
     // declared order among themselves.
     ordered.sort_by_key(|criterion| median_duration(history, &criterion.cmd).unwrap_or(u64::MAX));
     let ordered: Vec<Criterion> = ordered.into_iter().cloned().collect();
-    let runs = run_all_criteria(&task.id, &ordered, cwd, memo, supervision).await?;
-
-    let mut outcome = PreCheckOutcome::Red;
-    for run in &runs {
-        if matches!(outcome, PreCheckOutcome::Red) {
-            if run.is_guard && run.exit_code != 0 {
-                outcome = PreCheckOutcome::BrokenGuard {
-                    cmd: run.cmd.clone(),
-                };
-            } else if !run.is_guard && run.exit_code == 0 {
-                outcome = PreCheckOutcome::TrivialCriterion {
-                    cmd: run.cmd.clone(),
-                };
-            }
-        }
-    }
-
-    Ok((runs, outcome))
+    run_all_criteria(&task.id, &ordered, cwd, memo, supervision).await
 }
 
 /// Post-check: every criterion, guard or not, must now

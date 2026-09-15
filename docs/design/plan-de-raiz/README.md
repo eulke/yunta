@@ -801,8 +801,8 @@ spec-ledger → spec-tasks: 9 reglas, regla 1 en su capa, ejemplo con path
 real, sin "se escribe antes del código". referencia-schema: `2000000`,
 `50000000`, `32000`, `baseline.suite` igual al fixture. compatibility: 9
 schemas, todos los códigos de artifact. adrs: D132 "tasks document", D139
-"nueve", D152 `Retirada por D157` (8-03), D02/D05/D07/D46 con reviser, D03 sin
-nota que revisar, D147 con reviser (8-03, D178),
+"nueve", D152 `Retirada por D157`, D02/D05/D07/D46 con reviser, D03 sin
+nota que revisar, D147 con reviser (D178),
 D140/D144 `Revisada por D156`, D06 sin `plugin`, D37 sin `subagente`. rfc-0002 `M14` → A-06;
 rfc-0003 `deuda ⑪` → A-05. README: `graph <workflow> [--run <id>]`, `list`
 sin "modes". concepts: `waiting` incluye preguntas. Rustdoc:

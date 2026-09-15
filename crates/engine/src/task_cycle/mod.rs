@@ -100,15 +100,108 @@ pub struct CriterionRun {
     pub duration_ms: Option<u64>,
 }
 
-/// The pre-check's verdict: "esta fase valida al
-/// validador" — a non-guard criterion that already passes, or a guard
-/// that's already red, means the criteria themselves are wrong, not that
-/// the (not-yet-started) work is wrong.
+/// A criterion the pre-check found wrong before any work: "esta fase
+/// valida al validador" — a non-guard that already passes, or a guard
+/// that is already red, means the criteria themselves need fixing, not
+/// the task nobody has started.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PreCheckOutcome {
-    Red,
+pub enum Surprise {
     TrivialCriterion { cmd: String },
     BrokenGuard { cmd: String },
+}
+
+impl std::fmt::Display for Surprise {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Surprise::TrivialCriterion { cmd } => write!(
+                f,
+                "criterion `{cmd}` already passes before any work — the criteria need \
+                 fixing, not the task"
+            ),
+            Surprise::BrokenGuard { cmd } => {
+                write!(f, "guard `{cmd}` is already red before any work started")
+            }
+        }
+    }
+}
+
+/// Everything the pre-check found wrong, in the order the task declares
+/// its criteria; empty when every non-guard is red and every guard
+/// green, which is the normal case.
+///
+/// A function of what ran and nothing else: the learned order decides
+/// when the evidence arrives, never what is verified or what is
+/// reported (D177), and a replay derives the same verdict from
+/// `criteria_checked`.
+pub fn surprises(task: &yunta_core::Task, runs: &[CriterionRun]) -> Vec<Surprise> {
+    task.criteria
+        .iter()
+        .filter_map(|criterion| {
+            // By command *and* kind: one task may declare the same
+            // command twice, once as a guard and once not, and those
+            // are two different questions about it.
+            let is_guard = criterion.r#type == Some(yunta_core::events::CriterionType::Guard);
+            let run = runs
+                .iter()
+                .find(|run| run.cmd == criterion.cmd && run.is_guard == is_guard)?;
+            match (run.is_guard, run.exit_code) {
+                (true, code) if code != 0 => Some(Surprise::BrokenGuard {
+                    cmd: run.cmd.clone(),
+                }),
+                (false, 0) => Some(Surprise::TrivialCriterion {
+                    cmd: run.cmd.clone(),
+                }),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+/// Why a task stopped without being done. One type for every answer the
+/// cycle gives, so the sentence a reader sees is produced once, here,
+/// from the fact rather than from a `format!` at each site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BlockedCause {
+    /// The criteria were wrong before any work started.
+    PreCheck(yunta_core::NonEmpty<Surprise>),
+    /// Every attempt ran and the criteria are still red, or the work
+    /// left the scope the task declared.
+    Unmet { attempts: u32 },
+    /// A scope-expansion request is owed a human decision, and no
+    /// further session spends budget while one is owed.
+    ScopeDecisionOwed,
+    /// The session reported a failure nothing will retry, and the
+    /// criteria the engine checked itself are still red.
+    NonRetryable,
+    /// A criterion's own command is one the run's permissions refuse,
+    /// so the task cannot be verified at all. `rule` is the refusal the
+    /// permission check wrote, naming the pattern and the field.
+    CommandDenied { rule: String },
+}
+
+impl std::fmt::Display for BlockedCause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            // One line per surprise: a task whose criteria are wrong in
+            // two ways is wrong in two ways, and a reader fixes both.
+            BlockedCause::PreCheck(found) => {
+                let said: Vec<String> = found.as_slice().iter().map(ToString::to_string).collect();
+                write!(f, "{}", said.join("\n"))
+            }
+            BlockedCause::Unmet { attempts } => write!(
+                f,
+                "criteria still red or scope violated after {attempts} attempt(s)"
+            ),
+            BlockedCause::ScopeDecisionOwed => {
+                write!(f, "a scope expansion request needs a human decision")
+            }
+            BlockedCause::NonRetryable => write!(
+                f,
+                "the session reported a non-retryable failure and the criteria are still red"
+            ),
+            BlockedCause::CommandDenied { rule } => write!(f, "{rule}"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,7 +257,7 @@ pub struct AttemptRecord {
 pub enum TaskOutcome {
     Done,
     Blocked {
-        reason: String,
+        cause: BlockedCause,
     },
     /// The cycle's cancellation token fired mid-attempt — the
     /// session was cut (interrupt→kill) and the cycle stopped without a
@@ -301,7 +394,9 @@ pub async fn run_task(
                 staged: last_staged.clone(),
                 pre_check: Vec::new(),
                 attempts: Vec::new(),
-                outcome: TaskOutcome::Blocked { reason: rule },
+                outcome: TaskOutcome::Blocked {
+                    cause: BlockedCause::CommandDenied { rule },
+                },
                 needs_human_decision: false,
             });
         }
@@ -324,28 +419,22 @@ pub async fn run_task(
         });
     }
 
-    let (pre_runs, pre_outcome) = pre_check(task, cwd, memo, history, supervision).await?;
+    let pre_runs = pre_check(task, cwd, memo, history, supervision).await?;
 
-    // The pre-check validates the criteria before any work: a non-guard that
-    // already passes, or a guard already red, means the criteria are wrong,
-    // not the task. Only `Red` — nothing prejudged — proceeds to the
-    // attempts; every other verdict blocks the task naming what to fix.
-    let blocked_before_work = match pre_outcome {
-        PreCheckOutcome::Red => None,
-        PreCheckOutcome::TrivialCriterion { cmd } => Some(format!(
-            "criterion `{cmd}` already passes before any work — the criteria need fixing, not the task"
-        )),
-        PreCheckOutcome::BrokenGuard { cmd } => {
-            Some(format!("guard `{cmd}` is already red before any work started"))
-        }
-    };
-    if let Some(reason) = blocked_before_work {
+    // The pre-check validates the criteria before any work: a non-guard
+    // that already passes, or a guard already red, means the criteria
+    // are wrong, not the task. Nothing prejudged — the empty verdict —
+    // proceeds to the attempts; anything found blocks the task naming
+    // every one of them.
+    if let Some(found) = yunta_core::NonEmpty::new(surprises(task, &pre_runs)) {
         return Ok(TaskCycleReport {
             task_id: task.id.clone(),
             staged: last_staged.clone(),
             pre_check: pre_runs,
             attempts: Vec::new(),
-            outcome: TaskOutcome::Blocked { reason },
+            outcome: TaskOutcome::Blocked {
+                cause: BlockedCause::PreCheck(found),
+            },
             needs_human_decision: false,
         });
     }
@@ -399,10 +488,9 @@ pub async fn run_task(
         attempts,
         needs_human_decision: false,
         outcome: TaskOutcome::Blocked {
-            reason: format!(
-                "criteria still red or scope violated after {} attempt(s)",
-                max_retries + 1
-            ),
+            cause: BlockedCause::Unmet {
+                attempts: max_retries + 1,
+            },
         },
     })
 }

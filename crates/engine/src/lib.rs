@@ -144,9 +144,9 @@ pub use stats::{
     Submissions,
 };
 pub use task_cycle::{
-    post_check, pre_check, run_task, AttemptEnv, AttemptRecord, CriterionRun, DispatchOutcome,
-    Memo, PreCheckOutcome, ScopeGovernance, SessionObserver, SessionSetup, TaskCycleError,
-    TaskCycleReport, TaskOutcome, DEFAULT_MAX_RETRIES,
+    post_check, pre_check, run_task, surprises, AttemptEnv, AttemptRecord, BlockedCause,
+    CriterionRun, DispatchOutcome, Memo, ScopeGovernance, SessionObserver, SessionSetup, Surprise,
+    TaskCycleError, TaskCycleReport, TaskOutcome, DEFAULT_MAX_RETRIES,
 };
 pub use verification_effectiveness::{
     analyze as analyze_verification_effectiveness, AlwaysApprovedGate, AlwaysFirstTryTasks,

@@ -109,7 +109,7 @@ pub(super) async fn integrate_batch(
             ));
         }
         let blocked_reason = match report.outcome {
-            TaskOutcome::Blocked { reason } => {
+            TaskOutcome::Blocked { cause } => {
                 ctx.emit(
                     Some(&node.id),
                     EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
@@ -119,7 +119,7 @@ pub(super) async fn integrate_batch(
                     ))),
                 )
                 .await?;
-                Some(reason)
+                Some(cause.to_string())
             }
             TaskOutcome::Done => {
                 let outcome = integrate_task(

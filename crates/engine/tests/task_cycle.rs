@@ -17,7 +17,8 @@ use yunta_core::Criterion;
 use yunta_core::Task;
 use yunta_engine::scope_expansion::GrantLedger;
 use yunta_engine::{
-    run_task, AttemptEnv, DispatchOutcome, Memo, PreCheckOutcome, ScopeGovernance, TaskOutcome,
+    run_task, surprises, AttemptEnv, CriterionRun, DispatchOutcome, Memo, ScopeGovernance,
+    Surprise, TaskOutcome,
 };
 use yunta_testkit::{init_repo, Owner};
 use yunta_testkit_core::Log;
@@ -250,8 +251,8 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
         "no attempt should have been dispatched"
     );
     match report.outcome {
-        TaskOutcome::Blocked { reason } => assert_eq!(
-            reason,
+        TaskOutcome::Blocked { cause } => assert_eq!(
+            cause.to_string(),
             "criterion `true` already passes before any work — the criteria need fixing, not the task"
         ),
         other => panic!("expected Blocked, got {other:?}"),
@@ -296,9 +297,9 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
 
     assert!(report.attempts.is_empty());
     match report.outcome {
-        TaskOutcome::Blocked { reason } => {
+        TaskOutcome::Blocked { cause } => {
             assert_eq!(
-                reason,
+                cause.to_string(),
                 "guard `false` is already red before any work started"
             )
         }
@@ -516,12 +517,11 @@ async fn pre_check_and_post_check_run_every_criterion() {
         vec![cmd("test -f a.txt"), cmd("test -f b.txt")],
     );
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
-    let (runs, outcome) =
-        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
-            .await
-            .unwrap();
+    let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
     assert_eq!(runs.len(), 2);
-    assert_eq!(outcome, PreCheckOutcome::Red);
+    assert!(surprises(&t, &runs).is_empty());
 }
 
 #[tokio::test]
@@ -545,12 +545,12 @@ async fn a_criterion_is_reused_when_the_tree_and_config_havent_changed_since_the
     );
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
-    let (first, _) = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
+    let first = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     assert!(!first[0].reused, "the first check must actually execute");
 
-    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
+    let second = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     assert!(
@@ -589,7 +589,7 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
     // tree_hash (the marker file lives outside it and doesn't count).
     std::fs::write(repo.join("new-file.txt"), "changed").unwrap();
 
-    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
+    let second = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     assert!(
@@ -722,11 +722,10 @@ async fn pre_check_orders_criteria_by_the_median_duration_the_log_recorded() {
 
     // A log that priced nothing: declared order, and this pass records
     // what each command cost.
-    let (runs, outcome) =
-        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
-            .await
-            .unwrap();
-    assert_eq!(outcome, PreCheckOutcome::Red);
+    let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
+    assert!(surprises(&t, &runs).is_empty());
     assert_eq!(runs[0].cmd, costly);
     assert_eq!(runs[1].cmd, cheap);
     assert!(
@@ -738,13 +737,11 @@ async fn pre_check_orders_criteria_by_the_median_duration_the_log_recorded() {
     // reorder the pass: the cheap command runs first to fail fast.
     std::fs::write(dir.path().join("changed.txt"), "x").unwrap();
     let history = priced(&[(costly, &[400, 600]), (cheap, &[5, 7])]);
-    let (runs, outcome) =
-        yunta_engine::pre_check(&t, dir.path(), &memo, &history, owner.supervision())
-            .await
-            .unwrap();
-    assert_eq!(
-        outcome,
-        PreCheckOutcome::Red,
+    let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &history, owner.supervision())
+        .await
+        .unwrap();
+    assert!(
+        surprises(&t, &runs).is_empty(),
         "ordering never alters the verdict"
     );
     assert_eq!(
@@ -762,19 +759,17 @@ async fn reused_criteria_carry_no_duration() {
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
     let t = task("T1", &["**"], vec![cmd("test -f never.txt")]);
 
-    let (runs, _) =
-        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
-            .await
-            .unwrap();
+    let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
     assert!(!runs[0].reused);
     assert!(runs[0].duration_ms.is_some());
 
     // Same tree: the memo answers, and a reused result has no duration
     // of its own (nothing ran).
-    let (runs, _) =
-        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
-            .await
-            .unwrap();
+    let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
     assert!(runs[0].reused);
     assert!(runs[0].duration_ms.is_none());
 }
@@ -800,16 +795,15 @@ async fn criterion_declaration_order_never_alters_the_pre_check_verdict() {
     for (i, permutation) in permutations.drain(..).enumerate() {
         let memo = Memo::new(yunta_core::sha256_hex(format!("config-{i}").as_bytes()));
         let t = task("T1", &["**"], permutation);
-        let (_, outcome) =
-            yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
-                .await
-                .unwrap();
-        verdicts.push(outcome);
+        let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
+            .await
+            .unwrap();
+        verdicts.push(surprises(&t, &runs));
     }
     assert!(
         verdicts
             .iter()
-            .all(|v| matches!(v, PreCheckOutcome::TrivialCriterion { .. })),
+            .all(|found| matches!(found.as_slice(), [Surprise::TrivialCriterion { .. }])),
         "got: {verdicts:?}"
     );
 }
@@ -896,4 +890,64 @@ outcome: { type: completed, summary: "wrote it" }
         matches!(err, yunta_engine::TaskCycleError::Audit { .. }),
         "a lost session audit event must fail the task, got: {err:?}"
     );
+}
+
+/// The verdict is a function of what ran, not of the order it ran in
+/// (D177): the pre-check evaluates the whole set and names every
+/// criterion that already passes and every guard already red, in the
+/// order the task declares them.
+#[test]
+fn surprises_names_every_trivial_criterion_and_every_broken_guard_in_declaration_order() {
+    let t = task(
+        "a-whole-set",
+        &["out.txt"],
+        vec![
+            cmd("test -f out.txt"),
+            guard("lint"),
+            cmd("already-green"),
+            guard("build"),
+        ],
+    );
+    // Run out of declared order, the way the learned ordering runs them.
+    let runs = vec![
+        ran("already-green", 0, false),
+        ran("build", 1, true),
+        ran("test -f out.txt", 1, false),
+        ran("lint", 0, true),
+    ];
+
+    assert_eq!(
+        surprises(&t, &runs),
+        vec![
+            Surprise::TrivialCriterion {
+                cmd: "already-green".to_string()
+            },
+            Surprise::BrokenGuard {
+                cmd: "build".to_string()
+            },
+        ],
+        "every surprise, in the order the task declares its criteria"
+    );
+
+    let all_red = vec![
+        ran("test -f out.txt", 1, false),
+        ran("lint", 0, true),
+        ran("already-green", 1, false),
+        ran("build", 0, true),
+    ];
+    assert!(
+        surprises(&t, &all_red).is_empty(),
+        "nothing prejudged is the normal case"
+    );
+}
+
+/// One `criterion_checked`, as the pre-check records it.
+fn ran(cmd: &str, exit_code: i32, is_guard: bool) -> CriterionRun {
+    CriterionRun {
+        cmd: cmd.to_string(),
+        exit_code,
+        is_guard,
+        reused: false,
+        duration_ms: None,
+    }
 }

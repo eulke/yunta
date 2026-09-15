@@ -167,7 +167,7 @@ pub(super) async fn run_one_attempt(
             AttemptStep::Stop {
                 record,
                 outcome: TaskOutcome::Blocked {
-                    reason: "a scope expansion request needs a human decision".to_string(),
+                    cause: super::BlockedCause::ScopeDecisionOwed,
                 },
                 needs_human_decision: true,
             },
@@ -183,9 +183,7 @@ pub(super) async fn run_one_attempt(
             AttemptStep::Stop {
                 record,
                 outcome: TaskOutcome::Blocked {
-                    reason: "the session reported a non-retryable failure and the criteria \
-                             are still red"
-                        .to_string(),
+                    cause: super::BlockedCause::NonRetryable,
                 },
                 needs_human_decision: false,
             },

@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::Mode;
-use decision::{by_number, name, numbering, reciprocals, resolve, Decision};
+use decision::{by_number, name, numbering, reciprocals, resolve, Decision, Status};
 
 /// The workspace root — the parent of this crate's directory.
 fn workspace_root() -> Result<PathBuf, String> {
@@ -124,19 +124,25 @@ fn citations(dir: &Path) -> Result<BTreeSet<(u32, String)>, String> {
 /// The index as the decision files say it: number, title, status, who
 /// revised it, and where to read it.
 fn index(decisions: &BTreeMap<u32, Decision>) -> String {
+    /// The decisions, as the index names them in a sentence.
+    fn named(numbers: &[u32]) -> String {
+        numbers
+            .iter()
+            .map(|number| name(*number))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
     decisions
         .values()
         .map(|decision| {
-            let revised_by = match decision.revised_by.as_slice() {
-                [] => String::new(),
-                numbers => format!(
-                    " *(Revisada por {}.)*",
-                    numbers
-                        .iter()
-                        .map(|number| name(*number))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
+            // A withdrawal is a revision plus a standing, and the four
+            // bodies that carry one say «Retirada por»: the index says
+            // the same word, out of the same fact.
+            let revised_by = match &decision.status {
+                Status::Accepted => String::new(),
+                Status::Revised { by } => format!(" *(Revisada por {}.)*", named(by.as_slice())),
+                Status::Retired { by } => format!(" *(Retirada por {}.)*", named(by.as_slice())),
             };
             format!(
                 "**{} — {}.** `{}`{revised_by} → [`adr/{}`](adr/{})\n",
@@ -201,18 +207,22 @@ pub fn run(mode: Mode) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::decision::Status;
+
     use super::*;
 
-    fn decision(number: u32, status: Status, revised_by: &[u32]) -> Decision {
+    fn decision(number: u32, status: Status) -> Decision {
         Decision {
             number,
             title: format!("La decisión {number}"),
             status,
             revises: Vec::new(),
-            revised_by: revised_by.to_vec(),
             file: format!("{}-una-decision.md", name(number)),
         }
+    }
+
+    /// A status naming the decisions that changed this one.
+    fn by(numbers: &[u32]) -> yunta_core::NonEmpty<u32> {
+        yunta_core::NonEmpty::new(numbers.to_vec()).expect("a reviser")
     }
 
     fn set(decisions: Vec<Decision>) -> BTreeMap<u32, Decision> {
@@ -230,15 +240,23 @@ mod tests {
     #[test]
     fn the_index_names_a_decision_its_status_its_revisers_and_its_file() {
         let rendered = index(&set(vec![
-            decision(6, Status::Accepted, &[]),
-            decision(45, Status::Revised, &[162, 164]),
+            decision(6, Status::Accepted),
+            decision(
+                45,
+                Status::Revised {
+                    by: by(&[162, 164]),
+                },
+            ),
+            decision(152, Status::Retired { by: by(&[157]) }),
         ]));
         assert_eq!(
             rendered,
             "**D06 — La decisión 6.** `accepted` → \
              [`adr/D06-una-decision.md`](adr/D06-una-decision.md)\n\
              **D45 — La decisión 45.** `revised` *(Revisada por D162, D164.)* → \
-             [`adr/D45-una-decision.md`](adr/D45-una-decision.md)\n"
+             [`adr/D45-una-decision.md`](adr/D45-una-decision.md)\n\
+             **D152 — La decisión 152.** `retired` *(Retirada por D157.)* → \
+             [`adr/D152-una-decision.md`](adr/D152-una-decision.md)\n"
         );
     }
 

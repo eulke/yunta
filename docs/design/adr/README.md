@@ -27,10 +27,15 @@ nombre del archivo repite. `status` es una de tres palabras:
 | `revised` | una decisión posterior cambió parte de lo que decidió; la nota del cuerpo dice qué parte |
 | `retired` | una decisión posterior la retiró: lo que decidió ya no rige |
 
+`status` y `revised_by` son un solo hecho: `accepted` no lleva revisor, y
+`revised` y `retired` llevan al menos uno. Un archivo que diga otra cosa se
+rechaza al leerlo.
+
 `revises` y `revised_by` son las dos caras de la misma relación: si una
 decisión nombra a otra en `revises`, la otra la nombra en `revised_by`. Lo que
 cambió lo cuenta la nota del cuerpo; los dos campos son la relación que se
-verifica.
+verifica. El índice dice «Revisada por» para una `revised` y «Retirada por»
+para una `retired`, que es lo que dicen sus cuerpos.
 
 `cargo xtask adr` regenera el índice y `--check` lo compara byte a byte con el
 comprometido, después de exigir el front-matter completo, numeración sin huecos
