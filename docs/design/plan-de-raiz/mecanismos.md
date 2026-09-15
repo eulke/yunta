@@ -925,11 +925,11 @@ cancel-in-progress: true }`; `timeout-minutes: 30` por job; step `cargo test
 | `the_reference_config_parses_and_its_workflows_check` | `referencia-schema.md` bloques: la config parsea, y cada workflow verifica en un proyecto que declara los tres que la composición `release-cycle` usa |
 
 **`cargo xtask adr --check`**: lee `docs/design/adr/D*.md`, exige
-front-matter `number,title,status,revises,revised_by`, numeración sin
+front-matter `number,title,status,revises,revised_by` —con el estado
+concorde con los revisores: `accepted` sin revisor, `revised` y `retired`
+con al menos uno (M29)—, numeración sin
 huecos ni duplicados, toda cita `D\d+` en cualquier `docs/**/*.md` resuelve,
-`revises`/`revised_by` recíprocos, el estado concorde con los revisores
-(`accepted` sin revisor; `revised` y `retired` con al menos uno; M29), y
-regenera `adrs.md` (índice: número,
+`revises`/`revised_by` recíprocos, y regenera `adrs.md` (índice: número,
 título, estado, revisado-por, enlace) comparándolo byte a byte.
 
 **Pase de corpus**: script único en `xtask` (`cargo xtask docs-unescape`,
@@ -953,7 +953,9 @@ mecanismo sin consumidor.
 
 **Regla.** Lo prometido y no construido se construye, o se retira con entrada
 `A-NN` en `deuda-consciente.md` ("por qué es deuda / qué lo resolvería") y
-nota `(Revisada por Dnnn: …)` en el ADR que lo describía. Lo construido y no
+nota `(Revisada por Dnnn: …)` en el ADR que lo describía. Una promesa que
+contradice un invariante no es deuda: es un error de la promesa, y se
+retira por decisión, sin `A-NN` (D177, M29). Lo construido y no
 conectado se conecta, o se retira igual. Nunca un comentario que explique el
 atajo, y nunca borrar lo inconcluso (§0.15). En ambos casos el comentario que
 hoy explica el atajo se borra (`check_exec.rs:77-82`, `criteria.rs:29-36`,
@@ -1086,7 +1088,8 @@ impl<'a> Supervision<'a> {
 // engine/src/git.rs — la pareja sincrónica se borra; `build_manifest`, `init` y `yunta test` usan `output`/`success`
 pub async fn build_manifest(workflow: &Workflow, config: &ConfigLayer, repo: &Path, workflow_dir: &Path, inputs: &HashMap<InputName, String>, supervision: Supervision<'_>) -> Result<Built, ManifestError>;   // `git_line` por `git::output`
 // engine/src/run/create.rs — la supervisión del llamador es infraestructura, como storage y clock
-pub async fn create_run(params: CreateRunParams<'_>, storage: &AsyncStorage, clock: &dyn Clock, supervision: Supervision<'_>) -> Result<PathBuf, RunError>;
+pub async fn create_run(params: CreateRunParams<'_>, storage: &AsyncStorage, supervision: Supervision<'_>) -> Result<PathBuf, RunError>;   // un reloj por nacimiento: `RunLog::new(storage, run_id, supervision.clock, …)`
+pub struct CallerInfra<'a> { pub storage: &'a AsyncStorage, pub ids: &'a dyn IdSource, pub supervision: Supervision<'a> }   // `ids.mint_run_id(supervision.clock.now())`
 //   workflow_exec/mod.rs:372 pasa `ctx.supervision(cancel)` (el token del nodo); run/promote.rs:126 pasa `supervision` de `CallerInfra`
 // engine/src/run/mod.rs — la cancelación es un hecho tipado en toda puerta que spawnea
 pub enum RunError { /* … */ Cancelled, /* … */ }   // lo que `create_run` y `prepare_worktree` devuelven cuando su git fue detenido por el token (`GitError::Cancelled`, que `git::stopped` produce)
@@ -1094,31 +1097,42 @@ pub enum RunError { /* … */ Cancelled, /* … */ }   // lo que `create_run` y 
 //   worktree::prepare_worktree deshace lo que empezó cuando su git fue cancelado: el worktree a medio agregar y su rama
 // engine/src/run/mod.rs
 pub struct RunEnv<'a> { /* … */ pub cancel: &'a CancellationToken, /* … */ }   // antes Option; `build_ctx` clona, no inventa
-// engine/src/task_cycle/mod.rs
-pub struct AttemptEnv<'a> { /* … */ pub clock: &'a dyn Clock, /* … */ }   // antes Option; `registry` sigue Option
+// engine/src/task_cycle/mod.rs — «baja por parámetro hasta el spawn», también en el ciclo de tareas
+pub struct AttemptEnv<'a> { pub adapter, pub node, pub cwd, pub max_retries, pub budget, pub memo, pub history, pub supervision: Supervision<'a> }   // reemplaza `registry`, `clock` y el parámetro `cancel` de `run_task`
+//   loop_exec/dispatch.rs:115-125 la arma con `ctx.supervision(cancel)`; el literal de mod.rs:282-287 se borra y un criterio corre con los `subprocess_vars` del run
 // engine/src/run/ctx.rs:105 — `supervision(&self, cancel)` sin cambio de forma: `cancel` y `clock` dejan de envolverse en Some
 
 // cli/src/interrupt.rs (nuevo)
-/// What trips the invocation's cancellation: Ctrl-C on a real command, nothing on a test's, the server's own on a `yunta mcp` request. A value the composition root is handed, never a process global.
-pub(crate) struct Interrupt { token: CancellationToken, listener: Option<JoinHandle<()>> }   // el handle se conserva (M10)
-impl Interrupt { pub(crate) fn ctrl_c() -> Self; pub(crate) fn never() -> Self; pub(crate) fn token(&self) -> &CancellationToken; }
+/// What trips the invocation's cancellation, in two stages: the first Ctrl-C stops the work, the second aborts what stopping still holds and hands the signal back to the process default (D181). Ctrl-C on a real command, nothing on a test's, the server's own on a `yunta mcp` request. A value the composition root is handed, never a process global.
+pub(crate) struct Interrupt { stop: CancellationToken, abort: CancellationToken, listener: Option<JoinHandle<()>> }   // el handle se conserva (M10)
+impl Interrupt {
+    /// Installs the SIGINT stream synchronously — `tokio::signal::unix::signal(SignalKind::interrupt())` — so the handler exists when `Context::load` returns, and spawns the listener that trips the stages.
+    pub(crate) fn ctrl_c() -> std::io::Result<Self>;
+    pub(crate) fn never() -> Self;
+    pub(crate) fn stop(&self) -> &CancellationToken;
+    pub(crate) fn abort(&self) -> &CancellationToken;
+}
 // cli/src/context.rs
 pub struct Context { /* … */ pub env: yunta_core::Env /* `process_env()` una vez, en `resolve_in` */, interrupt: Interrupt }
 impl Context {
-    pub fn load() -> Result<Self, CliError>;                                          // `Interrupt::ctrl_c()`
+    pub fn load() -> Result<Self, CliError>;                                          // `Interrupt::ctrl_c()?`
     pub fn resolve_in(cwd: PathBuf, interrupt: Interrupt) -> Result<Self, CliError>;   // `yunta mcp` pasa la suya por pedido; `sandboxed` comparte la del padre
-    /// The token every subprocess of this invocation answers to.
-    pub fn cancel(&self) -> &CancellationToken;                                       // getter puro
-    /// The supervision every subprocess of this invocation runs under: no registry, the invocation's interrupt, its env and its clock.
-    pub fn supervision(&self) -> Supervision<'_>;    // Supervision::outside_any_run(self.cancel(), &self.clock).with_env(&self.env.subprocess_vars)
+    /// The token the work of this invocation answers to: the first Ctrl-C.
+    pub fn cancellation(&self) -> &CancellationToken;
+    /// The supervision the work runs under: no registry, the first stage, this invocation's env and clock.
+    pub fn supervision(&self) -> Supervision<'_>;    // Supervision::outside_any_run(self.cancellation(), &self.clock).with_env(&self.env.subprocess_vars)
+    /// The supervision for what gives a take back once the work stopped — `released`, `hand_over` — answering only to the second Ctrl-C.
+    pub fn teardown(&self) -> Supervision<'_>;       // Supervision::outside_any_run(self.interrupt.abort(), &self.clock)
 }
 //   drive.rs:101, promote.rs:102 y cli.rs:428 dejan de leer `process_env()`: `Executing.ambient` y `PromotionEnv` toman `&ctx.env`.
-//   `cancel.rs` espera la muerte del engine con `select!` sobre `ctx.cancel()`; `mcp.rs` cierra el servidor cuando dispara.
-// cli/src/commands/mod.rs:52 — `cancel_on_ctrl_c(diagnostics)` se borra; `drive::watch` (drive.rs:221) toma `ctx.cancel()` y lanza el watcher que escribe
+//   `cancel.rs` espera la muerte del engine con `select!` sobre `ctx.cancellation()`; `mcp.rs` cierra el servidor cuando dispara.
+//   `released` (drive.rs:379) y `hand_over_worktree` (detach.rs:145) corren bajo `ctx.teardown()`: lo que devuelve una toma no puede responder al token que la pidió.
+// cli/src/commands/mod.rs:52 — `cancel_on_ctrl_c(diagnostics)` se borra; `drive::watch` toma `ctx.cancellation()` y lanza el watcher que escribe
 //   "interrupt received — stopping the run (sessions get interrupt, then kill)" por la `Diagnostics` de la superficie o por stderr sin ella (`--json`), como hoy; su handle vive en `Watching`.
-// cli/src/commands/drive.rs — `Executing.cancel: &CancellationToken`; `released` (:379) usa `settling.ctx.supervision()`
-// cli/src/commands/promote.rs — `PromotionEnv { cancel: &CancellationToken, supervision: Supervision<'a>, … }`; `:98` usa `env.supervision`
-// cli/src/commands/run.rs:355,384; run/detach.rs:145,154 — `ctx.supervision()`
+//   `Watching`, `watch` y `close` se mudan a `cli/src/commands/drive/watch.rs`: `drive.rs` está a ocho líneas del techo y el contador de archivos no sube.
+// cli/src/commands/drive.rs — `Executing.cancel: &CancellationToken`; `released` (:379) usa `settling.ctx.teardown()`
+// cli/src/commands/promote.rs — `PromotionEnv { ctx: &'a Context, storage, adapters, forge, human_interaction, observer }`: un dueño para reloj, token, env y fence_hook, como `Driving` y `Settling`; `:98` usa `env.ctx.supervision()`, `:114` `env.ctx.cancellation()`
+// cli/src/commands/run.rs:355,384; run/detach.rs:154 — `ctx.supervision()`; detach.rs:145 — `ctx.teardown()`
 // cli/src/commands/pack.rs::{add, update} — construyen `Context::load()`; `pack.rs::{clone_pack, head_commit, current_branch, run_git}` toman `Supervision<'_>`
 // cli/src/commands/init.rs:90,98 y test/mod.rs:201 — `git::output`/`git::success` con `ctx.supervision()`
 // cli/src/commands/mcp.rs — el servidor observa `ctx.cancel()`: un SIGINT cancela lo que está naciendo y cierra el servidor, como hoy lo cerraba el proceso
@@ -1126,10 +1140,10 @@ impl Context {
 
 // testkit-core/src/owner.rs (nuevo)
 /// What a test's subprocesses answer to: a token the test may trip and the fixed clock — the supervision outside any run, owned so the borrows have somewhere to live.
-pub struct Owner { cancel: CancellationToken, clock: FixedClock }
-impl Owner { pub fn new() -> Self; pub fn cancel(&self) -> &CancellationToken; pub fn supervision(&self) -> Supervision<'_>; }
+pub struct Owner { cancellation: CancellationToken, clock: FixedClock }
+impl Owner { pub fn new() -> Self; pub fn cancellation(&self) -> &CancellationToken; pub fn supervision(&self) -> Supervision<'_>; }   // `Supervision::outside_any_run(&self.cancellation, &self.clock)`
 // testkit/src/bench/mod.rs — `cancel: CancellationToken` (nace con el bench; `with_cancel` lo reemplaza); `Bench::supervision(&self) -> Supervision<'_>` = `Supervision::outside_any_run(&self.cancel, self.clock.as_ref()).with_env(..)` para lo que el bench spawnea al nacer y al congelar
-// testkit/src/bench/driving.rs:259 — `create_run(.., self.clock.as_ref(), self.supervision())`; `:326` — `cancel: &self.cancel`; `freeze` pasa `self.supervision()` a `build_manifest`
+// testkit/src/bench/driving.rs:259 — `create_run(.., self.supervision())`; `:326` — `cancel: &self.cancel`; `freeze` pasa `self.supervision()` a `build_manifest`
 ```
 
 **Archivos.** Nuevo: `cli/src/interrupt.rs`, `testkit-core/src/owner.rs`,
@@ -1139,9 +1153,10 @@ impl Owner { pub fn new() -> Self; pub fn cancel(&self) -> &CancellationToken; p
 `engine/src/worktree/mod.rs` (sólo `.clock()` → `.clock`; §8 lo conserva),
 `engine/src/run/{create.rs, ctx.rs, exec.rs, mod.rs, workflow_exec/mod.rs,
 promote.rs, loop_exec/dispatch.rs}`, `engine/src/task_cycle/mod.rs`,
-`engine/src/lib.rs`, `cli/src/{context.rs, pack.rs, lib.rs}`,
+`engine/src/lib.rs`, `cli/src/{context.rs, pack.rs, main.rs}`,
 `cli/src/commands/{mod.rs, drive.rs, run.rs, run/detach.rs, promote.rs,
-pack.rs, init.rs, mcp.rs, test/mod.rs, test/case.rs}`,
+pack.rs, init.rs, mcp.rs, test/mod.rs, test/case.rs}` (y `drive/watch.rs`,
+nuevo), `docs/design/adr/D181-*.md` (nuevo),
 `testkit-core/src/lib.rs`, `testkit/src/bench/{mod.rs, driving.rs}`, los
 tests que construían una `Supervision` a mano —`engine/tests/process.rs:41,79-84,104,155-160`,
 `engine/src/tasks/crossing.rs` ×5, `engine/tests/{promotion.rs ×6, scope.rs ×9,
@@ -1189,11 +1204,22 @@ rename y bloquea; tras SIGINT ese git está `Liveness::Dead`, el lock del
 checkout no tiene holder y no hay `run_created`; rojo: hoy el git sobrevive
 en su propio grupo y el lock nombra un pid muerto),
 `an_interrupt_during_a_resume_pauses_the_run_as_cancelled_by_user` (hoy
-`resume` no armaba nada antes de `drive`) y
-`an_interrupt_during_yunta_cancel_stops_the_wait`.
+`resume` no armaba nada antes de `drive`),
+`yunta_cancel_on_a_detached_run_pauses_it_as_cancelled_by_user` (hoy el
+`resume` desacoplado no tiene listener y `yunta cancel` lo mata a SIGKILL
+tras esperar el timeout),
+`an_interrupt_during_yunta_cancel_stops_the_wait` y
+`a_second_interrupt_aborts_a_release_the_first_left_running` (con la
+fuente falsa: el primer disparo deja `teardown` viva, el segundo la
+cancela).
 
 **Cierra.** EN-D30, EN-D31, EN-D32, CLI-D27; L-91 (git, worktree y
 manifest; la suite es de M28).
+
+**Decisión.** D181: dos Ctrl-C —el primero detiene el trabajo, el
+segundo aborta lo que detenerlo todavía sostiene y devuelve la señal al
+proceso—, el mismo «interrupt, then kill» que el repo ya aplica a las
+sesiones (L-108).
 
 **Encastre.** M10: `spawn_governed` se conserva; `Supervision` es el
 `Shell` de M10 en la forma que 3-05 le dio, ahora sin `Option` en token y
@@ -1418,98 +1444,117 @@ atado por `every_event_spec_section_lists_the_fields_its_payload_has`;
 ## M29 · Una decisión dice lo que el código hace
 
 **Vicio V7** (la promesa sin mecanismo) y **V11** (documentación sin atar),
-en el registro que 7-02 construyó. `xtask adr --check` acepta `status:
-revised` con `revised_by: []`: D147 es el único de las 33 revisadas y 4
-retiradas sin revisor —su nota `*(Revisada: …)*` (`adr/D147:11-13`) no
-nombra a nadie, y el commit `fcb956e` enmendó el cuerpo en su lugar
-(`--allowedTools mcp__yunta` → `mcp__yunta__*`, `adr/D147:15`), así que la
-decisión tal como se tomó sobrevive sólo en git—. D62 (`adr/D62:11-13`) y
-D59 (en el título) prometen un corto-circuito del pre-check que el Contrato
-repite en §5.2 (línea 171) y §5.4 (línea 206) y que contradice I6 (línea
-650) y §8.7 (líneas 431-437); `pre_check` corre todos los criterios
+en el registro que 7-02 construyó. `Decision::parse` acepta `status:
+revised` con `revised_by: []` —D147 fue el único de las 33 revisadas y 4
+retiradas sin revisor: su nota no nombraba a nadie y el commit `fcb956e`
+enmendó el cuerpo en su lugar (`--allowedTools mcp__yunta` →
+`mcp__yunta__*`), así que la decisión tal como se tomó sobrevivía sólo en
+git; el plan de la fase 8 (`00fd102`) registró D178 y D180, devolvió al
+cuerpo lo que decidió y puso los revisores, pero el parser sigue
+aceptando la combinación—. D62 (`adr/D62:11-13`) y D59 (en el título)
+prometían un corto-circuito del pre-check que el Contrato repite en §5.2
+(línea 171) y §5.4 (línea 206) y que contradice I6 (línea 650) y §8.7
+(líneas 431-437); `pre_check` corre todos los criterios
 (`task_cycle/criteria.rs:183-191`) pero devuelve la primera sorpresa en el
 orden aprendido (`criteria.rs:199-217`): con un criterio trivial y un guard
-roto a la vez, qué variante y qué `cmd` vuelven depende del orden. §9 manda
-«D152 `Revisada por D157`» donde las cuatro retiradas dicen «Retirada por» y
-el índice generado dice «Revisada por» para todas (`xtask/src/adr.rs:130-140`).
-Evidencia: L-87, L-95, L-105 (§11); EN-D35, DO-D46, DO-D47 (§12).
+roto a la vez, qué variante y qué `cmd` vuelven depende del orden, y el
+veredicto se aplana a `TaskOutcome::Blocked { reason: String }`
+(`mod.rs:156-160,328-340`) antes de llegar a nadie. Las cuatro retiradas
+dicen «Retirada por» en el cuerpo y el índice generado dice «Revisada por»
+para todas (`xtask/src/adr.rs:130-140`). Evidencia: L-87, L-95, L-105
+(§11); EN-D35, DO-D46, DO-D47 (§12).
 
 **Regla.** Una revisión es una decisión: el cuerpo de un ADR nunca se
 enmienda; lo que cambia lo dice un ADR nuevo que lo revisa, el revisado
 lleva la nota «(Revisada por Dnnn: …)» y el front-matter lleva la
-reciprocidad. El estado y la lista de revisores concuerdan —`accepted` no
-tiene revisor; `revised` y `retired` tienen al menos uno— y el checker lo
-prueba sobre el front-matter; la nota es prosa y dice qué parte cambió. Una
-promesa de comportamiento que el código contradice se resuelve con una
-decisión —construir o retirar—, nunca con prosa ni con un comentario. Un
-veredicto sobre un conjunto nombra todo lo que encontró.
+reciprocidad. El estado y los revisores son un solo hecho que el tipo no
+deja disentir: `accepted` no tiene revisor; `revised` y `retired` llevan al
+menos uno, y `Decision::parse` rechaza el archivo que diga otra cosa. Una
+promesa de comportamiento que el código contradice se resuelve como M24
+lo distingue: la que contradice un invariante se retira por decisión; la
+sólo no construida es deuda `A-NN`. Un veredicto sobre un conjunto es una
+función pura de lo que corrió, nombra todo lo que encontró en el orden de
+declaración, y viaja tipado hasta el borde que lo dice.
 
 **Firmas.**
 
 ```rust
-// xtask/src/adr/decision.rs
-/// Proves each decision's status agrees with who revised it: an accepted one names no reviser; a revised or retired one names at least one.
-pub fn statuses(decisions: &BTreeMap<u32, Decision>) -> Result<(), String>;
-// xtask/src/adr.rs:16,176-178 — `statuses(&decisions)?;` después de `reciprocals`; `index()` escribe «Retirada por» para `Status::Retired` y «Revisada por» para `Status::Revised`
-// decision.rs tests — el helper `decision(number, revises, revised_by)` gana `status`
+// xtask/src/adr/decision.rs — el front-matter sigue siendo de cinco campos; `revised_by` se pliega en el estado al parsear
+pub enum Status { Accepted, Revised { by: NonEmpty<u32> }, Retired { by: NonEmpty<u32> } }
+impl Decision { pub fn revisers(&self) -> &[u32]; }        // lo que `reciprocals` y `index()` leen
+//   `Decision::parse` rechaza «D147: `status: revised` and `revised_by` names no decision» y «`status: accepted` and `revised_by` names D178», como rechaza sus hermanos;
+//   `index()` escribe «Retirada por» para `Retired` y «Revisada por» para `Revised`, por `match` sobre el mismo enum.
 
-// engine/src/task_cycle/mod.rs — el pre-check nombra todo lo que encontró
-pub enum PreCheckOutcome { Red, Rejected { trivial: Vec<String>, broken_guards: Vec<String> } }   // reemplaza TrivialCriterion { cmd } y BrokenGuard { cmd }; nunca las dos listas vacías
-//   criteria.rs:199-217 junta todas las sorpresas; mod.rs:334-340 arma la causa del rebote con las dos listas
+// engine/src/task_cycle/mod.rs — el veredicto es una función de lo que corrió
+/// A criterion the pre-check found wrong before any work: the criteria need fixing, not the task.
+pub enum Surprise { TrivialCriterion { cmd: String }, BrokenGuard { cmd: String } }
+/// Everything the pre-check found, in the order the task declares its criteria; empty when every non-guard is red and every guard green. A function of what ran, so replay derives the same verdict from `criteria_checked`.
+pub fn surprises(task: &Task, runs: &[CriterionRun]) -> Vec<Surprise>;
+pub enum TaskOutcome { Done, Blocked { surprises: NonEmpty<Surprise> }, Interrupted, /* … */ }
+//   `pre_check` devuelve `Vec<CriterionRun>` como `post_check`; `PreCheckOutcome` se borra; `run_task` (mod.rs:328-340) bloquea con `NonEmpty::from_vec(surprises(task, &pre_runs))`;
+//   la oración se produce una vez, por `Display` de `Surprise` —«criterion `true` already passes before any work — the criteria need fixing, not the task» / «guard `false` is already red before any work started»—,
+//   una línea por sorpresa, donde se escribe la causa del `task_status_changed` (loop_exec/integrate.rs:111-122) y donde `status` la muestra; ningún `reason:` se arma con `format!` (M22).
 ```
 
-**Decisiones.** D177 revisa D62 y D59: el pre-check evalúa el conjunto
-entero y su veredicto nombra cada criterio trivial y cada guard roto; el
-orden aprendido del log decide cuándo llega la evidencia, nunca qué se
-verifica ni qué se reporta. Contrato §5.2 (línea 171: «con memoización y
-en el orden aprendido, §5.4») y §5.4 último párrafo reescritos:
-«Complemento del pre-check: **orden aprendido**. El engine evalúa todos los
-criterios, de menor a mayor duración histórica (dato que el log ya tiene),
-de modo que la evidencia barata llega primero; el veredicto es sobre el
-conjunto completo, nombra cada sorpresa, y no depende del orden». D178
-revisa D147: la regla de permiso nombra al servidor entero,
-`mcp__<servidor>__*` —un prefijo de servidor sin `__<tool>` ni `__*` no
-nombra ninguna tool y el CLI lo descarta con un warning de arranque—; el
-cuerpo de D147 vuelve a decir lo que decidió (`--allowedTools mcp__yunta`),
-pierde el paréntesis sin número y gana «(Revisada por D178: …)» con
-`revised_by: [D178]`. L-105: §9 pasa a decir lo que se hizo («D152
-`Retirada por D157`»; «D02/D05/D07/D46 con reviser; D147 con reviser en
-8-03»; D03 no lleva nota alguna que revisar), y el índice dice lo mismo
-que los cuatro cuerpos. L-87: la mitad de D147 que 7-03 no cerró, cierra
-acá.
+**Decisiones.** D177 (registrada con el plan) revisa D62 y D59: el
+pre-check evalúa el conjunto entero y su veredicto nombra cada criterio
+trivial y cada guard roto, en orden de declaración; el orden aprendido
+decide cuándo llega la evidencia, nunca qué se verifica ni qué se reporta.
+D178 (registrada con el plan) revisa D147: la regla de permiso nombra al
+servidor entero, `mcp__<servidor>__*`. Lo que el ítem construye: el
+parser que rechaza el estado sin revisor, el índice que dice «Retirada
+por», el veredicto tipado, y el Contrato §5.2 (línea 171: «con
+memoización y en el orden aprendido, §5.4») y §5.4 último párrafo:
+«Complemento del pre-check: **orden aprendido**. El engine evalúa todos
+los criterios, de menor a mayor duración histórica (dato que el log ya
+tiene), de modo que la evidencia barata llega primero; el veredicto es
+sobre el conjunto completo, nombra cada sorpresa en orden de declaración,
+y no depende del orden de ejecución». L-105: §9 ya dice lo que se hizo
+(«D152 `Retirada por D157`»); al cerrar, los marcadores «(8-03)» de esa
+línea salen y el índice dice lo mismo que los cuatro cuerpos. L-87: la
+mitad de D147 que 7-03 no cerró, cerró con el plan (D178, D180).
 
-**Archivos.** Nuevo: `docs/design/adr/D177-*.md`, `D178-*.md`. Modifica:
-`xtask/src/adr.rs` (`:1-8` módulo doc, `:16`, `:130-140`, `:176-178`, tests
-`:207-243`), `xtask/src/adr/decision.rs` (`:25-35` rustdoc de `Status`,
-`statuses`, helper y tests `:272-281,355-417`), `docs/design/adr/README.md:27,35-38`,
-`docs/design/adr/{D59, D62, D147}` (nota y `revised_by`), `docs/design/adrs.md`,
-`docs/design/contrato-del-run.md:171,206`, `engine/src/task_cycle/{mod.rs,
-criteria.rs}`, `engine/tests/task_cycle.rs:780-812`, `mecanismos.md` M23
-(el párrafo de `adr --check`), README del plan §0.6 (la lista del gate gana
-`cargo run -p xtask -- adr --check`, que CI ya corre en `ci.yml:51`) y §9
-línea 770.
+**Archivos.** Modifica: `xtask/src/adr.rs` (`:1-8` módulo doc, `:16`,
+`:130-140` `index()`, tests `:207-243`), `xtask/src/adr/decision.rs`
+(`Status`, `parse`, `revisers`, rustdoc `:25-35`, helper y tests
+`:272-281,355-417`), `xtask/Cargo.toml` si `NonEmpty` no está al alcance,
+`docs/design/adr/README.md:27,35-38`, `docs/design/adrs.md` (regenerado:
+«Retirada por» en cuatro filas), `docs/design/contrato-del-run.md:171,206`,
+`engine/src/task_cycle/{mod.rs, criteria.rs}`, `engine/src/run/loop_exec/integrate.rs:111-122`,
+`engine/tests/task_cycle.rs:218-306,505-525,780-812`, `mecanismos.md` M23
+(el párrafo de `adr --check`) y M24 (la distinción entre retirar por
+decisión y registrar deuda), README del plan §9 (los marcadores «(8-03)»).
+Borra: `PreCheckOutcome`, el `format!` de `mod.rs:334-340`.
 
-**Prerequisitos.** 8-02 (D176 antes que D177: la numeración no admite
-huecos).
+**Prerequisitos.** Ninguno.
 
 **Tests.** `xtask/src/adr/decision.rs`:
-`a_revised_decision_names_its_reviser`, `a_retired_decision_names_its_reviser`,
-`an_accepted_decision_names_no_reviser` (unitarios sobre `Decision`
-sintéticas); el rojo sobre el corpus es `cargo run -p xtask -- adr --check`,
-que falla nombrando D147 hasta que D178 exista; `xtask/src/adr.rs`:
-`the_index_says_retired_for_a_retired_decision`;
-`engine/tests/task_cycle.rs`: `a_pre_check_names_every_trivial_criterion_and_every_broken_guard`
-(rojo: hoy vuelve la primera), y `pre_check_and_post_check_run_every_criterion`
-sostiene D177; `adapters/tests/claude_code.rs:804-808` sostiene D178.
+`a_status_that_disagrees_with_its_revisers_is_refused` (rojo: `parse`
+acepta `revised`/`[]`, `retired`/`[]` y `accepted`/`[Dn]`; verde: los
+rechaza y acepta las tres formas concordes);
+`xtask/src/adr.rs::the_index_names_a_decision_its_status_its_revisers_and_its_file`
+gana una fila `retired` y espera «`retired` *(Retirada por D157.)*» (rojo:
+dice «Revisada»); `cargo run -p xtask -- adr --check` verde antes y después
+salvo esa fila del índice; `engine/tests/task_cycle.rs`:
+`surprises_names_every_trivial_criterion_and_every_broken_guard_in_declaration_order`
+(unitario sobre runs sintéticos, sin subprocesos; rojo: la función no
+existe y hoy vuelve la primera), `pre_check_and_post_check_run_every_criterion`
+sostiene D177, `a_trivial_criterion_blocks_before_any_attempt_runs` y
+`a_broken_guard_blocks_before_any_attempt_runs` conservan su oración byte a
+byte para una sola sorpresa; `adapters/tests/claude_code.rs:804-808`
+sostiene D178.
 
-**Cierra.** EN-D35, DO-D46, DO-D47; L-87 (D147), L-95, L-105.
+**Cierra.** EN-D35, DO-D46, DO-D47; L-95, L-105; L-87 (cerrado con el plan).
 
-**Encastre.** 7-02 (M23): el checker gana la cuarta regla junto a
-numeración, reciprocidad y citas; el índice se regenera. M24: «nunca un
-comentario que explique el atajo» se generaliza a «nunca prosa que
-enmiende una decisión». M06: `PreCheckOutcome::Rejected` es el hecho
-tipado; la frase del rebote se produce una vez en `mod.rs:334`. D167: su
-fila de D62 queda revisada por D177 sin tocar D167.
+**Encastre.** 7-02 (M23): el checker sigue con sus tres reglas de
+conjunto —numeración, reciprocidad, citas— y la cuarta vive donde vive
+todo lo que es de un archivo: en `parse`. M24: la regla de la promesa no
+construida es una y M29 la cita. M06: `Surprise` es el hecho tipado y la
+prosa se produce en el borde por `Display`. M05/Replay: `surprises` es una
+función de `criteria_checked`, así que un `status` tras un resume deriva
+el mismo porqué. M22: ningún contador sube —`reason_built_by_format`
+queda en su valor—. D167: su fila de D62 queda revisada por D177 sin tocar
+D167.
 
 ---
 
@@ -1522,91 +1567,127 @@ declaración, cada grupo `parallel` seguido de sus hijos (`view/mod.rs:114-116`)
 `NodeStanding::{Skipped, ToGo, Reached}`, y `NodeFrame.group`, escrito en
 `view/node.rs:115` y leído por nadie (I-08)—; `status` lee `RunState.nodes`
 en orden alfabético y sólo los que el log nombra (`status/mod.rs:60-71`;
-`print_failures` igual, `:122-137`); `--json` igual (`json.rs:133-137`);
-`graph --run` recorre el workflow de disco y no el manifest congelado del
-run (`graph.rs:37,72-86`), sin los hijos de un `parallel`; `stats` toma la
-palabra de `RunState` (`stats.rs:318`). `NodeDisplay::of(Option<&NodeState>)`
-(`render/state.rs:102`) no puede decir qué preguntó un nodo:
-`pending_questions` vive en `RunState.gates` (`core/src/events/gates/ledger.rs:92`)
-y `preguntas.md` §5 pide «waiting — asked 2 questions: q1, q2». Evidencia:
-L-67, L-97 (§11); M24 I-08; CLI-D28, CLI-D29, CLI-D30 (§12).
+`print_failures` igual, `:122-137`); `--json` igual, en un `BTreeMap`
+que no puede decir orden ni grupo (`json.rs:87,133-137`); `graph --run`
+recorre el workflow de disco y no el manifest congelado del run
+(`graph.rs:37,72-86`), sin los hijos de un `parallel`; `stats` toma la
+palabra de `RunState` (`stats.rs:318`). Y el hecho «qué espera un nodo»
+está aplastado en el origen: `NodeState::Waiting { external_ref }`
+(`node/ledger.rs:43-50`) confunde tres esperas —gate interno, gate externo,
+preguntas sin responder—, `replay.rs:305` descarta `p.questions` al
+escribir `Waiting { external_ref: None }`, y la oración «asked 2 questions:
+q1, q2» se arma a mano en tres sitios: la crónica (`words.rs:235-246`),
+`PauseReason::Questions` (`run/payloads.rs:167-172`, con «question(s)») y
+lo que `preguntas.md` §5 pide de `NodeDisplay`. Un `parallel` dentro de un
+`parallel` es representable (`node_kind.rs:52`), ningún check lo rechaza
+(`check/error.rs:212,266,319`) y el iterador empareja con el grupo
+inmediato (`workflow/mod.rs:141-150`). Evidencia: L-67, L-97, L-109 (§11);
+M24 I-08; CLI-D28, CLI-D29, CLI-D30 (§12).
 
 **Regla.** El frame es la única derivación que una superficie lee para
-listar los nodos de un run: todos los del modo, en orden de declaración,
-cada grupo `parallel` con sus hijos debajo, del manifest congelado del run.
-El frame lleva lo que la palabra necesita, las preguntas pendientes
-incluidas, y `NodeDisplay::framed` la produce; `NodeDisplay::of(state)` se
-conserva para quien tiene un estado y no un frame —la crónica dice un
-momento, y el caso de `yunta test` juzga una palabra—.
+listar los nodos de un run: todo `NodeFrame` del frame —del manifest
+congelado del run, en orden de declaración, cada grupo `parallel` con sus
+hijos un paso debajo, los que el modo excluye incluidos y etiquetados
+`skipped`, como `graph --run` ya imprime—. Lo que un nodo espera vive en
+su estado: `NodeState::Waiting { on: NodeWait }`, y `NodeDisplay::of(state)`
+—una sola entrada, la que se conserva— lo dice. Una oración, un productor:
+`text::asked_questions`. Un `parallel` no anida otro: `check` lo rechaza, y
+un paso de sangría es exacto.
 
 **Firmas.**
 
 ```rust
-// engine/src/view/node.rs
-pub struct NodeFrame {
-    /* … */
-    /// The questions this node asked and nobody has answered — `GateLedger::pending_questions` — empty for every node that is not waiting on them.
-    pub asked: Vec<QuestionId>,
+// core/src/events/node/ledger.rs — la espera tiene forma
+pub enum NodeState { /* … */ Waiting { on: NodeWait } }
+/// What a waiting node waits on.
+pub enum NodeWait {
+    /// A published, unresolved gate; `external_ref` is the forge's handle once recorded.
+    Gate { external_ref: Option<String> },
+    /// The questions the node asked and nobody answered — `QuestionsAskedPayload.questions`, never empty.
+    Questions { asked: Vec<QuestionId> },
 }
+// engine/src/replay.rs:276 → `Waiting { on: NodeWait::Gate { external_ref } }`; :305 → `Waiting { on: NodeWait::Questions { asked: p.questions.clone() } }`
+// core/src/text.rs
+/// The one sentence for questions awaiting an answer: `asked 2 questions: q1, q2`.
+pub fn asked_questions(asked: &[QuestionId]) -> String;    // `counted` + la lista; la consumen `NodeDisplay::of`, `PauseReason::Questions`'s Display y la crónica
+// cli/src/render/state.rs — `NodeDisplay::of(Option<&NodeState>)` conserva su firma y gana el brazo
+//   `Some(NodeState::Waiting { on: NodeWait::Questions { asked } }) => Some(text::asked_questions(asked))`; `skipped()` se conserva
+// cli/src/surface/chronicle/words.rs:235-246 — `H::Asked { questions }` dice `NodeDisplay::of(Some(&NodeState::Waiting { on: NodeWait::Questions { asked } })).label()`: la crónica y `status` son los mismos bytes por construcción; el `format!` se borra
+// core/src/events/run/payloads.rs:167-172 — `PauseReason::Questions` Display: «node `{node}` {asked_questions(pending)} — awaiting an answer»
+// cli/src/render/width.rs — `pub(crate) const CHILD_DEPTH: usize = 1;` (D179), consumida por `chronicle::graduation` y por `view::node_rows`; la copia privada de `chronicle/mod.rs:26` se borra
+// cli/src/surface/view.rs:69 — `node_rows` sangra `CHILD_DEPTH` las filas de un nodo con `group: Some(_)`; `standing` (:221-227) se conserva
+// cli/src/commands/status/mod.rs — `print_derived(frame: &RunFrame, state: &RunState)`: los nodos salen de `frame.nodes`, `{id}: {label}` como hoy, los hijos sangrados `CHILD_DEPTH` bajo su grupo; `print_failures` recorre `frame.nodes` en ese mismo orden; las tareas siguen saliendo de `state.tasks`
+// cli/src/json.rs — con el salto a `SCHEMA_VERSION = 5`, `nodes` deja de ser un mapa:
+pub struct NodeJson { id: String, state: StateWord /* serializa `word()`, como RunWord */, #[serde(skip_serializing_if = "Option::is_none")] detail: Option<String>, #[serde(skip_serializing_if = "Option::is_none")] group: Option<String>, #[serde(skip_serializing_if = "Option::is_none")] waiting_on: Option<NodeWaitJson> }
+#[serde(tag = "on", rename_all = "snake_case")] pub enum NodeWaitJson { Gate { external_ref: Option<String> }, Questions { asked: Vec<String> } }
+//   `nodes: Vec<NodeJson>` en orden de declaración; `impl Serialize for StateWord` junto al de `RunWord` (state.rs:299-304)
+// cli/src/graph.rs — `pub async fn graph(..)` (cli.rs:380 lo espera): con `--run` abre el run por `Context::open_run` y dibuja `open.manifest.doc.workflow`, hijos bajo su grupo; deja de calcular `mode_included_nodes`
+// cli/src/commands/stats.rs:306-323 — `render_nodes(stats, state, glyphs)` sin cambio de forma: una fila por nodo que arrancó, la palabra por `NodeDisplay::of(state.nodes.state(..))`, que ahora sabe qué preguntó
+// engine/src/check/error.rs — `CheckError::ParallelInsideParallel { group, node }` junto a sus tres hermanos `*InsideParallel`
 // engine/src/lib.rs:107 — `mode_included_nodes` deja de exportarse: su único consumidor externo era `graph.rs`; sigue en `view/mod.rs` y `schedule.rs`
-// cli/src/render/state.rs
-impl NodeDisplay {
-    pub(crate) fn of(state: Option<&NodeState>) -> Self;      // se conserva: la crónica (words.rs:68) y cualquier estado suelto
-    /// How `node` reads as the frame stands: skipped, yet to run, or reached — with the questions it is waiting on when it asked.
-    pub(crate) fn framed(node: &NodeFrame) -> Self;           // Skipped → `skipped()`, ToGo → `of(None)`, Reached → `of(Some(state))` más `asked`
-}
-// cli/src/surface/view.rs:69 — `node_rows` sangra bajo su grupo las filas de un nodo con `group: Some(_)`; `standing` (:221-227) se borra: `framed` lo reemplaza
-// cli/src/commands/status/mod.rs — `print_derived(frame: &RunFrame, state: &RunState)`: los nodos salen de `frame.nodes`, `{id}: {label}` como hoy, los hijos sangrados bajo su grupo; `print_failures` recorre `frame.nodes` en ese mismo orden; las tareas siguen saliendo de `state.tasks`
-// cli/src/json.rs — `nodes` se arma sobre `frame.nodes`: mismo mapa id → label, con todos los nodos del modo; `SCHEMA_VERSION` pasa a 5 (la presencia en `nodes` cambia de significado: «el run lo alcanzó» → «el modo lo incluye»)
-// cli/src/graph.rs — `derive_labels` enmarca el manifest congelado del run (`run_frame(run_id, &manifest.workflow, &events, None, ctx.clock.now())`), hijos incluidos; deja de calcular `mode_included_nodes`
-// cli/src/commands/stats.rs:306-323 — `render_nodes(stats, frame, glyphs)`: una fila por nodo que arrancó, como hoy; la palabra sale de `framed` por id; `stats_run` construye el frame con `ctx.clock.now()`
-// cli/src/commands/test/case.rs:242 — sin cambio: `expect.nodes` se juzga por `StateWord::of`
-// testkit/src/frames.rs:52-69 — `node_frame` gana `asked`
 ```
 
-**Decisión.** D179: `yunta status`, `--json` y `graph --run` listan los
-nodos como la vista viva —todos los del modo, en orden de declaración, los
-hijos bajo su grupo, del manifest congelado, con las mismas palabras—; un
-nodo que preguntó dice qué preguntó; `--json` sube a `schema_version: 5`.
-Cambio visible: `docs/compatibility.md:278-295` (qué contiene `nodes` y el
-número), `README.md:134-135,164`, `docs/concepts.md:99-101` sin cambio.
+**Decisión.** D179 (registrada con el plan): `status`, `--json` y `graph
+--run` listan los nodos como el frame; lo que un nodo espera vive en su
+estado y `NodeDisplay::of` lo dice; `--json` sube a `schema_version: 5`
+con `nodes` como lista ordenada; un `parallel` no anida otro (L-109).
+Cambio visible: `docs/compatibility.md:278-295` (qué contiene `nodes`, su
+forma y el número), `README.md:134-135,164`, `docs/concepts.md:99-101` sin
+cambio; el aviso de `check` por `ParallelInsideParallel` entra en
+`docs/guide.md` junto a sus hermanos.
 
-**Archivos.** Nuevo: `docs/design/adr/D179-*.md`. Modifica:
-`engine/src/view/node.rs`, `engine/src/lib.rs`, `cli/src/render/state.rs`
-(`:87-101,117-122` rustdoc; tests `:147-200`), `cli/src/surface/view.rs`,
-`cli/src/commands/status/mod.rs`, `cli/src/json.rs`, `cli/src/graph.rs`
-(`:1-6,54-62` docs), `cli/src/commands/stats.rs`, `testkit/src/frames.rs`,
-`docs/design/adrs.md`, `docs/compatibility.md`, `README.md`,
-`cli/tests/parked_runs.rs:410`, y las líneas del plan que decían «sin
-cambios»: `cronica.md:44,224`, `preguntas.md:252-253,418`, `mecanismos.md`
-fila I-08. Borra: `view.rs::standing`, la exportación de `mode_included_nodes`.
+**Archivos.** Modifica: `core/src/events/node/ledger.rs`, `core/src/text.rs`,
+`core/src/events/run/payloads.rs:160-175`, `core/schemas/events.json` (si
+`NodeState` aparece en un payload), `engine/src/replay.rs:271-310`,
+`engine/src/view/phase.rs:157`, `engine/src/run/schedule.rs:388`,
+`engine/src/check/{error.rs, graph.rs}`, `engine/src/lib.rs`,
+`cli/src/render/{state.rs (:87-101,110-122 rustdoc y brazo; tests
+:147-200), width.rs}`, `cli/src/surface/{view.rs, chronicle/mod.rs,
+chronicle/words.rs}`, `cli/src/commands/status/mod.rs`, `cli/src/json.rs`,
+`cli/src/cli.rs:380`, `cli/src/graph.rs` (`:1-6,54-62` docs),
+`docs/compatibility.md`, `README.md`, `docs/guide.md`, y los tests que
+fijan la forma vieja: `engine/tests/{external_gate.rs:78, properties.rs:369,
+run_questions.rs:214, run_questions_close.rs:130, view.rs, check.rs}`,
+`cli/tests/{parked_runs.rs:410,418,545-590, graph_cmd.rs, run_questions*.rs}`,
+`cli/src/commands/mcp.rs:303-316` y `drive.rs:468` (consumidores del
+documento). Borra: la exportación de `mode_included_nodes`, el `format!`
+de `words.rs:237-245`, `chronicle/mod.rs:26`. `frames.rs`, `NodeFrame` y
+`StateWord::of` no cambian.
 
-**Prerequisitos.** 8-03 (D178 antes que D179).
+**Prerequisitos.** Ninguno.
 
-**Tests.** `cli/tests/status_cmd.rs`:
-`status_lists_every_node_of_the_mode_in_declaration_order_with_children_under_their_group`
+**Tests.** `core/tests/events.rs`:
+`a_node_that_asked_waits_on_its_questions_in_its_own_state` (rojo:
+`Waiting` no tiene forma); `cli/tests/status_nodes_cmd.rs` (nuevo, para
+que `status_cmd.rs` no cruce las 500 líneas):
+`status_lists_every_declared_node_in_declaration_order_with_children_under_their_group`
 (rojo: hoy alfabético y sólo los que el log nombra),
 `status_says_which_questions_a_node_is_waiting_on` (rojo),
-`status_and_the_live_view_list_the_same_nodes_in_the_same_order`,
-`status_json_lists_every_node_of_the_mode_under_schema_version_five`;
+`status_and_the_live_view_list_the_same_nodes_in_the_same_order` (ids y
+orden contra `frame.nodes`),
+`status_json_lists_every_declared_node_in_order_under_schema_version_five`,
+`the_chronicle_and_status_say_a_node_that_asked_with_the_same_bytes`;
 `status_attributes_each_problem_to_the_document_it_came_from` sigue verde
 (`{id}: {label}` no cambia); `cli/tests/run_surface.rs`:
 `the_live_view_indents_a_groups_children_under_it`; `cli/tests/graph_cmd.rs`:
-`graph_with_a_run_id_labels_a_parallel_groups_children`;
-`cli/src/render/state.rs` (unit): `a_framed_node_that_asked_names_its_pending_questions`;
-`engine/tests/view.rs`: `a_frame_carries_the_questions_a_node_is_waiting_on`.
+`graph_with_a_run_id_draws_the_runs_frozen_workflow_with_a_groups_children`;
+`engine/tests/check.rs`: `a_parallel_inside_a_parallel_is_refused`;
+`cli/src/render/state.rs` (unit): `a_waiting_node_that_asked_names_its_questions`.
 
-**Cierra.** CLI-D28, CLI-D29, CLI-D30; L-67; M24 I-08.
+**Cierra.** CLI-D28, CLI-D29, CLI-D30; L-67, L-109; M24 I-08.
 
 **Encastre.** M19 (`cronica.md`): «toda palabra de estado sale de
-`NodeDisplay::of(state).label()`» sigue siendo verdad —`framed` la llama—;
-la región y `status` listan el mismo frame. M26 (`preguntas.md` §5): el
-modificador del nodo que preguntó. M16: la palabra de `expect.nodes` no
-cambia. M15: `graph` deja de enmarcar otro documento que el run. §8:
-`render::state` se generaliza (el mismo vocabulario, una entrada más);
-`run_frame`/`view/` y `frames.rs` ganan un campo; `json::SCHEMA_VERSION`
-sube por su propia regla.
-
+`NodeDisplay::of(state).label()`» sigue siendo verdad con una sola entrada;
+la región y `status` listan el mismo frame con las mismas palabras. M26
+(`preguntas.md` §5): el modificador del nodo que preguntó. M06: la espera
+es un hecho tipado y la oración se produce en un lugar. M16: la palabra de
+`expect.nodes` no cambia. M15: `graph` deja de enmarcar otro documento que
+el run. M22: `CHILD_DEPTH` cita D179; `status_nodes_cmd.rs` deja el
+contador de archivos donde está. §8: `render::state` se generaliza (el
+mismo vocabulario, la misma entrada, un brazo más); `run_frame`/`view/` y
+`frames.rs` sin cambio; `json::SCHEMA_VERSION` sube por su propia regla.
+M31: `print_failures` y `RunDocument` cambian acá primero; 8-05 les agrega
+la muerte de una sesión.
 ---
 
 ## M31 · Una sesión que muere dice por qué

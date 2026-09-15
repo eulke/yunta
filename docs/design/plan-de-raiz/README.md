@@ -392,10 +392,10 @@ en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
   Especificación completa: `preguntas.md`.
 - **M27 · La cáscara nace con el proceso.** `Supervision` sin `Option` en
   token y reloj, `Supervision::outside_any_run`; `create_run`,
-  `build_manifest` y `RunEnv` la exigen; `Interrupt`, la fuente inyectada
-  que `Context::load` arma una vez por invocación, y `Context::supervision()`
-  la baja a todo spawn del CLI; `RunError::Cancelled` en toda puerta que
-  spawnea; `Supervision::none` y la pareja sincrónica de git se
+  `build_manifest` y `RunEnv` la exigen, con un solo reloj; `Interrupt`
+  en dos etapas (D181), inyectado en `Context`, y `Context::supervision()`
+  / `teardown()` la bajan a todo spawn del CLI; `RunError::Cancelled` en
+  toda puerta que spawnea; `AttemptEnv` y `PromotionEnv` con un dueño; `Supervision::none` y la pareja sincrónica de git se
   borran; `Owner` en el testkit. Fase 8.
 - **M28 · Un baseline por linaje.** `RunEvent::BaselineCaptured` plegado
   por `RunLedger`; la raíz mide en su primer despertar por
@@ -404,13 +404,16 @@ en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
   `BaselineOrigin::Inherited { run }`); `RunLedger::woken` reconoce el
   primer despertar; `baseline_compare` reutiliza por `Memo`; `yunta check`
   avisa (`BaselineNeverCompared`); D176. Fase 8.
-- **M29 · Una decisión dice lo que el código hace.** `statuses` en `adr
-  --check`; `PreCheckOutcome::Rejected` nombra cada sorpresa; D177 (D62,
-  D59), D178 (D147); Contrato §5.2/§5.4; §9. Fase 8.
-- **M30 · Una superficie, un frame.** `NodeFrame.asked`,
-  `NodeDisplay::framed`; `status`, `--json`, `graph` y `stats` listan el
-  frame del manifest congelado, los hijos bajo su grupo; `schema_version:
-  5`; D179. Fase 8.
+- **M29 · Una decisión dice lo que el código hace.** `Status` con sus
+  revisores adentro, que `Decision::parse` no deja disentir; `Surprise` y
+  `surprises(task, runs)` como veredicto puro del pre-check, tipado hasta
+  `TaskOutcome::Blocked`; D177 (D62, D59), D178 (D147); Contrato
+  §5.2/§5.4. Fase 8.
+- **M30 · Una superficie, un frame.** `NodeState::Waiting { on: NodeWait }`
+  y `text::asked_questions`, una oración; `status`, `--json` y `graph --run`
+  listan el frame del manifest congelado, los hijos bajo su grupo; `nodes`
+  como lista bajo `schema_version: 5`; un `parallel` no anida otro; D179.
+  Fase 8.
 - **M31 · Una sesión que muere dice por qué.** `SERVER_NAME = "yunta-run"`,
   `AgentSession::exit`, `Failure::SessionDied`, `DispatchOutcome::Crashed {
   exit }`, `doctor --session`, los stubs en el testkit; D180. Fase 8.
@@ -716,9 +719,9 @@ nodo que pregunta, pregunta; registrada el 2026-09-14 con el panel de tres
 diseños que la respalda).
 Viven en `docs/design/adr/` y las indexa `adrs.md`. Un ítem que quiera
 apartarse de una de ellas la revisa con un ADR nuevo; no la reinterpreta.
-Las de la fase 8 —D176 (M28), D177 y D178 (M29), D179 (M30), D180 (M31)—
-quedaron registradas el 2026-09-15 con la recomendación como decisión, por
-aprobación explícita del dueño del repo, junto con L-106 y L-107.
+Las de la fase 8 —D176 (M28), D177 y D178 (M29), D179 (M30), D180 (M31),
+D181 (M27)— quedaron registradas el 2026-09-15 con la recomendación como decisión, por
+aprobación explícita del dueño del repo, junto con L-106 a L-109.
 
 | id | pregunta | decisión | ADR · desbloquea |
 |---|---|---|---|
@@ -873,10 +876,10 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | 7-05 | baseline eager en `create_run` (M24, D167) con su test | 3-05 | cerrado (`d1f59fc`) |
 | 7-06 | orden de criterios aprendido del log desde `TaskLedger` (M24, D167) con su test | 2-03 | cerrado (`419387e`) |
 | 7-07 | el inventario de M24: `manual_review` y `justification` se retiran con D174 (I-02); lo que se construye cierra en el ítem de su mecanismo | 7-04 | cerrado (`cb8c531`); I-08 queda en L-67 |
-| 8-01 | M27: `Supervision` con token y reloj; `create_run`, `build_manifest` y `RunEnv` la exigen; `Interrupt` inyectado en `Context`, `Context::supervision`; `RunError::Cancelled`; `Owner`; `Supervision::none` y la pareja sincrónica de git se borran | — | pendiente |
+| 8-01 | M27: `Supervision` con token y reloj, un solo reloj por nacimiento; `create_run`, `build_manifest`, `RunEnv` y `AttemptEnv` la exigen; `Interrupt` en dos etapas (D181) inyectado en `Context`, `supervision`/`teardown`; `PromotionEnv { ctx }`; `RunError::Cancelled`; `Owner`; `Supervision::none` y la pareja sincrónica de git se borran | — | pendiente |
 | 8-02 | M28: `RunEvent::BaselineCaptured` en `RunLedger`; `Decision::MeasureBaseline` y `steps::measure_baseline`; todo run nace teniendo la medición de la raíz; `RunLedger::woken`; `baseline_compare` por `Memo`; `BaselineNeverCompared`; D176; L-107 | — | pendiente |
-| 8-03 | M29: `statuses` en `adr --check`; `PreCheckOutcome::Rejected`; D177 (D62, D59) y D178 (D147); §5.2/§5.4; §9; §0.6 | 8-02 | pendiente |
-| 8-04 | M30: `NodeFrame.asked`; `NodeDisplay::framed`; `status`, `--json`, `graph`, `stats` por el frame; `schema_version: 5`; D179 | 8-03 | pendiente |
+| 8-03 | M29: `Status` con revisores, rechazado en `parse`; «Retirada por» en el índice; `Surprise`/`surprises`; `TaskOutcome::Blocked` tipado; Contrato §5.2/§5.4 | — | pendiente |
+| 8-04 | M30: `NodeState::Waiting { on: NodeWait }`; `text::asked_questions`; `status`, `--json`, `graph --run` por el frame; `nodes` como lista, `schema_version: 5`; `ParallelInsideParallel`; D179 | — | pendiente |
 | 8-05 | M31: `yunta-run`; `AgentSession::exit`; `Failure::SessionDied`; `doctor --session`; stubs en el testkit; D180 | 8-04 | pendiente |
 
 Ya cerrado en esta rama, antes del plan: merge de `main` con la costura del
@@ -1007,6 +1010,8 @@ uno están en el commit que lo escribió.
 | L-105 | 7-03 | §9 manda «D152 `Revisada por D157`», y la nota de D152 dice «Retirada por D157». Las otras tres decisiones retiradas dicen todas «Retirada por», y desde 7-02 la reciprocidad se verifica sobre el front-matter, no sobre la prosa: el índice ya renderiza «Revisada por D157» a partir de `revised_by: [D157]` | la prosa queda como está. L-86 fijó que una retirada es una revisión más una posición —`status: retired` más `revised_by`—, así que lo que §9 pide está satisfecho en la superficie que lleva la reciprocidad, y cambiar sólo el cuerpo de D152 la volvería la rara entre cuatro. Queda dicho porque §9 lo pide literal y no se hizo literal; es una edición de dos palabras si se decide lo contrario | fila 8-03 (§10); M29 (§9 dice «Retirada por»; el índice también) |
 | L-106 | 8-05 | Reportado desde Codex: con el control plane registrado como `[mcp_servers.yunta]`, el adapter inyecta el servidor per-run sobre la misma tabla (`-c mcp_servers.yunta.url=…`) y Codex rechaza `url is not supported for stdio`; el nodo falla con «session ended without a terminal event» y 0 tokens, sin exit ni stderr, y `doctor` dice sano porque sólo corre `--version` | tres partes de un mismo defecto, un mecanismo: el servidor per-run tiene nombre propio (`yunta-run`), una sesión que muere falla con un hecho tipado (`Failure::SessionDied`, con exit y las últimas líneas de stderr) y `doctor --session` abre una sesión real por runner por el mismo camino que un workflow; aprobado por el dueño del repo | fila 8-05 (§10); M31; D180 |
 | L-107 | 8-02 | `.yunta/config.yaml` de este repo declara `baseline.suite: cargo test --workspace` y ninguno de sus dos workflows compara, ni los dos del pack `starter` que CI verifica bajo la misma config (`ci.yml:68-71`): con M28, `yunta check` lo avisaría cuatro veces por corrida de CI, y cada `yunta run` y cada caso de `yunta test` sobre este repo miden minutos que nadie lee | `baseline:` sale de la config del repo; la alternativa —un `baseline_compare` en `lint-fix` o `run-tasks`— pone una verificación que esos workflows no piden. Decidido por el dueño del repo al aprobar la fase 8 | fila 8-02 (§10); M28; `.yunta/config.yaml` |
+| L-108 | 8-01 | Con todo spawn bajo el token de la invocación, `released()` —que corre *porque* el token disparó— devolvería la toma con un git que ese mismo token cancela: el lock del checkout quedaría tomado por un pid muerto, lo contrario de lo que Ctrl-C promete (`drive.rs:376-378`) | la interrupción tiene dos etapas, como «interrupt, then kill» ya lo tiene para las sesiones: el primer Ctrl-C detiene el trabajo (`Context::supervision`), el segundo aborta lo que detenerlo todavía sostiene (`Context::teardown`) y devuelve la señal al proceso. Aprobado con la fase; D181 | fila 8-01 (§10); M27; D181 |
+| L-109 | 8-04 | Un `parallel` dentro de un `parallel` es representable (`node_kind.rs:52`), ningún check lo rechaza y el iterador empareja cada nodo con su grupo inmediato: «cada grupo con sus hijos un paso debajo» sería falso a la segunda profundidad, y ninguna superficie ni el scheduler lo tratan como un caso | `check` lo rechaza (`CheckError::ParallelInsideParallel`, junto a sus tres hermanos `*InsideParallel`) y un paso de sangría es exacto; anidar entra el día que alguien lo pida, con su diseño. Aprobado con la fase; D179 | fila 8-04 (§10); M30; D179 |
 
 ---
 

@@ -25,9 +25,11 @@ llama «un bug de determinismo» (plan de raíz, §11 L-95).
 ## Decisión
 
 1. **El pre-check evalúa el conjunto entero.** Cada criterio corre; el
-   veredicto es sobre el conjunto y nombra cada criterio trivial y cada
-   guard roto que encontró (`PreCheckOutcome::Rejected { trivial,
-   broken_guards }`), nunca sólo el primero.
+   veredicto es una función pura de lo que corrió —`surprises(task, runs)`,
+   en el orden en que la tarea declara sus criterios— y nombra cada
+   criterio trivial y cada guard roto que encontró (`Surprise`), nunca
+   sólo el primero; viaja tipado hasta el borde que lo dice
+   (`TaskOutcome::Blocked { surprises }`).
 2. **El orden aprendido decide cuándo llega la evidencia.** Los criterios
    corren de menor a mayor duración histórica, tomada del log, de modo que
    la evidencia barata llega primero; el orden no decide qué se verifica
