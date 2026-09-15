@@ -1301,7 +1301,11 @@ pub enum BaselineOrigin { #[default] Measured, Inherited { run: RunId } }   // `
 impl RunLedger {
     /// The measurement this run holds — its own, or the one it was born holding. `None` for a lineage whose root declared no suite.
     pub fn baseline(&self) -> Option<&BaselineCapturedPayload>;
-    /// Whether an invocation already woke this run: the log has a pause, a resume, a node start, or a `baseline_captured { origin: measured }`. What separates a first wake from a resume — a birth writes any number of events, the measurement a run is born holding among them.
+    /// Whether the run's own events say an invocation woke it: a pause, a resume, or a `baseline_captured { origin: measured }`.
+    pub fn woken(&self) -> bool;
+}
+impl RunState {
+    /// Whether an invocation already woke this run: the run's own events say so, nodes an invocation that died without pausing left behind, or a replay that stopped. What separates a first wake from a resume — a birth writes any number of events, the measurement a run is born holding among them. Un ledger por dominio no ve otro dominio, así que la pregunta vive donde se componen (L-112).
     pub fn woken(&self) -> bool;
 }
 pub enum run::happening::Happening { /* … */ BaselineCaptured(BaselineOrigin) }   // words.rs:101: `baseline measured` | `baseline inherited from run <root>`
@@ -1311,10 +1315,10 @@ pub enum run::happening::Happening { /* … */ BaselineCaptured(BaselineOrigin) 
 pub struct Policy { /* … */ pub baseline_suite: Option<String> }     // Policy::of: manifest.config.baseline.as_ref().map(|b| b.suite.clone())
 pub enum Decision { /* … */ MeasureBaseline { suite: String }, /* … */ }
 //   decide(): antes de cualquier `Execute`, `policy.baseline_suite` es `Some` y `state.run.baseline()` es `None` → `MeasureBaseline`; un run que nació teniéndola o que ya midió nunca la ve
-// engine/src/run/steps.rs — ejecutar es la cáscara
+// engine/src/run/baseline.rs — ejecutar es la cáscara, y medir vive con lo demás del baseline
 /// Measures the suite the scheduler decided this run owes, under the run's own supervision: keeps its output under `baseline/`, records `baseline_captured { origin: measured }`. A suite the cancellation stops records nothing and answers `Ok(())` — a step is not a node, so there is no `cancelled_end` to write; the loop's next turn sees the token fired and pauses the run.
-pub(super) async fn measure_baseline(ctx: &RunCtx<'_>, suite: String) -> Result<(), RunError>;   // exec.rs:128 gana el brazo `Decision::MeasureBaseline { suite } => steps::measure_baseline(&ctx, suite).await?`
-// engine/src/run/exec.rs:214-218 — `if view.state.run.woken() { resume(&ctx, &view).await?; }` reemplaza `events.len() > 1`
+pub(super) async fn measure(ctx: &RunCtx<'_>, suite: String) -> Result<(), RunError>;   // exec.rs:128 gana el brazo `Decision::MeasureBaseline { suite } => baseline::measure(&ctx, suite).await?`
+// engine/src/run/exec.rs:214-218 — `if view.state.woken() { resume(&ctx, &view).await?; }` reemplaza `events.len() > 1`
 
 // engine/src/run/baseline.rs (nuevo) — lo que un nacimiento hereda y lo que la suite deja
 /// What a run born of another holds: the root's measurement, named by the run that took it. Pure: the parent's own or inherited capture, with the root resolved.
@@ -1334,7 +1338,7 @@ impl Memo {
     pub(crate) async fn exit_code(&self, cmd: &str, cwd: &Path, supervision: Supervision<'_>) -> Result<Memoized, TaskCycleError>;
 }
 pub struct Memoized { pub exit_code: i32, pub reused: bool }
-//   `run_all_criteria` lo consume (y sigue midiendo la duración); check_exec::execute_baseline_compare compara `ctx.run_view().await?.state.run.baseline()` contra `ctx.memo.exit_code(..)` y cierra con
+//   el lazo de criterios sigue con su huella compartida (L-110); check_exec::execute_baseline_compare compara `ctx.run_view().await?.state.run.baseline()` contra `ctx.memo.exit_code(..)` y cierra con
 //   "no regression vs baseline (exit 0)" o "no regression vs baseline (exit 0, reused: same tree since an earlier compare)"; coverage_gate sigue por `run_command`.
 
 // engine/src/receipt/mod.rs:66-73 — `BaselineSummary { suite, hash, compared, regressions, origin: BaselineOrigin }`, aditivo, `Receipt::SCHEMA_VERSION` queda en 1;
