@@ -1140,7 +1140,7 @@ impl Context {
 // cli/src/commands/mcp.rs — el servidor observa `ctx.cancellation()`: un SIGINT cancela lo que está naciendo y cierra el servidor, como hoy lo cerraba el proceso
 // cli/src/commands/test/case.rs:151,191,313 — `Interrupt::shared` para el `Context` del sandbox y `cancel: ctx.cancellation()`
 
-// testkit-core/src/owner.rs (nuevo)
+// testkit/src/owner.rs (nuevo; L-113)
 /// What a test's subprocesses answer to: a token the test may trip and the fixed clock — the supervision outside any run, owned so the borrows have somewhere to live.
 pub struct Owner { cancellation: CancellationToken, clock: FixedClock }
 impl Owner { pub fn new() -> Self; pub fn cancellation(&self) -> &CancellationToken; pub fn supervision(&self) -> Supervision<'_>; }   // `Supervision::outside_any_run(&self.cancellation, &self.clock)`
@@ -1148,7 +1148,7 @@ impl Owner { pub fn new() -> Self; pub fn cancellation(&self) -> &CancellationTo
 // testkit/src/bench/driving.rs:259 — `create_run(.., self.supervision())`; `:326` — `cancel: &self.cancel`; `freeze` pasa `self.supervision()` a `build_manifest`
 ```
 
-**Archivos.** Nuevo: `cli/src/interrupt.rs`, `testkit-core/src/owner.rs`,
+**Archivos.** Nuevo: `cli/src/interrupt.rs`, `testkit/src/owner.rs`,
 `testkit/src/stubs.rs` (`git()`, el stub que M31 amplía) y
 `testkit/stubs/git_stub.sh`. Modifica: `testkit/src/checkout.rs`
 (`Checkout::with_stubs`), `cli/src/commands/cancel.rs`, `cli/src/cli.rs:428`, `engine/src/process.rs`, `engine/src/git.rs`, `engine/src/manifest.rs`,
