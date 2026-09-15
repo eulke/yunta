@@ -132,6 +132,22 @@ pub enum CliError {
     #[error(transparent)]
     UnknownArtifactKind(#[from] yunta_core::UnknownArtifactKind),
 
+    /// A reply that does not answer the questions it claims to, or a
+    /// round that could not be read back — the engine's own verdict,
+    /// which is the same one a person at a console gets.
+    #[error(transparent)]
+    AnswerQuestions(#[from] yunta_engine::AnswerQuestionsError),
+
+    /// The answers were recorded and the run could not be handed back
+    /// to a detached `yunta resume`. They are on the log either way,
+    /// which is what the sentence leads with: a reader who takes this
+    /// for a refusal answers the same questions twice.
+    #[error("answers recorded, but {source}")]
+    AnswersRecordedNotResumed {
+        #[source]
+        source: crate::commands::DetachedResumeError,
+    },
+
     /// A value that has to be an identifier and is not — a run id, an
     /// adapter, a mode, a gate option, a responder — wherever one is
     /// read off an argument.

@@ -13,7 +13,9 @@ use serde_json::{json, Value};
 use yunta_core::events::GateEvent;
 use yunta_core::process::signal::{signal_process, Signal};
 use yunta_core::Pid;
-use yunta_testkit::{git, init_repo, run_id_from, stderr, wait_until_async, write, yunta_in};
+use yunta_testkit::{
+    git, init_repo, run_id_from, stderr, stdout, wait_until_async, write, yunta_in,
+};
 
 fn tool_text(result: &rmcp::model::CallToolResult) -> String {
     result
@@ -1074,4 +1076,174 @@ async fn an_mcp_client_answering_a_running_run_gets_the_advice_a_person_gets() {
     assert_eq!(answered.is_error, Some(true), "{answered:#?}");
     assert_eq!(tool_text(&answered), sentence);
     client.cancel().await.ok();
+}
+
+/// A node whose session hands questions over and ends: with nothing to
+/// answer them the run parks, and the round stands for whichever
+/// surface reaches it next.
+const ASKING: &str = r#"
+name: asking
+nodes:
+  - id: ask
+    kind: prompt
+    runner: executor
+    prompt: "Ask what has to be known before going on."
+    artifacts:
+      produces: [questions]
+"#;
+
+const ASKING_FIXTURE: &str = r#"
+capabilities: { run_tools: true }
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_questions
+        arguments:
+          document:
+            questions:
+              - id: summary
+                text: "What changed?"
+                answer_type: text
+                required: true
+    outcome: { type: completed, summary: asked }
+"#;
+
+#[tokio::test]
+async fn answer_questions_pre_seeds_the_answer_and_resume_finishes_the_node() {
+    // The control plane is the second surface on the door a console
+    // round already answers through: the reply is judged against the
+    // very document the node asked from, both events land or neither
+    // does, and what finishes the node is the engine's own step on the
+    // next resume — not anything this tool did.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(&repo.join("asking.yaml"), ASKING);
+    write(&repo.join("fixture.yaml"), ASKING_FIXTURE);
+    // A real adapter name, so the detached `yunta resume` this tool
+    // hands off to can build the registry at all. Nothing ever runs on
+    // it: the node's work is done and it owes only its close, which the
+    // engine's own step gives it with no session.
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "runners:\n  executor:\n    - { adapter: claude-code, model: claude-model }\n",
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "fixtures"]);
+
+    let run = yunta_in!(
+        &repo,
+        &home,
+        &[
+            "run",
+            "asking.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml",
+        ]
+    );
+    assert!(!run.status.success(), "the run parks: {}", stdout(&run));
+    let run_id = run_id_from(&run);
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    command
+        .arg("mcp")
+        .current_dir(&repo)
+        .env("YUNTA_HOME", &home);
+    let transport = TokioChildProcess::new(command).unwrap();
+    let client = ().serve(transport).await.unwrap();
+
+    // A reply the document refuses is refused whole, and nothing is
+    // recorded: the round is still open for the next attempt.
+    let refused = client
+        .call_tool(
+            CallToolRequestParams::new("answer_questions").with_arguments(
+                json!({"run_id": run_id, "node": "ask", "answers": []})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_eq!(refused.is_error, Some(true), "{refused:#?}");
+    assert!(
+        tool_text(&refused).contains("summary"),
+        "the refusal names the question that went unanswered: {}",
+        tool_text(&refused)
+    );
+
+    let answered = client
+        .call_tool(
+            CallToolRequestParams::new("answer_questions").with_arguments(
+                json!({
+                    "run_id": run_id,
+                    "node": "ask",
+                    "answers": [{"id": "summary", "value": "the resize handler"}],
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+            ),
+        )
+        .await
+        .unwrap();
+    assert_ne!(answered.is_error, Some(true), "{answered:#?}");
+    client.cancel().await.ok();
+
+    // The answer is a fact of the run, recorded as arriving through the
+    // control plane, and the node it belonged to is finished.
+    wait_until_async(
+        || {
+            let repo = repo.clone();
+            let home = home.clone();
+            let run_id = run_id.clone();
+            async move {
+                let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
+                let document: Value = serde_json::from_slice(&status.stdout).unwrap_or_default();
+                document["outcome"] == "finished"
+                    && document["nodes"]["ask"]
+                        .as_str()
+                        .is_some_and(|state| state.starts_with("finished"))
+            }
+        },
+        || {
+            let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
+            let log = std::fs::read_to_string(
+                yunta_testkit::runs_root(&home)
+                    .join(&run_id)
+                    .join("scratch/detached.log"),
+            )
+            .unwrap_or_default();
+            format!(
+                "the answered node never finished: {}\nthe detached resume said: {log}",
+                String::from_utf8_lossy(&status.stdout)
+            )
+        },
+    )
+    .await;
+
+    let text = std::fs::read_to_string(
+        yunta_testkit::runs_root(&home)
+            .join(&run_id)
+            .join("events.jsonl"),
+    )
+    .expect("the run exports its own log");
+    assert!(
+        text.contains("questions_answered"),
+        "the answer is on the log: {text}"
+    );
+    assert!(
+        text.contains("\"channel\":\"mcp\""),
+        "recorded as arriving through the control plane, which is what \
+         `Channel::Mcp` is for: {text}"
+    );
+    assert!(
+        text.matches("questions_answered").count() == 1,
+        "the refused reply wrote nothing: {text}"
+    );
 }

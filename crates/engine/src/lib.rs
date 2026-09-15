@@ -75,7 +75,10 @@ mod verification_effectiveness;
 mod view;
 mod worktree;
 
-pub use answers::{AnswersError, Recorded as AnswersRecorded, Reply as AnswersReply};
+pub use answers::{
+    answer_questions, AnswerQuestionsError, AnswersError, Recorded as AnswersRecorded,
+    Reply as AnswersReply,
+};
 pub use artifacts::store::{ObjectError, ObjectStore};
 pub use artifacts::{
     close_artifacts, AcceptError, ArtifactContent, ArtifactFault, ArtifactIntegrity, StagedHash,
