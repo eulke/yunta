@@ -168,16 +168,15 @@ fn accept_names_the_path_of_the_value_it_refused() {
         "tasks": [{
             "id": "t1",
             "title": "t",
-            "scope": ["src/**"],
+            "scope": "src/**",
             "criteria": [{"cmd": "true"}],
-            "manual_review": "yes",
         }]
     });
     let report = accept::<TasksFile>(document, "artifacts/plan.yaml")
-        .expect_err("a string where a boolean belongs is refused");
+        .expect_err("a string where a sequence belongs is refused");
     let rendered = report.diagnostics[0].to_string();
     assert!(
-        rendered.contains("tasks[0].manual_review"),
+        rendered.contains("tasks[0].scope"),
         "the path locates the value: {rendered}"
     );
 }

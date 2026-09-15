@@ -146,10 +146,10 @@ pub(super) async fn execute_node(
             if *coordination == yunta_core::Coordination::Blackboard
                 && matches!(end, NodeEnd::Finished | NodeEnd::Failed)
             {
-                let members: Vec<yunta_core::NodeId> =
-                    nodes.iter().map(|child| child.id.clone()).collect();
-                let consolidated =
-                    crate::run_tools::consolidate_blackboard(&ctx.load_events().await?, &members);
+                let consolidated = crate::run_tools::consolidate_blackboard(
+                    &ctx.load_events().await?,
+                    ctx.run_tools_host.members_of(&node.id),
+                );
                 super::context_resolve::write_node_output(
                     ctx.run_dir,
                     &node.id,

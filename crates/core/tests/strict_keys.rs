@@ -174,12 +174,26 @@ fn a_tasks_document_refuses_unknown_keys_on_tasks_and_criteria() {
     );
     assert_eq!(
         text,
-        "`tasks[0].titel`: tasks[0]: unknown field `titel`, expected one of `id`, `title`, `scope`, `criteria`, `depends_on`, `notes`, `manual_review`, `justification` at line 3 column 5"
+        "`tasks[0].titel`: tasks[0]: unknown field `titel`, expected one of `id`, `title`, `scope`, `criteria`, `depends_on`, `notes` at line 3 column 5"
     );
     let text = err::<TasksFile>("tasks:\n  - id: t\n    title: x\n    scope: [a]\n    criteria: [{ cmd: true, typ: guard }]\n");
     assert_eq!(
         text,
         "`tasks[0].criteria[0].typ`: tasks[0].criteria[0]: unknown field `typ`, expected `cmd` or `type` at line 5 column 29"
+    );
+}
+
+/// A task's `criteria` are its whole verification, and what no command can
+/// settle goes behind a `gate`, where a person decides. A document that asks
+/// for a judge instead is refused with the key it wrote.
+#[test]
+fn a_task_that_asks_to_be_reviewed_by_hand_is_refused_with_the_key_it_wrote() {
+    let text = err::<TasksFile>(
+        "tasks:\n  - id: t\n    title: x\n    scope: [a]\n    criteria: [{ cmd: \"cargo test\" }]\n    manual_review: true\n    justification: \"no command reads prose\"\n",
+    );
+    assert_eq!(
+        text,
+        "`tasks[0].manual_review`: tasks[0]: unknown field `manual_review`, expected one of `id`, `title`, `scope`, `criteria`, `depends_on`, `notes` at line 6 column 5"
     );
 }
 

@@ -40,8 +40,6 @@ fn task(id: &str, scope: &[&str], criteria: Vec<Criterion>, depends_on: &[&str])
         criteria,
         depends_on: depends_on.iter().map(|&d| d.into()).collect(),
         notes: None,
-        manual_review: false,
-        justification: None,
     }
 }
 
@@ -170,26 +168,6 @@ fn a_guard_alongside_a_real_criterion_is_fine() {
             &[],
         )],
     };
-    assert_eq!(check(&tasks), Vec::new());
-}
-
-#[test]
-fn manual_review_without_justification_is_reported() {
-    let mut tasks = TasksFile {
-        tasks: vec![task("a", &["src/**"], vec![cmd("true")], &[])],
-    };
-    tasks.tasks[0].manual_review = true;
-    let errors = check(&tasks);
-    assert_eq!(codes(&errors), ["manual-review-without-justification"]);
-}
-
-#[test]
-fn manual_review_with_justification_is_fine() {
-    let mut tasks = TasksFile {
-        tasks: vec![task("a", &["docs/**"], vec![cmd("true")], &[])],
-    };
-    tasks.tasks[0].manual_review = true;
-    tasks.tasks[0].justification = Some("prose review, no command can verify tone".to_string());
     assert_eq!(check(&tasks), Vec::new());
 }
 

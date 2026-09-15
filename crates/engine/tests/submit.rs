@@ -268,8 +268,7 @@ sessions:
             tasks:
               - id: alpha
                 title: "First"
-                scope: ["src/alpha/**"]
-                manual_review: "yes"
+                scope: "src/alpha/**"
                 criteria:
                   - cmd: "cargo test alpha"
     outcome: { type: completed, summary: "gave up" }
@@ -279,7 +278,7 @@ sessions:
     let report = refusals(&bench).pop().expect("the refusal is on the log");
     let rendered = report.diagnostics[0].to_string();
     assert!(
-        rendered.contains("tasks[0].manual_review"),
+        rendered.contains("tasks[0].scope"),
         "the path locates the value: {rendered}"
     );
 }

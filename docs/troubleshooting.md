@@ -116,7 +116,7 @@ once. A document that does not read into its kind is refused with that one probl
 and the path where it sits:
 
 ```
-  1. does not parse at `tasks[1].manual_review`: invalid type: string "yes", expected a boolean
+  1. does not parse at `tasks[1].scope`: invalid type: string "src/**", expected a sequence
 ```
 
 A value of the wrong type stops the read, and the rules only hold over a document

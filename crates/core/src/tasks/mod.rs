@@ -64,14 +64,6 @@ pub struct Task {
     pub depends_on: Vec<TaskId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub manual_review: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub justification: Option<String>,
-}
-
-fn is_false(b: &bool) -> bool {
-    !b
 }
 
 mod rules;

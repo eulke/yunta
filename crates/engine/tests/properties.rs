@@ -683,18 +683,23 @@ proptest! {
         for k in 1..=log.len() {
             let cur = derive(&log[..k]);
             prop_assert!(cur.total_tokens().total() >= prev.total_tokens().total());
+            // The one event this prefix added is the only thing that can
+            // have taken a finding back, so the property reads it rather
+            // than the ledger: a run-level finding has no node to ask
+            // about, and it is withdrawn the same way any other is.
+            let added = &log[k - 1];
             for posted in prev.findings.effective() {
                 let stands = cur
                     .findings
                     .effective()
                     .iter()
                     .any(|now| now.node == posted.node && now.finding.id == posted.finding.id);
-                let withdrawn = posted.node.as_ref().is_some_and(|node| {
-                    matches!(
-                        cur.findings.status(node, &posted.finding.id),
-                        Some(yunta_core::events::findings::Slot::Withdrawn { .. })
-                    )
-                });
+                let withdrawn = added.node_id == posted.node
+                    && matches!(
+                        added.payload(),
+                        Some(EventPayload::Findings(FindingEvent::Withdrawn(taken)))
+                            if taken.id == posted.finding.id
+                    );
                 prop_assert!(
                     stands || withdrawn,
                     "finding {} left the set without a withdrawal",

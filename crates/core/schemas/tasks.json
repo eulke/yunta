@@ -69,15 +69,6 @@
         "id": {
           "$ref": "#/$defs/TaskId"
         },
-        "justification": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "manual_review": {
-          "type": "boolean"
-        },
         "notes": {
           "type": [
             "string",

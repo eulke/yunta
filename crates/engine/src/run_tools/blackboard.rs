@@ -55,7 +55,7 @@ impl SessionTools {
     /// Whether this session's node sits in a `coordination: blackboard`
     /// group — the mount rule for `yunta_get_blackboard`.
     pub(super) fn in_blackboard_group(&self) -> bool {
-        self.host.blackboard_members.contains_key(&self.node)
+        self.host.is_blackboard_member(&self.node)
     }
 
     pub(super) async fn get_blackboard(&self) -> Result<String, RunToolError> {

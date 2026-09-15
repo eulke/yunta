@@ -175,7 +175,7 @@ registered: ...` — and puts the canonical document into the run: the bytes und
 `objects/`, the acceptance on the log. A refusal lists every
 rule the document breaks, all at once — or, when the
 object does not read into its kind at all, that one problem and the path where it
-sits (`tasks[1].manual_review`), because a value of the wrong type stops the read
+sits (`tasks[1].scope`), because a value of the wrong type stops the read
 before any rule can hold. Either way the session fixes it and submits again: a
 refused document costs a call, not a session. The document the node holds is the
 last one it got accepted, and the node's close asks the log for it — no file

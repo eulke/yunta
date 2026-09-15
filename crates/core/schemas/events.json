@@ -951,7 +951,7 @@
         {
           "oneOf": [
             {
-              "description": "The document does not parse into its kind: an unknown key, a\nvalue of the wrong type, an id that is not one. `path` locates\nthe offending value from the document's root\n(`tasks[1].manual_review`), and is empty when the root itself is\nthe problem; `message` is what the deserializer said about that\nvalue, which names the key and what it expected.",
+              "description": "The document does not parse into its kind: an unknown key, a\nvalue of the wrong type, an id that is not one. `path` locates\nthe offending value from the document's root (`tasks[1].scope`),\nand is empty when the root itself is the problem; `message` is\nwhat the deserializer said about that value, which names the key\nand what it expected.",
               "type": "object",
               "properties": {
                 "message": {
@@ -2388,7 +2388,6 @@
             "empty-scope",
             "no-criteria",
             "dependency-cycle",
-            "manual-review-without-justification",
             "empty-text",
             "empty-detail"
           ]

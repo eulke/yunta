@@ -35,8 +35,6 @@ en el event log.
 | `criteria` | lista de objetos, ≥1 | sí | ver la tabla de `criteria[]` más abajo |
 | `depends_on` | lista de ids | no | default vacío |
 | `notes` | string | no | contexto mínimo para un runner sin historial |
-| `manual_review` | bool | no | requiere `justification` |
-| `justification` | string no vacío | solo si `manual_review` | por qué no es verificable por comando |
 
 ### 2.1 `criteria[]`
 
@@ -50,7 +48,7 @@ estar en rojo antes del trabajo, y el pre-check pierde sentido.
 
 ## 3. Validación al registrar
 
-Nueve reglas, cada una con su código estable: el mismo con el que el engine la
+Ocho reglas, cada una con su código estable: el mismo con el que el engine la
 publica junto a la forma del documento, con el que la nombra el diagnóstico cuando
 se rompe y con el que un reporte la cuenta. El engine rechaza el documento
 completo — y falla el nodo que lo produjo — si alguna no se cumple:
@@ -69,13 +67,11 @@ completo — y falla el nodo que lo produjo — si alguna no se cumple:
 8. `overlapping-scope` — dos tareas sin dependencia entre sí declaran scopes
    disjuntos; un solapamiento impide correrlas en paralelo y vuelve ambiguo el
    diff, así que o se separan los scopes o se declara la dependencia.
-9. `manual-review-without-justification` — `manual_review: true` lleva una
-   `justification` no vacía, y los criterios de la tarea siguen valiendo.
 
 Estas reglas corren como parte de la lectura del documento, no como un paso aparte
 que un llamador pueda saltear: quien obtiene un documento de tareas obtiene uno que las cumple.
 Y se publican antes de que el documento se escriba: la lista que las aplica es la
-misma que el contrato le entrega a la sesión, así que ninguna de las nueve llega
+misma que el contrato le entrega a la sesión, así que ninguna de las ocho llega
 por primera vez como un fallo (D143).
 
 Lo que el engine **no** valida acá: que los comandos existan o sean correctos — eso
@@ -138,9 +134,12 @@ intento de forzarlas:
 - **Tareas que exigen entorno externo** — los adapters reales necesitan
   un CLI instalado y autenticado; la distribución necesita cinco plataformas.
   No son verificables por un criterio local y se hacen a mano.
-- **Tareas de juicio** — documentación, revisión de redacción. Ahí `manual_review` es
-  la salida honesta.
+- **Tareas de juicio** — documentación, revisión de redacción. Lo que no cierra
+  ningún comando no es una tarea: el autor del workflow lo pone detrás de un
+  `gate`, donde una persona mira y decide.
 
-Que el schema tenga una salida explícita para lo no verificable es deliberado: sin
+Que lo no verificable por comando tenga una salida explícita es deliberado: sin
 ella, esas tareas tentarían a inventar criterios falsos — exactamente los criterios
-triviales que el pre-check en rojo existe para rechazar.
+triviales que el pre-check en rojo existe para rechazar. La salida es el `gate`,
+fuera del documento de tareas, y quien la cierra es una persona y no quien hizo
+el trabajo.

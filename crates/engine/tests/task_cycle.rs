@@ -103,8 +103,6 @@ fn task(id: &str, scope: &[&str], criteria: Vec<Criterion>) -> Task {
         criteria,
         depends_on: vec![],
         notes: None,
-        manual_review: false,
-        justification: None,
     }
 }
 

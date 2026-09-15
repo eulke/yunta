@@ -84,7 +84,6 @@ rule_codes! {
     DependencyCycle => "dependency-cycle",
     /// Two independent tasks reach for the same files.
     OverlappingScope => "overlapping-scope",
-    ManualReviewWithoutJustification => "manual-review-without-justification",
     EmptyText => "empty-text",
     EmptyDetail => "empty-detail",
     /// An update or a withdrawal names a finding this node never posted.
@@ -134,10 +133,10 @@ pub struct Rule {
 pub enum Problem {
     /// The document does not parse into its kind: an unknown key, a
     /// value of the wrong type, an id that is not one. `path` locates
-    /// the offending value from the document's root
-    /// (`tasks[1].manual_review`), and is empty when the root itself is
-    /// the problem; `message` is what the deserializer said about that
-    /// value, which names the key and what it expected.
+    /// the offending value from the document's root (`tasks[1].scope`),
+    /// and is empty when the root itself is the problem; `message` is
+    /// what the deserializer said about that value, which names the key
+    /// and what it expected.
     Parse {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         path: String,

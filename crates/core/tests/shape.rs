@@ -102,12 +102,12 @@ fn a_rule_names_its_subject_the_way_the_document_names_it() {
 #[test]
 fn a_value_of_the_wrong_type_is_located_by_its_path() {
     let report = read::<TasksFile>(
-        b"tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    manual_review: yes please\n    criteria:\n      - cmd: \"cargo test\"\n",
+        b"tasks:\n  - id: t1\n    title: Work\n    scope: \"src/**\"\n    criteria:\n      - cmd: \"cargo test\"\n",
         PLAN,
     )
-    .expect_err("a string where a boolean belongs");
+    .expect_err("a string where a sequence belongs");
     let text = report.to_string();
-    assert!(text.contains("tasks[0].manual_review"), "{text}");
+    assert!(text.contains("tasks[0].scope"), "{text}");
 }
 
 #[test]

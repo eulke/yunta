@@ -44,7 +44,15 @@ pub struct RunToolsHost {
     /// host's listeners append — the same door the run's own appends go
     /// through.
     pub(super) redactor: yunta_core::Redactor,
-    pub(super) blackboard_members: HashMap<NodeId, Vec<NodeId>>,
+    /// The members of each `coordination: blackboard` group, by the
+    /// group's own id and in declaration order — what the group
+    /// consolidates when it closes, and what each of its members reads
+    /// while it runs. One reading of the workflow, so no consumer can
+    /// compute a second list.
+    groups: HashMap<NodeId, Vec<NodeId>>,
+    /// Which group a node belongs to — the mount rule for
+    /// `yunta_get_blackboard`.
+    member_of: HashMap<NodeId, NodeId>,
     /// Where the run keeps its artifacts. A session's working directory is
     /// the worktree, not this, so a tool that reads what the node declared
     /// has to be told.
@@ -75,7 +83,8 @@ impl RunToolsHost {
             max_artifact_bytes,
             redactor,
         } = host;
-        let mut blackboard_members = HashMap::new();
+        let mut groups = HashMap::new();
+        let mut member_of = HashMap::new();
         for node in &workflow.nodes {
             if let NodeKind::Parallel {
                 coordination: Coordination::Blackboard,
@@ -83,17 +92,21 @@ impl RunToolsHost {
                 ..
             } = &node.kind
             {
-                let member_ids: Vec<NodeId> = children.iter().map(|c| c.id.clone()).collect();
                 for child in children {
-                    blackboard_members.insert(child.id.clone(), member_ids.clone());
+                    member_of.insert(child.id.clone(), node.id.clone());
                 }
+                groups.insert(
+                    node.id.clone(),
+                    children.iter().map(|c| c.id.clone()).collect(),
+                );
             }
         }
         Self {
             storage,
             run_id,
             redactor,
-            blackboard_members,
+            groups,
+            member_of,
             clock,
             observer,
             run_dir,
@@ -107,7 +120,19 @@ impl RunToolsHost {
     /// need it (a declared coordination the adapter can't carry is a
     /// node failure, never silent emulation).
     pub fn is_blackboard_member(&self, node: &NodeId) -> bool {
-        self.blackboard_members.contains_key(node)
+        self.member_of.contains_key(node)
+    }
+
+    /// The members of the `coordination: blackboard` group `node` is —
+    /// in declaration order — or of the group it belongs to. Empty for
+    /// a node that is neither.
+    ///
+    /// The group asks when it closes and a member asks while it runs,
+    /// and both get the same list: what a group consolidates is exactly
+    /// what its members could read.
+    pub fn members_of(&self, node: &NodeId) -> &[NodeId] {
+        let group = self.member_of.get(node).unwrap_or(node);
+        self.groups.get(group).map_or(&[], Vec::as_slice)
     }
 }
 

@@ -200,17 +200,16 @@ under `of`, names the entry the problem is about; for a workflow that is `node`.
 
 A problem is one of two shapes, under the key `problem`. `parse` carries `message`
 and, unless the root itself is at fault, the `path` of the value that stopped the
-read (`tasks[1].manual_review`); its stable code is `parse`. `rule` carries a
-`code` from a closed set and the `detail` a reader acts on. A node fails on an
+read (`tasks[1].scope`); its stable code is `parse`. `rule` carries a `code` from a
+closed set and the `detail` a reader acts on. A node fails on an
 artifact with `retryable: false`: there is no second session to instruct, so
 nothing about the failure asks for one.
 
 The rules a document can break, which is that closed set: `duplicate-id`,
 `empty-title`, `empty-scope`, `no-criteria`, `all-criteria-are-guards`,
-`unknown-dependency`, `dependency-cycle`, `overlapping-scope`,
-`manual-review-without-justification`, `empty-text`, `empty-detail`,
-`unknown-id`, `withdrawn-id`, `empty-reason`, `missing-values`, `missing-answer`,
-`mismatched-answer` and `incoherent-mode`. Together with
+`unknown-dependency`, `dependency-cycle`, `overlapping-scope`, `empty-text`,
+`empty-detail`, `unknown-id`, `withdrawn-id`, `empty-reason`, `missing-values`,
+`missing-answer`, `mismatched-answer` and `incoherent-mode`. Together with
 `parse` and the six an artifact fails under, they are every stable code this
 system reports: a receipt counts by one, `status --json` publishes one, and a log
 is grepped by one.
