@@ -15,12 +15,11 @@ use yunta_core::events::{
 use yunta_core::port::{Budget, PermissionProfile};
 use yunta_core::Criterion;
 use yunta_core::Task;
-use yunta_engine::process::Supervision;
 use yunta_engine::scope_expansion::GrantLedger;
 use yunta_engine::{
     run_task, AttemptEnv, DispatchOutcome, Memo, PreCheckOutcome, ScopeGovernance, TaskOutcome,
 };
-use yunta_testkit::init_repo;
+use yunta_testkit::{init_repo, Owner};
 use yunta_testkit_core::Log;
 
 /// The setup a task session of node `build` runs under: the mock
@@ -118,6 +117,7 @@ fn task(id: &str, scope: &[&str], criteria: Vec<Criterion>) -> Task {
 
 #[tokio::test]
 async fn a_session_that_makes_the_criterion_pass_reaches_done() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
@@ -147,8 +147,7 @@ outcome: { type: completed, summary: "wrote it" }
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
-            registry: None,
-            clock: None,
+            supervision: owner.supervision(),
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -171,6 +170,7 @@ outcome: { type: completed, summary: "wrote it" }
 
 #[tokio::test]
 async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_done() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
@@ -198,8 +198,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
-            registry: None,
-            clock: None,
+            supervision: owner.supervision(),
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -216,6 +215,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
 
 #[tokio::test]
 async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
@@ -235,8 +235,7 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
-            registry: None,
-            clock: None,
+            supervision: owner.supervision(),
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -261,6 +260,7 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
 
 #[tokio::test]
 async fn a_broken_guard_blocks_before_any_attempt_runs() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
@@ -284,8 +284,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
-            registry: None,
-            clock: None,
+            supervision: owner.supervision(),
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -309,6 +308,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
 
 #[tokio::test]
 async fn an_edit_outside_scope_is_a_violation_even_if_criteria_pass() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
@@ -342,8 +342,7 @@ outcome: { type: completed, summary: "done" }
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
-            registry: None,
-            clock: None,
+            supervision: owner.supervision(),
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -363,6 +362,7 @@ outcome: { type: completed, summary: "done" }
 
 #[tokio::test]
 async fn retries_run_exactly_max_retries_plus_one_attempts_before_blocking() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
@@ -395,8 +395,7 @@ sessions:
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
-            registry: None,
-            clock: None,
+            supervision: owner.supervision(),
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -412,6 +411,7 @@ sessions:
 
 #[tokio::test]
 async fn a_non_retryable_failure_ends_the_cycle() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
@@ -444,8 +444,7 @@ sessions:
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
-            registry: None,
-            clock: None,
+            supervision: owner.supervision(),
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -472,6 +471,7 @@ sessions:
 
 #[tokio::test]
 async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
@@ -490,8 +490,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
-            registry: None,
-            clock: None,
+            supervision: owner.supervision(),
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -507,6 +506,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
 
 #[tokio::test]
 async fn pre_check_and_post_check_run_every_criterion() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
@@ -517,7 +517,7 @@ async fn pre_check_and_post_check_run_every_criterion() {
     );
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
     let (runs, outcome) =
-        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), Supervision::none())
+        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
             .await
             .unwrap();
     assert_eq!(runs.len(), 2);
@@ -526,6 +526,7 @@ async fn pre_check_and_post_check_run_every_criterion() {
 
 #[tokio::test]
 async fn a_criterion_is_reused_when_the_tree_and_config_havent_changed_since_the_last_check() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -544,12 +545,12 @@ async fn a_criterion_is_reused_when_the_tree_and_config_havent_changed_since_the
     );
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
-    let (first, _) = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), Supervision::none())
+    let (first, _) = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     assert!(!first[0].reused, "the first check must actually execute");
 
-    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), Supervision::none())
+    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     assert!(
@@ -567,6 +568,7 @@ async fn a_criterion_is_reused_when_the_tree_and_config_havent_changed_since_the
 
 #[tokio::test]
 async fn a_criterion_re_executes_once_the_tree_changes() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -580,14 +582,14 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
     );
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
-    yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), Supervision::none())
+    yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     // Dirty the repo's own tree — the next check must see a different
     // tree_hash (the marker file lives outside it and doesn't count).
     std::fs::write(repo.join("new-file.txt"), "changed").unwrap();
 
-    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), Supervision::none())
+    let (second, _) = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
         .await
         .unwrap();
     assert!(
@@ -601,6 +603,7 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
 
 #[tokio::test]
 async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
@@ -628,8 +631,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
                 budget,
                 memo: &memo,
                 history: &unpriced(),
-                registry: None,
-                clock: None,
+                supervision: owner.supervision(),
             },
             ungoverned(&GrantLedger::new(0)),
             None,
@@ -651,6 +653,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
 
 #[tokio::test]
 async fn exceeding_max_tokens_cuts_the_session_before_its_outcome() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
@@ -687,8 +690,7 @@ outcome: { type: completed, summary: "should never be reached" }
             budget,
             memo: &memo,
             history: &unpriced(),
-            registry: None,
-            clock: None,
+            supervision: owner.supervision(),
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -710,6 +712,7 @@ outcome: { type: completed, summary: "should never be reached" }
 
 #[tokio::test]
 async fn pre_check_orders_criteria_by_the_median_duration_the_log_recorded() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
@@ -720,7 +723,7 @@ async fn pre_check_orders_criteria_by_the_median_duration_the_log_recorded() {
     // A log that priced nothing: declared order, and this pass records
     // what each command cost.
     let (runs, outcome) =
-        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), Supervision::none())
+        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
             .await
             .unwrap();
     assert_eq!(outcome, PreCheckOutcome::Red);
@@ -736,7 +739,7 @@ async fn pre_check_orders_criteria_by_the_median_duration_the_log_recorded() {
     std::fs::write(dir.path().join("changed.txt"), "x").unwrap();
     let history = priced(&[(costly, &[400, 600]), (cheap, &[5, 7])]);
     let (runs, outcome) =
-        yunta_engine::pre_check(&t, dir.path(), &memo, &history, Supervision::none())
+        yunta_engine::pre_check(&t, dir.path(), &memo, &history, owner.supervision())
             .await
             .unwrap();
     assert_eq!(
@@ -753,13 +756,14 @@ async fn pre_check_orders_criteria_by_the_median_duration_the_log_recorded() {
 
 #[tokio::test]
 async fn reused_criteria_carry_no_duration() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
     let t = task("T1", &["**"], vec![cmd("test -f never.txt")]);
 
     let (runs, _) =
-        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), Supervision::none())
+        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
             .await
             .unwrap();
     assert!(!runs[0].reused);
@@ -768,7 +772,7 @@ async fn reused_criteria_carry_no_duration() {
     // Same tree: the memo answers, and a reused result has no duration
     // of its own (nothing ran).
     let (runs, _) =
-        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), Supervision::none())
+        yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
             .await
             .unwrap();
     assert!(runs[0].reused);
@@ -777,6 +781,7 @@ async fn reused_criteria_carry_no_duration() {
 
 #[tokio::test]
 async fn criterion_declaration_order_never_alters_the_pre_check_verdict() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     // A trivially-green criterion among red ones: the verdict must be
@@ -796,7 +801,7 @@ async fn criterion_declaration_order_never_alters_the_pre_check_verdict() {
         let memo = Memo::new(yunta_core::sha256_hex(format!("config-{i}").as_bytes()));
         let t = task("T1", &["**"], permutation);
         let (_, outcome) =
-            yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), Supervision::none())
+            yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
                 .await
                 .unwrap();
         verdicts.push(outcome);
@@ -842,6 +847,7 @@ impl yunta_engine::SessionObserver for FailingObserver {
 
 #[tokio::test]
 async fn a_lost_session_audit_event_fails_the_task() {
+    let owner = Owner::new();
     // A session's audit event that cannot be appended is not dropped
     // with a warning: the storage cause travels back and fails the task,
     // so the trail never silently loses an event.
@@ -876,8 +882,7 @@ outcome: { type: completed, summary: "wrote it" }
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
-            registry: None,
-            clock: None,
+            supervision: owner.supervision(),
         },
         ungoverned(&GrantLedger::new(0)),
         Some((&observer as &dyn yunta_engine::SessionObserver, &node)),

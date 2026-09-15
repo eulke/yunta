@@ -127,6 +127,14 @@ pub enum RunError {
     #[error("run is broken: {diagnostic}")]
     Broken { diagnostic: String },
 
+    /// The invocation's token fired while the run was being born, or
+    /// while it was preparing the tree a run works on. A birth has no
+    /// log of its own to record a pause on, so it says so to its
+    /// caller — a `kind: workflow` node turns it into the parent's
+    /// `run_paused { cancelled by user }`, and a CLI into its own exit.
+    #[error("cancelled by user")]
+    Cancelled,
+
     /// A `HumanInteraction` surface returned an option the escalation it
     /// was shown never offered: a decision nobody was given, refused
     /// rather than recorded as the gate's outcome.
@@ -183,7 +191,7 @@ pub enum RunError {
     },
 
     #[error(transparent)]
-    Git(#[from] crate::git::GitError),
+    Git(crate::git::GitError),
 
     #[error("failed to serialize the manifest for `{path}`: {detail}")]
     ManifestWrite { path: PathBuf, detail: String },
@@ -215,7 +223,7 @@ pub enum RunError {
     EventsExport(#[from] crate::events_export::EventsExportError),
 
     #[error(transparent)]
-    Worktree(#[from] crate::worktree::WorktreeError),
+    Worktree(crate::worktree::WorktreeError),
 
     /// An artifact the run acquired that could not become a fact of the
     /// run: its bytes, its acceptance or its view did not land.
@@ -227,6 +235,27 @@ pub enum RunError {
     /// accepted.
     #[error(transparent)]
     Object(#[from] crate::artifacts::ObjectError),
+}
+
+/// A git the caller's token stopped is not a failure of anything: it is
+/// the invocation being cancelled, and it says so wherever it surfaces.
+/// One conversion, so no call site has to remember to ask.
+impl From<crate::git::GitError> for RunError {
+    fn from(git: crate::git::GitError) -> Self {
+        match git.cancelled() {
+            true => RunError::Cancelled,
+            false => RunError::Git(git),
+        }
+    }
+}
+
+impl From<crate::worktree::WorktreeError> for RunError {
+    fn from(worktree: crate::worktree::WorktreeError) -> Self {
+        match worktree.cancelled() {
+            true => RunError::Cancelled,
+            false => RunError::Worktree(worktree),
+        }
+    }
 }
 
 /// How `execute_run` came back: everything done, waiting on a human, or
@@ -283,7 +312,10 @@ pub struct RunEnv<'a> {
     pub max_task_retries: u32,
     pub human_interaction: &'a dyn HumanInteraction,
     pub forge: Option<&'a dyn Forge>,
-    pub cancel: Option<&'a CancellationToken>,
+    /// What stops this run: the invocation's own token, which the shell
+    /// that started it owns. Every subprocess the run spawns is born
+    /// under it, so a Ctrl-C reaches the whole tree.
+    pub cancel: &'a CancellationToken,
     /// `yunta run --adapter <id>`: every role resolves to its candidate
     /// on this adapter, or fails naming what it tried. Invocation-scoped,
     /// never frozen: the log's `runner_resolved` records the discards.

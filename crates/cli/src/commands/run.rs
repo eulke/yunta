@@ -302,6 +302,7 @@ async fn build_frozen_manifest(
         workflow_dir,
         &ctx.cwd,
         &provided_inputs,
+        ctx.supervision(),
     )
     .await?;
     frozen.manifest.paths = Some(yunta_core::FrozenPaths::new(
@@ -352,7 +353,7 @@ pub(super) async fn create_run_from(
         &manifest.base_commit,
         &yunta_engine::run_branch(&run_id),
         manifest.isolation,
-        yunta_engine::process::Supervision::none(),
+        ctx.supervision(),
     )
     .await?
     {
@@ -397,7 +398,7 @@ pub(super) async fn create_run_from(
             baseline: None,
         },
         storage,
-        &ctx.clock,
+        ctx.supervision(),
     )
     .await?;
 

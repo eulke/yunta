@@ -243,11 +243,11 @@ pub struct AttemptEnv<'a> {
     /// reads to run the cheap criteria before the expensive ones,
     /// derived from the same log every wake derives its state from.
     pub history: &'a TaskLedger,
-    /// Where every criterion's process registers for the run.
-    pub registry: Option<&'a crate::process_registry::ProcessRegistry>,
-    /// What tells the time inside the cycle: a lock's holder is judged
-    /// against it, never against the process clock.
-    pub clock: Option<&'a dyn yunta_core::Clock>,
+    /// What every subprocess of the cycle is born under: the run's
+    /// registry, the node's token, the run's `subprocess_vars` and the
+    /// run's clock. It reaches the spawn by parameter, so a criterion
+    /// runs under the same governance as the session before it.
+    pub supervision: Supervision<'a>,
 }
 
 /// Runs a task through the full cycle: pre-check once, then
@@ -284,15 +284,8 @@ pub async fn run_task(
         budget,
         memo,
         history,
-        registry,
-        clock,
+        supervision,
     } = env;
-    let supervision = Supervision {
-        registry,
-        cancel: Some(cancel),
-        env: &[],
-        clock,
-    };
     let ScopeGovernance {
         permissions,
         profile,
@@ -320,7 +313,7 @@ pub async fn run_task(
     // caller to read as a verdict. A `join: any` sibling winning between
     // the batch starting and this task's first check is exactly that
     // case: the task was cut, not judged.
-    if supervision.cancel.is_some_and(|token| token.is_cancelled()) {
+    if supervision.cancel.is_cancelled() {
         return Ok(TaskCycleReport {
             task_id: task.id.clone(),
             staged: last_staged.clone(),

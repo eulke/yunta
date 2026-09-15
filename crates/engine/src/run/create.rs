@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{ArtifactId, EventPayload, RecordedOrigin, RunCreatedPayload};
-use yunta_core::{Clock, CommitSha, InputName, Manifest, ModeName, NodeId, RunId, TaskId};
+use yunta_core::{CommitSha, InputName, Manifest, ModeName, NodeId, RunId, TaskId};
 use yunta_storage::AsyncStorage;
 
 use crate::artifacts::accept;
@@ -122,8 +122,11 @@ pub struct CreateRunParams<'a> {
 pub async fn create_run(
     params: CreateRunParams<'_>,
     storage: &AsyncStorage,
-    clock: &dyn Clock,
+    supervision: crate::process::Supervision<'_>,
 ) -> Result<PathBuf, RunError> {
+    // One clock per birth: whatever the caller tells the time by is what
+    // stamps the log and what judges a lock's holder.
+    let clock = supervision.clock;
     let CreateRunParams {
         run_id,
         manifest,
@@ -161,7 +164,7 @@ pub async fn create_run(
     // Everything the run must be able to answer for is resolved before
     // it exists: a source whose log cannot be read leaves no run
     // directory and no `run_created` behind.
-    let documents = birth_registrations(artifacts, worktree, storage).await?;
+    let documents = birth_registrations(artifacts, worktree, storage, supervision).await?;
 
     let run_dir = runs_root.join(run_id.as_str());
     tokio::fs::create_dir_all(runs_root)
@@ -290,6 +293,7 @@ async fn birth_registrations(
     artifacts: &[BirthArtifact],
     worktree: &Path,
     storage: &AsyncStorage,
+    supervision: crate::process::Supervision<'_>,
 ) -> Result<Vec<Option<BirthDocument>>, RunError> {
     let tasks = ArtifactId::Interpreted {
         kind: yunta_core::ArtifactKind::Tasks,
@@ -319,18 +323,7 @@ async fn birth_registrations(
                         slot.insert(crate::tasks::standing_of(run, &events)?)
                     }
                 };
-                Some(
-                    crate::tasks::carried_into(
-                        standing,
-                        &document,
-                        worktree,
-                        // Creating a run has no run to cancel yet: the
-                        // git that answers what the tree carries is the
-                        // caller's, bounded by its own invocation.
-                        crate::process::Supervision::none(),
-                    )
-                    .await?,
-                )
+                Some(crate::tasks::carried_into(standing, &document, worktree, supervision).await?)
             }
         };
         documents.push(Some(BirthDocument { document, carried }));

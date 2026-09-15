@@ -75,6 +75,7 @@ pub async fn build_manifest(
     workflow_dir: &Path,
     repo: &Path,
     provided_inputs: &HashMap<InputName, String>,
+    supervision: crate::process::Supervision<'_>,
 ) -> Result<FrozenRun, ManifestError> {
     let mut workflow = workflow.clone();
     yunta_core::workflow::read::expand_runner_fanout(&mut workflow);
@@ -88,14 +89,14 @@ pub async fn build_manifest(
         freeze_prompt(node, workflow_dir, &mut prompts).await?;
     }
 
-    let base_commit: CommitSha =
-        git_line(repo, &["rev-parse", "HEAD"])?
-            .parse()
-            .map_err(|source| ManifestError::BaseCommit {
-                cwd: repo.to_path_buf(),
-                source,
-            })?;
-    let base_branch = git_line(repo, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    let base_commit: CommitSha = git_line(repo, &["rev-parse", "HEAD"], supervision)
+        .await?
+        .parse()
+        .map_err(|source| ManifestError::BaseCommit {
+            cwd: repo.to_path_buf(),
+            source,
+        })?;
+    let base_branch = git_line(repo, &["rev-parse", "--abbrev-ref", "HEAD"], supervision).await?;
 
     let manifest = Manifest {
         schema_version: <Manifest as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
@@ -199,8 +200,13 @@ async fn freeze_prompt(
     Ok(())
 }
 
-fn git_line(repo: &Path, args: &[&str]) -> Result<String, ManifestError> {
-    crate::git::output_blocking(repo, args)
+async fn git_line(
+    repo: &Path,
+    args: &[&str],
+    supervision: crate::process::Supervision<'_>,
+) -> Result<String, ManifestError> {
+    crate::git::output(repo, args, supervision)
+        .await
         .map(|stdout| stdout.trim().to_string())
         .map_err(|e| {
             let detail = e.detail();

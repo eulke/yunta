@@ -6,12 +6,13 @@ use std::collections::HashMap;
 
 use yunta_core::ConfigLayer;
 use yunta_engine::build_manifest;
-use yunta_testkit::{init_repo, write};
+use yunta_testkit::{init_repo, write, Owner};
 
 const LEAF: &str = "name: leaf\nnodes:\n  - { id: work, kind: bash, run: \"true\" }\n";
 
 #[tokio::test]
 async fn a_repo_origin_workflow_freezes_no_pack_provenance() {
+    let owner = Owner::new();
     let repo = tempfile::tempdir().unwrap();
     init_repo(repo.path());
     let workflow_dir = repo.path().join(".yunta/workflows");
@@ -24,6 +25,7 @@ async fn a_repo_origin_workflow_freezes_no_pack_provenance() {
         &workflow_dir,
         repo.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -34,6 +36,7 @@ async fn a_repo_origin_workflow_freezes_no_pack_provenance() {
 
 #[tokio::test]
 async fn a_pack_origin_workflow_freezes_publisher_name_and_version() {
+    let owner = Owner::new();
     let repo = tempfile::tempdir().unwrap();
     init_repo(repo.path());
     let pack_dir = repo.path().join(".yunta/packs/acme/review-pack");
@@ -51,6 +54,7 @@ async fn a_pack_origin_workflow_freezes_publisher_name_and_version() {
         &pack_dir,
         repo.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -65,6 +69,7 @@ async fn a_pack_origin_workflow_freezes_publisher_name_and_version() {
 
 #[tokio::test]
 async fn a_pack_origin_workflow_also_freezes_the_locked_commit_when_one_exists() {
+    let owner = Owner::new();
     let repo = tempfile::tempdir().unwrap();
     init_repo(repo.path());
     let pack_dir = repo.path().join(".yunta/packs/acme/review-pack");
@@ -88,6 +93,7 @@ async fn a_pack_origin_workflow_also_freezes_the_locked_commit_when_one_exists()
         &pack_dir,
         repo.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -105,6 +111,7 @@ async fn a_pack_origin_workflow_also_freezes_the_locked_commit_when_one_exists()
 
 #[tokio::test]
 async fn a_pack_with_no_readable_manifest_freezes_no_provenance_rather_than_failing_the_run() {
+    let owner = Owner::new();
     let repo = tempfile::tempdir().unwrap();
     init_repo(repo.path());
     // The directory exists (so origin_of reports Pack) but pack.yaml
@@ -120,6 +127,7 @@ async fn a_pack_with_no_readable_manifest_freezes_no_provenance_rather_than_fail
         &pack_dir,
         repo.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()

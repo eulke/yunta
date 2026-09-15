@@ -118,7 +118,11 @@ impl FinalState {
 /// person compares; the error is the CLI's one error type, so a case
 /// that could not run at all says why in exactly the words the command
 /// it stands in for would have used.
-pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>, CliError> {
+pub(crate) async fn run_case(
+    cwd: &Path,
+    case_path: &Path,
+    interrupt: crate::interrupt::Interrupt,
+) -> Result<Vec<String>, CliError> {
     let case: TestCase = load_yaml(case_path, "test case").map_err(|_| {
         CliError::msg(format!(
             "could not load test case `{}`",
@@ -146,9 +150,9 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         copy_dir_all(&seed, &worktree)
             .map_err(|e| CliError::io("seed the sandbox from", seed.display(), e))?;
     }
-    init_git(&worktree)?;
-
-    let ctx = Context::resolve_in(cwd.to_path_buf())?.sandboxed(worktree, sandbox.path());
+    let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
+    init_git(&worktree, ctx.supervision()).await?;
+    let ctx = ctx.sandboxed(worktree, sandbox.path());
     let storage = ctx.async_storage().await?;
     let fixture_path = beside(&case.fixture);
 
@@ -188,7 +192,7 @@ pub(crate) async fn run_case(cwd: &Path, case_path: &Path) -> Result<Vec<String>
         // gate here has no human to ask, same as it has no LLM to call.
         human_interaction: &yunta_engine::NoInteraction,
         forge: None,
-        cancel: None,
+        cancel: ctx.cancellation(),
         adapter_override: None,
         // A case's verdict is its report, compared against `expect:` —
         // there is no live surface drawing it.
@@ -310,7 +314,7 @@ async fn answered(
             ids: &ctx.ids,
             human_interaction: &yunta_engine::NoInteraction,
             forge: None,
-            cancel: None,
+            cancel: ctx.cancellation(),
             adapter_override: None,
             observer: None,
             fence_hook: ctx.fence_hook.clone(),

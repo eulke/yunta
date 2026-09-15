@@ -351,8 +351,8 @@ async fn record_resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError>
 
 /// Builds the run's context and the two invocation-scoped values the
 /// scheduler loop needs beside it: the loop's own handle on the root
-/// cancellation (`None` — tests, callers with no signal source — gets a
-/// token nothing ever fires), and the process-registry write error,
+/// cancellation, which the caller always brings, and the
+/// process-registry write error,
 /// carried past construction because a failed write has no log to record
 /// itself on until the context exists.
 fn build_ctx(
@@ -383,7 +383,7 @@ fn build_ctx(
     // secret builds an empty one and pays nothing.
     let redactor =
         yunta_core::Redactor::of(&manifest.config.secrets, secrets.as_deref().map(|s| s as _));
-    let root_cancel = cancel.cloned().unwrap_or_default();
+    let root_cancel = cancel.clone();
     let root_cancel_for_ctx = root_cancel.clone();
     let (registry, registry_error) = match crate::process_registry::ProcessRegistry::create(
         run_dir,

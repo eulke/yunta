@@ -161,3 +161,82 @@ async fn cancel_once_the_suite_is_registered(bench: &Bench, token: &Cancellation
     .await;
     token.cancel();
 }
+
+/// A birth runs git: a tasks document another run handed over is held to
+/// the tree the receiving run opens on, and the answer is a `git
+/// merge-base`. Under a token that already fired, that git dies with its
+/// tree and the birth says so — a run with no log of its own answers its
+/// caller, and nothing is left on disk to resume.
+#[tokio::test]
+async fn a_cancelled_token_stops_the_git_a_birth_runs() {
+    let token = CancellationToken::new();
+    let staging = Bench::new().with_cancel(token.clone());
+    let handed = handed_over_document(&staging);
+    let bench = staging.born_holding(vec![handed]);
+
+    // The token fires between the freeze and the birth, so the birth's
+    // own git is the first thing it meets.
+    let error = bench
+        .try_create_after(ONE_NODE, "sessions: []", yunta_testkit::MOCK_CONFIG, || {
+            token.cancel();
+        })
+        .await
+        .expect_err("a birth whose git was killed cannot say what the tree carries");
+
+    assert!(
+        matches!(error, yunta_engine::RunError::Cancelled),
+        "a stopped git is the invocation being cancelled, not the birth failing: {error:?}"
+    );
+    assert!(
+        bench.events().is_empty(),
+        "the birth reads what it was handed before it writes anything, so a cancelled one \
+         leaves no run"
+    );
+    assert!(
+        !bench.runs_root.join(bench.run_id.as_str()).exists(),
+        "and no directory either"
+    );
+}
+
+const ONE_NODE: &str = "name: born\nnodes:\n  - { id: work, kind: bash, run: \"true\" }\n";
+
+/// A tasks document another run finished a task of, at a commit
+/// `bench`'s tree carries — what makes a birth ask git whether the work
+/// crossed.
+fn handed_over_document(bench: &Bench) -> yunta_engine::BirthArtifact {
+    yunta_testkit::write(&bench.worktree.join("a.txt"), "a\n");
+    yunta_testkit::git(&bench.worktree, &["add", "."]);
+    yunta_testkit::git(&bench.worktree, &["commit", "-q", "-m", "a"]);
+    let landed: yunta_core::CommitSha =
+        yunta_testkit::git_output(&bench.worktree, &["rev-parse", "HEAD"])
+            .parse()
+            .expect("a commit sha");
+
+    let document = yunta_testkit::tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
+    let source = yunta_core::RunId::from("run-source");
+    let log = yunta_testkit::SourceLog::open(
+        &bench.storage,
+        &source,
+        std::sync::Arc::new(yunta_testkit_core::FixedClock),
+    );
+    let registered = log.record(yunta_testkit::task_registered(&document.tasks[0]));
+    log.record(yunta_testkit::status_changed_carrying(
+        &document.tasks[0].id,
+        yunta_core::events::TaskStatus::Done,
+        &landed,
+        registered,
+    ));
+
+    yunta_engine::BirthArtifact {
+        artifact: yunta_core::events::ArtifactId::Interpreted {
+            kind: yunta_core::ArtifactKind::Tasks,
+        },
+        origin: yunta_engine::BirthOrigin::Inherited {
+            run: source,
+            producer: None,
+        },
+        bytes: yunta_core::shape::render(&document)
+            .expect("the canonical rendering")
+            .into_bytes(),
+    }
+}

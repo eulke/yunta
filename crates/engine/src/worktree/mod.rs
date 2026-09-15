@@ -31,6 +31,7 @@ mod integrity;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 use yunta_core::process::signal::Liveness;
 use yunta_core::{CommitSha, InvalidId, Isolation, Pid};
 
@@ -134,6 +135,15 @@ pub enum WorktreeError {
     NoMainRepo { common_dir: PathBuf },
 }
 
+impl WorktreeError {
+    /// Whether the token this ran under fired: nobody is waiting for
+    /// the tree any more, so there is no failure to report — only a
+    /// stop to honour.
+    pub fn cancelled(&self) -> bool {
+        matches!(self, WorktreeError::Git(git) if git.cancelled())
+    }
+}
+
 /// Puts `repo` in the state a run needs before it starts: for
 /// `Isolation::Worktree`, creates a dedicated `git worktree` at
 /// `worktree_path` on a new branch `branch_name`, checked out at
@@ -173,8 +183,8 @@ pub async fn prepare_worktree(
                     })?;
             }
             let common_dir = common_git_dir(repo, supervision).await?;
-            let _mutation_lock = lock_worktree_mutations(&common_dir, supervision.clock()).await?;
-            run_git(
+            let _mutation_lock = lock_worktree_mutations(&common_dir, supervision.clock).await?;
+            match run_git(
                 repo,
                 &[
                     "worktree",
@@ -186,8 +196,15 @@ pub async fn prepare_worktree(
                 ],
                 supervision,
             )
-            .await?;
-            Ok(WorktreePrepared::Ready)
+            .await
+            {
+                Ok(_) => Ok(WorktreePrepared::Ready),
+                Err(stopped) if stopped.cancelled() => {
+                    undo_half_added(repo, worktree_path, branch_name, supervision).await;
+                    Err(stopped)
+                }
+                Err(other) => Err(other),
+            }
         }
         Isolation::None => {
             if !is_clean(repo, supervision).await? {
@@ -219,7 +236,7 @@ pub async fn hand_over_worktree(
         Isolation::Worktree => Ok(()),
         Isolation::None => {
             let lock_path = lock_path(repo, supervision).await?;
-            lock::hand_over(&lock_path, pid, &SystemProbe, supervision.clock()).map_err(|source| {
+            lock::hand_over(&lock_path, pid, &SystemProbe, supervision.clock).map_err(|source| {
                 WorktreeError::Io {
                     action: "hand over the isolation lock".to_string(),
                     path: lock_path,
@@ -300,7 +317,7 @@ pub async fn cleanup_worktree(
     // Removal rewrites the same `.git/worktrees/` metadata an
     // `add` scans — same lock, same reasoning.
     let _mutation_lock =
-        lock_worktree_mutations(Path::new(common_dir.trim()), supervision.clock()).await?;
+        lock_worktree_mutations(Path::new(common_dir.trim()), supervision.clock).await?;
     run_git(
         &main_repo,
         &[
@@ -316,6 +333,54 @@ pub async fn cleanup_worktree(
     let _ = run_git(&main_repo, &["branch", "-d", branch], supervision).await;
     Ok(WorktreeCleanup::Removed)
 }
+
+/// Undoes a `worktree add` a cancellation killed in the middle: the
+/// directory it was writing into and the branch it may already have
+/// created. Best effort throughout — what it is undoing was killed with
+/// no chance to say how far it got, so every step is allowed to find
+/// nothing to do.
+///
+/// It runs under a token of its own: the token that killed the `add`
+/// would kill the undo before it started, and the caller asked to stop
+/// making a worktree, not to be left with half of one. A bound of its
+/// own keeps it from becoming the thing that hangs a Ctrl-C.
+async fn undo_half_added(
+    repo: &Path,
+    worktree_path: &Path,
+    branch_name: &str,
+    supervision: Supervision<'_>,
+) {
+    let undo = CancellationToken::new();
+    let undo = Supervision::outside_any_run(&undo, supervision.clock).with_env(supervision.env);
+    let path = worktree_path.display().to_string();
+    for args in [
+        ["worktree", "remove", "--force", &path].as_slice(),
+        // A directory git never registered is not a worktree it can
+        // remove, and the metadata of one it half-registered is what
+        // `prune` is for.
+        ["worktree", "prune"].as_slice(),
+        // `-D`, not `-d`: this branch was born a moment ago pointing at
+        // the base commit, and nothing has been committed on it.
+        ["branch", "-D", branch_name].as_slice(),
+    ] {
+        match tokio::time::timeout(UNDO_BOUND, run_git(repo, args, undo)).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => {
+                tracing::debug!(%error, ?args, "a step of the undo found nothing to undo");
+            }
+            Err(_) => tracing::debug!(?args, "a step of the undo outlasted its bound"),
+        }
+    }
+    if let Err(error) = tokio::fs::remove_dir_all(worktree_path).await {
+        tracing::debug!(%error, path = %worktree_path.display(), "nothing left of the tree to remove");
+    }
+}
+
+/// How long the undo of a killed `worktree add` may take before it is
+/// abandoned, fixed by D170: long enough for a local git on a cold
+/// cache, short enough that a person who pressed Ctrl-C twice is not
+/// waiting on it.
+const UNDO_BOUND: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The commit `repo`'s HEAD is on — the one place the engine asks a
 /// checkout where it is, so "HEAD" means the same thing to the batch that
@@ -463,7 +528,7 @@ async fn lock(
         &lock_path,
         Contention::Refuse,
         &SystemProbe,
-        supervision.clock(),
+        supervision.clock,
     )
     .await
     {

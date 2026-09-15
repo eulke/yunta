@@ -8,16 +8,16 @@
 //! its returned `(run_id, manifest, worktree, report)` — the *last*
 //! run in the chain — for everything after (release/report).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use yunta_core::port::Forge;
-use yunta_core::{Clock, IdSource, Manifest, RunId};
+use yunta_core::{Manifest, RunId};
 use yunta_engine::{HumanInteraction, RunObserver, RunReport, RunTerminal};
 use yunta_storage::AsyncStorage;
 
+use crate::context::Context;
 use crate::error::CliError;
-use crate::project::Project;
 
 /// The CLI-side environment a promotion chain runs in — everything
 /// [`drive_promotions`] needs that stays fixed across every successor it
@@ -25,22 +25,14 @@ use crate::project::Project;
 /// (`run_id`/`manifest`/`worktree`/`report`, which change every
 /// iteration and so stay their own arguments).
 pub(crate) struct PromotionEnv<'a> {
-    pub cwd: &'a Path,
-    pub project: &'a Project,
+    /// One owner for everything a successor inherits from the
+    /// invocation: where it runs, where its state goes, the clock that
+    /// stamps it, the token that stops it, the environment its
+    /// subprocesses are born in and the hook its sessions ask.
+    pub(crate) ctx: &'a Context,
     pub(crate) storage: &'a AsyncStorage,
-    /// The invocation's own clock, so a successor is stamped by the
-    /// same reading of time its predecessor was. Injected rather than
-    /// read from the process: deciding is a pure function of what it is
-    /// handed, and a chain whose members disagree about when they
-    /// happened is a chain nobody can replay.
-    pub clock: Arc<dyn Clock>,
-    /// This binary, as the hook a CLI runs to ask the judge about one
-    /// write — the same one the predecessor ran under.
-    pub fence_hook: yunta_core::fence::FenceHook,
-    pub ids: &'a dyn IdSource,
     pub adapters: &'a super::Adapters,
     pub forge: Option<&'a dyn Forge>,
-    pub cancel: Option<&'a tokio_util::sync::CancellationToken>,
     /// Where every successor puts its questions — the same console the
     /// predecessor used, so a prompt takes its turn with the same
     /// surface and a cancellation stops a chain waiting on a person
@@ -83,23 +75,21 @@ pub(crate) async fn drive_promotions(
                 id: &run_id,
                 manifest: &manifest,
                 worktree: &worktree,
-                run_dir: &env.project.runs_root.join(run_id.as_str()),
+                run_dir: &env.ctx.project.runs_root.join(run_id.as_str()),
             },
-            env.cwd,
+            &env.ctx.cwd,
             &suggested_mode,
             yunta_engine::RunRoots {
-                runs: &env.project.runs_root,
-                worktrees: &env.project.worktrees_root,
+                runs: &env.ctx.project.runs_root,
+                worktrees: &env.ctx.project.worktrees_root,
             },
             yunta_engine::CallerInfra {
                 storage: env.storage,
-                clock: env.clock.as_ref(),
-                ids: env.ids,
-                supervision: yunta_engine::process::Supervision::none(),
+                ids: &env.ctx.ids,
+                supervision: env.ctx.supervision(),
             },
         )
         .await?;
-        let ambient = crate::project::process_env();
         let successor_report = super::drive::execute(super::drive::Executing {
             run_id: &successor.run_id,
             manifest: &successor.manifest,
@@ -107,17 +97,17 @@ pub(crate) async fn drive_promotions(
             worktree: &successor.worktree,
             adapters: env.adapters,
             storage: env.storage,
-            clock: Arc::clone(&env.clock),
-            ids: env.ids,
+            clock: Arc::new(env.ctx.clock),
+            ids: &env.ctx.ids,
             human_interaction: env.human_interaction,
             forge: env.forge,
-            cancel: env.cancel,
+            cancel: env.ctx.cancellation(),
             // A successor is the run carrying on, not a new invocation:
             // the `--adapter` override belongs to whoever asked for it.
             adapter_override: None,
             observer: env.observer.clone(),
-            fence_hook: env.fence_hook.clone(),
-            ambient: &ambient,
+            fence_hook: env.ctx.fence_hook.clone(),
+            ambient: &env.ctx.env,
         })
         .await?;
 
@@ -191,20 +181,31 @@ nodes:
         init_repo(&cwd);
         std::fs::create_dir_all(cwd.join(".yunta")).unwrap();
 
-        let project = Project {
-            config: ConfigLayer::default(),
-            runs_root: root.path().join("runs"),
-            worktrees_root: root.path().join("worktrees"),
-            storage_path: root.path().join("yunta.db"),
-        };
+        let ctx = Context::for_test(
+            cwd.clone(),
+            crate::project::Project {
+                config: ConfigLayer::default(),
+                runs_root: root.path().join("runs"),
+                worktrees_root: root.path().join("worktrees"),
+                storage_path: root.path().join("yunta.db"),
+            },
+        );
+        let project = &ctx.project;
         let storage = Storage::open(&project.storage_path).unwrap();
         let adapters = crate::commands::Adapters::new();
 
         let workflow: Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
-        let manifest = build_manifest(&workflow, &project.config, &cwd, &cwd, &HashMap::new())
-            .await
-            .unwrap()
-            .manifest;
+        let manifest = build_manifest(
+            &workflow,
+            &project.config,
+            &cwd,
+            &cwd,
+            &HashMap::new(),
+            ctx.supervision(),
+        )
+        .await
+        .unwrap()
+        .manifest;
 
         let run_id = RunId::from("run-parent");
         let worktree = project.worktrees_root.join(run_id.as_str());
@@ -214,7 +215,7 @@ nodes:
             &manifest.base_commit,
             &yunta_engine::run_branch(&run_id),
             manifest.isolation,
-            yunta_engine::process::Supervision::none(),
+            ctx.supervision(),
         )
         .await
         .unwrap();
@@ -230,7 +231,7 @@ nodes:
                 baseline: None,
             },
             &storage.async_handle(),
-            &SystemClock,
+            ctx.supervision(),
         )
         .await
         .unwrap();
@@ -247,7 +248,7 @@ nodes:
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction: &AlwaysPromote,
             forge: None,
-            cancel: None,
+            cancel: ctx.cancellation(),
             adapter_override: None,
             ambient: None,
             secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
@@ -263,15 +264,10 @@ nodes:
 
         let (final_id, _final_manifest, _final_worktree, final_report) = drive_promotions(
             &PromotionEnv {
-                clock: Arc::new(SystemClock),
-                fence_hook: crate::context::fence_hook(),
-                cwd: &cwd,
-                project: &project,
+                ctx: &ctx,
                 storage: &storage.async_handle(),
-                ids: &yunta_core::SystemIdSource,
                 adapters: &adapters,
                 forge: None,
-                cancel: None,
                 human_interaction: &AlwaysPromote,
                 observer: Some(recorder.clone()),
             },

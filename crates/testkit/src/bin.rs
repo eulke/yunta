@@ -111,7 +111,12 @@ pub fn stderr(output: &Output) -> String {
 /// handle every follow-up command (`status`, `receipt`, `graph --run`)
 /// needs. Panics if no such line is present, naming what it saw.
 pub fn run_id_from(output: &Output) -> String {
-    let text = stdout(output);
+    run_id_in(&stdout(output))
+}
+
+/// The same, from output a test collected some other way — a log file
+/// the command was spawned onto.
+pub fn run_id_in(text: &str) -> String {
     text.lines()
         .find_map(|line| {
             line.strip_prefix("run ")

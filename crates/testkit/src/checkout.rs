@@ -34,6 +34,9 @@ pub struct Checkout {
     /// hands one over — a test that inherited the machine's would
     /// measure the machine.
     org_config: String,
+    /// Variables the binary runs with on top of the hermetic ones —
+    /// what puts a stub on its `PATH` without touching this process.
+    stubs: Vec<(String, String)>,
 }
 
 impl Checkout {
@@ -61,6 +64,7 @@ impl Checkout {
             home: root.join("state"),
             told_its_home: true,
             org_config: String::new(),
+            stubs: Vec::new(),
         }
     }
 
@@ -69,6 +73,16 @@ impl Checkout {
     /// a test about that default measures.
     pub fn without_yunta_home(mut self) -> Self {
         self.told_its_home = false;
+        self
+    }
+
+    /// Runs the binary with `vars` set on top of the hermetic
+    /// environment — a `PATH` with [`stubs::git`](crate::stubs::git)
+    /// first, and whatever that stub reads. Every subprocess the run
+    /// spawns inherits them, which is how a test reaches the git a run
+    /// is running.
+    pub fn with_stubs(mut self, vars: Vec<(String, String)>) -> Self {
+        self.stubs = vars;
         self
     }
 
@@ -94,6 +108,7 @@ impl Checkout {
         if !self.org_config.is_empty() {
             write(&self.home.join("org.yaml"), &self.org_config);
         }
+        command.envs(self.stubs.iter().map(|(key, value)| (key, value)));
         command
     }
 

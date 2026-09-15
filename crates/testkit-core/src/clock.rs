@@ -17,6 +17,7 @@ pub fn fixed_now() -> DateTime<Utc> {
 
 /// A [`Clock`] frozen at [`FIXED_NOW`] — the default for a test that only
 /// needs time to be constant, not any particular value.
+#[derive(Default)]
 pub struct FixedClock;
 
 impl Clock for FixedClock {

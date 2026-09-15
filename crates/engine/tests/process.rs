@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use yunta_core::Pid;
 use yunta_engine::process::{spawn_governed, GovernedCommand, Outcome, Supervision};
+use yunta_testkit::Owner;
+use yunta_testkit_core::FixedClock;
 
 /// True while any member of `pgid` still runs. A zombie is not
 /// running: it has exited and only waits for its parent to collect its
@@ -29,8 +31,43 @@ fn group_running(pgid: Pid) -> bool {
         .any(|(member_group, state)| member_group == group && !state.starts_with('Z'))
 }
 
+/// Outside a run there is no registry, but there is always somebody who
+/// can stop the work: a supervision that cannot be built without a token
+/// is what makes "no subprocess without an owner" a property of the type
+/// rather than of every call site remembering.
+#[tokio::test]
+async fn a_supervision_outside_any_run_still_answers_to_its_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let owner = Owner::new();
+    let marker = dir.path().join("running.marker");
+    let trigger = owner.cancellation().clone();
+    let watcher = tokio::spawn(async move {
+        while !marker.exists() {
+            tokio::task::yield_now().await;
+        }
+        trigger.cancel();
+    });
+
+    let outcome = spawn_governed(
+        GovernedCommand::shell(dir.path(), "touch running.marker; tail -f /dev/null"),
+        owner.supervision(),
+    )
+    .await
+    .unwrap();
+    watcher.await.unwrap();
+
+    let Outcome::Cancelled { pgid, .. } = outcome else {
+        panic!("expected a cancellation, got {outcome:?}");
+    };
+    assert!(
+        !group_running(pgid),
+        "a command outside any run dies with its tree like any other"
+    );
+}
+
 #[tokio::test]
 async fn context_command_timeout_leaves_no_process_alive() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     let command = GovernedCommand::shell(
         dir.path(),
@@ -38,7 +75,7 @@ async fn context_command_timeout_leaves_no_process_alive() {
     )
     .timeout(Duration::from_millis(200));
 
-    let outcome = spawn_governed(command, Supervision::none()).await.unwrap();
+    let outcome = spawn_governed(command, owner.supervision()).await.unwrap();
 
     let Outcome::TimedOut { pgid, stdout, .. } = outcome else {
         panic!("expected a timeout, got {outcome:?}");
@@ -74,17 +111,9 @@ async fn cancellation_kills_the_tree_and_drains_the_pipes() {
         "echo begun; touch running.marker; tail -f /dev/null & tail -f /dev/null",
     );
 
-    let outcome = spawn_governed(
-        command,
-        Supervision {
-            registry: None,
-            cancel: Some(&cancel),
-            env: &[],
-            clock: None,
-        },
-    )
-    .await
-    .unwrap();
+    let outcome = spawn_governed(command, Supervision::outside_any_run(&cancel, &FixedClock))
+        .await
+        .unwrap();
 
     let Outcome::Cancelled { pgid, stdout, .. } = outcome else {
         panic!("expected a cancellation, got {outcome:?}");
@@ -98,10 +127,11 @@ async fn cancellation_kills_the_tree_and_drains_the_pipes() {
 
 #[tokio::test]
 async fn a_finished_command_reports_its_status_and_both_streams() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     let command = GovernedCommand::shell(dir.path(), "echo out; echo err 1>&2; exit 3");
 
-    let outcome = spawn_governed(command, Supervision::none()).await.unwrap();
+    let outcome = spawn_governed(command, owner.supervision()).await.unwrap();
 
     let Outcome::Exited {
         status,
@@ -152,12 +182,7 @@ async fn a_cancelled_run_kills_the_git_it_spawned() {
         std::env::var("PATH").unwrap_or_default()
     );
     let env = [("PATH".to_string(), path.clone())];
-    let supervision = Supervision {
-        registry: None,
-        cancel: Some(&cancel),
-        env: &env,
-        clock: None,
-    };
+    let supervision = Supervision::outside_any_run(&cancel, &FixedClock).with_env(&env);
 
     let waiting = started.clone();
     let trigger = cancel.clone();

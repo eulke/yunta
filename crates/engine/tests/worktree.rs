@@ -15,7 +15,7 @@ use yunta_core::process::signal::Liveness;
 use yunta_core::{CommitSha, Isolation, Pid, SystemClock};
 use yunta_engine::lock::{acquire, Acquired, Contention, LockError, LockOwner, OwnerProbe};
 use yunta_engine::{prepare_worktree, release_worktree, run_branch, task_branch, WorktreeError};
-use yunta_testkit::{git_output, init_repo};
+use yunta_testkit::{git_output, init_repo, Owner};
 
 fn head(dir: &Path) -> CommitSha {
     git_output(dir, &["rev-parse", "HEAD"])
@@ -26,6 +26,7 @@ fn head(dir: &Path) -> CommitSha {
 
 #[tokio::test]
 async fn worktree_isolation_creates_a_real_git_worktree_at_base_commit() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -39,7 +40,7 @@ async fn worktree_isolation_creates_a_real_git_worktree_at_base_commit() {
         &base_commit,
         "yunta/run-1",
         Isolation::Worktree,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -53,6 +54,7 @@ async fn worktree_isolation_creates_a_real_git_worktree_at_base_commit() {
 
 #[tokio::test]
 async fn two_worktree_isolated_runs_on_the_same_repo_never_collide() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -67,7 +69,7 @@ async fn two_worktree_isolated_runs_on_the_same_repo_never_collide() {
         &base_commit,
         "yunta/run-1",
         Isolation::Worktree,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -77,7 +79,7 @@ async fn two_worktree_isolated_runs_on_the_same_repo_never_collide() {
         &base_commit,
         "yunta/run-2",
         Isolation::Worktree,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -93,6 +95,7 @@ async fn two_worktree_isolated_runs_on_the_same_repo_never_collide() {
 
 #[tokio::test]
 async fn none_isolation_with_a_clean_tree_succeeds_and_locks_the_repo() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -105,7 +108,7 @@ async fn none_isolation_with_a_clean_tree_succeeds_and_locks_the_repo() {
         &base_commit,
         "unused",
         Isolation::None,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -119,7 +122,7 @@ async fn none_isolation_with_a_clean_tree_succeeds_and_locks_the_repo() {
         &base_commit,
         "unused",
         Isolation::None,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap_err();
@@ -128,6 +131,7 @@ async fn none_isolation_with_a_clean_tree_succeeds_and_locks_the_repo() {
 
 #[tokio::test]
 async fn none_isolation_with_a_dirty_tree_is_refused_before_anything_runs() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -141,7 +145,7 @@ async fn none_isolation_with_a_dirty_tree_is_refused_before_anything_runs() {
         &base_commit,
         "unused",
         Isolation::None,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap_err();
@@ -150,6 +154,7 @@ async fn none_isolation_with_a_dirty_tree_is_refused_before_anything_runs() {
 
 #[tokio::test]
 async fn releasing_a_none_isolation_lock_lets_a_later_run_proceed() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -162,17 +167,13 @@ async fn releasing_a_none_isolation_lock_lets_a_later_run_proceed() {
         &base_commit,
         "unused",
         Isolation::None,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
-    release_worktree(
-        &repo,
-        Isolation::None,
-        yunta_engine::process::Supervision::none(),
-    )
-    .await
-    .unwrap();
+    release_worktree(&repo, Isolation::None, owner.supervision())
+        .await
+        .unwrap();
 
     // No longer locked — a fresh run may proceed.
     prepare_worktree(
@@ -181,7 +182,7 @@ async fn releasing_a_none_isolation_lock_lets_a_later_run_proceed() {
         &base_commit,
         "unused",
         Isolation::None,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -189,6 +190,7 @@ async fn releasing_a_none_isolation_lock_lets_a_later_run_proceed() {
 
 #[tokio::test]
 async fn releasing_a_worktree_isolated_run_leaves_the_worktree_on_disk() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -202,17 +204,13 @@ async fn releasing_a_worktree_isolated_run_leaves_the_worktree_on_disk() {
         &base_commit,
         "yunta/run-1",
         Isolation::Worktree,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
-    release_worktree(
-        &repo,
-        Isolation::Worktree,
-        yunta_engine::process::Supervision::none(),
-    )
-    .await
-    .unwrap();
+    release_worktree(&repo, Isolation::Worktree, owner.supervision())
+        .await
+        .unwrap();
 
     // Worktrees are left in place for inspection — cleanup is a
     // separate, not-yet-built concern (on_finish).
@@ -265,6 +263,7 @@ fn read_owner(path: &Path) -> LockOwner {
 
 #[tokio::test]
 async fn a_dead_owner_s_lock_is_stolen_and_the_takeover_is_reported() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -283,7 +282,7 @@ async fn a_dead_owner_s_lock_is_stolen_and_the_takeover_is_reported() {
         &base_commit,
         "unused",
         Isolation::None,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -303,6 +302,7 @@ async fn a_dead_owner_s_lock_is_stolen_and_the_takeover_is_reported() {
 
 #[tokio::test]
 async fn a_live_owner_s_lock_still_refuses() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -322,7 +322,7 @@ async fn a_live_owner_s_lock_still_refuses() {
         &base_commit,
         "unused",
         Isolation::None,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap_err();
@@ -331,6 +331,7 @@ async fn a_live_owner_s_lock_still_refuses() {
 
 #[tokio::test]
 async fn a_legacy_empty_lock_refuses_conservatively_naming_the_file() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -345,7 +346,7 @@ async fn a_legacy_empty_lock_refuses_conservatively_naming_the_file() {
         &base_commit,
         "unused",
         Isolation::None,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap_err();
@@ -371,6 +372,10 @@ async fn a_legacy_empty_lock_refuses_conservatively_naming_the_file() {
 /// deterministically.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn concurrent_worktree_adds_on_one_repo_never_corrupt_git_metadata() {
+    let owner = Owner::new();
+    // `Supervision` is a copy of two borrows, so every task that spawns
+    // in this round takes its own without moving what they point at.
+    let supervision = owner.supervision();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -390,7 +395,7 @@ async fn concurrent_worktree_adds_on_one_repo_never_corrupt_git_metadata() {
                     &base_commit,
                     &branch,
                     Isolation::Worktree,
-                    yunta_engine::process::Supervision::none(),
+                    supervision,
                 )
                 .await
             }
@@ -503,6 +508,7 @@ async fn a_live_holder_with_an_unknown_start_time_keeps_its_lock() {
 
 #[tokio::test]
 async fn both_locks_share_one_protocol() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -528,7 +534,7 @@ async fn both_locks_share_one_protocol() {
         &base_commit,
         "unused",
         Isolation::None,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -539,9 +545,9 @@ async fn both_locks_share_one_protocol() {
         ),
         "got: {prepared:?}"
     );
-    let owner = read_owner(&lock_file(&repo));
-    assert_eq!(owner.pid, Pid::current());
-    assert!(owner.started_at > Utc::now() - chrono::Duration::minutes(1));
+    let holder = read_owner(&lock_file(&repo));
+    assert_eq!(holder.pid, Pid::current());
+    assert!(holder.started_at > Utc::now() - chrono::Duration::minutes(1));
     assert_eq!(
         std::fs::read_to_string(&witness).unwrap(),
         stale,
@@ -557,7 +563,7 @@ async fn both_locks_share_one_protocol() {
         &base_commit,
         "yunta/shared-protocol",
         Isolation::Worktree,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -574,6 +580,7 @@ async fn both_locks_share_one_protocol() {
 /// two shapes have to be siblings, whatever a run is called.
 #[tokio::test]
 async fn a_run_branch_and_its_task_branches_coexist() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -587,7 +594,7 @@ async fn a_run_branch_and_its_task_branches_coexist() {
         &base_commit,
         &run_branch(&run),
         Isolation::Worktree,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .expect("the run's own branch");
@@ -597,7 +604,7 @@ async fn a_run_branch_and_its_task_branches_coexist() {
         &base_commit,
         &task_branch(&run, &"T001".into(), 1),
         Isolation::Worktree,
-        yunta_engine::process::Supervision::none(),
+        owner.supervision(),
     )
     .await
     .expect("a task branch of the same run, beside it and not under it");
@@ -609,6 +616,7 @@ async fn a_run_branch_and_its_task_branches_coexist() {
 /// the same branch — and the second one fails.
 #[tokio::test]
 async fn two_runs_working_the_same_task_get_their_own_branches() {
+    let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -629,7 +637,7 @@ async fn two_runs_working_the_same_task_get_their_own_branches() {
             &base_commit,
             &task_branch(run, &task, 1),
             Isolation::Worktree,
-            yunta_engine::process::Supervision::none(),
+            owner.supervision(),
         )
         .await
         .expect("each run's own task branch");

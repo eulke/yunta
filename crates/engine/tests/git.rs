@@ -17,6 +17,7 @@ fn exited_non_zero(stderr: &str) -> GitError {
         cwd: PathBuf::from("/repo"),
         stderr: stderr.to_string(),
         code: Some(128),
+        stopped: None,
         source: None,
     }
 }
@@ -99,6 +100,7 @@ fn a_git_that_never_ran_keeps_the_io_error_under_it() {
         cwd: PathBuf::from("/repo"),
         stderr: String::new(),
         code: None,
+        stopped: None,
         source: Some(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "no such file or directory",

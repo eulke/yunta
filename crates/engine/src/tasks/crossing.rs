@@ -141,7 +141,7 @@ mod tests {
 
     use yunta_core::{CommitSha, RunId, Seq, Task, TaskId};
     use yunta_testkit::{git, git_output, init_repo, tasks_document, INITIAL_BRANCH};
-    use yunta_testkit_core::Log;
+    use yunta_testkit_core::{FixedClock, Log};
 
     use super::*;
     use crate::run::RunError;
@@ -195,6 +195,12 @@ mod tests {
 
     #[tokio::test]
     async fn work_in_the_tree_crosses() {
+        // The engine's own unit tests cannot borrow `yunta_testkit::Owner`:
+        // it names this crate's `Supervision` from outside, and the lib
+        // under test is a different build of it. The constructor says the
+        // same thing in two lines.
+        let stop = tokio_util::sync::CancellationToken::new();
+        let owner = Supervision::outside_any_run(&stop, &FixedClock);
         let tree = tree();
         let landed = commit(tree.path(), "a.txt");
         let document = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
@@ -204,7 +210,7 @@ mod tests {
         )
         .expect("a log that replays");
 
-        let carried = carried_into(&standing, &document, tree.path(), Supervision::none())
+        let carried = carried_into(&standing, &document, tree.path(), owner)
             .await
             .expect("git answers");
 
@@ -217,6 +223,12 @@ mod tests {
 
     #[tokio::test]
     async fn work_on_a_branch_the_tree_never_took_does_not_cross() {
+        // The engine's own unit tests cannot borrow `yunta_testkit::Owner`:
+        // it names this crate's `Supervision` from outside, and the lib
+        // under test is a different build of it. The constructor says the
+        // same thing in two lines.
+        let stop = tokio_util::sync::CancellationToken::new();
+        let owner = Supervision::outside_any_run(&stop, &FixedClock);
         let tree = tree();
         git(tree.path(), &["checkout", "-q", "-b", "aside"]);
         let aside = commit(tree.path(), "a.txt");
@@ -228,7 +240,7 @@ mod tests {
         )
         .expect("a log that replays");
 
-        let carried = carried_into(&standing, &document, tree.path(), Supervision::none())
+        let carried = carried_into(&standing, &document, tree.path(), owner)
             .await
             .expect("git answers");
 
@@ -240,6 +252,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_done_the_log_never_placed_does_not_cross() {
+        // The engine's own unit tests cannot borrow `yunta_testkit::Owner`:
+        // it names this crate's `Supervision` from outside, and the lib
+        // under test is a different build of it. The constructor says the
+        // same thing in two lines.
+        let stop = tokio_util::sync::CancellationToken::new();
+        let owner = Supervision::outside_any_run(&stop, &FixedClock);
         let tree = tree();
         let document = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
         let standing = standing_of(
@@ -248,7 +266,7 @@ mod tests {
         )
         .expect("a log that replays");
 
-        let carried = carried_into(&standing, &document, tree.path(), Supervision::none())
+        let carried = carried_into(&standing, &document, tree.path(), owner)
             .await
             .expect("git answers");
 
@@ -260,6 +278,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_task_the_document_no_longer_has_is_not_carried() {
+        // The engine's own unit tests cannot borrow `yunta_testkit::Owner`:
+        // it names this crate's `Supervision` from outside, and the lib
+        // under test is a different build of it. The constructor says the
+        // same thing in two lines.
+        let stop = tokio_util::sync::CancellationToken::new();
+        let owner = Supervision::outside_any_run(&stop, &FixedClock);
         let tree = tree();
         let landed = commit(tree.path(), "a.txt");
         let source_document = tasks_document(&[
@@ -276,7 +300,7 @@ mod tests {
         .expect("a log that replays");
         let document = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
 
-        let carried = carried_into(&standing, &document, tree.path(), Supervision::none())
+        let carried = carried_into(&standing, &document, tree.path(), owner)
             .await
             .expect("git answers");
 
@@ -290,6 +314,12 @@ mod tests {
 
     #[tokio::test]
     async fn only_done_stands_from_a_source_log() {
+        // The engine's own unit tests cannot borrow `yunta_testkit::Owner`:
+        // it names this crate's `Supervision` from outside, and the lib
+        // under test is a different build of it. The constructor says the
+        // same thing in two lines.
+        let stop = tokio_util::sync::CancellationToken::new();
+        let owner = Supervision::outside_any_run(&stop, &FixedClock);
         let tree = tree();
         let landed = commit(tree.path(), "a.txt");
         let document = tasks_document(&[
@@ -316,7 +346,7 @@ mod tests {
             .collect();
         let standing = standing_of(&source(), &source_log(&entries)).expect("a log that replays");
 
-        let carried = carried_into(&standing, &document, tree.path(), Supervision::none())
+        let carried = carried_into(&standing, &document, tree.path(), owner)
             .await
             .expect("git answers");
 

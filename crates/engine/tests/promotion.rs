@@ -14,7 +14,7 @@ use yunta_core::events::{BaselineOrigin, FindingEvent, RunEvent, TaskEvent};
 use yunta_core::ModeName;
 use yunta_engine::{BirthArtifact, BirthOrigin, HumanInteraction, RunReport, RunTerminal};
 use yunta_testkit::{baselines, Bench, ScriptedInteraction};
-use yunta_testkit_core::{FixedClock, Log, SeqIdSource};
+use yunta_testkit_core::{Log, SeqIdSource};
 
 /// The fixture every run of this suite is driven on: no session is
 /// scripted, because every node of these workflows runs a command.
@@ -328,9 +328,8 @@ async fn successor_of(
         },
         yunta_engine::CallerInfra {
             storage: &bench.storage.async_handle(),
-            clock: &FixedClock,
             ids,
-            supervision: yunta_engine::process::Supervision::none(),
+            supervision: bench.supervision(),
         },
     )
     .await

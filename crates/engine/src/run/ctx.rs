@@ -108,12 +108,12 @@ impl RunCtx<'_> {
     ) -> crate::process::Supervision<'a> {
         crate::process::Supervision {
             registry: self.process_registry.as_ref(),
-            cancel: Some(cancel),
+            cancel,
             env: self
                 .ambient
                 .map(|ambient| ambient.subprocess_vars.as_slice())
                 .unwrap_or(&[]),
-            clock: Some(self.clock.as_ref()),
+            clock: self.clock.as_ref(),
         }
     }
 

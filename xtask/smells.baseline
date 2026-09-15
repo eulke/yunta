@@ -17,7 +17,7 @@ sleep_outside_mock_latency 4
 space_runs_in_prod_strings 0
 src_files_over_500_lines 10
 sync_fs_in_async 215
-system_clock_outside_boundary 79
+system_clock_outside_boundary 77
 tense_markers 99
 test_files_over_500_lines 37
 test_fns_over_50_lines 131

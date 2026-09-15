@@ -186,7 +186,14 @@ fn count_env_read_outside_boundary(root: &Path) -> usize {
     outside(
         root,
         &[Text("std::env::var")],
-        &["crates/cli/src/main.rs", "crates/core/src/config/env.rs"],
+        &[
+            "crates/cli/src/main.rs",
+            "crates/core/src/config/env.rs",
+            // A stub stands in for a program on `PATH`: knowing what
+            // `PATH` is, and where the real program lives, is the whole
+            // of what it does.
+            "crates/testkit/src/stubs.rs",
+        ],
     )
 }
 

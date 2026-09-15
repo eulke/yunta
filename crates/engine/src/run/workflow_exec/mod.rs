@@ -272,6 +272,7 @@ pub(super) async fn execute_workflow(
         &workflows_dir,
         ctx.worktree,
         &provided,
+        ctx.supervision(cancel),
     )
     .await
     {
@@ -327,6 +328,12 @@ pub(super) async fn execute_workflow(
             .await
             {
                 Ok(_) => tree,
+                // Somebody stopped the run while its child's tree was
+                // being made: that is not the node failing, it is the
+                // node being cut.
+                Err(e) if e.cancelled() => {
+                    return crate::run::node_exec::cancelled_end(ctx, node).await;
+                }
                 Err(e) => {
                     return fail(
                         ctx,
@@ -369,7 +376,7 @@ pub(super) async fn execute_workflow(
         .as_ref()
         .and_then(|modes| modes.keys().next().cloned())
         .unwrap_or_default();
-    let child_run_dir = super::create_run(
+    let child_run_dir = match super::create_run(
         CreateRunParams {
             run_id: &child_id,
             manifest: &child_manifest,
@@ -384,9 +391,17 @@ pub(super) async fn execute_workflow(
             baseline: crate::run::baseline::inherited(ctx.run_id, &state).as_ref(),
         },
         ctx.storage,
-        ctx.clock.as_ref(),
+        ctx.supervision(cancel),
     )
-    .await?;
+    .await
+    {
+        Ok(run_dir) => run_dir,
+        // A birth the cancellation cut has no log of its own to pause:
+        // it says so to the node that asked for it, which ends cut
+        // like any other, and the loop's next turn pauses the run.
+        Err(RunError::Cancelled) => return crate::run::node_exec::cancelled_end(ctx, node).await,
+        Err(other) => return Err(other),
+    };
 
     drive_child(
         ctx,
@@ -521,7 +536,7 @@ async fn drive_child(
                     max_task_retries: ctx.max_task_retries,
                     human_interaction: ctx.human_interaction,
                     forge: ctx.forge,
-                    cancel: Some(cancel),
+                    cancel,
                     adapter_override: ctx.adapter_override,
                     ambient: ctx.ambient,
                     secrets: ctx.secrets.clone(),
@@ -601,7 +616,6 @@ async fn drive_child(
                     },
                     super::promote::CallerInfra {
                         storage: ctx.storage,
-                        clock: ctx.clock.as_ref(),
                         ids: ctx.ids,
                         supervision: ctx.root_supervision(),
                     },

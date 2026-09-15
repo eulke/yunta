@@ -35,33 +35,6 @@ use yunta_core::{describe, AdapterId, AdapterSettings, ConfigLayer, Pid, RunId, 
 use yunta_engine::UnknownKindCount;
 
 use crate::error::{warn, CliError};
-use crate::surface::Diagnostics;
-
-/// Ctrl-C → the run's root `CancellationToken`. The in-process
-/// interrupt→kill path does the actual exterminating; this only
-/// bridges the signal to the token and tells the user what's
-/// happening. Installing the handler means SIGINT no longer kills the
-/// process outright — the run pauses cleanly with `run_paused
-/// { reason: "cancelled by user" }` instead.
-///
-/// What it tells the user goes out through `diagnostics`, which is the
-/// surface's own door: the interrupt arrives while the run is being
-/// drawn, and a line printed around the pinned region lands inside the
-/// rows it is redrawing — so the person who pressed Ctrl-C would read
-/// their confirmation until the next redraw erased it.
-pub(crate) fn cancel_on_ctrl_c(diagnostics: Diagnostics) -> tokio_util::sync::CancellationToken {
-    let root = tokio_util::sync::CancellationToken::new();
-    let token = root.clone();
-    tokio::spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
-            diagnostics
-                .raise("interrupt received — stopping the run (sessions get interrupt, then kill)")
-                .await;
-            token.cancel();
-        }
-    });
-    root
-}
 
 /// A detached `yunta resume` that never started, and the run it was
 /// for. Recover by running that command yourself: the run is on disk

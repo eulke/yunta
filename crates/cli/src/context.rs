@@ -16,6 +16,7 @@ use yunta_core::{Manifest, RunId, SystemClock, SystemIdSource};
 use yunta_storage::{AsyncStorage, Storage};
 
 use crate::error::CliError;
+use crate::interrupt::Interrupt;
 use crate::project::{self, Project};
 
 /// Everything a subcommand resolves before it can act: the current
@@ -26,6 +27,14 @@ pub struct Context {
     pub project: Project,
     pub clock: SystemClock,
     pub ids: SystemIdSource,
+    /// The ambient environment this invocation runs in, read once here
+    /// rather than from the process below: the user state root and the
+    /// variables layered onto every subprocess.
+    pub env: yunta_core::Env,
+    /// What stops this invocation, in two stages (D181). Private: every
+    /// command reaches it through the getters below, so nothing below
+    /// the shell decides which stage it answers to.
+    interrupt: Interrupt,
     /// This binary, as the hook a CLI runs to ask the judge about one
     /// write. Resolved once here, so nothing below the shell reads the
     /// process to find out where it lives.
@@ -37,22 +46,74 @@ impl Context {
     /// prologue a command run from a shell shares.
     pub fn load() -> Result<Self, CliError> {
         let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
-        Self::resolve_in(cwd)
+        // The SIGINT stream is installed before this returns, so an
+        // interrupt that lands while the project is still resolving is
+        // one this invocation catches.
+        let interrupt = Interrupt::ctrl_c().map_err(|source| {
+            CliError::io("install the interrupt handler for", "this command", source)
+        })?;
+        Self::resolve_in(cwd, interrupt)
     }
 
     /// Resolves the project rooted at an explicit directory — what the
     /// control plane (`yunta mcp`) and `yunta test --dir` need, since
     /// they act on a directory they were handed, not the one they run in.
     /// The single place `project::resolve` is called.
-    pub fn resolve_in(cwd: PathBuf) -> Result<Self, CliError> {
+    pub fn resolve_in(cwd: PathBuf, interrupt: Interrupt) -> Result<Self, CliError> {
         let project = project::resolve(&cwd)?;
         Ok(Self {
             cwd,
             project,
             clock: SystemClock,
             ids: SystemIdSource,
+            env: crate::project::process_env(),
+            interrupt,
             fence_hook: fence_hook(),
         })
+    }
+
+    /// The same interruption, for a `Context` derived from this one —
+    /// a sandbox, a request the control plane handles. One stream per
+    /// process, two stages every derived context shares.
+    pub fn interrupt(&self) -> Interrupt {
+        self.interrupt.shared()
+    }
+
+    /// The token the work of this invocation answers to: the first
+    /// interrupt.
+    pub fn cancellation(&self) -> &tokio_util::sync::CancellationToken {
+        self.interrupt.stop()
+    }
+
+    /// What the work runs under: no registry — a command is not a run —
+    /// the first stage, and this invocation's clock and environment.
+    pub fn supervision(&self) -> yunta_engine::process::Supervision<'_> {
+        yunta_engine::process::Supervision::outside_any_run(self.cancellation(), &self.clock)
+            .with_env(&self.env.subprocess_vars)
+    }
+
+    /// What gives a take back once the work stopped — `released`, a
+    /// hand-over — runs under: the second stage. Something that runs
+    /// *because* the first interrupt fired cannot answer to it.
+    pub fn teardown(&self) -> yunta_engine::process::Supervision<'_> {
+        yunta_engine::process::Supervision::outside_any_run(self.interrupt.abort(), &self.clock)
+    }
+
+    /// A context over a project a test built by hand, with nothing to
+    /// interrupt it: what a unit test of a command needs, since the
+    /// project it drives is a temp directory rather than one
+    /// `project::resolve` would find.
+    #[cfg(test)]
+    pub(crate) fn for_test(cwd: PathBuf, project: Project) -> Self {
+        Self {
+            cwd,
+            project,
+            clock: SystemClock,
+            ids: SystemIdSource,
+            env: yunta_core::Env::default(),
+            interrupt: Interrupt::never(),
+            fence_hook: fence_hook(),
+        }
     }
 
     /// The same project with its state roots moved under `sandbox` and
@@ -76,6 +137,10 @@ impl Context {
             },
             clock: self.clock,
             ids: self.ids,
+            env: self.env.clone(),
+            // One stream per process: a sandbox sees the same two
+            // stages the invocation that made it does.
+            interrupt: self.interrupt.shared(),
             fence_hook: self.fence_hook.clone(),
         }
     }

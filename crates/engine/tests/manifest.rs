@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{build_manifest, ManifestError};
-use yunta_testkit::{git_output, init_repo};
+use yunta_testkit::{git_output, init_repo, Owner};
 
 fn workflow(yaml: &str) -> Workflow {
     serde_norway::from_str(yaml).unwrap()
@@ -43,6 +43,7 @@ runners:
 
 #[tokio::test]
 async fn the_same_inputs_always_produce_the_same_manifest_hash() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
@@ -52,6 +53,7 @@ async fn the_same_inputs_always_produce_the_same_manifest_hash() {
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -62,6 +64,7 @@ async fn the_same_inputs_always_produce_the_same_manifest_hash() {
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -74,6 +77,7 @@ async fn the_same_inputs_always_produce_the_same_manifest_hash() {
 
 #[tokio::test]
 async fn a_file_prompt_is_frozen_by_content_not_by_path() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     std::fs::create_dir_all(dir.path().join("prompts")).unwrap();
@@ -95,6 +99,7 @@ nodes:
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -117,6 +122,7 @@ nodes:
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -126,6 +132,7 @@ nodes:
 
 #[tokio::test]
 async fn an_inline_prompt_freezes_nothing_from_disk() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
@@ -135,6 +142,7 @@ async fn an_inline_prompt_freezes_nothing_from_disk() {
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -145,6 +153,7 @@ async fn an_inline_prompt_freezes_nothing_from_disk() {
 
 #[tokio::test]
 async fn a_missing_prompt_file_is_a_typed_error_naming_the_node() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
@@ -164,6 +173,7 @@ nodes:
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap_err();
@@ -178,6 +188,7 @@ nodes:
 
 #[tokio::test]
 async fn base_commit_is_the_repository_head() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
@@ -189,6 +200,7 @@ async fn base_commit_is_the_repository_head() {
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -199,6 +211,7 @@ async fn base_commit_is_the_repository_head() {
 
 #[tokio::test]
 async fn a_non_git_directory_is_a_typed_error_not_a_panic() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap(); // no git init
 
     let err = build_manifest(
@@ -207,6 +220,7 @@ async fn a_non_git_directory_is_a_typed_error_not_a_panic() {
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap_err();
@@ -215,6 +229,7 @@ async fn a_non_git_directory_is_a_typed_error_not_a_panic() {
 
 #[tokio::test]
 async fn each_content_hash_reacts_only_to_its_own_content() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
@@ -224,6 +239,7 @@ async fn each_content_hash_reacts_only_to_its_own_content() {
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -242,6 +258,7 @@ runners:
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -254,6 +271,7 @@ runners:
 
 #[tokio::test]
 async fn a_manifest_survives_yaml_round_trip_with_the_same_hash() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
@@ -263,6 +281,7 @@ async fn a_manifest_survives_yaml_round_trip_with_the_same_hash() {
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -277,6 +296,7 @@ async fn a_manifest_survives_yaml_round_trip_with_the_same_hash() {
 
 #[tokio::test]
 async fn isolation_defaults_to_worktree_and_freezes_into_the_manifest() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
@@ -286,6 +306,7 @@ async fn isolation_defaults_to_worktree_and_freezes_into_the_manifest() {
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -296,6 +317,7 @@ async fn isolation_defaults_to_worktree_and_freezes_into_the_manifest() {
 
 #[tokio::test]
 async fn an_explicit_none_isolation_freezes_as_none() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let cfg = config("defaults:\n  isolation: none\n");
@@ -306,6 +328,7 @@ async fn an_explicit_none_isolation_freezes_as_none() {
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -316,6 +339,7 @@ async fn an_explicit_none_isolation_freezes_as_none() {
 
 #[tokio::test]
 async fn max_parallel_nodes_defaults_to_1_and_freezes_into_the_manifest() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
@@ -325,6 +349,7 @@ async fn max_parallel_nodes_defaults_to_1_and_freezes_into_the_manifest() {
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -335,6 +360,7 @@ async fn max_parallel_nodes_defaults_to_1_and_freezes_into_the_manifest() {
 
 #[tokio::test]
 async fn an_explicit_max_parallel_nodes_freezes_that_value() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
     let cfg = config("defaults:\n  max_parallel_nodes: 4\n");
@@ -345,6 +371,7 @@ async fn an_explicit_max_parallel_nodes_freezes_that_value() {
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -369,6 +396,7 @@ nodes:
 
 #[tokio::test]
 async fn a_required_input_with_no_value_refuses_before_any_worktree_work() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
@@ -378,6 +406,7 @@ async fn a_required_input_with_no_value_refuses_before_any_worktree_work() {
         dir.path(),
         dir.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap_err();
@@ -388,6 +417,7 @@ async fn a_required_input_with_no_value_refuses_before_any_worktree_work() {
 
 #[tokio::test]
 async fn a_provided_input_value_freezes_into_the_manifest() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     init_repo(dir.path());
 
@@ -398,6 +428,7 @@ async fn a_provided_input_value_freezes_into_the_manifest() {
         dir.path(),
         dir.path(),
         &provided,
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -413,6 +444,7 @@ async fn a_provided_input_value_freezes_into_the_manifest() {
 
 #[tokio::test]
 async fn a_runners_fanout_node_expands_into_one_node_per_role() {
+    let owner = Owner::new();
     let yaml = r#"
 name: fanout
 modes:
@@ -445,6 +477,7 @@ nodes:
         dir.path(),
         dir.path(),
         &std::collections::HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()
@@ -551,6 +584,7 @@ async fn a_manifest_the_binary_cannot_read_says_which_version_it_supports() {
 /// A manifest as `build_manifest` freezes one, for the tests above that
 /// are about reading a manifest rather than about building it.
 async fn frozen_manifest() -> yunta_core::Manifest {
+    let owner = Owner::new();
     let repo = tempfile::tempdir().unwrap();
     init_repo(repo.path());
     let workflow: Workflow = serde_norway::from_str(WORKFLOW).unwrap();
@@ -561,6 +595,7 @@ async fn frozen_manifest() -> yunta_core::Manifest {
         repo.path(),
         repo.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
     .await
     .unwrap()

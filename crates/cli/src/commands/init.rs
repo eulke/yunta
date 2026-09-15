@@ -12,9 +12,11 @@ use std::path::Path;
 
 use yunta_core::port::ProbeReport;
 use yunta_core::{AdapterId, AdapterSettings};
+use yunta_engine::process::Supervision;
 
 use crate::ask::{ask_line, Console, Escape};
 use crate::error::{warn, CliError, Outcome};
+use crate::interrupt::Interrupt;
 use crate::surface::Diagnostics;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
@@ -82,12 +84,16 @@ fn detect_ecosystem(repo: &Path) -> Option<Ecosystem> {
         .map(|(_, ecosystem)| ecosystem)
 }
 
-fn detect_base_branch(repo: &Path) -> String {
+async fn detect_base_branch(repo: &Path, supervision: Supervision<'_>) -> String {
     // Both probes are best-effort: a git that can't answer (no remote
     // HEAD, detached head, no repo) falls through to the next, then to
     // the conventional default.
-    if let Ok(raw) =
-        yunta_engine::git::output_blocking(repo, &["symbolic-ref", "refs/remotes/origin/HEAD"])
+    if let Ok(raw) = yunta_engine::git::output(
+        repo,
+        &["symbolic-ref", "refs/remotes/origin/HEAD"],
+        supervision,
+    )
+    .await
     {
         if let Some(branch) = raw.trim().strip_prefix("refs/remotes/origin/") {
             if !branch.is_empty() {
@@ -95,7 +101,9 @@ fn detect_base_branch(repo: &Path) -> String {
             }
         }
     }
-    if let Ok(name) = yunta_engine::git::output_blocking(repo, &["branch", "--show-current"]) {
+    if let Ok(name) =
+        yunta_engine::git::output(repo, &["branch", "--show-current"], supervision).await
+    {
         let name = name.trim();
         if !name.is_empty() {
             return name.to_string();
@@ -287,6 +295,13 @@ fn asked(console: &Console, prompt: &str, default: &str) -> String {
 
 pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
     let repo = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    // `init` is the command that makes a project, so there is no
+    // `Context` to resolve yet — and its probes still spawn git, so it
+    // owns the interruption itself, like any other invocation.
+    let interrupt = Interrupt::ctrl_c()
+        .map_err(|source| CliError::io("install the interrupt handler for", "init", source))?;
+    let clock = yunta_core::SystemClock;
+    let supervision = Supervision::outside_any_run(interrupt.stop(), &clock);
 
     let config_path = repo.join(".yunta/config.yaml");
     if config_path.exists() && !force {
@@ -312,7 +327,7 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "workflow-project".to_string());
-    let default_branch = detect_base_branch(&repo);
+    let default_branch = detect_base_branch(&repo, supervision).await;
     let ecosystem = detect_ecosystem(&repo);
 
     let (project_name, base_branch) = match &console {

@@ -9,6 +9,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tokio_util::sync::CancellationToken;
+
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
     ArtifactId, BaselineOrigin, EventPayload, NodeEvent, StoredEvent, TerminalState,
@@ -1783,4 +1785,72 @@ nodes:
         1,
         "the root measured; the child was born holding what it measured"
     );
+}
+
+/// A child's birth prepares a tree, and preparing a tree is git. When
+/// the invocation is stopped while that git runs, the node is cut rather
+/// than failed: the parent pauses as cancelled, and the child never
+/// reaches `run_created`.
+#[tokio::test]
+async fn a_parent_whose_child_birth_is_interrupted_pauses_as_cancelled_by_user() {
+    let token = CancellationToken::new();
+    let stubs = tempfile::tempdir().expect("a directory for the stub");
+    let held = stubs.path().join("worktree-add.pid");
+    let vars = yunta_testkit::stubs::git_holding(stubs.path(), "worktree add", &held, None);
+
+    let bench = Bench::with_run_id("run-birth-interrupted")
+        .with_cancel(token.clone())
+        .with_subprocess_vars(vars)
+        .with_workflow(
+            "child-wf",
+            r#"
+name: child-wf
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#,
+        );
+    let parent = r#"
+name: parent
+nodes:
+  - id: feat
+    kind: workflow
+    use: child-wf
+"#;
+
+    let interrupt = tokio::spawn(cancel_once_held(held, token));
+    let RunReport { terminal, .. } = bench.run(parent, EMPTY_FIXTURE).await;
+    interrupt.await.expect("the waiter finishes with the run");
+
+    let RunTerminal::Paused { reason } = terminal else {
+        panic!("an interrupted birth pauses the parent, got {terminal:?}");
+    };
+    assert_eq!(reason, "cancelled by user");
+    let linked = children_created(&bench.events());
+    assert!(
+        linked.is_empty()
+            || bench
+                .storage
+                .events_for_run(&linked[0].0)
+                .unwrap()
+                .is_empty(),
+        "the child the parent linked never reached `run_created`: {:#?}",
+        bench.events()
+    );
+}
+
+/// Fires `token` once the stub git has published its pid at `held`: the
+/// synchronization is the stub's own record, so the cancellation lands
+/// on a git that is provably running.
+async fn cancel_once_held(held: std::path::PathBuf, token: CancellationToken) {
+    yunta_testkit::wait_until_async(
+        || {
+            let held = held.clone();
+            async move { held.exists() }
+        },
+        || "the child's birth never reached `git worktree add`".to_string(),
+    )
+    .await;
+    token.cancel();
 }

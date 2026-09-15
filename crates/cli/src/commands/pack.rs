@@ -19,6 +19,7 @@ use yunta_core::{
 use yunta_engine::audit_pack;
 
 use super::pack_audit::{count_pack_tests, print_report, print_test_summary, run_pack_tests};
+use crate::context::Context;
 use crate::error::{note, warn, CliError, Outcome};
 use crate::pack::{
     clone_pack, clone_url, current_branch, hash_tree, head_commit, load_lock, lock_path,
@@ -187,7 +188,10 @@ pub async fn add(
     confirmed_executors: bool,
     run_tests: bool,
 ) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    // The invocation's own composition root: `pack add` clones, and a
+    // clone is a subprocess that answers to whoever ran the command.
+    let ctx = Context::load()?;
+    let cwd = ctx.cwd.clone();
 
     let (source_part, ref_arg) = split_source_and_ref(source);
     let url = clone_url(source_part);
@@ -197,7 +201,7 @@ pub async fn add(
         source,
     })?;
 
-    clone_pack(&url, ref_arg, clone_dir.path()).await?;
+    clone_pack(&url, ref_arg, clone_dir.path(), ctx.supervision()).await?;
 
     let manifest = read_manifest(clone_dir.path())?;
 
@@ -227,10 +231,10 @@ pub async fn add(
     println!();
     enforce_executor_policy(&policy, &manifest, confirmed_executors, "install")?;
 
-    let commit = head_commit(clone_dir.path()).await?;
+    let commit = head_commit(clone_dir.path(), ctx.supervision()).await?;
     let resolved_ref = match ref_arg {
         Some(ref_arg) => ref_arg.to_string(),
-        None => current_branch(clone_dir.path()).await?,
+        None => current_branch(clone_dir.path(), ctx.supervision()).await?,
     };
 
     // The lock is loaded before anything is written, so a lock that
@@ -275,7 +279,7 @@ pub async fn add(
     // The pack's own cases run last, on the vendored copy, and only on
     // request — after the confirmation, never as part of deciding it.
     let tests = if run_tests {
-        run_pack_tests(&dest).await
+        run_pack_tests(&dest, &ctx).await
     } else {
         count_pack_tests(&dest)
     };
@@ -301,7 +305,8 @@ pub async fn update(
     new_ref: &str,
     confirmed_executors: bool,
 ) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let ctx = Context::load()?;
+    let cwd = ctx.cwd.clone();
     let mut lock = load_lock(&cwd)?;
     let Some(entry) = lock.packs.get(pack).cloned() else {
         return Err(CliError::msg(format!(
@@ -313,7 +318,13 @@ pub async fn update(
         context: "create a temp directory to clone into".to_string(),
         source,
     })?;
-    clone_pack(&entry.source, Some(new_ref), clone_dir.path()).await?;
+    clone_pack(
+        &entry.source,
+        Some(new_ref),
+        clone_dir.path(),
+        ctx.supervision(),
+    )
+    .await?;
     let manifest = read_manifest(clone_dir.path())?;
     if manifest.reference() != *pack {
         return Err(CliError::msg(format!(
@@ -338,7 +349,7 @@ pub async fn update(
     }
     enforce_executor_policy(&policy, &manifest, confirmed_executors, "update")?;
 
-    let commit = head_commit(clone_dir.path()).await?;
+    let commit = head_commit(clone_dir.path(), ctx.supervision()).await?;
 
     // The new ref is vendored beside the installed tree and swapped in
     // only once it is complete: a ref that cannot be vendored leaves the

@@ -19,7 +19,8 @@ use crate::pack::{packs_root, read_manifest, vendor_dir};
 use yunta_core::PackRef;
 
 pub async fn audit(pack: &PackRef) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let ctx = crate::context::Context::load()?;
+    let cwd = ctx.cwd.clone();
     let pack_dir = vendor_dir(&cwd, pack);
     if !pack_dir.is_dir() {
         return Err(CliError::msg(format!(
@@ -31,7 +32,7 @@ pub async fn audit(pack: &PackRef) -> Result<Outcome, CliError> {
 
     let report = audit_pack(&pack_dir, manifest);
     print_report(&report);
-    let tests = run_pack_tests(&pack_dir).await;
+    let tests = run_pack_tests(&pack_dir, &ctx).await;
     print_test_summary(&tests);
     Ok(Outcome::Success)
 }
@@ -153,7 +154,7 @@ pub fn count_pack_tests(pack_dir: &Path) -> PackTestSummary {
     }
 }
 
-pub async fn run_pack_tests(pack_dir: &Path) -> PackTestSummary {
+pub async fn run_pack_tests(pack_dir: &Path, ctx: &crate::context::Context) -> PackTestSummary {
     let empty = PackTestSummary {
         has_tests: false,
         total: 0,
@@ -175,7 +176,7 @@ pub async fn run_pack_tests(pack_dir: &Path) -> PackTestSummary {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| case_path.display().to_string());
-        match run_case(pack_dir, case_path).await {
+        match run_case(pack_dir, case_path, ctx.interrupt()).await {
             Ok(problems) if problems.is_empty() => {}
             Ok(problems) => {
                 failed += 1;

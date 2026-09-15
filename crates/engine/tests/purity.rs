@@ -8,10 +8,12 @@
 //! an async task blocks the executor that was supposed to be running the
 //! rest of the run.
 //!
-//! `process.rs` is the exception, and the only one: it is the shell
-//! module — it spawns children, signals them and waits on them — so what
-//! it touches it touches on purpose, before a child exists or after one
-//! is gone.
+//! `process.rs` is the exception for the machine it must touch: it is
+//! the shell module — it spawns children, signals them and waits on
+//! them — so what it touches it touches on purpose, before a child
+//! exists or after one is gone. The clock is not among them: a
+//! supervision carries the one it tells the time by, so no module of
+//! this crate reads the process clock.
 //!
 //! These read the source. A grep test is coarse, and coarse is what
 //! keeps it honest: it cannot be satisfied by anything but not doing the
@@ -104,7 +106,14 @@ const NO_RUNTIME: [&str; 3] = ["catalog.rs", "check/", "pack_audit.rs"];
 /// Sites of `needle` outside the shell and outside a justified
 /// exception, rendered for a failure message.
 fn offenders(needle: &str) -> Vec<String> {
-    let lines = lines_outside(&SHELL);
+    offenders_outside(needle, &SHELL)
+}
+
+/// Sites of `needle` outside `exempt` and outside a justified
+/// exception. The clock has no exemption at all: even the shell tells
+/// the time by what it is handed.
+fn offenders_outside(needle: &str, exempt: &[&str]) -> Vec<String> {
+    let lines = lines_outside(exempt);
     // A marker covers the first line of code under it, however many
     // lines the justification itself takes.
     let mut justified: std::collections::HashSet<(String, usize)> =
@@ -132,13 +141,17 @@ fn offenders(needle: &str) -> Vec<String> {
 /// The clock is injected. A module that reads the process clock derives
 /// a different run every time it replays one.
 ///
+/// No exemption, the shell included: a supervision carries the clock it
+/// tells the time by, so nothing below the caller has a reason to ask
+/// the machine.
+///
 /// `Instant` is not the clock: it measures how long something took,
 /// which is a fact about this machine's execution and not a timestamp a
 /// replay has to reproduce.
 #[test]
 fn no_engine_module_reads_the_process_clock() {
     for needle in ["Utc::now", "SystemClock"] {
-        let found = offenders(needle);
+        let found = offenders_outside(needle, &[]);
         assert!(
             found.is_empty(),
             "`{needle}` belongs to the shell that builds the engine's clock, \
@@ -171,6 +184,21 @@ fn no_engine_module_blocks_the_executor_on_disk() {
     assert!(
         found.is_empty(),
         "disk goes through `tokio::fs` or `spawn_blocking`:\n  {}",
+        found.join("\n  ")
+    );
+}
+
+/// Every git the engine runs is a subprocess the caller owns: born in
+/// its own process group, registered, killed with its whole tree when
+/// the token fires. `git.rs` is the one door, so a `Command::new("git")`
+/// anywhere else is a git nobody governs.
+#[test]
+fn no_engine_module_spawns_git_outside_the_shell() {
+    let found = offenders_outside("Command::new(\"git\")", &["git.rs"]);
+    assert!(
+        found.is_empty(),
+        "git goes through `git::{{output, success, output_bytes}}`, which spawn it \
+         governed:\n  {}",
         found.join("\n  ")
     );
 }

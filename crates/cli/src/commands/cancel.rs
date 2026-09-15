@@ -107,7 +107,21 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
 
         let deadline = tokio::time::Instant::now() + ENGINE_SHUTDOWN_TIMEOUT;
         loop {
-            tokio::time::sleep(ENGINE_SHUTDOWN_POLL).await;
+            // A person who stops waiting is a person who stopped
+            // waiting: `cancel` is the one command whose whole body is
+            // a wait, so it answers to its own interrupt like the run
+            // it is stopping answers to the engine's.
+            tokio::select! {
+                () = tokio::time::sleep(ENGINE_SHUTDOWN_POLL) => {}
+                () = ctx.cancellation().cancelled() => {
+                    note(format!(
+                        "run {run_id}: interrupted while waiting — the SIGINT is with the \
+                         engine, which stops on its own; `{}` says where it got to",
+                        advice::status(run_id)
+                    ));
+                    return Ok(Outcome::Success);
+                }
+            }
             let events = storage.events_for_run(run_id.clone()).await?;
             let terminal = events.iter().any(|e| {
                 matches!(

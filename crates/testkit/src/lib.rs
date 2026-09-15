@@ -22,15 +22,17 @@ mod events;
 mod frames;
 mod interaction;
 mod observer;
+mod owner;
 mod repo;
 mod stack;
+pub mod stubs;
 mod tasks;
 mod terminal;
 mod tools;
 mod wait;
 
 pub use bench::{Bench, MOCK_CONFIG};
-pub use bin::{hermetic, run_id_from, run_yunta, stderr, stdout, Spawning};
+pub use bin::{hermetic, run_id_from, run_id_in, run_yunta, stderr, stdout, Spawning};
 pub use checkout::Checkout;
 pub use corpus::{
     backticked, bullets, fenced_blocks, field_tables, fixed_consts, has_top_level_key, json_schema,
@@ -43,6 +45,7 @@ pub use events::{
 pub use frames::{child_link, moment, node_frame, run_frame};
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use observer::{Frame, RecordingObserver};
+pub use owner::Owner;
 pub use repo::{git, git_output, init_repo, write, INITIAL_BRANCH};
 pub use stack::on_a_deep_stack;
 pub use tasks::tasks_document;

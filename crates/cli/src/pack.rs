@@ -7,6 +7,7 @@
 
 use std::path::{Path, PathBuf};
 use yunta_core::CommitSha;
+use yunta_engine::process::Supervision;
 
 use yunta_core::{sha256_hex, ContentHash, PackLock, PackManifest, PackRef};
 
@@ -78,8 +79,12 @@ pub fn clone_url(source: &str) -> String {
     }
 }
 
-async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, PackError> {
-    yunta_engine::git::output(cwd, args, yunta_engine::process::Supervision::none())
+async fn run_git(
+    cwd: &Path,
+    args: &[&str],
+    supervision: Supervision<'_>,
+) -> Result<String, PackError> {
+    yunta_engine::git::output(cwd, args, supervision)
         .await
         .map(|stdout| stdout.trim().to_string())
         .map_err(|e| {
@@ -95,14 +100,20 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, PackError> {
 /// `ref_` when given — a full clone, not shallow: `--depth 1` would
 /// only work for a ref that's a branch tip, and a ref here can just as
 /// well be a tag or a commit-ish.
-pub async fn clone_pack(url: &str, ref_: Option<&str>, dest: &Path) -> Result<(), PackError> {
+pub async fn clone_pack(
+    url: &str,
+    ref_: Option<&str>,
+    dest: &Path,
+    supervision: Supervision<'_>,
+) -> Result<(), PackError> {
     run_git(
         Path::new("."),
         &["clone", "--quiet", url, &dest.display().to_string()],
+        supervision,
     )
     .await?;
     if let Some(ref_) = ref_ {
-        run_git(dest, &["checkout", "--quiet", ref_]).await?;
+        run_git(dest, &["checkout", "--quiet", ref_], supervision).await?;
     }
     Ok(())
 }
@@ -110,8 +121,11 @@ pub async fn clone_pack(url: &str, ref_: Option<&str>, dest: &Path) -> Result<()
 /// The commit `dest` (an already-cloned working tree) currently has
 /// checked out — what `add`/`update` records as the lock entry's
 /// `commit`, independent of whether `ref` itself later moves.
-pub async fn head_commit(dest: &Path) -> Result<CommitSha, PackError> {
-    let line = run_git(dest, &["rev-parse", "HEAD"]).await?;
+pub async fn head_commit(
+    dest: &Path,
+    supervision: Supervision<'_>,
+) -> Result<CommitSha, PackError> {
+    let line = run_git(dest, &["rev-parse", "HEAD"], supervision).await?;
     line.parse()
         .map_err(|source| PackError::NotACommit { line, source })
 }
@@ -119,8 +133,11 @@ pub async fn head_commit(dest: &Path) -> Result<CommitSha, PackError> {
 /// The branch `dest` landed on when no explicit ref was requested — the
 /// descriptive `ref` a lock entry records for a plain `pack add <url>`
 /// with no `@ref` suffix, so `yunta.lock` never has to say "unknown".
-pub async fn current_branch(dest: &Path) -> Result<String, PackError> {
-    run_git(dest, &["rev-parse", "--abbrev-ref", "HEAD"]).await
+pub async fn current_branch(
+    dest: &Path,
+    supervision: Supervision<'_>,
+) -> Result<String, PackError> {
+    run_git(dest, &["rev-parse", "--abbrev-ref", "HEAD"], supervision).await
 }
 
 /// Reads, parses and validates `<dir>/pack.yaml`: a manifest whose

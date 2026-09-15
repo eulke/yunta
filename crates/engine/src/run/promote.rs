@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::events::artifacts::ArtifactRef;
 use yunta_core::events::{ArtifactId, StoredEvent};
-use yunta_core::{Clock, IdSource, Isolation, Manifest, ModeName, RunId};
+use yunta_core::{IdSource, Isolation, Manifest, ModeName, RunId};
 use yunta_storage::AsyncStorage;
 
 use crate::artifacts::ObjectError;
@@ -64,8 +64,10 @@ pub struct Predecessor<'a> {
 /// trail, exactly as [`create_run`](crate::create_run) is.
 pub struct CallerInfra<'a> {
     pub storage: &'a AsyncStorage,
-    pub clock: &'a dyn Clock,
     pub ids: &'a dyn IdSource,
+    /// The token, the clock and the environment every subprocess this
+    /// creation spawns is born under — the successor's birth reads the
+    /// time by the same clock its git answers to.
     pub supervision: crate::process::Supervision<'a>,
 }
 
@@ -73,8 +75,8 @@ pub struct CallerInfra<'a> {
 /// `cwd` for a top-level chain; the parent run's own tree for a child's).
 /// Under `Isolation::None` the successor reuses the predecessor's
 /// checkout — the lock (if any) is the caller's and only releases when
-/// the whole chain ends. `storage`, `clock` and `ids` are the caller's
-/// infrastructure and trail, as in [`create_run`].
+/// the whole chain ends. `storage`, `ids` and `supervision` are the
+/// caller's infrastructure and trail, as in [`create_run`].
 pub async fn create_promotion_successor(
     predecessor: Predecessor<'_>,
     repo: &Path,
@@ -84,7 +86,6 @@ pub async fn create_promotion_successor(
 ) -> Result<PromotionSuccessor, RunError> {
     let CallerInfra {
         storage,
-        clock,
         ids,
         supervision,
     } = caller;
@@ -94,7 +95,7 @@ pub async fn create_promotion_successor(
         worktree: predecessor_worktree,
         run_dir: predecessor_run_dir,
     } = predecessor;
-    let successor_id = ids.mint_run_id(clock.now());
+    let successor_id = ids.mint_run_id(supervision.clock.now());
 
     let mut manifest = predecessor_manifest.clone();
     // The successor builds on wherever the predecessor's own
@@ -143,7 +144,7 @@ pub async fn create_promotion_successor(
             .as_ref(),
         },
         storage,
-        clock,
+        supervision,
     )
     .await?;
 

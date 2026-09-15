@@ -79,8 +79,8 @@ pub(super) async fn run_one_attempt(
     // token — so running it would only produce a "killed before it could
     // answer" to interpret as a failure. This attempt lost; it did not
     // fail.
-    let cancelled = matches!(dispatch_outcome, DispatchOutcome::Cancelled)
-        || supervision.cancel.is_some_and(|token| token.is_cancelled());
+    let cancelled =
+        matches!(dispatch_outcome, DispatchOutcome::Cancelled) || supervision.cancel.is_cancelled();
     if cancelled {
         let record = AttemptRecord {
             attempt,

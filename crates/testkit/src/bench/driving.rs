@@ -246,6 +246,21 @@ impl Bench {
         fixture_yaml: &str,
         config_yaml: &str,
     ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
+        self.try_create_after(workflow_yaml, fixture_yaml, config_yaml, || {})
+            .await
+    }
+
+    /// Creates the run with `between` run after the manifest is frozen
+    /// and before the birth writes anything — where a test states what
+    /// must be true of the world by the time the run is actually born,
+    /// and not a moment earlier.
+    pub async fn try_create_after(
+        &self,
+        workflow_yaml: &str,
+        fixture_yaml: &str,
+        config_yaml: &str,
+        between: impl FnOnce(),
+    ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
         let workflow: Workflow = serde_norway::from_str(workflow_yaml).expect("parse workflow");
         let config: ConfigLayer = serde_norway::from_str(config_yaml).expect("parse config");
         let frozen = self.freeze(&workflow, &config).await;
@@ -255,6 +270,7 @@ impl Bench {
         let artifacts: Vec<BirthArtifact> =
             self.birth.iter().cloned().chain(frozen.documents).collect();
         let manifest = frozen.manifest;
+        between();
 
         let run_dir = create_run(
             CreateRunParams {
@@ -271,7 +287,7 @@ impl Bench {
                 baseline: None,
             },
             &self.storage.async_handle(),
-            self.clock.as_ref(),
+            self.supervision(),
         )
         .await?;
 
@@ -327,7 +343,7 @@ impl Bench {
             max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction,
             forge: self.forge.as_deref(),
-            cancel: self.cancel.as_ref(),
+            cancel: &self.cancel,
             adapter_override: None,
             ambient: self.ambient.as_ref(),
             secrets,
@@ -365,6 +381,7 @@ impl Bench {
             self.workflow_dir.as_deref().unwrap_or(&self.worktree),
             &self.worktree,
             &self.inputs,
+            self.supervision(),
         )
         .await
         .expect("build manifest")

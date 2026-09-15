@@ -45,6 +45,11 @@ pub(crate) use case::run_case;
 
 pub async fn test(dir: Option<&Path>) -> Result<Outcome, CliError> {
     let root = project_root(dir).map_err(CliError::msg)?;
+    // One interruption for the whole suite: every case's sandbox shares
+    // its two stages, so a Ctrl-C stops the case that is running and
+    // the ones after it never start.
+    let interrupt = crate::interrupt::Interrupt::ctrl_c()
+        .map_err(|source| CliError::io("install the interrupt handler for", "test", source))?;
 
     let tests_dir = root.join(".yunta/tests");
     let Some(case_paths) = discover_case_paths(&root) else {
@@ -62,26 +67,9 @@ pub async fn test(dir: Option<&Path>) -> Result<Outcome, CliError> {
 
     let mut failures = 0usize;
     for case_path in &case_paths {
-        let name = case_path
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| case_path.display().to_string());
-        // A case that could not run at all is one problem like any
-        // other: the verdict column says which kind of failure it was,
-        // and one block under it counts and lists what went wrong.
-        let (verdict, problems) = match run_case(&root, case_path).await {
-            Ok(problems) if problems.is_empty() => {
-                println!("case {name} ... ok");
-                continue;
-            }
-            Ok(problems) => ("FAILED", problems),
-            Err(error) => ("ERROR", vec![error.to_string()]),
-        };
-        failures += 1;
-        println!(
-            "{}",
-            yunta_core::text::problems(format!("case {name} ... {verdict}"), &problems)
-        );
+        if !report(&root, case_path, interrupt.shared()).await {
+            failures += 1;
+        }
     }
 
     println!(
@@ -187,10 +175,38 @@ fn copy_dir_all(from: &Path, into: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Runs one case and prints its line. `true` when it passed.
+///
+/// A case that could not run at all is one problem like any other: the
+/// verdict column says which kind of failure it was, and one block
+/// under it counts and lists what went wrong.
+async fn report(root: &Path, case_path: &Path, interrupt: crate::interrupt::Interrupt) -> bool {
+    let name = case_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| case_path.display().to_string());
+    let (verdict, problems) = match run_case(root, case_path, interrupt).await {
+        Ok(problems) if problems.is_empty() => {
+            println!("case {name} ... ok");
+            return true;
+        }
+        Ok(problems) => ("FAILED", problems),
+        Err(error) => ("ERROR", vec![error.to_string()]),
+    };
+    println!(
+        "{}",
+        yunta_core::text::problems(format!("case {name} ... {verdict}"), &problems)
+    );
+    false
+}
+
 /// Turns the sandbox worktree into a repository whose initial commit
 /// holds the seed (or nothing), so a run's scope diff only ever shows
 /// what its sessions changed.
-fn init_git(dir: &Path) -> Result<(), CliError> {
+async fn init_git(
+    dir: &Path,
+    supervision: yunta_engine::process::Supervision<'_>,
+) -> Result<(), CliError> {
     for args in [
         vec!["init", "-q"],
         vec!["config", "user.email", "yunta-test@localhost"],
@@ -198,7 +214,8 @@ fn init_git(dir: &Path) -> Result<(), CliError> {
         vec!["add", "-A"],
         vec!["commit", "-q", "--allow-empty", "-m", "sandbox"],
     ] {
-        let ran = yunta_engine::git::success_blocking(dir, &args)
+        let ran = yunta_engine::git::success(dir, &args, supervision)
+            .await
             .map_err(|e| CliError::msg(format!("git {args:?}: {}", e.detail())))?;
         if !ran {
             return Err(CliError::msg(format!(

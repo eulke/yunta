@@ -34,11 +34,32 @@ pub struct GitError {
     pub cwd: PathBuf,
     pub stderr: String,
     pub code: Option<i32>,
+    /// What ended the invocation, when git itself did not. A caller
+    /// that must tell "the answer is no" from "nobody waited for the
+    /// answer" reads this rather than the absent exit code.
+    pub stopped: Option<Stopped>,
     #[source]
     pub source: Option<std::io::Error>,
 }
 
+/// What stopped a git before it could answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stopped {
+    /// The supervision's token fired: whoever asked for this git no
+    /// longer wants it.
+    Cancelled,
+    /// The command's own timeout elapsed.
+    TimedOut,
+}
+
 impl GitError {
+    /// Whether the token the caller spawned this git under fired: the
+    /// invocation was stopped, and there is no verdict to read out of
+    /// it.
+    pub fn cancelled(&self) -> bool {
+        self.stopped == Some(Stopped::Cancelled)
+    }
+
     /// The human-facing cause: git's own error message when it spawned
     /// and failed, or the spawn error itself when it never ran. Empty
     /// when git exited non-zero without writing to stderr.
@@ -86,16 +107,6 @@ fn describe<S: AsRef<OsStr>>(args: &[S]) -> String {
         .join(" ")
 }
 
-fn spawn_error<S: AsRef<OsStr>>(cwd: &Path, args: &[S], source: std::io::Error) -> GitError {
-    GitError {
-        args: describe(args),
-        cwd: cwd.to_path_buf(),
-        stderr: String::new(),
-        code: None,
-        source: Some(source),
-    }
-}
-
 /// git's stdout on a zero exit, [`GitError`] otherwise. The stdout is
 /// decoded lossily — a caller that needs raw bytes (a `-z` listing whose
 /// paths may not be UTF-8) uses [`output_bytes`] instead.
@@ -114,6 +125,7 @@ fn exit_error<S: AsRef<OsStr>>(cwd: &Path, args: &[S], output: &Output) -> GitEr
         cwd: cwd.to_path_buf(),
         stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
         code: output.status.code(),
+        stopped: None,
         source: None,
     }
 }
@@ -146,25 +158,31 @@ async fn run<S: AsRef<OsStr>>(
             stdout,
             stderr,
         }),
-        Ok(Outcome::TimedOut { .. }) => Err(stopped(cwd, args, "timed out")),
-        Ok(Outcome::Cancelled { .. }) => Err(stopped(cwd, args, "was cancelled")),
+        Ok(Outcome::TimedOut { .. }) => Err(stopped(cwd, args, Stopped::TimedOut)),
+        Ok(Outcome::Cancelled { .. }) => Err(stopped(cwd, args, Stopped::Cancelled)),
         Err(source) => Err(GitError {
             args: describe(args),
             cwd: cwd.to_path_buf(),
             stderr: source.to_string(),
             code: None,
+            stopped: None,
             source: None,
         }),
     }
 }
 
 /// The error for a git the run stopped before it could answer.
-fn stopped<S: AsRef<OsStr>>(cwd: &Path, args: &[S], what: &str) -> GitError {
+fn stopped<S: AsRef<OsStr>>(cwd: &Path, args: &[S], what: Stopped) -> GitError {
+    let said = match what {
+        Stopped::Cancelled => "was cancelled",
+        Stopped::TimedOut => "timed out",
+    };
     GitError {
         args: describe(args),
         cwd: cwd.to_path_buf(),
-        stderr: format!("git {what} and was killed with its whole process tree"),
+        stderr: format!("git {said} and was killed with its whole process tree"),
         code: None,
+        stopped: Some(what),
         source: None,
     }
 }
@@ -205,25 +223,4 @@ pub async fn success<S: AsRef<OsStr>>(
     supervision: Supervision<'_>,
 ) -> Result<bool, GitError> {
     Ok(run(cwd, args, supervision).await?.status.success())
-}
-
-/// [`output`] for a synchronous caller (manifest build, a CLI command
-/// with no runtime of its own).
-pub fn output_blocking<S: AsRef<OsStr>>(cwd: &Path, args: &[S]) -> Result<String, GitError> {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .map_err(|source| spawn_error(cwd, args, source))?;
-    interpret(cwd, args, output)
-}
-
-/// [`success`] for a synchronous caller.
-pub fn success_blocking<S: AsRef<OsStr>>(cwd: &Path, args: &[S]) -> Result<bool, GitError> {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .map_err(|source| spawn_error(cwd, args, source))?;
-    Ok(output.status.success())
 }

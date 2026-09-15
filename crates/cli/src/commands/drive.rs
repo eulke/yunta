@@ -6,6 +6,10 @@
 //! its manifest is frozen, and its tree is ready — so a stop reported
 //! here reads the same whichever command reached it.
 
+mod watch;
+
+use watch::{watch, Watching};
+
 use std::path::{Path, PathBuf};
 
 use yunta_core::{AdapterId, Clock, Manifest, RunId};
@@ -15,9 +19,7 @@ use yunta_storage::AsyncStorage;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::render::Glyphs;
-use crate::surface::{
-    Closing, ClosingEnv, Curtain, Delivery, Diagnostics, Outline, Surface, SurfaceEnv, TerminalEnv,
-};
+use crate::surface::{Closing, ClosingEnv, Delivery, Outline, TerminalEnv};
 
 /// A run's identity and the paths it lives at — what the executing path,
 /// the detaching path and a resume all name it by.
@@ -75,30 +77,12 @@ impl Presentation {
     }
 }
 
-/// Everything this invocation holds while the run is being drawn: the
-/// surface the progress goes on, the observer the engine feeds it
-/// through, the console the run puts its questions to, and the token a
-/// person stops it with.
-///
-/// One object because they are one arrangement over one terminal — the
-/// prompt takes its turn with the surface through the curtain, the
-/// interrupt says so above the region through the surface's own door,
-/// and a run with no surface has none of it.
-struct Watching {
-    surface: Option<Surface>,
-    observer: Option<std::sync::Arc<dyn yunta_engine::RunObserver>>,
-    asking: crate::human_interaction::ConsoleInteraction,
-    /// Ctrl-C, bridged to the run's root cancellation.
-    cancel: tokio_util::sync::CancellationToken,
-}
-
 /// Executes the run under a live surface, chases any promotion to its
 /// end, and closes the invocation out — the one path `yunta run` and
 /// `yunta resume` both take once the run they drive is open.
 pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
     let shown = Presentation::of(env.quiet);
     let forge = super::real_forge(&env.manifest.config);
-    let ambient = crate::project::process_env();
     let watching = watch(&env, &shown).await?;
     let root_cancel = watching.cancel.clone();
     let report = match execute(Executing {
@@ -112,17 +96,17 @@ pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
         ids: &env.ctx.ids,
         human_interaction: &watching.asking,
         forge: forge.as_deref(),
-        cancel: Some(&root_cancel),
+        cancel: &root_cancel,
         adapter_override: env.adapter_override.as_ref(),
         observer: watching.observer.clone(),
         fence_hook: env.ctx.fence_hook.clone(),
-        ambient: &ambient,
+        ambient: &env.ctx.env,
     })
     .await
     {
         Ok(report) => report,
         Err(e) => {
-            close(watching.surface).await;
+            watching.close().await;
             return Err(e.into());
         }
     };
@@ -156,7 +140,7 @@ pub(crate) struct Executing<'a> {
     pub(crate) ids: &'a dyn yunta_core::IdSource,
     pub(crate) human_interaction: &'a dyn yunta_engine::HumanInteraction,
     pub(crate) forge: Option<&'a dyn yunta_core::port::Forge>,
-    pub(crate) cancel: Option<&'a tokio_util::sync::CancellationToken>,
+    pub(crate) cancel: &'a tokio_util::sync::CancellationToken,
     /// `--adapter <id>`: every runner resolves to its candidate on this
     /// adapter. A successor never carries one — the override belongs to
     /// the invocation that asked for it, and a promotion is the run
@@ -192,53 +176,6 @@ pub(crate) async fn execute(on: Executing<'_>) -> Result<RunReport, yunta_engine
     .await
 }
 
-/// What this invocation draws on, asks on, and is stopped through.
-///
-/// `--json` gets no surface at all: the document is the whole story, so
-/// the engine carries no observer, and a prompt has no region to take a
-/// turn with.
-///
-/// The order is the arrangement's own: the cancellation bridge is armed
-/// once there is a surface for it to say so through, because the line
-/// it raises belongs above the region rather than around it.
-async fn watch(env: &Driving<'_>, shown: &Presentation) -> Result<Watching, CliError> {
-    let surface = if env.json {
-        None
-    } else {
-        Some(
-            Surface::open(SurfaceEnv {
-                run_id: &env.prepared.run_id,
-                manifest: env.manifest,
-                prior: env.prior.as_ref(),
-                storage: env.storage,
-                clock: std::sync::Arc::new(env.ctx.clock),
-                delivery: shown.delivery,
-                glyphs: shown.glyphs,
-            })
-            .await?,
-        )
-    };
-    let cancel = super::cancel_on_ctrl_c(
-        surface
-            .as_ref()
-            .map_or_else(Diagnostics::none, Surface::diagnostics),
-    );
-    Ok(Watching {
-        observer: surface.as_ref().and_then(Surface::observer),
-        asking: crate::human_interaction::ConsoleInteraction::new(
-            surface
-                .as_ref()
-                .map_or_else(Curtain::none, Surface::curtain),
-            surface
-                .as_ref()
-                .map_or_else(Diagnostics::none, Surface::diagnostics),
-            cancel.clone(),
-        ),
-        cancel,
-        surface,
-    })
-}
-
 /// Chases a promotion to its end, takes the surface down, and reports
 /// the run that actually closed.
 ///
@@ -257,15 +194,10 @@ async fn finish(
 ) -> Result<Outcome, CliError> {
     let (run_id, manifest, worktree, report) = super::promote::drive_promotions(
         &super::promote::PromotionEnv {
-            cwd: &env.ctx.cwd,
-            project: &env.ctx.project,
+            ctx: env.ctx,
             storage: env.storage,
-            clock: std::sync::Arc::new(env.ctx.clock),
-            fence_hook: env.ctx.fence_hook.clone(),
-            ids: &env.ctx.ids,
             adapters: &env.adapters,
             forge,
-            cancel: Some(cancel),
             human_interaction: &watching.asking,
             observer: watching.observer.clone(),
         },
@@ -275,7 +207,7 @@ async fn finish(
         report,
     )
     .await?;
-    close(watching.surface).await;
+    watching.close().await;
 
     settle(Settling {
         ctx: env.ctx,
@@ -292,15 +224,6 @@ async fn finish(
         json: env.json,
     })
     .await
-}
-
-/// Takes the live surface down, drawing everything the engine handed it
-/// first, so nothing lands on a terminal that still has a region pinned
-/// to it.
-pub(crate) async fn close(surface: Option<Surface>) {
-    if let Some(surface) = surface {
-        surface.close().await;
-    }
 }
 
 /// How an invocation that drove a run to its stop was asked to report
@@ -385,7 +308,7 @@ async fn released(settling: &Settling<'_>) -> Result<(), CliError> {
         yunta_engine::release_worktree(
             &settling.ctx.cwd,
             settling.manifest.isolation,
-            yunta_engine::process::Supervision::none(),
+            settling.ctx.teardown(),
         )
         .await?;
     }

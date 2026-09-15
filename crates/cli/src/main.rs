@@ -25,6 +25,7 @@ mod error;
 mod graph;
 mod human_interaction;
 mod identity;
+mod interrupt;
 mod json;
 mod pack;
 mod project;

@@ -51,7 +51,10 @@ pub struct Bench {
     ids: Arc<dyn yunta_core::IdSource>,
     clock: Arc<dyn Clock>,
     forge: Option<Arc<dyn yunta_core::port::Forge>>,
-    cancel: Option<tokio_util::sync::CancellationToken>,
+    /// What stops everything this bench spawns. It exists from the
+    /// start — a run always has an owner — and `with_cancel` replaces
+    /// it with one the test can trip.
+    cancel: tokio_util::sync::CancellationToken,
     mode: yunta_core::ModeName,
     /// What the invocation hands the workflow's `inputs:`.
     inputs: HashMap<yunta_core::InputName, String>,
@@ -112,7 +115,7 @@ impl Bench {
             ids: Arc::new(SeqIdSource::new("minted")),
             clock: Arc::new(FixedClock),
             forge: None,
-            cancel: None,
+            cancel: tokio_util::sync::CancellationToken::new(),
             mode: yunta_core::ModeName::default(),
             inputs: HashMap::new(),
             workflow_dir: None,
@@ -203,8 +206,21 @@ impl Bench {
     /// Cancels the run when `cancel` fires — the token a `yunta cancel`
     /// from another process trips.
     pub fn with_cancel(mut self, cancel: tokio_util::sync::CancellationToken) -> Self {
-        self.cancel = Some(cancel);
+        self.cancel = cancel;
         self
+    }
+
+    /// What the bench spawns outside a run — the git of a birth, the
+    /// git a manifest freeze asks — is born under: this bench's token,
+    /// its clock and whatever environment it injects.
+    pub fn supervision(&self) -> yunta_engine::process::Supervision<'_> {
+        yunta_engine::process::Supervision::outside_any_run(&self.cancel, self.clock.as_ref())
+            .with_env(
+                self.ambient
+                    .as_ref()
+                    .map(|ambient| ambient.subprocess_vars.as_slice())
+                    .unwrap_or(&[]),
+            )
     }
 
     /// Creates the run in `mode` — the subset of the graph a `yunta run

@@ -23,10 +23,15 @@ use crate::process_registry::{self, ProcessRegistry};
 /// run's registry, so `yunta cancel` finds it, and the token whose firing
 /// kills it — and the variables layered onto its environment (a run's
 /// injected `PATH` and the like, empty by default).
-#[derive(Clone, Copy, Default)]
+///
+/// There is no supervision without an owner: a token and a clock are
+/// what every caller has, so they are fields and not options, and the
+/// registry is optional because only a run has one.
+#[derive(Clone, Copy)]
 pub struct Supervision<'a> {
     pub registry: Option<&'a ProcessRegistry>,
-    pub cancel: Option<&'a CancellationToken>,
+    /// Whose firing kills the child and its whole tree.
+    pub cancel: &'a CancellationToken,
     /// Variables set on the child on top of the inherited environment —
     /// the run's `subprocess_vars`, so a node's `PATH` is injected rather
     /// than read from a mutated process. Empty leaves the child's
@@ -34,23 +39,27 @@ pub struct Supervision<'a> {
     pub env: &'a [(String, String)],
     /// What tells the time, for the one thing supervision does with it:
     /// judging whether a lock's holder is still the process that took
-    /// it. `None` reads the process clock, which is what a call outside
-    /// any run — `yunta init`, a CLI probe — has.
-    pub clock: Option<&'a dyn Clock>,
+    /// it.
+    pub clock: &'a dyn Clock,
 }
 
 impl<'a> Supervision<'a> {
-    /// The clock this supervision tells the time by.
-    pub fn clock(&self) -> &dyn Clock {
-        self.clock.unwrap_or(&yunta_core::SystemClock)
+    /// A supervision outside any run: the caller's token and clock, no
+    /// registry and no env overrides — what a CLI command and a test
+    /// spawn under.
+    pub fn outside_any_run(cancel: &'a CancellationToken, clock: &'a dyn Clock) -> Self {
+        Supervision {
+            registry: None,
+            cancel,
+            env: &[],
+            clock,
+        }
     }
-}
 
-impl Supervision<'_> {
-    /// No registry, no cancellation and no env overrides: the child is
-    /// bounded only by its own timeout.
-    pub fn none() -> Self {
-        Supervision::default()
+    /// The same supervision, with variables layered onto the child's
+    /// environment.
+    pub fn with_env(self, env: &'a [(String, String)]) -> Self {
+        Supervision { env, ..self }
     }
 }
 
@@ -58,9 +67,8 @@ impl fmt::Debug for Supervision<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Supervision")
             .field("registered", &self.registry.is_some())
-            .field("cancellable", &self.cancel.is_some())
+            .field("cancelled", &self.cancel.is_cancelled())
             .field("env_vars", &self.env.len())
-            .field("clocked", &self.clock.is_some())
             .finish()
     }
 }
@@ -254,12 +262,7 @@ pub async fn spawn_governed(
     let stdout_task = child.stdout.take().map(read_to_end);
     let stderr_task = child.stderr.take().map(read_to_end);
 
-    let cancelled = async {
-        match supervision.cancel {
-            Some(token) => token.cancelled().await,
-            None => std::future::pending().await,
-        }
-    };
+    let cancelled = supervision.cancel.cancelled();
     let deadline = async {
         match command.timeout {
             Some(timeout) => tokio::time::sleep(timeout).await,
