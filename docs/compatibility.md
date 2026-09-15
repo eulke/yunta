@@ -326,7 +326,11 @@ always the state the node is in now.
 
 Yunta serves MCP in two places: the per-session tool server the engine starts on
 loopback HTTP for one node's session, and the control plane `yunta mcp` serves over
-stdio. Both announce every protocol revision the SDK implements — `2024-11-05`
+stdio. They are named apart. The per-session server is always `yunta-run`, which is
+the name a CLI writes it under and the prefix its tools carry; the control plane is
+registered by whoever uses it, under whatever name they choose. A CLI merges both
+entries into one table by key, so one name for both would be one server configured
+twice. Both announce every protocol revision the SDK implements — `2024-11-05`
 through `2026-07-28` — and both serve all of them from one set of handlers.
 
 Every result either server builds satisfies the newest revision it announces. A
@@ -370,6 +374,14 @@ is what qualifies it, `group` names the enclosing `parallel` group, and
 `waiting_on` carries the wait in the same shape the run-level one uses.
 `tasks` and `diagnostics` stay maps: a reader indexes those by id, and they
 carry no order of their own.
+
+A node that failed because its session ended without ever reporting a terminal
+event carries `session_death`: the `adapter` whose session it was and, when that
+session had a process of its own, its `exit` — `end`, tagged `code`, `signal` or
+`unknown`, and `stderr_tail`, the last lines the process wrote, with every value
+its environment carried replaced by `[redacted]`. `detail` says the same thing in
+a sentence. `diagnostics` gains no entry for it: a dead session names no document,
+the same as a failure stated in one sentence.
 
 A parked run's `decision.evidence` is a list of the facts the engine attached,
 each `{label?, value}` — the escalation as the log holds it, not the lines a
@@ -502,7 +514,9 @@ pid reused while the lock stands keeps it until that process ends.
 Individual adapters (CLI integrations like `claude-code`, `codex`) have
 their own version compatibility against the coding-agent CLI they wrap; see
 `yunta doctor`, which checks the installed binary's version against what the
-adapter supports. Pack compatibility (a pack's own `declares:`/`requires:`
+adapter supports — and `yunta doctor --session`, which goes further and opens one
+real session per binding, because a version check never touches the configuration
+a run writes the CLI and so cannot say whether a session opens at all. Pack compatibility (a pack's own `declares:`/`requires:`
 against a given Yunta version) is the pack author's responsibility, checked
 statically at `pack add`/`check` time — this document covers the engine
 itself, not third-party content distributed through it.

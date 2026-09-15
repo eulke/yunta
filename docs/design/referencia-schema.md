@@ -291,8 +291,9 @@ nodes:
 El cliente lanza `yunta mcp` como subproceso por stdio; tools expuestas:
 `list_workflows` (catálogo vivo del repo y de packs: nombre, descripción, inputs,
 modos), `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`. Además
-existe el **MCP por-run** (endpoint que el engine pasa en
-`SessionRequest.run_tools_endpoint`) con tools de scope de run: `yunta_post_finding`,
+existe el **MCP por-run**, que el engine monta él mismo en cada sesión bajo el
+nombre `yunta-run` (endpoint que pasa en `SessionRequest.run_tools_endpoint`), con
+tools de scope de run: `yunta_post_finding`,
 `yunta_get_blackboard`, `yunta_task_status`, `yunta_request_scope_expansion`.
 
 Para que el agente cliente sepa **cuándo** usar todo esto, `yunta init` instala una

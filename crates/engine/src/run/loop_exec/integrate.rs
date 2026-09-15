@@ -108,7 +108,7 @@ pub(super) async fn integrate_batch(
                 crate::run::node_exec::cancelled_end(ctx, node).await?,
             ));
         }
-        let blocked_reason = match report.outcome {
+        let blocked_cause = match report.outcome {
             TaskOutcome::Blocked { cause } => {
                 ctx.emit(
                     Some(&node.id),
@@ -119,7 +119,7 @@ pub(super) async fn integrate_batch(
                     ))),
                 )
                 .await?;
-                Some(cause.to_string())
+                Some(cause)
             }
             TaskOutcome::Done => {
                 let outcome = integrate_task(
@@ -171,16 +171,13 @@ pub(super) async fn integrate_batch(
             // Handled by the early return above.
             TaskOutcome::Interrupted => None,
         };
-        let was_blocked = blocked_reason.is_some();
-        if let Some(reason) = blocked_reason {
+        let was_blocked = blocked_cause.is_some();
+        if let Some(cause) = blocked_cause {
             // An escalation-blocked task is the escalation flow's to report
             // (resolved by the caller, or the pause diagnostic) — its interim
             // Blocked never feeds the generic tail.
             if !needs_human_decision {
-                state.blocked_reasons.push(yunta_core::text::detailed(
-                    format!("task `{}` blocked", task.id),
-                    &reason,
-                ));
+                state.blocked.push((task.id.clone(), cause));
             }
         }
         if needs_human_decision {

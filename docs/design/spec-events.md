@@ -276,13 +276,14 @@ registra.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `outcome` [inferido] | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter | solo en `node_finished` | el outcome del agente es telemetría, esto es el veredicto |
-| `outcome` / `artifacts` | frase \| lista de artifacts que no cerraron | solo en `node_failed` | por qué falló, como dato: uno de los dos, plano sobre el payload; ver abajo |
+| `outcome` / `artifacts` / `died` | frase \| lista de artifacts que no cerraron \| la sesión que murió | solo en `node_failed` | por qué falló, como dato: uno de los tres, plano sobre el payload; ver abajo |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage` |
 | `retryable` | `bool` | solo en `node_failed` | guía la política de reintento; lo fija quien gobierna el presupuesto, de modo que un intento terminal nunca se registra como reintentable |
 
-**La falla es dato, no prosa.** La falla toma una de dos formas, planas sobre el
-payload: `outcome: <frase>`, una falla que el engine enuncia en una oración, o
-`artifacts: [...]`, un elemento por artifact declarado que no cerró. Cada elemento
+**La falla es dato, no prosa.** La falla toma una de tres formas, planas sobre el
+payload: `outcome: <frase>`, una falla que el engine enuncia en una oración,
+`artifacts: [...]`, un elemento por artifact declarado que no cerró, o `died:
+{adapter, exit?}`, una sesión que terminó sin evento terminal. Cada elemento
 es una de cuatro: el archivo — `path` y uno de `artifact-missing`, `artifact-empty`,
 `artifact-oversized` (con bytes y techo) o `artifact-unreadable` —, un documento que
 nadie entregó (`artifact-undelivered`): el `node` que lo declaró y el `artifact`
@@ -296,6 +297,14 @@ composición no escriben archivo, así que sus elementos no nombran ninguno. El 
 produce al leer el evento, nunca al escribirlo (D133). Un payload que lleva
 `outcome:` solo se lee como la falla de una frase, sin migración: es la tolerancia
 de lectura de §3.1 del Contrato aplicada a este campo.
+
+**Una sesión que muere dice cómo salió.** `died` nombra el `adapter` que la abrió
+y, cuando esa sesión tenía proceso propio, su `exit`: `end`, una unión cerrada
+—`{type: code, code}` o `{type: signal, signal}`, y `unknown` para un `type` que
+este binario no conoce—, y `stderr_tail`, las últimas 20 líneas que el hijo
+escribió, con todo valor del entorno de la sesión reemplazado por `[redacted]`.
+Una sesión sin proceso propio no lleva `exit`. El engine pregunta sólo a la sesión
+cuyo stream terminó sin decir nada; el adapter nunca inventa un terminal (D180).
 
 ### 5.16 `hook_executed` — engine
 **Fuente:** node_id, fase before/after, comando, exit code

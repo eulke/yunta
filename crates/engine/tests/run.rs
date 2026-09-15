@@ -1210,3 +1210,69 @@ nodes:
         );
     }
 }
+
+/// A `loop` node whose executor session dies reports the death, not the
+/// tail that says no task is ready: what a reader has to act on is the
+/// CLI that would not start, and the criteria were never run at all.
+#[tokio::test]
+async fn a_loop_node_whose_session_died_fails_naming_the_adapter_and_the_exit() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: dying-loop
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Read your task from the tasks document and implement it."
+"#;
+
+    let fixture = r#"
+capabilities: { run_tools: true }
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            tasks:
+              - id: T001
+                title: "Create hello"
+                scope: ["hello.txt"]
+                criteria:
+                  - cmd: "test -f hello.txt"
+    outcome: { type: completed, summary: "planned" }
+  - outcome: { type: crash }
+"#;
+
+    let RunReport { terminal, state: _ } = bench.run(workflow, fixture).await;
+    assert!(
+        !matches!(terminal, RunTerminal::Finished),
+        "a loop whose session died does not finish: {terminal:?}"
+    );
+
+    let failure = bench
+        .events()
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::Failed(p))) => Some(p.clone()),
+            _ => None,
+        })
+        .expect("the loop node failed");
+    let yunta_core::events::Failure::SessionDied { died } = &failure.failure else {
+        panic!("the death is the fact, not a tail: {:?}", failure.failure);
+    };
+    assert_eq!(died.adapter, "mock");
+    assert!(
+        failure.retryable,
+        "a CLI that would not start is worth another run"
+    );
+}

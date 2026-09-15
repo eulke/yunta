@@ -140,6 +140,12 @@ fn print_failures(frame: &RunFrame, state: &yunta_engine::RunState) {
         })
         .filter(|(_, failure)| match failure {
             Failure::Artifacts { artifacts } => !artifacts.is_empty(),
+            // A death with nothing to show fits in the node's own line;
+            // the lines the CLI left behind are what needs the room.
+            Failure::SessionDied { died } => died
+                .exit
+                .as_ref()
+                .is_some_and(|exit| !exit.stderr_tail.is_empty()),
             Failure::Message { outcome } => outcome.contains('\n'),
         })
         .collect();
@@ -159,6 +165,15 @@ fn print_failures(frame: &RunFrame, state: &yunta_engine::RunState) {
                         "{}",
                         yunta_core::text::indent(&artifact.to_string(), &detail)
                     );
+                }
+            }
+            // How the process went, then what it said on its way out:
+            // the last line is already in the node's own line, and the
+            // ones above it are what a person reads to know why.
+            Failure::SessionDied { died } => {
+                println!("{}", yunta_core::text::indent(&died.to_string(), &detail));
+                for line in died.exit.iter().flat_map(|exit| &exit.stderr_tail) {
+                    println!("{}", yunta_core::text::indent(line, &indent(3)));
                 }
             }
             Failure::Message { outcome } => {

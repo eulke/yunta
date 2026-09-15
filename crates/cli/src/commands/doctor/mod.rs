@@ -12,6 +12,10 @@
 //! leaves to this command, since it needs real filesystem access —
 //! `requires.commands` present on `PATH`.
 
+mod session;
+
+use std::collections::BTreeSet;
+
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use yunta_core::port::ProbeReport;
@@ -24,55 +28,73 @@ fn command_on_path(command: &str) -> bool {
     std::env::split_paths(&path).any(|dir| dir.join(command).is_file())
 }
 
-pub async fn doctor() -> Result<Outcome, CliError> {
+pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
+    let (healthy, all_probed) = probe_adapters(&ctx).await;
+    let mut all_well = all_probed;
 
+    if !check_installed_pack_requires(&ctx.cwd, &ctx.project.config) {
+        all_well = false;
+    }
+
+    if session {
+        all_well &= probe_sessions(&ctx, &healthy).await;
+    } else {
+        println!(
+            "no session opened — `doctor` says the binary is there, answers and authenticates; \
+             `yunta doctor --session` opens one per binding and says whether a run's session \
+             actually starts, at the cost of a prompt each"
+        );
+    }
+
+    if all_well {
+        Ok(Outcome::Success)
+    } else {
+        Ok(Outcome::Reported)
+    }
+}
+
+/// Probes every adapter this project's `runners:` names and prints each
+/// result. Hands back the ones that answered healthy — the only ones a
+/// session is worth opening on — and whether all of them did.
+async fn probe_adapters(ctx: &Context) -> (BTreeSet<AdapterId>, bool) {
     let adapters = ctx.adapters();
-    let mut all_healthy = true;
     if adapters.is_empty() {
         println!(
             "no adapter to probe — `runners:` in the merged config names none this build \
              supports (built: {})",
             super::built_adapter_names()
         );
-    } else {
-        let mut names: Vec<&AdapterId> = adapters.keys().collect();
-        names.sort();
-        for name in names {
-            let Some(adapter) = adapters.get(name) else {
-                continue;
-            };
-            match adapter.probe().await {
-                Ok(ProbeReport::Healthy { version }) => {
-                    println!(
-                        "{name}: healthy{}",
-                        version
-                            .as_deref()
-                            .map(|v| format!(" ({v})"))
-                            .unwrap_or_default()
-                    );
-                }
-                Ok(ProbeReport::Unhealthy { diagnostic }) => {
-                    all_healthy = false;
-                    println!("{name}: unhealthy — {diagnostic}");
-                }
-                Err(e) => {
-                    all_healthy = false;
-                    println!("{name}: unhealthy — {e}");
-                }
+        return (BTreeSet::new(), true);
+    }
+    let mut healthy = BTreeSet::new();
+    let mut all_healthy = true;
+    let mut names: Vec<&AdapterId> = adapters.keys().collect();
+    names.sort();
+    for name in names {
+        let Some(adapter) = adapters.get(name) else {
+            continue;
+        };
+        match adapter.probe().await {
+            Ok(ProbeReport::Healthy { version }) => {
+                healthy.insert(name.clone());
+                let said = version
+                    .as_deref()
+                    .map(|v| format!(" ({v})"))
+                    .unwrap_or_default();
+                println!("{name}: healthy{said}");
+            }
+            Ok(ProbeReport::Unhealthy { diagnostic }) => {
+                all_healthy = false;
+                println!("{name}: unhealthy — {diagnostic}");
+            }
+            Err(e) => {
+                all_healthy = false;
+                println!("{name}: unhealthy — {e}");
             }
         }
     }
-
-    if !check_installed_pack_requires(&ctx.cwd, &ctx.project.config) {
-        all_healthy = false;
-    }
-
-    if all_healthy {
-        Ok(Outcome::Success)
-    } else {
-        Ok(Outcome::Reported)
-    }
+    (healthy, all_healthy)
 }
 
 /// Checks every installed pack's own `requires:` against this
@@ -122,4 +144,27 @@ fn check_installed_pack_requires(cwd: &std::path::Path, config: &yunta_core::Con
         }
     }
     all_satisfied
+}
+
+/// Opens one session per binding whose adapter probed healthy, and
+/// prints how each ended. Returns `false` when any of them did not open.
+///
+/// Only the bindings whose adapter is already healthy: the rest have
+/// nothing a session could add, and the lines above already name them.
+async fn probe_sessions(ctx: &Context, healthy: &BTreeSet<AdapterId>) -> bool {
+    let bindings: Vec<session::Binding> = session::bindings(&ctx.project.config)
+        .into_iter()
+        .filter(|binding| healthy.contains(&binding.candidate.adapter))
+        .collect();
+    if bindings.is_empty() {
+        println!("no binding to open a session on");
+        return true;
+    }
+    let mut all_opened = true;
+    for binding in &bindings {
+        let probe = session::session_probe(ctx, binding).await;
+        all_opened &= probe.is_ok();
+        println!("{probe}");
+    }
+    all_opened
 }

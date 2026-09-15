@@ -7,19 +7,21 @@
 //! `claude_code` and `codex` differ only in the arguments they build,
 //! the lines they parse and the settings they read.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use crate::{AdapterError, AdapterId, Pid, Result, Secret};
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
-use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Child;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use super::lines::LineReader;
+use crate::events::{SessionEnd, SessionExit, STDERR_TAIL_LINES};
 use crate::port::{AgentError, AgentEvent, AgentSession, ProbeReport};
 use crate::process::signal::{signal_group, Signal};
 
@@ -168,10 +170,21 @@ pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
             }
         }
     });
+    // The tail is shared with the session: the drain writes it as the
+    // child speaks, and `exit` reads it once the child is gone, which is
+    // the only moment anybody asks.
+    let stderr_tail = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_LINES)));
+    let secrets: Vec<Secret<String>> = launch.env.values().cloned().collect();
+    let tail = Arc::clone(&stderr_tail);
     let stderr_drain = tokio::spawn(async move {
         let mut lines = LineReader::new(stderr);
         while let Some(line) = lines.next_line().await {
             tracing::debug!(adapter = %adapter, "stderr: {line}");
+            let mut tail = tail.lock().unwrap_or_else(PoisonError::into_inner);
+            if tail.len() == STDERR_TAIL_LINES {
+                tail.pop_front();
+            }
+            tail.push_back(redacted(line, &secrets));
         }
     });
     // Owned before the prompt goes out: a failed write drops the
@@ -183,6 +196,7 @@ pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
         reaped: false,
         reader,
         stderr_drain,
+        stderr_tail,
         receiver: Some(rx),
     };
     write_prompt(stdin, launch.prompt, adapter).await?;
@@ -229,7 +243,26 @@ pub struct SubprocessSession {
     reaped: bool,
     reader: JoinHandle<()>,
     stderr_drain: JoinHandle<()>,
+    /// The last [`STDERR_TAIL_LINES`] lines the child wrote, redacted.
+    stderr_tail: Arc<Mutex<VecDeque<String>>>,
     receiver: Option<mpsc::UnboundedReceiver<AgentEvent>>,
+}
+
+/// One stderr line as the log keeps it: every value this session's
+/// environment carried replaced by `[redacted]`.
+///
+/// The child's environment is where this system puts its secrets — the
+/// run tools' token among them — and a CLI that fails at startup is
+/// exactly the one liable to echo what it was given back at stderr.
+fn redacted(line: String, secrets: &[Secret<String>]) -> String {
+    secrets.iter().fold(line, |line, secret| {
+        let value = secret.expose();
+        if value.is_empty() {
+            line
+        } else {
+            line.replace(value, "[redacted]")
+        }
+    })
 }
 
 impl SubprocessSession {
@@ -283,6 +316,60 @@ impl AgentSession for SubprocessSession {
     fn pgid(&self) -> Option<Pid> {
         Some(self.pgid)
     }
+
+    async fn exit(&mut self) -> Option<SessionExit> {
+        // The group dies first, as in `kill`, so nothing can still be
+        // writing and no reader can be left holding a pipe open. The
+        // stdout reader is then dropped — its stream is exhausted, which
+        // is why anyone is asking — while the stderr reader runs to the
+        // end of its pipe rather than being cut off: what the child said
+        // on its way out is the whole point of the question, and a pipe
+        // whose only writer is a dead process ends by itself. The status
+        // is collected last, a wait bounded by a process already dead.
+        if let Err(e) = self.kill_group() {
+            tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %e, "failed to kill a dead session's process group");
+        }
+        self.reader.abort();
+        if let Err(e) = (&mut self.stderr_drain).await {
+            tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %e, "failed to read a dead session's last stderr lines");
+        }
+        let status = match self.child.wait().await {
+            Ok(status) => {
+                self.reaped = true;
+                status
+            }
+            Err(e) => {
+                tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %e, "failed to collect a dead session's exit");
+                return None;
+            }
+        };
+        Some(SessionExit {
+            end: end_of(status),
+            stderr_tail: self
+                .stderr_tail
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .iter()
+                .cloned()
+                .collect(),
+        })
+    }
+}
+
+/// How a collected status says the process ended. A status is one or the
+/// other on every platform this runs on; neither is [`SessionEnd::Unknown`],
+/// which is what a reader makes of a `type` a newer build wrote.
+fn end_of(status: std::process::ExitStatus) -> SessionEnd {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt as _;
+        if let Some(signal) = status.signal() {
+            return SessionEnd::Signal { signal };
+        }
+    }
+    SessionEnd::Code {
+        code: status.code().unwrap_or_default(),
+    }
 }
 
 /// The tokio child's own `kill_on_drop` reaches the leader alone; the
@@ -293,67 +380,6 @@ impl Drop for SubprocessSession {
             tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %e, "failed to kill a dropped session's process group");
         }
         self.close_pipes();
-    }
-}
-
-/// Lines from a pipe: decoded with replacement characters where the
-/// bytes are not UTF-8, without their line ending, and at most
-/// [`MAX_LINE_BYTES`] long — a longer one is discarded whole, with a
-/// warning, and reading goes on with the next. A last line without a
-/// line ending is still a line.
-struct LineReader<R> {
-    reader: BufReader<R>,
-}
-
-impl<R: AsyncRead + Unpin> LineReader<R> {
-    fn new(pipe: R) -> Self {
-        LineReader {
-            reader: BufReader::new(pipe),
-        }
-    }
-
-    async fn next_line(&mut self) -> Option<String> {
-        let mut line = Vec::new();
-        let mut discarding = false;
-        loop {
-            let available = match self.reader.fill_buf().await {
-                Ok(available) => available,
-                Err(e) => {
-                    tracing::warn!(error = %e, "error reading a subprocess pipe");
-                    return None;
-                }
-            };
-            if available.is_empty() {
-                return (!discarding && !line.is_empty()).then(|| decode(&line));
-            }
-            let (chunk, ended) = match available
-                .iter()
-                .position(|byte| *byte == b'\n')
-                .and_then(|at| available.get(..at))
-            {
-                Some(chunk) => (chunk, true),
-                None => (available, false),
-            };
-            let consumed = chunk.len() + usize::from(ended);
-            if !discarding && line.len() + chunk.len() > MAX_LINE_BYTES {
-                tracing::warn!(
-                    limit = MAX_LINE_BYTES,
-                    "discarding a subprocess line longer than the limit"
-                );
-                line.clear();
-                discarding = true;
-            } else if !discarding {
-                line.extend_from_slice(chunk);
-            }
-            self.reader.consume(consumed);
-            if ended {
-                if discarding {
-                    discarding = false;
-                    continue;
-                }
-                return Some(decode(&line));
-            }
-        }
     }
 }
 
@@ -368,50 +394,5 @@ fn describe(event: &AgentEvent) -> &'static str {
         AgentEvent::Note { .. } => "a note",
         AgentEvent::Completed { .. } => "a completion",
         AgentEvent::Failed { .. } => "a failure",
-    }
-}
-
-fn decode(line: &[u8]) -> String {
-    let line = line.strip_suffix(b"\r").unwrap_or(line);
-    String::from_utf8_lossy(line).into_owned()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    async fn lines_of(bytes: &'static [u8]) -> Vec<String> {
-        let mut reader = LineReader::new(bytes);
-        let mut lines = Vec::new();
-        while let Some(line) = reader.next_line().await {
-            lines.push(line);
-        }
-        lines
-    }
-
-    #[tokio::test]
-    async fn bytes_that_are_not_utf8_become_replacement_characters() {
-        assert_eq!(
-            lines_of(b"caf\xff\xfe\nok\n").await,
-            vec!["caf\u{FFFD}\u{FFFD}".to_string(), "ok".to_string()]
-        );
-    }
-
-    #[tokio::test]
-    async fn a_last_line_without_a_line_ending_is_still_a_line() {
-        assert_eq!(
-            lines_of(b"first\r\nlast").await,
-            vec!["first".to_string(), "last".to_string()]
-        );
-    }
-
-    #[tokio::test]
-    async fn a_line_over_the_limit_is_discarded_and_reading_goes_on() {
-        let oversized: &'static [u8] = Box::leak(
-            [vec![b'x'; MAX_LINE_BYTES + 1], b"\nafter\n".to_vec()]
-                .concat()
-                .into_boxed_slice(),
-        );
-        assert_eq!(lines_of(oversized).await, vec!["after".to_string()]);
     }
 }

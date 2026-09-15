@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::events::SessionExit;
 use crate::fence::{Coverage, Fence, FenceHook, Verdict};
 use crate::{
     AdapterError, AdapterId, AgentName, Capabilities, Capability, ModelName, Pid, Result, Secret,
@@ -130,7 +131,14 @@ impl RunToolsEndpoint {
     /// with it, so this is also what an allow-rule names to admit all
     /// of them without any adapter knowing which tools the engine
     /// mounted.
-    pub const SERVER_NAME: &'static str = "yunta";
+    ///
+    /// It is not `yunta`, which is what a person registering the
+    /// control plane in their CLI's own configuration calls it. A CLI
+    /// merges both entries into one table by key, so two servers under
+    /// one name is one server configured twice — and the second write
+    /// contradicts the first, because the control plane is a command
+    /// and this is a URL.
+    pub const SERVER_NAME: &'static str = "yunta-run";
 }
 
 /// Health check result (`probe()` — binary present, version compatible,
@@ -306,8 +314,9 @@ pub trait Adapter: Send + Sync {
 #[async_trait]
 pub trait AgentSession: Send {
     /// Terminates with exactly one `Completed` or `Failed` — or ends
-    /// without either, which is a crash: the engine, not the adapter,
-    /// synthesizes `Failed { retryable: true }` for that case.
+    /// without either, which is a session that died. The adapter never
+    /// invents a terminal for that case: the engine asks [`Self::exit`]
+    /// how the process went and records the death with that answer.
     fn events(&mut self) -> BoxStream<'_, AgentEvent>;
 
     /// Ordered termination (Esc/SIGINT-equivalent) — the agent may still
@@ -324,6 +333,17 @@ pub trait AgentSession: Send {
     /// cancel` after a crash) can still exterminate the tree.
     /// `None` for sessions with no subprocess of their own (mock).
     fn pgid(&self) -> Option<Pid> {
+        None
+    }
+
+    /// How the process ended, asked only of a session whose stream ended
+    /// without a terminal event.
+    ///
+    /// The session is over by the time it is asked, so the group dies
+    /// first and the status is collected after: the wait is bounded by
+    /// construction and nothing outlives the run. A session with no
+    /// process of its own answers `None`.
+    async fn exit(&mut self) -> Option<SessionExit> {
         None
     }
 }

@@ -18,12 +18,15 @@ use chrono::{DateTime, Utc};
 
 use yunta_core::events::{ArtifactId, EventPayload, Failure, NodeEvent, StoredEvent};
 use yunta_core::{ArtifactFailure, Diagnostic, FileProblem, Manifest, NodeId, RunId};
-use yunta_engine::{NodeFrame, NodeStanding, NodeWait, RunPhase, WaitingOn};
+use yunta_engine::{RunPhase, WaitingOn};
+
+mod node;
+
+use node::{NodeJson, NodeWaitJson};
 
 use crate::commands::status::{decision, progress, task_status_label};
 use crate::error::{CliError, Outcome};
-use crate::render::state::{RunWord, StateWord};
-use crate::render::NodeDisplay;
+use crate::render::state::RunWord;
 
 /// The version stamped on every machine-readable document this CLI emits.
 /// Bumped when a field's meaning changes, never for an additive one, so a
@@ -205,71 +208,6 @@ fn parked_decision(
     ))
 }
 
-/// One node of the run's frozen workflow, as the document carries it.
-///
-/// The word and its detail are the two halves every surface shows, so a
-/// reader of this document and a reader of `status` are told the same
-/// thing about the same node.
-#[derive(serde::Serialize)]
-pub(crate) struct NodeJson {
-    id: String,
-    state: StateWord,
-    /// What qualifies the word — the outcome, the failure, the attempt
-    /// running, the questions it asked. Absent when the word says all
-    /// there is.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    detail: Option<String>,
-    /// The enclosing `parallel` group, absent for a top-level node.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    group: Option<String>,
-    /// What this node waits on, for a node that is waiting.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    waiting_on: Option<NodeWaitJson>,
-}
-
-impl NodeJson {
-    fn of(node: &NodeFrame) -> Self {
-        let display = NodeDisplay::standing(&node.state);
-        NodeJson {
-            id: node.id.to_string(),
-            state: display.word,
-            detail: display.modifier.clone(),
-            group: node.group.as_ref().map(ToString::to_string),
-            waiting_on: match &node.state {
-                NodeStanding::Reached(state) => state.waiting_on().map(NodeWaitJson::of),
-                _ => None,
-            },
-        }
-    }
-}
-
-/// What one waiting node waits on — the same vocabulary the run-level
-/// `waiting_on` uses, so the document says "waiting" one way.
-#[derive(serde::Serialize)]
-#[serde(tag = "on", rename_all = "snake_case")]
-pub(crate) enum NodeWaitJson {
-    Gate {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        external_ref: Option<String>,
-    },
-    Questions {
-        asked: Vec<String>,
-    },
-}
-
-impl NodeWaitJson {
-    fn of(on: &NodeWait) -> Self {
-        match on {
-            NodeWait::Gate { external_ref } => NodeWaitJson::Gate {
-                external_ref: external_ref.clone(),
-            },
-            NodeWait::Questions { asked } => NodeWaitJson::Questions {
-                asked: asked.as_slice().iter().map(ToString::to_string).collect(),
-            },
-        }
-    }
-}
-
 /// What a waiting run is waiting on.
 ///
 /// Tagged by `on`, so a reader matches on the shape instead of
@@ -429,9 +367,10 @@ fn node_diagnostics(events: &[StoredEvent]) -> BTreeMap<String, Vec<ArtifactProb
                         artifacts.iter().map(ArtifactProblems::from).collect(),
                     );
                 }
-                // A failure stated in one sentence names no document;
-                // the node's own line carries it whole.
-                Failure::Message { .. } => {
+                // A failure stated in one sentence names no document,
+                // and neither does a session that died: the node's own
+                // entry carries each of them whole.
+                Failure::Message { .. } | Failure::SessionDied { .. } => {
                     latest.remove(node_id.as_str());
                 }
             },

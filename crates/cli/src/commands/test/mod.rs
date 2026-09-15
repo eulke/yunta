@@ -158,10 +158,55 @@ pub(crate) fn mock_adapters(
     adapters
 }
 
+/// A checkout of its own for a run that must not touch the project: a
+/// temp root, and under it a worktree seeded with this project's
+/// catalog. Whoever built it writes what the run needs on top and then
+/// makes it a repository with [`init_git`].
+pub(crate) struct SandboxedCheckout {
+    /// Owns the temp root, so the sandbox lasts exactly as long as this
+    /// value and not a moment longer.
+    root: tempfile::TempDir,
+    worktree: PathBuf,
+}
+
+impl SandboxedCheckout {
+    /// Where the run's state — its event log, its run directories —
+    /// goes, so the project's own is never written to.
+    pub(crate) fn root(&self) -> &Path {
+        self.root.path()
+    }
+
+    /// The tree the run works in.
+    pub(crate) fn worktree(&self) -> &Path {
+        &self.worktree
+    }
+}
+
+/// Builds one, seeded from `cwd`'s `.yunta`, so a run inside it
+/// resolves its workflow through the very catalog a real run resolves
+/// through.
+pub(crate) fn sandboxed_checkout(cwd: &Path) -> Result<SandboxedCheckout, CliError> {
+    let root = tempfile::tempdir().map_err(|e| CliError::io("create", "a sandbox", e))?;
+    let worktree = root.path().join("worktree");
+    std::fs::create_dir_all(&worktree)
+        .map_err(|e| CliError::io("create", worktree.display(), e))?;
+    let catalog = cwd.join(".yunta");
+    if catalog.is_dir() {
+        // Created here rather than left to the first entry that happens
+        // to be a directory: a catalog holding only files would
+        // otherwise be copied into a directory that is not there.
+        let into = worktree.join(".yunta");
+        std::fs::create_dir_all(&into).map_err(|e| CliError::io("create", into.display(), e))?;
+        copy_dir_all(&catalog, &into)
+            .map_err(|e| CliError::io("copy the catalog from", catalog.display(), e))?;
+    }
+    Ok(SandboxedCheckout { root, worktree })
+}
+
 /// Copies `from`'s tree into `into`, which already exists. Every entry
 /// is copied as a regular file or directory; the seed is repository
 /// content a case commits, never a place for symlinks.
-fn copy_dir_all(from: &Path, into: &Path) -> std::io::Result<()> {
+pub(crate) fn copy_dir_all(from: &Path, into: &Path) -> std::io::Result<()> {
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
         let target = into.join(entry.file_name());
@@ -203,7 +248,7 @@ async fn report(root: &Path, case_path: &Path, interrupt: crate::interrupt::Inte
 /// Turns the sandbox worktree into a repository whose initial commit
 /// holds the seed (or nothing), so a run's scope diff only ever shows
 /// what its sessions changed.
-async fn init_git(
+pub(crate) async fn init_git(
     dir: &Path,
     supervision: yunta_engine::process::Supervision<'_>,
 ) -> Result<(), CliError> {

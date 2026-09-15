@@ -3,6 +3,7 @@
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::EventPayload;
+use yunta_core::events::Failure;
 use yunta_core::events::OrphanedSession;
 use yunta_core::{Node, PromptSource};
 
@@ -218,13 +219,15 @@ pub(super) async fn execute_prompt(
         DispatchOutcome::Failed { message, retryable } => {
             fail_with_tokens(ctx, node, message, retryable, tokens).await
         }
-        // No terminal event means the engine synthesizes a retryable
-        // failure — the adapter never invents one.
-        DispatchOutcome::Crashed => {
-            fail_with_tokens(
+        // No terminal event means the engine records the death — the
+        // adapter never invents a terminal of its own — with how the
+        // process went, which is what a reader needs to tell a CLI that
+        // refused its configuration from one that merely stopped.
+        DispatchOutcome::Crashed { exit } => {
+            super::node_close::fail_with(
                 ctx,
                 node,
-                "session ended without a terminal event".to_string(),
+                Failure::session_died(adapter.id().clone(), exit),
                 true,
                 tokens,
             )

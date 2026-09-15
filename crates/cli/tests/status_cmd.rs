@@ -376,3 +376,89 @@ fn run_json_and_status_json_are_one_document() {
     );
     assert_eq!(from_run["outcome"], "finished", "{from_run:#}");
 }
+
+// --- a session that never opened -----------------------------------------
+
+/// A project whose one runner is a `codex` that refuses whatever it is
+/// given: it writes the refusal on stderr and exits before its first
+/// line, which is what a CLI rejecting the configuration this engine
+/// writes it actually does.
+fn run_a_dying_session(root: &Path, repo: &Path, home: &Path) -> String {
+    let said = root.join("stderr.txt");
+    write(&said, "url is not supported for stdio\n");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        &format!(
+            "runners:\n  executor:\n    - {{ adapter: codex, model: codex-model }}\nadapters:\n  \
+             codex:\n    binary: {stub}\nsecrets: [CODEX_STUB_STDERR_FILE, CODEX_STUB_EXIT]\n",
+            stub = yunta_testkit_core::stubs::codex().display()
+        ),
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: dying\nnodes:\n  - id: work\n    kind: prompt\n    runner: executor\n    prompt: \
+         \"Do the thing.\"\n",
+    );
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-q", "-m", "project"]);
+
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, repo, home);
+    let run = command
+        .args(["run", "wf.yaml"])
+        .env("CODEX_STUB_STDERR_FILE", &said)
+        .env("CODEX_STUB_EXIT", "2")
+        .output()
+        .expect("the yunta binary runs");
+    run_id_from(&run)
+}
+
+#[test]
+fn status_prints_the_stderr_a_dead_session_left() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    let run_id = run_a_dying_session(root.path(), &repo, &home);
+
+    let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    assert!(
+        text.contains("session `codex` exited with code 2 before any terminal event"),
+        "the node's own line says how the process went: {text}"
+    );
+    assert!(
+        text.contains("url is not supported for stdio"),
+        "and the page shows what the CLI said on its way out: {text}"
+    );
+}
+
+#[test]
+fn status_json_publishes_a_session_death_on_its_node() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    let run_id = run_a_dying_session(root.path(), &repo, &home);
+
+    let document: serde_json::Value = serde_json::from_str(&stdout(&yunta_in!(
+        &repo,
+        &home,
+        &["status", &run_id, "--json"]
+    )))
+    .expect("a JSON document");
+    let node = document["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.first())
+        .expect("the one node");
+    assert_eq!(node["session_death"]["adapter"], "codex", "{document:#}");
+    assert_eq!(node["session_death"]["exit"]["end"], "code", "{document:#}");
+    assert_eq!(node["session_death"]["exit"]["code"], 2, "{document:#}");
+    assert_eq!(
+        node["session_death"]["exit"]["stderr_tail"][0], "url is not supported for stdio",
+        "{document:#}"
+    );
+    // A dead session names no document, so it is not a diagnostic.
+    assert!(document.get("diagnostics").is_none(), "{document:#}");
+}

@@ -24,7 +24,7 @@ pub trait Adapter: Send + Sync { /* idéntico a adapters/src/session.rs:251-280 
 pub trait AgentSession: Send { /* idéntico a session.rs:282-305 */ }
 pub struct SessionRequest { /* idéntico a session.rs:44-105; en 3-08 toma la forma de cerco.md §3 */ }
 pub struct RunToolsEndpoint { pub url: String, pub token: Secret<String> }
-pub const SERVER_NAME: &str = "yunta";   // M31 (fase 8) lo fija en "yunta-run"
+pub const SERVER_NAME: &str = "yunta-run";   // M31: nombre propio, distinto del control plane que un usuario registra
 pub enum ProbeReport { Healthy { version: Option<String> }, Unhealthy { diagnostic: String } }
 pub enum AgentEvent { /* idéntico; en 3-08 gana `fence` en SessionOpened y `WriteRefused` (cerco.md §3) */ }
 pub enum AdapterError { /* idéntico */ }

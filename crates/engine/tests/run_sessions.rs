@@ -5,7 +5,9 @@ use yunta_testkit::Bench;
 
 mod common;
 use common::*;
-use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, ScopeEvent, SessionEvent};
+use yunta_core::events::{
+    ArtifactEvent, Failure, FindingEvent, NodeEvent, ScopeEvent, SessionEvent,
+};
 
 #[tokio::test]
 async fn a_session_leaves_agent_session_opened_in_the_log_with_its_session_id() {
@@ -1296,4 +1298,69 @@ nodes:
         yunta_core::fence::Advice::RequestExpansion,
         "a task session mounted the tool that asks"
     );
+}
+
+/// A session whose stream ends saying nothing is not a sentence the
+/// engine invents: it is a fact with the adapter that owned it and how
+/// its process went, so a reader can tell a CLI that refused its
+/// configuration from one that merely stopped.
+#[tokio::test]
+async fn a_node_whose_session_died_fails_naming_the_adapter_and_the_exit() {
+    let bench = Bench::new();
+    let RunReport { terminal, state } = bench
+        .run(
+            SESSION_EVENTS_WORKFLOW,
+            "sessions:\n  - outcome: { type: crash }\n",
+        )
+        .await;
+    assert!(
+        matches!(
+            terminal,
+            RunTerminal::Paused { .. } | RunTerminal::Failed { .. }
+        ),
+        "a run whose only node died does not finish: {terminal:?}"
+    );
+
+    let failure = bench
+        .events()
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::Failed(p))) => {
+                Some(p.failure.clone())
+            }
+            _ => None,
+        })
+        .expect("the node failed");
+    let Failure::SessionDied { died } = &failure else {
+        panic!("a dead session is a fact, not a sentence: {failure:?}");
+    };
+    assert_eq!(died.adapter, "mock");
+    // A mock has no process of its own, so there is nothing to report
+    // about how one ended — and the sentence says exactly that.
+    assert_eq!(died.exit, None);
+    assert_eq!(
+        failure.to_string(),
+        "session `mock` ended without a terminal event"
+    );
+    assert!(bench.mock().interrogated(), "the one that died was asked");
+    let work: yunta_core::NodeId = "work".parse().unwrap();
+    assert!(matches!(
+        state.nodes.state(&work),
+        Some(NodeState::Failed { .. })
+    ));
+}
+
+/// Asking costs a kill and a wait. A session that closed its turn said
+/// everything it had to say, so the question is never put to it.
+#[tokio::test]
+async fn a_session_that_finished_its_turn_is_never_asked_how_it_exited() {
+    let bench = Bench::new();
+    let RunReport { terminal, state: _ } = bench
+        .run(
+            SESSION_EVENTS_WORKFLOW,
+            "sessions:\n  - outcome: { type: completed, summary: \"done\" }\n",
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(!bench.mock().interrogated());
 }

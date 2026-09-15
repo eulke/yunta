@@ -127,3 +127,52 @@ installed and configured later, the same way an adapter that isn't set up
 yet doesn't stop `yunta init`. Run `yunta doctor` after adding a pack, or
 whenever a run fails in a way that looks like a missing binary or an
 unresolved role.
+
+### `--session`: opening one for real
+
+A probe asks the CLI for its version. That tells you the binary is there,
+answers and authenticates; it does not tell you a session opens, because
+`--version` never touches the configuration a run writes the CLI. A CLI
+that refuses that configuration says so on stderr and exits before its
+first line — from the outside, a node that failed with no exit and no
+tokens.
+
+```bash
+yunta doctor --session
+```
+
+opens the smallest run there is — one `kind: prompt` node, run tools
+mounted, driven through the same machinery a workflow is — once per
+*binding*: an adapter, a model and an agent that some runner names. The
+binding and not the runner name, because a session exercises a binding:
+two runners naming the same one are not two things to check, and one a
+runner falls back to is checked too, since a run reaches it exactly when
+the first is down.
+
+```
+claude-code/claude-sonnet-5 (executor, reviewer): ok — 812 tokens
+codex/gpt-5-codex (planner fallback): session died — session `codex` exited with code 2 before any terminal event — url is not supported for stdio
+```
+
+It spends one prompt per binding, which is why it is opt-in. It runs in a
+sandbox of its own — nothing of your tree is touched, and your
+`baseline:` suite is never measured, because the question is whether a
+session opens, not what the tree measures.
+
+## The two MCP servers
+
+Two different servers carry the name of this system, and they are not the
+same thing:
+
+- **The control plane**, `yunta mcp`, which you register in your own
+  CLI's configuration, under whatever name you give it. It talks over
+  stdio and offers `list_workflows`, `run_workflow`, `workflow_status`
+  and the rest.
+- **The per-run server**, which the engine mounts into each session
+  itself and always calls `yunta-run`. It talks over streamable HTTP,
+  lives as long as the run does, and carries the tools a node uses to
+  post findings and submit documents.
+
+A CLI merges both entries into one table by key, so the per-run server
+carries a name of its own: registering the control plane as `yunta` — the
+natural thing to call it — leaves both intact.

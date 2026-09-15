@@ -15,7 +15,7 @@ use yunta_testkit::{
 };
 
 fn claude_code_stub() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../adapters/tests/fixtures/claude_code_stub.sh")
+    yunta_testkit_core::stubs::claude_code()
 }
 
 #[test]
@@ -2744,7 +2744,7 @@ nodes:
 }
 
 fn codex_stub() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../adapters/tests/fixtures/codex_stub.sh")
+    yunta_testkit_core::stubs::codex()
 }
 
 /// `--adapter <real>` makes every role resolve to its candidate on that

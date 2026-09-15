@@ -8,6 +8,12 @@
 # - $CLAUDE_STUB_ARGS_FILE, if set: every argv entry, one per line — lets
 #   tests assert the exact CLI invocation the adapter built (permission
 #   flags, --model, --resume, ...) without exposing that logic publicly.
+# - $CLAUDE_STUB_STDERR_FILE, if set: its contents go to stderr before
+#   the session streams anything — what a CLI that refuses its
+#   configuration says on its way out. A file rather than the text
+#   itself, because a session redacts every value its environment
+#   carried and a test asserting on the line needs it unredacted.
+# - $CLAUDE_STUB_EXIT, if set: the status to exit with.
 # - $CLAUDE_STUB_CHILD_PID_FILE, if set: spawns a background blocker of
 #   its own and records its pid — a grandchild the adapter's kill() must
 #   also reach, since the whole process tree must die together.
@@ -31,6 +37,10 @@ fi
 if [ "$1" = "--version" ]; then
   echo "2.1.235 (Claude Code)"
   exit 0
+fi
+
+if [ -n "$CLAUDE_STUB_STDERR_FILE" ]; then
+  cat "$CLAUDE_STUB_STDERR_FILE" >&2
 fi
 
 if [ -n "$CLAUDE_STUB_CHILD_PID_FILE" ]; then

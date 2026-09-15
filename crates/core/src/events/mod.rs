@@ -28,7 +28,7 @@ mod wire;
 pub use artifacts::{payloads::*, ArtifactEvent};
 pub use children::{ledger::*, payloads::*, ChildEvent};
 pub use evidence::{Evidence, Fact};
-pub use failure::Failure;
+pub use failure::{Failure, SessionDeath, SessionEnd, SessionExit, STDERR_TAIL_LINES};
 pub use findings::{payloads::*, FindingEvent};
 pub use gates::{ledger::*, payloads::*, GateEvent};
 pub use meta::EventMeta;

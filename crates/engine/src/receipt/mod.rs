@@ -222,6 +222,10 @@ fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
         _ => None,
     });
     for failure in failed {
+        // Only a failure about documents has documents to count. A
+        // sentence and a dead session name no artifact, and counting
+        // them as zero of something would be a different claim from
+        // having nothing to say.
         let Failure::Artifacts { artifacts } = failure else {
             continue;
         };

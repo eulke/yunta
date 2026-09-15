@@ -14,7 +14,10 @@ use std::time::Duration;
 use yunta_core::fence::{Advice, Fence, FenceHook};
 
 use futures::StreamExt;
+use yunta_core::events::SessionExit;
 use yunta_core::port::{AgentEvent, AgentSession, Budget, PermissionProfile, SessionRequest};
+use yunta_core::process::signal::{liveness, Liveness};
+use yunta_core::Pid;
 
 /// A session request with nothing declared: the baseline a test varies
 /// one field of, so what it asserts about is the field it set.
@@ -40,6 +43,21 @@ pub fn request(cwd: PathBuf) -> SessionRequest {
 
 /// Every event `session` produces, to the end of its stream.
 pub async fn drain(mut session: Box<dyn AgentSession>) -> Vec<AgentEvent> {
+    to_the_end(&mut session).await
+}
+
+/// The same, and how the session's process ended — the pair the engine
+/// reads of a session whose stream said nothing terminal, so a test
+/// reads both without draining twice.
+pub async fn drain_for_exit(
+    mut session: Box<dyn AgentSession>,
+) -> (Vec<AgentEvent>, Option<SessionExit>) {
+    let events = to_the_end(&mut session).await;
+    let exit = session.exit().await;
+    (events, exit)
+}
+
+async fn to_the_end(session: &mut Box<dyn AgentSession>) -> Vec<AgentEvent> {
     let mut events = Vec::new();
     let mut stream = session.events();
     while let Some(event) = stream.next().await {
@@ -60,6 +78,23 @@ pub fn write_lines(dir: &Path, name: &str, lines: &[&str]) -> PathBuf {
     };
     std::fs::write(&path, contents).expect("the script writes");
     path
+}
+
+/// Waits until `pid` names no process at all.
+///
+/// A process a group signal reached is a zombie until whoever adopted it
+/// reaps it, and a zombie still answers a signal, so "the group is gone"
+/// is a question with a moment of latency in it. The deadline turns a
+/// survivor into a failed test rather than a hung one.
+pub async fn wait_until_gone(pid: Pid) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while liveness(pid) != Liveness::Dead {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "`{pid}` outlived the session that owned it"
+        );
+        tokio::task::yield_now().await;
+    }
 }
 
 /// The fifo a scripted CLI records its child pid into. A fifo, not a

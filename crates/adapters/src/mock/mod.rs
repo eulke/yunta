@@ -23,8 +23,9 @@ pub use fixture::{
 };
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use yunta_core::events::SessionExit;
 use yunta_core::fence::{Fence, Verdict};
 use yunta_core::FenceLevel;
 
@@ -80,6 +81,11 @@ pub struct MockAdapter {
     /// The next session id's number: every adapter counts from one, so
     /// a fixture's ids never depend on what else ran in the process.
     next_session: AtomicU64,
+    /// Whether any session of this adapter was asked how its process
+    /// ended. A mock has no process, so what this records is the
+    /// engine's own rule: the question is put only to a session whose
+    /// stream ended saying nothing.
+    interrogated: Arc<AtomicBool>,
 }
 
 impl MockAdapter {
@@ -96,7 +102,13 @@ impl MockAdapter {
             artifact_dirs_seen: Mutex::new(Vec::new()),
             requests_seen: Mutex::new(Vec::new()),
             next_session: AtomicU64::new(1),
+            interrogated: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Whether any session this adapter opened was asked how it exited.
+    pub fn interrogated(&self) -> bool {
+        self.interrogated.load(Ordering::SeqCst)
     }
 
     /// The scripts no `spawn()` claimed, by index in the fixture — what
@@ -279,6 +291,7 @@ impl MockAdapter {
             interrupt,
             kill,
             player,
+            interrogated: Arc::clone(&self.interrogated),
         }))
     }
 
@@ -420,6 +433,9 @@ pub struct MockSession {
     /// the stream — leaves a player waiting on a step that will never
     /// be read, so the session owns it and takes it down with itself.
     player: tokio::task::JoinHandle<()>,
+    /// Shared with the adapter that opened this session: see
+    /// [`MockAdapter::interrogated`].
+    interrogated: Arc<AtomicBool>,
 }
 
 impl Drop for MockSession {
@@ -449,5 +465,13 @@ impl AgentSession for MockSession {
     async fn kill(&mut self) -> Result<()> {
         self.kill.notify_one();
         Ok(())
+    }
+
+    /// Nothing, because there is no process — and a record that the
+    /// question was put, which is what a test of the engine's rule
+    /// reads.
+    async fn exit(&mut self) -> Option<SessionExit> {
+        self.interrogated.store(true, Ordering::SeqCst);
+        None
     }
 }

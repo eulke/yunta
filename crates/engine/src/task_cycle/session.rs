@@ -285,8 +285,17 @@ pub(crate) async fn dispatch_session(
         });
     }
 
+    let outcome = match terminal {
+        Some(outcome) => outcome,
+        // Only the one that fell silent is asked: a session that closed
+        // its turn said everything it had to say, and asking it would
+        // cost a kill and a wait for nothing.
+        None => DispatchOutcome::Crashed {
+            exit: session.exit().await,
+        },
+    };
     Ok(Dispatched {
-        outcome: terminal.unwrap_or(DispatchOutcome::Crashed),
+        outcome,
         tokens,
         fence,
     })

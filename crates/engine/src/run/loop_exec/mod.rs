@@ -11,8 +11,12 @@ mod dispatch;
 mod escalate;
 mod integrate;
 
-use yunta_core::events::{EventPayload, LoopIterationPayload, StoredEvent, TaskStatus, TokenUsage};
-use yunta_core::{Node, NodeKind, PromptSource, Task, TasksFile};
+use yunta_core::events::{
+    EventPayload, Failure, LoopIterationPayload, SessionDeath, StoredEvent, TaskStatus, TokenUsage,
+};
+use yunta_core::{Node, NodeKind, PromptSource, Task, TaskId, TasksFile};
+
+use crate::task_cycle::BlockedCause;
 
 use crate::replay::RunState;
 
@@ -44,7 +48,7 @@ pub(super) async fn execute_loop(
         tokens: TokenUsage::default(),
         iteration: 0,
         iterations_lifted: false,
-        blocked_reasons: Vec::new(),
+        blocked: Vec::new(),
     };
     loop {
         state.iteration += 1;
@@ -76,12 +80,29 @@ pub(super) async fn execute_loop(
                 )
                 .await;
             }
+            // A session that died is the actionable fact among them, and
+            // it reaches the log as the fact rather than inside a
+            // sentence: the node failed because a CLI would not start,
+            // and that is retryable in a way an unmet criterion is not.
+            if let Some(died) = state.first_death() {
+                return crate::run::node_close::fail_with(
+                    ctx,
+                    node,
+                    Failure::SessionDied { died },
+                    true,
+                    state.tokens,
+                )
+                .await;
+            }
             let mut diagnostic = "no task is ready and not all are done — blocked or failed \
                                   tasks need a decision"
                 .to_string();
-            for reason in &state.blocked_reasons {
+            for (task, cause) in &state.blocked {
                 diagnostic.push_str("; ");
-                diagnostic.push_str(reason);
+                diagnostic.push_str(&yunta_core::text::detailed(
+                    format!("task `{task}` blocked"),
+                    &cause.to_string(),
+                ));
             }
             return fail_with_tokens(ctx, node, diagnostic, false, state.tokens).await;
         }
@@ -214,10 +235,23 @@ struct LoopState {
     tokens: TokenUsage,
     iteration: u32,
     iterations_lifted: bool,
-    /// Blocked reasons gathered this invocation, so the loop's own failure
-    /// can cite them. A resume starts empty — the log carries each task's
-    /// status, and the empty-batch tail still names which tasks are blocked.
-    blocked_reasons: Vec<String>,
+    /// What blocked each task this invocation, so the loop's own failure
+    /// can cite them. Typed rather than a sentence: the node closes with
+    /// the first death among them as the fact it is, and writes prose
+    /// only at the edge. A resume starts empty — the log carries each
+    /// task's status, and the empty-batch tail still names which tasks
+    /// are blocked.
+    blocked: Vec<(TaskId, BlockedCause)>,
+}
+
+impl LoopState {
+    /// The first session death among this invocation's blocked tasks.
+    fn first_death(&self) -> Option<SessionDeath> {
+        self.blocked.iter().find_map(|(_, cause)| match cause {
+            BlockedCause::SessionDied(died) => Some(died.clone()),
+            _ => None,
+        })
+    }
 }
 
 /// What integrating one batch produced: a cancellation that ends the node,

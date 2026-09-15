@@ -1,5 +1,5 @@
 //! Integration tests for the real `claude-code` adapter against a fake
-//! `claude` binary (`fixtures/claude_code_stub.sh`) — no network, no
+//! `claude` binary (`yunta_testkit_core::stubs::claude_code`) — no network, no
 //! API cost, no real LLM in CI. The one thing this suite cannot cover
 //! is whether the real CLI's actual output matches what the stub
 //! scripts: that is what the manual smoke test covers instead.
@@ -19,7 +19,7 @@ use yunta_core::{AdapterSettings, SessionId};
 use yunta_testkit_core::adapter::{child_pid_fifo, drain, grandchild_pid, request, write_lines};
 
 fn stub_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude_code_stub.sh")
+    yunta_testkit_core::stubs::claude_code()
 }
 
 fn adapter() -> ClaudeCodeAdapter {
@@ -788,7 +788,11 @@ async fn the_per_run_tools_reach_the_session_without_the_token_on_the_command_li
         .expect("the per-run MCP server is mounted");
     let config: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&args[pos + 1]).unwrap()).unwrap();
-    let server = &config["mcpServers"]["yunta"];
+    assert!(
+        config["mcpServers"]["yunta"].is_null(),
+        "the per-run server never takes the name a person's own entry takes: {config:#}"
+    );
+    let server = &config["mcpServers"]["yunta-run"];
     assert_eq!(server["url"], "http://127.0.0.1:54321/mcp");
     assert_eq!(
         server["headers"]["Authorization"], "Bearer s3cr3t-token-value",
@@ -803,7 +807,7 @@ async fn the_per_run_tools_reach_the_session_without_the_token_on_the_command_li
     // Mounting a server the profile then forbids would be a tool the
     // agent is told to call and cannot.
     assert!(
-        args.iter().any(|a| a == "mcp__yunta__*"),
+        args.iter().any(|a| a == "mcp__yunta-run__*"),
         "every tool of the mounted server is allowed, so this adapter \
          never has to know which tools the engine mounts: {args:?}"
     );
@@ -825,7 +829,7 @@ async fn no_per_run_endpoint_mounts_no_server() {
 async fn init_with_tools(tools: &str) -> Vec<AgentEvent> {
     events_of(&[
         &format!(
-            r#"{{"type":"system","subtype":"init","session_id":"sess-tools","model":"claude-sonnet-5","mcp_servers":[{{"name":"yunta","status":"connected"}}],"tools":{tools}}}"#
+            r#"{{"type":"system","subtype":"init","session_id":"sess-tools","model":"claude-sonnet-5","mcp_servers":[{{"name":"yunta-run","status":"connected"}}],"tools":{tools}}}"#
         ),
         r#"{"type":"result","is_error":false,"result":"done"}"#,
     ])
@@ -842,7 +846,7 @@ fn run_tools_mounted(events: &[AgentEvent]) -> Option<usize> {
 #[tokio::test]
 async fn the_init_line_reports_how_many_run_tools_the_session_holds() {
     let events = init_with_tools(
-        r#"["Bash","mcp__yunta__yunta_check_artifact","mcp__yunta__yunta_post_finding"]"#,
+        r#"["Bash","mcp__yunta-run__yunta_check_artifact","mcp__yunta-run__yunta_post_finding"]"#,
     )
     .await;
     assert_eq!(

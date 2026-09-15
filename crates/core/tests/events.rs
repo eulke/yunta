@@ -634,3 +634,33 @@ fn questions_awaiting_an_answer_are_said_one_way() {
         "asked 2 questions: `q-scope`, `q-api`"
     );
 }
+
+#[test]
+fn a_node_failed_by_a_dead_session_round_trips_with_its_exit() {
+    let payload = EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+        Failure::session_died(
+            "codex".parse().unwrap(),
+            Some(SessionExit {
+                end: SessionEnd::Code { code: 2 },
+                stderr_tail: vec!["url is not supported for stdio".to_string()],
+            }),
+        ),
+        true,
+        TokenUsage::default(),
+    )));
+
+    let json: serde_json::Value = serde_json::to_value(&payload).unwrap();
+    assert_eq!(json["died"]["adapter"], "codex");
+    assert_eq!(json["died"]["exit"]["end"]["type"], "code");
+    assert_eq!(json["died"]["exit"]["end"]["code"], 2);
+
+    let parsed: EventPayload = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(payload, parsed, "{json}");
+}
+
+#[test]
+fn a_session_end_this_build_does_not_know_reads_back_as_unknown() {
+    let end: SessionEnd =
+        serde_json::from_value(serde_json::json!({"type": "stopped", "by": "a debugger"})).unwrap();
+    assert_eq!(end, SessionEnd::Unknown);
+}

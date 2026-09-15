@@ -137,7 +137,14 @@ enum Command {
     },
     /// Health-checks every adapter this project's `runners:` names —
     /// binary present, version compatible, auth valid.
-    Doctor,
+    Doctor {
+        /// Also opens one real session per binding any runner names —
+        /// the smallest run there is, through the same machinery a
+        /// workflow uses, run tools mounted — and reports how each one
+        /// ended. Spends one prompt per binding.
+        #[arg(long)]
+        session: bool,
+    },
     /// Runs the control-plane MCP server over stdio: `document_shape`,
     /// `list_workflows`, `run_workflow`, `workflow_status`,
     /// `resume_run`, `resolve_gate`, `answer_questions` — none of which
@@ -372,7 +379,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
                 commands::list::list_workflows().await
             }
         }
-        Command::Doctor => commands::doctor::doctor().await,
+        Command::Doctor { session } => commands::doctor::doctor(session).await,
         Command::Mcp => commands::mcp::mcp().await,
         Command::Gc { dry_run } => commands::gc::gc(dry_run),
         Command::Graph {

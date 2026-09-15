@@ -2130,7 +2130,7 @@
       ]
     },
     "NodeFailedPayload": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "type": "object",
       "properties": {
         "retryable": {
@@ -2155,6 +2155,18 @@
           },
           "required": [
             "artifacts"
+          ]
+        },
+        {
+          "description": "The session the node was working in ended without a terminal\nevent, and how its process went.",
+          "type": "object",
+          "properties": {
+            "died": {
+              "$ref": "#/$defs/SessionDeath"
+            }
+          },
+          "required": [
+            "died"
           ]
         },
         {
@@ -2825,6 +2837,97 @@
       "description": "A position in a run's log: a positive number",
       "type": "integer",
       "minimum": 1
+    },
+    "SessionDeath": {
+      "description": "A session that ended without ever reporting a terminal event: whose\nit was, and how its process went, when it had one of its own.",
+      "type": "object",
+      "properties": {
+        "adapter": {
+          "$ref": "#/$defs/AdapterId"
+        },
+        "exit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionExit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "adapter"
+      ]
+    },
+    "SessionEnd": {
+      "description": "How the process ended: the status it exited with, or the signal that\nended it.\n\nA closed union rather than two optionals, so a process that says\nneither is not representable. A stored `type` this build does not\nknow reads back as [`SessionEnd::Unknown`] — the tolerance everything\npersisted here gives a reader older than its writer.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "type": {
+              "type": "string",
+              "const": "code"
+            }
+          },
+          "required": [
+            "type",
+            "code"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "signal": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "type": {
+              "type": "string",
+              "const": "signal"
+            }
+          },
+          "required": [
+            "type",
+            "signal"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "SessionExit": {
+      "description": "What a process left behind: how it ended, and the last lines it wrote\nto stderr, redacted of every value its environment carried.",
+      "type": "object",
+      "properties": {
+        "end": {
+          "$ref": "#/$defs/SessionEnd"
+        },
+        "stderr_tail": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "end"
+      ]
     },
     "SessionId": {
       "description": "A session id: not empty and without control characters",

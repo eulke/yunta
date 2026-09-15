@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::TokenUsage;
+use yunta_core::events::{SessionDeath, TokenUsage};
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::Task;
 
@@ -137,6 +137,17 @@ pub(super) async fn run_one_attempt(
             ..
         }
     );
+    // The same, for a session that never reported anything at all: it
+    // left no work behind and said how its process went, and the next
+    // attempt would open the same session against the same
+    // configuration. Captured here for the same reason.
+    let session_death = match &dispatch_outcome {
+        DispatchOutcome::Crashed { exit } => Some(SessionDeath {
+            adapter: params.adapter.id().clone(),
+            exit: exit.clone(),
+        }),
+        _ => None,
+    };
 
     let record = AttemptRecord {
         attempt,
@@ -170,6 +181,20 @@ pub(super) async fn run_one_attempt(
                     cause: super::BlockedCause::ScopeDecisionOwed,
                 },
                 needs_human_decision: true,
+            },
+        ));
+    }
+    // A session that died says so instead of leaving the tail to report
+    // criteria that were never run.
+    if let Some(died) = session_death {
+        return Ok((
+            last_staged,
+            AttemptStep::Stop {
+                record,
+                outcome: TaskOutcome::Blocked {
+                    cause: super::BlockedCause::SessionDied(died),
+                },
+                needs_human_decision: false,
             },
         ));
     }

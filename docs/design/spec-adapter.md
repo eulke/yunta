@@ -215,8 +215,13 @@ telemetría, no evidencia.
   resumibilidad de nivel nodo; un adapter que no puede obtenerlo emite un id
   sintético propio y declara `resume_session: false`.
 - **O2. Terminación única**: el stream termina con exactamente un `Completed` o
-  `Failed`. Muerte del proceso sin evento = el engine sintetiza
-  `Failed {retryable: true}` (crash ≠ error del agente).
+  `Failed`. Un stream que termina sin ninguno de los dos no es un error del
+  agente: el adapter nunca inventa un terminal, el engine le pregunta a esa
+  sesión —y sólo a esa— cómo salió su proceso (`AgentSession::exit`) y registra
+  la muerte con esa salida, `retryable: true`. Preguntar es matar primero: el
+  grupo muere, las cañerías se cierran y recién después se recoge la salida, de
+  modo que la espera está acotada y nada sobrevive al run. Una sesión sin
+  proceso propio responde `None` (D180).
 - **O3. Nada sensible en eventos**: los payloads llevan digests y resúmenes, jamás
   contenido de archivos, prompts completos ni valores de env. El engine además
   redacta todo valor de secreto conocido antes de persistir (I12): defensa en

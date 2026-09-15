@@ -17,8 +17,8 @@ use yunta_core::Criterion;
 use yunta_core::Task;
 use yunta_engine::scope_expansion::GrantLedger;
 use yunta_engine::{
-    run_task, surprises, AttemptEnv, CriterionRun, DispatchOutcome, Memo, ScopeGovernance,
-    Surprise, TaskOutcome,
+    run_task, surprises, AttemptEnv, BlockedCause, CriterionRun, DispatchOutcome, Memo,
+    ScopeGovernance, Surprise, TaskOutcome,
 };
 use yunta_testkit::{init_repo, Owner};
 use yunta_testkit_core::Log;
@@ -501,8 +501,60 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
     .await
     .unwrap();
 
-    assert_eq!(report.attempts[0].dispatch, DispatchOutcome::Crashed);
+    // The mock has no process of its own, so there is nothing to ask
+    // about how one ended.
+    assert_eq!(
+        report.attempts[0].dispatch,
+        DispatchOutcome::Crashed { exit: None }
+    );
     assert!(!report.attempts[0].succeeded);
+}
+
+/// A session that says nothing leaves no work behind and no criteria
+/// worth re-running: the task blocks naming the death, so a reader is
+/// not left to infer a dead CLI from criteria that never ran.
+#[tokio::test]
+async fn a_task_whose_session_died_blocks_naming_the_exit() {
+    let owner = Owner::new();
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    let t = task("crash", &["output.txt"], vec![cmd("test -f output.txt")]);
+    let adapter = MockAdapter::from_yaml("outcome: { type: crash }").unwrap();
+
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        AttemptEnv {
+            node: &build_node(),
+            adapter: &adapter,
+            cwd: dir.path(),
+            max_retries: 2,
+            budget: Budget::default(),
+            memo: &memo,
+            history: &unpriced(),
+            supervision: owner.supervision(),
+        },
+        ungoverned(&GrantLedger::new(0)),
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &bare_setup(),
+    )
+    .await
+    .unwrap();
+
+    let TaskOutcome::Blocked {
+        cause: BlockedCause::SessionDied(died),
+    } = &report.outcome
+    else {
+        panic!("a dead session blocks the task: {:?}", report.outcome);
+    };
+    assert_eq!(died.adapter, "mock");
+    assert_eq!(
+        report.attempts.len(),
+        1,
+        "and stops there: the next attempt would open the same session"
+    );
 }
 
 #[tokio::test]

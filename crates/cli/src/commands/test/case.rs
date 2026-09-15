@@ -16,7 +16,7 @@ use serde::Deserialize;
 use yunta_core::{ModeName, NodeId, OptionId, WorkflowName};
 use yunta_engine::RunTerminal;
 
-use super::{copy_dir_all, init_git, load_mock_fixture, mock_adapters};
+use super::{copy_dir_all, init_git, load_mock_fixture, mock_adapters, sandboxed_checkout};
 use crate::commands::status::task_status_label;
 use crate::commands::Adapters;
 use crate::context::Context;
@@ -136,23 +136,15 @@ pub(crate) async fn run_case(
     // around both. A case then resolves its workflow through the very
     // catalog a run resolves through, and `runnable` refuses here
     // exactly what it refuses there.
-    let sandbox = tempfile::tempdir().map_err(|e| CliError::io("create", "a sandbox", e))?;
-    let worktree = sandbox.path().join("worktree");
-    std::fs::create_dir_all(&worktree)
-        .map_err(|e| CliError::io("create", worktree.display(), e))?;
-    let catalog = cwd.join(".yunta");
-    if catalog.is_dir() {
-        copy_dir_all(&catalog, &worktree.join(".yunta"))
-            .map_err(|e| CliError::io("copy the catalog from", catalog.display(), e))?;
-    }
+    let sandbox = sandboxed_checkout(cwd)?;
     if let Some(seed) = &case.worktree {
         let seed = beside(seed);
-        copy_dir_all(&seed, &worktree)
+        copy_dir_all(&seed, sandbox.worktree())
             .map_err(|e| CliError::io("seed the sandbox from", seed.display(), e))?;
     }
     let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt)?;
-    init_git(&worktree, ctx.supervision()).await?;
-    let ctx = ctx.sandboxed(worktree, sandbox.path());
+    init_git(sandbox.worktree(), ctx.supervision()).await?;
+    let ctx = ctx.sandboxed(sandbox.worktree().to_path_buf(), sandbox.root());
     let storage = ctx.async_storage().await?;
     let fixture_path = beside(&case.fixture);
 

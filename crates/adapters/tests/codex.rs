@@ -1,6 +1,6 @@
 //! Integration tests for the real `codex` adapter against a fake
-//! `codex` binary (`fixtures/codex_stub.sh`) — no network, no API cost,
-//! no real LLM in CI. What this suite cannot cover — whether the
+//! `codex` binary (`yunta_testkit_core::stubs::codex`) — no network, no
+//! API cost, no real LLM in CI. What this suite cannot cover — whether the
 //! real CLI's actual output matches what the stub scripts — has no
 //! manual smoke test to fall back on either: no `codex` binary or
 //! credentials exist in this environment. See `codex/mod.rs`'s own doc
@@ -11,12 +11,16 @@ use std::path::PathBuf;
 use yunta_core::fence::{Advice, Fence};
 
 use yunta_adapters::CodexAdapter;
+use yunta_core::events::SessionEnd;
 use yunta_core::port::{Adapter, AgentEvent, PermissionProfile, ProbeReport};
+use yunta_core::Pid;
 use yunta_core::{AdapterSettings, SessionId};
-use yunta_testkit_core::adapter::{child_pid_fifo, drain, grandchild_pid, request, write_lines};
+use yunta_testkit_core::adapter::{
+    child_pid_fifo, drain, drain_for_exit, grandchild_pid, request, wait_until_gone, write_lines,
+};
 
 fn stub_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/codex_stub.sh")
+    yunta_testkit_core::stubs::codex()
 }
 
 fn adapter() -> CodexAdapter {
@@ -283,6 +287,89 @@ async fn a_crashed_session_ends_the_stream_with_no_terminal_event() {
 
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0], AgentEvent::SessionOpened { .. }));
+}
+
+/// A CLI that refuses its configuration says so on stderr and exits
+/// before opening anything. That is the whole of what the engine has to
+/// go on, so the session hands it over rather than dropping it into a
+/// trace nobody reads.
+#[tokio::test]
+async fn a_session_that_dies_before_its_first_event_reports_its_exit_and_its_last_stderr_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    let said = write_lines(
+        dir.path(),
+        "stderr.txt",
+        &["url is not supported for stdio"],
+    );
+    req.env.insert(
+        "CODEX_STUB_STDERR_FILE".to_string(),
+        said.display().to_string().into(),
+    );
+    req.env
+        .insert("CODEX_STUB_EXIT".to_string(), "2".to_string().into());
+    let (events, exit) = drain_for_exit(adapter().spawn(req).await.unwrap()).await;
+
+    assert!(events.is_empty(), "the CLI said nothing: {events:?}");
+    let exit = exit.expect("a session with a process of its own says how it ended");
+    assert_eq!(exit.end, SessionEnd::Code { code: 2 });
+    assert_eq!(exit.stderr_tail, ["url is not supported for stdio"]);
+}
+
+/// The child's environment is where this system puts its secrets, and a
+/// CLI that fails at startup is exactly the one liable to echo what it
+/// was handed straight back.
+#[tokio::test]
+async fn a_dead_sessions_stderr_tail_never_carries_a_value_from_its_env() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "YUNTA_RUN_TOOLS_TOKEN".to_string(),
+        "s3cr3t-token-value".to_string().into(),
+    );
+    let said = write_lines(
+        dir.path(),
+        "stderr.txt",
+        &["auth failed for bearer s3cr3t-token-value"],
+    );
+    req.env.insert(
+        "CODEX_STUB_STDERR_FILE".to_string(),
+        said.display().to_string().into(),
+    );
+    req.env
+        .insert("CODEX_STUB_EXIT".to_string(), "1".to_string().into());
+    let (_, exit) = drain_for_exit(adapter().spawn(req).await.unwrap()).await;
+
+    let tail = exit
+        .expect("the session ended with a process of its own")
+        .stderr_tail;
+    assert_eq!(tail, ["auth failed for bearer [redacted]"], "{tail:?}");
+}
+
+/// Asking is killing first: nothing of a session outlives the run, and
+/// the wait for its status is bounded by a process already dead.
+#[tokio::test]
+async fn a_dead_sessions_process_group_is_gone_once_its_exit_is_collected() {
+    let dir = tempfile::tempdir().unwrap();
+    let child_pid_file = child_pid_fifo(dir.path());
+    let lines = write_lines(dir.path(), "lines.jsonl", &[THREAD_STARTED_LINE]);
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CODEX_STUB_CHILD_PID_FILE".to_string(),
+        child_pid_file.display().to_string().into(),
+    );
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    req.env
+        .insert("CODEX_STUB_HANG".to_string(), "1".to_string().into());
+    let mut session = adapter().spawn(req).await.unwrap();
+    let grandchild: i32 = grandchild_pid(&child_pid_file).await.parse().unwrap();
+
+    assert!(session.exit().await.is_some(), "the session had a process");
+    wait_until_gone(Pid::try_from(grandchild).unwrap()).await;
 }
 
 #[tokio::test]
@@ -787,13 +874,13 @@ async fn the_per_run_tools_reach_the_session_with_the_token_only_in_the_environm
     let env = std::fs::read_to_string(&env_file).unwrap();
 
     assert!(
-        args.contains("mcp_servers.yunta.url=\"http://127.0.0.1:54321/mcp\""),
+        args.contains("mcp_servers.yunta-run.url=\"http://127.0.0.1:54321/mcp\""),
         "the per-run server is configured: {args}"
     );
     // The CLI reads the credential from a named variable rather than
     // from its own config, which is what keeps it out of argv.
     assert!(
-        args.contains("mcp_servers.yunta.bearer_token_env_var=\"YUNTA_RUN_TOOLS_TOKEN\""),
+        args.contains("mcp_servers.yunta-run.bearer_token_env_var=\"YUNTA_RUN_TOOLS_TOKEN\""),
         "the credential is named, not inlined: {args}"
     );
     assert!(
@@ -822,6 +909,38 @@ async fn no_per_run_endpoint_configures_no_server() {
             .unwrap()
             .contains("mcp_servers"),
         "nothing to configure, nothing configured"
+    );
+}
+
+/// A person registers the control plane under whatever name they like,
+/// and the name they reach for is this system's own. The per-run server
+/// carries a name of its own so a CLI that merges both by key never
+/// reads one entry as the other.
+#[tokio::test]
+async fn the_per_run_server_never_shares_the_control_planes_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+
+    let mut req = request(dir.path().to_path_buf());
+    req.run_tools_endpoint = Some(yunta_core::port::RunToolsEndpoint {
+        url: "http://127.0.0.1:54321/mcp".to_string(),
+        token: "s3cr3t-token-value".to_string().into(),
+    });
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let _ = drain(session).await;
+    let args = std::fs::read_to_string(&args_file).unwrap();
+
+    assert!(
+        args.contains("mcp_servers.yunta-run.url="),
+        "the per-run server has a name of its own: {args}"
+    );
+    assert!(
+        !args.contains("mcp_servers.yunta."),
+        "and never the one a person's own entry takes: {args}"
     );
 }
 
@@ -859,7 +978,7 @@ async fn no_dead_config_override_reaches_the_cli() {
     );
     let server: Vec<&String> = args
         .iter()
-        .filter(|a| a.starts_with("mcp_servers.yunta."))
+        .filter(|a| a.starts_with("mcp_servers.yunta-run."))
         .collect();
     assert_eq!(
         server.len(),
@@ -869,13 +988,13 @@ async fn no_dead_config_override_reaches_the_cli() {
     assert!(
         server
             .iter()
-            .any(|a| a.starts_with("mcp_servers.yunta.url=")),
+            .any(|a| a.starts_with("mcp_servers.yunta-run.url=")),
         "the url selects streamable HTTP: {args:?}"
     );
     assert!(
         server
             .iter()
-            .any(|a| a.starts_with("mcp_servers.yunta.bearer_token_env_var=")),
+            .any(|a| a.starts_with("mcp_servers.yunta-run.bearer_token_env_var=")),
         "the credential is named, not inlined: {args:?}"
     );
 }

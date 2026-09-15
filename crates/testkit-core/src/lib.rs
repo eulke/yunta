@@ -18,6 +18,7 @@ mod ids;
 mod kinds;
 mod log;
 pub mod persisted;
+pub mod stubs;
 
 pub use capture::Captured;
 pub use clock::{fixed_now, AtClock, FixedClock, FIXED_NOW};
