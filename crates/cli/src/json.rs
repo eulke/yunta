@@ -272,7 +272,8 @@ struct TokensJson {
 #[derive(Default, serde::Serialize)]
 pub(crate) struct ArtifactProblems {
     /// The stable name of what is wrong with the artifact itself —
-    /// `artifact-missing`, `artifact-undelivered`, `artifact-unheld`.
+    /// `artifact-missing`, `artifact-empty`, `artifact-oversized`,
+    /// `artifact-unreadable`, `artifact-undelivered`, `artifact-unheld`.
     /// Absent when the file is there and its content is what failed,
     /// because that is not one problem: each of the document's own
     /// carries its code.

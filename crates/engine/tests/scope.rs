@@ -1,3 +1,10 @@
+//! The scope check over a real git checkout: what a node changed,
+//! compared against the globs its task declared.
+//!
+//! A change inside scope is no violation, a file outside it is, a glob
+//! means exactly what it says about directory boundaries and non-ASCII
+//! paths, and a path the adapter staged is never charged to the node.
+
 use yunta_engine::{scope_check, ScopeCheckError};
 
 fn setup_repo(dir: &std::path::Path) {

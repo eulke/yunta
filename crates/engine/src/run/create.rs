@@ -116,9 +116,9 @@ pub struct CreateRunParams<'a> {
 /// log. `"default"` — the caller's choice when nothing else applies,
 /// same sentinel `events::run_mode` falls back to for a log with no
 /// mode recorded — always passes: a workflow declaring no `modes:` at
-/// all has nothing to validate a name against, and every node stays
-/// schedulable, exactly the behavior before modes existed. A workflow
-/// that *does* declare `modes:` rejects any other unrecognized name.
+/// all has nothing to validate a name against, so every node stays
+/// schedulable. A workflow that *does* declare `modes:` rejects any
+/// other unrecognized name.
 pub async fn create_run(
     params: CreateRunParams<'_>,
     storage: &AsyncStorage,

@@ -3,8 +3,9 @@
 //! directly and never contains CLI-specific knowledge — those
 //! are enforced by the crate graph itself, not by convention.
 //!
-//! This crate anchors the workspace dependency graph
-//! (core ← storage/adapters ← engine ← cli), keeping it compiling and testable.
+//! It sits in the middle of that graph (core ← storage/adapters ← engine
+//! ← cli): it reaches an adapter only through the ports `yunta-core`
+//! declares, and the CLI is the only crate above it.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting, indexing, or panicking.

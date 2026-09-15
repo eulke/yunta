@@ -307,7 +307,8 @@ names — `{"<node>": [{code?, path?, kind?, file?, run?, producer?, artifact?,
 diagnostics?}, ...]}`, one entry per artifact. Every field is absent when the
 failure has nothing to put there, so no consumer meets an invented path: only a
 failure the close opened a file for carries `path`. `code` is the stable name of
-what is wrong with the artifact itself — `artifact-missing`, `artifact-undelivered`,
+what is wrong with the artifact itself — `artifact-missing`, `artifact-empty`,
+`artifact-oversized`, `artifact-unreadable`, `artifact-undelivered`,
 `artifact-unheld` — and is absent for a content failure, whose problems each carry
 a code of their own. A content failure carries `kind`, the artifact kind whose
 shape the content was read against, and `diagnostics`, every problem that document
@@ -447,14 +448,15 @@ empty: a blank line under the heading, an empty block that shows it is empty.
 ## The schemas as files
 
 `crates/core/schemas/` holds `workflow.json`, `config.json`, `pack.json`,
-`tasks.json`, `findings.json`, `questions.json` and `events.json`: the JSON
-Schema (draft 2020-12) of a workflow file, a config layer, a pack manifest, the
-three artifacts the engine interprets, and one event of the log — the shape of a
-line of `events.jsonl`. They are generated from the types that read those
-documents: `cargo xtask schema` writes them and CI fails when a committed file
-differs from what the types emit, so any change to a format is a visible diff in
-the pull request that makes it. They live inside the crate whose types produce
-them, which is also the crate that ships them: the binary embeds those exact
+`tasks.json`, `findings.json`, `questions.json`, `answers.json`,
+`withdrawal.json` and `events.json`: the JSON Schema (draft 2020-12) of a
+workflow file, a config layer, a pack manifest, the four artifacts the engine
+interprets, the withdrawal that retires a finding, and one event of the log —
+the shape of a line of `events.jsonl`. They are generated from the types that
+read those documents: `cargo xtask schema` writes them and CI fails when a
+committed file differs from what the types emit, so any change to a format is a
+visible diff in the pull request that makes it. They live inside the crate whose
+types produce them, which is also the crate that ships them: the binary embeds those exact
 files, so `yunta schema <kind> --json` prints the bytes CI checked rather than
 deriving a schema of its own at run time. An editor or a validator can use the
 files as they are, with or without a checkout.

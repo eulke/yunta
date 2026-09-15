@@ -1,9 +1,9 @@
 //! The adapters that implement `yunta_core::port`: `claude-code`,
 //! `codex` and `mock` — Spec Adapter v0.2.
 //!
-//! `claude-code` and `codex` are built. `mock` is what CI exercises the
-//! engine against — the two real adapters are each tested against their
-//! own scripted fake binary, never a real LLM in CI.
+//! `claude-code` and `codex` each drive their own CLI; `mock` is what CI
+//! exercises the engine against — the two real adapters are each tested
+//! against their own scripted fake binary, never a real LLM in CI.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting, indexing, or panicking.

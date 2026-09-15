@@ -1,8 +1,8 @@
 //! Per-run process registry: `run.dir/scratch/engine.json`,
-//! the one thing that lets a *separate* process — `yunta cancel`, a
-//! future `--detach` supervisor — find and signal a live run's process
-//! tree so cancellation can always tear the whole tree down, not just
-//! the top process. Scratch, deliberately: it is ephemeral process
+//! the one thing that lets a *separate* process — `yunta cancel`, which
+//! shares no memory with the run it stops — find and signal a live run's
+//! process tree so cancellation can always tear the whole tree down, not
+//! just the top process. Scratch, deliberately: it is ephemeral process
 //! state, not an artifact and not event-log truth; it is written when
 //! `execute_run` starts, updated as sessions/hooks/executors spawn and
 //! close, and deleted at every terminal.

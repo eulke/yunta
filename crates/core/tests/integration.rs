@@ -1,3 +1,10 @@
+//! The YAML the design corpus publishes, read by the types that consume
+//! it: the reference config, the reference workflow and the composed and
+//! promotion workflows beside it.
+//!
+//! Each one parses whole and serializes back to the same value, so an
+//! example a reader copies is one the binary accepts.
+
 // --- The reference YAMLs are real fixtures -----------------------------------
 
 #[test]

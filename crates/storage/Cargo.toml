@@ -31,8 +31,8 @@ testkit = []
 # way `yunta-core` enables its own `testkit` feature for its tests.
 yunta-storage = { path = ".", features = ["testkit"] }
 yunta-core = { workspace = true, features = ["testkit"] }
-# The shared test harness: the fixed clock store tests time events with.
-yunta-testkit.workspace = true
+# The clocks a store test times its events with, and the event samples
+# it appends: the layer of the harness that needs no run.
 yunta-testkit-core.workspace = true
 tempfile.workspace = true
 # The chain's own properties — any append sequence verifies, any

@@ -2,7 +2,7 @@
 number: D53
 title: "SQLite como único backend de storage; Postgres deja de ser feature planificada"
 status: accepted
-revises: []
+revises: [D07]
 revised_by: []
 ---
 

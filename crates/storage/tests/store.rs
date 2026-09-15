@@ -1,3 +1,12 @@
+//! The SQLite event store: appending, reading back, and the hash chain
+//! over what was stored.
+//!
+//! A seq is assigned per run and never collides, however many threads or
+//! connections append at once, and a reopened database keeps what it
+//! held. The chain verifies an untouched log intact and names the exact
+//! seq where a tampered payload, a deleted row or a single flipped byte
+//! breaks it.
+
 use std::sync::Arc;
 use std::thread;
 

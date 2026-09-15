@@ -42,9 +42,9 @@ impl Project {
 
     /// The worktrees root a run's checkout lives under: the one *frozen*
     /// in its manifest, so a `paths.*` change after the run was created
-    /// never loses its worktree; a pre-freeze manifest (no `paths:`)
-    /// falls back to this project's current root, the old behavior. The
-    /// one place `resume` and `gc` derive a run's worktree location from.
+    /// never loses its worktree; a manifest with no `paths:` falls back
+    /// to this project's current root. The one place `resume` and `gc`
+    /// derive a run's worktree location from.
     pub fn worktrees_root_for(&self, manifest: &Manifest) -> PathBuf {
         manifest
             .paths

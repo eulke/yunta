@@ -101,10 +101,11 @@ a person's answer is what the node is missing: a `gate` asking for a decision,
 or a node that handed its questions over and is waiting on them. Nothing is
 running underneath either, and both survive the engine restarting exactly like
 any other state.
-`yunta resolve-gate` (or the MCP `resolve_gate` tool) answers it from a
-completely separate process; the run picks the decision up on its own next
-resume. Nothing about a run depends on the process that started it, or hit
-the gate, staying alive.
+`yunta resolve-gate` (or the MCP `resolve_gate` tool) answers a decision from
+a completely separate process, and the MCP `answer_questions` tool answers a
+node's questions the same way; either lands on the log and a detached resume
+carries the run on from there. Nothing about a run depends on the process that
+started it, or hit the wait, staying alive.
 
 ## Where to go next
 

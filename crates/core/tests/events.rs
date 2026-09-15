@@ -1,3 +1,12 @@
+//! The event wire: every kind the log can carry, field by field.
+//!
+//! One sample of each kind is built through its constructor, so a
+//! variant added without one fails to compile; the set of names, their
+//! JSON round trip, their schema version and the domain each belongs to
+//! are all asserted against that sample. A kind this binary does not
+//! know reads as unknown and writes back verbatim, which is what lets an
+//! older reader run against a newer log.
+
 use yunta_core::events::EventShapeError;
 use yunta_core::events::*;
 use yunta_core::{Capability, NonEmpty, RunId};

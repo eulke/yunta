@@ -22,9 +22,10 @@ use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervis
 /// across invocations onto a tree no event in between speaks for (which
 /// would risk under-verifying).
 ///
-/// The full key is `cmd + tree_hash + declared env + resolved config`;
-/// `declared env` drops out here because a criterion declares no `env:`
-/// of its own.
+/// The key is `sha256(cmd \0 tree_hash \0 config_hash)`: the command as
+/// written, a fingerprint of the tree it would run against, and the hash
+/// of the resolved config it runs under — the three things its exit code
+/// can turn on, since a criterion declares no `env:` of its own.
 pub struct Memo {
     config_hash: ContentHash,
     cache: Mutex<HashMap<ContentHash, i32>>,

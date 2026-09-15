@@ -1,18 +1,21 @@
 ---
 number: D144
 title: "Toda clave que un tipo acepta aparece en el ejemplo publicado, y toda clave del ejemplo tiene su propio diagnóstico"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D156]
 ---
 
 # D144 — Toda clave que un tipo acepta aparece en el ejemplo publicado, y toda clave del ejemplo tiene su propio diagnóstico
 
-Dos tests encadenados sobre `Document`: el primero afirma que el ejemplo
-escribe cada clave de `REQUIRED ∪ OPTIONAL`; el segundo toma ese mismo
-ejemplo, le pone a cada clave un valor del tipo equivocado y afirma que el
-recorrido produce un diagnóstico que la nombra, nunca un
-`Problem::Unreadable`.
+*(Revisada por D156: sin recorrido de forma no hay unión de claves que
+recorrer ni `Problem::Unreadable` que evitar; los dos tests atan el ejemplo al
+parser por la puerta que quedó — `shape::read` lo lee de vuelta, y un valor
+del tipo equivocado vuelve como `Problem::Parse` en su path.)* Dos tests
+encadenados sobre `Document`: el primero afirma que el ejemplo escribe cada
+clave de `REQUIRED ∪ OPTIONAL`; el segundo toma ese mismo ejemplo, le pone a
+cada clave un valor del tipo equivocado y afirma que el recorrido produce un
+diagnóstico que la nombra, nunca un `Problem::Unreadable`.
 
 Racional: un agente escribió bien todas las claves para las que el ejemplo le
 daba un literal y erró la única que el ejemplo mencionaba solo en un

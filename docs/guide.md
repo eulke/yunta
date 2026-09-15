@@ -304,10 +304,11 @@ the receipt the PR description itself, no copy-paste required.
 
 Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:
 
-- **Control plane** (`yunta mcp`): `list_workflows`, `run_workflow`,
-  `workflow_status`, `resume_run`, `resolve_gate` — for an outer agent (e.g. Claude
-  Code itself) driving Yunta as a tool. `run_workflow` always returns immediately; the
-  run keeps going independent of the MCP session that started it.
+- **Control plane** (`yunta mcp`): `document_shape`, `list_workflows`,
+  `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`,
+  `answer_questions` — for an outer agent (e.g. Claude Code itself) driving Yunta as
+  a tool. `run_workflow` always returns immediately; the run keeps going independent
+  of the MCP session that started it.
 - **Per-run tools**: a loopback HTTP MCP endpoint opened for the duration of a single
   agent session that declared `run_tools` capability — `yunta_post_finding`,
   `yunta_update_finding`, `yunta_withdraw_finding`, `yunta_check_artifact`,

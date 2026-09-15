@@ -2,7 +2,7 @@
 number: D156
 title: "Un artifact interpretado entra por una herramienta tipada; el engine escribe el archivo"
 status: revised
-revises: [D86, D129, D131, D138, D146, D149, D151]
+revises: [D86, D129, D131, D138, D140, D144, D146, D149, D151]
 revised_by: [D157]
 ---
 

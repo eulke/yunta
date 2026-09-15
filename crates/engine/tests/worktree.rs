@@ -1,3 +1,12 @@
+//! Isolation on a real repository: the checkout a run works in and the
+//! lock that says it is a run's.
+//!
+//! `worktree` gives each run its own checkout at the base commit;
+//! `none` takes the repository itself and refuses a dirty tree. A lock
+//! is taken from a dead owner and reported, never from a live one, and
+//! never from an owner this process cannot verify — a reused pid is not
+//! the owner, and an unreadable record refuses rather than guesses.
+
 use std::path::Path;
 use std::time::Duration;
 

@@ -1,18 +1,17 @@
-//! State derivation by replay — covers what the event schema can
-//! currently produce.
+//! State derivation by replay: a run's whole state read back off its
+//! event log.
 //!
-//! `derive` is the functional core: a pure function
-//! over an event slice, no IO, safe to call from a property test or from
-//! `yunta resume` alike. It tracks what the schema can actually produce
-//! today — node lifecycle (`node_started`/`node_finished`/`node_failed`)
-//! task status and the node each task belongs to
-//! (`task_registered`/`task_status_changed`) — plus the
-//! running token total `limits.max_tokens_per_run` is compared
+//! `derive` is the functional core: a pure function over an event slice,
+//! no IO, safe to call from a property test or from `yunta resume`
+//! alike. It derives node lifecycle
+//! (`node_started`/`node_finished`/`node_failed`), task status and the
+//! node each task belongs to (`task_registered`/`task_status_changed`),
+//! plus the running token total `limits.max_tokens_per_run` is compared
 //! against. `waiting` is derived too: a published gate without its
 //! resolution (the state that outlives an invocation), and a node that
-//! recorded `questions_asked` with no `questions_answered` yet. Both are
-//! the same shape — a fact that opens the wait and a fact that closes
-//! it — and both round-trip back to the node's prior state by
+//! recorded `questions_asked` with no `questions_answered` beside it.
+//! Both are the same shape — a fact that opens the wait and one that
+//! closes it — and both round-trip back to the node's prior state by
 //! construction, so a node that asked comes back `Running`, owed the
 //! terminal its close deferred.
 //!

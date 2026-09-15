@@ -6,8 +6,7 @@ use yunta_core::ArtifactRefId;
 
 /// Config `defaults:` values that only `check` can catch before a run:
 /// a `max_parallel_nodes` of zero (which would schedule nothing), and a
-/// `defaults.runner` that `runners:` doesn't define. Every
-/// `defaults.on_failure` value is now built, so none is refused here.
+/// `defaults.runner` that `runners:` doesn't define.
 pub(crate) fn check_config_defaults(config: &ConfigLayer, errors: &mut Vec<CheckError>) {
     let Some(defaults) = &config.defaults else {
         return;

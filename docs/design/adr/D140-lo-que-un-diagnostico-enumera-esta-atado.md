@@ -1,21 +1,25 @@
 ---
 number: D140
 title: "Lo que un diagnóstico enumera está atado por un test a lo que el parser acepta"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D156]
 ---
 
 # D140 — Lo que un diagnóstico enumera está atado por un test a lo que el parser acepta
 
-Los conjuntos cerrados que un mensaje lista —las kinds de artifact (D132), la
-escalera de severidad de un finding, los tipos de respuesta de una pregunta—
-tienen una sola escritura de sus valores, atada variante por variante a lo que
-serde deriva. Las listas de claves con las que el recorrido de forma decide si
-una clave es desconocida o si falta una obligatoria siguen siendo constantes,
-y un test lee el JSON Schema generado y afirma, para cada uno de los tres
-tipos, que `properties` es la unión de obligatorias y opcionales y que
-`required` es la lista de obligatorias.
+*(Revisada por D156: el recorrido de forma desaparece, y con él las listas de
+claves y el test que las comparaba contra el JSON Schema generado — serde
+parsea y `Problem::Parse` nombra el path del valor que rechazó. La mitad que
+rige es la primera: un conjunto cerrado tiene una sola escritura de sus
+valores.)* Los conjuntos cerrados que un mensaje lista —las kinds de artifact
+(D132), la escalera de severidad de un finding, los tipos de respuesta de una
+pregunta— tienen una sola escritura de sus valores, atada variante por
+variante a lo que serde deriva. Las listas de claves con las que el recorrido
+de forma decide si una clave es desconocida o si falta una obligatoria siguen
+siendo constantes, y un test lee el JSON Schema generado y afirma, para cada
+uno de los tres tipos, que `properties` es la unión de obligatorias y
+opcionales y que `required` es la lista de obligatorias.
 
 Racional: un diagnóstico que dice "los valores válidos son estos" es una
 afirmación sobre el parser, y con dos escrituras del mismo conjunto el día que

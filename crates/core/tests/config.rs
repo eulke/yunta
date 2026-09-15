@@ -1,3 +1,11 @@
+//! One config layer parsed, and three of them merged.
+//!
+//! Each group of the reference config reads into its type with the
+//! defaults the schema declares, and repo over user over org resolves
+//! group by group: a list is replaced whole, a struct merges field by
+//! field, and a permission a lower layer re-allows is named as a
+//! conflict rather than silently widened.
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 

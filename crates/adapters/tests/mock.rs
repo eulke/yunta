@@ -1,3 +1,12 @@
+//! The `mock` adapter and the forge beside it: a session is whatever the
+//! fixture scripted for it, and nothing else.
+//!
+//! Every behavior a real adapter is asked for is exercised here against
+//! a script — the terminal event a session always pays, the effects the
+//! fence lets through, resume under one session id, the capabilities the
+//! fixture declares, and a gate published to a pull request — so the
+//! engine's own suites can trust the adapter they run on.
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use yunta_core::fence::{Advice, Fence};

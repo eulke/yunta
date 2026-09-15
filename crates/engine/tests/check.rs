@@ -1,3 +1,12 @@
+//! `yunta check`: everything a workflow and its config can be refused
+//! for before a run exists.
+//!
+//! Each case builds the smallest workflow that breaks one rule and
+//! asserts the error that names it — a cycle, an undefined runner, a
+//! gate with no forge, an artifact nobody produces, a template variable
+//! nothing binds — so a refusal a person reads is tied to the shape that
+//! earns it.
+
 use std::collections::BTreeMap;
 
 use yunta_core::{

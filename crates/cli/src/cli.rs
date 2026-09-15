@@ -138,11 +138,12 @@ enum Command {
     /// Health-checks every adapter this project's `runners:` names —
     /// binary present, version compatible, auth valid.
     Doctor,
-    /// Runs the control-plane MCP server over stdio: `list_workflows`,
-    /// `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`
-    /// — none of which ever blocks for a run's own duration. Not a
-    /// daemon: exits when the client closes stdin, and no run's own
-    /// life depends on this process staying up.
+    /// Runs the control-plane MCP server over stdio: `document_shape`,
+    /// `list_workflows`, `run_workflow`, `workflow_status`,
+    /// `resume_run`, `resolve_gate`, `answer_questions` — none of which
+    /// ever blocks for a run's own duration. Not a daemon: exits when
+    /// the client closes stdin, and no run's own life depends on this
+    /// process staying up.
     Mcp,
     /// Removes orphaned run and worktree directories, respecting
     /// `storage.retention_days`.
@@ -229,7 +230,7 @@ enum Command {
     /// Prints the shape of a document Yunta reads and validates, so
     /// nobody has to guess it. With no arguments, lists the kinds.
     Schema {
-        /// Which document: `tasks`, `findings` or `questions`.
+        /// Which document: `tasks`, `findings`, `questions` or `answers`.
         kind: Option<String>,
         /// Emits the JSON Schema instead of the annotated example — what
         /// an editor's language server validates against.

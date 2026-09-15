@@ -77,9 +77,9 @@ pub enum WorktreeError {
         lock_path: PathBuf,
         pid: Pid,
     },
-    /// A lock whose owner can't be verified — pre-owner-format
-    /// (empty) or corrupted. Conservative on purpose: guessing that an
-    /// unreadable lock is stale would break the old contract silently.
+    /// A lock whose owner can't be verified — empty or corrupted.
+    /// Conservative on purpose: a lock whose holder cannot be checked is
+    /// never taken, so no live run loses its checkout to a guess.
     #[error(
         "`{path}` has an isolation lock with no readable owner (`{lock_path}`) — written by \
          an older build or corrupted; if no other run is active on this checkout, delete \

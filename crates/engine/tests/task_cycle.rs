@@ -1,3 +1,13 @@
+//! One task from red to done: the pre-check that has to fail, the
+//! attempts, the post-check that has to pass, and everything that ends
+//! the cycle short of done.
+//!
+//! An agent's claim is never the verdict — only a criterion passing is —
+//! and a criterion that was already red, a guard that was already
+//! broken, an edit outside scope, a wall clock or a token budget each
+//! close the cycle on their own terms. A criterion is reused only while
+//! the tree and the config behind it are unchanged.
+
 use yunta_adapters::MockAdapter;
 use yunta_core::events::{
     CriteriaCheckedPayload, CriterionResult, EventPayload, NodeEvent, Phase, TaskLedger,

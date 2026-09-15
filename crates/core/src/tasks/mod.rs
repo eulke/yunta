@@ -49,10 +49,11 @@ impl From<&Criterion> for events::Criterion {
     }
 }
 
-/// One task. `id`'s pattern isn't enforced by this type — the
-/// spec treats that as a registration-time rule, not a parse-time
-/// one, so an ill-formed id still parses and gets a proper diagnostic
-/// naming the task, field and expectation instead of a raw serde error.
+/// One task. `id` is a `TaskId`, so an ill-formed one is a problem of
+/// reading the document: the report names the path that carries it
+/// (`tasks[0].id`) and what an id is, never a raw serde error. The rules
+/// that only hold across the whole document, uniqueness among them, run
+/// once it parses.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Task {

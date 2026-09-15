@@ -1,3 +1,13 @@
+//! The manifest a run freezes at birth: what its hash covers, and what
+//! reading one back says.
+//!
+//! The same inputs always hash the same, a prompt is frozen by its
+//! content rather than its path, each content hash reacts only to its
+//! own content, and the defaults a run needs are resolved into the
+//! manifest rather than re-read later. A manifest from a newer writer is
+//! read with its unknown keys named; one this binary cannot read says
+//! which version it supports.
+
 use std::collections::HashMap;
 
 use yunta_core::{ConfigLayer, Workflow};

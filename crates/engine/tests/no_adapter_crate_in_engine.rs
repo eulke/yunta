@@ -1,9 +1,9 @@
-// The engine knows an adapter only by the port: the trait it calls, the
-// request it hands over, the events it reads back. That port is
-// `yunta_core::port`, so `yunta-adapters` — where `claude-code`, `codex`
-// and `mock` are actually built — is a crate the engine's library never
-// links, and the compiler is what holds that. This test is what says so
-// when the manifest is edited.
+//! The engine knows an adapter only by the port: the trait it calls, the
+//! request it hands over, the events it reads back. That port is
+//! `yunta_core::port`, so `yunta-adapters` — where `claude-code`, `codex`
+//! and `mock` are actually built — is a crate the engine's library never
+//! links, and the compiler is what holds that. This test is what says so
+//! when the manifest is edited.
 //
 // The library, not the tests: a port is exercised against an
 // implementation of it, so `[dev-dependencies]` does name the crate and

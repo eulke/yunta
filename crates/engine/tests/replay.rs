@@ -1,3 +1,13 @@
+//! `derive`: the state a run is in, read back off its event log and
+//! nothing else.
+//!
+//! A node's lifecycle, a task's status, the findings that stand and the
+//! artifacts a run holds all come out of the same fold, and two logs
+//! that carry the same facts derive the same state. A log that cannot be
+//! true — a node finished that never started — is marked broken with the
+//! event that broke it named, and the state up to that point is still
+//! returned.
+
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventBody,
     EventPayload, Failure, Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload,

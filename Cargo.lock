@@ -2955,7 +2955,6 @@ dependencies = [
  "tokio",
  "yunta-core",
  "yunta-storage",
- "yunta-testkit",
  "yunta-testkit-core",
 ]
 

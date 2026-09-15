@@ -1,3 +1,10 @@
+//! The workflow schema, node kind by node kind.
+//!
+//! Every field a workflow may declare parses into its type with the
+//! default the schema states when it is absent, survives a serialization
+//! round trip, and is refused by name when its value is outside the
+//! closed set it belongs to.
+
 use yunta_core::{
     ArtifactKind, ArtifactSpec, CheckBuiltin, HookFailurePolicy, JoinPolicy, LoopUntil, NodeKind,
     NodePermissions, OnInterrupt, PromptSource, Workflow,

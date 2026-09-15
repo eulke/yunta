@@ -119,7 +119,7 @@ pub fn counted(n: usize, noun: &str) -> String {
     }
 }
 
-/// The block `spec-ledger.md` §4 fixes: a heading naming what was read
+/// The block `spec-tasks.md` §4 fixes: a heading naming what was read
 /// and how many problems it has, then one indented line per problem.
 ///
 /// ```text

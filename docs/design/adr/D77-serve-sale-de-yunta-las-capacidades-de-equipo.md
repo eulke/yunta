@@ -2,7 +2,7 @@
 number: D77
 title: "`serve` sale de Yunta: las capacidades de equipo son un proyecto separado"
 status: accepted
-revises: []
+revises: [D02, D05]
 revised_by: []
 ---
 

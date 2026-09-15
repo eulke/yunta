@@ -14,12 +14,12 @@ schema`, el enum de `kind` de la tool `document_shape` y el documento del que
 habla un diagnóstico son el mismo conjunto y llevan el mismo tipo.
 `ArtifactKind` reúne lo que ese conjunto sabe de sí mismo: `ALL` (las kinds en
 el orden en que las puertas las listan), `label()` (cómo se nombra a un
-lector: "task ledger"), `as_str()`/`Display`/`FromStr` (el valor que viaja en
-YAML y en la línea de comando) y `listed()` (la frase que enumera las válidas,
-escrita una sola vez y consumida por el error de kind desconocida y por la
-ayuda del comando). Un test afirma, variante por variante, que `as_str()` es
-exactamente lo que serde serializa y que ese valor vuelve por `FromStr`;
-ninguna otra parte del workspace repite esas cadenas.
+lector: "tasks document"), `as_str()`/`Display`/`FromStr` (el valor que viaja
+en YAML y en la línea de comando) y `listed()` (la frase que enumera las
+válidas, escrita una sola vez y consumida por el error de kind desconocida y
+por la ayuda del comando). Un test afirma, variante por variante, que
+`as_str()` es exactamente lo que serde serializa y que ese valor vuelve por
+`FromStr`; ninguna otra parte del workspace repite esas cadenas.
 
 Racional: dos tipos para un conjunto obligan a una conversión en cada
 frontera, y la conversión es el lugar donde las dos listas se separan sin que
