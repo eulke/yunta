@@ -1,5 +1,6 @@
 //! Verification gates: baseline and coverage compares, findings gates, progress.md, the executor, command-permission denials, and events.jsonl.
 
+use yunta_core::events::{EventPayload, NodeEvent};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
@@ -7,42 +8,71 @@ mod common;
 use common::*;
 
 #[tokio::test]
-async fn baseline_compare_passes_on_its_first_run_with_nothing_to_compare_against() {
+async fn a_run_captures_its_baseline_when_it_is_created() {
     let bench = Bench::new();
-    std::fs::write(bench.worktree.join("marker.txt"), "ok").unwrap();
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
 
     let workflow = r#"
-name: baseline-first-run
+name: baseline-at-birth
 nodes:
-  - id: no-regressions
-    kind: check
-    builtin: baseline_compare
+  - id: work
+    kind: bash
+    run: "true"
 "#;
 
-    let RunReport { terminal, state: _ } = bench
-        .run_with_config(workflow, "sessions: []", CONFIG_WITH_BASELINE)
+    // Creation and nothing else: no node of this run has run, and the
+    // run already knows what its suite did on the tree it starts from.
+    let run_dir = bench
+        .create(workflow, "sessions: []", CONFIG_WITH_BASELINE)
         .await;
-    assert_eq!(terminal, RunTerminal::Finished);
+
+    let (node, captured) = bench
+        .events()
+        .into_iter()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::Node(NodeEvent::BaselineCaptured(payload))) => {
+                Some((event.node_id.clone(), payload.clone()))
+            }
+            _ => None,
+        })
+        .expect("a run whose config declares `baseline.suite` captures it when it is created");
+
+    assert_eq!(
+        node, None,
+        "the capture is the run's own fact, under no node"
+    );
+    assert_eq!(captured.command, "cat marker.txt");
+    assert_eq!(captured.results.exit_code, 0);
+
+    let kept = tokio::fs::read(yunta_engine::run_dir::baseline_capture(&run_dir))
+        .await
+        .expect("the run keeps everything the suite wrote, where the event carries only its tail");
+    assert_eq!(kept, b"ok\n");
+    assert_eq!(
+        captured.hash,
+        yunta_core::sha256_hex(&kept),
+        "the hash on the log names the bytes the run kept"
+    );
 }
 
 #[tokio::test]
-async fn baseline_compare_fails_when_a_previously_green_suite_turns_red() {
+async fn the_first_baseline_compare_fails_on_a_regression_made_before_it() {
     let bench = Bench::new();
-    // `cat marker.txt` exits 0 while the file exists — the first
-    // `baseline_compare` node below captures that as the baseline.
-    std::fs::write(bench.worktree.join("marker.txt"), "ok").unwrap();
+    // `cat marker.txt` exits 0 while the file is there — what the run
+    // captures when it is created, and what `regress` then breaks.
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
 
     let workflow = r#"
 name: baseline-regression
 nodes:
-  - id: capture
-    kind: check
-    builtin: baseline_compare
   - id: regress
     kind: bash
     run: "rm marker.txt"
-    depends_on: [capture]
-  - id: compare
+  - id: no-regressions
     kind: check
     builtin: baseline_compare
     depends_on: [regress]
@@ -56,8 +86,32 @@ nodes:
             reason.contains("regression"),
             "expected a regression diagnostic, got: {reason}"
         ),
-        other => panic!("expected the second baseline_compare to pause the run, got {other:?}"),
+        other => panic!(
+            "a run's only `baseline_compare` compares against the capture its birth took, \
+             so it must catch the regression; got {other:?}"
+        ),
     }
+}
+
+#[tokio::test]
+async fn baseline_compare_passes_while_the_suite_keeps_passing() {
+    let bench = Bench::new();
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+
+    let workflow = r#"
+name: baseline-green
+nodes:
+  - id: no-regressions
+    kind: check
+    builtin: baseline_compare
+"#;
+
+    let RunReport { terminal, state: _ } = bench
+        .run_with_config(workflow, "sessions: []", CONFIG_WITH_BASELINE)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
 }
 
 #[tokio::test]

@@ -64,7 +64,7 @@ impl<'a> RunLog<'a> {
     /// The mirror hangs here because this is the one way an event
     /// reaches the log: a site that appends through a log built this way
     /// feeds a live view by doing nothing about it. What is left
-    /// unmirrored is exactly what is built without this — `run_created`,
+    /// unmirrored is exactly what is built without this — a run's birth,
     /// written before an execution context, and so an observer, exists.
     pub(crate) fn observed_by(mut self, observer: Option<&'a dyn RunObserver>) -> Self {
         self.observer = observer;

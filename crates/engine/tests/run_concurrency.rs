@@ -850,15 +850,16 @@ nodes:
 #[tokio::test]
 async fn a_join_any_race_cancels_a_slow_check_child_when_a_sibling_wins() {
     let bench = Bench::new();
-    // The baseline suite blocks forever; the losing check ends only when
+    // The coverage command blocks forever; the losing check ends only when
     // the race cancels it. If it were not cancelled the run would hang here,
     // so its finishing is the proof — never a wall-clock margin.
     let config = r#"
 runners:
   executor:
     - { adapter: mock, model: mock-model }
-baseline:
-  suite: "tail -f /dev/null"
+coverage:
+  cmd: "tail -f /dev/null"
+  threshold: 80.0
 "#;
     let workflow = r#"
 name: race-check
@@ -872,7 +873,7 @@ nodes:
         run: "true"
       - id: slow-check
         kind: check
-        builtin: baseline_compare
+        builtin: coverage_gate
 "#;
 
     let RunReport { terminal, state } = bench

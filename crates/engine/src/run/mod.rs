@@ -1,7 +1,8 @@
 //! Run creation and execution.
 //!
 //! `create_run` freezes the anatomy on disk (run.dir, `manifest.yaml`,
-//! `run_created`); `execute_run` drives the run forward and is also
+//! `run_created`, and the baseline the run is measured against);
+//! `execute_run` drives the run forward and is also
 //! `yunta resume` — it replays the log, asks [`schedule::decide`]
 //! what's next, and executes until the answer is terminal. Crash,
 //! restart and Ctrl-C are the same case: whatever the log says happened,

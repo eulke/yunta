@@ -207,9 +207,9 @@ baseline:
 "#;
 
 /// Exercises every receipt section in one run: a task with two
-/// criteria (`plan`/`implement`), a baseline capture-then-compare pair
-/// (`capture`/`compare`), a re-route (`lint` fails once, `fix-lint`
-/// corrects it), and a fan-out review (`runners: [reviewer,
+/// criteria (`plan`/`implement`), two baseline comparisons
+/// (`compare-early`/`compare`), a re-route (`lint` fails once,
+/// `fix-lint` corrects it), and a fan-out review (`runners: [reviewer,
 /// reviewer-alt]`) whose effects stay inside its own declared `scope`.
 const WORKFLOW: &str = r#"
 name: receipt-fixture
@@ -226,14 +226,14 @@ nodes:
     depends_on: [plan]
     until: all_tasks_complete
     prompt: "implement your task"
-  - id: capture
+  - id: compare-early
     kind: check
     builtin: baseline_compare
     depends_on: [implement]
   - id: compare
     kind: check
     builtin: baseline_compare
-    depends_on: [capture]
+    depends_on: [compare-early]
   - id: lint
     kind: bash
     depends_on: [compare]
@@ -308,7 +308,10 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
 
     let baseline = receipt.baseline.clone().expect("baseline_compare was used");
     assert_eq!(baseline.suite, "true");
-    assert_eq!(baseline.compared, 1, "capture doesn't count, compare does");
+    assert_eq!(
+        baseline.compared, 2,
+        "every `baseline_compare` compares against the capture the run's birth took"
+    );
     assert_eq!(baseline.regressions, 0);
 
     assert!(

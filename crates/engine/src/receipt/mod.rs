@@ -66,9 +66,8 @@ pub struct CriteriaSummary {
 pub struct BaselineSummary {
     pub suite: String,
     pub hash: ContentHash,
-    /// `baseline_compare` nodes that actually compared against the
-    /// capture (the run's first `baseline_compare` only captures — it
-    /// has nothing yet to regress against).
+    /// `baseline_compare` nodes that ran against the capture the run
+    /// took when it was created.
     pub compared: usize,
     pub regressions: usize,
 }
@@ -333,31 +332,31 @@ fn criteria_summary(events: &[StoredEvent]) -> CriteriaSummary {
 }
 
 fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<BaselineSummary> {
-    // The one node that emitted `baseline_captured` did the capturing;
-    // every other `baseline_compare` node compared. Read from the event
-    // kind and the envelope's node id, never the node's outcome text.
-    let capturing_node = events.iter().find_map(|e| match e.payload() {
-        Some(EventPayload::Node(NodeEvent::BaselineCaptured(_))) => e.node_id.clone(),
-        _ => None,
-    });
+    // A run captures its baseline whenever its config names a suite,
+    // so what decides whether the run *looked* is the workflow: with no
+    // `baseline_compare` in it there is no comparison to report, and a
+    // "0 regressions" line would be about nothing.
+    let compares: Vec<&NodeId> = manifest
+        .workflow
+        .iter_nodes()
+        .filter(|node| matches!(&node.kind, NodeKind::Check(CheckBuiltin::BaselineCompare)))
+        .map(|node| &node.id)
+        .collect();
+    if compares.is_empty() {
+        return None;
+    }
     let captured = events.iter().find_map(|e| match e.payload() {
         Some(EventPayload::Node(NodeEvent::BaselineCaptured(p))) => Some(p),
         _ => None,
     })?;
 
+    // Read from the event kind and each node's derived state, never
+    // from a node's outcome text.
     let state = derive(events);
     let mut compared = 0usize;
     let mut regressions = 0usize;
-    for node in manifest.workflow.iter_nodes() {
-        if !matches!(&node.kind, NodeKind::Check(CheckBuiltin::BaselineCompare)) {
-            continue;
-        }
-        // The run's very first `baseline_compare` only captures — it has
-        // nothing yet to compare against, so it isn't counted.
-        if capturing_node.as_ref() == Some(&node.id) {
-            continue;
-        }
-        match state.nodes.state(&node.id) {
+    for node in compares {
+        match state.nodes.state(node) {
             Some(NodeState::Finished { .. }) => compared += 1,
             Some(NodeState::Failed { .. }) => {
                 compared += 1;

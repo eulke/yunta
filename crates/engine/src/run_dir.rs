@@ -44,6 +44,22 @@ pub fn task_worktrees(run_dir: &Path) -> PathBuf {
     run_dir.join("task-worktrees")
 }
 
+/// The run's baseline: the snapshot of its suite, taken on the tree the
+/// run opens on. Absent from a run whose config names no suite.
+pub(crate) fn baseline_dir(run_dir: &Path) -> PathBuf {
+    run_dir.join("baseline")
+}
+
+/// Everything the run's baseline suite wrote when the run was created.
+///
+/// The log states what the suite did — its command, its exit code, a
+/// summary and the hash of all of it — and the bytes that hash names sit
+/// here, so a reader of a comparison against the baseline can read the
+/// output it is against and not only its summary.
+pub fn baseline_capture(run_dir: &Path) -> PathBuf {
+    baseline_dir(run_dir).join("suite.out")
+}
+
 /// The run's view of what it holds: one file per artifact, written from
 /// the acceptance that named it.
 pub fn artifacts_view(run_dir: &Path) -> PathBuf {

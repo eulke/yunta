@@ -14,12 +14,13 @@
 //! events, a live session's audit trail, what an agent posts
 //! mid-session and every document a session hands over all append
 //! through that one door, and so every one of them is observed without
-//! knowing an observer exists. Three appends stay outside, and nothing
+//! knowing an observer exists. Three sites stay outside, and nothing
 //! is lost by any of them:
 //!
-//! - `create_run` writes `run_created` before an execution context —
-//!   and so an observer — exists at all; a caller that draws the run
-//!   reads that one event as its seed.
+//! - `create_run` writes the run's birth — `run_created`, what the run
+//!   is born holding, and the baseline it captures — before an
+//!   execution context, and so an observer, exists at all; a caller that
+//!   draws the run reads those events as its seed.
 //! - `resolve_gate` and `record_pause_after_crash` append to storage
 //!   directly, and only ever to a run *this* process is not executing:
 //!   a parked one another process left behind, or one whose engine
