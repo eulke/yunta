@@ -1490,9 +1490,12 @@ impl Decision { pub fn revisers(&self) -> &[u32]; }        // lo que `reciprocal
 pub enum Surprise { TrivialCriterion { cmd: String }, BrokenGuard { cmd: String } }
 /// Everything the pre-check found, in the order the task declares its criteria; empty when every non-guard is red and every guard green. A function of what ran, so replay derives the same verdict from `criteria_checked`.
 pub fn surprises(task: &Task, runs: &[CriterionRun]) -> Vec<Surprise>;
-pub enum TaskOutcome { Done, Blocked { surprises: NonEmpty<Surprise> }, Interrupted, /* … */ }
-//   `pre_check` devuelve `Vec<CriterionRun>` como `post_check`; `PreCheckOutcome` se borra; `run_task` (mod.rs:328-340) bloquea con `NonEmpty::from_vec(surprises(task, &pre_runs))`;
-//   la oración se produce una vez, por `Display` de `Surprise` —«criterion `true` already passes before any work — the criteria need fixing, not the task» / «guard `false` is already red before any work started»—,
+/// Why a task stopped without being done. One type for the two answers the cycle gives today and the one M31 adds.
+pub enum BlockedCause { PreCheck(NonEmpty<Surprise>), Unmet { attempts: u32 } }
+pub enum TaskOutcome { Done, Blocked { cause: BlockedCause }, Interrupted, /* … */ }
+//   `pre_check` devuelve `Vec<CriterionRun>` como `post_check`; `PreCheckOutcome` se borra; `run_task` (mod.rs:328-340) bloquea con `BlockedCause::PreCheck(NonEmpty::from_vec(surprises(task, &pre_runs)))`
+//   y `mod.rs:400-405` con `BlockedCause::Unmet { attempts }`, la frase que hoy arma un `format!`;
+//   la oración se produce una vez, por `Display` de `BlockedCause` y de `Surprise` —«criterion `true` already passes before any work — the criteria need fixing, not the task» / «guard `false` is already red before any work started»—,
 //   una línea por sorpresa, donde se escribe la causa del `task_status_changed` (loop_exec/integrate.rs:111-122) y donde `status` la muestra; ningún `reason:` se arma con `format!` (M22).
 ```
 
@@ -1565,21 +1568,25 @@ duplicados): qué nodos tiene un run, en qué orden y con qué palabra lo
 contestan varios caminos. La vista viva lee el `RunFrame` —orden de
 declaración, cada grupo `parallel` seguido de sus hijos (`view/mod.rs:114-116`),
 `NodeStanding::{Skipped, ToGo, Reached}`, y `NodeFrame.group`, escrito en
-`view/node.rs:115` y leído por nadie (I-08)—; `status` lee `RunState.nodes`
-en orden alfabético y sólo los que el log nombra (`status/mod.rs:60-71`;
-`print_failures` igual, `:122-137`); `--json` igual, en un `BTreeMap`
-que no puede decir orden ni grupo (`json.rs:87,133-137`); `graph --run`
-recorre el workflow de disco y no el manifest congelado del run
-(`graph.rs:37,72-86`), sin los hijos de un `parallel`; `stats` toma la
-palabra de `RunState` (`stats.rs:318`). Y el hecho «qué espera un nodo»
-está aplastado en el origen: `NodeState::Waiting { external_ref }`
-(`node/ledger.rs:43-50`) confunde tres esperas —gate interno, gate externo,
-preguntas sin responder—, `replay.rs:305` descarta `p.questions` al
-escribir `Waiting { external_ref: None }`, y la oración «asked 2 questions:
-q1, q2» se arma a mano en tres sitios: la crónica (`words.rs:235-246`),
-`PauseReason::Questions` (`run/payloads.rs:167-172`, con «question(s)») y
-lo que `preguntas.md` §5 pide de `NodeDisplay`. Un `parallel` dentro de un
-`parallel` es representable (`node_kind.rs:52`), ningún check lo rechaza
+`view/node.rs:115` y que ninguna superficie lee (I-08)—; `status` deriva el
+frame y vuelve a derivar el estado para listar `RunState.nodes` en orden
+alfabético y sólo los que el log nombra (`status/mod.rs:51-71`;
+`print_failures` igual, `:122-137`; auditoría `04-cli.md:43-44`, «two
+passes»); `--json` igual, en un `BTreeMap` que no puede decir orden ni
+grupo (`json.rs:87,133-137`); `graph --run` recorre el workflow de disco y
+no el manifest congelado del run (`graph.rs:37,72-86`; auditoría
+`04-cli.md:51`), sin los hijos de un `parallel`; `stats` toma la palabra de
+`RunState` (`stats.rs:318`; auditoría `04-cli.md:98` lista los cinco
+consumidores de `NodeDisplay`). Y el hecho «qué espera un nodo» está
+aplastado en el origen: `NodeState::Waiting { external_ref }`
+(`node/ledger.rs:43-50`) no distingue un gate de unas preguntas sin
+responder, `replay.rs:305` descarta `p.questions` al escribir `Waiting {
+external_ref: None }`, y la oración «asked N questions: …» se arma a mano
+en tres sitios con dos ortografías —la crónica (`words.rs:235-246`, con
+`counted`), `PauseReason::Questions` (`run/payloads.rs:167-172`, con
+«question(s)») y los veredictos de las tools (`run_tools/verdicts.rs:71-80`,
+con «question(s)»)—. Un `parallel` dentro de un `parallel` es
+representable (`node_kind.rs:52`), ningún check lo rechaza
 (`check/error.rs:212,266,319`) y el iterador empareja con el grupo
 inmediato (`workflow/mod.rs:141-150`). Evidencia: L-67, L-97, L-109 (§11);
 M24 I-08; CLI-D28, CLI-D29, CLI-D30 (§12).
@@ -1589,70 +1596,91 @@ listar los nodos de un run: todo `NodeFrame` del frame —del manifest
 congelado del run, en orden de declaración, cada grupo `parallel` con sus
 hijos un paso debajo, los que el modo excluye incluidos y etiquetados
 `skipped`, como `graph --run` ya imprime—. Lo que un nodo espera vive en
-su estado: `NodeState::Waiting { on: NodeWait }`, y `NodeDisplay::of(state)`
-—una sola entrada, la que se conserva— lo dice. Una oración, un productor:
-`text::asked_questions`. Un `parallel` no anida otro: `check` lo rechaza, y
-un paso de sangría es exacto.
+su estado: `NodeState::Waiting { on: NodeWait }`, y de ahí lo leen
+`NodeDisplay::of(state)` —una sola entrada, la que se conserva—, el
+scheduler y la pausa del run. Una oración, un productor:
+`text::asked_questions`. Un `parallel` no anida otro: `check` lo rechaza,
+y un paso de sangría es exacto. Una superficie que lista nodos en orden los
+lista como lista; las colecciones que un lector indexa por id —`tasks`,
+`diagnostics`— siguen siendo mapas.
 
 **Firmas.**
 
 ```rust
 // core/src/events/node/ledger.rs — la espera tiene forma
 pub enum NodeState { /* … */ Waiting { on: NodeWait } }
-/// What a waiting node waits on.
+/// What a waiting node waits on. A gate's kind — internal or external — is a property of the declaration, never of the wait: the scheduler reads it from the workflow and the state says only whether the gate has a handle yet.
 pub enum NodeWait {
     /// A published, unresolved gate; `external_ref` is the forge's handle once recorded.
     Gate { external_ref: Option<String> },
     /// The questions the node asked and nobody answered — `QuestionsAskedPayload.questions`, never empty.
-    Questions { asked: Vec<QuestionId> },
+    Questions { asked: NonEmpty<QuestionId> },
 }
-// engine/src/replay.rs:276 → `Waiting { on: NodeWait::Gate { external_ref } }`; :305 → `Waiting { on: NodeWait::Questions { asked: p.questions.clone() } }`
+// engine/src/replay.rs:276 → `Waiting { on: NodeWait::Gate { external_ref } }`; :305 → `Waiting { on: NodeWait::Questions { asked } }`
+// engine/src/run/schedule.rs:386-417 — `waiting_step` decide sobre `on`: `Questions { .. }` no es un gate y nunca llega a `PublishGate`/`PollGate`; `Gate { external_ref }` sigue eligiendo por `is_external_gate(node)`, que es de la declaración
+// engine/src/view/phase.rs:82-86,157-161 — `WaitingOn::Node { node, on: NodeWait, reason }` en vez de `external_ref`: un solo vocabulario para «qué espera» en el run y en el nodo
 // core/src/text.rs
+/// Identifiers as a reader sees a list of them, each in its own backticks — the one joiner every sentence about a set of ids uses.
+pub fn listed<'a>(ids: impl IntoIterator<Item = &'a str>) -> String;    // mudada desde `run/payloads.rs:122`, que la tenía privada
 /// The one sentence for questions awaiting an answer: `asked 2 questions: q1, q2`.
-pub fn asked_questions(asked: &[QuestionId]) -> String;    // `counted` + la lista; la consumen `NodeDisplay::of`, `PauseReason::Questions`'s Display y la crónica
+pub fn asked_questions(asked: &[QuestionId]) -> String;                 // `counted` + `listed`
+//   la consumen `NodeDisplay::of`, `PauseReason::Questions`'s Display y la crónica; `run_tools/verdicts.rs:60-80` pasa a `counted` + `listed` para sus cuatro veredictos, de modo que «question(s)» desaparece del repo
 // cli/src/render/state.rs — `NodeDisplay::of(Option<&NodeState>)` conserva su firma y gana el brazo
 //   `Some(NodeState::Waiting { on: NodeWait::Questions { asked } }) => Some(text::asked_questions(asked))`; `skipped()` se conserva
 // cli/src/surface/chronicle/words.rs:235-246 — `H::Asked { questions }` dice `NodeDisplay::of(Some(&NodeState::Waiting { on: NodeWait::Questions { asked } })).label()`: la crónica y `status` son los mismos bytes por construcción; el `format!` se borra
-// core/src/events/run/payloads.rs:167-172 — `PauseReason::Questions` Display: «node `{node}` {asked_questions(pending)} — awaiting an answer»
 // cli/src/render/width.rs — `pub(crate) const CHILD_DEPTH: usize = 1;` (D179), consumida por `chronicle::graduation` y por `view::node_rows`; la copia privada de `chronicle/mod.rs:26` se borra
-// cli/src/surface/view.rs:69 — `node_rows` sangra `CHILD_DEPTH` las filas de un nodo con `group: Some(_)`; `standing` (:221-227) se conserva
-// cli/src/commands/status/mod.rs — `print_derived(frame: &RunFrame, state: &RunState)`: los nodos salen de `frame.nodes`, `{id}: {label}` como hoy, los hijos sangrados `CHILD_DEPTH` bajo su grupo; `print_failures` recorre `frame.nodes` en ese mismo orden; las tareas siguen saliendo de `state.tasks`
+// cli/src/surface/view.rs:69 — `node_rows` sangra `CHILD_DEPTH` las filas de un nodo con `group: Some(_)`; `standing` (:221-227) se conserva; `working` (:273-287) sigue filtrando lo que corre: la región muestra el trabajo en curso, no la lista
+// cli/src/commands/status/mod.rs — `print_derived(frame: &RunFrame, state: &RunState)`: los nodos salen de `frame.nodes`, `{id}: {label}` como hoy, los hijos sangrados `CHILD_DEPTH` bajo su grupo; `print_failures` recorre `frame.nodes` en ese mismo orden; las tareas siguen saliendo de `state.tasks`; `status` deriva una vez y pasa la misma lectura a las tres partes de la página
 // cli/src/json.rs — con el salto a `SCHEMA_VERSION = 5`, `nodes` deja de ser un mapa:
 pub struct NodeJson { id: String, state: StateWord /* serializa `word()`, como RunWord */, #[serde(skip_serializing_if = "Option::is_none")] detail: Option<String>, #[serde(skip_serializing_if = "Option::is_none")] group: Option<String>, #[serde(skip_serializing_if = "Option::is_none")] waiting_on: Option<NodeWaitJson> }
 #[serde(tag = "on", rename_all = "snake_case")] pub enum NodeWaitJson { Gate { external_ref: Option<String> }, Questions { asked: Vec<String> } }
-//   `nodes: Vec<NodeJson>` en orden de declaración; `impl Serialize for StateWord` junto al de `RunWord` (state.rs:299-304)
-// cli/src/graph.rs — `pub async fn graph(..)` (cli.rs:380 lo espera): con `--run` abre el run por `Context::open_run` y dibuja `open.manifest.doc.workflow`, hijos bajo su grupo; deja de calcular `mode_included_nodes`
+//   `nodes: Vec<NodeJson>` en orden de declaración; `impl Serialize for StateWord` junto al de `RunWord` (state.rs:299-304); `WaitingOnJson::Node` lleva el mismo `NodeWaitJson`, así que el documento tiene un solo vocabulario de espera
+// cli/src/cli.rs:157-166 — `Graph { workflow: Option<PathBuf>, run: Option<RunId>, format }`: exactamente una fuente. Sin `--run`, el positional es obligatorio y se lee de disco como hoy; con `--run`, el workflow es el que el run congeló y un positional además del id se rechaza nombrando las dos fuentes.
+// cli/src/graph.rs — `pub async fn graph(..)`: con `--run` abre el run por `Context::open_run` y dibuja `open.manifest.doc.workflow`; `render_mermaid` emite un `subgraph` por nodo `parallel` con sus hijos adentro y `render_dot` un `cluster_<id>`; deja de calcular `mode_included_nodes`
 // cli/src/commands/stats.rs:306-323 — `render_nodes(stats, state, glyphs)` sin cambio de forma: una fila por nodo que arrancó, la palabra por `NodeDisplay::of(state.nodes.state(..))`, que ahora sabe qué preguntó
 // engine/src/check/error.rs — `CheckError::ParallelInsideParallel { group, node }` junto a sus tres hermanos `*InsideParallel`
 // engine/src/lib.rs:107 — `mode_included_nodes` deja de exportarse: su único consumidor externo era `graph.rs`; sigue en `view/mod.rs` y `schedule.rs`
+// core/src/events/gates/ledger.rs:91-95 — `pending_questions` y `QuestionRound::pending` se borran (§0.15, reemplazado): lo que preguntó un nodo se lee del estado del nodo, no de un segundo pliegue
 ```
 
 **Decisión.** D179 (registrada con el plan): `status`, `--json` y `graph
 --run` listan los nodos como el frame; lo que un nodo espera vive en su
 estado y `NodeDisplay::of` lo dice; `--json` sube a `schema_version: 5`
-con `nodes` como lista ordenada; un `parallel` no anida otro (L-109).
-Cambio visible: `docs/compatibility.md:278-295` (qué contiene `nodes`, su
-forma y el número), `README.md:134-135,164`, `docs/concepts.md:99-101` sin
-cambio; el aviso de `check` por `ParallelInsideParallel` entra en
-`docs/guide.md` junto a sus hermanos.
+con `nodes` como lista ordenada; `graph` toma el workflow de una sola
+fuente; un `parallel` no anida otro (L-109). Cambio visible:
+`docs/compatibility.md:278-321` (qué contiene `nodes`, su forma, el número,
+y que `tasks`/`diagnostics` siguen siendo mapas), `:193-198` (la lista de
+reglas de `check` gana el anidado), `:353-357` (`waiting_on`),
+`README.md:134-135,164` (la fila de `graph`), `docs/concepts.md:99-101` sin
+cambio. Un `run_paused.reason` escrito antes del cambio conserva su
+oración: la prosa del pausado es lo persistido (§0.15, planificado) y la
+página lo muestra tal como se escribió.
 
 **Archivos.** Modifica: `core/src/events/node/ledger.rs`, `core/src/text.rs`,
-`core/src/events/run/payloads.rs:160-175`, `core/schemas/events.json` (si
-`NodeState` aparece en un payload), `engine/src/replay.rs:271-310`,
-`engine/src/view/phase.rs:157`, `engine/src/run/schedule.rs:388`,
+`core/src/events/run/payloads.rs:118-175`, `core/src/events/gates/ledger.rs`,
+`engine/src/replay.rs:271-310`, `engine/src/view/{phase.rs, mod.rs}`,
+`engine/src/run/schedule.rs:386-417`, `engine/src/run_tools/verdicts.rs:60-90`,
 `engine/src/check/{error.rs, graph.rs}`, `engine/src/lib.rs`,
 `cli/src/render/{state.rs (:87-101,110-122 rustdoc y brazo; tests
-:147-200), width.rs}`, `cli/src/surface/{view.rs, chronicle/mod.rs,
-chronicle/words.rs}`, `cli/src/commands/status/mod.rs`, `cli/src/json.rs`,
-`cli/src/cli.rs:380`, `cli/src/graph.rs` (`:1-6,54-62` docs),
-`docs/compatibility.md`, `README.md`, `docs/guide.md`, y los tests que
-fijan la forma vieja: `engine/tests/{external_gate.rs:78, properties.rs:369,
-run_questions.rs:214, run_questions_close.rs:130, view.rs, check.rs}`,
-`cli/tests/{parked_runs.rs:410,418,545-590, graph_cmd.rs, run_questions*.rs}`,
+:147-201), width.rs}`, `cli/src/surface/{view.rs, region.rs,
+chronicle/mod.rs, chronicle/words.rs, closing.rs}`,
+`cli/src/commands/{status/mod.rs, advice.rs, stats.rs}`, `cli/src/json.rs`,
+`cli/src/cli.rs:157-166,380`, `cli/src/graph.rs`, `docs/compatibility.md`,
+`README.md`, y los tests y fixtures que fijan la forma vieja:
+`engine/tests/{external_gate.rs:78-79, properties.rs:369, view.rs:955-1057
+(`RunPhase::Waiting`) y :973 (la oración «question(s)»), check.rs}`,
+`cli/tests/{status_cmd.rs, parked_runs.rs:410,418,545-590, graph_cmd.rs,
+run_flow.rs:62-63,2078, mcp_flow.rs:1176-1180, console_interaction.rs}`,
 `cli/src/commands/mcp.rs:303-316` y `drive.rs:468` (consumidores del
-documento). Borra: la exportación de `mode_included_nodes`, el `format!`
-de `words.rs:237-245`, `chronicle/mod.rs:26`. `frames.rs`, `NodeFrame` y
-`StateWord::of` no cambian.
+documento), y el plan: `preguntas.md:252-254` (el modificador sale del
+estado, no de `NodeFrame.asked`), `cronica.md:225-226` (`--json` y la tool
+`workflow_status` cambian de forma), `README.md` §11 L-97 y §10 filas 5-05
+y 7-07 (I-08 cierra acá). Borra: la exportación de `mode_included_nodes`,
+el `format!` de `words.rs:237-245`, `chronicle/mod.rs:26`,
+`GateLedger::pending_questions`, `QuestionRound::pending`, el `listed`
+privado de `payloads.rs:122`. `frames.rs`, `NodeFrame` y `StateWord::of` no
+cambian; `NodeState` no aparece en `core/schemas/events.json`, así que no
+hay schema que regenerar.
 
 **Prerequisitos.** Ninguno.
 
@@ -1663,31 +1691,36 @@ que `status_cmd.rs` no cruce las 500 líneas):
 `status_lists_every_declared_node_in_declaration_order_with_children_under_their_group`
 (rojo: hoy alfabético y sólo los que el log nombra),
 `status_says_which_questions_a_node_is_waiting_on` (rojo),
-`status_and_the_live_view_list_the_same_nodes_in_the_same_order` (ids y
-orden contra `frame.nodes`),
+`status_lists_the_nodes_the_frame_declares_in_its_order` (ids y orden
+contra `frame.nodes`),
 `status_json_lists_every_declared_node_in_order_under_schema_version_five`,
 `the_chronicle_and_status_say_a_node_that_asked_with_the_same_bytes`;
 `status_attributes_each_problem_to_the_document_it_came_from` sigue verde
 (`{id}: {label}` no cambia); `cli/tests/run_surface.rs`:
 `the_live_view_indents_a_groups_children_under_it`; `cli/tests/graph_cmd.rs`:
-`graph_with_a_run_id_draws_the_runs_frozen_workflow_with_a_groups_children`;
-`engine/tests/check.rs`: `a_parallel_inside_a_parallel_is_refused`;
+`graph_with_a_run_id_draws_the_runs_frozen_workflow_with_its_groups_as_subgraphs`
+y `graph_refuses_a_workflow_and_a_run_at_once`; `engine/tests/check.rs`:
+`a_parallel_inside_a_parallel_is_refused`; `engine/tests/schedule.rs`:
+`a_node_waiting_on_questions_is_never_taken_for_a_gate`;
 `cli/src/render/state.rs` (unit): `a_waiting_node_that_asked_names_its_questions`.
 
-**Cierra.** CLI-D28, CLI-D29, CLI-D30; L-67, L-109; M24 I-08.
+**Cierra.** CLI-D28, CLI-D29, CLI-D30; L-67, L-97, L-109; M24 I-08.
 
 **Encastre.** M19 (`cronica.md`): «toda palabra de estado sale de
 `NodeDisplay::of(state).label()`» sigue siendo verdad con una sola entrada;
-la región y `status` listan el mismo frame con las mismas palabras. M26
-(`preguntas.md` §5): el modificador del nodo que preguntó. M06: la espera
-es un hecho tipado y la oración se produce en un lugar. M16: la palabra de
-`expect.nodes` no cambia. M15: `graph` deja de enmarcar otro documento que
-el run. M22: `CHILD_DEPTH` cita D179; `status_nodes_cmd.rs` deja el
-contador de archivos donde está. §8: `render::state` se generaliza (el
-mismo vocabulario, la misma entrada, un brazo más); `run_frame`/`view/` y
+la región sigue mostrando el trabajo en curso —lo que corre y lo que
+espera— y `status` la lista entera, con las mismas palabras y el mismo
+orden del frame. M26 (`preguntas.md` §5): el modificador del nodo que
+preguntó, leído del estado. M06: la espera es un hecho tipado y la oración
+se produce en un lugar. M16: la palabra de `expect.nodes` no cambia
+(`StateWord::of`). M15: `graph` deja de enmarcar otro documento que el run.
+M22: `CHILD_DEPTH` cita D179; `status_nodes_cmd.rs` deja el contador de
+archivos donde está. §8: `render::state` se generaliza (el mismo
+vocabulario, la misma entrada, un brazo más); `run_frame`/`view/` y
 `frames.rs` sin cambio; `json::SCHEMA_VERSION` sube por su propia regla.
 M31: `print_failures` y `RunDocument` cambian acá primero; 8-05 les agrega
 la muerte de una sesión.
+
 ---
 
 ## M31 · Una sesión que muere dice por qué
@@ -1700,113 +1733,149 @@ mcp_servers.yunta.url=…` (`adapters/src/codex/mod.rs:185-196`,
 `RunToolsEndpoint::SERVER_NAME = "yunta"` en `core/src/port/session.rs:133`);
 Codex hace merge sobre la misma tabla y rechaza `url is not supported for
 stdio`. El stderr que lo dice se drena a `tracing::debug!`
-(`core/src/process/subprocess.rs:171-174`) y el engine sintetiza un
+(`core/src/process/subprocess.rs:171-174`) y el nodo falla con
 `Failure::message("session ended without a terminal event")` reintentable
 (`engine/src/run/prompt_exec.rs:222-231`, `task_cycle/session.rs:289`) sin
-código de salida; `probe()` de codex corre `--version`
-(`adapters/src/codex/mod.rs:263-271`), así que `doctor` dice sano.
-Evidencia: L-106 (§11); AD-D25, EN-D36, CLI-D32 (§12).
+código de salida; en un nodo `kind: loop` ni eso: el intento guarda
+`dispatch: Crashed` en `AttemptRecord` (`task_cycle/attempt.rs:137-146`) y
+nadie lo lee, así que la tarea termina «criteria still red or scope
+violated after N attempt(s)» (`task_cycle/mod.rs:400-405`) y la muerte no
+llega a ningún lado. `probe()` de codex corre `--version`
+(`adapters/src/codex/mod.rs:263-271`), así que `doctor` dice sano, y
+`docs/troubleshooting.md:40-44` promete que «a healthy `doctor` means a run
+won't fail on setup for that adapter». Evidencia: L-106 (§11); AD-D25,
+EN-D36, EN-D38, CLI-D32 (§12).
 
 **Regla.** El servidor per-run tiene nombre propio, `yunta-run`, distinto
 del control plane que un usuario registra con el nombre que quiera. Una
-sesión que termina sin evento terminal falla con un hecho tipado —cómo
-salió su proceso y las últimas líneas que escribió en stderr—, que llega
-al log, a `status`, a `--json` y a la crónica. `yunta doctor --session`
-abre una sesión real por runner por el mismo camino que un workflow, con
-las run tools montadas, y reporta cada una con esa misma evidencia; gasta
-un prompt por runner, por eso es opt-in.
+sesión que termina sin evento terminal dice cómo salió su proceso y qué
+escribió último en stderr, y ese hecho tipado llega al log por los dos
+caminos que abren sesiones —el nodo de prompt y el ciclo de tareas— y de
+ahí a `status`, a `--json` y a la crónica. El proceso se interroga sólo
+cuando murió sin decir nada: una sesión que terminó su turno no paga nada.
+`yunta doctor --session` abre una sesión real por runner sano por el mismo
+camino que un workflow y reporta cada una con esa misma evidencia; gasta un
+prompt por runner, por eso es opt-in, y `doctor` sin la bandera dice qué
+garantiza y qué no.
 
 **Firmas.**
 
 ```rust
 // core/src/port/session.rs
 impl RunToolsEndpoint { pub const SERVER_NAME: &'static str = "yunta-run"; }   // claude_code/mod.rs:49,161 y parse.rs:136, codex/mod.rs:185 lo siguen sin cambio de texto
-/// How a session's process ended, once its events were exhausted.
-pub struct SessionExit { pub code: Option<i32>, pub signal: Option<i32>, pub stderr_tail: Vec<String> }
 pub trait AgentSession {
     /* … */
-    /// How the process ended, asked once the event stream is exhausted: the status it exited with and the last lines it wrote to stderr. `None` for a session with no process of its own.
+    /// How the process ended, asked only of a session whose stream ended without a terminal event: the status it exited with and the last lines it wrote to stderr. Reaps the child and takes the tail the drain collected; a session with no process of its own answers `None`.
     async fn exit(&mut self) -> Option<SessionExit> { None }     // el mock hereda el default
 }
+// core/src/events/failure.rs — el hecho es del log, así que el tipo vive con los hechos y el puerto lo usa
+pub struct SessionExit { pub code: Option<i32>, pub signal: Option<i32>, pub stderr_tail: Vec<String> }   // Serialize, Deserialize, JsonSchema, PartialEq, Eq, Clone, Debug, como sus vecinos
+pub struct SessionDeath { pub adapter: AdapterId, pub exit: Option<SessionExit> }
+pub enum Failure { Artifacts { artifacts: Vec<ArtifactFailure> }, SessionDied { died: SessionDeath }, Message { outcome: String } }   // untagged; `died` es el discriminador, antes de `Message`
+impl Failure { pub fn session_died(adapter: AdapterId, exit: Option<SessionExit>) -> Self; }
+//   Display: una línea «session `codex` exited with code 2 before any terminal event — url is not supported for stdio» (la última línea del tail);
+//   `Failure::failures()` gana el brazo vacío; `status` lista el tail entero bajo el nodo, un bloque más de `print_failures`; `--json` publica `session_deaths`, aditivo, y `node_diagnostics` gana su brazo
 // core/src/process/subprocess.rs
 /// How many stderr lines a session keeps for its exit (D180).
 pub const STDERR_TAIL_LINES: usize = 20;
-//   el drain guarda las últimas STDERR_TAIL_LINES en un VecDeque compartido; `exit()` espera al drain, hace `wait()` al child (`reaped = true`) y devuelve el `SessionExit`
+//   el drain guarda las últimas STDERR_TAIL_LINES en un `Mutex<VecDeque<String>>` compartido; `exit()` hace `wait()` al child (`reaped = true`), aborta el drain y devuelve lo que la cola tiene: nada espera a un nieto que dejó stderr abierto
 
-// core/src/events/failure.rs — untagged; `died` es el discriminador, antes de `Message`
-pub enum Failure { Artifacts { artifacts: Vec<ArtifactFailure> }, SessionDied { died: SessionDeath }, Message { outcome: String } }
-pub struct SessionDeath { pub adapter: AdapterId, pub exit: Option<SessionExit> }
-impl Failure { pub fn session_died(adapter: AdapterId, exit: Option<SessionExit>) -> Self; }
-//   Display: una línea «session `codex` exited with code 2 before any terminal event — url is not supported for stdio» (la última línea del tail);
-//   `status` lista el tail entero bajo el nodo, un bloque más de `print_failures`; `--json` publica `session_deaths: [{ node, adapter, code, signal, stderr }]`, aditivo
-
-// engine/src/task_cycle/mod.rs
+// engine/src/task_cycle/mod.rs — los dos caminos dicen la muerte
 pub enum DispatchOutcome { /* … */ Crashed { exit: Option<SessionExit> }, /* … */ }
-//   session.rs:289 — `terminal.unwrap_or_else(|| Crashed { exit })` con `exit = session.exit().await`; prompt_exec.rs:223 — `fail_with(ctx, node, Failure::session_died(adapter.id().clone(), exit), true, tokens)`
+pub enum BlockedCause { PreCheck(NonEmpty<Surprise>), SessionDied(SessionDeath), Unmet { attempts: u32 } }   // `Surprise` es de M29
+pub enum TaskOutcome { Done, Blocked { cause: BlockedCause }, Interrupted, /* … */ }
+//   session.rs:289 — `match terminal { Some(outcome) => outcome, None => Crashed { exit: session.exit().await } }`: sólo se pregunta al que murió;
+//   prompt_exec.rs:223 — `fail_with(ctx, node, Failure::session_died(adapter.id().clone(), exit), true, tokens)`;
+//   task_cycle/mod.rs:400-405 — un intento que murió bloquea la tarea con `SessionDied`, y `loop_exec/integrate.rs:111-122` escribe la causa por `Display` de `BlockedCause`
 
 // cli/src/cli.rs
 Doctor {
-    /// Also opens one real session per runner `runners:` names — the smallest run there is, through the same machinery a workflow uses, run tools mounted — and reports how each ended. Spends one prompt per runner.
+    /// Also opens one real session per healthy runner `runners:` names — the smallest run there is, through the same machinery a workflow uses, run tools mounted — and reports how each ended. Spends one prompt per runner.
     #[arg(long)] session: bool,
 }
 // cli/src/commands/doctor.rs
 pub async fn doctor(session: bool) -> Result<Outcome, CliError>;
-/// The workflow `--session` runs: one `kind: prompt` node per runner, `prompt: "Reply with exactly: ok"`, no artifacts, `on_failure: continue`, so every runner is tried whatever the others did.
-fn session_workflow(runners: &[RunnerName]) -> Workflow;
-//   corre como un caso de `yunta test` con adapters reales: `Context::sandboxed`, `runnable` → `create_run_from` → `drive::execute`; el reporte lee el log del run por runner:
-//   `planner (claude-code/claude-opus-4-8): ok — 812 tokens` | `executor (codex/gpt-5-codex): session died — exit 2: url is not supported for stdio`; `Outcome::Reported` si alguna murió
+/// The run `--session` drives for one runner: a single `kind: prompt` node on it, `prompt: "Reply with exactly: ok"`, no artifacts. One run per runner, so a runner whose CLI dies is reported as itself and not as the refusal of a batch.
+async fn session_probe(ctx: &Context, runner: &RunnerName) -> SessionProbe;
+//   corre en el sandbox de `yunta test` (`Context::sandboxed`) con los adapters reales y el `Env` de la invocación, escribiendo el workflow de un nodo en el catálogo del sandbox y pasando por `runnable` → `create_run_from` → `drive::execute`;
+//   sólo para los runners cuyo adapter ya probó sano, porque `probe_or_refuse` rechaza la invocación entera y eso es lo que `doctor` reporta por su cuenta.
+//   Reporte: `planner (claude-code/claude-opus-4-8): ok — 812 tokens` | `executor (codex/gpt-5-codex): session died — exit 2: url is not supported for stdio`; `Outcome::Reported` si alguna murió o algún adapter probó enfermo.
 
-// testkit/src/stubs.rs — gana `pub fn codex() -> PathBuf; pub fn claude_code() -> PathBuf`: los stubs se mudan de `adapters/tests/fixtures/` a `crates/testkit/stubs/` y los comparten adapters y cli (M20)
+// testkit-core/src/stubs.rs (nuevo) — el crate que adapters y cli pueden compartir (`yunta-testkit` depende de `yunta-adapters`, así que los stubs no pueden vivir ahí)
+/// The stub CLIs the adapter and CLI tests drive, by absolute path. Each honours `<NAME>_STUB_EXIT` and `<NAME>_STUB_STDERR`: what to exit with, and the lines to write to stderr before exiting.
+pub fn codex() -> PathBuf;
+pub fn claude_code() -> PathBuf;
+// testkit-core/src/adapter.rs:41-49 — junto a `drain`, `drain_for_exit(session) -> (Vec<AgentEvent>, Option<SessionExit>)`: devuelve lo que la sesión dijo y cómo salió, sin que el test escriba un segundo drenaje
 ```
 
 **Decisión.** D180 revisa D147 (el nombre) y fija `STDERR_TAIL_LINES`: el
 servidor per-run se llama `yunta-run`; una sesión que muere falla con
-`SessionDied`; `doctor --session` corre el workflow de doctor. D147 queda
+`SessionDied` por los dos caminos que abren sesiones; `doctor --session`
+abre una sesión real por runner sano, una por runner. D147 queda
 `revised_by: [D178, D180]`. Docs: `docs/adapters.md` (§doctor gana
 `--session`; los dos servidores y sus nombres), `docs/compatibility.md`
-§The MCP servers (los nombra), `docs/troubleshooting.md` («session died:
-exit N» → las líneas de stderr en `status`), README tabla de comandos,
-spec-events `node_failed.failure` (tercera forma), spec-adapter (`exit` en
-el trait; `yunta-run`), `mecanismos.md` M01 (`SERVER_NAME` con su valor
-nuevo).
+§The MCP servers (los nombra), §The JSON surfaces (`session_deaths` y qué
+publica `diagnostics` para un nodo cuya sesión murió) y §What isn't covered
+(qué chequea `doctor`), `docs/troubleshooting.md:40-44` (qué garantiza
+`doctor` sin `--session` y qué sólo con ella) y su entrada «session died»,
+README tabla de comandos, spec-events §5.15 (la falla toma **tres** formas;
+la fila nombra `died`), spec-adapter O2 (`:217-219`: el engine registra la
+muerte con su salida, no sintetiza una frase) y su `exit` en el trait,
+`contrato-del-run.md:356` (lo mismo), `mecanismos.md` M01 (`SERVER_NAME`
+con su valor nuevo).
 
-**Archivos.** Nuevo: `crates/testkit/stubs/{codex_stub.sh, claude_code_stub.sh}`,
-`cli/tests/doctor_cmd.rs`, `docs/design/adr/D180-*.md`.
-Modifica: `crates/testkit/src/stubs.rs` (gana `codex()` y `claude_code()`), `core/src/port/session.rs`, `core/src/process/subprocess.rs`,
-`core/src/events/failure.rs`, `core/schemas/events.json`,
-`engine/src/task_cycle/{mod.rs, session.rs}`, `engine/src/run/prompt_exec.rs`,
-`adapters/tests/{codex.rs:766-808,833-882, claude_code.rs:772-808,806,845}`,
-`cli/src/{cli.rs, json.rs}`, `cli/src/commands/{doctor.rs, status/mod.rs}`,
-`docs/adapters.md`, `docs/compatibility.md`, `docs/troubleshooting.md`,
-`README.md`, `docs/design/{spec-events.md, spec-adapter.md}`,
-`docs/design/adr/D147`, `docs/design/adrs.md`, `mecanismos.md` M01. Borra:
-`adapters/tests/fixtures/*_stub.sh` (mudados).
+**Archivos.** Nuevo: `testkit-core/src/stubs.rs`, `testkit-core/stubs/{codex_stub.sh,
+claude_code_stub.sh}` (mudados desde `adapters/tests/fixtures/`, con la
+variable de stderr), `docs/design/adr/D180-*.md` (registrado con el plan).
+Modifica: `core/src/port/session.rs` (`SERVER_NAME`, `exit`, el rustdoc de
+`events` `:308-310`, el re-export de `port/mod.rs:17-20`),
+`core/src/process/subprocess.rs`, `core/src/events/failure.rs` (`:3-8,18-23,57-62`),
+`core/schemas/events.json`, `engine/src/task_cycle/{mod.rs, session.rs,
+attempt.rs}`, `engine/src/run/{prompt_exec.rs, loop_exec/integrate.rs}`,
+`engine/tests/task_cycle.rs:504`, `adapters/tests/{codex.rs,
+claude_code.rs}` enteros (cada uno resuelve el stub por `stub_path()` y lo
+nombra en su doc de módulo; las fixtures `codex.rs:195` y
+`claude_code.rs:828` dicen `yunta` donde el CLI real dirá `yunta-run`),
+`testkit-core/src/{lib.rs, adapter.rs}`, `cli/src/{cli.rs, json.rs}`,
+`cli/src/commands/{doctor.rs, status/mod.rs}`,
+`cli/tests/pack_requires_doctor_cmd.rs` (los casos de `doctor` viven donde
+ya viven), `docs/adapters.md`, `docs/compatibility.md`,
+`docs/troubleshooting.md`, `README.md`, `docs/design/{spec-events.md,
+spec-adapter.md, contrato-del-run.md}`, `mecanismos.md` M01. Borra:
+`adapters/tests/fixtures/*_stub.sh`.
 
-**Prerequisitos.** 8-04 (D179 antes que D180; D178 antes que D180 sobre
-D147).
+**Prerequisitos.** 8-03 (`BlockedCause` extiende el `Blocked` tipado que
+M29 construye) y 8-04 (`print_failures` y `RunDocument` ya sobre el frame).
 
 **Tests.** `adapters/tests/codex.rs`:
 `the_per_run_server_never_shares_the_control_planes_name` (rojo: los args
 dicen `mcp_servers.yunta.`; verde: `mcp_servers.yunta-run.url` y ningún
 `mcp_servers.yunta.`), `a_session_that_dies_before_its_first_event_reports_its_exit_and_its_last_stderr_lines`
-(rojo: el trait no tiene `exit`; el stub escribe la línea a stderr y sale
-con 2); `adapters/tests/claude_code.rs`: el allow-rule y el prefijo dicen
-`yunta-run`; `core/tests/events.rs`: `a_node_failed_by_a_dead_session_round_trips_with_its_exit`;
+(rojo: el trait no tiene `exit`; el stub escribe la línea por
+`CODEX_STUB_STDERR` y sale con 2, y el test lee la salida por
+`drain_for_exit`); `adapters/tests/claude_code.rs`: el allow-rule y el
+prefijo dicen `yunta-run`, y una sesión que terminó su turno no se
+interroga (`a_session_that_finished_its_turn_is_never_asked_how_it_exited`);
+`core/tests/events.rs`: `a_node_failed_by_a_dead_session_round_trips_with_its_exit`;
 `engine/tests/run_sessions.rs`: `a_node_whose_session_died_fails_naming_the_adapter_and_the_exit`;
-`cli/tests/status_cmd.rs`: `status_prints_the_stderr_a_dead_session_left`,
+`engine/tests/task_cycle.rs`: `a_task_whose_session_died_blocks_naming_the_exit`
+(rojo: hoy dice «criteria still red»); `cli/tests/status_cmd.rs`:
+`status_prints_the_stderr_a_dead_session_left`,
 `status_json_publishes_a_session_death_with_its_exit`;
-`cli/tests/doctor_cmd.rs`: `doctor_session_reports_a_runner_whose_cli_dies_at_startup_with_its_stderr`,
+`cli/tests/pack_requires_doctor_cmd.rs`:
+`doctor_session_reports_a_runner_whose_cli_dies_at_startup_with_its_stderr`,
 `doctor_session_reports_a_runner_whose_cli_answers`,
-`doctor_without_session_opens_none` (los stubs del testkit en `PATH` por
-`hermetic()`, con `binary:` en la config del sandbox).
+`doctor_without_session_opens_none` (los stubs del testkit nombrados por
+`binary:` en la config del sandbox, sin tocar `PATH`).
 
-**Cierra.** AD-D25, EN-D36, CLI-D32; L-106.
+**Cierra.** AD-D25, EN-D36, EN-D38, CLI-D32; L-106.
 
 **Encastre.** M01: `SERVER_NAME` sigue siendo el único nombre y los
 adapters lo siguen. M06: el hecho es tipado y la prosa se produce en el
 borde, en `Failure::Display`. M08: `doctor --session` abre sesiones por
-`open_session`, la única puerta, porque corre un run de verdad. M18: un
-solo camino de ejecución —el de `yunta test`— con adapters reales. M20:
-los stubs viven en el testkit. M22: `STDERR_TAIL_LINES` cita D180. M19: la
-crónica dice el `Failure` como a cualquier otro. M29: D178 y D180 revisan
-D147 en ese orden.
+`open_session`, la única puerta, porque corre un run. M18: un solo camino
+de ejecución —el de `yunta test`— con adapters reales. M20: los stubs y el
+helper que los drena viven en `testkit-core`, el crate que adapters y cli
+comparten. M22: `STDERR_TAIL_LINES` cita D180. M19: la crónica dice el
+`Failure` como a cualquier otro. M29: `BlockedCause` reúne lo que bloquea
+una tarea en un tipo; D178 y D180 revisan D147 en ese orden.

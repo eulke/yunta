@@ -25,18 +25,26 @@ sesión (plan de raíz, §11 L-106).
    es `yunta-run`; el control plane lo registra el usuario con el nombre
    que quiera. D147 nombraba `mcp_servers.yunta`; esta decisión lo revisa.
 2. **Una sesión que muere dice cómo salió.** `AgentSession::exit` responde,
-   una vez agotados los eventos, con el código o la señal de salida del
-   proceso y las últimas `STDERR_TAIL_LINES = 20` líneas de stderr; una
-   sesión sin proceso propio no responde nada. Una sesión que termina sin
-   evento terminal falla con `Failure::SessionDied { adapter, exit }`,
-   tipado, que llega al log, a `status`, a `--json` y a la crónica; la
-   prosa se produce en el borde.
-3. **`doctor --session` abre una sesión real por runner.** Corre el
-   workflow de doctor —un nodo `kind: prompt` por runner, con las run
-   tools montadas— por el mismo camino que un workflow, en el sandbox de
-   `yunta test`, y reporta cada runner con la evidencia del punto 2. Gasta
-   un prompt por runner, por eso es opt-in; `doctor` sin la bandera sigue
-   siendo gratis.
+   con el código o la señal de salida del proceso y las últimas
+   `STDERR_TAIL_LINES = 20` líneas de stderr; reap el hijo, aborta el
+   drenaje y entrega lo que la cola tiene, así que nada espera a un nieto
+   que dejó stderr abierto. Se pregunta sólo a la sesión cuyo stream
+   terminó sin evento terminal: una que cerró su turno no paga nada, y una
+   sin proceso propio responde `None`. La muerte llega tipada por los dos
+   caminos que abren sesiones: el nodo de prompt falla con
+   `Failure::SessionDied { adapter, exit }` y el ciclo de tareas bloquea
+   con `BlockedCause::SessionDied`, de ahí al log, a `status`, a `--json` y
+   a la crónica; la prosa se produce en el borde.
+3. **`doctor --session` abre una sesión real por runner sano.** Un run por
+   runner —un solo nodo `kind: prompt` sobre él, con las run tools
+   montadas—, por el mismo camino que un workflow y en el sandbox de
+   `yunta test`, con los adapters reales y el entorno de la invocación. Uno
+   por runner, y no un run con un nodo por runner, porque la salud del
+   adapter rechaza la invocación entera: así un runner que muere se reporta
+   como él mismo. Se intentan los runners cuyo adapter ya probó sano;
+   los demás los reporta el `doctor` de siempre. Gasta un prompt por
+   runner, por eso es opt-in, y `doctor` sin la bandera dice qué garantiza
+   —que el binario está, responde y autentica— y qué no.
 
 ## Racional
 

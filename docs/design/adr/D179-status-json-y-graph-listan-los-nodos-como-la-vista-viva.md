@@ -30,7 +30,11 @@ nodo que preguntó dice `waiting` a secas porque `NodeDisplay` no llega a
    por nodo que arrancó —una fila de stats es una medición—.
 2. **Lo que un nodo espera vive en su estado.** `NodeState::Waiting { on:
    NodeWait }` distingue un gate —con su `external_ref`— de las preguntas
-   que el nodo hizo y nadie respondió; `NodeDisplay::of(state)`, la única
+   que el nodo hizo y nadie respondió; que un gate sea interno o externo es
+   una propiedad de la declaración, no de la espera, y el scheduler la
+   sigue leyendo del workflow. La pausa del run dice lo mismo con el mismo
+   tipo (`WaitingOn::Node { on: NodeWait }`), así que el documento no lleva
+   dos vocabularios de espera; `NodeDisplay::of(state)`, la única
    entrada, las dice: `waiting — asked 2 questions: q1, q2`, con la única
    oración, `text::asked_questions`, que también dicen la crónica y
    `PauseReason::Questions`.
@@ -40,8 +44,15 @@ nodo que preguntó dice `waiting` a secas porque `NodeDisplay` no llega a
    pasa a ser una lista en orden de declaración, cada entrada con `id`,
    `state`, `detail`, `group` y `waiting_on` tipado. La regla de
    `json::SCHEMA_VERSION` sube el número cuando un campo cambia de
-   significado, y ese es el momento de darle la forma.
-4. **Un `parallel` no anida otro.** `check` lo rechaza junto a sus tres
+   significado, y ese es el momento de darle la forma. Lo que un lector
+   indexa por id —`tasks`, `diagnostics`— sigue siendo un mapa: la lista es
+   para lo que tiene orden.
+4. **`graph` toma el workflow de una sola fuente.** Sin `--run`, del
+   archivo que el positional nombra; con `--run`, del manifest que ese run
+   congeló, y un positional además del id se rechaza nombrando las dos
+   fuentes. Un grupo `parallel` se dibuja como `subgraph` en Mermaid y como
+   `cluster_<id>` en DOT, con sus hijos adentro.
+5. **Un `parallel` no anida otro.** `check` lo rechaza junto a sus tres
    hermanos `*InsideParallel`; un paso de sangría es exacto.
 
 ## Racional
