@@ -4,132 +4,10 @@
 //! These runs provoke each degradation deterministically and read the
 //! event back off storage.
 
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Arc;
-
 use yunta_core::events::FindingEvent;
 use yunta_core::events::{EventPayload, Finding, StoredEvent};
-use yunta_core::port::Adapter;
-use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, RunEnv, RunTerminal,
-    DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::{git, init_repo};
-use yunta_testkit_core::FixedClock;
-use yunta_testkit_core::SeqIdSource;
-
-static IDS: SeqIdSource = SeqIdSource::new("degradation");
-
-const CONFIG: &str = r#"
-runners:
-  planner:
-    - { adapter: mock, model: mock-model }
-  executor:
-    - { adapter: mock, model: mock-model }
-"#;
-
-struct Bench {
-    _root: tempfile::TempDir,
-    worktree: std::path::PathBuf,
-    runs_root: std::path::PathBuf,
-    storage: Storage,
-    run_id: RunId,
-}
-
-impl Bench {
-    fn new() -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let worktree = root.path().join("worktree");
-        std::fs::create_dir_all(&worktree).unwrap();
-        init_repo(&worktree);
-        let runs_root = root.path().join("runs");
-        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        Bench {
-            _root: root,
-            worktree,
-            runs_root,
-            storage,
-            run_id: RunId::from("run-degradation"),
-        }
-    }
-
-    /// Freezes the manifest and creates the run directory, then hands
-    /// both to `sabotage` — the window a test uses to break something the
-    /// run then trips over — before executing the run to its terminal.
-    async fn run_sabotaged(
-        &self,
-        workflow_yaml: &str,
-        sabotage: impl FnOnce(&Path),
-    ) -> RunTerminal {
-        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-        let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-        let manifest = build_manifest(
-            &workflow,
-            &config,
-            &self.worktree,
-            &self.worktree,
-            &HashMap::new(),
-        )
-        .await
-        .unwrap()
-        .manifest;
-
-        let run_dir = create_run(
-            CreateRunParams {
-                run_id: &self.run_id,
-                manifest: &manifest,
-                runs_root: &self.runs_root,
-                mode: &"default".into(),
-                worktree: &self.worktree,
-                promoted_from: None,
-                artifacts: &[],
-            },
-            &self.storage.async_handle(),
-            &FixedClock,
-        )
-        .await
-        .unwrap();
-
-        sabotage(&run_dir);
-
-        // The degradation workflows here are `bash`-only, so no adapter
-        // is ever asked for a session.
-        let adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-        let report = execute_run(RunEnv {
-            run_id: &self.run_id,
-            manifest: &manifest,
-            run_dir: &run_dir,
-            worktree: &self.worktree,
-            adapters: &adapters,
-            storage: &self.storage.async_handle(),
-            clock: std::sync::Arc::new(FixedClock),
-            ids: &IDS,
-            max_task_retries: DEFAULT_MAX_RETRIES,
-            human_interaction: &NoInteraction,
-            forge: None,
-            cancel: None,
-            adapter_override: None,
-            ambient: None,
-            secrets: None,
-            observer: None,
-            fence_hook: None,
-        })
-        .await
-        .unwrap();
-        report.terminal
-    }
-
-    async fn run(&self, workflow_yaml: &str) -> RunTerminal {
-        self.run_sabotaged(workflow_yaml, |_| {}).await
-    }
-
-    fn events(&self) -> Vec<StoredEvent> {
-        self.storage.events_for_run(&self.run_id).unwrap()
-    }
-}
+use yunta_engine::{RunReport, RunTerminal};
+use yunta_testkit::{git, Bench, MOCK_CONFIG};
 
 /// The finding with `id`, or `None` — findings are the engine's own
 /// record of a degradation, so a test asserts one is present by id.
@@ -156,8 +34,8 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let terminal = bench
-        .run_sabotaged(workflow, |run_dir| {
+    let RunReport { terminal, .. } = bench
+        .run_sabotaged(workflow, "sessions: []\n", |run_dir| {
             std::fs::create_dir_all(run_dir.join("scratch").join("engine.json")).unwrap();
         })
         .await;
@@ -188,7 +66,7 @@ nodes:
 on_finish:
   - cleanup: worktree
 "#;
-    let terminal = bench.run(workflow).await;
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
 
     assert!(matches!(terminal, RunTerminal::Finished));
     assert!(
@@ -225,7 +103,7 @@ on_finish:
   - distill:
       - { node: build, name: notes.md }
 "#;
-    let terminal = bench.run(workflow).await;
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
 
     assert!(matches!(terminal, RunTerminal::Finished));
     assert!(
@@ -240,7 +118,7 @@ on_finish:
 /// that per node says nothing new and buries what does.
 #[tokio::test]
 async fn a_run_on_an_adapter_without_a_fence_says_so_once() {
-    let bench = yunta_testkit::Bench::new();
+    let bench = Bench::new();
     let workflow = r#"
 name: two-scoped-nodes
 nodes:
@@ -261,7 +139,7 @@ sessions:
   - outcome: { type: completed, summary: "first" }
   - outcome: { type: completed, summary: "second" }
 "#;
-    let (terminal, _) = bench.run(workflow, fixture).await;
+    let RunReport { terminal, .. } = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let stated = degradations_of(&bench, yunta_core::Capability::Fence);
@@ -281,7 +159,7 @@ sessions:
 /// about the cap it was given.
 #[tokio::test]
 async fn a_run_on_an_adapter_without_usage_reporting_says_it_has_no_token_budget() {
-    let bench = yunta_testkit::Bench::new();
+    let bench = Bench::new();
     let workflow = r#"
 name: capped
 nodes:
@@ -290,12 +168,12 @@ nodes:
     runner: executor
     prompt: "Do the thing."
 "#;
-    let config = format!("{}\nlimits:\n  max_tokens_per_run: 100000\n", CONFIG);
+    let config = format!("{MOCK_CONFIG}\nlimits:\n  max_tokens_per_run: 100000\n");
     let fixture = r#"
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _) = bench.run_with_config(workflow, fixture, &config).await;
+    let RunReport { terminal, .. } = bench.run_with_config(workflow, fixture, &config).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let stated = degradations_of(&bench, yunta_core::Capability::UsageReporting);
@@ -321,10 +199,7 @@ sessions:
 
 /// The `policy_applied` of every `capability_degraded` the run recorded
 /// for `capability`, in log order.
-fn degradations_of(
-    bench: &yunta_testkit::Bench,
-    capability: yunta_core::Capability,
-) -> Vec<String> {
+fn degradations_of(bench: &Bench, capability: yunta_core::Capability) -> Vec<String> {
     bench
         .events()
         .iter()
@@ -348,8 +223,8 @@ fn degradations_of(
 async fn a_secret_the_config_names_never_reaches_the_log() {
     const VALUE: &str = "hunter2-the-whole-token";
 
-    let bench = yunta_testkit::Bench::new();
-    let config = format!("{CONFIG}\nsecrets: [YUNTA_TEST_TOKEN]\n");
+    let bench = Bench::new();
+    let config = format!("{MOCK_CONFIG}\nsecrets: [YUNTA_TEST_TOKEN]\n");
     let workflow = r#"
 name: leaky
 nodes:
@@ -364,7 +239,7 @@ nodes:
         "sessions:\n  - steps:\n      - {{ type: note, text: \"ran psql with {VALUE}\" }}\n    outcome: {{ type: completed, summary: \"used {VALUE}\" }}\n"
     );
 
-    let (_terminal, _) = bench
+    let RunReport { .. } = bench
         .run_with_secrets(workflow, &fixture, &config, &[("YUNTA_TEST_TOKEN", VALUE)])
         .await;
 
@@ -388,7 +263,7 @@ nodes:
 /// the adapter, filed beside the failure the violation causes either way.
 #[tokio::test]
 async fn a_write_that_escapes_an_exact_fence_is_an_engine_finding() {
-    let bench = yunta_testkit::Bench::new();
+    let bench = Bench::new();
     let workflow = r#"
 name: scoped
 nodes:
@@ -407,7 +282,7 @@ effects:
   - { path: b.txt, content: "outside the scope\n" }
 outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _) = bench.run(workflow, fixture).await;
+    let RunReport { terminal, .. } = bench.run(workflow, fixture).await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "the violation fails the node and pauses the run: {terminal:?}"
@@ -429,7 +304,7 @@ outcome: { type: completed, summary: "done" }
 /// was: the node fails with the list, and nobody claimed more.
 #[tokio::test]
 async fn a_write_inside_widened_roots_is_a_scope_violation_and_nothing_more() {
-    let bench = yunta_testkit::Bench::new();
+    let bench = Bench::new();
     let workflow = r#"
 name: scoped
 nodes:
@@ -445,7 +320,7 @@ effects:
   - { path: b.txt, content: "outside the scope\n" }
 outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _) = bench.run(workflow, fixture).await;
+    let RunReport { terminal, .. } = bench.run(workflow, fixture).await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "the violation fails the node and pauses the run: {terminal:?}"
@@ -458,7 +333,7 @@ outcome: { type: completed, summary: "done" }
 }
 
 /// Every fence breach the run filed.
-fn breaches(bench: &yunta_testkit::Bench) -> Vec<Finding> {
+fn breaches(bench: &Bench) -> Vec<Finding> {
     bench
         .events()
         .iter()
@@ -491,8 +366,8 @@ nodes:
 on_finish:
   - cleanup: worktree
 "#;
-    let terminal = bench
-        .run_sabotaged(workflow, |run_dir| {
+    let RunReport { terminal, .. } = bench
+        .run_sabotaged(workflow, "sessions: []\n", |run_dir| {
             std::fs::create_dir_all(run_dir.join("scratch").join("engine.json")).unwrap();
         })
         .await;

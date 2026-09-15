@@ -2,19 +2,10 @@
 //! records `questions_asked`, and waits between that and `questions_answered`
 //! for the `node_finished` its close deferred.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use yunta_adapters::MockAdapter;
 use yunta_core::events::{EventPayload, StoredEvent};
-use yunta_core::port::Adapter;
-use yunta_core::AdapterId;
-use yunta_engine::{
-    build_manifest, create_run, derive, execute_run, CreateRunParams, NoInteraction, NodeState,
-    RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_testkit::{Bench, MOCK_CONFIG};
-use yunta_testkit_core::{FixedClock, Log};
+use yunta_engine::{derive, NoInteraction, NodeState, RunReport, RunTerminal};
+use yunta_testkit::Bench;
+use yunta_testkit_core::Log;
 
 mod common;
 use common::*;
@@ -89,7 +80,7 @@ async fn a_node_that_asks_records_questions_asked_and_no_terminal_event() {
     // document it handed over and the ids awaiting an answer.
     let bench = Bench::new();
     let fixture = ask_then_brief_fixture(&bench.staging("brief"));
-    let (terminal, state) = bench.run(ASK_THEN_BRIEF, &fixture).await;
+    let RunReport { terminal, state } = bench.run(ASK_THEN_BRIEF, &fixture).await;
 
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
@@ -197,7 +188,7 @@ async fn the_answer_round_finishes_the_node_without_a_second_node_started() {
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "staging")],
     };
-    let (terminal, state) = bench
+    let RunReport { terminal, state } = bench
         .run_with_interaction(ASK_THEN_BRIEF, &fixture, &interaction)
         .await;
 
@@ -272,7 +263,10 @@ sessions:
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "staging")],
     };
-    let (terminal, _state) = bench
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench
         .run_with_interaction(workflow, fixture, &interaction)
         .await;
 
@@ -301,65 +295,17 @@ async fn an_answered_node_owed_its_finish_is_finished_on_resume_without_a_sessio
     // A crash between the answer and the terminal leaves the node owed its
     // finish. Resume pays it from the log: no session, no second attempt.
     let bench = Bench::new();
-    let workflow: yunta_core::Workflow = serde_norway::from_str(ASK_THEN_BRIEF).unwrap();
-    let config: yunta_core::ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .await
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
 
     // First invocation: the session asks, a surface answers, and the run
     // would finish — but the process dies before `brief` runs. What is on
     // the log at that point is what the second invocation starts from.
     let fixture = ask_then_brief_fixture(&bench.staging("brief"));
-    let first = MockAdapter::from_yaml(&fixture).unwrap();
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), Arc::new(first));
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "staging")],
     };
-    execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &interaction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
+    bench
+        .run_with_interaction(ASK_THEN_BRIEF, &fixture, &interaction)
+        .await;
 
     // The log cut right after `questions_answered`: the node is answered
     // and owed its terminal.
@@ -396,7 +342,10 @@ async fn the_finished_node_carries_what_the_asking_session_spent() {
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "staging")],
     };
-    let (_terminal, state) = bench
+    let RunReport {
+        terminal: _terminal,
+        state,
+    } = bench
         .run_with_interaction(ASK_THEN_BRIEF, &fixture, &interaction)
         .await;
 
@@ -439,7 +388,7 @@ sessions:
 "##,
         brief = staging.join("brief.md"),
     );
-    let (terminal, state) = bench.run(ASK_THEN_BRIEF, &fixture).await;
+    let RunReport { terminal, state } = bench.run(ASK_THEN_BRIEF, &fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
@@ -485,7 +434,7 @@ async fn the_node_that_follows_reads_the_questions_and_the_answers_of_the_node_t
     let interaction = ScriptedAnswers {
         answers: vec![answer("q1", "staging")],
     };
-    let (terminal, state) = bench
+    let RunReport { terminal, state } = bench
         .run_with_interaction(ASK_THEN_BRIEF, &fixture, &interaction)
         .await;
 
@@ -524,7 +473,10 @@ async fn the_node_that_follows_reads_the_questions_and_the_answers_of_the_node_t
 async fn a_run_with_no_surface_parks_naming_the_questions_it_asked() {
     let bench = Bench::new();
     let fixture = ask_then_brief_fixture(&bench.staging("brief"));
-    let (terminal, _state) = bench
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench
         .run_with_interaction(ASK_THEN_BRIEF, &fixture, &NoInteraction)
         .await;
 

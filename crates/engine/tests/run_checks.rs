@@ -1,6 +1,6 @@
 //! Verification gates: baseline and coverage compares, findings gates, progress.md, the executor, command-permission denials, and events.jsonl.
 
-use yunta_engine::{NodeState, RunTerminal};
+use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 mod common;
@@ -19,7 +19,7 @@ nodes:
     builtin: baseline_compare
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_BASELINE)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -48,7 +48,7 @@ nodes:
     depends_on: [regress]
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_BASELINE)
         .await;
     match terminal {
@@ -73,7 +73,7 @@ nodes:
     builtin: coverage_gate
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_COVERAGE)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -92,7 +92,7 @@ nodes:
     builtin: coverage_gate
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_COVERAGE)
         .await;
     match terminal {
@@ -134,7 +134,7 @@ nodes:
         "The Result is discarded.",
     )]);
 
-    let (terminal, _) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
     match terminal {
         RunTerminal::Paused { reason } => assert_eq!(
             reason,
@@ -166,7 +166,7 @@ nodes:
 
     let fixture = review_session(&[("f1", "minor", "Style nit", "src/lib.rs:10", "Naming.")]);
 
-    let (terminal, _) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -187,7 +187,7 @@ nodes:
     depends_on: [write]
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let progress = std::fs::read_to_string(bench.run_dir().join("progress.md")).unwrap();
@@ -212,7 +212,7 @@ nodes:
 
     let fixture = review_session(&[]);
 
-    let (terminal, _) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     // The artifact is named by what it is and by the bytes the run
@@ -259,7 +259,7 @@ nodes:
       threshold: 80
 "#;
 
-    let (terminal, state) = bench
+    let RunReport { terminal, state } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -290,7 +290,7 @@ nodes:
     executor: probe
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
         .await;
     match terminal {
@@ -325,7 +325,7 @@ nodes:
     executor: probe
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
         .await;
     match terminal {
@@ -355,7 +355,7 @@ nodes:
     timeout_seconds: 1
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
         .await;
     match terminal {
@@ -381,7 +381,7 @@ nodes:
     executor: does-not-exist
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
     match terminal {
         RunTerminal::Paused { reason } => {
             assert!(
@@ -410,7 +410,7 @@ nodes:
     run: "ls {{run.worktree}}/forbidden-marker"
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_DENY)
         .await;
     match terminal {
@@ -443,7 +443,7 @@ nodes:
           on_failure: warn
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_DENY)
         .await;
     match terminal {
@@ -480,7 +480,7 @@ nodes:
         task_yaml("T001", "Task", "out.txt", "test -f forbidden-marker")
     ));
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, &fixture, CONFIG_WITH_DENY)
         .await;
     match terminal {
@@ -509,7 +509,7 @@ nodes:
     network: false
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
     assert_eq!(
         terminal,
         RunTerminal::Finished,
@@ -545,7 +545,7 @@ permissions:
     deny: ["*probe.py"]
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", config)
         .await;
     match terminal {
@@ -574,7 +574,7 @@ nodes:
     run: "true"
 "#;
 
-    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let jsonl = std::fs::read_to_string(bench.run_dir().join("events.jsonl")).unwrap();
@@ -615,7 +615,7 @@ nodes:
     prompt: "plan it"
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
     match terminal {
         RunTerminal::Paused { .. } => {}
         other => panic!("expected the run to pause, got {other:?}"),

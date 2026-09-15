@@ -1,17 +1,7 @@
 //! Sessions end-to-end: session events, the skills chain, on_finish distillation, runner fan-out, forensic events.jsonl, and resume_session.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use yunta_adapters::MockAdapter;
-use yunta_core::port::Adapter;
-use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
-    RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_testkit::{Bench, MOCK_CONFIG};
-use yunta_testkit_core::FixedClock;
+use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_testkit::Bench;
 
 mod common;
 use common::*;
@@ -24,10 +14,10 @@ async fn a_session_leaves_agent_session_opened_in_the_log_with_its_session_id() 
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _) = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let opened = events
         .iter()
         .find_map(|e| match e.payload() {
@@ -56,10 +46,10 @@ sessions:
       - { type: tool_use, name: edit, target: abc123 }
     outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _) = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let messages: Vec<&yunta_core::events::AgentMessagePayload> = events
         .iter()
         .filter_map(|e| match e.payload() {
@@ -118,11 +108,12 @@ capabilities: { skills: true }
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _, adapter) =
-        run_with_recording_mock(&bench, SKILLS_WORKFLOW, fixture, SKILLS_CONFIG).await;
+    let RunReport { terminal, .. } = bench
+        .run_with_config(SKILLS_WORKFLOW, fixture, SKILLS_CONFIG)
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let seen = adapter.skills_seen();
+    let seen = bench.mock().skills_seen();
     assert_eq!(seen.len(), 1);
     assert_eq!(
         seen[0],
@@ -144,8 +135,9 @@ capabilities: { skills: true }
 sessions:
   - outcome: { type: completed, summary: "never reached" }
 "#;
-    let (terminal, state, adapter) =
-        run_with_recording_mock(&bench, SKILLS_WORKFLOW, fixture, SKILLS_CONFIG).await;
+    let RunReport { terminal, state } = bench
+        .run_with_config(SKILLS_WORKFLOW, fixture, SKILLS_CONFIG)
+        .await;
     match &terminal {
         RunTerminal::Paused { reason } => {
             assert_eq!(
@@ -162,7 +154,10 @@ sessions:
         state.nodes.state("work"),
         Some(NodeState::Failed { .. })
     ));
-    assert!(adapter.skills_seen().is_empty(), "no session was spawned");
+    assert!(
+        bench.mock().skills_seen().is_empty(),
+        "no session was spawned"
+    );
 }
 
 #[tokio::test]
@@ -175,8 +170,9 @@ async fn an_adapter_without_the_skills_capability_degrades_with_an_event() {
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _, adapter) =
-        run_with_recording_mock(&bench, SKILLS_WORKFLOW, fixture, SKILLS_CONFIG).await;
+    let RunReport { terminal, .. } = bench
+        .run_with_config(SKILLS_WORKFLOW, fixture, SKILLS_CONFIG)
+        .await;
     assert_eq!(
         terminal,
         RunTerminal::Finished,
@@ -184,11 +180,11 @@ sessions:
     );
 
     assert_eq!(
-        adapter.skills_seen(),
+        bench.mock().skills_seen(),
         vec![Vec::<std::path::PathBuf>::new()],
         "the engine never populates skills an adapter didn't declare"
     );
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let degraded = events
         .iter()
         .find_map(|e| match e.payload() {
@@ -206,7 +202,7 @@ sessions:
 async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
     let bench = Bench::new();
     let fixture = distill_fixture(&bench);
-    let (terminal, _) = bench.run(DISTILL_WORKFLOW, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(DISTILL_WORKFLOW, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let dest = bench
@@ -235,21 +231,18 @@ async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
 
     // The knowledge travels on the run's own branch: a conventional
     // commit exists in the worktree.
-    let log = std::process::Command::new("git")
-        .args(["log", "--oneline", "-3"])
-        .current_dir(&bench.worktree)
-        .output()
-        .unwrap();
-    let log = String::from_utf8_lossy(&log.stdout);
+    let subjects = bench.commit_subjects();
     assert!(
-        log.contains(&format!("docs(knowledge): distill from {}", bench.run_id)),
-        "got: {log}"
+        subjects.contains(&format!("docs(knowledge): distill from {}", bench.run_id)),
+        "got: {subjects:?}"
     );
 }
 
 #[tokio::test]
 async fn a_distill_path_never_produced_becomes_a_finding_and_the_rest_lands() {
-    let bench = Bench::new();
+    // Run in `quick` mode: `notes` never runs, its artifact never
+    // exists, but distill declares it.
+    let bench = Bench::new().in_mode("quick");
     let workflow = r#"
 name: distiller
 nodes:
@@ -291,60 +284,8 @@ sessions:
 "#,
         artifacts = bench.staging("plan").display()
     );
-    // Run in `quick` mode: `notes` never runs, its artifact never
-    // exists, but distill declares it.
-    let workflow_parsed: Workflow = serde_norway::from_str(&workflow).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow_parsed,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .await
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"quick".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-    let adapter = MockAdapter::from_yaml(&fixture).unwrap();
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), Arc::new(adapter));
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
-    assert_eq!(report.terminal, RunTerminal::Finished);
+    let RunReport { terminal, .. } = bench.run(&workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
 
     let dest = bench
         .worktree
@@ -353,7 +294,7 @@ sessions:
     assert!(dest.join("plan.md").exists(), "the produced path lands");
     assert!(!dest.join("notes.md").exists());
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let finding = events
         .iter()
         .find_map(|e| match e.payload() {
@@ -399,7 +340,7 @@ on_finish:
   - distill: [{ node: plan, name: plan.md }]
 "#;
     let fixture = distill_fixture(&bench);
-    let (terminal, _) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(
         !bench.worktree.join(".yunta/knowledge").exists(),
@@ -411,7 +352,7 @@ on_finish:
 async fn a_later_run_mounts_the_distilled_knowledge() {
     let bench = Bench::new();
     let fixture = distill_fixture(&bench);
-    let (terminal, _) = bench.run(DISTILL_WORKFLOW, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(DISTILL_WORKFLOW, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     // Second run, same checkout: a knowledge context source must see
@@ -431,60 +372,10 @@ sessions:
   - match_prompt_contains: "DISTILLED-MARKER"
     outcome: { type: completed, summary: "informed" }
 "#;
-    let workflow: Workflow = serde_norway::from_str(second_workflow).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .await
-    .unwrap()
-    .manifest;
-    let second_id = RunId::from("run-test-2");
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &second_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-    let adapter = MockAdapter::from_yaml(second_fixture).unwrap();
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), Arc::new(adapter));
-    let report = execute_run(RunEnv {
-        run_id: &second_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
+    let consumer = bench.beside("run-test-2");
+    let RunReport { terminal, .. } = consumer.run(second_workflow, second_fixture).await;
     assert_eq!(
-        report.terminal,
+        terminal,
         RunTerminal::Finished,
         "the consumer session only matches if the distilled content reached its prompt"
     );
@@ -530,7 +421,7 @@ sessions:
         alt = bench.staging("review@reviewer-alt").display()
     );
 
-    let (terminal, state) = bench.run_with_config(workflow, &fixture, config).await;
+    let RunReport { terminal, state } = bench.run_with_config(workflow, &fixture, config).await;
     assert_eq!(terminal, RunTerminal::Finished);
     for node in ["review@reviewer", "review@reviewer-alt"] {
         assert!(
@@ -598,7 +489,7 @@ sessions:
     outcome: { type: completed, summary: "reviewed-alt" }
 "#;
 
-    let (terminal, state) = bench.run_with_config(workflow, fixture, config).await;
+    let RunReport { terminal, state } = bench.run_with_config(workflow, fixture, config).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     // One acceptance per sibling, under the same identity and different
@@ -661,10 +552,10 @@ capabilities: { custom_agents: true }
 sessions:
   - outcome: { type: completed, summary: "audited" }
 "#;
-    let (terminal, _, adapter) = run_with_recording_mock(&bench, workflow, fixture, config).await;
+    let RunReport { terminal, .. } = bench.run_with_config(workflow, fixture, config).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        adapter.agents_seen(),
+        bench.mock().agents_seen(),
         vec![Some("security-auditor".into())],
         "the node's own agent wins over the candidate's"
     );
@@ -722,9 +613,12 @@ nodes:
         ));
     }
 
-    let (_terminal, _state) = bench.run(workflow, &fixture).await;
+    let RunReport {
+        terminal: _terminal,
+        state: _state,
+    } = bench.run(workflow, &fixture).await;
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let requested = events
         .iter()
         .filter(|e| {
@@ -769,73 +663,29 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    // Corrupt the log by hand: a node_finished with no node_started —
-    // exactly the class of inconsistency `derive` refuses to guess over.
-    let wf: Workflow = serde_norway::from_str(workflow).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &wf,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .await
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-    bench
-        .storage
-        .append(
-            &yunta_core::events::EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: Some("ghost".into()),
-                payload: yunta_core::events::EventPayload::Node(NodeEvent::Finished(
-                    yunta_core::events::NodeFinishedPayload::new(
-                        "??".to_string(),
-                        yunta_core::events::TokenUsage::default(),
-                    ),
-                )),
-            },
-            &yunta_core::SystemClock,
-        )
-        .unwrap();
-
-    let adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    let result = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await;
+    // Corrupt the log by hand between the run's creation and its first
+    // wake: a node_finished with no node_started — exactly the class of
+    // inconsistency `derive` refuses to guess over.
+    let result = bench
+        .try_run_sabotaged(workflow, "sessions: []\n", |_| {
+            bench
+                .storage
+                .append(
+                    &yunta_core::events::EventDraft {
+                        run_id: bench.run_id.clone(),
+                        node_id: Some("ghost".into()),
+                        payload: yunta_core::events::EventPayload::Node(NodeEvent::Finished(
+                            yunta_core::events::NodeFinishedPayload::new(
+                                "??".to_string(),
+                                yunta_core::events::TokenUsage::default(),
+                            ),
+                        )),
+                    },
+                    &yunta_core::SystemClock,
+                )
+                .unwrap();
+        })
+        .await;
 
     assert!(
         matches!(result, Err(yunta_engine::RunError::Broken { .. })),
@@ -843,7 +693,7 @@ nodes:
     );
     // The corrupt log is exactly the one you most want exported — the
     // forensic copy exists even though the run errored.
-    let exported = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+    let exported = std::fs::read_to_string(bench.run_dir().join("events.jsonl")).unwrap();
     let kinds: Vec<String> = exported
         .lines()
         .filter(|line| !line.is_empty())
@@ -954,11 +804,10 @@ sessions:
   - outcome: { type: completed, summary: "first run" }
 "#;
     let bench = Bench::new();
-    let (terminal, _state, adapter) =
-        run_with_recording_mock(&bench, RESUME_WORKFLOW, fixture, MOCK_CONFIG).await;
+    let RunReport { terminal, .. } = bench.run(RESUME_WORKFLOW, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
-    assert!(adapter.resumes_seen().is_empty());
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert!(bench.mock().resumes_seen().is_empty());
+    let events = bench.events();
     assert!(!events.iter().any(|e| matches!(
         e.payload(),
         Some(yunta_core::events::EventPayload::Session(
@@ -1080,14 +929,14 @@ async fn network_false_is_reported_as_declarative_only() {
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _) = bench.run(NETWORK_DECLARED_WORKFLOW, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(NETWORK_DECLARED_WORKFLOW, fixture).await;
     assert_eq!(
         terminal,
         RunTerminal::Finished,
         "network: false blocks nothing — policy, not capability"
     );
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let degraded = events
         .iter()
         .find_map(|e| match e.payload() {
@@ -1114,10 +963,10 @@ async fn a_node_that_declares_no_network_policy_records_no_isolation_degradation
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _) = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(SESSION_EVENTS_WORKFLOW, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
@@ -1139,11 +988,10 @@ capabilities: { network_isolation: true }
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _, _adapter) =
-        run_with_recording_mock(&bench, NETWORK_DECLARED_WORKFLOW, fixture, MOCK_CONFIG).await;
+    let RunReport { terminal, .. } = bench.run(NETWORK_DECLARED_WORKFLOW, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
@@ -1183,7 +1031,7 @@ on_finish:
         view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
     );
     let fixture = distill_fixture(&bench);
-    let (terminal, state) = bench.run(&workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let dest = bench
@@ -1235,7 +1083,7 @@ sessions:
         staging = staging.display()
     );
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
     assert_eq!(
         bench.mock().artifact_dirs_seen(),
@@ -1285,7 +1133,7 @@ nodes:
         "  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
     );
 
-    let (terminal, _) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "the run reaches its end");
 
     let requests = bench.mock().requests_seen();
@@ -1346,7 +1194,7 @@ nodes:
         "  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
     );
 
-    let (terminal, _) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let brief = bench
@@ -1388,7 +1236,7 @@ sessions:
   - outcome: { type: completed, summary: "scoped" }
   - outcome: { type: completed, summary: "reading" }
 "#;
-    let (terminal, _) = bench.run(workflow, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let requests = bench.mock().requests_seen();
@@ -1434,7 +1282,7 @@ nodes:
         "  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
     );
 
-    let (terminal, _) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let requests = bench.mock().requests_seen();

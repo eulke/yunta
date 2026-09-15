@@ -9,31 +9,16 @@
 //! the original checkout a fresh one needs — so this suite only proves
 //! the parent-side half of the chain.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use yunta_adapters::MockAdapter;
 use yunta_core::events::EventPayload;
 use yunta_core::events::{FindingEvent, RunEvent, TaskEvent};
-use yunta_core::port::Adapter;
-use yunta_core::{AdapterId, ConfigLayer, ModeName, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, HumanInteraction, NoInteraction,
-    RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::{init_repo, ScriptedInteraction};
+use yunta_core::ModeName;
+use yunta_engine::{BirthArtifact, BirthOrigin, HumanInteraction, RunReport, RunTerminal};
+use yunta_testkit::{Bench, ScriptedInteraction};
 use yunta_testkit_core::{FixedClock, Log, SeqIdSource};
 
-/// Run ids for everything a test run gives birth to — unique across
-/// the binary, so parallel tests never share a run directory.
-static IDS: SeqIdSource = SeqIdSource::new("minted");
-
-const CONFIG: &str = r#"
-runners:
-  executor:
-    - { adapter: mock, model: mock-model }
-"#;
+/// The fixture every run of this suite is driven on: no session is
+/// scripted, because every node of these workflows runs a command.
+const NO_SESSIONS: &str = "sessions: []\n";
 
 /// `lint` fails immediately (`test -f` on a file nothing ever creates)
 /// with `max_reroutes: 0` — its very first failure already exhausts
@@ -67,38 +52,15 @@ nodes:
     run: "true"
 "#;
 
-/// A run that has already closed, with everything a test needs to ask
-/// about it — and to build its successor on top.
-struct Promoted {
-    terminal: RunTerminal,
-    events: Vec<yunta_core::events::StoredEvent>,
-    run_id: RunId,
-    run_dir: std::path::PathBuf,
-    worktree: std::path::PathBuf,
-    runs_root: std::path::PathBuf,
-    manifest: yunta_core::Manifest,
-    storage: Storage,
-    _root: tempfile::TempDir,
-}
-
-async fn run_with_mode(
-    workflow_yaml: &str,
-    mode: &str,
-    interaction: &dyn HumanInteraction,
-) -> (RunTerminal, Vec<yunta_core::events::StoredEvent>) {
-    let closed = run_with_mode_and_findings(workflow_yaml, mode, interaction, &[]).await;
-    (closed.terminal, closed.events)
-}
-
-/// Same, but with engine findings planted on the log after creation (the
-/// scenario where a scope-expansion denial lives only in the parent's events), and
-/// the run dir returned so tests can inspect derived artifacts.
+/// A run closed with engine findings planted on its log after creation —
+/// the scenario where a scope-expansion denial lives only in the parent's
+/// events.
 async fn run_with_mode_and_findings(
     workflow_yaml: &str,
     mode: &str,
     interaction: &dyn HumanInteraction,
     findings: &[yunta_core::events::Finding],
-) -> Promoted {
+) -> (Bench, RunTerminal) {
     run_planted(
         workflow_yaml,
         mode,
@@ -124,142 +86,93 @@ struct Planted<'a> {
     done: &'a [&'a str],
 }
 
-/// Runs one workflow to its close with `planted` already true of it.
+/// Runs one workflow to its close with `planted` already true of it,
+/// answering with the world the closed run leaves behind.
 async fn run_planted(
     workflow_yaml: &str,
     mode: &str,
     interaction: &dyn HumanInteraction,
     planted: Planted<'_>,
-) -> Promoted {
-    let root = tempfile::tempdir().unwrap();
-    let worktree = root.path().join("worktree");
-    std::fs::create_dir_all(&worktree).unwrap();
-    init_repo(&worktree);
-    let runs_root = root.path().join("runs");
-    let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-    let run_id = RunId::from("run-promo-1");
-
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-    let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
-        .await
-        .unwrap()
-        .manifest;
-    let born: Vec<yunta_engine::BirthArtifact> = planted
+) -> (Bench, RunTerminal) {
+    let born: Vec<BirthArtifact> = planted
         .tasks
         .into_iter()
-        .map(|tasks| yunta_engine::BirthArtifact {
+        .map(|tasks| BirthArtifact {
             artifact: yunta_core::events::ArtifactId::Interpreted {
                 kind: yunta_core::ArtifactKind::Tasks,
             },
-            origin: yunta_engine::BirthOrigin::Input {
+            origin: BirthOrigin::Input {
                 input: "tasks".into(),
             },
             bytes: canonical_tasks(tasks),
         })
         .collect();
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &run_id,
-            manifest: &manifest,
-            runs_root: &runs_root,
-            mode: &ModeName::from(mode),
-            worktree: &worktree,
-            promoted_from: None,
-            artifacts: &born,
-        },
-        &storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
+    let bench = Bench::new().in_mode(mode).born_holding(born);
+    let RunReport { terminal, .. } = bench
+        .run_sabotaged_answering(workflow_yaml, NO_SESSIONS, interaction, |_| {
+            plant(&bench, &planted)
+        })
+        .await;
+    (bench, terminal)
+}
 
+/// States `planted` on the run's log, between its creation — which
+/// registers the tasks a `done` points back to — and its first wake.
+fn plant(bench: &Bench, planted: &Planted<'_>) {
     // Where the planted work landed: this run's own tree, which is what
     // a successor branches from, so the `done` answers there too.
     let landed: yunta_core::CommitSha =
-        yunta_testkit::git_output(&worktree, &["rev-parse", "HEAD"])
+        yunta_testkit::git_output(&bench.worktree, &["rev-parse", "HEAD"])
             .parse()
             .unwrap();
     for task in planted.done {
-        let caused_by = registration_of(&storage.events_for_run(&run_id).unwrap(), task);
-        storage
-            .append(
-                &yunta_core::events::EventDraft {
-                    run_id: run_id.clone(),
-                    node_id: None,
-                    payload: yunta_testkit::task_status_changed(
-                        &(*task).into(),
-                        yunta_core::events::TaskStatus::Done,
-                        Some(&landed),
-                        caused_by,
-                    ),
-                },
-                &yunta_core::SystemClock,
-            )
-            .unwrap();
+        let caused_by = registration_of(&bench.events(), task);
+        record(
+            bench,
+            yunta_testkit::task_status_changed(
+                &(*task).into(),
+                yunta_core::events::TaskStatus::Done,
+                Some(&landed),
+                caused_by,
+            ),
+        );
     }
 
     for finding in planted.findings {
-        storage
-            .append(
-                &yunta_core::events::EventDraft {
-                    run_id: run_id.clone(),
-                    node_id: None,
-                    payload: EventPayload::Findings(FindingEvent::Posted(
-                        yunta_core::events::FindingPostedPayload {
-                            finding: finding.clone(),
-                        },
-                    )),
+        record(
+            bench,
+            EventPayload::Findings(FindingEvent::Posted(
+                yunta_core::events::FindingPostedPayload {
+                    finding: finding.clone(),
                 },
-                &yunta_core::SystemClock,
-            )
-            .unwrap();
+            )),
+        );
     }
+}
 
-    let adapter = MockAdapter::from_yaml("sessions: []\n").unwrap();
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), Arc::new(adapter));
-
-    let report = execute_run(RunEnv {
-        run_id: &run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &worktree,
-        adapters: &adapters,
-        storage: &storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: interaction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
-
-    let events = storage.events_for_run(&run_id).unwrap();
-    Promoted {
-        terminal: report.terminal,
-        events,
-        run_id,
-        run_dir,
-        worktree,
-        runs_root,
-        manifest,
-        storage,
-        _root: root,
-    }
+/// Appends one run-level event to the run's log.
+fn record(bench: &Bench, payload: EventPayload) {
+    bench
+        .storage
+        .append(
+            &yunta_core::events::EventDraft {
+                run_id: bench.run_id.clone(),
+                node_id: None,
+                payload,
+            },
+            &yunta_core::SystemClock,
+        )
+        .unwrap();
 }
 
 #[tokio::test]
 async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
     let interaction = ScriptedInteraction::choose("promote");
-    let (terminal, events) = run_with_mode(PROMOTABLE_WORKFLOW, "quick", &interaction).await;
+    let bench = Bench::new().in_mode("quick");
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(PROMOTABLE_WORKFLOW, NO_SESSIONS, &interaction)
+        .await;
+    let events = bench.events();
 
     match &terminal {
         RunTerminal::Promoted { suggested_mode } => assert_eq!(suggested_mode, "full"),
@@ -301,7 +214,10 @@ async fn promote_is_offered_and_closes_the_run_with_promotion_signaled() {
 #[tokio::test]
 async fn promote_is_never_offered_with_no_later_mode() {
     let interaction = ScriptedInteraction::choose("abort");
-    let (terminal, _events) = run_with_mode(NO_LATER_MODE_WORKFLOW, "full", &interaction).await;
+    let RunReport { terminal, .. } = Bench::new()
+        .in_mode("full")
+        .run_with_interaction(NO_LATER_MODE_WORKFLOW, NO_SESSIONS, &interaction)
+        .await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
 
     let options = interaction.seen_options();
@@ -313,7 +229,9 @@ async fn promote_is_never_offered_with_no_later_mode() {
 
 #[tokio::test]
 async fn without_a_live_human_interaction_the_run_just_pauses_never_promotes() {
-    let (terminal, events) = run_with_mode(PROMOTABLE_WORKFLOW, "quick", &NoInteraction).await;
+    let bench = Bench::new().in_mode("quick");
+    let RunReport { terminal, .. } = bench.run(PROMOTABLE_WORKFLOW, NO_SESSIONS).await;
+    let events = bench.events();
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(
         !events.iter().any(|e| matches!(
@@ -359,11 +277,11 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
             "tasks/T002",
         ),
     ];
-    let closed =
+    let (bench, terminal) =
         run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
-    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
 
-    let path = closed.run_dir.join("artifacts/findings.yaml");
+    let path = bench.run_dir().join("artifacts/findings.yaml");
     let bytes = std::fs::read(&path).expect("the promotion close must derive the file");
     // Through the same door every findings artifact is read by, so the
     // derived file satisfies the shape and the rules, not just serde.
@@ -378,10 +296,13 @@ async fn a_promoting_run_derives_findings_inherited_for_its_successor() {
 #[tokio::test]
 async fn a_promoting_run_with_no_findings_writes_no_inherited_file() {
     let interaction = ScriptedInteraction::choose("promote");
-    let closed = run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &[]).await;
-    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+    let bench = Bench::new().in_mode("quick");
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(PROMOTABLE_WORKFLOW, NO_SESSIONS, &interaction)
+        .await;
+    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
     assert!(
-        !closed.run_dir.join("artifacts/findings.yaml").exists(),
+        !bench.run_dir().join("artifacts/findings.yaml").exists(),
         "no findings, no file — zero noise"
     );
 }
@@ -390,34 +311,37 @@ async fn a_promoting_run_with_no_findings_writes_no_inherited_file() {
 async fn a_successor_is_born_naming_every_artifact_it_inherits() {
     let interaction = ScriptedInteraction::choose("promote");
     let planted = [finding("scope-expansion-T001-1", "Denied", "tasks/T001")];
-    let closed =
+    let (bench, terminal) =
         run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
-    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
 
+    let manifest = bench.manifest();
+    let run_dir = bench.run_dir();
+    let ids = SeqIdSource::new("minted");
     let successor = yunta_engine::create_promotion_successor(
         yunta_engine::Predecessor {
-            id: &closed.run_id,
-            manifest: &closed.manifest,
-            worktree: &closed.worktree,
-            run_dir: &closed.run_dir,
+            id: &bench.run_id,
+            manifest: &manifest,
+            worktree: &bench.worktree,
+            run_dir: &run_dir,
         },
-        &closed.worktree,
+        &bench.worktree,
         &ModeName::from("full"),
         yunta_engine::RunRoots {
-            runs: &closed.runs_root,
-            worktrees: &closed.runs_root.parent().unwrap().join("worktrees"),
+            runs: &bench.runs_root,
+            worktrees: &bench.runs_root.parent().unwrap().join("worktrees"),
         },
         yunta_engine::CallerInfra {
-            storage: &closed.storage.async_handle(),
+            storage: &bench.storage.async_handle(),
             clock: &FixedClock,
-            ids: &IDS,
+            ids: &ids,
             supervision: yunta_engine::process::Supervision::none(),
         },
     )
     .await
     .expect("the successor is created");
 
-    let events = closed.storage.events_for_run(&successor.run_id).unwrap();
+    let events = bench.storage.events_for_run(&successor.run_id).unwrap();
     assert!(
         matches!(
             events.first().and_then(|e| e.payload()),
@@ -446,7 +370,7 @@ async fn a_successor_is_born_naming_every_artifact_it_inherits() {
     assert_eq!(
         held.origin,
         yunta_core::events::RecordedOrigin::Inherited {
-            run: closed.run_id.clone(),
+            run: bench.run_id.clone(),
             producer: None,
         },
         "the predecessor derived it as the run's own, with no node behind it"
@@ -459,7 +383,7 @@ async fn a_successor_is_born_naming_every_artifact_it_inherits() {
                 .join(held.content_hash.as_str())
         )
         .expect("the successor holds the bytes"),
-        std::fs::read(closed.run_dir.join("artifacts/findings.yaml")).unwrap()
+        std::fs::read(run_dir.join("artifacts/findings.yaml")).unwrap()
     );
 }
 
@@ -470,40 +394,39 @@ async fn a_successor_inherits_what_the_log_holds_and_not_a_stray_file() {
     // not born with it.
     let interaction = ScriptedInteraction::choose("promote");
     let planted = [finding("scope-expansion-T001-1", "Denied", "tasks/T001")];
-    let closed =
+    let (bench, terminal) =
         run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
-    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
 
-    std::fs::write(
-        closed.run_dir.join("artifacts/stray.md"),
-        "nobody declared this\n",
-    )
-    .unwrap();
+    let manifest = bench.manifest();
+    let run_dir = bench.run_dir();
+    std::fs::write(run_dir.join("artifacts/stray.md"), "nobody declared this\n").unwrap();
 
+    let ids = SeqIdSource::new("minted");
     let successor = yunta_engine::create_promotion_successor(
         yunta_engine::Predecessor {
-            id: &closed.run_id,
-            manifest: &closed.manifest,
-            worktree: &closed.worktree,
-            run_dir: &closed.run_dir,
+            id: &bench.run_id,
+            manifest: &manifest,
+            worktree: &bench.worktree,
+            run_dir: &run_dir,
         },
-        &closed.worktree,
+        &bench.worktree,
         &ModeName::from("full"),
         yunta_engine::RunRoots {
-            runs: &closed.runs_root,
-            worktrees: &closed.runs_root.parent().unwrap().join("worktrees"),
+            runs: &bench.runs_root,
+            worktrees: &bench.runs_root.parent().unwrap().join("worktrees"),
         },
         yunta_engine::CallerInfra {
-            storage: &closed.storage.async_handle(),
+            storage: &bench.storage.async_handle(),
             clock: &FixedClock,
-            ids: &IDS,
+            ids: &ids,
             supervision: yunta_engine::process::Supervision::none(),
         },
     )
     .await
     .expect("the successor is created");
 
-    let events = closed.storage.events_for_run(&successor.run_id).unwrap();
+    let events = bench.storage.events_for_run(&successor.run_id).unwrap();
     let inherited = yunta_testkit::accepted(&events);
     assert_eq!(
         inherited
@@ -560,7 +483,7 @@ tasks:
 #[tokio::test]
 async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_done() {
     let interaction = ScriptedInteraction::choose("promote");
-    let closed = run_planted(
+    let (bench, terminal) = run_planted(
         PROMOTABLE_WORKFLOW,
         "quick",
         &interaction,
@@ -571,32 +494,35 @@ async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_d
         },
     )
     .await;
-    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
 
+    let manifest = bench.manifest();
+    let run_dir = bench.run_dir();
+    let ids = SeqIdSource::new("minted");
     let successor = yunta_engine::create_promotion_successor(
         yunta_engine::Predecessor {
-            id: &closed.run_id,
-            manifest: &closed.manifest,
-            worktree: &closed.worktree,
-            run_dir: &closed.run_dir,
+            id: &bench.run_id,
+            manifest: &manifest,
+            worktree: &bench.worktree,
+            run_dir: &run_dir,
         },
-        &closed.worktree,
+        &bench.worktree,
         &ModeName::from("full"),
         yunta_engine::RunRoots {
-            runs: &closed.runs_root,
-            worktrees: &closed.runs_root.parent().unwrap().join("worktrees"),
+            runs: &bench.runs_root,
+            worktrees: &bench.runs_root.parent().unwrap().join("worktrees"),
         },
         yunta_engine::CallerInfra {
-            storage: &closed.storage.async_handle(),
+            storage: &bench.storage.async_handle(),
             clock: &FixedClock,
-            ids: &IDS,
+            ids: &ids,
             supervision: yunta_engine::process::Supervision::none(),
         },
     )
     .await
     .expect("the successor is created");
 
-    let events = closed.storage.events_for_run(&successor.run_id).unwrap();
+    let events = bench.storage.events_for_run(&successor.run_id).unwrap();
     let inherited = yunta_testkit::accepted(&events);
     assert_eq!(
         inherited
@@ -608,7 +534,7 @@ async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_d
     assert_eq!(
         inherited[0].origin,
         yunta_core::events::RecordedOrigin::Inherited {
-            run: closed.run_id.clone(),
+            run: bench.run_id.clone(),
             producer: None,
         },
         "the predecessor held the document with no node behind it"
@@ -663,7 +589,7 @@ async fn a_successor_is_born_owning_its_predecessor_s_tasks_with_the_done_ones_d
 #[tokio::test]
 async fn a_done_that_crossed_keeps_the_commit_it_names_so_it_crosses_again() {
     let interaction = ScriptedInteraction::choose("promote");
-    let closed = run_planted(
+    let (bench, terminal) = run_planted(
         PROMOTABLE_WORKFLOW,
         "quick",
         &interaction,
@@ -674,26 +600,29 @@ async fn a_done_that_crossed_keeps_the_commit_it_names_so_it_crosses_again() {
         },
     )
     .await;
-    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
-    let worktrees = closed.runs_root.parent().unwrap().join("worktrees");
+    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
+    let worktrees = bench.runs_root.parent().unwrap().join("worktrees");
 
+    let manifest = bench.manifest();
+    let run_dir = bench.run_dir();
+    let ids = SeqIdSource::new("minted");
     let first = yunta_engine::create_promotion_successor(
         yunta_engine::Predecessor {
-            id: &closed.run_id,
-            manifest: &closed.manifest,
-            worktree: &closed.worktree,
-            run_dir: &closed.run_dir,
+            id: &bench.run_id,
+            manifest: &manifest,
+            worktree: &bench.worktree,
+            run_dir: &run_dir,
         },
-        &closed.worktree,
+        &bench.worktree,
         &ModeName::from("full"),
         yunta_engine::RunRoots {
-            runs: &closed.runs_root,
+            runs: &bench.runs_root,
             worktrees: &worktrees,
         },
         yunta_engine::CallerInfra {
-            storage: &closed.storage.async_handle(),
+            storage: &bench.storage.async_handle(),
             clock: &FixedClock,
-            ids: &IDS,
+            ids: &ids,
             supervision: yunta_engine::process::Supervision::none(),
         },
     )
@@ -713,13 +642,13 @@ async fn a_done_that_crossed_keeps_the_commit_it_names_so_it_crosses_again() {
         &first.worktree,
         &ModeName::from("full"),
         yunta_engine::RunRoots {
-            runs: &closed.runs_root,
+            runs: &bench.runs_root,
             worktrees: &worktrees,
         },
         yunta_engine::CallerInfra {
-            storage: &closed.storage.async_handle(),
+            storage: &bench.storage.async_handle(),
             clock: &FixedClock,
-            ids: &IDS,
+            ids: &ids,
             supervision: yunta_engine::process::Supervision::none(),
         },
     )
@@ -727,12 +656,12 @@ async fn a_done_that_crossed_keeps_the_commit_it_names_so_it_crosses_again() {
     .expect("the second successor is created");
 
     let landed = done_at(
-        &closed.storage.events_for_run(&first.run_id).unwrap(),
+        &bench.storage.events_for_run(&first.run_id).unwrap(),
         "T001",
     );
     assert_eq!(
         done_at(
-            &closed.storage.events_for_run(&second.run_id).unwrap(),
+            &bench.storage.events_for_run(&second.run_id).unwrap(),
             "T001"
         ),
         landed,
@@ -743,7 +672,7 @@ async fn a_done_that_crossed_keeps_the_commit_it_names_so_it_crosses_again() {
         "the commit the work landed at is what the crossing is made of"
     );
 
-    let state = yunta_engine::derive(&closed.storage.events_for_run(&second.run_id).unwrap());
+    let state = yunta_engine::derive(&bench.storage.events_for_run(&second.run_id).unwrap());
     assert_eq!(
         state.tasks.status("T001"),
         Some(yunta_core::events::TaskStatus::Done)
@@ -818,33 +747,39 @@ async fn a_promotion_successor_is_stamped_by_the_run_clock() {
     // never the wall clock read behind its back. A chain whose members
     // disagree about when they happened is a chain nobody can replay.
     let interaction = ScriptedInteraction::choose("promote");
-    let closed = run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &[]).await;
-    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+    let bench = Bench::new().in_mode("quick");
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(PROMOTABLE_WORKFLOW, NO_SESSIONS, &interaction)
+        .await;
+    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
 
+    let manifest = bench.manifest();
+    let run_dir = bench.run_dir();
+    let ids = SeqIdSource::new("minted");
     let successor = yunta_engine::create_promotion_successor(
         yunta_engine::Predecessor {
-            id: &closed.run_id,
-            manifest: &closed.manifest,
-            worktree: &closed.worktree,
-            run_dir: &closed.run_dir,
+            id: &bench.run_id,
+            manifest: &manifest,
+            worktree: &bench.worktree,
+            run_dir: &run_dir,
         },
-        &closed.worktree,
+        &bench.worktree,
         &ModeName::from("full"),
         yunta_engine::RunRoots {
-            runs: &closed.runs_root,
-            worktrees: &closed.runs_root.parent().unwrap().join("worktrees"),
+            runs: &bench.runs_root,
+            worktrees: &bench.runs_root.parent().unwrap().join("worktrees"),
         },
         yunta_engine::CallerInfra {
-            storage: &closed.storage.async_handle(),
+            storage: &bench.storage.async_handle(),
             clock: &FixedClock,
-            ids: &IDS,
+            ids: &ids,
             supervision: yunta_engine::process::Supervision::none(),
         },
     )
     .await
     .expect("the successor is created");
 
-    let events = closed.storage.events_for_run(&successor.run_id).unwrap();
+    let events = bench.storage.events_for_run(&successor.run_id).unwrap();
     let born = events.first().expect("the successor's own birth");
     assert_eq!(
         born.timestamp,

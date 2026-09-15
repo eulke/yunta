@@ -14,7 +14,7 @@ use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, EventBody, EventPayload, RecordedOrigin, StoredEvent,
 };
 use yunta_core::{sha256_hex, ArtifactKind, Node};
-use yunta_engine::{close_artifacts, ArtifactContent, ObjectStore};
+use yunta_engine::{close_artifacts, ArtifactContent, ObjectStore, RunReport};
 
 /// A run that has accepted nothing: what a node with no history closes
 /// against.
@@ -720,7 +720,7 @@ nodes:
       produces: ["{{node.artifacts}}/report.md"]
 "#;
 
-    let (terminal, state) = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []\n").await;
 
     assert!(matches!(terminal, yunta_engine::RunTerminal::Paused { .. }));
     match state.nodes.state("write") {

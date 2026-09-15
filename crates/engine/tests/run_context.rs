@@ -1,6 +1,6 @@
 //! Context assembly: sources, templates, stable-first hashing, knowledge layering across repo/user/org, and loop-level context.
 
-use yunta_engine::RunTerminal;
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{Bench, MOCK_CONFIG};
 
 mod common;
@@ -15,7 +15,10 @@ async fn a_files_source_resolves_a_literal_path_and_is_replayable() {
     let workflow = context_workflow("      - files: [\"a.txt\"]\n");
     let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FILES-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -31,7 +34,10 @@ async fn a_command_source_resolves_stdout_and_is_replayable() {
     let workflow = context_workflow("      - command: \"echo MARKER-COMMAND-OUTPUT\"\n");
     let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-COMMAND-OUTPUT\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -67,7 +73,10 @@ nodes:
         bench.staging("grill").display()
     );
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, &fixture).await;
     assert_eq!(
         terminal,
         RunTerminal::Finished,
@@ -112,7 +121,7 @@ nodes:
 "#;
     let fixture = "sessions: []";
 
-    let (terminal, state) = bench.run(workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, fixture).await;
     match &state.nodes.state("plan") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
             assert_eq!(failure.to_string(), "context `artifact:grill/brief.md` on node `plan`: the artifact `brief.md` (declared by node `grill`) was never produced — this run's log holds no such artifact");
@@ -147,7 +156,10 @@ nodes:
     let fixture =
         "sessions:\n  - match_prompt_contains: \"node_failed\"\n    outcome: { type: completed, summary: tried }\n";
 
-    let (terminal, _state) = bench.run(workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, fixture).await;
     match terminal {
         RunTerminal::Paused { reason } => assert_eq!(
             reason,
@@ -192,7 +204,10 @@ nodes:
         )),
     );
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -214,7 +229,10 @@ async fn a_knowledge_source_resolves_the_repo_layer_and_is_replayable() {
     let workflow = context_workflow("      - knowledge: {}\n");
     let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-KNOWLEDGE-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -242,7 +260,10 @@ nodes:
 "#;
     let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-BUILD-OUTPUT\"\n    outcome: { type: completed, summary: reported }\n";
 
-    let (terminal, _state) = bench.run(workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -267,7 +288,7 @@ nodes:
     runner: executor
     run: "test 'executor' = '{{runner.name}}'"
 "#;
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -281,7 +302,7 @@ nodes:
     kind: bash
     run: "test 'only' = '{{node.id}}'"
 "#;
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -298,7 +319,7 @@ nodes:
     kind: bash
     run: "test '{{project.name}}' = 'mi-repo' && test '{{project.base_branch}}' = 'main' && test '{{project.branch_prefix}}' = 'yunta/'"
 "#;
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", &config)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -317,7 +338,7 @@ nodes:
     kind: bash
     run: "echo {{inputs.idea}}"
 "#;
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
     match terminal {
         RunTerminal::Paused { reason } => {
             assert_eq!(reason, "node `only` failed: template references `{{inputs.idea}}`, which is not defined here");
@@ -343,7 +364,7 @@ nodes:
     kind: bash
     run: "test '{{inputs.greeting}}' = 'hola'"
 "#;
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -402,7 +423,10 @@ async fn a_knowledge_source_with_only_the_user_layer_resolves_the_user_root_and_
     let workflow = context_workflow("      - knowledge: { layers: [user] }\n");
     let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-USER-ONLY-CONTENT\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -438,7 +462,10 @@ async fn a_knowledge_source_merges_repo_and_user_with_repo_winning_a_name_collis
     let workflow = context_workflow("      - knowledge: {}\n");
     let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, _state) = bench.run(&workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -479,7 +506,7 @@ async fn a_knowledge_source_resolves_an_installed_org_knowledge_pack() {
     let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
     let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-ORG-CONVENTIONS\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, state) = bench.run(&workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -514,7 +541,7 @@ async fn repo_knowledge_wins_a_name_collision_with_an_org_pack() {
     let workflow = context_workflow("      - knowledge: {}\n");
     let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-FROM-REPO-WINS\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, state) = bench.run(&workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -560,7 +587,7 @@ async fn two_org_packs_shipping_the_same_filename_fail_the_node_naming_both() {
     let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
     let fixture = "sessions: []";
 
-    let (terminal, state) = bench.run(&workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     match &state.nodes.state("ask") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
             assert_eq!(failure.to_string(), "context `knowledge:org` on node `ask`: knowledge file `conventions.md` is shipped by two installed packs — `acme/pack-a` and `globex/pack-b` — and the org layer has no precedence between packs; remove one, or shadow the file with the repo's own `.yunta/knowledge/conventions.md`");
@@ -592,7 +619,7 @@ async fn layers_repo_only_never_mounts_an_installed_org_pack() {
     let workflow = context_workflow("      - knowledge: { layers: [repo] }\n");
     let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-REPO-LOCAL\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, state) = bench.run(&workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -617,7 +644,7 @@ async fn an_org_layer_with_no_packs_installed_resolves_empty_not_an_error() {
     let workflow = context_workflow("      - knowledge: { layers: [org] }\n");
     let fixture = "sessions:\n  - outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, state) = bench.run(&workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 }
 
@@ -663,7 +690,10 @@ nodes:
         ));
     }
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     // One `context_assembled` per task brief, each naming its task.
@@ -730,7 +760,10 @@ sessions:
     outcome: { type: completed, summary: planned }
 "#;
 
-    let (terminal, _state) = bench.run(workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -772,7 +805,10 @@ sessions:
     outcome: { type: completed, summary: planned }
 "#;
 
-    let (terminal, _state) = bench.run(workflow, fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -794,7 +830,10 @@ nodes:
         bench.staging("write").display()
     );
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -850,7 +889,7 @@ sessions:
         dir = bench.staging("alpha").display()
     );
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
     match state.nodes.state("plan") {
         Some(yunta_engine::NodeState::Failed { failure, .. }) => {
             let text = failure.to_string();
@@ -926,6 +965,6 @@ sessions:
         beta = bench.staging("beta").display()
     );
 
-    let (terminal, state) = bench.run(&workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 }

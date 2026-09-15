@@ -4,25 +4,18 @@
 //! un workflow de Yunta como cualquier otro." Runs end to end with
 //! mock, and never publishes without an actually-approved gate.
 
-use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 
-use yunta_adapters::MockAdapter;
-use yunta_core::port::Adapter;
-use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, check, create_run, execute_run, CreateRunParams, NoInteraction, NodeState,
-    RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::{git, git_output, write, ApproveEverything};
-use yunta_testkit_core::FixedClock;
-use yunta_testkit_core::SeqIdSource;
+use yunta_core::{ConfigLayer, Workflow};
+use yunta_engine::{check, NodeState, RunReport, RunTerminal};
+use yunta_testkit::{git, git_output, write, ApproveEverything, Bench};
 
-/// Run ids for everything a test run gives birth to — unique across
-/// the binary, so parallel tests never share a run directory.
-static IDS: SeqIdSource = SeqIdSource::new("minted");
+/// The reference workflow as the repo ships it, checked and run from the
+/// one copy every other reader of it also gets.
+const WORKFLOW: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../core/tests/fixtures/promote-knowledge.yaml"
+));
 
 const CONFIG: &str = r#"
 runners:
@@ -30,11 +23,36 @@ runners:
     - { adapter: mock, model: mock-model }
 "#;
 
-/// An org-knowledge pack's own repo: `pack.yaml` (the thing `publish`
-/// version-bumps and tags), an existing `knowledge/` entry, and a
-/// curator-gathered `candidates.md` naming what's up for promotion.
-fn org_pack_worktree(root: &Path) -> std::path::PathBuf {
-    let worktree = root.join("worktree");
+/// A curator who copies one candidate into `knowledge/` verbatim and
+/// records what it promoted in the artifact the node declares.
+const PROMOTION_FIXTURE: &str = r#"
+sessions:
+  - effects:
+      - path: "knowledge/retry-budgets.md"
+        content: |
+          # Retry budgets
+
+          From repo acme/api, distilled 2026-01-01.
+      - path: "{{run.staging}}/review-candidates/promotion-notes.md"
+        content: "promoted retry-budgets; nothing left out\n"
+    outcome: { type: completed, summary: "reviewed" }
+"#;
+
+/// The same review, writing only its notes: what the worktree holds when
+/// nothing behind the gate ever runs.
+const REVIEW_ONLY_FIXTURE: &str = r#"
+sessions:
+  - effects:
+      - path: "{{run.staging}}/review-candidates/promotion-notes.md"
+        content: "promoted retry-budgets; nothing left out\n"
+    outcome: { type: completed, summary: "reviewed" }
+"#;
+
+/// Lays an org-knowledge pack's own repo over `worktree`: `pack.yaml`
+/// (the thing `publish` version-bumps and tags), an existing
+/// `knowledge/` entry, and a curator-gathered `candidates.md` naming
+/// what's up for promotion.
+fn org_pack(worktree: &Path) {
     write(
         &worktree.join("pack.yaml"),
         "name: org-knowledge\npublisher: acme\nversion: 1.0.0\ndeclares:\n  \
@@ -48,39 +66,22 @@ fn org_pack_worktree(root: &Path) -> std::path::PathBuf {
         &worktree.join("candidates.md"),
         "# Candidate: retry budgets\n\nFrom repo acme/api, distilled 2026-01-01.\n",
     );
-    git(&worktree, &["init", "-q", "-b", "master"]);
-    git(&worktree, &["config", "user.email", "test@example.com"]);
-    git(&worktree, &["config", "user.name", "Test"]);
-    git(&worktree, &["add", "."]);
-    git(&worktree, &["commit", "-q", "-m", "initial"]);
-    worktree
+    git(worktree, &["add", "."]);
+    git(worktree, &["commit", "-q", "-m", "pack"]);
 }
 
-async fn build(
-    worktree: &Path,
-    inputs: &HashMap<yunta_core::InputName, String>,
-) -> yunta_core::Manifest {
-    let workflow_yaml = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../core/tests/fixtures/promote-knowledge.yaml"
-    ))
-    .unwrap();
-    let workflow: Workflow = serde_norway::from_str(&workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-    build_manifest(&workflow, &config, worktree, worktree, inputs)
-        .await
-        .unwrap()
-        .manifest
+/// A bench whose worktree is the org pack's repo, invoked the way a
+/// curator invokes the workflow.
+fn curator_bench(run_id: &str) -> Bench {
+    let bench = Bench::with_run_id(run_id)
+        .with_inputs(&[("candidates", "candidates.md"), ("new_version", "1.1.0")]);
+    org_pack(&bench.worktree);
+    bench
 }
 
 #[test]
 fn the_reference_workflow_passes_static_check() {
-    let workflow_yaml = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../core/tests/fixtures/promote-knowledge.yaml"
-    ))
-    .unwrap();
-    let workflow: Workflow = serde_norway::from_str(&workflow_yaml).unwrap();
+    let workflow: Workflow = serde_norway::from_str(WORKFLOW).unwrap();
     let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
     let errors = check(&workflow, &config, &|_| None);
     assert!(errors.is_empty(), "{errors:?}");
@@ -88,183 +89,59 @@ fn the_reference_workflow_passes_static_check() {
 
 #[tokio::test]
 async fn an_approved_gate_publishes_the_new_version() {
-    let root = tempfile::tempdir().unwrap();
-    let worktree = org_pack_worktree(root.path());
-    let inputs = HashMap::from([
-        ("candidates".into(), "candidates.md".to_string()),
-        ("new_version".into(), "1.1.0".to_string()),
-    ]);
-    let manifest = build(&worktree, &inputs).await;
+    let bench = curator_bench("run-promote");
 
-    let run_id = RunId::from("run-promote");
-    let runs_root = root.path().join("runs");
-    let run_dir = runs_root.join(run_id.as_str());
-    let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-    create_run(
-        CreateRunParams {
-            run_id: &run_id,
-            manifest: &manifest,
-            runs_root: &runs_root,
-            mode: &"default".into(),
-            worktree: &worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
+    let RunReport { terminal, state } = bench
+        .run_full(
+            WORKFLOW,
+            PROMOTION_FIXTURE,
+            CONFIG,
+            &ApproveEverything::new("curator"),
+        )
+        .await;
 
-    let notes_path = yunta_engine::run_dir::staging(&run_dir, &"review-candidates".into())
-        .join("promotion-notes.md");
-    let fixture = format!(
-        r##"
-sessions:
-  - effects:
-      - path: "knowledge/retry-budgets.md"
-        content: |
-          # Retry budgets
-
-          From repo acme/api, distilled 2026-01-01.
-      - {{ path: {notes:?}, content: "promoted retry-budgets; nothing left out\n" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
-"##,
-        notes = notes_path,
-    );
-    let adapter = MockAdapter::from_yaml(&fixture).unwrap();
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), Arc::new(adapter));
-
-    let report = execute_run(RunEnv {
-        run_id: &run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &worktree,
-        adapters: &adapters,
-        storage: &storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &ApproveEverything::new("curator"),
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
-
-    assert_eq!(
-        report.terminal,
-        RunTerminal::Finished,
-        "state: {:?}",
-        report.state
-    );
+    assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
     assert!(matches!(
-        report.state.nodes.state("publish"),
+        state.nodes.state("publish"),
         Some(NodeState::Finished { .. })
     ));
 
-    let pack_yaml = std::fs::read_to_string(worktree.join("pack.yaml")).unwrap();
+    let pack_yaml = std::fs::read_to_string(bench.worktree.join("pack.yaml")).unwrap();
     let pack: serde_norway::Value = serde_norway::from_str(&pack_yaml).unwrap();
     assert_eq!(pack["version"].as_str(), Some("1.1.0"));
-    let tags = git_output(&worktree, &["tag", "--list"]);
+    let tags = git_output(&bench.worktree, &["tag", "--list"]);
     assert_eq!(tags, "v1.1.0");
-    let subject = git_output(&worktree, &["log", "-1", "--format=%s"]);
+    let subject = git_output(&bench.worktree, &["log", "-1", "--format=%s"]);
     assert_eq!(subject, "knowledge: promote to 1.1.0");
 }
 
 #[tokio::test]
 async fn an_unresolved_gate_never_publishes_anything() {
-    let root = tempfile::tempdir().unwrap();
-    let worktree = org_pack_worktree(root.path());
-    let inputs = HashMap::from([
-        ("candidates".into(), "candidates.md".to_string()),
-        ("new_version".into(), "1.1.0".to_string()),
-    ]);
-    let manifest = build(&worktree, &inputs).await;
-
-    let run_id = RunId::from("run-promote-unresolved");
-    let runs_root = root.path().join("runs");
-    let run_dir = runs_root.join(run_id.as_str());
-    let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-    create_run(
-        CreateRunParams {
-            run_id: &run_id,
-            manifest: &manifest,
-            runs_root: &runs_root,
-            mode: &"default".into(),
-            worktree: &worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-
-    let notes_path = yunta_engine::run_dir::staging(&run_dir, &"review-candidates".into())
-        .join("promotion-notes.md");
-    let fixture = format!(
-        r##"
-sessions:
-  - effects:
-      - {{ path: {notes:?}, content: "promoted retry-budgets; nothing left out\n" }}
-    outcome: {{ type: completed, summary: "reviewed" }}
-"##,
-        notes = notes_path,
-    );
-    let adapter = MockAdapter::from_yaml(&fixture).unwrap();
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), Arc::new(adapter));
+    let bench = curator_bench("run-promote-unresolved");
 
     // No surface to ask — the same conservative default `yunta test`
     // and headless CI use: a gate no one can answer must pause, never
     // guess, and everything behind it (here: the entire publish step)
     // must never run.
-    let report = execute_run(RunEnv {
-        run_id: &run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &worktree,
-        adapters: &adapters,
-        storage: &storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
+    let RunReport { terminal, state } = bench
+        .run_with_config(WORKFLOW, REVIEW_ONLY_FIXTURE, CONFIG)
+        .await;
 
     assert!(
-        matches!(report.terminal, RunTerminal::Paused { .. }),
-        "terminal: {:?}",
-        report.terminal
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "terminal: {terminal:?}"
     );
     assert!(
-        !report.state.nodes.has_state("publish"),
+        !state.nodes.has_state("publish"),
         "publish ran despite the gate never being resolved: {:?}",
-        report.state.nodes.state("publish")
+        state.nodes.state("publish")
     );
 
-    let pack_yaml = std::fs::read_to_string(worktree.join("pack.yaml")).unwrap();
+    let pack_yaml = std::fs::read_to_string(bench.worktree.join("pack.yaml")).unwrap();
     assert!(
         pack_yaml.contains("version: 1.0.0"),
         "version must not have moved: {pack_yaml}"
     );
-    let tags = git_output(&worktree, &["tag", "--list"]);
+    let tags = git_output(&bench.worktree, &["tag", "--list"]);
     assert!(tags.is_empty(), "no tag should exist yet: {tags:?}");
 }

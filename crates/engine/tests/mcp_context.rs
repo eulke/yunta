@@ -4,7 +4,6 @@
 //! `context_resolve.rs` client code path against a real (if minimal)
 //! `rmcp` server, the same library the client itself is built on.
 
-use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use rmcp::model::{
@@ -16,22 +15,9 @@ use rmcp::transport::streamable_http_server::session::local::LocalSessionManager
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::MockAdapter;
 use yunta_core::events::NodeEvent;
-use yunta_core::port::Adapter;
-use yunta_core::{AdapterId, ConfigLayer, McpServerConfig, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, RunEnv, RunTerminal,
-    DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::init_repo;
-use yunta_testkit_core::FixedClock;
-use yunta_testkit_core::SeqIdSource;
-
-/// Run ids for everything a test run gives birth to — unique across
-/// the binary, so parallel tests never share a run directory.
-static IDS: SeqIdSource = SeqIdSource::new("minted");
+use yunta_engine::{RunReport, RunTerminal};
+use yunta_testkit::Bench;
 
 /// Echoes the `query` argument back inside its own response text, so a
 /// test can prove round-trip content without guessing at a fixed reply.
@@ -110,94 +96,23 @@ nodes:
       - mcp: { server: toy, query: "MARKER-MCP-QUERY" }
 "#;
 
-async fn run_with_config(
-    workflow_yaml: &str,
-    fixture_yaml: &str,
-    config: ConfigLayer,
-) -> (
-    RunTerminal,
-    Vec<yunta_core::events::StoredEvent>,
-    std::path::PathBuf,
-    tempfile::TempDir,
-) {
-    let root = tempfile::tempdir().unwrap();
-    let worktree = root.path().join("worktree");
-    std::fs::create_dir_all(&worktree).unwrap();
-    init_repo(&worktree);
-    let runs_root = root.path().join("runs");
-    let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-    let run_id = RunId::from("run-test-1");
-
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
-        .await
-        .unwrap()
-        .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &run_id,
-            manifest: &manifest,
-            runs_root: &runs_root,
-            mode: &"default".into(),
-            worktree: &worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &storage.async_handle(),
-        &FixedClock,
+/// A config layer declaring the toy server under `mcp_servers:`,
+/// alongside the `executor` runner the workflow's node binds to.
+fn config_with_server(url: &str, auth_env: Option<&str>) -> String {
+    let auth = match auth_env {
+        Some(var) => format!("    auth_env: {var}\n"),
+        None => String::new(),
+    };
+    format!(
+        "\
+runners:
+  executor:
+    - {{ adapter: mock, model: mock-model }}
+mcp_servers:
+  toy:
+    url: \"{url}\"
+{auth}"
     )
-    .await
-    .unwrap();
-
-    let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), Arc::new(adapter));
-
-    let report = execute_run(RunEnv {
-        run_id: &run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &worktree,
-        adapters: &adapters,
-        storage: &storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
-
-    let events = storage.events_for_run(&run_id).unwrap();
-    (report.terminal, events, run_dir, root)
-}
-
-fn config_with_server(url: &str, auth_env: Option<&str>) -> ConfigLayer {
-    ConfigLayer {
-        runners: Some(BTreeMap::from([(
-            "executor".into(),
-            vec![yunta_core::RunnerCandidate {
-                adapter: "mock".into(),
-                model: "mock-model".into(),
-                agent: None,
-            }],
-        )])),
-        mcp_servers: Some(BTreeMap::from([(
-            "toy".into(),
-            McpServerConfig {
-                url: url.to_string(),
-                auth_env: auth_env.map(str::to_string),
-            },
-        )])),
-        ..Default::default()
-    }
 }
 
 #[tokio::test]
@@ -205,12 +120,15 @@ async fn an_mcp_source_resolves_the_toy_server_s_response_and_is_replayable() {
     let (url, ct) = start_toy_server().await;
     let fixture = "sessions:\n  - match_prompt_contains: \"MARKER-MCP-RESPONSE for: MARKER-MCP-QUERY\"\n    outcome: { type: completed, summary: ok }\n";
 
-    let (terminal, events, run_dir, _root) =
-        run_with_config(CONTEXT_WORKFLOW, fixture, config_with_server(&url, None)).await;
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_config(CONTEXT_WORKFLOW, fixture, &config_with_server(&url, None))
+        .await;
     ct.cancel();
 
     assert_eq!(terminal, RunTerminal::Finished);
 
+    let events = bench.events();
     let sources: Vec<_> = events
         .iter()
         .find_map(|e| match (&e.node_id, e.payload()) {
@@ -223,32 +141,19 @@ async fn an_mcp_source_resolves_the_toy_server_s_response_and_is_replayable() {
         .expect("context_assembled event for `ask`");
     assert_eq!(sources[0].kind, "mcp");
 
-    let materialized = run_dir
-        .join("objects")
-        .join(sources[0].content_hash.as_str());
-    let bytes = std::fs::read(&materialized).expect("materialized mcp response");
+    let bytes = bench
+        .object(&sources[0].content_hash)
+        .expect("materialized mcp response");
     assert_eq!(yunta_core::sha256_hex(&bytes), sources[0].content_hash);
     assert!(String::from_utf8_lossy(&bytes).contains("MARKER-MCP-RESPONSE"));
 }
 
 #[tokio::test]
 async fn an_unknown_mcp_server_fails_the_node_before_any_connection_attempt() {
-    let config = ConfigLayer {
-        runners: Some(BTreeMap::from([(
-            "executor".into(),
-            vec![yunta_core::RunnerCandidate {
-                adapter: "mock".into(),
-                model: "mock-model".into(),
-                agent: None,
-            }],
-        )])),
-        // No `mcp_servers:` declared at all.
-        ..Default::default()
-    };
     // No sessions declared — if the node somehow tried to dispatch a
-    // session before failing, the mock would error loudly instead.
-    let (terminal, _events, _run_dir, _root) =
-        run_with_config(CONTEXT_WORKFLOW, "sessions: []", config).await;
+    // session before failing, the mock would error loudly instead. The
+    // config behind `run` declares no `mcp_servers:` at all.
+    let RunReport { terminal, .. } = Bench::new().run(CONTEXT_WORKFLOW, "sessions: []").await;
     match terminal {
         RunTerminal::Paused { reason } => {
             assert!(reason.contains("toy"), "got: {reason}");
@@ -263,9 +168,11 @@ async fn a_missing_auth_env_var_fails_the_node_before_any_connection_attempt() {
         "http://127.0.0.1:1/mcp", // never dialed — the env check comes first
         Some("YUNTA_TEST_MCP_TOKEN_DOES_NOT_EXIST"),
     );
-    std::env::remove_var("YUNTA_TEST_MCP_TOKEN_DOES_NOT_EXIST");
-    let (terminal, _events, _run_dir, _root) =
-        run_with_config(CONTEXT_WORKFLOW, "sessions: []", config).await;
+    // The run carries no secrets, so the variable the server names is
+    // one nothing can answer with.
+    let RunReport { terminal, .. } = Bench::new()
+        .run_with_secrets(CONTEXT_WORKFLOW, "sessions: []", &config, &[])
+        .await;
     match terminal {
         RunTerminal::Paused { reason } => {
             assert!(

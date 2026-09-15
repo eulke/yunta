@@ -9,11 +9,6 @@
 //! field by field rather than as one giant string so a fixture tweak
 //! doesn't need to reprint an entire golden blob.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
-
-use yunta_adapters::MockAdapter;
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::diagnostic::{ArtifactCode, DiagnosticCode, FileCode, ParseCode, RuleCode};
 use yunta_core::events::{
@@ -21,21 +16,14 @@ use yunta_core::events::{
     RunMetrics, StoredEvent, TerminalState, TokenUsage,
 };
 use yunta_core::events::{NodeEvent, RunEvent};
-use yunta_core::port::Adapter;
-use yunta_core::{AdapterId, ArtifactKind, ConfigLayer, NodeId, RunId, Workflow};
+use yunta_core::{ArtifactKind, NodeId, RunId};
 use yunta_engine::{
-    build_manifest, build_receipt, create_run, execute_run, render_receipt_json,
-    render_receipt_markdown, BaselineSummary, CostSummary, CriteriaSummary, CriterionEntry,
-    DiagnosticCount, EventChainStatus, Receipt, ReceiptError, RunEnv, RunnerUsage, ScopeSummary,
+    build_receipt, render_receipt_json, render_receipt_markdown, BaselineSummary, CostSummary,
+    CriteriaSummary, CriterionEntry, DiagnosticCount, EventChainStatus, Receipt, ReceiptError,
+    RunReport, RunnerUsage, ScopeSummary,
 };
-use yunta_storage::Storage;
-use yunta_testkit::init_repo;
+use yunta_testkit::Bench;
 use yunta_testkit_core::FixedClock;
-use yunta_testkit_core::SeqIdSource;
-
-/// Run ids for everything a test run gives birth to — unique across
-/// the binary, so parallel tests never share a run directory.
-static IDS: SeqIdSource = SeqIdSource::new("minted");
 
 // --- formatters: golden output over a hand-built Receipt --------------------
 
@@ -300,99 +288,12 @@ sessions:
     outcome: { type: completed, summary: "reviewed" }
 "#;
 
-struct Bench {
-    _root: tempfile::TempDir,
-    worktree: PathBuf,
-    runs_root: PathBuf,
-    storage: Storage,
-    run_id: RunId,
-}
-
-impl Bench {
-    fn new() -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let worktree = root.path().join("worktree");
-        std::fs::create_dir_all(&worktree).unwrap();
-        init_repo(&worktree);
-        let runs_root = root.path().join("runs");
-        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        Bench {
-            _root: root,
-            worktree,
-            runs_root,
-            storage,
-            run_id: RunId::from("run-receipt-1"),
-        }
-    }
-
-    async fn run(
-        &self,
-        workflow_yaml: &str,
-        fixture_yaml: &str,
-    ) -> (yunta_core::Manifest, Vec<StoredEvent>) {
-        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-        let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-        let manifest = build_manifest(
-            &workflow,
-            &config,
-            &self.worktree,
-            &self.worktree,
-            &HashMap::new(),
-        )
-        .await
-        .unwrap()
-        .manifest;
-        let run_dir = create_run(
-            yunta_engine::CreateRunParams {
-                run_id: &self.run_id,
-                manifest: &manifest,
-                runs_root: &self.runs_root,
-                mode: &"default".into(),
-                worktree: &self.worktree,
-                promoted_from: None,
-                artifacts: &[],
-            },
-            &self.storage.async_handle(),
-            &FixedClock,
-        )
-        .await
-        .unwrap();
-
-        let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-        let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".into(), Arc::new(adapter));
-
-        execute_run(RunEnv {
-            run_id: &self.run_id,
-            manifest: &manifest,
-            run_dir: &run_dir,
-            worktree: &self.worktree,
-            adapters: &adapters,
-            storage: &self.storage.async_handle(),
-            clock: std::sync::Arc::new(FixedClock),
-            ids: &IDS,
-            max_task_retries: yunta_engine::DEFAULT_MAX_RETRIES,
-            human_interaction: &yunta_engine::NoInteraction,
-            forge: None,
-            cancel: None,
-            adapter_override: None,
-            ambient: None,
-            secrets: None,
-            observer: None,
-            fence_hook: None,
-        })
-        .await
-        .unwrap();
-
-        let events = self.storage.events_for_run(&self.run_id).unwrap();
-        (manifest, events)
-    }
-}
-
 #[tokio::test]
 async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     let bench = Bench::new();
-    let (manifest, events) = bench.run(WORKFLOW, FIXTURE).await;
+    let RunReport { .. } = bench.run_with_config(WORKFLOW, FIXTURE, CONFIG).await;
+    let manifest = bench.manifest();
+    let events = bench.events();
 
     let chain = EventChainStatus::Intact {
         events: events.len(),
@@ -449,57 +350,12 @@ nodes:
     kind: bash
     run: "false"
 "#;
-    let workflow_parsed: Workflow = serde_norway::from_str(workflow).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow_parsed,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .await
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        yunta_engine::CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-    let adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: yunta_engine::DEFAULT_MAX_RETRIES,
-        human_interaction: &yunta_engine::NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
+    let RunReport { .. } = bench
+        .run_with_config(workflow, "sessions: []\n", CONFIG)
+        .await;
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let manifest = bench.manifest();
+    let events = bench.events();
     let err = build_receipt(
         &bench.run_id,
         &manifest,
@@ -560,18 +416,7 @@ fn the_receipt_counts_artifact_problems_by_their_stable_code() {
 /// `node_failed`, and that is exactly what the log carries.
 async fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Receipt {
     let bench = Bench::new();
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .await
-    .unwrap()
-    .manifest;
+    let manifest = bench.manifest_for(workflow_yaml, CONFIG).await;
 
     let events = vec![
         StoredEvent {

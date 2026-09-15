@@ -3,15 +3,9 @@
 //! implements it task by task, a bash gate — plus re-routes, hooks,
 //! findings and the birth of a run, all derived from the event log alone.
 
-use std::collections::HashMap;
-
-use yunta_core::{ConfigLayer, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
-    RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::{init_repo, Bench, MOCK_CONFIG};
+use yunta_core::RunId;
+use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_testkit::{Bench, MOCK_CONFIG};
 use yunta_testkit_core::FixedClock;
 
 mod common;
@@ -79,7 +73,7 @@ sessions:
     outcome: { type: completed, summary: "did T002" }
 "#;
 
-    let (terminal, state) = bench.run(workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     for node in ["plan", "implement", "verify"] {
@@ -129,7 +123,7 @@ sessions:
     outcome: { type: completed, summary: "fixed it" }
 "#;
 
-    let (terminal, state) = bench.run(workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
@@ -172,7 +166,7 @@ nodes:
 sessions: []
 "#;
 
-    let (terminal, state) = bench.run(workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
@@ -206,7 +200,7 @@ nodes:
     run: "true"
 "#;
 
-    let (terminal, state) = bench
+    let RunReport { terminal, state } = bench
         .run_with_interaction(
             workflow,
             "sessions: []",
@@ -246,7 +240,7 @@ sessions:
   - outcome: { type: completed, summary: "did nothing useful" }
 "#;
 
-    let (terminal, _) = bench.run(workflow, fixture).await;
+    let RunReport { terminal, .. } = bench.run(workflow, fixture).await;
 
     match terminal {
         RunTerminal::Paused { reason } => {
@@ -271,7 +265,7 @@ nodes:
     run: "exit 3"
 "#;
 
-    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
 
     match terminal {
         RunTerminal::Paused { reason } => assert_eq!(reason, "node `build` failed: exit 3"),
@@ -308,7 +302,7 @@ sessions:
   - outcome: { type: completed, summary: "trust me, it is written" }
 "#;
 
-    let (terminal, state) = bench.run(workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, fixture).await;
 
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     match state.nodes.state("plan") {
@@ -335,47 +329,15 @@ nodes:
     run: "true"
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    // Second execution: same log, no new adapter, still Finished — and
-    // no duplicate node execution (the log would show a second start).
-    let workflow: Workflow = serde_norway::from_str(workflow).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .await
-    .unwrap()
-    .manifest;
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &bench.run_dir(),
-        worktree: &bench.worktree,
-        adapters: &HashMap::new(),
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
-    assert_eq!(report.terminal, RunTerminal::Finished);
+    // Second execution: same log, still Finished — and no duplicate
+    // node execution (the log would show a second start).
+    let RunReport { terminal, .. } = bench.wake().await;
+    assert_eq!(terminal, RunTerminal::Finished);
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let starts = events
         .iter()
         .filter(|e| {
@@ -409,7 +371,7 @@ nodes:
     // No sessions declared: if the engine opened one despite the failing
     // before-hook, the mock would fail for a different, distinguishable
     // reason than "before hook".
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
 
     match terminal {
         RunTerminal::Paused { reason } => assert_eq!(
@@ -435,7 +397,7 @@ nodes:
         - run: "exit 1"
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
 
     match terminal {
         RunTerminal::Paused { reason } => {
@@ -461,7 +423,7 @@ nodes:
           on_failure: warn
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -484,7 +446,7 @@ nodes:
           timeout_seconds: 1
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
 
     match terminal {
         RunTerminal::Paused { reason } => assert_eq!(
@@ -511,7 +473,7 @@ nodes:
     run: "true"
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(bench.worktree.join("defaults-ran.txt").exists());
 }
@@ -535,7 +497,7 @@ nodes:
         - run: "touch overridden.txt"
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(bench.worktree.join("overridden.txt").exists());
     assert!(!bench.worktree.join("should-not-run.txt").exists());
@@ -556,7 +518,7 @@ nodes:
         worktree = bench.worktree.display()
     );
 
-    let (terminal, _) = bench.run(&workflow, "sessions: []").await;
+    let RunReport { terminal, .. } = bench.run(&workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
@@ -590,7 +552,7 @@ sessions:
     outcome: { type: completed, summary: "reviewed" }
 "#;
 
-    let (terminal, state) = bench.run(workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(state.effective_findings().len(), 1);
     assert_eq!(state.effective_findings()[0].id, "f1");
@@ -616,7 +578,7 @@ nodes:
     context:
       - run-events: {}
 "#;
-    let (terminal, _) = bench
+    let RunReport { terminal, .. } = bench
         .run(
             workflow,
             "sessions:\n  - outcome: { type: completed, summary: ok }\n",
@@ -624,7 +586,7 @@ nodes:
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let source = events
         .iter()
         .find_map(|e| match (&e.node_id, e.payload()) {
@@ -636,13 +598,7 @@ nodes:
         })
         .expect("a run-events context source assembled for `read`");
 
-    let content = std::fs::read_to_string(
-        bench
-            .run_dir()
-            .join("objects")
-            .join(source.content_hash.as_str()),
-    )
-    .unwrap();
+    let content = String::from_utf8(bench.object(&source.content_hash).unwrap()).unwrap();
     assert!(
         !content.contains("StoredEvent {"),
         "the context must not be Rust Debug output: {content}"
@@ -674,7 +630,7 @@ nodes:
     run: "echo the-report > {{node.artifacts}}/report.md"
     artifacts: { produces: [report.md] }
 "#;
-    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let held = bench.accepted();
@@ -695,7 +651,9 @@ nodes:
         b"the-report\n"
     );
     assert_eq!(
-        std::fs::read(bench.run_dir().join("artifacts/report/report.md")).expect("the view"),
+        bench
+            .projection(Some("report"), "report.md")
+            .expect("the view"),
         b"the-report\n",
         "the view sits under the node that produced it"
     );
@@ -715,7 +673,7 @@ nodes:
     artifacts:
       produces: [tasks]
 "#;
-    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let held = bench.accepted();
@@ -754,74 +712,16 @@ nodes:
 
 // --- a run is born once, whole -----------------------------------------------
 
-struct BirthBench {
-    _root: tempfile::TempDir,
-    runs_root: std::path::PathBuf,
-    /// The tree the run works in — a birth asks it what it already has.
-    worktree: std::path::PathBuf,
-    storage: Storage,
-    manifest: yunta_core::Manifest,
-}
-
-impl BirthBench {
-    async fn new() -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let worktree = root.path().join("worktree");
-        std::fs::create_dir_all(&worktree).unwrap();
-        init_repo(&worktree);
-        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        let workflow: Workflow = serde_norway::from_str(
-            "name: birth\nnodes:\n  - id: a\n    kind: bash\n    run: \"true\"\n",
-        )
-        .unwrap();
-        let manifest = build_manifest(
-            &workflow,
-            &ConfigLayer::default(),
-            &worktree,
-            &worktree,
-            &HashMap::new(),
-        )
-        .await
-        .unwrap()
-        .manifest;
-        BirthBench {
-            runs_root: root.path().join("runs"),
-            _root: root,
-            worktree,
-            storage,
-            manifest,
-        }
-    }
-
-    async fn create(
-        &self,
-        run_id: &RunId,
-        artifacts: &[yunta_engine::BirthArtifact],
-    ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
-        create_run(
-            CreateRunParams {
-                run_id,
-                manifest: &self.manifest,
-                runs_root: &self.runs_root,
-                mode: &"default".into(),
-                worktree: &self.worktree,
-                promoted_from: None,
-                artifacts,
-            },
-            &self.storage.async_handle(),
-            &FixedClock,
-        )
-        .await
-    }
-}
+/// A workflow with a single node that always passes: what a test about a
+/// birth points a run at, so what it reads is the birth itself.
+const BIRTH_WORKFLOW: &str = "name: birth\nnodes:\n  - { id: a, kind: bash, run: \"true\" }\n";
 
 #[tokio::test]
 async fn create_run_refuses_an_existing_run_dir() {
-    let bench = BirthBench::new().await;
-    let run_id = RunId::from("run-once");
-    bench.create(&run_id, &[]).await.unwrap();
+    let bench = Bench::with_run_id("run-once");
+    bench.birth(BIRTH_WORKFLOW).await.unwrap();
 
-    let error = bench.create(&run_id, &[]).await.unwrap_err();
+    let error = bench.birth(BIRTH_WORKFLOW).await.unwrap_err();
     assert!(
         matches!(
             &error,
@@ -830,15 +730,13 @@ async fn create_run_refuses_an_existing_run_dir() {
         "{error:?}"
     );
     // Refused before anything is written: the log still holds one birth.
-    assert_eq!(bench.storage.events_for_run(&run_id).unwrap().len(), 1);
+    assert_eq!(bench.events().len(), 1);
 }
 
 #[tokio::test]
 async fn a_run_born_holding_artifacts_names_each_one_after_run_created() {
-    let bench = BirthBench::new().await;
-    let run_id = RunId::from("run-with-brief");
     let from = RunId::from("run-predecessor");
-    let artifacts = vec![yunta_engine::BirthArtifact {
+    let bench = Bench::new().born_holding(vec![yunta_engine::BirthArtifact {
         artifact: yunta_core::events::ArtifactId::Opaque {
             name: "brief/plan.md".to_string(),
         },
@@ -847,16 +745,16 @@ async fn a_run_born_holding_artifacts_names_each_one_after_run_created() {
             producer: Some("write".into()),
         },
         bytes: b"hello".to_vec(),
-    }];
+    }]);
 
-    let run_dir = bench.create(&run_id, &artifacts).await.unwrap();
+    bench.run(BIRTH_WORKFLOW, "sessions: []").await;
 
     assert_eq!(
-        std::fs::read(run_dir.join("artifacts").join("brief").join("plan.md")).unwrap(),
+        bench.projection(None, "brief/plan.md").unwrap(),
         b"hello",
         "the view of what the run was handed sits at the root: it has no producer here"
     );
-    let events = bench.storage.events_for_run(&run_id).unwrap();
+    let events = bench.events();
     assert!(
         matches!(
             events.first().and_then(|e| e.payload()),
@@ -864,7 +762,7 @@ async fn a_run_born_holding_artifacts_names_each_one_after_run_created() {
         ),
         "the run exists in the log before anything is said about it"
     );
-    let accepted = yunta_testkit::accepted(&events);
+    let accepted = bench.accepted();
     assert_eq!(accepted.len(), 1, "{accepted:?}");
     assert_eq!(
         accepted[0].producer, None,
@@ -877,22 +775,15 @@ async fn a_run_born_holding_artifacts_names_each_one_after_run_created() {
             producer: Some("write".into()),
         }
     );
-    assert_eq!(
-        std::fs::read(
-            run_dir
-                .join("objects")
-                .join(accepted[0].content_hash.as_str())
-        )
-        .unwrap(),
-        b"hello"
-    );
+    assert_eq!(bench.object(&accepted[0].content_hash).unwrap(), b"hello");
 }
 
 #[tokio::test]
 async fn run_created_freezes_resolved_inputs() {
-    let bench = Bench::new();
-    let workflow: Workflow = serde_norway::from_str(
-        r#"
+    let bench = Bench::new().with_inputs(&[("idea", "ship it")]);
+    bench
+        .birth(
+            r#"
 name: with-inputs
 inputs:
   idea:
@@ -906,45 +797,20 @@ nodes:
     kind: bash
     run: "true"
 "#,
-    )
-    .unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let provided = HashMap::from([("idea".into(), "ship it".to_string())]);
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &provided,
-    )
-    .await
-    .unwrap()
-    .manifest;
-    create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
+        )
+        .await
+        .unwrap();
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    let created = events
+    let created = bench
+        .events()
         .iter()
         .find_map(|e| match e.payload() {
             Some(yunta_core::events::EventPayload::Run(RunEvent::Created(p))) => Some(p.clone()),
             _ => None,
         })
         .expect("run_created is the first event");
-    let frozen: std::collections::BTreeMap<String, serde_json::Value> = manifest
+    let frozen: std::collections::BTreeMap<String, serde_json::Value> = bench
+        .manifest()
         .inputs
         .iter()
         .map(|(name, value)| (name.to_string(), serde_json::Value::String(value.clone())))
@@ -963,10 +829,11 @@ const TASKS_ON_DISK: &str = "tasks:\n  - id: greeting\n    title: 'Add the greet
 
 #[tokio::test]
 async fn a_document_input_is_born_as_an_artifact_and_frozen_as_its_hash() {
-    let bench = Bench::new();
+    let bench = Bench::new().with_inputs(&[("tasks", "plan.yaml")]);
     std::fs::write(bench.worktree.join("plan.yaml"), TASKS_ON_DISK).unwrap();
-    let workflow: Workflow = serde_norway::from_str(
-        r#"
+    bench
+        .birth(
+            r#"
 name: with-a-document
 inputs:
   tasks:
@@ -977,36 +844,11 @@ nodes:
     kind: bash
     run: "true"
 "#,
-    )
-    .unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let provided = HashMap::from([("tasks".into(), "plan.yaml".to_string())]);
-    let frozen = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &provided,
-    )
-    .await
-    .unwrap();
-    create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &frozen.manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &frozen.documents,
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
+        )
+        .await
+        .expect("a run holding the document its inputs named");
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     assert!(
         matches!(
             events.first().and_then(|e| e.payload()),
@@ -1035,7 +877,8 @@ nodes:
 
     let frozen_value = format!("sha256:{}", accepted[0].content_hash);
     assert_eq!(
-        frozen.manifest.inputs["tasks"], frozen_value,
+        bench.manifest().inputs["tasks"],
+        frozen_value,
         "the manifest freezes the document the run holds, not the path it was read from"
     );
     let created = events
@@ -1065,86 +908,39 @@ nodes:
 #[tokio::test]
 async fn run_resumed_records_the_policy_each_orphan_resolved_to() {
     let bench = Bench::new();
-    let workflow: Workflow = serde_norway::from_str(
-        r#"
+    let workflow = r#"
 name: resumable
 nodes:
   - id: only
     kind: bash
     on_interrupt: fail_if_uncertain
     run: "true"
-"#,
-    )
-    .unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .await
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-    // A crash mid-node: node_started with no terminal event.
-    bench
-        .storage
-        .append(
-            &yunta_core::events::EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: Some("only".into()),
-                payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
-                    yunta_core::events::NodeStartedPayload::attempt(1),
-                )),
-            },
-            &yunta_core::SystemClock,
-        )
-        .unwrap();
+"#;
 
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &HashMap::new(),
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &yunta_engine::NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
+    let RunReport { terminal, .. } = bench
+        .run_sabotaged(workflow, "sessions: []", |_| {
+            // A crash mid-node: node_started with no terminal event.
+            bench
+                .storage
+                .append(
+                    &yunta_core::events::EventDraft {
+                        run_id: bench.run_id.clone(),
+                        node_id: Some("only".into()),
+                        payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                            yunta_core::events::NodeStartedPayload::attempt(1),
+                        )),
+                    },
+                    &yunta_core::SystemClock,
+                )
+                .unwrap();
+        })
+        .await;
     assert!(
-        matches!(report.terminal, RunTerminal::Paused { .. }),
-        "fail_if_uncertain pauses instead of guessing: {:?}",
-        report.terminal
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "fail_if_uncertain pauses instead of guessing: {terminal:?}"
     );
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let resumed = events
         .iter()
         .find_map(|e| match e.payload() {
@@ -1205,7 +1001,7 @@ sessions:
     outcome: { type: completed, summary: "did T001" }
 "#;
 
-    let (terminal, state) = bench.run(&workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
     assert_eq!(
         state.tasks.status("T001"),
@@ -1233,7 +1029,7 @@ nodes:
     kind: bash
     run: "touch marker"
 "#;
-    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
     let RunTerminal::Paused { reason } = &terminal else {
         panic!("the second attempt owes an artifact it never wrote: {terminal:?} {state:?}");
     };
@@ -1250,35 +1046,36 @@ nodes:
 
 // --- a run answers for the tasks of every document it holds ------------
 
-const ONE_TASK: &str = r#"
-tasks:
-  - id: T001
-    title: "Write done.txt"
-    scope: ["done.txt"]
-    criteria: [{cmd: "test -f done.txt"}]
-"#;
-
-/// The tasks document as a run stores it: read through its own door and
-/// rendered canonically.
-fn tasks_document(yaml: &str) -> (yunta_core::TasksFile, Vec<u8>) {
-    let document: yunta_core::TasksFile =
-        yunta_core::shape::read(yaml.as_bytes(), "tasks").expect("a valid tasks document");
-    let bytes = yunta_core::shape::render(&document)
-        .expect("the canonical rendering")
-        .into_bytes();
-    (document, bytes)
+/// The bytes of a document naming one task, as a run stores it: read
+/// through its own door and rendered canonically.
+fn one_task_document() -> Vec<u8> {
+    yunta_core::shape::render(&yunta_testkit::tasks_document(&[(
+        "T001",
+        "done.txt",
+        "test -f done.txt",
+    )]))
+    .expect("the canonical rendering")
+    .into_bytes()
 }
 
 #[tokio::test]
 async fn a_run_inheriting_a_tasks_document_from_a_log_that_does_not_replay_is_never_created() {
-    let bench = BirthBench::new().await;
     let source = RunId::from("run-unreadable-source");
+    let bench = Bench::with_run_id("run-from-a-broken-source").born_holding(vec![
+        yunta_engine::BirthArtifact {
+            artifact: yunta_core::events::ArtifactId::Interpreted {
+                kind: yunta_core::ArtifactKind::Tasks,
+            },
+            origin: yunta_engine::BirthOrigin::Inherited {
+                run: source.clone(),
+                producer: None,
+            },
+            bytes: one_task_document(),
+        },
+    ]);
     // A status about a task nobody registered: a log replay stops at.
-    let planted = yunta_testkit::SourceLog::open(
-        &bench.storage,
-        &source,
-        std::sync::Arc::new(yunta_testkit_core::FixedClock),
-    );
+    let planted =
+        yunta_testkit::SourceLog::open(&bench.storage, &source, std::sync::Arc::new(FixedClock));
     planted.record(yunta_testkit::task_status_changed(
         &"T001".into(),
         yunta_core::events::TaskStatus::Done,
@@ -1286,24 +1083,7 @@ async fn a_run_inheriting_a_tasks_document_from_a_log_that_does_not_replay_is_ne
         1u64.into(),
     ));
 
-    let (_document, bytes) = tasks_document(ONE_TASK);
-    let run_id = RunId::from("run-from-a-broken-source");
-    let error = bench
-        .create(
-            &run_id,
-            &[yunta_engine::BirthArtifact {
-                artifact: yunta_core::events::ArtifactId::Interpreted {
-                    kind: yunta_core::ArtifactKind::Tasks,
-                },
-                origin: yunta_engine::BirthOrigin::Inherited {
-                    run: source.clone(),
-                    producer: None,
-                },
-                bytes,
-            }],
-        )
-        .await
-        .unwrap_err();
+    let error = bench.birth(BIRTH_WORKFLOW).await.unwrap_err();
 
     let yunta_engine::RunError::Broken { diagnostic } = &error else {
         panic!("a source whose log does not replay refuses the birth: {error:?}");
@@ -1313,13 +1093,10 @@ async fn a_run_inheriting_a_tasks_document_from_a_log_that_does_not_replay_is_ne
         "the diagnostic names the run that cannot answer: {diagnostic}"
     );
     assert!(
-        !bench.runs_root.join(run_id.as_str()).exists(),
+        !bench.run_dir().exists(),
         "the run has no directory, because it was never born"
     );
-    assert!(
-        bench.storage.events_for_run(&run_id).unwrap().is_empty(),
-        "nor a single event"
-    );
+    assert!(bench.events().is_empty(), "nor a single event");
 }
 
 const LOOP_ONLY_WORKFLOW: &str = r#"
@@ -1335,39 +1112,12 @@ nodes:
 #[tokio::test]
 async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stuck() {
     let bench = Bench::new();
-    let workflow: Workflow = serde_norway::from_str(LOOP_ONLY_WORKFLOW).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .await
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
+    let run_dir = bench.birth(LOOP_ONLY_WORKFLOW).await.unwrap();
 
     // A document the run holds and never said what to do about — the
     // one shape that reaches a loop with no registration behind it.
-    let (_document, bytes) = tasks_document(ONE_TASK);
     let content_hash = yunta_engine::ObjectStore::at(&run_dir)
-        .put(&bytes)
+        .put(&one_task_document())
         .await
         .unwrap();
     bench
@@ -1393,33 +1143,7 @@ async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stu
         )
         .unwrap();
 
-    let adapters: HashMap<yunta_core::AdapterId, std::sync::Arc<dyn yunta_core::port::Adapter>> =
-        HashMap::from([(
-            "mock".into(),
-            std::sync::Arc::new(yunta_adapters::MockAdapter::from_yaml("sessions: []\n").unwrap())
-                as std::sync::Arc<dyn yunta_core::port::Adapter>,
-        )]);
-    let error = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap_err();
+    let error = bench.try_wake().await.unwrap_err();
 
     let yunta_engine::RunError::Broken { diagnostic } = &error else {
         panic!("a document with no registration behind it is broken: {error:?}");
@@ -1456,10 +1180,10 @@ nodes:
         ),
     ] {
         let bench = Bench::new();
-        let (terminal, _) = bench
+        let RunReport { terminal, .. } = bench
             .run_with_config(workflow, "sessions: []\n", config)
             .await;
-        let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+        let events = bench.events();
         let closes: Vec<&yunta_core::events::StoredEvent> = events
             .iter()
             .filter(|e| e.body.kind_name() == "run_finished")

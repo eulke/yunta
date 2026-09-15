@@ -1,6 +1,6 @@
 //! Scope expansion — plain violations, requests across the three modes, and human escalation to a real gate — plus re-plan.
 
-use yunta_engine::{RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_engine::{RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
 use yunta_testkit::{Bench, ScriptedInteraction};
 
 mod common;
@@ -30,7 +30,7 @@ async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_i
         );
     }
 
-    let (terminal, state) = bench.run(&workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
 
     assert_eq!(
         state.tasks.status("task-s"),
@@ -73,7 +73,7 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
         request_yaml,
     ));
 
-    let (terminal, state) = bench.run(&workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
 
     assert_eq!(
         terminal,
@@ -134,7 +134,7 @@ async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterio
         request_yaml,
     ));
 
-    let (terminal, state) = bench.run(&workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
@@ -198,8 +198,10 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
     let granted_workflow = scope_expansion_workflow("rules", &["b.txt"], None);
     let mut granted_fixture = plan_session(&tasks);
     granted_fixture.push_str(&session);
-    let (granted_terminal, granted_state) =
-        granted_bench.run(&granted_workflow, &granted_fixture).await;
+    let RunReport {
+        terminal: granted_terminal,
+        state: granted_state,
+    } = granted_bench.run(&granted_workflow, &granted_fixture).await;
     assert_eq!(granted_terminal, RunTerminal::Finished);
     assert_eq!(
         granted_state.tasks.status("task-w"),
@@ -216,8 +218,10 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
     for _ in 0..=DEFAULT_MAX_RETRIES {
         denied_fixture.push_str(&session);
     }
-    let (_denied_terminal, denied_state) =
-        denied_bench.run(&denied_workflow, &denied_fixture).await;
+    let RunReport {
+        state: denied_state,
+        ..
+    } = denied_bench.run(&denied_workflow, &denied_fixture).await;
     assert_eq!(
         denied_state.tasks.status("task-w"),
         Some(yunta_core::events::TaskStatus::Blocked),
@@ -310,7 +314,7 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
         by: "eulke".into(),
         free_text: None,
     });
-    let (terminal, state) = bench
+    let RunReport { terminal, state } = bench
         .run_with_interaction(&workflow, &fixture, &interaction)
         .await;
 
@@ -382,7 +386,7 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
         by: "eulke".into(),
         free_text: Some("out of this sprint".to_string()),
     });
-    let (terminal, state) = bench
+    let RunReport { terminal, state } = bench
         .run_with_interaction(&workflow, &fixture, &interaction)
         .await;
 
@@ -444,7 +448,10 @@ async fn an_ask_mode_request_with_no_surface_still_pauses_exactly_as_before() {
     let mut fixture = plan_session(&tasks);
     fixture.push_str(&requesting_session("task-p"));
 
-    let (terminal, _state) = bench.run(&workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, &fixture).await;
     match terminal {
         RunTerminal::Paused { .. } => {}
         other => panic!("headless ask must pause, got {other:?}"),
@@ -526,7 +533,7 @@ nodes:
         "  - match_prompt_contains: \"task-c\"\n    effects:\n      - { path: c.txt, content: \"c\" }\n    outcome: { type: completed, summary: did-c }\n",
     );
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
@@ -585,7 +592,7 @@ nodes:
         "both the original and the re-planned registration must stay in the log"
     );
 
-    let commits = commit_subjects(&bench.worktree);
+    let commits = bench.commit_subjects();
     assert!(
         commits.contains(&"task task-a: Write a".to_string()),
         "task-a's committed work must survive the re-plan: {commits:?}"
@@ -667,7 +674,7 @@ nodes:
         "  - match_prompt_contains: \"task-c\"\n    effects:\n      - { path: c.txt, content: \"c\" }\n    outcome: { type: completed, summary: did-c }\n",
     );
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
@@ -709,7 +716,9 @@ nodes:
         "a re-cut task loses the done it crossed with and runs again"
     );
     assert!(
-        !commit_subjects(&bench.worktree).contains(&"task task-a: Write a".to_string()),
+        !bench
+            .commit_subjects()
+            .contains(&"task task-a: Write a".to_string()),
         "no session ever ran for task-a here"
     );
 }
@@ -742,7 +751,10 @@ nodes:
         "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
     );
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();

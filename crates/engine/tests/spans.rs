@@ -2,7 +2,7 @@
 //! the `run_id` (and, for a node, the `node_id`) — the fields an operator
 //! filters logs by. A capturing subscriber reads them back off a real run.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use tracing::field::{Field, Visit};
@@ -11,17 +11,7 @@ use tracing::Subscriber;
 use tracing_subscriber::layer::{Context, Layer};
 use tracing_subscriber::prelude::*;
 use tracing_subscriber::registry::LookupSpan;
-use yunta_core::{ConfigLayer, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, RunEnv,
-    DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::init_repo;
-use yunta_testkit_core::FixedClock;
-use yunta_testkit_core::SeqIdSource;
-
-static IDS: SeqIdSource = SeqIdSource::new("spans");
+use yunta_testkit::Bench;
 
 /// One recorded span: its name and its fields as strings.
 type RecordedSpan = (String, BTreeMap<String, String>);
@@ -62,60 +52,10 @@ async fn node_execution_runs_inside_a_span_carrying_run_id_and_node_id() {
     let _guard =
         tracing::subscriber::set_default(tracing_subscriber::registry().with(capture.clone()));
 
-    let root = tempfile::tempdir().unwrap();
-    let worktree = root.path().join("worktree");
-    std::fs::create_dir_all(&worktree).unwrap();
-    init_repo(&worktree);
-    let runs_root = root.path().join("runs");
-    let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-    let run_id = RunId::from("run-spans");
-
-    let workflow: Workflow = serde_norway::from_str(
-        "name: spans\nnodes:\n  - id: build\n    kind: bash\n    run: \"true\"\n",
-    )
-    .unwrap();
-    let config: ConfigLayer = serde_norway::from_str("runners: {}\n").unwrap();
-    let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
-        .await
-        .unwrap()
-        .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &run_id,
-            manifest: &manifest,
-            runs_root: &runs_root,
-            mode: &"default".into(),
-            worktree: &worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-
-    execute_run(RunEnv {
-        run_id: &run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &worktree,
-        adapters: &HashMap::new(),
-        storage: &storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
+    let workflow = "name: spans\nnodes:\n  - id: build\n    kind: bash\n    run: \"true\"\n";
+    Bench::with_run_id("run-spans")
+        .run_with_config(workflow, "sessions: []\n", "runners: {}\n")
+        .await;
 
     let spans = capture.0.lock().unwrap();
     let node_span = spans
@@ -180,7 +120,7 @@ sessions:
                 required: true
     outcome: { type: completed, summary: "asked" }
 "#;
-    yunta_testkit::Bench::new().run(asking, asked).await;
+    Bench::new().run(asking, asked).await;
 
     let gating = r#"
 name: gates
@@ -189,9 +129,7 @@ nodes:
     kind: gate
     assignee: lead
 "#;
-    yunta_testkit::Bench::new()
-        .run(gating, "sessions: []\n")
-        .await;
+    Bench::new().run(gating, "sessions: []\n").await;
 
     let spans = capture.0.lock().unwrap();
     let recorded: Vec<&str> = spans.iter().map(|(name, _)| name.as_str()).collect();

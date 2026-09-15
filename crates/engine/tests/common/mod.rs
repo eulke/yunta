@@ -1,26 +1,19 @@
+//! The workflows, fixtures, configs and scenarios more than one engine
+//! test needs, in the one place they are written.
+//!
+//! Every test binary that declares `mod common` compiles the whole
+//! module and uses a part of it, so what another binary needs reads as
+//! dead here.
 #![allow(dead_code)]
-#![allow(unused_imports)]
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 
 use yunta_adapters::MockAdapter;
 use yunta_core::events::{FindingEvent, NodeEvent, SessionEvent};
-use yunta_core::port::Adapter;
-use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
-    RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::{git, init_repo, Bench, ScriptedInteraction, MOCK_CONFIG};
-use yunta_testkit_core::FixedClock;
-use yunta_testkit_core::SeqIdSource;
-
-/// Run ids for everything a test run gives birth to — unique across
-/// the binary, so parallel tests never share a run directory.
-pub static IDS: SeqIdSource = SeqIdSource::new("minted");
+use yunta_engine::{RunReport, RunTerminal};
+use yunta_testkit::Bench;
 
 // --- kind: questions ------------------------------------
 
@@ -225,14 +218,6 @@ pub fn review_session(findings: &[(&str, &str, &str, &str, &str)]) -> String {
 
 // --- concurrency: N in loop nodes -----------------------
 
-pub const CONCURRENCY_CONFIG: &str = r#"
-runners:
-  planner:
-    - { adapter: mock, model: mock-model }
-  executor:
-    - { adapter: mock, model: mock-model }
-"#;
-
 /// An 8-independent-task document: no `depends_on` between any of them, each
 /// with its own disjoint scope (`out-N.txt`) so `tasks::register`
 /// accepts it as a legal batch of fully parallelizable work.
@@ -286,22 +271,6 @@ pub fn eight_tasks_fixture() -> String {
         ));
     }
     yaml
-}
-
-/// Commit subjects on `worktree`'s current branch, oldest first, excluding
-/// the `init_repo` seed commit.
-pub fn commit_subjects(worktree: &std::path::Path) -> Vec<String> {
-    let output = std::process::Command::new("git")
-        .args(["log", "--format=%s", "--reverse"])
-        .current_dir(worktree)
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter(|line| *line != "initial")
-        .map(str::to_string)
-        .collect()
 }
 
 // --- scope_expansion ------------------------------------
@@ -466,10 +435,13 @@ pub async fn run_stable_first(
     );
     let workflow = stable_first_workflow(volatile_command_output);
 
-    let (terminal, _state) = bench.run(&workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let payload = events
         .iter()
         .find_map(|e| match (&e.node_id, e.payload()) {
@@ -764,69 +736,6 @@ pub fn install_skill(worktree: &std::path::Path, name: &str) {
     std::fs::write(dir.join("SKILL.md"), format!("# {name}\n")).unwrap();
 }
 
-/// Runs one workflow with a hand-held mock so the test can ask it what
-/// skills each spawn carried.
-pub async fn run_with_recording_mock(
-    bench: &Bench,
-    workflow_yaml: &str,
-    fixture_yaml: &str,
-    config_yaml: &str,
-) -> (RunTerminal, yunta_engine::RunState, Arc<MockAdapter>) {
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(config_yaml).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .await
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-
-    let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), adapter.clone());
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
-    (report.terminal, report.state, adapter)
-}
-
 // --- on_finish.distill — deterministic knowledge distillation ---------
 
 pub const DISTILL_WORKFLOW: &str = r#"
@@ -875,6 +784,10 @@ pub struct Orphan<'a> {
 /// optionally an open `agent_session_opened`) with no terminal event,
 /// plus whatever the cut session had written — exactly what a
 /// mid-session crash leaves — then resumes it with a recording mock.
+///
+/// The crash is staged in the window a run's creation and its first wake
+/// leave open, which is the only place a log can hold a started node no
+/// execution ever closed.
 pub async fn resume_orphan_with_mock(
     orphan: Orphan<'_>,
 ) -> (
@@ -883,105 +796,56 @@ pub async fn resume_orphan_with_mock(
     Arc<MockAdapter>,
 ) {
     let Orphan {
-        workflow: workflow_yaml,
-        fixture: fixture_yaml,
+        workflow,
+        fixture,
         session: orphan_session,
         staged,
     } = orphan;
     let bench = Bench::new();
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(MOCK_CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .await
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-    let emit = |node: &str, payload: yunta_core::events::EventPayload| {
-        bench
-            .storage
-            .append(
-                &yunta_core::events::EventDraft {
-                    run_id: bench.run_id.clone(),
-                    node_id: Some(node.into()),
-                    payload,
-                },
-                &yunta_core::SystemClock,
-            )
-            .unwrap();
-    };
-    emit(
-        "work",
-        yunta_core::events::EventPayload::Node(NodeEvent::Started(
-            yunta_core::events::NodeStartedPayload::attempt(1),
-        )),
-    );
-    if let Some(session_id) = orphan_session {
-        emit(
-            "work",
-            yunta_core::events::EventPayload::Session(SessionEvent::Opened(
-                yunta_core::events::AgentSessionOpenedPayload {
-                    session_id: session_id.into(),
-                    agent: None,
-                    model: Some("mock-model".into()),
-                    capabilities: yunta_core::Capabilities::default(),
-                    fence: None,
-                },
-            )),
-        );
-    }
+    let RunReport { terminal, .. } = bench
+        .run_sabotaged(workflow, fixture, |run_dir| {
+            let emit = |node: &str, payload: yunta_core::events::EventPayload| {
+                bench
+                    .storage
+                    .append(
+                        &yunta_core::events::EventDraft {
+                            run_id: bench.run_id.clone(),
+                            node_id: Some(node.into()),
+                            payload,
+                        },
+                        &yunta_core::SystemClock,
+                    )
+                    .unwrap();
+            };
+            emit(
+                "work",
+                yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                    yunta_core::events::NodeStartedPayload::attempt(1),
+                )),
+            );
+            if let Some(session_id) = orphan_session {
+                emit(
+                    "work",
+                    yunta_core::events::EventPayload::Session(SessionEvent::Opened(
+                        yunta_core::events::AgentSessionOpenedPayload {
+                            session_id: session_id.into(),
+                            agent: None,
+                            model: Some("mock-model".into()),
+                            capabilities: yunta_core::Capabilities::default(),
+                            fence: None,
+                        },
+                    )),
+                );
+            }
 
-    for (node, name, content) in staged {
-        let dir = yunta_engine::run_dir::staging(&run_dir, &(*node).into());
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(name), content).unwrap();
-    }
-
-    let adapter = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), adapter.clone());
-    let report = execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &bench.runs_root.join(bench.run_id.as_str()),
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
-    (report.terminal, events, adapter)
+            for (node, name, content) in staged {
+                let dir = yunta_engine::run_dir::staging(run_dir, &(*node).into());
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join(name), content).unwrap();
+            }
+        })
+        .await;
+    (terminal, bench.events(), bench.mock())
 }
 
 pub const RESUME_WORKFLOW: &str = r#"

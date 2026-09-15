@@ -24,6 +24,7 @@ mod observer;
 mod repo;
 mod tasks;
 mod terminal;
+mod tools;
 mod wait;
 
 pub use bench::{Bench, MOCK_CONFIG};
@@ -38,6 +39,7 @@ pub use observer::{Frame, RecordingObserver};
 pub use repo::{git, git_output, init_repo, write, INITIAL_BRANCH};
 pub use tasks::tasks_document;
 pub use terminal::{runs_root, Terminal};
+pub use tools::ToolsHost;
 pub use wait::{wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};
 
 /// Runs the `yunta` binary in a [`Checkout`], with whatever that

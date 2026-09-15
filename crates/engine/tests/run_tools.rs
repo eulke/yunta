@@ -10,11 +10,10 @@ use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::ServiceExt;
 use serde_json::json;
-use yunta_core::events::{EventDraft, EventPayload};
-use yunta_core::events::{FindingEvent, RunEvent, TaskEvent};
-use yunta_core::{NodeId, RunId, TaskId, Workflow};
-use yunta_engine::{open_session_listener, RunToolsHost, RunToolsSession};
-use yunta_storage::Storage;
+use yunta_core::events::{EventPayload, FindingEvent, TaskEvent};
+use yunta_core::TaskId;
+use yunta_engine::RunToolsSession;
+use yunta_testkit::ToolsHost;
 
 const BLACKBOARD_WORKFLOW: &str = r#"
 name: coordinated
@@ -40,164 +39,37 @@ nodes:
         run: "true"
 "#;
 
-struct Bench {
-    _root: tempfile::TempDir,
-    run_dir: std::path::PathBuf,
-    storage: Storage,
-    run_id: RunId,
-    host: Arc<RunToolsHost>,
+/// Puts a finding under `node` on the log, as a node that already
+/// reported one leaves it.
+fn seed_finding(host: &ToolsHost, node: &str, id: &str) {
+    host.record(
+        Some(node),
+        EventPayload::Findings(FindingEvent::Posted(
+            yunta_core::events::FindingPostedPayload {
+                finding: yunta_core::events::Finding {
+                    id: id.into(),
+                    severity: yunta_core::events::FindingSeverity::Minor,
+                    title: format!("seeded {id}"),
+                    location: "src/lib.rs".into(),
+                    detail: "seeded directly".to_string(),
+                    proposed_criterion: None,
+                },
+            },
+        )),
+    );
 }
 
-/// A clock frozen at a distinctive instant, so a test can prove an event
-/// carries the run's injected clock rather than wall time.
-struct FrozenClock;
-
-impl yunta_core::Clock for FrozenClock {
-    fn now(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::parse_from_rfc3339("2020-02-02T02:02:02Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc)
-    }
-}
-
-impl Bench {
-    fn new() -> Self {
-        Self::with_clock(Arc::new(yunta_core::SystemClock))
-    }
-
-    fn with_clock(clock: Arc<dyn yunta_core::Clock>) -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        let run_id = RunId::from("run-tools-1");
-        let workflow: Workflow = serde_norway::from_str(BLACKBOARD_WORKFLOW).unwrap();
-        // Every log opens with run_created — the listener's own
-        // appends land on an already-born run in production too.
-        storage
-            .append(
-                &EventDraft {
-                    run_id: run_id.clone(),
-                    node_id: None,
-                    payload: EventPayload::Run(RunEvent::Created(
-                        yunta_core::events::RunCreatedPayload {
-                            manifest_hash: yunta_core::sha256_hex(b"test-manifest"),
-                            inputs: Default::default(),
-                            mode: "default".into(),
-                            promoted_from: None,
-                            yunta_schema: None,
-                            base_branch: "main".to_string(),
-                            base_commit: "deadbeef".into(),
-                        },
-                    )),
-                },
-                &yunta_core::SystemClock,
-            )
-            .unwrap();
-        let run_dir = root.path().join("run");
-        // The directories `create_run` gives every run: the view the
-        // engine writes, and the working space every node stages in.
-        for dir in [
-            yunta_core::ARTIFACTS_DIR,
-            yunta_engine::run_dir::SCRATCH_DIR,
-        ] {
-            std::fs::create_dir_all(run_dir.join(dir)).unwrap();
-        }
-        let host = Arc::new(RunToolsHost::new(
-            &workflow,
-            yunta_engine::HostOf {
-                storage: storage.async_handle(),
-                run_id: run_id.clone(),
-                clock,
-                // These tests read what a tool call lands on the log;
-                // the mirror of it has its own test (`observer.rs`).
-                observer: None,
-                run_dir: run_dir.clone(),
-                max_artifact_bytes: None,
-                redactor: yunta_core::Redactor::default(),
-            },
-        ));
-        Bench {
-            _root: root,
-            run_dir,
-            storage,
-            run_id,
-            host,
-        }
-    }
-
-    /// Where `node` writes what it declares, created as an attempt of
-    /// that node would create it.
-    fn staging(&self, node: &str) -> std::path::PathBuf {
-        let dir = yunta_engine::run_dir::staging(&self.run_dir, &node.into());
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    async fn listener(&self, node: &str, task: Option<&str>) -> RunToolsSession {
-        self.listener_for(node, task, Vec::new()).await
-    }
-
-    async fn listener_for(
-        &self,
-        node: &str,
-        task: Option<&str>,
-        declared: Vec<yunta_core::ArtifactSpec>,
-    ) -> RunToolsSession {
-        open_session_listener(
-            yunta_engine::RunToolsAccess {
-                host: self.host.clone(),
-                node: NodeId::from(node),
-                // Run tools belong to a session, and a `prompt` node is
-                // the one that opens one of its own.
-                node_kind: yunta_core::NodeKind::Prompt {
-                    prompt: yunta_core::PromptSource::Inline(String::new()),
-                },
-                declared,
-            },
-            task.map(TaskId::from),
-            self._root.path().to_path_buf(),
-        )
-        .await
-        .unwrap()
-    }
-
-    fn seed_finding(&self, node: &str, id: &str) {
-        self.storage
-            .append(
-                &EventDraft {
-                    run_id: self.run_id.clone(),
-                    node_id: Some(NodeId::from(node)),
-                    payload: EventPayload::Findings(FindingEvent::Posted(
-                        yunta_core::events::FindingPostedPayload {
-                            finding: yunta_core::events::Finding {
-                                id: id.into(),
-                                severity: yunta_core::events::FindingSeverity::Minor,
-                                title: format!("seeded {id}"),
-                                location: "src/lib.rs".into(),
-                                detail: "seeded directly".to_string(),
-                                proposed_criterion: None,
-                            },
-                        },
-                    )),
-                },
-                &yunta_core::SystemClock,
-            )
-            .unwrap();
-    }
-
-    fn findings_by(&self, node: &str) -> Vec<String> {
-        self.storage
-            .events_for_run(&self.run_id)
-            .unwrap()
-            .into_iter()
-            .filter(|e| e.node_id.as_ref().map(|n| n.as_str()) == Some(node))
-            .filter_map(|e| match e.payload() {
-                Some(EventPayload::Findings(FindingEvent::Posted(p))) => {
-                    Some(p.finding.id.to_string())
-                }
-                _ => None,
-            })
-            .collect()
-    }
+/// The id of every finding posted under `node`, in the order the log
+/// carries them.
+fn findings_by(host: &ToolsHost, node: &str) -> Vec<String> {
+    host.events()
+        .into_iter()
+        .filter(|e| e.node_id.as_ref().map(|n| n.as_str()) == Some(node))
+        .filter_map(|e| match e.payload() {
+            Some(EventPayload::Findings(FindingEvent::Posted(p))) => Some(p.finding.id.to_string()),
+            _ => None,
+        })
+        .collect()
 }
 
 async fn client_for(
@@ -244,8 +116,8 @@ async fn call(
 
 #[tokio::test]
 async fn a_wrong_bearer_token_is_rejected_before_any_tool_runs() {
-    let bench = Bench::new();
-    let session = bench.listener("solo", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
 
     let denied = client_for(&session, Some("not-the-token")).await;
     assert!(
@@ -263,8 +135,8 @@ async fn a_wrong_bearer_token_is_rejected_before_any_tool_runs() {
 
 #[tokio::test]
 async fn post_finding_lands_on_the_log_under_the_sessions_own_node() {
-    let bench = Bench::new();
-    let session = bench.listener("solo", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
     let client = client_for(&session, None).await.unwrap();
 
     let (is_error, text) = call(
@@ -280,7 +152,7 @@ async fn post_finding_lands_on_the_log_under_the_sessions_own_node() {
     )
     .await;
     assert!(!is_error, "got: {text}");
-    assert_eq!(bench.findings_by("solo"), vec!["hot-1"]);
+    assert_eq!(findings_by(&host, "solo"), vec!["hot-1"]);
 
     // An incomplete report is a visible error naming the schema — and a
     // no-op on the log: reporting badly must fail visibly, not silently.
@@ -292,7 +164,7 @@ async fn post_finding_lands_on_the_log_under_the_sessions_own_node() {
     .await;
     assert!(is_error);
     assert!(text.contains("severity"), "got: {text}");
-    assert_eq!(bench.findings_by("solo").len(), 1);
+    assert_eq!(findings_by(&host, "solo").len(), 1);
     client.cancel().await.unwrap();
 }
 
@@ -301,8 +173,9 @@ async fn a_tool_written_event_carries_the_runs_injected_clock() {
     // The finding a tool writes is stamped by the run's own clock, not a
     // fresh `SystemClock` — so a run driven by a fixed clock is
     // reproducible through its listener's events too.
-    let bench = Bench::with_clock(Arc::new(FrozenClock));
-    let session = bench.listener("solo", None).await;
+    let clock = Arc::new(yunta_testkit_core::AtClock::rfc3339("2020-02-02T02:02:02Z"));
+    let host = ToolsHost::stamped_by(BLACKBOARD_WORKFLOW, clock.clone());
+    let session = host.session("solo", None).await;
     let client = client_for(&session, None).await.unwrap();
 
     let (is_error, text) = call(
@@ -320,10 +193,8 @@ async fn a_tool_written_event_carries_the_runs_injected_clock() {
     assert!(!is_error, "got: {text}");
     client.cancel().await.unwrap();
 
-    let event = bench
-        .storage
-        .events_for_run(&bench.run_id)
-        .unwrap()
+    let event = host
+        .events()
         .into_iter()
         .find(|e| {
             matches!(
@@ -332,18 +203,18 @@ async fn a_tool_written_event_carries_the_runs_injected_clock() {
             )
         })
         .expect("the finding is on the log");
-    assert_eq!(event.timestamp, yunta_core::Clock::now(&FrozenClock));
+    assert_eq!(event.timestamp, yunta_core::Clock::now(clock.as_ref()));
 }
 
 // --- yunta_get_blackboard (mount rule, read rule) --------------------
 
 #[tokio::test]
 async fn blackboard_is_not_mounted_outside_a_blackboard_group() {
-    let bench = Bench::new();
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
     // `solo` is no group's child; `reviewer` sits in an `independent`
     // group — neither may even see the tool.
     for node in ["solo", "reviewer"] {
-        let session = bench.listener(node, None).await;
+        let session = host.session(node, None).await;
         let client = client_for(&session, None).await.unwrap();
         let tools = client.list_tools(None).await.unwrap();
         assert!(
@@ -363,12 +234,12 @@ async fn blackboard_is_not_mounted_outside_a_blackboard_group() {
 
 #[tokio::test]
 async fn blackboard_serves_own_posts_only_while_the_group_runs() {
-    let bench = Bench::new();
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
     // A sibling (worker-b) and a foreign node (reviewer) already posted.
-    bench.seed_finding("worker-b", "sibling-post");
-    bench.seed_finding("reviewer", "foreign-post");
+    seed_finding(&host, "worker-b", "sibling-post");
+    seed_finding(&host, "reviewer", "foreign-post");
 
-    let session = bench.listener("worker-a", None).await;
+    let session = host.session("worker-a", None).await;
     let client = client_for(&session, None).await.unwrap();
 
     let (is_error, text) = call(
@@ -421,27 +292,20 @@ async fn blackboard_serves_own_posts_only_while_the_group_runs() {
 
 #[tokio::test]
 async fn task_status_reflects_the_task_state_derived_from_the_log() {
-    let bench = Bench::new();
-    bench
-        .storage
-        .append(
-            &EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: Some(NodeId::from("implement")),
-                payload: EventPayload::Tasks(TaskEvent::Registered(
-                    yunta_core::events::TaskRegisteredPayload {
-                        task_id: TaskId::from("T001"),
-                        criteria: Vec::new(),
-                        scope: Vec::new(),
-                        depends_on: Vec::new(),
-                    },
-                )),
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    host.record(
+        Some("implement"),
+        EventPayload::Tasks(TaskEvent::Registered(
+            yunta_core::events::TaskRegisteredPayload {
+                task_id: TaskId::from("T001"),
+                criteria: Vec::new(),
+                scope: Vec::new(),
+                depends_on: Vec::new(),
             },
-            &yunta_core::SystemClock,
-        )
-        .unwrap();
+        )),
+    );
 
-    let session = bench.listener("solo", None).await;
+    let session = host.session("solo", None).await;
     let client = client_for(&session, None).await.unwrap();
     let (is_error, text) = call(&client, "yunta_task_status", json!({})).await;
     assert!(!is_error, "got: {text}");
@@ -454,8 +318,8 @@ async fn task_status_reflects_the_task_state_derived_from_the_log() {
 
 #[tokio::test]
 async fn scope_expansion_request_round_trips_through_the_real_consumer() {
-    let bench = Bench::new();
-    let session = bench.listener("implement", Some("T001")).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("implement", Some("T001")).await;
     let client = client_for(&session, None).await.unwrap();
 
     let (is_error, text) = call(
@@ -487,7 +351,7 @@ async fn scope_expansion_request_round_trips_through_the_real_consumer() {
     // The file the tool wrote is the exact artifact the engine's
     // existing post-attempt evaluation consumes — proven by parsing it
     // with the real consumer, not a mirror type.
-    let request = yunta_engine::scope_expansion::load_request(bench._root.path())
+    let request = yunta_engine::scope_expansion::load_request(&host.attempt_dir())
         .await
         .unwrap()
         .expect("the request file must exist and parse");
@@ -501,8 +365,8 @@ async fn scope_expansion_request_round_trips_through_the_real_consumer() {
 
 #[tokio::test]
 async fn scope_expansion_is_refused_for_sessions_without_a_task() {
-    let bench = Bench::new();
-    let session = bench.listener("solo", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
     let client = client_for(&session, None).await.unwrap();
 
     let tools = client.list_tools(None).await.unwrap();
@@ -531,9 +395,9 @@ async fn scope_expansion_is_refused_for_sessions_without_a_task() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_concurrent_sessions_post_interleaved_without_losing_or_misattributing_any() {
-    let bench = Bench::new();
-    let session_a = bench.listener("worker-a", None).await;
-    let session_b = bench.listener("worker-b", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session_a = host.session("worker-a", None).await;
+    let session_b = host.session("worker-b", None).await;
     let client_a = client_for(&session_a, None).await.unwrap();
     let client_b = client_for(&session_b, None).await.unwrap();
 
@@ -557,8 +421,8 @@ async fn two_concurrent_sessions_post_interleaved_without_losing_or_misattributi
         assert!(!is_error, "got: {text}");
     }
 
-    let by_a = bench.findings_by("worker-a");
-    let by_b = bench.findings_by("worker-b");
+    let by_a = findings_by(&host, "worker-a");
+    let by_b = findings_by(&host, "worker-b");
     assert_eq!(by_a.len(), 8, "worker-a posts lost: {by_a:?}");
     assert_eq!(by_b.len(), 8, "worker-b posts lost: {by_b:?}");
     assert!(by_a.iter().all(|id| id.starts_with("worker-a-")));
@@ -571,13 +435,25 @@ async fn two_concurrent_sessions_post_interleaved_without_losing_or_misattributi
 
 #[tokio::test]
 async fn dropping_the_session_closes_the_endpoint() {
-    let bench = Bench::new();
-    let session = bench.listener("solo", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
     let url = session.endpoint.url.clone();
     let token = session.endpoint.token.expose().clone();
     drop(session);
-    // Give the graceful shutdown a beat to release the socket.
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    // The graceful shutdown releases the socket on its own schedule.
+    yunta_testkit::wait_until_async(
+        || {
+            let (url, token) = (url.clone(), token.clone());
+            async move {
+                let config = StreamableHttpClientTransportConfig::with_uri(url).auth_header(token);
+                let transport =
+                    StreamableHttpClientTransport::with_client(reqwest::Client::default(), config);
+                ().serve(transport).await.is_err()
+            }
+        },
+        || "the dropped session's endpoint went on serving clients".to_string(),
+    )
+    .await;
 
     let config = StreamableHttpClientTransportConfig::with_uri(url).auth_header(token);
     let transport = StreamableHttpClientTransport::with_client(reqwest::Client::default(), config);
@@ -638,8 +514,10 @@ async fn submit_plan(client: &rmcp::service::RunningService<rmcp::RoleClient, ()
 
 #[tokio::test]
 async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
-    let bench = Bench::new();
-    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host
+        .session_declaring("plan", None, vec![tasks_spec()])
+        .await;
     let client = client_for(&session, None).await.unwrap();
     submit_plan(&client).await;
 
@@ -654,21 +532,23 @@ async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
 
 #[tokio::test]
 async fn a_check_before_the_document_is_handed_over_says_what_the_close_would() {
-    let bench = Bench::new();
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
     // A tasks document written by hand where a command node writes one.
     // This node's document arrives through the tool, so the file is not
     // it — and the session is told exactly what its close would say,
     // word for word, instead of a confidence the close will not honour.
     std::fs::write(
-        bench.staging("plan").join("tasks.yaml"),
+        host.staging("plan").join("tasks.yaml"),
         "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
     )
     .unwrap();
-    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let session = host
+        .session_declaring("plan", None, vec![tasks_spec()])
+        .await;
     let client = client_for(&session, None).await.unwrap();
     let (_, text) = call(&client, "yunta_check_artifact", json!({"name": "tasks"})).await;
 
-    let close = yunta_engine::close_artifacts(&plan_node(), &bench.run_dir, &[], None)
+    let close = yunta_engine::close_artifacts(&plan_node(), &host.run_dir, &[], None)
         .await
         .expect_err("the close owes the document nobody handed over");
     assert!(
@@ -683,13 +563,15 @@ async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() 
     // Once a document is handed over it is a fact of the run. The verdict
     // is about that document, so a file somebody wrote over afterwards
     // does not change what the session is told.
-    let bench = Bench::new();
-    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host
+        .session_declaring("plan", None, vec![tasks_spec()])
+        .await;
     let client = client_for(&session, None).await.unwrap();
     submit_plan(&client).await;
 
     std::fs::write(
-        bench.staging("plan").join("tasks.yaml"),
+        host.staging("plan").join("tasks.yaml"),
         "not a tasks document at all\n",
     )
     .unwrap();
@@ -704,8 +586,10 @@ async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() 
 
 #[tokio::test]
 async fn a_check_of_an_artifact_this_node_never_declared_says_which_it_declares() {
-    let bench = Bench::new();
-    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host
+        .session_declaring("plan", None, vec![tasks_spec()])
+        .await;
     let client = client_for(&session, None).await.unwrap();
     let (is_error, text) = call(
         &client,
@@ -727,8 +611,10 @@ async fn a_check_of_an_artifact_this_node_never_declared_says_which_it_declares(
 /// tool to arrive through.
 #[tokio::test]
 async fn only_the_kinds_this_node_declares_have_a_submission_tool() {
-    let bench = Bench::new();
-    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host
+        .session_declaring("plan", None, vec![tasks_spec()])
+        .await;
     let client = client_for(&session, None).await.unwrap();
 
     let tools = client.list_tools(None).await.unwrap();
@@ -757,8 +643,8 @@ async fn only_the_kinds_this_node_declares_have_a_submission_tool() {
 
 #[tokio::test]
 async fn a_node_with_nothing_to_check_says_so_rather_than_reporting_success() {
-    let bench = Bench::new();
-    let session = bench.listener("plan", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("plan", None).await;
     let client = client_for(&session, None).await.unwrap();
     let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
     assert!(is_error, "{text}");
@@ -877,8 +763,8 @@ fn assert_serves_the_session_tools(result: &serde_json::Value) {
 
 #[tokio::test]
 async fn a_modern_client_lists_the_session_tools_without_a_handshake() {
-    let bench = Bench::new();
-    let session = bench.listener("solo", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
 
     let discovered = post(
         &session,
@@ -929,8 +815,8 @@ async fn a_modern_client_lists_the_session_tools_without_a_handshake() {
 
 #[tokio::test]
 async fn a_legacy_client_still_initializes_and_lists_the_same_tools() {
-    let bench = Bench::new();
-    let session = bench.listener("solo", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
 
     let opened = post(
         &session,

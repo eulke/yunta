@@ -2969,6 +2969,7 @@ dependencies = [
  "serde_norway",
  "tempfile",
  "tokio",
+ "tokio-util",
  "yunta-adapters",
  "yunta-core",
  "yunta-engine",

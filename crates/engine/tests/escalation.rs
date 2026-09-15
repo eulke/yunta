@@ -4,101 +4,62 @@
 //! lets `resolve_gate` (a separate `yunta mcp` invocation, not the
 //! process that paused the run) know what it's answering.
 
-use std::collections::HashMap;
-
-use yunta_adapters::MockAdapter;
-use yunta_core::port::Adapter;
-use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
+use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
 use yunta_engine::{
-    build_manifest, create_run, current_escalation, execute_run, CreateRunParams, NoInteraction,
-    RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
+    current_escalation, resolve_gate, ResolveGateError, RunReport, RunState, RunTerminal,
 };
-use yunta_storage::Storage;
-use yunta_testkit::init_repo;
+use yunta_testkit::Bench;
 use yunta_testkit_core::FixedClock;
-use yunta_testkit_core::SeqIdSource;
 
-/// Run ids for everything a test run gives birth to — unique across
-/// the binary, so parallel tests never share a run directory.
-static IDS: SeqIdSource = SeqIdSource::new("minted");
+/// A bench whose run is parked: it drove `(workflow_yaml, fixture_yaml)`
+/// with no human present and stopped on a pause, which is where every
+/// test here starts.
+async fn paused(workflow_yaml: &str, fixture_yaml: &str) -> Bench {
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench.run(workflow_yaml, fixture_yaml).await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "expected the run to pause, got {terminal:?}"
+    );
+    bench
+}
 
-const CONFIG: &str = r#"
-runners:
-  executor:
-    - { adapter: mock, model: mock-model }
-"#;
+/// Records `option` as the answer to whatever escalation the bench's run
+/// is parked on — the write a separate `yunta mcp` process makes, with
+/// nothing of the run's own process behind it.
+async fn resolve(bench: &Bench, option: &str) -> Result<(), ResolveGateError> {
+    resolve_gate(
+        &bench.manifest(),
+        &bench.storage.async_handle(),
+        &bench.run_id,
+        &FixedClock,
+        yunta_core::events::HumanChoice {
+            option: option.into(),
+            by: "mcp".into(),
+            free_text: None,
+        },
+    )
+    .await
+}
 
-/// Runs `workflow_yaml` with `NoInteraction` to a pause, and returns the
-/// run's frozen manifest alongside its log — exactly the two inputs a
-/// separate `resolve_gate` invocation would read off disk (manifest.yaml
-/// + storage), with nothing else.
+/// How many of the run's events carry a payload `pred` accepts.
+fn count(bench: &Bench, pred: impl Fn(&yunta_core::events::EventPayload) -> bool) -> usize {
+    bench
+        .events()
+        .iter()
+        .filter(|e| e.payload().is_some_and(&pred))
+        .count()
+}
+
+/// The frozen manifest of a run parked with `NoInteraction` alongside its
+/// log — exactly the two inputs a separate `resolve_gate` invocation
+/// reads off disk (manifest.yaml + storage), with nothing else.
 async fn paused_manifest_and_events(
     workflow_yaml: &str,
     fixture_yaml: &str,
 ) -> (yunta_core::Manifest, Vec<yunta_core::events::StoredEvent>) {
-    let root = tempfile::tempdir().unwrap();
-    let worktree = root.path().join("worktree");
-    std::fs::create_dir_all(&worktree).unwrap();
-    init_repo(&worktree);
-    let runs_root = root.path().join("runs");
-    let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-    let run_id = RunId::from("run-escalation-1");
-
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-    let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
-        .await
-        .unwrap()
-        .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &run_id,
-            manifest: &manifest,
-            runs_root: &runs_root,
-            mode: &"default".into(),
-            worktree: &worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-
-    let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-    let mut adapters: HashMap<AdapterId, std::sync::Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), std::sync::Arc::new(adapter));
-
-    let report = execute_run(RunEnv {
-        run_id: &run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &worktree,
-        adapters: &adapters,
-        storage: &storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-        secrets: None,
-        observer: None,
-        fence_hook: None,
-    })
-    .await
-    .unwrap();
-    assert!(
-        matches!(report.terminal, RunTerminal::Paused { .. }),
-        "expected the run to pause, got {:?}",
-        report.terminal
-    );
-
-    let events = storage.events_for_run(&run_id).unwrap();
-    (manifest, events)
+    let bench = paused(workflow_yaml, fixture_yaml).await;
+    (bench.manifest(), bench.events())
 }
 
 const HOPELESS_UNTIL_RETRIED_WORKFLOW: &str = r#"
@@ -201,130 +162,6 @@ nodes:
 // --- resolve_gate writes ONLY the decision; the engine
 // consumes it on wake through its one existing consequence path.
 
-use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
-use yunta_engine::{resolve_gate, ResolveGateError, RunState};
-
-struct GateBench {
-    _root: tempfile::TempDir,
-    worktree: std::path::PathBuf,
-    storage: Storage,
-    run_id: RunId,
-    manifest: yunta_core::Manifest,
-    run_dir: std::path::PathBuf,
-}
-
-impl GateBench {
-    /// Creates the run and drives it with `NoInteraction` to its first
-    /// stop — asserting it paused, since every test here starts from a
-    /// parked run.
-    async fn paused(workflow_yaml: &str, fixture_yaml: &str) -> Self {
-        let bench = Self::created(workflow_yaml).await;
-        let (terminal, _) = bench.execute(fixture_yaml, &NoInteraction).await;
-        assert!(
-            matches!(terminal, RunTerminal::Paused { .. }),
-            "expected the run to pause, got {terminal:?}"
-        );
-        bench
-    }
-
-    async fn created(workflow_yaml: &str) -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let worktree = root.path().join("worktree");
-        std::fs::create_dir_all(&worktree).unwrap();
-        init_repo(&worktree);
-        let runs_root = root.path().join("runs");
-        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        let run_id = RunId::from("run-gate-bench");
-        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-        let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-        let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
-            .await
-            .unwrap()
-            .manifest;
-        let run_dir = create_run(
-            CreateRunParams {
-                run_id: &run_id,
-                manifest: &manifest,
-                runs_root: &runs_root,
-                mode: &"default".into(),
-                worktree: &worktree,
-                promoted_from: None,
-                artifacts: &[],
-            },
-            &storage.async_handle(),
-            &FixedClock,
-        )
-        .await
-        .unwrap();
-        GateBench {
-            _root: root,
-            worktree,
-            storage,
-            run_id,
-            manifest,
-            run_dir,
-        }
-    }
-
-    async fn execute(
-        &self,
-        fixture_yaml: &str,
-        interaction: &dyn yunta_engine::HumanInteraction,
-    ) -> (RunTerminal, RunState) {
-        let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-        let mut adapters: HashMap<AdapterId, std::sync::Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".into(), std::sync::Arc::new(adapter));
-        let report = execute_run(RunEnv {
-            run_id: &self.run_id,
-            manifest: &self.manifest,
-            run_dir: &self.run_dir,
-            worktree: &self.worktree,
-            adapters: &adapters,
-            storage: &self.storage.async_handle(),
-            clock: std::sync::Arc::new(FixedClock),
-            ids: &IDS,
-            max_task_retries: DEFAULT_MAX_RETRIES,
-            human_interaction: interaction,
-            forge: None,
-            cancel: None,
-            adapter_override: None,
-            ambient: None,
-            secrets: None,
-            observer: None,
-            fence_hook: None,
-        })
-        .await
-        .unwrap();
-        (report.terminal, report.state)
-    }
-
-    async fn resolve(&self, option: &str) -> Result<(), ResolveGateError> {
-        resolve_gate(
-            &self.manifest,
-            &self.storage.async_handle(),
-            &self.run_id,
-            &FixedClock,
-            yunta_core::events::HumanChoice {
-                option: option.into(),
-                by: "mcp".into(),
-                free_text: None,
-            },
-        )
-        .await
-    }
-
-    fn events(&self) -> Vec<yunta_core::events::StoredEvent> {
-        self.storage.events_for_run(&self.run_id).unwrap()
-    }
-
-    fn count(&self, pred: impl Fn(&yunta_core::events::EventPayload) -> bool) -> usize {
-        self.events()
-            .iter()
-            .filter(|e| e.payload().is_some_and(&pred))
-            .count()
-    }
-}
-
 const RETRY_FIX_FIXTURE: &str = r#"
 sessions:
   - effects:
@@ -334,17 +171,17 @@ sessions:
 
 #[tokio::test]
 async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
-    let bench = GateBench::paused(
+    let bench = paused(
         HOPELESS_UNTIL_RETRIED_WORKFLOW,
         HOPELESS_UNTIL_RETRIED_FIXTURE,
     )
     .await;
 
-    bench.resolve("retry").await.unwrap();
+    resolve(&bench, "retry").await.unwrap();
     // resolve_gate writes ONLY the decision pair — the reroute
     // consequence is the engine's to apply, not this function's.
     assert_eq!(
-        bench.count(|p| matches!(
+        count(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Node(NodeEvent::Rerouted(_))
         )),
@@ -352,7 +189,7 @@ async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
         "only the run's own automatic reroute is on the log before the resume"
     );
 
-    let (terminal, state) = bench.execute(RETRY_FIX_FIXTURE, &NoInteraction).await;
+    let RunReport { terminal, state } = bench.wake_on_fixture(RETRY_FIX_FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
         state.nodes.state("lint"),
@@ -360,14 +197,14 @@ async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
     ));
     // The consuming engine never re-emits the recorded pair.
     assert_eq!(
-        bench.count(|p| matches!(
+        count(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Gates(GateEvent::Waiting(_))
         )),
         1
     );
     assert_eq!(
-        bench.count(|p| matches!(
+        count(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Gates(GateEvent::Resolved(_))
         )),
@@ -399,91 +236,20 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
     // declaration order — `promote` is on its menu. resolve_gate
     // records the choice; the resuming engine (a live process, exactly
     // what promotion's distill+close needs) applies it.
-    let root = tempfile::tempdir().unwrap();
-    let worktree = root.path().join("worktree");
-    std::fs::create_dir_all(&worktree).unwrap();
-    init_repo(&worktree);
-    let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-    let run_id = RunId::from("run-preseed-promote");
-    let workflow: Workflow = serde_norway::from_str(PROMOTABLE_WORKFLOW).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-    let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
-        .await
-        .unwrap()
-        .manifest;
-    let run_dir = create_run(
-        CreateRunParams {
-            run_id: &run_id,
-            manifest: &manifest,
-            runs_root: &root.path().join("runs"),
-            mode: &"quick".into(),
-            worktree: &worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-    async fn drive(
-        run_id: &RunId,
-        manifest: &yunta_core::Manifest,
-        run_dir: &std::path::Path,
-        worktree: &std::path::Path,
-        storage: &Storage,
-    ) -> yunta_engine::RunReport {
-        let adapter = MockAdapter::from_yaml("sessions: []\n").unwrap();
-        let mut adapters: HashMap<AdapterId, std::sync::Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".into(), std::sync::Arc::new(adapter));
-        execute_run(RunEnv {
-            run_id,
-            manifest,
-            run_dir,
-            worktree,
-            adapters: &adapters,
-            storage: &storage.async_handle(),
-            clock: std::sync::Arc::new(FixedClock),
-            ids: &IDS,
-            max_task_retries: DEFAULT_MAX_RETRIES,
-            human_interaction: &NoInteraction,
-            forge: None,
-            cancel: None,
-            adapter_override: None,
-            ambient: None,
-            secrets: None,
-            observer: None,
-            fence_hook: None,
-        })
-        .await
-        .unwrap()
-    }
-
-    let report = drive(&run_id, &manifest, &run_dir, &worktree, &storage).await;
+    let bench = Bench::new().in_mode("quick");
+    let report = bench.run(PROMOTABLE_WORKFLOW, "sessions: []\n").await;
     assert!(matches!(report.terminal, RunTerminal::Paused { .. }));
 
-    resolve_gate(
-        &manifest,
-        &storage.async_handle(),
-        &run_id,
-        &FixedClock,
-        yunta_core::events::HumanChoice {
-            option: "promote".into(),
-            by: "mcp".into(),
-            free_text: None,
-        },
-    )
-    .await
-    .unwrap();
+    resolve(&bench, "promote").await.unwrap();
 
-    let report = drive(&run_id, &manifest, &run_dir, &worktree, &storage).await;
+    let report = bench.wake_on_fixture("sessions: []\n").await;
     assert_eq!(
         report.terminal,
         RunTerminal::Promoted {
             suggested_mode: "full".into()
         }
     );
-    let events = storage.events_for_run(&run_id).unwrap();
+    let events = bench.events();
     assert!(events.iter().any(|e| matches!(
         e.payload(),
         Some(yunta_core::events::EventPayload::Run(
@@ -523,10 +289,10 @@ fn plan_runs(worktree: &std::path::Path) -> usize {
 
 #[tokio::test]
 async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume() {
-    let bench = GateBench::paused(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
+    let bench = paused(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
 
-    bench.resolve("aprobar").await.unwrap();
-    let (terminal, state) = bench.execute("sessions: []\n", &NoInteraction).await;
+    resolve(&bench, "aprobar").await.unwrap();
+    let RunReport { terminal, state } = bench.wake_on_fixture("sessions: []\n").await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     match state.nodes.state("approve") {
@@ -536,14 +302,14 @@ async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume(
     assert!(bench.worktree.join("shipped.txt").exists());
     // One recorded pair — the consuming engine never re-emits it.
     assert_eq!(
-        bench.count(|p| matches!(
+        count(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Gates(GateEvent::Waiting(_))
         )),
         1
     );
     assert_eq!(
-        bench.count(|p| matches!(
+        count(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Gates(GateEvent::Resolved(_))
         )),
@@ -553,11 +319,11 @@ async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume(
 
 #[tokio::test]
 async fn a_pre_seeded_internal_gate_mapped_option_reroutes_and_asks_again() {
-    let bench = GateBench::paused(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
+    let bench = paused(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
     assert_eq!(plan_runs(&bench.worktree), 1);
 
-    bench.resolve("ajustar").await.unwrap();
-    let (terminal, _) = bench.execute("sessions: []\n", &NoInteraction).await;
+    resolve(&bench, "ajustar").await.unwrap();
+    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
 
     // A reroute through a pre-seeded choice: plan re-ran, the gate came
     // back to ask again, and with no live surface the run parks there.
@@ -567,14 +333,14 @@ async fn a_pre_seeded_internal_gate_mapped_option_reroutes_and_asks_again() {
 
 #[tokio::test]
 async fn a_pre_seeded_abort_is_consumed_exactly_once() {
-    let bench = GateBench::paused(
+    let bench = paused(
         HOPELESS_UNTIL_RETRIED_WORKFLOW,
         HOPELESS_UNTIL_RETRIED_FIXTURE,
     )
     .await;
 
-    bench.resolve("abort").await.unwrap();
-    let (terminal, _) = bench.execute("sessions: []\n", &NoInteraction).await;
+    resolve(&bench, "abort").await.unwrap();
+    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the consumed abort to pause, got {terminal:?}");
     };
@@ -583,7 +349,7 @@ async fn a_pre_seeded_abort_is_consumed_exactly_once() {
     // A later manual resume must NOT re-apply the stale abort — the
     // decision was consumed; with no live surface it parks on the
     // escalation again, exactly as an interactive abort does today.
-    let (terminal, _) = bench.execute("sessions: []\n", &NoInteraction).await;
+    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the second resume to pause, got {terminal:?}");
     };
@@ -592,7 +358,7 @@ async fn a_pre_seeded_abort_is_consumed_exactly_once() {
         "a stale abort must not be re-applied: {reason}"
     );
     assert_eq!(
-        bench.count(|p| matches!(
+        count(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Gates(GateEvent::Resolved(_))
         )),
@@ -628,16 +394,28 @@ sessions:
     outcome: { type: completed, summary: "actually fixed it this time" }
 "#;
 
-    let live = GateBench::created(HOPELESS_UNTIL_RETRIED_WORKFLOW).await;
-    let (live_terminal, live_state) = live.execute(TWO_SESSION_FIXTURE, &RetryOnce).await;
+    let live = Bench::new();
+    let RunReport {
+        terminal: live_terminal,
+        state: live_state,
+    } = live
+        .run_with_interaction(
+            HOPELESS_UNTIL_RETRIED_WORKFLOW,
+            TWO_SESSION_FIXTURE,
+            &RetryOnce,
+        )
+        .await;
 
-    let seeded = GateBench::paused(
+    let seeded = paused(
         HOPELESS_UNTIL_RETRIED_WORKFLOW,
         HOPELESS_UNTIL_RETRIED_FIXTURE,
     )
     .await;
-    seeded.resolve("retry").await.unwrap();
-    let (seeded_terminal, seeded_state) = seeded.execute(RETRY_FIX_FIXTURE, &NoInteraction).await;
+    resolve(&seeded, "retry").await.unwrap();
+    let RunReport {
+        terminal: seeded_terminal,
+        state: seeded_state,
+    } = seeded.wake_on_fixture(RETRY_FIX_FIXTURE).await;
 
     assert_eq!(live_terminal, seeded_terminal);
     // The state each node reached, not where its events landed: the
@@ -657,31 +435,33 @@ sessions:
 
 #[tokio::test]
 async fn resolve_gate_refuses_a_run_that_is_not_parked() {
-    let bench = GateBench::created(
-        r#"
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run(
+            r#"
 name: fine
 nodes:
   - id: ok
     kind: bash
     run: "true"
 "#,
-    )
-    .await;
-    let (terminal, _) = bench.execute("sessions: []\n", &NoInteraction).await;
+            "sessions: []\n",
+        )
+        .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let err = bench.resolve("retry").await.unwrap_err();
+    let err = resolve(&bench, "retry").await.unwrap_err();
     assert!(matches!(err, ResolveGateError::NotPaused));
 }
 
 #[tokio::test]
 async fn resolve_gate_rejects_an_option_not_on_the_menu() {
-    let bench = GateBench::paused(
+    let bench = paused(
         HOPELESS_UNTIL_RETRIED_WORKFLOW,
         HOPELESS_UNTIL_RETRIED_FIXTURE,
     )
     .await;
-    let err = bench.resolve("nonexistent-option").await.unwrap_err();
+    let err = resolve(&bench, "nonexistent-option").await.unwrap_err();
     match err {
         ResolveGateError::UnknownOption { chosen, declared } => {
             assert_eq!(chosen, "nonexistent-option");
@@ -691,7 +471,7 @@ async fn resolve_gate_rejects_an_option_not_on_the_menu() {
     }
     // A refusal is a no-op on the log.
     assert_eq!(
-        bench.count(|p| matches!(
+        count(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Gates(GateEvent::Resolved(_))
         )),
@@ -701,7 +481,7 @@ async fn resolve_gate_rejects_an_option_not_on_the_menu() {
 
 #[tokio::test]
 async fn resolve_gate_on_a_run_paused_without_a_menu_errors() {
-    let bench = GateBench::paused(
+    let bench = paused(
         r#"
 name: plain-failure
 nodes:
@@ -712,6 +492,6 @@ nodes:
         "sessions: []\n",
     )
     .await;
-    let err = bench.resolve("anything").await.unwrap_err();
+    let err = resolve(&bench, "anything").await.unwrap_err();
     assert!(matches!(err, ResolveGateError::NothingToResolve));
 }

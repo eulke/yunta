@@ -11,7 +11,7 @@
 use yunta_core::events::EventPayload;
 use yunta_core::events::{ChildEvent, FindingEvent, RunEvent, SessionEvent};
 use yunta_core::{RunId, Seq};
-use yunta_engine::RunTerminal;
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{Bench, RecordingObserver};
 
 const ONE_SESSION_AND_A_CHECK: &str = r#"
@@ -55,7 +55,7 @@ async fn every_event_the_run_appends_reaches_the_observer() {
     let recorder = RecordingObserver::new();
     let bench = Bench::new().with_observer(recorder.clone());
 
-    let (terminal, state) = bench.run(ONE_SESSION_AND_A_CHECK, POSTS_A_FINDING).await;
+    let RunReport { terminal, state } = bench.run(ONE_SESSION_AND_A_CHECK, POSTS_A_FINDING).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     let on_the_log: Vec<Landmark> = bench
@@ -101,7 +101,7 @@ async fn a_session_audit_event_reaches_the_observer() {
     let recorder = RecordingObserver::new();
     let bench = Bench::new().with_observer(recorder.clone());
 
-    let (terminal, state) = bench.run(ONE_SESSION_AND_A_CHECK, COMPLETES).await;
+    let RunReport { terminal, state } = bench.run(ONE_SESSION_AND_A_CHECK, COMPLETES).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     // `agent_session_opened` is written by `RunCtx`'s `SessionObserver`
@@ -147,7 +147,7 @@ async fn an_agent_posted_finding_reaches_the_observer() {
     let recorder = RecordingObserver::new();
     let bench = Bench::new().with_observer(recorder.clone());
 
-    let (terminal, state) = bench.run(REVIEWS, POSTS_A_FINDING).await;
+    let RunReport { terminal, state } = bench.run(REVIEWS, POSTS_A_FINDING).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     let posted: Vec<_> = recorder
@@ -192,7 +192,7 @@ async fn a_child_run_reports_under_its_own_run_id() {
         .with_workflow("child-wf", CHILD)
         .with_observer(recorder.clone());
 
-    let (terminal, state) = bench.run(PARENT, "sessions: []\n").await;
+    let RunReport { terminal, state } = bench.run(PARENT, "sessions: []\n").await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     let frames = recorder.frames();

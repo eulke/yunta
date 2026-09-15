@@ -14,7 +14,7 @@
 use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RecordedOrigin, SessionEvent};
 use yunta_core::events::{ArtifactId, EventPayload, SubmissionOutcome};
 use yunta_core::ArtifactKind;
-use yunta_engine::{NodeState, RunTerminal};
+use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 const PLAN_NODE: &str = r#"
@@ -108,7 +108,7 @@ sessions:
         tasks_document(&[("alpha", "First"), ("beta", "Second")])
     );
 
-    let (terminal, state) = bench.run(PLAN_NODE, &fixture).await;
+    let RunReport { terminal, state } = bench.run(PLAN_NODE, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     assert_eq!(submitted(&bench), vec![("tasks.yaml".to_string(), true)]);
@@ -228,7 +228,7 @@ sessions:
     outcome: { type: completed, summary: "planned after a correction" }
 "#;
 
-    let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(PLAN_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     // One attempt: a refusal is an answer, not the end of the session.
@@ -341,7 +341,7 @@ capabilities: { run_tools: true }
 sessions:
   - outcome: { type: completed, summary: "said it was done" }
 "#;
-    let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(PLAN_NODE, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
 
     // One attempt, and no session opened to correct anything: a document
@@ -371,7 +371,7 @@ async fn a_typed_artifact_on_an_adapter_without_run_tools_fails_before_dispatch(
 sessions:
   - outcome: { type: completed, summary: "never reached" }
 "#;
-    let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(PLAN_NODE, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
 
     match state.nodes.state("plan") {
@@ -413,7 +413,7 @@ sessions:
           detail: "The flag it names was renamed two releases ago."
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, state) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let bytes = bench.artifact("findings").expect("the run holds it");
@@ -452,7 +452,7 @@ capabilities: { run_tools: true }
 sessions:
   - outcome: { type: completed, summary: "found nothing" }
 "#;
-    let (terminal, state) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let bytes = bench.artifact("findings").expect("the run holds it");
@@ -535,7 +535,7 @@ sessions:
           detail: "d"
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(kinds(&bench, "finding_posted"), 1);
@@ -579,7 +579,7 @@ sessions:
           detail: "d"
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let bytes = bench.artifact("findings").expect("the engine wrote it");
@@ -634,7 +634,7 @@ sessions:
           reason: "the call it named is gone"
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let bytes = bench.artifact("findings").expect("the engine wrote it");
@@ -702,7 +702,7 @@ sessions:
           reason: "again"
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(kinds(&bench, "finding_refused"), 3);
@@ -747,7 +747,7 @@ sessions:
           reason: "   "
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let report = bench
@@ -787,7 +787,7 @@ sessions:
           detail: "d"
     outcome: { type: crash }
 "#;
-    let (terminal, state) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(REVIEW_NODE, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
 
     // The session never reached an answer, and the finding is still the
@@ -811,7 +811,7 @@ sessions:
     outcome: { type: completed, summary: "nothing to submit with" }
 "#;
 
-    let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(PLAN_NODE, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
     assert!(
         matches!(state.nodes.state("plan"), Some(NodeState::Failed { .. })),
@@ -874,7 +874,7 @@ nodes:
 sessions:
   - outcome: { type: completed, summary: "never reached" }
 "#;
-    let (terminal, state) = bench.run(workflow, fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
 
     match state.nodes.state("implement") {
