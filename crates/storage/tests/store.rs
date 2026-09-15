@@ -1,9 +1,10 @@
 use std::sync::Arc;
 use std::thread;
 
+use proptest::prelude::*;
 use yunta_core::events::RunEvent;
 use yunta_core::events::{EventBody, EventDraft, EventPayload, EventShapeError, RunPausedPayload};
-use yunta_core::{RunId, Seq};
+use yunta_core::{NodeId, RunId, Seq};
 use yunta_storage::{AsyncStorage, ChainVerification, Purge, Storage, StorageError};
 
 fn open_temp() -> (tempfile::TempDir, Storage) {
@@ -369,6 +370,143 @@ fn a_single_byte_flip_at_any_position_breaks_the_chain() {
             ChainVerification::Intact { .. } => {
                 panic!("a corrupted event at seq {seq} went undetected")
             }
+        }
+    }
+}
+
+/// One persisted column of one stored event, as the chain hashes it.
+struct PersistedCell {
+    seq: i64,
+    column: &'static str,
+    text: String,
+}
+
+/// Every text the hash chain covers, event by event and column by column,
+/// read straight off disk: the timestamp, the node id where a row carries
+/// one, the kind, the payload, the schema version, and the stored hash the
+/// walk compares its recomputation against.
+///
+/// `run_id` and `seq` stay out: altering either moves an event to another
+/// run or on top of its neighbour, which is the gap a deleted or reordered
+/// event leaves rather than an altered event's own bytes.
+fn persisted_cells(db: &std::path::Path, run_id: &str) -> Vec<PersistedCell> {
+    let conn = rusqlite::Connection::open(db).unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT seq, ts, node_id, kind, payload_json, schema_version, event_hash
+             FROM events WHERE run_id = ?1 ORDER BY seq ASC",
+        )
+        .unwrap();
+    stmt.query_map(rusqlite::params![run_id], |row| {
+        let seq: i64 = row.get(0)?;
+        let columns = [
+            ("ts", Some(row.get::<_, String>(1)?)),
+            ("node_id", row.get::<_, Option<String>>(2)?),
+            ("kind", Some(row.get::<_, String>(3)?)),
+            ("payload_json", Some(row.get::<_, String>(4)?)),
+            ("schema_version", Some(row.get::<_, u32>(5)?.to_string())),
+            ("event_hash", Some(row.get::<_, String>(6)?)),
+        ];
+        Ok(columns
+            .into_iter()
+            .filter_map(|(column, text)| text.map(|text| PersistedCell { seq, column, text }))
+            .collect::<Vec<_>>())
+    })
+    .unwrap()
+    .flat_map(|row| row.unwrap())
+    .collect()
+}
+
+/// The offsets of `text` whose byte a single-bit flip keeps printable
+/// ASCII: bit 0 toggles inside a pair of adjacent codes, so `0x20..0x7f`
+/// maps onto itself. The altered column is still valid UTF-8, a digit is
+/// still a digit, and a column SQLite stores as an integer still reads
+/// back as one — the only difference the store sees is the one byte.
+fn flippable_offsets(text: &str) -> Vec<usize> {
+    text.bytes()
+        .enumerate()
+        .filter(|(_, byte)| (0x20..0x7f).contains(byte))
+        .map(|(offset, _)| offset)
+        .collect()
+}
+
+/// Flips bit 0 of the byte at `offset` of one persisted column, behind the
+/// store's back — a disk that changed under a log whose own interface
+/// never rewrites a row. The column name is one of this file's own, never
+/// generated input.
+fn flip_one_byte(db: &std::path::Path, run_id: &str, cell: &PersistedCell, offset: usize) {
+    let mut bytes = cell.text.clone().into_bytes();
+    bytes[offset] ^= 1;
+    let flipped = String::from_utf8(bytes).unwrap();
+    let conn = rusqlite::Connection::open(db).unwrap();
+    conn.execute(
+        &format!(
+            "UPDATE events SET {} = ?1 WHERE run_id = ?2 AND seq = ?3",
+            cell.column
+        ),
+        rusqlite::params![flipped, run_id, cell.seq],
+    )
+    .unwrap();
+}
+
+proptest! {
+    /// The chain covers every append and every byte of one: a log grown by
+    /// any sequence of payloads, node-scoped or not, verifies intact over
+    /// exactly the events it was given; and flipping a single bit of any
+    /// byte the chain hashes — a timestamp, a node id, a kind, a payload, a
+    /// schema version, or an event's own stored hash — breaks verification
+    /// at exactly the event that changed.
+    #[test]
+    fn any_append_sequence_verifies_and_any_flipped_byte_is_caught(
+        appends in prop::collection::vec(
+            (0..yunta_testkit_core::all_kinds().len(), any::<bool>()),
+            0..6,
+        ),
+        which_cell in any::<prop::sample::Index>(),
+        which_byte in any::<prop::sample::Index>(),
+    ) {
+        let kinds = yunta_testkit_core::all_kinds();
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("yunta.db");
+        let storage = Storage::open(&db).unwrap();
+        let run_id = RunId::from("run-prop");
+
+        // A run's first event is its `run_created`: the chain's genesis.
+        storage
+            .append(&created_draft(run_id.as_str()), &yunta_testkit_core::FixedClock)
+            .unwrap();
+        for (kind, node_scoped) in &appends {
+            storage
+                .append(
+                    &EventDraft {
+                        run_id: run_id.clone(),
+                        node_id: node_scoped.then(|| NodeId::from("plan")),
+                        payload: kinds[*kind].clone(),
+                    },
+                    &yunta_testkit_core::FixedClock,
+                )
+                .unwrap();
+        }
+
+        prop_assert_eq!(
+            storage.verify_chain(&run_id).unwrap(),
+            ChainVerification::Intact { events: appends.len() + 1 }
+        );
+
+        let cells = persisted_cells(&db, run_id.as_str());
+        let cell = &cells[which_cell.index(cells.len())];
+        let offsets = flippable_offsets(&cell.text);
+        let offset = offsets[which_byte.index(offsets.len())];
+        flip_one_byte(&db, run_id.as_str(), cell, offset);
+
+        match storage.verify_chain(&run_id).unwrap() {
+            ChainVerification::Broken { seq, detail } => {
+                prop_assert_eq!(u64::try_from(cell.seq).unwrap(), seq.get(), "{}", detail);
+            }
+            ChainVerification::Intact { .. } => panic!(
+                "byte {offset} of `{}` at seq {} is flipped and the chain still verifies intact",
+                cell.column, cell.seq
+            ),
         }
     }
 }

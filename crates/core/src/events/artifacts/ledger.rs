@@ -160,7 +160,7 @@ impl ArtifactLedger {
 /// The identity an `artifact_written` states. A declared `artifact_kind`
 /// is the identity; without one the artifact is opaque and its name is
 /// what the run wrote it as.
-fn legacy_identity(written: &ArtifactWrittenPayload) -> ArtifactId {
+pub fn legacy_identity(written: &ArtifactWrittenPayload) -> ArtifactId {
     ArtifactId::of(&artifact_name(&written.path), written.artifact_kind)
 }
 

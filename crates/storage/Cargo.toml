@@ -35,4 +35,8 @@ yunta-core = { workspace = true, features = ["testkit"] }
 yunta-testkit.workspace = true
 yunta-testkit-core.workspace = true
 tempfile.workspace = true
+# The chain's own properties — any append sequence verifies, any
+# flipped byte is caught — stated the way `yunta-core` and the engine
+# state theirs.
+proptest.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }

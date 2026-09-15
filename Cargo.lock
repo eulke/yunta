@@ -2947,6 +2947,7 @@ name = "yunta-storage"
 version = "0.0.4"
 dependencies = [
  "chrono",
+ "proptest",
  "rusqlite",
  "serde_json",
  "tempfile",
