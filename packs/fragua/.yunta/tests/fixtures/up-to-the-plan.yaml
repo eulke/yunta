@@ -1,7 +1,7 @@
-# One script per session `quick` mode spawns, selected by prompt: the
-# planner's three sessions and the executor's one task. A mode that
-# stops earlier opens fewer, and reads a fixture of its own — a fixture
-# describing a session nobody opened describes a run nobody made.
+# One script per session the planner spawns, selected by prompt: the
+# three that run before `approve-plan`. `standard` and `full` both stop
+# at that gate, so neither ever opens the executor's task — which is
+# why they read this fixture and not `build-feature.yaml`.
 #
 # The planner hands its interpreted artifacts over through run tools, so
 # the fixture declares that capability; only `brief.md`, an opaque
@@ -31,18 +31,3 @@ sessions:
                   - cmd: "test -f Cargo.toml"
                   - cmd: "test -f src/lib.rs"
     outcome: { type: completed, summary: "tasks document registered" }
-  - match_prompt_contains: "Read your task from the tasks document"
-    effects:
-      - path: Cargo.toml
-        content: |
-          [package]
-          name = "sandbox"
-          version = "0.1.0"
-          edition = "2021"
-      - path: src/lib.rs
-        content: |
-          /// Whether the interface renders in dark mode.
-          pub fn dark_mode() -> bool {
-              true
-          }
-    outcome: { type: completed, summary: "crate bootstrapped" }

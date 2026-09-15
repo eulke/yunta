@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use yunta_core::port::Forge;
-use yunta_core::{IdSource, Manifest, RunId, SystemClock};
-use yunta_engine::{HumanInteraction, RunObserver, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_core::{Clock, IdSource, Manifest, RunId};
+use yunta_engine::{HumanInteraction, RunObserver, RunReport, RunTerminal};
 use yunta_storage::AsyncStorage;
 
 use crate::error::CliError;
@@ -28,6 +28,15 @@ pub(crate) struct PromotionEnv<'a> {
     pub cwd: &'a Path,
     pub project: &'a Project,
     pub(crate) storage: &'a AsyncStorage,
+    /// The invocation's own clock, so a successor is stamped by the
+    /// same reading of time its predecessor was. Injected rather than
+    /// read from the process: deciding is a pure function of what it is
+    /// handed, and a chain whose members disagree about when they
+    /// happened is a chain nobody can replay.
+    pub clock: Arc<dyn Clock>,
+    /// This binary, as the hook a CLI runs to ask the judge about one
+    /// write — the same one the predecessor ran under.
+    pub fence_hook: yunta_core::fence::FenceHook,
     pub ids: &'a dyn IdSource,
     pub adapters: &'a super::Adapters,
     pub forge: Option<&'a dyn Forge>,
@@ -84,31 +93,31 @@ pub(crate) async fn drive_promotions(
             },
             yunta_engine::CallerInfra {
                 storage: env.storage,
-                clock: &SystemClock,
+                clock: env.clock.as_ref(),
                 ids: env.ids,
                 supervision: yunta_engine::process::Supervision::none(),
             },
         )
         .await?;
         let ambient = crate::project::process_env();
-        let successor_report = yunta_engine::execute_run(yunta_engine::RunEnv {
+        let successor_report = super::drive::execute(super::drive::Executing {
             run_id: &successor.run_id,
             manifest: &successor.manifest,
             run_dir: &successor.run_dir,
             worktree: &successor.worktree,
             adapters: env.adapters,
             storage: env.storage,
-            clock: std::sync::Arc::new(SystemClock),
+            clock: Arc::clone(&env.clock),
             ids: env.ids,
-            max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction: env.human_interaction,
             forge: env.forge,
             cancel: env.cancel,
+            // A successor is the run carrying on, not a new invocation:
+            // the `--adapter` override belongs to whoever asked for it.
             adapter_override: None,
-            ambient: Some(&ambient),
-            secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
             observer: env.observer.clone(),
-            fence_hook: Some(crate::context::fence_hook()),
+            fence_hook: env.fence_hook.clone(),
+            ambient: &ambient,
         })
         .await?;
 
@@ -253,6 +262,8 @@ nodes:
 
         let (final_id, _final_manifest, _final_worktree, final_report) = drive_promotions(
             &PromotionEnv {
+                clock: Arc::new(SystemClock),
+                fence_hook: crate::context::fence_hook(),
                 cwd: &cwd,
                 project: &project,
                 storage: &storage.async_handle(),

@@ -9,12 +9,10 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use yunta_core::{NodeId, RunId, Workflow};
-use yunta_storage::Storage;
 
 use crate::commands::{check_or_refuse, resolve_workflow_ref};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::project;
 use crate::render::NodeDisplay;
 
 type Labels = HashMap<NodeId, String>;
@@ -38,10 +36,10 @@ pub fn graph(
     let workflow_path = resolve_workflow_ref(&ctx.cwd, workflow_path)?;
     let workflow = crate::load_workflow(&workflow_path)?;
 
-    check_or_refuse(&workflow, &ctx.project.config, &workflow_path)?;
+    check_or_refuse(&ctx.cwd, &workflow, &ctx.project.config, &workflow_path)?;
 
     let labels = match run_id {
-        Some(run_id) => Some(derive_labels(&ctx.project, run_id, &workflow)?),
+        Some(run_id) => Some(derive_labels(&ctx, run_id, &workflow)?),
         None => None,
     };
 
@@ -62,18 +60,13 @@ pub fn graph(
 /// reach it or is never going to. A node this run's mode excludes is
 /// skipped, a node the mode includes and the log has nothing for never
 /// ran, and the two are different answers to the same question.
-fn derive_labels(
-    project: &project::Project,
-    run_id: &RunId,
-    workflow: &Workflow,
-) -> Result<Labels, CliError> {
-    let storage = Storage::open(&project.storage_path)?;
-    let events = storage.events_for_run(run_id)?;
+fn derive_labels(ctx: &Context, run_id: &RunId, workflow: &Workflow) -> Result<Labels, CliError> {
+    let events = ctx.storage()?.events_for_run(run_id)?;
     if events.is_empty() {
-        return Err(CliError::msg(format!(
-            "no run `{run_id}` in {}",
-            project.storage_path.display()
-        )));
+        return Err(CliError::RunNotFound {
+            id: run_id.clone(),
+            roots: ctx.run_roots(),
+        });
     }
 
     let state = yunta_engine::derive(&events);

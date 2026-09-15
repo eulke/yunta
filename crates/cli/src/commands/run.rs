@@ -184,7 +184,7 @@ fn mock_fixture<'a>(
 /// adapter step whole: a scripted session needs no binary, so none is
 /// built or probed for it, and the caller gets an empty registry to
 /// fill from the fixture once the run has a directory to read it into.
-async fn runnable(
+pub(super) async fn runnable(
     ctx: &Context,
     workflow_path: &Path,
     raw_inputs: &[String],
@@ -278,7 +278,7 @@ async fn estimate(ctx: &Context, manifest: &Manifest, quiet: bool, json: bool) -
 fn resolve_and_check(ctx: &Context, workflow_path: &Path) -> Result<(PathBuf, Workflow), CliError> {
     let resolved = super::resolve_workflow_ref(&ctx.cwd, workflow_path)?;
     let workflow = crate::load_workflow(&resolved)?;
-    super::check_or_refuse(&workflow, &ctx.project.config, &resolved)?;
+    super::check_or_refuse(&ctx.cwd, &workflow, &ctx.project.config, &resolved)?;
     Ok((resolved, workflow))
 }
 
@@ -315,7 +315,7 @@ async fn build_frozen_manifest(
 /// clock, prepares the isolation worktree and creates the run — the
 /// shared create step of an executed run and a detached one. Prints
 /// nothing of its own: the caller reports what it made.
-async fn create_run_from(
+pub(super) async fn create_run_from(
     ctx: &Context,
     storage: &AsyncStorage,
     frozen: &FrozenRun,

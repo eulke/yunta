@@ -6,7 +6,7 @@ workflow: build-feature
 mode: standard
 inputs: { idea: "add dark mode" }
 worktree: worktrees/library
-fixture: fixtures/build-feature.yaml
+fixture: fixtures/up-to-the-plan.yaml
 expect:
   final_state: paused
   nodes:

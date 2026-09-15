@@ -820,3 +820,47 @@ fn inherited_findings_dedup_the_way_the_frame_counts_them() {
     );
     assert_eq!(yunta_engine::inherited_findings(&events).len(), 2);
 }
+
+#[tokio::test]
+async fn a_promotion_successor_is_stamped_by_the_run_clock() {
+    // Deciding is a pure function of what it is handed, and time is
+    // handed in: a successor carries the caller's reading of the clock,
+    // never the wall clock read behind its back. A chain whose members
+    // disagree about when they happened is a chain nobody can replay.
+    let interaction = ScriptedInteraction::choose("promote");
+    let closed = run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &[]).await;
+    assert!(matches!(closed.terminal, RunTerminal::Promoted { .. }));
+
+    let successor = yunta_engine::create_promotion_successor(
+        yunta_engine::Predecessor {
+            id: &closed.run_id,
+            manifest: &closed.manifest,
+            worktree: &closed.worktree,
+            run_dir: &closed.run_dir,
+        },
+        &closed.worktree,
+        &ModeName::from("full"),
+        yunta_engine::RunRoots {
+            runs: &closed.runs_root,
+            worktrees: &closed.runs_root.parent().unwrap().join("worktrees"),
+        },
+        yunta_engine::CallerInfra {
+            storage: &closed.storage.async_handle(),
+            clock: &FixedClock,
+            ids: &IDS,
+            supervision: yunta_engine::process::Supervision::none(),
+        },
+    )
+    .await
+    .expect("the successor is created");
+
+    let events = closed.storage.events_for_run(&successor.run_id).unwrap();
+    let born = events.first().expect("the successor's own birth");
+    assert_eq!(
+        born.timestamp,
+        chrono::DateTime::parse_from_rfc3339(yunta_testkit_core::FIXED_NOW)
+            .unwrap()
+            .with_timezone(&chrono::Utc),
+        "the clock the caller handed in, not the one on the wall"
+    );
+}

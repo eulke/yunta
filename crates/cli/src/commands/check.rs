@@ -15,9 +15,12 @@ use crate::error::{note, warn, CliError, Outcome};
 use crate::{load_yaml, project};
 
 pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome, CliError> {
-    // The one directory this command resolves everything against: the
-    // catalog reference, the config layers, and the composition graph.
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    // The one prologue: the directory this command resolves everything
+    // against — the catalog reference, the config layers, the
+    // composition graph — comes from the same `Context` its history
+    // reading does, so a project resolved twice cannot be two projects.
+    let ctx = Context::load()?;
+    let cwd = ctx.cwd.clone();
     let workflow_path = super::resolve_workflow_ref(&cwd, workflow_path)?;
     let workflow = crate::load_workflow(&workflow_path)?;
 
@@ -58,16 +61,12 @@ pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<O
     // --workflow`. Best effort: a project with no state root yet (nothing
     // ever ran) or an unnamed workflow simply shows nothing, the same
     // stance `list_workflows` takes on missing history.
-    if let Ok(ctx) = Context::load() {
-        {
-            let opened = super::stats::history(&ctx, &workflow.name).await;
-            let (history, _) = super::stats::raw_history(&opened);
-            let findings = yunta_engine::analyze_verification_effectiveness(&workflow, &history);
-            let text = super::stats::render_verification_findings(&findings);
-            if !text.is_empty() {
-                note(format!("\n{text}"));
-            }
-        }
+    let opened = super::stats::history(&ctx, &workflow.name).await;
+    let (history, _) = super::stats::raw_history(&opened);
+    let findings = yunta_engine::analyze_verification_effectiveness(&workflow, &history);
+    let text = super::stats::render_verification_findings(&findings);
+    if !text.is_empty() {
+        note(format!("\n{text}"));
     }
 
     if errors.is_empty() {

@@ -234,7 +234,30 @@ case — `mode: standard` and `inputs: { idea: "add dark mode" }` — see
 [`packs/fragua/.yunta/tests/`](../packs/fragua/.yunta/tests) for mode-specific
 cases.
 
-Every case runs in a fresh, empty repository. A workflow whose nodes read
+A case answers a gate the way a person does, under `decisions:`, by node id
+and by the option that gate's own menu offers:
+
+```yaml
+# .yunta/tests/approved.yaml
+workflow: review
+fixture: fixtures/review.yaml
+decisions:
+  approve-plan: approve
+expect:
+  final_state: finished
+```
+
+The decision goes on the run's log and the run is handed back, so what it
+reaches afterwards is what a real answer reaches — a promotion included, which
+is what `final_state: promoted` asserts. A gate no entry names is a gate nobody
+answers, and the run parks on it; each answer is spent once, so a workflow that
+parks on the same gate twice stops there the second time.
+
+A fixture describes what the run does, so every session it scripts has to be one
+the run opens. A script nothing opened fails the case, naming which: two modes of
+one workflow that open different sessions read different fixtures.
+
+Every case runs in a copy of the pack's own `.yunta/` inside a fresh repository. A workflow whose nodes read
 files (`files:`), take a `path` input or run the project's own toolchain
 declares `worktree: <directory>` (relative to the case file): the directory's
 contents become the sandbox's initial commit before any session starts, so

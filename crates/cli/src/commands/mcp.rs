@@ -357,7 +357,7 @@ async fn tool_resolve_gate(
     args: &serde_json::Map<String, Value>,
 ) -> Result<String, CliError> {
     let run_id = required_run_id(args)?;
-    let option = required_str(args, "option")?;
+    let option = required_str(args, "option")?.parse::<yunta_core::OptionId>()?;
     let by = args
         .get("by")
         .and_then(Value::as_str)
@@ -365,31 +365,10 @@ async fn tool_resolve_gate(
         .transpose()?;
     let text = args.get("text").and_then(Value::as_str).map(str::to_string);
 
+    // The command's own path, called rather than copied: a client that
+    // answers a gate records exactly what a person answering it records,
+    // under this server's own injected clock, and reads back the same
+    // sentence.
     let ctx = Context::resolve_in(cwd.to_path_buf())?;
-    let open = ctx.open_run(&run_id).await?;
-    let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
-    let storage = ctx.async_storage().await?;
-
-    yunta_engine::resolve_gate(
-        &manifest,
-        &storage,
-        &run_id,
-        &yunta_core::SystemClock,
-        yunta_core::events::HumanChoice {
-            option: option.parse::<yunta_core::OptionId>()?,
-            by: crate::identity::responder(by.as_ref()),
-            free_text: text,
-        },
-    )
-    .await
-    .map_err(|refusal| CliError::gate_refused(&run_id, refusal))?;
-
-    super::spawn_detached_resume(&run_dir, run_id.as_str(), cwd)
-        .await
-        .map_err(|source| CliError::GateRecordedNotResumed {
-            source: super::DetachedResumeError::new(&run_id, source),
-        })?;
-    Ok(format!(
-        "run {run_id}: resolved `{option}`, driving forward independently"
-    ))
+    super::resolve_gate::resolve(&ctx, &run_id, &option, by.as_ref(), text.as_deref()).await
 }

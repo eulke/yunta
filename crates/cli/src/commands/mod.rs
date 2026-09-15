@@ -344,6 +344,7 @@ pub(crate) fn resolve_workflow_ref(cwd: &Path, reference: &Path) -> Result<PathB
 /// whether this workflow already lives inside a pack, since the
 /// cross-pack composition rule only applies once you're inside one.
 pub(crate) fn check_or_refuse(
+    cwd: &std::path::Path,
     workflow: &Workflow,
     config: &ConfigLayer,
     workflow_path: &std::path::Path,
@@ -359,12 +360,10 @@ pub(crate) fn check_or_refuse(
     // within depth) reads the repo catalog under the current
     // directory — the same `.yunta/workflows/` a run's children resolve
     // against at birth.
-    if let Ok(cwd) = std::env::current_dir() {
-        let origin = yunta_engine::origin_of(&cwd, workflow_path);
-        errors.extend(yunta_engine::check_workflow_refs(
-            workflow, config, &cwd, &origin,
-        ));
-    }
+    let origin = yunta_engine::origin_of(cwd, workflow_path);
+    errors.extend(yunta_engine::check_workflow_refs(
+        workflow, config, cwd, &origin,
+    ));
     if errors.is_empty() {
         return Ok(());
     }

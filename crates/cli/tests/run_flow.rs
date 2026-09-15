@@ -3043,3 +3043,181 @@ fn every_command_that_opens_a_run_refuses_a_missing_one_with_the_same_sentence()
         "and where this binary looked for it: {first}"
     );
 }
+
+/// A workflow with somewhere later to go, whose only node exhausts its
+/// re-routes at once — so the decision it parks on is the one that
+/// offers `promote`.
+const PROMOTABLE: &str = r#"
+name: promotable
+modes:
+  quick: { include: [check, fix] }
+  full:  { include: all }
+nodes:
+  - id: check
+    kind: bash
+    run: "test -f fixed.txt"
+    on_failure: { goto: fix, max_reroutes: 0 }
+  - id: fix
+    kind: bash
+    run: "touch fixed.txt"
+"#;
+
+#[test]
+fn a_case_answers_a_gate_and_reaches_the_promotion_it_expects() {
+    // `expect: promoted` is reachable because a case answers a gate the
+    // way a person does: the run parks, the decision goes on its log,
+    // and the run is handed back through the same consequence path.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(&repo.join(".yunta/workflows/promotable.yaml"), PROMOTABLE);
+    write(
+        &repo.join(".yunta/tests/fixtures/none.yaml"),
+        "sessions: []\n",
+    );
+    write(
+        &repo.join(".yunta/tests/promotes.yaml"),
+        r#"
+workflow: promotable
+mode: quick
+fixture: fixtures/none.yaml
+decisions:
+  check: promote
+expect:
+  final_state: promoted
+"#,
+    );
+
+    let out = yunta_in!(&repo, &home, &["test"]);
+    assert!(
+        out.status.success(),
+        "stdout: {}\nstderr: {}",
+        stdout(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout(&out).contains("case promotes ... ok"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn a_case_whose_fixture_describes_a_session_nobody_opened_fails() {
+    // A fixture is the case's own account of what the run does. One
+    // that scripts a session the run never opens describes a run
+    // nobody made, and the case says so rather than passing.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/workflows/one-node.yaml"),
+        "name: one-node\nnodes:\n  - id: touch\n    kind: bash\n    run: \"true\"\n",
+    );
+    write(
+        &repo.join(".yunta/tests/fixtures/spare.yaml"),
+        "sessions:\n  - outcome: { type: completed, summary: \"nobody asked\" }\n",
+    );
+    write(
+        &repo.join(".yunta/tests/spare.yaml"),
+        "workflow: one-node\nfixture: fixtures/spare.yaml\nexpect:\n  final_state: finished\n",
+    );
+
+    let out = yunta_in!(&repo, &home, &["test"]);
+    let text = stdout(&out);
+    assert!(!out.status.success(), "{text}");
+    assert!(
+        text.contains("1 scripted session nothing opened") && text.contains("#1"),
+        "the case names which script went unclaimed: {text}"
+    );
+}
+
+#[test]
+fn yunta_test_and_yunta_run_execute_the_same_recipe() {
+    // One execution path: a case resolves its workflow through the same
+    // catalog, refuses on the same static check, freezes the same
+    // manifest and drives through the same call. So a workflow this
+    // binary would refuse to run is refused to a case in the same
+    // words, and one it runs reaches the same stop.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/workflows/recipe.yaml"),
+        "name: recipe\nnodes:\n  - id: touch\n    kind: bash\n    run: \"echo made > made.txt\"\n",
+    );
+    write(
+        &repo.join(".yunta/tests/fixtures/none.yaml"),
+        "sessions: []\n",
+    );
+    write(
+        &repo.join(".yunta/tests/recipe.yaml"),
+        "workflow: recipe\nfixture: fixtures/none.yaml\nexpect:\n  final_state: finished\n  nodes:\n    touch: finished\n",
+    );
+
+    let driven = yunta_in!(
+        &repo,
+        &home,
+        &[
+            "run",
+            "recipe",
+            "--adapter",
+            "mock",
+            "--fixture",
+            ".yunta/tests/fixtures/none.yaml",
+        ]
+    );
+    assert!(driven.status.success(), "{}", stderr(&driven));
+    assert!(stdout(&driven).contains("finished"), "{}", stdout(&driven));
+
+    let cased = yunta_in!(&repo, &home, &["test"]);
+    assert!(cased.status.success(), "{}", stdout(&cased));
+    assert!(
+        stdout(&cased).contains("case recipe ... ok"),
+        "{}",
+        stdout(&cased)
+    );
+
+    // Now the same workflow, broken the same way for both: a node
+    // rerouting to one the only mode leaves out. `check` refuses it,
+    // and a case is refused by that same check rather than running a
+    // workflow `yunta run` would not.
+    write(
+        &repo.join(".yunta/workflows/recipe.yaml"),
+        "name: recipe\nmodes:\n  only: { include: [touch] }\nnodes:\n  - id: touch\n    kind: bash\n    run: \"true\"\n    on_failure: { goto: mend, max_reroutes: 1 }\n  - id: mend\n    kind: bash\n    run: \"true\"\n",
+    );
+
+    let refused_run = yunta_in!(
+        &repo,
+        &home,
+        &[
+            "run",
+            "recipe",
+            "--adapter",
+            "mock",
+            "--fixture",
+            ".yunta/tests/fixtures/none.yaml",
+        ]
+    );
+    assert!(!refused_run.status.success());
+    let said = String::from_utf8_lossy(&refused_run.stderr).into_owned();
+
+    let refused_case = yunta_in!(&repo, &home, &["test"]);
+    assert!(!refused_case.status.success());
+    let complaint = "a mode that keeps a node keeps what it reroutes to";
+    assert!(said.contains(complaint), "yunta run: {said}");
+    assert!(
+        stdout(&refused_case).contains(complaint),
+        "yunta test: {}",
+        stdout(&refused_case)
+    );
+}

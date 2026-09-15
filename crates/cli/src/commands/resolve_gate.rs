@@ -16,13 +16,21 @@ use yunta_core::{OptionId, Responder, RunId};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 
-pub async fn resolve_gate(
+/// Records the decision and hands the run back, returning the sentence
+/// that says so.
+///
+/// The one path a gate is answered through, whichever door asked: the
+/// command below prints this sentence on stdout, and the control
+/// plane's `resolve_gate` tool returns it in a tool result. Two doors,
+/// one decision, one wording — and one place that knows a decision
+/// recorded is not a decision undone when the hand-off fails.
+pub(crate) async fn resolve(
+    ctx: &Context,
     run_id: &RunId,
     option: &OptionId,
     resolved_by: Option<&Responder>,
     free_text: Option<&str>,
-) -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
+) -> Result<String, CliError> {
     let open = ctx.open_run(run_id).await?;
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let storage = ctx.async_storage().await?;
@@ -46,6 +54,21 @@ pub async fn resolve_gate(
         .map_err(|source| CliError::GateRecordedNotResumed {
             source: super::DetachedResumeError::new(run_id, source),
         })?;
-    println!("run {run_id}: resolved `{option}`, driving forward independently");
+    Ok(format!(
+        "run {run_id}: resolved `{option}`, driving forward independently"
+    ))
+}
+
+pub async fn resolve_gate(
+    run_id: &RunId,
+    option: &OptionId,
+    resolved_by: Option<&Responder>,
+    free_text: Option<&str>,
+) -> Result<Outcome, CliError> {
+    let ctx = Context::load()?;
+    println!(
+        "{}",
+        resolve(&ctx, run_id, option, resolved_by, free_text).await?
+    );
     Ok(Outcome::Success)
 }

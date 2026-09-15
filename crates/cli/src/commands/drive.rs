@@ -101,7 +101,7 @@ pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
     let ambient = crate::project::process_env();
     let watching = watch(&env, &shown).await?;
     let root_cancel = watching.cancel.clone();
-    let report = match yunta_engine::execute_run(RunEnv {
+    let report = match execute(Executing {
         run_id: &env.prepared.run_id,
         manifest: env.manifest,
         run_dir: &env.prepared.run_dir,
@@ -110,15 +110,13 @@ pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
         storage: env.storage,
         clock: std::sync::Arc::new(env.ctx.clock),
         ids: &env.ctx.ids,
-        max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: &watching.asking,
         forge: forge.as_deref(),
         cancel: Some(&root_cancel),
         adapter_override: env.adapter_override.as_ref(),
-        ambient: Some(&ambient),
-        secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
         observer: watching.observer.clone(),
-        fence_hook: Some(env.ctx.fence_hook.clone()),
+        fence_hook: env.ctx.fence_hook.clone(),
+        ambient: &ambient,
     })
     .await
     {
@@ -136,6 +134,61 @@ pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
         watching,
         report,
     )
+    .await
+}
+
+/// One run, handed to the engine.
+///
+/// Everything below this line is the same for the run an invocation was
+/// given and for every successor a promotion makes: the retry ceiling,
+/// the ambient environment, the secrets source, how a `RunEnv` is
+/// filled in. It used to be written twice — here and in the promotion
+/// loop — and the two agreed only by attention, so a field added to one
+/// was a field missing from the other.
+pub(crate) struct Executing<'a> {
+    pub(crate) run_id: &'a RunId,
+    pub(crate) manifest: &'a Manifest,
+    pub(crate) run_dir: &'a Path,
+    pub(crate) worktree: &'a Path,
+    pub(crate) adapters: &'a super::Adapters,
+    pub(crate) storage: &'a AsyncStorage,
+    pub(crate) clock: std::sync::Arc<dyn Clock>,
+    pub(crate) ids: &'a dyn yunta_core::IdSource,
+    pub(crate) human_interaction: &'a dyn yunta_engine::HumanInteraction,
+    pub(crate) forge: Option<&'a dyn yunta_core::port::Forge>,
+    pub(crate) cancel: Option<&'a tokio_util::sync::CancellationToken>,
+    /// `--adapter <id>`: every runner resolves to its candidate on this
+    /// adapter. A successor never carries one — the override belongs to
+    /// the invocation that asked for it, and a promotion is the run
+    /// carrying on, not a new invocation.
+    pub(crate) adapter_override: Option<&'a AdapterId>,
+    pub(crate) observer: Option<std::sync::Arc<dyn yunta_engine::RunObserver>>,
+    pub(crate) fence_hook: yunta_core::fence::FenceHook,
+    pub(crate) ambient: &'a yunta_core::Env,
+}
+
+/// Runs one run to its stop — the one `execute_run` call this binary
+/// makes.
+pub(crate) async fn execute(on: Executing<'_>) -> Result<RunReport, yunta_engine::RunError> {
+    yunta_engine::execute_run(RunEnv {
+        run_id: on.run_id,
+        manifest: on.manifest,
+        run_dir: on.run_dir,
+        worktree: on.worktree,
+        adapters: on.adapters,
+        storage: on.storage,
+        clock: on.clock,
+        ids: on.ids,
+        max_task_retries: DEFAULT_MAX_RETRIES,
+        human_interaction: on.human_interaction,
+        forge: on.forge,
+        cancel: on.cancel,
+        adapter_override: on.adapter_override,
+        ambient: Some(on.ambient),
+        secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
+        observer: on.observer,
+        fence_hook: Some(on.fence_hook),
+    })
     .await
 }
 
@@ -207,6 +260,8 @@ async fn finish(
             cwd: &env.ctx.cwd,
             project: &env.ctx.project,
             storage: env.storage,
+            clock: std::sync::Arc::new(env.ctx.clock),
+            fence_hook: env.ctx.fence_hook.clone(),
             ids: &env.ctx.ids,
             adapters: &env.adapters,
             forge,

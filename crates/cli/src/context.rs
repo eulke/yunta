@@ -55,6 +55,31 @@ impl Context {
         })
     }
 
+    /// The same project with its state roots moved under `sandbox` and
+    /// its work happening in `worktree` — what `yunta test` runs a case
+    /// in.
+    ///
+    /// The config is this project's real one, layers and all, because a
+    /// case exists to exercise the workflow the repo actually declares;
+    /// everything a run *writes* goes under the sandbox instead, so a
+    /// case leaves nothing behind and two cases never meet. The clock
+    /// and the id source are the invocation's own: a case is scripted
+    /// in what its sessions do, not in when they happened.
+    pub fn sandboxed(&self, worktree: PathBuf, sandbox: &std::path::Path) -> Self {
+        Self {
+            cwd: worktree,
+            project: Project {
+                config: self.project.config.clone(),
+                runs_root: sandbox.join("runs"),
+                worktrees_root: sandbox.join("worktrees"),
+                storage_path: sandbox.join("events.db"),
+            },
+            clock: self.clock,
+            ids: self.ids,
+            fence_hook: self.fence_hook.clone(),
+        }
+    }
+
     /// The async event-log handle `run`, `resume`, `cancel` and `status`
     /// drive the engine and read derived state through.
     pub async fn async_storage(&self) -> Result<AsyncStorage, CliError> {
