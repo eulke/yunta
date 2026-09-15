@@ -3,16 +3,16 @@ number: D147
 title: "Un adapter real monta el servidor MCP por sesión; la capacidad deja de ser solo del mock"
 status: revised
 revises: []
-revised_by: []
+revised_by: [D178, D180]
 ---
 
 # D147 — Un adapter real monta el servidor MCP por sesión; la capacidad deja de ser solo del mock
 
-*(Revisada: la regla de permiso se escribe `mcp__yunta__*` — un prefijo de
-servidor sin `__<tool>` ni `__*` no nombra ninguna tool y el CLI lo descarta
-con un warning de arranque.)* `claude-code` lo recibe como servidor HTTP
+*(Revisada por D178: la regla de permiso nombra al servidor entero,
+`mcp__<servidor>__*`. Revisada por D180: el servidor per-run se llama
+`yunta-run`.)* `claude-code` lo recibe como servidor HTTP
 externo (`--mcp-config` a un archivo en `run.dir/scratch`, permisos `0600`, y
-`--allowedTools mcp__yunta__*` para permitir el servidor entero sin que el
+`--allowedTools mcp__yunta` para permitir el servidor entero sin que el
 adapter tenga que conocer la lista de tools); `codex` por overrides `-c`
 (`experimental_use_rmcp_client`, `mcp_servers.yunta.url`, y
 `bearer_token_env_var` con el token en el entorno del hijo).

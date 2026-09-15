@@ -41,7 +41,7 @@ flowchart LR
   V --> R[Region: lo abierto]
   S --> SB[Scrollback: lo que cerró]
   S --> LN[Lines: todo momento, con elapsed]
-  F --> CL[Closing · status · --json: sin cambios]
+  F --> CL[Closing · status · --json: los nodos por el frame, M30 8-04]
 ```
 
 ## La derivación
@@ -221,7 +221,8 @@ hay `gone` que olvidar, porque un nodo que cierra dos veces son dos momentos.
   → `record(&[String])`; se borra `restart`.
 - **view.rs**: se borran `graduation`, `settled_nodes`, `working_nodes`;
   `closed_as` queda.
-- **Closing · status · --json · MCP**: sin cambios.
+- **Closing · status · --json · MCP**: `status` y `--json` listan los
+  nodos por el frame (M30, 8-04); Closing y MCP sin cambios.
 - **Turns · Feed · Fold**: sin cambios.
 
 ## El pase del pintor

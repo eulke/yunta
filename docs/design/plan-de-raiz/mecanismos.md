@@ -1,4 +1,4 @@
-# Los veintiséis mecanismos, uno por uno
+# Los treinta y un mecanismos, uno por uno
 
 Para cada mecanismo: qué vicio vuelve irrepresentable, las firmas exactas, los
 archivos que toca (nuevo · modifica · borra), los tests que lo sostienen y los
@@ -24,7 +24,7 @@ pub trait Adapter: Send + Sync { /* idéntico a adapters/src/session.rs:251-280 
 pub trait AgentSession: Send { /* idéntico a session.rs:282-305 */ }
 pub struct SessionRequest { /* idéntico a session.rs:44-105; en 3-08 toma la forma de cerco.md §3 */ }
 pub struct RunToolsEndpoint { pub url: String, pub token: Secret<String> }
-pub const SERVER_NAME: &str = "yunta";
+pub const SERVER_NAME: &str = "yunta";   // M31 (fase 8) lo fija en "yunta-run"
 pub enum ProbeReport { Healthy { version: Option<String> }, Unhealthy { diagnostic: String } }
 pub enum AgentEvent { /* idéntico; en 3-08 gana `fence` en SessionOpened y `WriteRefused` (cerco.md §3) */ }
 pub enum AdapterError { /* idéntico */ }
@@ -477,6 +477,13 @@ blanca `process.rs`); `every_gate_and_questions_node_carries_a_node_span`
 
 **Cierra.** EN-D1, EN-D7 (parte), EN-D8, EN-D9, EN-D10, EN-D12, EN-D13, EN-D16, EN-D17, EN-D18, EN-D19, AD-D1, AD-D11, AD-D12, AD-D21, CLI-D15, CO-20.
 
+**Lo que M27 termina (fase 8).** Lo que 3-05 construyó es `Supervision`
+(`registry: Option`, `env: &[(String, String)]`, sin `secrets`, que viajan
+por `RunEnv.secrets`), no el `Shell` firmado arriba; M27 le quita el
+`Option` a `cancel` y `clock`, borra `Supervision::none` y la pareja
+sincrónica de git, y le da a `init` y a `yunta test` el token que este
+mecanismo les dejaba sin dar.
+
 ---
 
 ## M11 · Secreto
@@ -920,7 +927,9 @@ cancel-in-progress: true }`; `timeout-minutes: 30` por job; step `cargo test
 **`cargo xtask adr --check`**: lee `docs/design/adr/D*.md`, exige
 front-matter `number,title,status,revises,revised_by`, numeración sin
 huecos ni duplicados, toda cita `D\d+` en cualquier `docs/**/*.md` resuelve,
-`revises`/`revised_by` recíprocos, y regenera `adrs.md` (índice: número,
+`revises`/`revised_by` recíprocos, el estado concorde con los revisores
+(`accepted` sin revisor; `revised` y `retired` con al menos uno; M29), y
+regenera `adrs.md` (índice: número,
 título, estado, revisado-por, enlace) comparándolo byte a byte.
 
 **Pase de corpus**: script único en `xtask` (`cargo xtask docs-unescape`,
@@ -952,7 +961,9 @@ hoy explica el atajo se borra (`check_exec.rs:77-82`, `criteria.rs:29-36`,
 
 **Los cinco de P3 (D167).** Se construyen el baseline eager en `create_run`
 (D18, §7.2 del Contrato) y el orden de criterios aprendido del log desde
-`TaskLedger` (D62): ítems 7-05 y 7-06, cada uno con su test. Se registraron
+`TaskLedger` (D62): ítems 7-05 y 7-06, cada uno con su test; M28 (fase 8,
+D176) reemplaza la captura al nacer por la medición en el primer despertar
+y la herencia por linaje. Se registraron
 los hooks de edición (A-13, que M25 cierra), las preguntas por PR (A-14) y
 las fuentes de contexto por executor (A-15).
 
@@ -971,7 +982,7 @@ decide la confirma dejando la fila, o la cambia.
 | I-05 | `RunStats::{artifact_submissions, submissions_by_node, findings, findings_by_node, findings_effective}`, `Submissions`, `FindingActivity` | `engine/src/stats.rs:110-125,155-172,470-535` | un pase propio los calcula | la superficie: `RunStatsJson` y el texto de `yunta stats` | construir: `stats.rs` renderiza los dos conteos (M16) | 5-02 |
 | I-06 | `EngineProcessFile.started_at` | `engine/src/process_registry.rs:29` | el instante en que el engine tomó el run | `cancel.rs` compara el arranque del pid contra `started_at` con la regla de `lock::holder_state` antes de señalar | construir: con `DateTime<Utc>` (M12) y la comparación en la cáscara (M10) | 3-05 |
 | I-07 | `interactive:` del nodo hasta `HumanInteraction::ask(…, interactive)` | `engine/src/human_interaction.rs:57-64`; `cli/src/human_interaction.rs:106` | D86: dato de presentación | una superficie que lo lea | retirar (D173): del nodo, del trait y del schema; un nodo que declara `questions` ya dijo todo (`preguntas.md` §2, §5) | W-11 |
-| I-08 | `NodeFrame.group: Option<NodeId>` | `engine/src/view/node.rs:29-33` | el frame sabe a qué grupo pertenece un nodo | agrupar en `cli/src/surface/view.rs::node_rows` y en `status` | construir: la crónica y el frame sangran los hijos bajo su grupo (M19) | 5-05 |
+| I-08 | `NodeFrame.group: Option<NodeId>` | `engine/src/view/node.rs:29-33` | el frame sabe a qué grupo pertenece un nodo | agrupar en `cli/src/surface/view.rs::node_rows` y en `status` | construir: la crónica y el frame sangran los hijos bajo su grupo (M19) | 8-04 |
 | I-09 | la mitad-valor de `RunToolsHost.blackboard_members: HashMap<NodeId, Vec<NodeId>>` | `engine/src/run_tools/host.rs:30,59-71` | el host sabe los miembros de cada grupo | que `consolidate_blackboard` se los pida (`members_of(&NodeId) -> &[NodeId]`) y `node_exec.rs:136-137` deje de recalcularlos | construir: un lugar para los miembros (M04) | 2-03 |
 | I-10 | `SessionRequest.adapter_settings` | `adapters/src/session.rs:66` | spec-adapter §4: el adapter recibe su config | que cada adapter lo lea en `spawn`/`resume` | construir: `open_session` lo arma (M08) y cada adapter consume el suyo por `typed_settings` (M09, 3-07) | 3-07 |
 | I-11 | `MockAdapter::unconsumed(&self) -> Vec<usize>` | `adapters/src/mock/mod.rs:97` | un fixture dice qué sesiones pasan | que `yunta test` y el `Bench` fallen el caso con scripts sin reclamar | construir: un script sin reclamar falla el caso siempre —un fixture que describe sesiones que no ocurrieron miente— (M18) | 5-04 |
@@ -1013,3 +1024,708 @@ de punta a punta hoy (`preguntas.md` §9).
 
 **Cierra.** EN-D27, EN-D28, EN-D29, EV-D20, AR-D19, CO-21, DO-D45; M24 I-01
 (5-06), I-07.
+
+---
+
+## M27 · La cáscara nace con el proceso
+
+**Vicio V8**, la mitad que M10 dejó: el tipo `Supervision` admite «sin
+dueño» —`#[derive(Default)]` en `process.rs:26` y `none()` en `:49-54`:
+`registry: None`, `cancel: None`, `clock: None`— y producción lo usa ocho
+veces: `engine/src/run/create.rs:274` (la suite del baseline, que M28 se
+lleva) y `:398` (el git de `carried_into`); `cli/src/commands/run.rs:355`
+(`prepare_worktree`), `run/detach.rs:145` (`hand_over_worktree`) y `:154`
+(`release_worktree`), `drive.rs:388` (`release_worktree` en `released`),
+`promote.rs:98` (`CallerInfra` de `drive_promotions`: `head_commit`,
+`prepare_worktree` y el `create_run` del sucesor), `pack.rs:82` (`run_git`,
+que sirven `clone_pack`, `head_commit` y `current_branch` para `pack add` y
+`pack update`). La pareja sincrónica de git —`output_blocking` y
+`success_blocking`, `git.rs:212-230`— lanza `Command::new("git")` sin
+gobierno alguno desde `build_manifest` (`manifest.rs:203`, `git_line`; corre
+también dentro de `workflow_exec` para el manifest del hijo), `init.rs:90,98`
+y `test/mod.rs:201`. El token de Ctrl-C del CLI nace en `drive.rs:221`
+(`cancel_on_ctrl_c`), después del worktree y del nacimiento; `RunEnv.cancel`
+es `Option` (`run/mod.rs:284`) y `build_ctx` inventa un token que nadie
+dispara (`exec.rs:378`); `Executing.cancel` (`drive.rs:159`) y
+`PromotionEnv.cancel` (`promote.rs:43`) son `Option` y `yunta test` pasa
+`None` (`test/case.rs:191,313`); `AttemptEnv.clock` es `Option<&dyn Clock>`
+(`task_cycle/mod.rs:242`) y el literal de `task_cycle/mod.rs:282-287` lo
+desenvuelve; el reloj de respaldo `SystemClock` vive en `process.rs:45`, fuera
+de `clock.rs`/`main.rs` (§0.10). Evidencia: L-91 (§11); EN-D30, EN-D31,
+EN-D32, CLI-D27 (§12).
+
+**Regla.** Ningún subproceso de producción nace sin `Supervision`, y una
+`Supervision` siempre tiene token y reloj: los dos nacen con el proceso —el
+CLI arma uno por invocación, el engine lo recibe en `RunEnv`— y bajan por
+parámetro hasta el spawn. El registro es opcional porque sólo un run tiene
+uno. El CLI arma la interrupción del proceso al cargar su `Context`, una
+vez por invocación, desde una fuente inyectada; todo comando la ve por el
+mismo getter, y los que esperan —`cancel`, `mcp`— la observan. Una
+cancelación es un hecho tipado en toda puerta que spawnea: llega al log
+como `run_paused { cancelled by user }`, nunca como un `Err` que se
+escapa. La línea «interrupt received» la escribe quien mira el run, por la
+puerta que ya usa.
+
+**Firmas.**
+
+```rust
+// engine/src/process.rs — `#[derive(Clone, Copy)]`, sin Default
+pub struct Supervision<'a> {
+    pub registry: Option<&'a ProcessRegistry>,   // sólo un run tiene uno
+    pub cancel: &'a CancellationToken,           // antes Option
+    pub env: &'a [(String, String)],
+    pub clock: &'a dyn Clock,                    // antes Option
+}
+impl<'a> Supervision<'a> {
+    /// A supervision outside any run: the caller's token and clock, no registry and no env overrides — what a CLI command and a test spawn under.
+    pub fn outside_any_run(cancel: &'a CancellationToken, clock: &'a dyn Clock) -> Self;
+    pub fn with_env(self, env: &'a [(String, String)]) -> Self;
+}
+// se borran: `Default` del derive, `Supervision::none()`, `Supervision::clock()` y su `SystemClock`; `worktree/mod.rs:176,222,303,466` pasan de `.clock()` a `.clock`
+
+// engine/src/git.rs — la pareja sincrónica se borra; `build_manifest`, `init` y `yunta test` usan `output`/`success`
+pub async fn build_manifest(workflow: &Workflow, config: &ConfigLayer, repo: &Path, workflow_dir: &Path, inputs: &HashMap<InputName, String>, supervision: Supervision<'_>) -> Result<Built, ManifestError>;   // `git_line` por `git::output`
+// engine/src/run/create.rs — la supervisión del llamador es infraestructura, como storage y clock
+pub async fn create_run(params: CreateRunParams<'_>, storage: &AsyncStorage, clock: &dyn Clock, supervision: Supervision<'_>) -> Result<PathBuf, RunError>;
+//   workflow_exec/mod.rs:372 pasa `ctx.supervision(cancel)` (el token del nodo); run/promote.rs:126 pasa `supervision` de `CallerInfra`
+// engine/src/run/mod.rs — la cancelación es un hecho tipado en toda puerta que spawnea
+pub enum RunError { /* … */ Cancelled, /* … */ }   // lo que `create_run` y `prepare_worktree` devuelven cuando su git fue detenido por el token (`GitError::Cancelled`, que `git::stopped` produce)
+//   workflow_exec/mod.rs:317-335 y :372-385 mapean `RunError::Cancelled` a `node_exec::cancelled_end(ctx, node)`: el padre escribe `run_paused { cancelled by user }` y el CLI corre `released()`
+//   worktree::prepare_worktree deshace lo que empezó cuando su git fue cancelado: el worktree a medio agregar y su rama
+// engine/src/run/mod.rs
+pub struct RunEnv<'a> { /* … */ pub cancel: &'a CancellationToken, /* … */ }   // antes Option; `build_ctx` clona, no inventa
+// engine/src/task_cycle/mod.rs
+pub struct AttemptEnv<'a> { /* … */ pub clock: &'a dyn Clock, /* … */ }   // antes Option; `registry` sigue Option
+// engine/src/run/ctx.rs:105 — `supervision(&self, cancel)` sin cambio de forma: `cancel` y `clock` dejan de envolverse en Some
+
+// cli/src/interrupt.rs (nuevo)
+/// What trips the invocation's cancellation: Ctrl-C on a real command, nothing on a test's, the server's own on a `yunta mcp` request. A value the composition root is handed, never a process global.
+pub(crate) struct Interrupt { token: CancellationToken, listener: Option<JoinHandle<()>> }   // el handle se conserva (M10)
+impl Interrupt { pub(crate) fn ctrl_c() -> Self; pub(crate) fn never() -> Self; pub(crate) fn token(&self) -> &CancellationToken; }
+// cli/src/context.rs
+pub struct Context { /* … */ pub env: yunta_core::Env /* `process_env()` una vez, en `resolve_in` */, interrupt: Interrupt }
+impl Context {
+    pub fn load() -> Result<Self, CliError>;                                          // `Interrupt::ctrl_c()`
+    pub fn resolve_in(cwd: PathBuf, interrupt: Interrupt) -> Result<Self, CliError>;   // `yunta mcp` pasa la suya por pedido; `sandboxed` comparte la del padre
+    /// The token every subprocess of this invocation answers to.
+    pub fn cancel(&self) -> &CancellationToken;                                       // getter puro
+    /// The supervision every subprocess of this invocation runs under: no registry, the invocation's interrupt, its env and its clock.
+    pub fn supervision(&self) -> Supervision<'_>;    // Supervision::outside_any_run(self.cancel(), &self.clock).with_env(&self.env.subprocess_vars)
+}
+//   drive.rs:101, promote.rs:102 y cli.rs:428 dejan de leer `process_env()`: `Executing.ambient` y `PromotionEnv` toman `&ctx.env`.
+//   `cancel.rs` espera la muerte del engine con `select!` sobre `ctx.cancel()`; `mcp.rs` cierra el servidor cuando dispara.
+// cli/src/commands/mod.rs:52 — `cancel_on_ctrl_c(diagnostics)` se borra; `drive::watch` (drive.rs:221) toma `ctx.cancel()` y lanza el watcher que escribe
+//   "interrupt received — stopping the run (sessions get interrupt, then kill)" por la `Diagnostics` de la superficie o por stderr sin ella (`--json`), como hoy; su handle vive en `Watching`.
+// cli/src/commands/drive.rs — `Executing.cancel: &CancellationToken`; `released` (:379) usa `settling.ctx.supervision()`
+// cli/src/commands/promote.rs — `PromotionEnv { cancel: &CancellationToken, supervision: Supervision<'a>, … }`; `:98` usa `env.supervision`
+// cli/src/commands/run.rs:355,384; run/detach.rs:145,154 — `ctx.supervision()`
+// cli/src/commands/pack.rs::{add, update} — construyen `Context::load()`; `pack.rs::{clone_pack, head_commit, current_branch, run_git}` toman `Supervision<'_>`
+// cli/src/commands/init.rs:90,98 y test/mod.rs:201 — `git::output`/`git::success` con `ctx.supervision()`
+// cli/src/commands/mcp.rs — el servidor observa `ctx.cancel()`: un SIGINT cancela lo que está naciendo y cierra el servidor, como hoy lo cerraba el proceso
+// cli/src/commands/test/case.rs:191,313 — `cancel: ctx.cancel()`
+
+// testkit-core/src/owner.rs (nuevo)
+/// What a test's subprocesses answer to: a token the test may trip and the fixed clock — the supervision outside any run, owned so the borrows have somewhere to live.
+pub struct Owner { cancel: CancellationToken, clock: FixedClock }
+impl Owner { pub fn new() -> Self; pub fn cancel(&self) -> &CancellationToken; pub fn supervision(&self) -> Supervision<'_>; }
+// testkit/src/bench/mod.rs — `cancel: CancellationToken` (nace con el bench; `with_cancel` lo reemplaza); `Bench::supervision(&self) -> Supervision<'_>` = `Supervision::outside_any_run(&self.cancel, self.clock.as_ref()).with_env(..)` para lo que el bench spawnea al nacer y al congelar
+// testkit/src/bench/driving.rs:259 — `create_run(.., self.clock.as_ref(), self.supervision())`; `:326` — `cancel: &self.cancel`; `freeze` pasa `self.supervision()` a `build_manifest`
+```
+
+**Archivos.** Nuevo: `cli/src/interrupt.rs`, `testkit-core/src/owner.rs`,
+`testkit/src/stubs.rs` (`git()`, el stub que M31 amplía) y
+`testkit/stubs/git_stub.sh`. Modifica: `testkit/src/checkout.rs`
+(`Checkout::with_stubs`), `cli/src/commands/cancel.rs`, `cli/src/cli.rs:428`, `engine/src/process.rs`, `engine/src/git.rs`, `engine/src/manifest.rs`,
+`engine/src/worktree/mod.rs` (sólo `.clock()` → `.clock`; §8 lo conserva),
+`engine/src/run/{create.rs, ctx.rs, exec.rs, mod.rs, workflow_exec/mod.rs,
+promote.rs, loop_exec/dispatch.rs}`, `engine/src/task_cycle/mod.rs`,
+`engine/src/lib.rs`, `cli/src/{context.rs, pack.rs, lib.rs}`,
+`cli/src/commands/{mod.rs, drive.rs, run.rs, run/detach.rs, promote.rs,
+pack.rs, init.rs, mcp.rs, test/mod.rs, test/case.rs}`,
+`testkit-core/src/lib.rs`, `testkit/src/bench/{mod.rs, driving.rs}`, los
+tests que construían una `Supervision` a mano —`engine/tests/process.rs:41,79-84,104,155-160`,
+`engine/src/tasks/crossing.rs` ×5, `engine/tests/{promotion.rs ×6, scope.rs ×9,
+worktree.rs ×20, scope_expansion.rs ×9, task_cycle.rs ×10}`, y todo `RunEnv`,
+`CallerInfra` o `build_manifest` literal de un test— por `Owner`;
+`engine/tests/purity.rs` (deja de exceptuar `process.rs`); el texto que
+describía la ausencia: `create.rs:263-267,395-397`, `exec.rs:344-349`,
+`process.rs:21-25,35-39,58-66`, `run/mod.rs:266-270`, `drive.rs:91-92,201-203`,
+`purity.rs:11-14,93-101`, `git.rs:210-211,221`; `xtask/smells.baseline`
+(`system_clock_outside_boundary` baja por medición). Borra: `Supervision::none`,
+`Supervision::clock`, `Default` del derive, `git::{output_blocking,
+success_blocking}`, `manifest::git_line` sincrónico, `commands::cancel_on_ctrl_c`.
+Lo que M10 firmó como `Shell` (`registry` sin `Option`, `&Env`, `secrets`)
+queda en la forma que 3-05 construyó: `Supervision` con `registry: Option`
+—un comando fuera de un run no tiene registro— y sin `secrets`, que ya
+viajan por `RunEnv.secrets`; M10 decía que `init` y `yunta test` corren «sin
+token de cancelación», y desde acá lo tienen.
+
+**Prerequisitos.** Ninguno.
+
+**Tests.** `engine/tests/process.rs`:
+`a_supervision_outside_any_run_still_answers_to_its_token` (rojo: el tipo no
+tiene `outside_any_run` ni exige token);
+`engine/tests/cancel.rs`: `a_cancelled_token_stops_the_git_a_birth_runs`
+(rojo: `create_run` no toma supervisión y el git de `carried_into` corre
+igual) —un run que nace teniendo un documento de tareas con un `done` que
+cruza, con el token ya disparado: `create_run` devuelve
+`RunError::Cancelled`, y como `birth_registrations` corre antes del
+directorio y de `run_created`, no queda run alguno—;
+`engine/tests/workflow_compose.rs`:
+`a_parent_whose_child_birth_is_interrupted_pauses_as_cancelled_by_user`
+(rojo: hoy el `Err` del nacimiento sale de `execute_run` sin `run_paused`;
+verde: el log del padre termina en `run_paused` y el hijo no tiene
+`run_created`); `engine/tests/purity.rs`:
+`no_engine_module_reads_the_process_clock` sin la excepción de `process.rs`
+(rojo hasta borrar el respaldo) y `no_engine_module_spawns_git_outside_the_shell`
+(grep sobre `crates/engine/src` por `Command::new("git")` fuera de `git.rs`,
+rojo por la pareja sincrónica); `cli/src/interrupt.rs` (unit):
+`a_fired_interrupt_cancels_the_contexts_token` (una fuente falsa, disparada,
+y `ctx.cancel().is_cancelled()`); `cli/tests/run_flow.rs`:
+`an_interrupt_while_the_worktree_is_being_prepared_kills_the_git_and_frees_the_lock`
+(el stub `git` del testkit en el `PATH` del comando —`Checkout::with_stubs`—
+delega en el git real salvo en `worktree add`, donde publica su pid por
+rename y bloquea; tras SIGINT ese git está `Liveness::Dead`, el lock del
+checkout no tiene holder y no hay `run_created`; rojo: hoy el git sobrevive
+en su propio grupo y el lock nombra un pid muerto),
+`an_interrupt_during_a_resume_pauses_the_run_as_cancelled_by_user` (hoy
+`resume` no armaba nada antes de `drive`) y
+`an_interrupt_during_yunta_cancel_stops_the_wait`.
+
+**Cierra.** EN-D30, EN-D31, EN-D32, CLI-D27; L-91 (git, worktree y
+manifest; la suite es de M28).
+
+**Encastre.** M10: `spawn_governed` se conserva; `Supervision` es el
+`Shell` de M10 en la forma que 3-05 le dio, ahora sin `Option` en token y
+reloj. M28: la suite del baseline corre bajo `RunCtx::root_supervision`
+porque la mide `execute_run`, no el nacimiento. M20: `Bench` ya llevaba
+`with_cancel`; el token existe siempre, y `Owner` es la infraestructura que
+antes cada test copiaba. M22: `system_clock_outside_boundary` baja. §8:
+`spawn_governed`, `worktree` (integridad, `branch -d`, guard en `Drop`),
+`Env::subprocess_vars`, `wait.rs`, `Terminal` sin cambio de conducta.
+
+---
+
+## M28 · Un baseline por linaje
+
+**Vicio V2** (una pregunta —qué pasaba antes— respondida por run y no por
+linaje) y **V7** (D61 y Contrato §7.2 ¶2 prometen una memoización sin
+construir). Un hijo `kind: workflow` mide de nuevo al nacer
+(`workflow_exec/mod.rs:372` → `create.rs:249`) sobre un árbol que el padre
+ya tocó, así que una regresión del padre le queda invisible al compare del
+hijo; un sucesor de promoción mide de nuevo (`run/promote.rs:126`, el mismo
+`create_run`); `yunta run --detach` y `run_workflow` pagan la suite antes de
+devolver el id (L-93); un nacimiento interrumpido deja un run sin
+`baseline_captured` que ningún despertar repone; y como el nacimiento
+escribe más de un evento, `start()` lee el primer despertar de todo run
+nacido con una suite o con documentos como una reanudación
+(`exec.rs:214-218`, «anything beyond `run_created` means a previous
+invocation worked on this run»), escribe `run_resumed` y verifica una
+historia que no existe. `baseline_compare` y `coverage_gate` corren su
+comando cada vez (`check_exec.rs:103,163`) y el `Memo` del run sólo sirve
+a los criterios (`task_cycle/criteria.rs:17-25`). El hecho está en el
+dominio equivocado: `baseline_captured` «carries no node» y vive en
+`NodeEvent` (`node/kinds.rs:9`), `NodeLedger` no lo pliega (`is_audit`,
+`node/kinds.rs:61`) y cada lector lo busca con un pliegue propio
+(`check_exec.rs:136`, `receipt/mod.rs:348`). `.yunta/config.yaml:29-30`
+de este repo declara `cargo test --workspace` y ninguno de sus dos
+workflows (`lint-fix`, `run-tasks`) ni los dos del pack `starter` que CI
+verifica bajo la misma config comparan. Evidencia: L-91, L-92, L-93,
+L-107 (§11); EN-D33, EN-D34, EN-D37, CLI-D31, DO-D48, DO-D49 (§12).
+
+**Regla.** El baseline es del linaje. La raíz lo mide una vez, en su
+primer despertar, antes de su primer nodo; medirlo es una decisión del
+scheduler y un paso de la cáscara, no un paso ad hoc del despertar. Todo
+run que nace de otro —hijo `kind: workflow`, sucesor de una promoción—
+nace teniendo la medición de la raíz, en su propio log, con origen
+`inherited` que nombra a la raíz; su propia config no se consulta y los
+bytes de la suite quedan con el run que midió. El hecho es del run:
+`RunEvent::BaselineCaptured`, plegado por `RunLedger`, y toda lectura sale
+del estado. Toda `baseline_compare` del linaje compara contra esa única
+medición; dentro de una invocación reutiliza, por el `Memo` de §5.4, el
+resultado de la suite sobre un árbol que no cambió desde otra comparación
+y lo dice en su cierre; `coverage_gate` mide cada vez, porque su veredicto
+lee la salida y no el código. Se mide si y sólo si la config declara
+`baseline.suite`; `yunta check` avisa cuando ni el workflow ni los
+workflows que compone comparan. Un primer despertar se reconoce por lo que
+el log tiene, no por cuántos eventos tiene.
+
+**Firmas.**
+
+```rust
+// core/src/events/run/{kinds.rs, payloads.rs, ledger.rs, happening.rs} — el kind cambia de dominio; el wire no cambia un byte
+pub enum RunEvent { Created(..), PromotionSignaled(..), Paused(..), Resumed(..), Finished(..), BaselineCaptured(BaselineCapturedPayload) }   // is_audit: false — mueve `RunLedger`
+pub struct BaselineCapturedPayload {
+    pub command: String,
+    pub results: BaselineResults,
+    pub hash: ContentHash,
+    /// Whose measurement this is. A log written before the field reads `measured`.
+    #[serde(default)]
+    pub origin: BaselineOrigin,
+}
+#[derive(Default)] #[serde(tag = "type", rename_all = "snake_case")]
+pub enum BaselineOrigin { #[default] Measured, Inherited { run: RunId } }   // `run` es la raíz que midió, nunca el padre inmediato
+impl RunLedger {
+    /// The measurement this run holds — its own, or the one it was born holding. `None` for a lineage whose root declared no suite.
+    pub fn baseline(&self) -> Option<&BaselineCapturedPayload>;
+    /// Whether an invocation already woke this run: it measured, paused, resumed or started a node. What separates a first wake from a resume — a birth writes any number of events.
+    pub fn woken(&self) -> bool;
+}
+pub enum run::happening::Happening { /* … */ BaselineCaptured(BaselineOrigin) }   // words.rs:101: `baseline measured` | `baseline inherited from run <root>`
+//   node/{kinds.rs:9,39,61, happening.rs:40,95,121, ledger.rs:354}, tasks/ledger.rs:142, replay.rs:251, wire.rs:88,134, testkit-core kinds.rs:36 pierden o mueven el brazo; core/tests/events.rs:25 y `all_kinds()` siguen al dominio nuevo
+
+// engine/src/run/schedule.rs — decidir es puro
+pub struct Policy { /* … */ pub baseline_suite: Option<String> }     // Policy::of: manifest.config.baseline.as_ref().map(|b| b.suite.clone())
+pub enum Decision { /* … */ MeasureBaseline { suite: String }, /* … */ }
+//   decide(): antes de cualquier `Execute`, `policy.baseline_suite` es `Some` y `state.run.baseline()` es `None` → `MeasureBaseline`; un run que nació teniéndola o que ya midió nunca la ve
+// engine/src/run/steps.rs — ejecutar es la cáscara
+/// Measures the suite the scheduler decided this run owes, under the run's own supervision: keeps its output under `baseline/`, records `baseline_captured { origin: measured }`. A suite the cancellation stops records nothing; the loop's next step pauses the run.
+pub(super) async fn measure_baseline(ctx: &RunCtx<'_>, suite: String) -> Result<(), RunError>;   // exec.rs:128 gana el brazo `Decision::MeasureBaseline { suite } => steps::measure_baseline(&ctx, suite).await?`
+// engine/src/run/exec.rs:214-218 — `if view.state.run.woken() { resume(&ctx, &view).await?; }` reemplaza `events.len() > 1`
+
+// engine/src/run/baseline.rs (nuevo) — lo que un nacimiento hereda y lo que la suite deja
+/// What a run born of another holds: the root's measurement, named by the run that took it. Pure: the parent's own or inherited capture, with the root resolved.
+pub struct BirthBaseline { pub measured_by: RunId, pub command: String, pub results: BaselineResults, pub hash: ContentHash }
+pub fn inherited(from: &RunId, from_state: &RunState) -> Option<BirthBaseline>;   // `from` cuando el padre midió; `origin.run` cuando heredó
+/// Keeps everything the suite wrote under the measuring run's `baseline/` (`run_dir::baseline_capture`), the file the receipt's hash names. A run born holding a measurement has no `baseline/`: the bytes are under the run its origin names.
+pub(super) async fn keep_capture(run_dir: &Path, output: &[u8]) -> Result<(), RunError>;   // mudada desde create.rs
+// engine/src/run/create.rs
+pub struct CreateRunParams<'a> { /* … */ pub baseline: Option<&'a BirthBaseline> }
+//   `None`: la raíz — nace sin medición. `Some`: nace teniéndola: `baseline_captured { origin: inherited { run: measured_by } }` después de los birth artifacts. `capture_baseline` se borra.
+//   workflow_exec/mod.rs:372 — `baseline: baseline::inherited(ctx.run_id, &derive(&events)).as_ref()` sobre los `events` ya cargados en :132; run/promote.rs:126 — sobre el estado del predecesor;
+//   cli run.rs:385, cli promote.rs:222 (test), testkit driving.rs:260 — `baseline: None`.
+
+// engine/src/task_cycle/criteria.rs — el memo del run sirve a un lector más
+impl Memo {
+    /// The exit code of `cmd` on `cwd` as this invocation already knows it, or by running it now under `supervision`: what a criterion and a `baseline_compare` share.
+    pub(crate) async fn exit_code(&self, cmd: &str, cwd: &Path, supervision: Supervision<'_>) -> Result<Memoized, TaskCycleError>;
+}
+pub struct Memoized { pub exit_code: i32, pub reused: bool }
+//   `run_all_criteria` lo consume (y sigue midiendo la duración); check_exec::execute_baseline_compare compara `ctx.run_view().await?.state.run.baseline()` contra `ctx.memo.exit_code(..)` y cierra con
+//   "no regression vs baseline (exit 0)" o "no regression vs baseline (exit 0, reused: same tree since an earlier compare)"; coverage_gate sigue por `run_command`.
+
+// engine/src/receipt/mod.rs:66-73 — `BaselineSummary { suite, hash, compared, regressions, origin: BaselineOrigin }`, aditivo, `Receipt::SCHEMA_VERSION` queda en 1;
+//   `baseline_summary` lee `state.run.baseline()` del estado que ya deriva; receipt/render.rs:74-83 imprime «(suite `{}`, hash `{}`, measured by run {})» cuando el origen es heredado.
+
+// engine/src/check/warning.rs
+CheckWarning::BaselineNeverCompared { suite: String }
+//   "config declares `baseline.suite` (`{suite}`) and no node of this workflow or of the workflows it composes is a `baseline_compare`: run on its own, this workflow measures the suite before its first node and nothing reads the measurement — add the check, or drop the suite"
+// engine/src/check/refs.rs — la caminata contesta lo que sólo ella puede contestar; `check` y `check_warnings` siguen sin leer archivos
+pub struct RefsCheck { pub errors: Vec<CheckError>, pub warnings: Vec<CheckWarning> }
+pub fn check_workflow_refs(workflow: &Workflow, config: &ConfigLayer, repo_root: &Path, origin: &WorkflowOrigin) -> RefsCheck;
+//   `walk_workflow_refs` gana `compares: &mut bool`, cierto cuando algún workflow recorrido tiene `NodeKind::Check(CheckBuiltin::BaselineCompare)`; al final, `config.baseline.is_some() && !compares` → el warning.
+//   cli/src/commands/check.rs:52-55 y cli/src/commands/mod.rs:355-364 imprimen `refs.warnings` junto a los demás.
+```
+
+**Decisión.** D176 revisa D18 («snapshot al abrir el run»: el primer
+despertar), D61 (`baseline_compare` reutiliza por `Memo`; `coverage_gate`
+mide cada vez) y D167 («`create_run` captura»: el nacimiento hereda, el
+despertar mide), y con ello la mitad de baseline de P3 (§6). Contrato §7.2
+reescrito —¶1 «antes de su primer nodo, en su primer despertar … un run que
+nace de otro nace teniendo la medición de la raíz», ¶2 «un linaje mide la
+suite una vez; cada `baseline_compare` la vuelve a correr sobre su árbol,
+y una invocación no la repite sobre un árbol que no cambió; coverage se
+mide en cada gate»—; §2 línea 16 («snapshot de suite al primer
+despertar»), §2 línea 66 y §3 línea 75 (la fila de `baseline_captured`,
+que pasa al dominio del run); README del plan §3 (la tabla de dominios:
+`baseline_captured` sale de `node` y entra en `run`). spec-events §5.3
+gana la fila `origin` —`{type: measured}` \| `{type: inherited, run}`,
+Oblig. «sí», «un log sin el campo se lee `measured`»—; `schemas/events.json`
+por `xtask schema`. L-107 (§11): `baseline:` sale de `.yunta/config.yaml`
+de este repo —ningún workflow del repo ni del pack `starter` compara, así
+que con la suite CI avisaría cuatro veces por corrida, y `yunta test` sobre
+este repo deja de medir nada—.
+
+**Archivos.** Nuevo: `engine/src/run/baseline.rs`, `docs/design/adr/D176-*.md`.
+Modifica: `core/src/events/run/{kinds.rs, payloads.rs, ledger.rs, happening.rs}`,
+`core/src/events/node/{kinds.rs, payloads.rs, happening.rs, ledger.rs}`,
+`core/src/events/tasks/ledger.rs:142`, `core/src/events/wire.rs`,
+`core/schemas/events.json`, `core/tests/events.rs`, `engine/src/replay.rs:251`,
+`engine/src/run/{create.rs, exec.rs, schedule.rs, steps.rs, check_exec.rs
+(módulo doc :5, rustdoc :76-82, diagnóstico :94-96 — «this run holds no
+baseline: its lineage's root declared no `baseline.suite`»),
+workflow_exec/mod.rs, promote.rs, mod.rs, run_dir.rs:47-53}`,
+`engine/src/observer.rs:21-23` (el `baseline_captured` de la raíz pasa por
+`ctx.emit` y se observa; el nacimiento sólo escribe el heredado),
+`engine/src/task_cycle/criteria.rs`, `engine/src/receipt/{mod.rs, render.rs}`,
+`engine/src/check/{refs.rs, warning.rs}`, `engine/src/lib.rs`,
+`cli/src/commands/{check.rs, mod.rs, run.rs, promote.rs}`,
+`cli/src/surface/chronicle/words.rs`, `testkit-core/src/kinds.rs:36`,
+`testkit/src/bench/driving.rs:30,260`, `docs/design/contrato-del-run.md`,
+`docs/design/spec-events.md:148,153`, `docs/design/adr/{D18, D61, D167}`
+(nota y `revised_by`), `docs/design/adrs.md`, `.yunta/config.yaml`, README
+del plan §3 y §6; los tests que fijan la forma vieja:
+`engine/tests/run_checks.rs:11-59,63-64,90`, `engine/tests/observer.rs:92-94`,
+`engine/tests/receipt.rs:58-63,103,170,313`, `cli/tests/receipt_cmd.rs:51`,
+`engine/tests/schedule.rs`, y los llamadores de `check_workflow_refs` en
+`engine/tests/{check.rs, catalog.rs, pack_permissions_ceiling.rs}`. Borra:
+`create.rs::capture_baseline`, `check_exec.rs::captured_baseline`, el pliegue
+inline de `receipt::baseline_summary`, `NodeEvent::BaselineCaptured`.
+
+**Prerequisitos.** Ninguno: la suite corre bajo `execute_run`, que ya
+está gobernado.
+
+**Tests.** `engine/tests/schedule.rs`:
+`a_run_owing_a_baseline_is_told_to_measure_it_before_any_node` y
+`a_run_born_holding_a_baseline_is_never_told_to_measure` (rojo: `Decision`
+no tiene el brazo); `engine/tests/run_checks.rs`:
+`a_run_born_and_not_yet_woken_holds_no_baseline` (rojo: hoy nace midiendo),
+`the_first_wake_measures_the_baseline_before_any_node` (reemplaza
+`a_run_captures_its_baseline_when_it_is_created`: tras `try_create` el log
+no tiene `baseline_captured`; tras el primer despertar tiene exactamente
+uno, después de `run_created`, sin `run_resumed` antes —rojo: hoy hay uno
+al nacer y el primer despertar escribe `run_resumed`—),
+`a_run_born_holding_documents_is_not_resumed_on_its_first_wake` (rojo),
+`a_resumed_run_measures_nothing_again` (un stub contador por ruta absoluta
+en `baseline.suite`, dos despertares, una medición),
+`two_baseline_compares_on_one_tree_run_the_suite_once_and_the_second_says_so`;
+`engine/tests/cancel.rs`: `a_suite_the_cancellation_stops_leaves_no_measurement_and_the_run_pauses`
+(la sincronización es el registro: `wait_until_async` hasta que
+`engine.json` liste el grupo de la suite, y recién entonces el token);
+`engine/tests/workflow_compose.rs`:
+`a_child_is_born_holding_the_roots_measurement` (rojo: hoy mide de nuevo),
+`a_grandchild_names_the_root_and_not_its_parent`,
+`a_childs_baseline_compare_sees_a_regression_its_parent_made` (rojo: hoy
+el hijo mide sobre el árbol roto y pasa), `a_lineage_measures_once`
+(el stub contador por ruta absoluta: hoy dos, después una);
+`engine/tests/promotion.rs`: `a_successor_is_born_holding_its_predecessors_measurement`;
+`engine/tests/check.rs`: `a_suite_nothing_compares_is_a_warning` (con un
+workflow de pack verificado bajo una config de proyecto que declara la
+suite, la forma que CI ejercita), `a_suite_a_composed_workflow_compares_is_not`;
+`core/tests/events.rs`: `a_baseline_captured_written_without_an_origin_reads_as_measured`
+y el par de `is_audit` para el kind en su dominio nuevo;
+`engine/tests/receipt.rs`: `the_receipt_names_the_run_that_measured_an_inherited_baseline`;
+`cli/tests/check.rs`: `check_warns_about_a_suite_nothing_compares`.
+
+**Cierra.** EN-D33, EN-D34, EN-D37, CLI-D31, DO-D48, DO-D49, y la forma
+final de DO-D1; L-91 (la suite), L-92, L-93, L-107.
+
+**Encastre.** M27: la suite corre bajo `RunCtx::root_supervision`
+—registro, token y `subprocess_vars` del run—; `yunta cancel` la encuentra
+por `engine.json`, que `build_ctx` escribe antes. M07: medir es una
+`Decision` y un paso de `steps`, como todo lo que el run hace. M02/M04/M05:
+el kind vive en su dominio, un ledger lo pliega, `is_audit` dice la
+verdad, y ningún lector pliega por su cuenta. M03: `origin` es un campo
+con `default`, tolerante en lo persistido; `BaselineOrigin` es exhaustivo
+y `all_kinds()` lo ejemplifica. M24: cierra la mitad de D61 que 7-05 dejó;
+`--detach` y `run_workflow` vuelven a devolver el id sin esperar (L-93).
+M19: la crónica dice `measured`/`inherited`. M23: spec-events §5.3 queda
+atado por `every_event_spec_section_lists_the_fields_its_payload_has`;
+§7.2 es prosa sin test. §8: `create_run`'s `tokio::fs` sin cambio;
+`shape::read` y `RULES` sin cambio.
+---
+
+## M29 · Una decisión dice lo que el código hace
+
+**Vicio V7** (la promesa sin mecanismo) y **V11** (documentación sin atar),
+en el registro que 7-02 construyó. `xtask adr --check` acepta `status:
+revised` con `revised_by: []`: D147 es el único de las 33 revisadas y 4
+retiradas sin revisor —su nota `*(Revisada: …)*` (`adr/D147:11-13`) no
+nombra a nadie, y el commit `fcb956e` enmendó el cuerpo en su lugar
+(`--allowedTools mcp__yunta` → `mcp__yunta__*`, `adr/D147:15`), así que la
+decisión tal como se tomó sobrevive sólo en git—. D62 (`adr/D62:11-13`) y
+D59 (en el título) prometen un corto-circuito del pre-check que el Contrato
+repite en §5.2 (línea 171) y §5.4 (línea 206) y que contradice I6 (línea
+650) y §8.7 (líneas 431-437); `pre_check` corre todos los criterios
+(`task_cycle/criteria.rs:183-191`) pero devuelve la primera sorpresa en el
+orden aprendido (`criteria.rs:199-217`): con un criterio trivial y un guard
+roto a la vez, qué variante y qué `cmd` vuelven depende del orden. §9 manda
+«D152 `Revisada por D157`» donde las cuatro retiradas dicen «Retirada por» y
+el índice generado dice «Revisada por» para todas (`xtask/src/adr.rs:130-140`).
+Evidencia: L-87, L-95, L-105 (§11); EN-D35, DO-D46, DO-D47 (§12).
+
+**Regla.** Una revisión es una decisión: el cuerpo de un ADR nunca se
+enmienda; lo que cambia lo dice un ADR nuevo que lo revisa, el revisado
+lleva la nota «(Revisada por Dnnn: …)» y el front-matter lleva la
+reciprocidad. El estado y la lista de revisores concuerdan —`accepted` no
+tiene revisor; `revised` y `retired` tienen al menos uno— y el checker lo
+prueba sobre el front-matter; la nota es prosa y dice qué parte cambió. Una
+promesa de comportamiento que el código contradice se resuelve con una
+decisión —construir o retirar—, nunca con prosa ni con un comentario. Un
+veredicto sobre un conjunto nombra todo lo que encontró.
+
+**Firmas.**
+
+```rust
+// xtask/src/adr/decision.rs
+/// Proves each decision's status agrees with who revised it: an accepted one names no reviser; a revised or retired one names at least one.
+pub fn statuses(decisions: &BTreeMap<u32, Decision>) -> Result<(), String>;
+// xtask/src/adr.rs:16,176-178 — `statuses(&decisions)?;` después de `reciprocals`; `index()` escribe «Retirada por» para `Status::Retired` y «Revisada por» para `Status::Revised`
+// decision.rs tests — el helper `decision(number, revises, revised_by)` gana `status`
+
+// engine/src/task_cycle/mod.rs — el pre-check nombra todo lo que encontró
+pub enum PreCheckOutcome { Red, Rejected { trivial: Vec<String>, broken_guards: Vec<String> } }   // reemplaza TrivialCriterion { cmd } y BrokenGuard { cmd }; nunca las dos listas vacías
+//   criteria.rs:199-217 junta todas las sorpresas; mod.rs:334-340 arma la causa del rebote con las dos listas
+```
+
+**Decisiones.** D177 revisa D62 y D59: el pre-check evalúa el conjunto
+entero y su veredicto nombra cada criterio trivial y cada guard roto; el
+orden aprendido del log decide cuándo llega la evidencia, nunca qué se
+verifica ni qué se reporta. Contrato §5.2 (línea 171: «con memoización y
+en el orden aprendido, §5.4») y §5.4 último párrafo reescritos:
+«Complemento del pre-check: **orden aprendido**. El engine evalúa todos los
+criterios, de menor a mayor duración histórica (dato que el log ya tiene),
+de modo que la evidencia barata llega primero; el veredicto es sobre el
+conjunto completo, nombra cada sorpresa, y no depende del orden». D178
+revisa D147: la regla de permiso nombra al servidor entero,
+`mcp__<servidor>__*` —un prefijo de servidor sin `__<tool>` ni `__*` no
+nombra ninguna tool y el CLI lo descarta con un warning de arranque—; el
+cuerpo de D147 vuelve a decir lo que decidió (`--allowedTools mcp__yunta`),
+pierde el paréntesis sin número y gana «(Revisada por D178: …)» con
+`revised_by: [D178]`. L-105: §9 pasa a decir lo que se hizo («D152
+`Retirada por D157`»; «D02/D05/D07/D46 con reviser; D147 con reviser en
+8-03»; D03 no lleva nota alguna que revisar), y el índice dice lo mismo
+que los cuatro cuerpos. L-87: la mitad de D147 que 7-03 no cerró, cierra
+acá.
+
+**Archivos.** Nuevo: `docs/design/adr/D177-*.md`, `D178-*.md`. Modifica:
+`xtask/src/adr.rs` (`:1-8` módulo doc, `:16`, `:130-140`, `:176-178`, tests
+`:207-243`), `xtask/src/adr/decision.rs` (`:25-35` rustdoc de `Status`,
+`statuses`, helper y tests `:272-281,355-417`), `docs/design/adr/README.md:27,35-38`,
+`docs/design/adr/{D59, D62, D147}` (nota y `revised_by`), `docs/design/adrs.md`,
+`docs/design/contrato-del-run.md:171,206`, `engine/src/task_cycle/{mod.rs,
+criteria.rs}`, `engine/tests/task_cycle.rs:780-812`, `mecanismos.md` M23
+(el párrafo de `adr --check`), README del plan §0.6 (la lista del gate gana
+`cargo run -p xtask -- adr --check`, que CI ya corre en `ci.yml:51`) y §9
+línea 770.
+
+**Prerequisitos.** 8-02 (D176 antes que D177: la numeración no admite
+huecos).
+
+**Tests.** `xtask/src/adr/decision.rs`:
+`a_revised_decision_names_its_reviser`, `a_retired_decision_names_its_reviser`,
+`an_accepted_decision_names_no_reviser` (unitarios sobre `Decision`
+sintéticas); el rojo sobre el corpus es `cargo run -p xtask -- adr --check`,
+que falla nombrando D147 hasta que D178 exista; `xtask/src/adr.rs`:
+`the_index_says_retired_for_a_retired_decision`;
+`engine/tests/task_cycle.rs`: `a_pre_check_names_every_trivial_criterion_and_every_broken_guard`
+(rojo: hoy vuelve la primera), y `pre_check_and_post_check_run_every_criterion`
+sostiene D177; `adapters/tests/claude_code.rs:804-808` sostiene D178.
+
+**Cierra.** EN-D35, DO-D46, DO-D47; L-87 (D147), L-95, L-105.
+
+**Encastre.** 7-02 (M23): el checker gana la cuarta regla junto a
+numeración, reciprocidad y citas; el índice se regenera. M24: «nunca un
+comentario que explique el atajo» se generaliza a «nunca prosa que
+enmiende una decisión». M06: `PreCheckOutcome::Rejected` es el hecho
+tipado; la frase del rebote se produce una vez en `mod.rs:334`. D167: su
+fila de D62 queda revisada por D177 sin tocar D167.
+
+---
+
+## M30 · Una superficie, un frame
+
+**Vicio V2** (una pregunta respondida en muchos lugares) y **V10** (caminos
+duplicados): qué nodos tiene un run, en qué orden y con qué palabra lo
+contestan varios caminos. La vista viva lee el `RunFrame` —orden de
+declaración, cada grupo `parallel` seguido de sus hijos (`view/mod.rs:114-116`),
+`NodeStanding::{Skipped, ToGo, Reached}`, y `NodeFrame.group`, escrito en
+`view/node.rs:115` y leído por nadie (I-08)—; `status` lee `RunState.nodes`
+en orden alfabético y sólo los que el log nombra (`status/mod.rs:60-71`;
+`print_failures` igual, `:122-137`); `--json` igual (`json.rs:133-137`);
+`graph --run` recorre el workflow de disco y no el manifest congelado del
+run (`graph.rs:37,72-86`), sin los hijos de un `parallel`; `stats` toma la
+palabra de `RunState` (`stats.rs:318`). `NodeDisplay::of(Option<&NodeState>)`
+(`render/state.rs:102`) no puede decir qué preguntó un nodo:
+`pending_questions` vive en `RunState.gates` (`core/src/events/gates/ledger.rs:92`)
+y `preguntas.md` §5 pide «waiting — asked 2 questions: q1, q2». Evidencia:
+L-67, L-97 (§11); M24 I-08; CLI-D28, CLI-D29, CLI-D30 (§12).
+
+**Regla.** El frame es la única derivación que una superficie lee para
+listar los nodos de un run: todos los del modo, en orden de declaración,
+cada grupo `parallel` con sus hijos debajo, del manifest congelado del run.
+El frame lleva lo que la palabra necesita, las preguntas pendientes
+incluidas, y `NodeDisplay::framed` la produce; `NodeDisplay::of(state)` se
+conserva para quien tiene un estado y no un frame —la crónica dice un
+momento, y el caso de `yunta test` juzga una palabra—.
+
+**Firmas.**
+
+```rust
+// engine/src/view/node.rs
+pub struct NodeFrame {
+    /* … */
+    /// The questions this node asked and nobody has answered — `GateLedger::pending_questions` — empty for every node that is not waiting on them.
+    pub asked: Vec<QuestionId>,
+}
+// engine/src/lib.rs:107 — `mode_included_nodes` deja de exportarse: su único consumidor externo era `graph.rs`; sigue en `view/mod.rs` y `schedule.rs`
+// cli/src/render/state.rs
+impl NodeDisplay {
+    pub(crate) fn of(state: Option<&NodeState>) -> Self;      // se conserva: la crónica (words.rs:68) y cualquier estado suelto
+    /// How `node` reads as the frame stands: skipped, yet to run, or reached — with the questions it is waiting on when it asked.
+    pub(crate) fn framed(node: &NodeFrame) -> Self;           // Skipped → `skipped()`, ToGo → `of(None)`, Reached → `of(Some(state))` más `asked`
+}
+// cli/src/surface/view.rs:69 — `node_rows` sangra bajo su grupo las filas de un nodo con `group: Some(_)`; `standing` (:221-227) se borra: `framed` lo reemplaza
+// cli/src/commands/status/mod.rs — `print_derived(frame: &RunFrame, state: &RunState)`: los nodos salen de `frame.nodes`, `{id}: {label}` como hoy, los hijos sangrados bajo su grupo; `print_failures` recorre `frame.nodes` en ese mismo orden; las tareas siguen saliendo de `state.tasks`
+// cli/src/json.rs — `nodes` se arma sobre `frame.nodes`: mismo mapa id → label, con todos los nodos del modo; `SCHEMA_VERSION` pasa a 5 (la presencia en `nodes` cambia de significado: «el run lo alcanzó» → «el modo lo incluye»)
+// cli/src/graph.rs — `derive_labels` enmarca el manifest congelado del run (`run_frame(run_id, &manifest.workflow, &events, None, ctx.clock.now())`), hijos incluidos; deja de calcular `mode_included_nodes`
+// cli/src/commands/stats.rs:306-323 — `render_nodes(stats, frame, glyphs)`: una fila por nodo que arrancó, como hoy; la palabra sale de `framed` por id; `stats_run` construye el frame con `ctx.clock.now()`
+// cli/src/commands/test/case.rs:242 — sin cambio: `expect.nodes` se juzga por `StateWord::of`
+// testkit/src/frames.rs:52-69 — `node_frame` gana `asked`
+```
+
+**Decisión.** D179: `yunta status`, `--json` y `graph --run` listan los
+nodos como la vista viva —todos los del modo, en orden de declaración, los
+hijos bajo su grupo, del manifest congelado, con las mismas palabras—; un
+nodo que preguntó dice qué preguntó; `--json` sube a `schema_version: 5`.
+Cambio visible: `docs/compatibility.md:278-295` (qué contiene `nodes` y el
+número), `README.md:134-135,164`, `docs/concepts.md:99-101` sin cambio.
+
+**Archivos.** Nuevo: `docs/design/adr/D179-*.md`. Modifica:
+`engine/src/view/node.rs`, `engine/src/lib.rs`, `cli/src/render/state.rs`
+(`:87-101,117-122` rustdoc; tests `:147-200`), `cli/src/surface/view.rs`,
+`cli/src/commands/status/mod.rs`, `cli/src/json.rs`, `cli/src/graph.rs`
+(`:1-6,54-62` docs), `cli/src/commands/stats.rs`, `testkit/src/frames.rs`,
+`docs/design/adrs.md`, `docs/compatibility.md`, `README.md`,
+`cli/tests/parked_runs.rs:410`, y las líneas del plan que decían «sin
+cambios»: `cronica.md:44,224`, `preguntas.md:252-253,418`, `mecanismos.md`
+fila I-08. Borra: `view.rs::standing`, la exportación de `mode_included_nodes`.
+
+**Prerequisitos.** 8-03 (D178 antes que D179).
+
+**Tests.** `cli/tests/status_cmd.rs`:
+`status_lists_every_node_of_the_mode_in_declaration_order_with_children_under_their_group`
+(rojo: hoy alfabético y sólo los que el log nombra),
+`status_says_which_questions_a_node_is_waiting_on` (rojo),
+`status_and_the_live_view_list_the_same_nodes_in_the_same_order`,
+`status_json_lists_every_node_of_the_mode_under_schema_version_five`;
+`status_attributes_each_problem_to_the_document_it_came_from` sigue verde
+(`{id}: {label}` no cambia); `cli/tests/run_surface.rs`:
+`the_live_view_indents_a_groups_children_under_it`; `cli/tests/graph_cmd.rs`:
+`graph_with_a_run_id_labels_a_parallel_groups_children`;
+`cli/src/render/state.rs` (unit): `a_framed_node_that_asked_names_its_pending_questions`;
+`engine/tests/view.rs`: `a_frame_carries_the_questions_a_node_is_waiting_on`.
+
+**Cierra.** CLI-D28, CLI-D29, CLI-D30; L-67; M24 I-08.
+
+**Encastre.** M19 (`cronica.md`): «toda palabra de estado sale de
+`NodeDisplay::of(state).label()`» sigue siendo verdad —`framed` la llama—;
+la región y `status` listan el mismo frame. M26 (`preguntas.md` §5): el
+modificador del nodo que preguntó. M16: la palabra de `expect.nodes` no
+cambia. M15: `graph` deja de enmarcar otro documento que el run. §8:
+`render::state` se generaliza (el mismo vocabulario, una entrada más);
+`run_frame`/`view/` y `frames.rs` ganan un campo; `json::SCHEMA_VERSION`
+sube por su propia regla.
+
+---
+
+## M31 · Una sesión que muere dice por qué
+
+**Vicio V2** (dos servidores con un nombre) y **V5** (una degradación sin
+evidencia). Reportado desde Codex: el usuario registra el control plane
+como `[mcp_servers.yunta] command = "yunta" args = ["mcp"]` en
+`~/.codex/config.toml`; el adapter inyecta el servidor per-run como `-c
+mcp_servers.yunta.url=…` (`adapters/src/codex/mod.rs:185-196`,
+`RunToolsEndpoint::SERVER_NAME = "yunta"` en `core/src/port/session.rs:133`);
+Codex hace merge sobre la misma tabla y rechaza `url is not supported for
+stdio`. El stderr que lo dice se drena a `tracing::debug!`
+(`core/src/process/subprocess.rs:171-174`) y el engine sintetiza un
+`Failure::message("session ended without a terminal event")` reintentable
+(`engine/src/run/prompt_exec.rs:222-231`, `task_cycle/session.rs:289`) sin
+código de salida; `probe()` de codex corre `--version`
+(`adapters/src/codex/mod.rs:263-271`), así que `doctor` dice sano.
+Evidencia: L-106 (§11); AD-D25, EN-D36, CLI-D32 (§12).
+
+**Regla.** El servidor per-run tiene nombre propio, `yunta-run`, distinto
+del control plane que un usuario registra con el nombre que quiera. Una
+sesión que termina sin evento terminal falla con un hecho tipado —cómo
+salió su proceso y las últimas líneas que escribió en stderr—, que llega
+al log, a `status`, a `--json` y a la crónica. `yunta doctor --session`
+abre una sesión real por runner por el mismo camino que un workflow, con
+las run tools montadas, y reporta cada una con esa misma evidencia; gasta
+un prompt por runner, por eso es opt-in.
+
+**Firmas.**
+
+```rust
+// core/src/port/session.rs
+impl RunToolsEndpoint { pub const SERVER_NAME: &'static str = "yunta-run"; }   // claude_code/mod.rs:49,161 y parse.rs:136, codex/mod.rs:185 lo siguen sin cambio de texto
+/// How a session's process ended, once its events were exhausted.
+pub struct SessionExit { pub code: Option<i32>, pub signal: Option<i32>, pub stderr_tail: Vec<String> }
+pub trait AgentSession {
+    /* … */
+    /// How the process ended, asked once the event stream is exhausted: the status it exited with and the last lines it wrote to stderr. `None` for a session with no process of its own.
+    async fn exit(&mut self) -> Option<SessionExit> { None }     // el mock hereda el default
+}
+// core/src/process/subprocess.rs
+/// How many stderr lines a session keeps for its exit (D180).
+pub const STDERR_TAIL_LINES: usize = 20;
+//   el drain guarda las últimas STDERR_TAIL_LINES en un VecDeque compartido; `exit()` espera al drain, hace `wait()` al child (`reaped = true`) y devuelve el `SessionExit`
+
+// core/src/events/failure.rs — untagged; `died` es el discriminador, antes de `Message`
+pub enum Failure { Artifacts { artifacts: Vec<ArtifactFailure> }, SessionDied { died: SessionDeath }, Message { outcome: String } }
+pub struct SessionDeath { pub adapter: AdapterId, pub exit: Option<SessionExit> }
+impl Failure { pub fn session_died(adapter: AdapterId, exit: Option<SessionExit>) -> Self; }
+//   Display: una línea «session `codex` exited with code 2 before any terminal event — url is not supported for stdio» (la última línea del tail);
+//   `status` lista el tail entero bajo el nodo, un bloque más de `print_failures`; `--json` publica `session_deaths: [{ node, adapter, code, signal, stderr }]`, aditivo
+
+// engine/src/task_cycle/mod.rs
+pub enum DispatchOutcome { /* … */ Crashed { exit: Option<SessionExit> }, /* … */ }
+//   session.rs:289 — `terminal.unwrap_or_else(|| Crashed { exit })` con `exit = session.exit().await`; prompt_exec.rs:223 — `fail_with(ctx, node, Failure::session_died(adapter.id().clone(), exit), true, tokens)`
+
+// cli/src/cli.rs
+Doctor {
+    /// Also opens one real session per runner `runners:` names — the smallest run there is, through the same machinery a workflow uses, run tools mounted — and reports how each ended. Spends one prompt per runner.
+    #[arg(long)] session: bool,
+}
+// cli/src/commands/doctor.rs
+pub async fn doctor(session: bool) -> Result<Outcome, CliError>;
+/// The workflow `--session` runs: one `kind: prompt` node per runner, `prompt: "Reply with exactly: ok"`, no artifacts, `on_failure: continue`, so every runner is tried whatever the others did.
+fn session_workflow(runners: &[RunnerName]) -> Workflow;
+//   corre como un caso de `yunta test` con adapters reales: `Context::sandboxed`, `runnable` → `create_run_from` → `drive::execute`; el reporte lee el log del run por runner:
+//   `planner (claude-code/claude-opus-4-8): ok — 812 tokens` | `executor (codex/gpt-5-codex): session died — exit 2: url is not supported for stdio`; `Outcome::Reported` si alguna murió
+
+// testkit/src/stubs.rs — gana `pub fn codex() -> PathBuf; pub fn claude_code() -> PathBuf`: los stubs se mudan de `adapters/tests/fixtures/` a `crates/testkit/stubs/` y los comparten adapters y cli (M20)
+```
+
+**Decisión.** D180 revisa D147 (el nombre) y fija `STDERR_TAIL_LINES`: el
+servidor per-run se llama `yunta-run`; una sesión que muere falla con
+`SessionDied`; `doctor --session` corre el workflow de doctor. D147 queda
+`revised_by: [D178, D180]`. Docs: `docs/adapters.md` (§doctor gana
+`--session`; los dos servidores y sus nombres), `docs/compatibility.md`
+§The MCP servers (los nombra), `docs/troubleshooting.md` («session died:
+exit N» → las líneas de stderr en `status`), README tabla de comandos,
+spec-events `node_failed.failure` (tercera forma), spec-adapter (`exit` en
+el trait; `yunta-run`), `mecanismos.md` M01 (`SERVER_NAME` con su valor
+nuevo).
+
+**Archivos.** Nuevo: `crates/testkit/stubs/{codex_stub.sh, claude_code_stub.sh}`,
+`cli/tests/doctor_cmd.rs`, `docs/design/adr/D180-*.md`.
+Modifica: `crates/testkit/src/stubs.rs` (gana `codex()` y `claude_code()`), `core/src/port/session.rs`, `core/src/process/subprocess.rs`,
+`core/src/events/failure.rs`, `core/schemas/events.json`,
+`engine/src/task_cycle/{mod.rs, session.rs}`, `engine/src/run/prompt_exec.rs`,
+`adapters/tests/{codex.rs:766-808,833-882, claude_code.rs:772-808,806,845}`,
+`cli/src/{cli.rs, json.rs}`, `cli/src/commands/{doctor.rs, status/mod.rs}`,
+`docs/adapters.md`, `docs/compatibility.md`, `docs/troubleshooting.md`,
+`README.md`, `docs/design/{spec-events.md, spec-adapter.md}`,
+`docs/design/adr/D147`, `docs/design/adrs.md`, `mecanismos.md` M01. Borra:
+`adapters/tests/fixtures/*_stub.sh` (mudados).
+
+**Prerequisitos.** 8-04 (D179 antes que D180; D178 antes que D180 sobre
+D147).
+
+**Tests.** `adapters/tests/codex.rs`:
+`the_per_run_server_never_shares_the_control_planes_name` (rojo: los args
+dicen `mcp_servers.yunta.`; verde: `mcp_servers.yunta-run.url` y ningún
+`mcp_servers.yunta.`), `a_session_that_dies_before_its_first_event_reports_its_exit_and_its_last_stderr_lines`
+(rojo: el trait no tiene `exit`; el stub escribe la línea a stderr y sale
+con 2); `adapters/tests/claude_code.rs`: el allow-rule y el prefijo dicen
+`yunta-run`; `core/tests/events.rs`: `a_node_failed_by_a_dead_session_round_trips_with_its_exit`;
+`engine/tests/run_sessions.rs`: `a_node_whose_session_died_fails_naming_the_adapter_and_the_exit`;
+`cli/tests/status_cmd.rs`: `status_prints_the_stderr_a_dead_session_left`,
+`status_json_publishes_a_session_death_with_its_exit`;
+`cli/tests/doctor_cmd.rs`: `doctor_session_reports_a_runner_whose_cli_dies_at_startup_with_its_stderr`,
+`doctor_session_reports_a_runner_whose_cli_answers`,
+`doctor_without_session_opens_none` (los stubs del testkit en `PATH` por
+`hermetic()`, con `binary:` en la config del sandbox).
+
+**Cierra.** AD-D25, EN-D36, CLI-D32; L-106.
+
+**Encastre.** M01: `SERVER_NAME` sigue siendo el único nombre y los
+adapters lo siguen. M06: el hecho es tipado y la prosa se produce en el
+borde, en `Failure::Display`. M08: `doctor --session` abre sesiones por
+`open_session`, la única puerta, porque corre un run de verdad. M18: un
+solo camino de ejecución —el de `yunta test`— con adapters reales. M20:
+los stubs viven en el testkit. M22: `STDERR_TAIL_LINES` cita D180. M19: la
+crónica dice el `Failure` como a cualquier otro. M29: D178 y D180 revisan
+D147 en ese orden.

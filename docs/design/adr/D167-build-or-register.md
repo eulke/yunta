@@ -3,7 +3,7 @@ number: D167
 title: "Lo prometido y no construido se construye o se registra; nunca queda como comentario"
 status: revised
 revises: [D18, D62, D19]
-revised_by: [D172]
+revised_by: [D172, D176]
 ---
 
 # D167 — Lo prometido y no construido se construye o se registra; nunca queda como comentario
@@ -12,6 +12,8 @@ Cinco comportamientos que la documentación promete y el código no tiene se
 resuelven así:
 
 - **Baseline al crear el run** (D18, Contrato §7.2): **se construye.**
+  *(Revisado por D176: el nacimiento hereda y el primer despertar mide,
+  antes del primer nodo.)*
   `create_run` captura la suite declarada en `baseline.suite` después del
   worktree y persiste resultados y hash bajo `baseline/`; el primer
   `baseline_compare` compara contra eso. La razón del atajo actual

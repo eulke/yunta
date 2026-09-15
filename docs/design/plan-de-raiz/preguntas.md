@@ -250,7 +250,8 @@ Cierra M24 I-01; `Channel::Mcp` queda como D167 lo fija. Ítem 5-06.
 asked 2 questions: q1, q2`; `questions_answered` → `Gates::Answered` → `+ grill
 — answered by eulke via tty`; el `node_finished` que sigue dice `finished`
 como todos. `NodeDisplay` de un `Waiting` que preguntó muestra los ids desde
-`GateLedger::pending_questions` (5-05); hasta entonces, `waiting`. `docs/concepts.md`:
+`GateLedger::pending_questions`, que el frame lleva en `NodeFrame.asked` y
+`NodeDisplay::framed` dice (8-04, M30). `docs/concepts.md`:
 `waiting` es un gate publicado o un nodo que preguntó.
 
 ---
@@ -415,7 +416,8 @@ dominio, `finish_node` absorbiendo `gate_exec.rs:188,490,570` (2-02, M03);
 `answered_step` en `decide` (3-02, M07); `#[instrument]` en `execute_ask`
 (3-05, M10); `ArtifactKind::Answers`, `AnswersFile::against`, el montaje por
 kind y sus dos reglas (4-02, M12); `text::counted` en la frase (4-03, M13);
-`Gates::{Asked, Answered}` y el modificador de `NodeDisplay` (5-05, M19);
+`Gates::{Asked, Answered}` (5-05, M19) y el modificador de `NodeDisplay`
+(8-04, M30);
 `answer_questions` (5-06, M17/M18); el generador completo (6-04, M21).
 
 ---
