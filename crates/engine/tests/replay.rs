@@ -8,6 +8,7 @@ use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RunEvent, TaskE
 use yunta_core::events::{RunPausedPayload, TaskRegisteredPayload};
 use yunta_core::Seq;
 use yunta_engine::{dedup_findings, derive, NodeState};
+use yunta_testkit_core::Log;
 
 fn finding(id: &str, severity: FindingSeverity, title: &str, location: &str) -> Finding {
     Finding {
@@ -17,16 +18,6 @@ fn finding(id: &str, severity: FindingSeverity, title: &str, location: &str) -> 
         location: location.into(),
         detail: "detail".to_string(),
         proposed_criterion: None,
-    }
-}
-
-fn event(seq: u64, node_id: Option<&str>, payload: EventPayload) -> StoredEvent {
-    StoredEvent {
-        run_id: "run-1".into(),
-        seq: seq.into(),
-        timestamp: chrono::Utc::now(),
-        node_id: node_id.map(Into::into),
-        body: EventBody::Known(payload),
     }
 }
 
@@ -40,21 +31,19 @@ fn tokens(input: u64, output: u64) -> TokenUsage {
 
 #[test]
 fn a_node_that_finishes_cleanly_derives_finished_with_its_tokens() {
-    let events = vec![
-        event(
-            1,
-            Some("lint"),
+    let events = Log::for_run("run-1")
+        .node(
+            "lint",
             EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
-        ),
-        event(
-            2,
-            Some("lint"),
+        )
+        .node(
+            "lint",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
                 "criteria green".to_string(),
                 tokens(10, 5),
             ))),
-        ),
-    ];
+        )
+        .build();
 
     let state = derive(&events);
     assert_eq!(state.broken, None);
@@ -70,35 +59,31 @@ fn a_node_that_finishes_cleanly_derives_finished_with_its_tokens() {
 
 #[test]
 fn a_retryable_failure_can_restart_and_then_finish() {
-    let events = vec![
-        event(
-            1,
-            Some("lint"),
+    let events = Log::for_run("run-1")
+        .node(
+            "lint",
             EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
-        ),
-        event(
-            2,
-            Some("lint"),
+        )
+        .node(
+            "lint",
             EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 Failure::message("criteria red".to_string()),
                 true,
                 tokens(5, 2),
             ))),
-        ),
-        event(
-            3,
-            Some("lint"),
+        )
+        .node(
+            "lint",
             EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(2))),
-        ),
-        event(
-            4,
-            Some("lint"),
+        )
+        .node(
+            "lint",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
                 "criteria green".to_string(),
                 tokens(3, 1),
             ))),
-        ),
-    ];
+        )
+        .build();
 
     let state = derive(&events);
     assert_eq!(state.broken, None);
@@ -115,14 +100,15 @@ fn a_retryable_failure_can_restart_and_then_finish() {
 
 #[test]
 fn node_finished_without_a_prior_node_started_is_broken() {
-    let events = vec![event(
-        1,
-        Some("lint"),
-        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-            "criteria green".to_string(),
-            tokens(1, 1),
-        ))),
-    )];
+    let events = Log::for_run("run-1")
+        .node(
+            "lint",
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "criteria green".to_string(),
+                tokens(1, 1),
+            ))),
+        )
+        .build();
 
     let state = derive(&events);
     let diagnostic = state.broken.expect("expected a broken diagnostic");
@@ -137,18 +123,16 @@ fn a_second_node_started_is_a_restart_not_a_broken_log() {
     // restart_node: a crash leaves node_started with no terminal
     // event, and resume emits node_started again. The log records what
     // happened — the restart is legal and the attempt number carries it.
-    let events = vec![
-        event(
-            1,
-            Some("lint"),
+    let events = Log::for_run("run-1")
+        .node(
+            "lint",
             EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
-        ),
-        event(
-            2,
-            Some("lint"),
+        )
+        .node(
+            "lint",
             EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(2))),
-        ),
-    ];
+        )
+        .build();
 
     let state = derive(&events);
     assert!(state.broken.is_none());
@@ -160,15 +144,16 @@ fn a_second_node_started_is_a_restart_not_a_broken_log() {
 
 #[test]
 fn task_status_changed_without_task_registered_is_broken() {
-    let events = vec![event(
-        1,
-        Some("implement"),
-        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
-            "graph-cmd".into(),
-            TaskStatus::Done,
-            1.into(),
-        ))),
-    )];
+    let events = Log::for_run("run-1")
+        .node(
+            "implement",
+            EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+                "graph-cmd".into(),
+                TaskStatus::Done,
+                1.into(),
+            ))),
+        )
+        .build();
 
     let state = derive(&events);
     assert!(state.broken.is_some());
@@ -176,36 +161,33 @@ fn task_status_changed_without_task_registered_is_broken() {
 
 #[test]
 fn task_lifecycle_derives_its_latest_status() {
-    let events = vec![
-        event(
-            1,
-            Some("implement"),
+    let events = Log::for_run("run-1")
+        .node(
+            "implement",
             EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
                 task_id: "graph-cmd".into(),
                 criteria: vec![],
                 scope: vec!["crates/cli/**".into()],
                 depends_on: vec![],
             })),
-        ),
-        event(
-            2,
-            Some("implement"),
+        )
+        .node(
+            "implement",
             EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
                 "graph-cmd".into(),
                 TaskStatus::Running,
                 1.into(),
             ))),
-        ),
-        event(
-            3,
-            Some("implement"),
+        )
+        .node(
+            "implement",
             EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
                 "graph-cmd".into(),
                 TaskStatus::Done,
                 2.into(),
             ))),
-        ),
-    ];
+        )
+        .build();
 
     let state = derive(&events);
     assert_eq!(state.broken, None);
@@ -214,10 +196,9 @@ fn task_lifecycle_derives_its_latest_status() {
 
 #[test]
 fn finding_posted_events_accumulate_in_run_state() {
-    let events = vec![
-        event(
-            1,
-            Some("review"),
+    let events = Log::for_run("run-1")
+        .node(
+            "review",
             EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: finding(
                     "f1",
@@ -226,15 +207,14 @@ fn finding_posted_events_accumulate_in_run_state() {
                     "src/lib.rs:10",
                 ),
             })),
-        ),
-        event(
-            2,
-            Some("review"),
+        )
+        .node(
+            "review",
             EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: finding("f2", FindingSeverity::Note, "style nit", "src/lib.rs:20"),
             })),
-        ),
-    ];
+        )
+        .build();
 
     let state = derive(&events);
     assert_eq!(state.broken, None);
@@ -274,35 +254,29 @@ fn dedup_findings_merges_same_location_and_normalized_title_keeping_the_first() 
 
 #[test]
 fn replay_stops_deriving_further_state_once_broken() {
-    let events = vec![
+    let events = Log::for_run("run-1")
         // broken immediately: no prior node_started for "lint"
-        event(
-            1,
-            Some("lint"),
+        .node(
+            "lint",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
                 "criteria green".to_string(),
                 tokens(1, 1),
             ))),
-        ),
+        )
         // a perfectly valid event that comes after the break point
-        event(
-            2,
-            None,
-            EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
-                "irrelevant".to_string(),
-            ))),
-        ),
-        event(
-            3,
-            Some("implement"),
+        .event(EventPayload::Run(RunEvent::Paused(
+            RunPausedPayload::recorded("irrelevant".to_string()),
+        )))
+        .node(
+            "implement",
             EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
                 task_id: "graph-cmd".into(),
                 criteria: vec![],
                 scope: vec![],
                 depends_on: vec![],
             })),
-        ),
-    ];
+        )
+        .build();
 
     let state = derive(&events);
     assert!(state.broken.is_some());
@@ -315,50 +289,46 @@ fn replay_stops_deriving_further_state_once_broken() {
 #[test]
 fn replay_is_deterministic_across_several_fixtures() {
     let fixtures: Vec<Vec<StoredEvent>> = vec![
-        vec![
-            event(
-                1,
-                Some("a"),
+        Log::for_run("run-1")
+            .node(
+                "a",
                 EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
-            ),
-            event(
-                2,
-                Some("a"),
+            )
+            .node(
+                "a",
                 EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
                     "ok".to_string(),
                     tokens(1, 1),
                 ))),
-            ),
-        ],
-        vec![
-            event(
-                1,
-                Some("a"),
+            )
+            .build(),
+        Log::for_run("run-1")
+            .node(
+                "a",
                 EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
-            ),
-            event(
-                2,
-                Some("a"),
+            )
+            .node(
+                "a",
                 EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                     Failure::message("bad".to_string()),
                     false,
                     tokens(2, 2),
                 ))),
-            ),
-            event(
-                3,
-                Some("b"),
+            )
+            .node(
+                "b",
                 EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
-            ),
-        ],
-        vec![event(
-            1,
-            Some("a"),
-            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                "broken from the start".to_string(),
-                tokens(0, 0),
-            ))),
-        )],
+            )
+            .build(),
+        Log::for_run("run-1")
+            .node(
+                "a",
+                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                    "broken from the start".to_string(),
+                    tokens(0, 0),
+                ))),
+            )
+            .build(),
     ];
 
     for events in fixtures {
@@ -370,33 +340,32 @@ fn replay_is_deterministic_across_several_fixtures() {
 
 #[test]
 fn an_unknown_kind_is_counted_and_never_breaks_replay() {
-    let unknown = StoredEvent {
-        run_id: "run-1".into(),
-        seq: 2.into(),
-        timestamp: chrono::Utc::now(),
-        node_id: Some("lint".into()),
-        body: EventBody::Unknown(UnknownEvent {
-            kind: "future_kind".to_string(),
-            schema_version: 1,
-            payload: serde_json::Map::new(),
-        }),
-    };
-    let events = vec![
-        event(
-            1,
-            Some("lint"),
+    // A log of three whose middle event was written under a kind this
+    // binary has no type for. A log is stated in known payloads, so that
+    // position is stated with a stand-in and its body replaced in place:
+    // the unknown event sits at position 2, under the log's own clock.
+    let mut events = Log::for_run("run-1")
+        .node(
+            "lint",
             EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
-        ),
-        unknown,
-        event(
-            3,
-            Some("lint"),
+        )
+        .node(
+            "lint",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(2))),
+        )
+        .node(
+            "lint",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
                 "criteria green".to_string(),
                 tokens(10, 5),
             ))),
-        ),
-    ];
+        )
+        .build();
+    events[1].body = EventBody::Unknown(UnknownEvent {
+        kind: "future_kind".to_string(),
+        schema_version: 1,
+        payload: serde_json::Map::new(),
+    });
 
     let state = derive(&events);
     assert_eq!(state.broken, None);
@@ -418,23 +387,21 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
     // to agree about what the run holds.
     let hash = yunta_core::sha256_hex(b"questions");
     let run = |artifact: EventPayload| {
-        vec![
-            event(
-                1,
-                Some("ask"),
+        Log::for_run("run-1")
+            .node(
+                "ask",
                 EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
-            ),
-            event(2, Some("ask"), artifact),
-            event(
-                3,
-                Some("ask"),
+            )
+            .node("ask", artifact)
+            .node(
+                "ask",
                 EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                     Failure::message("scope violated: 1 file(s) outside the declared globs"),
                     false,
                     tokens(0, 0),
                 ))),
-            ),
-        ]
+            )
+            .build()
     };
     let old = run(EventPayload::Artifacts(ArtifactEvent::Written(
         ArtifactWrittenPayload {
@@ -459,9 +426,8 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
         "a node that failed is failed, whatever documents the run holds for it: {:?}",
         old.nodes.state("ask")
     );
-    // The states they derive, not the instants their events carry: the
-    // two logs are written moments apart, and what this is about is the
-    // artifacts each one implies.
+    // The states they derive, not everything else their records carry:
+    // what this is about is the artifacts each log implies.
     let states = |ledger: &yunta_core::events::NodeLedger| {
         ledger
             .iter()
@@ -500,32 +466,29 @@ fn a_kind_that_moves_no_state_says_so_by_name() {
     let mut mismatched: Vec<String> = Vec::new();
     for payload in yunta_testkit_core::all_kinds() {
         let kind = payload.kind_name();
-        let event = StoredEvent {
-            run_id: yunta_core::RunId::from("run-audit"),
-            seq: 1.into(),
-            timestamp: chrono::DateTime::UNIX_EPOCH,
-            node_id: Some("only".into()),
-            body: yunta_core::events::EventBody::Known(payload.clone()),
-        };
         // Each kind meets the log that makes it legal: a terminal needs
         // its start, a status its registration, an update the posting it
         // updates. Without one the derivation refuses the event, which
         // is a broken log rather than a no-op, and counts as moving.
+        let log = establishing()
+            .into_iter()
+            // Never the kind under test: a log that already carries
+            // it would make every repeat of it look like a no-op.
+            .filter(|setup| setup.kind_name() != kind)
+            .fold(Log::for_run("run-audit"), |log, setup| {
+                log.node("only", setup)
+            })
+            .node("only", payload.clone())
+            .build();
+        let (event, behind_it) = log
+            .split_last()
+            .expect("the log ends with the kind under test");
         let mut state = yunta_engine::RunState::default();
-        let before = {
-            for setup in establishing() {
-                // Never the kind under test: a log that already carries
-                // it would make every repeat of it look like a no-op.
-                if setup.kind_name() == kind {
-                    continue;
-                }
-                let mut event = event.clone();
-                event.body = yunta_core::events::EventBody::Known(setup);
-                let _ = state.apply(&event);
-            }
-            state.clone()
-        };
-        let moved = match state.apply(&event) {
+        for setup in behind_it {
+            let _ = state.apply(setup);
+        }
+        let before = state.clone();
+        let moved = match state.apply(event) {
             // What a kind derives, not that its node was heard from:
             // every event of a node updates when it last said anything,
             // which is the envelope's doing and not the kind's.

@@ -40,22 +40,11 @@ impl Draw {
 
 #[cfg(test)]
 mod chronicle_tests {
-    use yunta_core::events::{
-        EventBody, EventPayload, Failure, NodeEvent, StoredEvent, TokenUsage,
-    };
+    use yunta_core::events::{EventPayload, Failure, NodeEvent, TokenUsage};
+    use yunta_testkit_core::Log;
 
     use super::super::chronicle;
     use crate::render::Glyphs;
-
-    fn event(seq: u64, node: &str, payload: EventPayload) -> StoredEvent {
-        StoredEvent {
-            run_id: "01JQ0000000000000000000000".into(),
-            seq: seq.into(),
-            timestamp: chrono::DateTime::UNIX_EPOCH + chrono::Duration::seconds(seq as i64),
-            node_id: Some(node.into()),
-            body: EventBody::Known(payload),
-        }
-    }
 
     #[test]
     fn what_a_watched_terminal_keeps_above_its_region_is_what_the_append_only_surface_writes() {
@@ -63,16 +52,15 @@ mod chronicle_tests {
         // terminal and a reader who read the same run out of a pipe met
         // the same sentences: what the terminal kept is a subsequence
         // of what the pipe wrote, in the same order and word for word.
-        let events = vec![
-            event(
-                1,
+        let events = Log::for_run("01JQ0000000000000000000000")
+            .node(
                 "lint",
-                EventPayload::Node(NodeEvent::Started(yunta_core::events::NodeStartedPayload {
-                    attempt: 1,
-                })),
-            ),
-            event(
-                2,
+                EventPayload::Node(NodeEvent::Started(
+                    yunta_core::events::NodeStartedPayload::attempt(1),
+                )),
+            )
+            .after(1)
+            .node(
                 "lint",
                 EventPayload::Node(NodeEvent::Failed(
                     yunta_core::events::NodeFailedPayload::new(
@@ -81,9 +69,9 @@ mod chronicle_tests {
                         TokenUsage::default(),
                     ),
                 )),
-            ),
-            event(
-                3,
+            )
+            .after(1)
+            .node(
                 "lint",
                 EventPayload::Node(NodeEvent::ContextAssembled(
                     serde_json::from_value(serde_json::json!({
@@ -92,8 +80,8 @@ mod chronicle_tests {
                     }))
                     .expect("a context that assembled from nothing"),
                 )),
-            ),
-        ];
+            )
+            .build();
 
         let moments = yunta_engine::chronicle(&events);
         let written: Vec<String> = moments

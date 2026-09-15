@@ -625,7 +625,11 @@ async fn a_successor_s_replan_keeps_done_what_it_kept_and_resets_what_it_recut()
         yunta_testkit::git_output(&bench.worktree, &["rev-parse", "HEAD"])
             .parse()
             .unwrap();
-    let planted = yunta_testkit::SourceLog::open(&bench.storage, &source);
+    let planted = yunta_testkit::SourceLog::open(
+        &bench.storage,
+        &source,
+        std::sync::Arc::new(yunta_testkit_core::FixedClock),
+    );
     for task in &document.tasks {
         planted.task(task, yunta_core::events::TaskStatus::Done, Some(&landed));
     }

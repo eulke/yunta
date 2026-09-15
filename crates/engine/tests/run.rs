@@ -1274,7 +1274,11 @@ async fn a_run_inheriting_a_tasks_document_from_a_log_that_does_not_replay_is_ne
     let bench = BirthBench::new().await;
     let source = RunId::from("run-unreadable-source");
     // A status about a task nobody registered: a log replay stops at.
-    let planted = yunta_testkit::SourceLog::open(&bench.storage, &source);
+    let planted = yunta_testkit::SourceLog::open(
+        &bench.storage,
+        &source,
+        std::sync::Arc::new(yunta_testkit_core::FixedClock),
+    );
     planted.record(yunta_testkit::task_status_changed(
         &"T001".into(),
         yunta_core::events::TaskStatus::Done,

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use yunta_adapters::MockAdapter;
-use yunta_core::events::{EventBody, EventPayload};
+use yunta_core::events::EventPayload;
 use yunta_core::events::{FindingEvent, SessionEvent};
 use yunta_core::port::Adapter;
 use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
@@ -17,8 +17,7 @@ use yunta_engine::{
 };
 use yunta_storage::Storage;
 use yunta_testkit::init_repo;
-use yunta_testkit_core::FixedClock;
-use yunta_testkit_core::SeqIdSource;
+use yunta_testkit_core::{FixedClock, Log, SeqIdSource};
 
 /// Run ids for everything a test run gives birth to — unique across
 /// the binary, so parallel tests never share a run directory.
@@ -376,32 +375,25 @@ sessions:
 
 #[test]
 fn consolidate_blackboard_is_invariant_under_event_shuffling() {
-    use yunta_core::events::{Finding, FindingPostedPayload, FindingSeverity, StoredEvent};
-    let finding = |id: &str| Finding {
-        id: id.into(),
-        severity: FindingSeverity::Minor,
-        title: format!("title {id}"),
-        location: "src/x.rs".into(),
-        detail: "detail".to_string(),
-        proposed_criterion: None,
-    };
-    let event = |node: &str, id: &str, seq: u64| StoredEvent {
-        run_id: RunId::from("run-x"),
-        seq: seq.into(),
-        timestamp: chrono::Utc::now(),
-        node_id: Some(node.into()),
-        body: EventBody::Known(EventPayload::Findings(FindingEvent::Posted(
-            FindingPostedPayload {
-                finding: finding(id),
+    use yunta_core::events::{Finding, FindingPostedPayload, FindingSeverity};
+    let posted = |id: &str| {
+        EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
+            finding: Finding {
+                id: id.into(),
+                severity: FindingSeverity::Minor,
+                title: format!("title {id}"),
+                location: "src/x.rs".into(),
+                detail: "detail".to_string(),
+                proposed_criterion: None,
             },
-        ))),
+        }))
     };
     let members = vec!["a".into(), "b".into()];
-    let forward = vec![
-        event("a", "one", 1),
-        event("b", "two", 2),
-        event("a", "three", 3),
-    ];
+    let forward = Log::for_run("run-x")
+        .node("a", posted("one"))
+        .node("b", posted("two"))
+        .node("a", posted("three"))
+        .build();
     let mut reversed = forward.clone();
     reversed.reverse();
 
@@ -432,36 +424,33 @@ fn group_log() -> Vec<yunta_core::events::StoredEvent> {
         detail: "detail".to_string(),
         proposed_criterion: None,
     };
-    let run = RunId::from("run-x");
-    let event =
-        |seq: u64, payload: EventPayload| yunta_testkit::stored_for(&run, seq, "a", payload);
-    vec![
-        event(
-            1,
+    Log::for_run("run-x")
+        .node(
+            "a",
             EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: finding("f1", "taken back"),
             })),
-        ),
-        event(
-            2,
+        )
+        .node(
+            "a",
             EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: finding("f2", "first wording"),
             })),
-        ),
-        event(
-            3,
+        )
+        .node(
+            "a",
             EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
                 id: "f1".into(),
                 reason: "it was the harness, not the code".to_string(),
             })),
-        ),
-        event(
-            4,
+        )
+        .node(
+            "a",
             EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
                 finding: finding("f2", "last wording"),
             })),
-        ),
-    ]
+        )
+        .build()
 }
 
 fn consolidated_titles(events: &[yunta_core::events::StoredEvent]) -> Vec<String> {

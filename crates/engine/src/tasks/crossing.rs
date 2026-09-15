@@ -139,8 +139,9 @@ async fn has_commit(
 mod tests {
     use std::path::Path;
 
-    use yunta_core::{CommitSha, RunId, Task, TaskId};
+    use yunta_core::{CommitSha, RunId, Seq, Task, TaskId};
     use yunta_testkit::{git, git_output, init_repo, tasks_document, INITIAL_BRANCH};
+    use yunta_testkit_core::Log;
 
     use super::*;
     use crate::run::RunError;
@@ -172,33 +173,24 @@ mod tests {
     /// A source run's log: each task registered, then left where the
     /// entry says, at the commit the entry names.
     fn source_log(entries: &[(&Task, TaskStatus, Option<&CommitSha>)]) -> Vec<StoredEvent> {
-        let run = source();
-        let mut events = Vec::new();
-        for (task, status, commit) in entries {
-            let registered = events.len() as u64 + 1;
-            events.push(yunta_testkit::stored(
-                &run,
-                registered,
-                yunta_testkit::task_registered(task),
-            ));
+        let mut log = Log::for_run(source().as_str());
+        for (index, (task, status, commit)) in entries.iter().enumerate() {
+            let registered = Seq::from(index as u64 * 2 + 1);
             // Every status carries a commit here, including the five
             // that have no business naming one: the point is what a
             // receiving run stands behind when it reads a log that
             // holds them anyway.
             let changed = match commit {
-                Some(commit) => yunta_testkit::status_changed_carrying(
-                    &task.id,
-                    *status,
-                    commit,
-                    registered.into(),
-                ),
-                None => {
-                    yunta_testkit::task_status_changed(&task.id, *status, None, registered.into())
+                Some(commit) => {
+                    yunta_testkit::status_changed_carrying(&task.id, *status, commit, registered)
                 }
+                None => yunta_testkit::task_status_changed(&task.id, *status, None, registered),
             };
-            events.push(yunta_testkit::stored(&run, registered + 1, changed));
+            log = log
+                .event(yunta_testkit::task_registered(task))
+                .event(changed);
         }
-        events
+        log.build()
     }
 
     #[tokio::test]
@@ -339,18 +331,16 @@ mod tests {
     fn a_source_log_that_does_not_replay_is_refused_naming_the_run() {
         // A status about a task nobody registered: a log stops replaying
         // right there.
-        let orphan = yunta_testkit::stored(
-            &source(),
-            1,
-            yunta_testkit::task_status_changed(
+        let orphan = Log::for_run(source().as_str())
+            .event(yunta_testkit::task_status_changed(
                 &TaskId::from("T001"),
                 TaskStatus::Done,
                 None,
                 1u64.into(),
-            ),
-        );
+            ))
+            .build();
 
-        let error = standing_of(&source(), &[orphan]).unwrap_err();
+        let error = standing_of(&source(), &orphan).unwrap_err();
 
         let RunError::Broken { diagnostic } = &error else {
             panic!("a source that cannot answer for itself is refused: {error:?}");

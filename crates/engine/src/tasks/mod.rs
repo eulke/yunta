@@ -174,18 +174,19 @@ pub(crate) async fn register(
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
-    use yunta_core::RunId;
     use yunta_testkit::tasks_document;
+    use yunta_testkit_core::Log;
 
     use super::*;
 
-    /// The registration this log holds for `task`, at `seq`.
-    fn registration(seq: u64, task: &Task) -> StoredEvent {
-        yunta_testkit::stored(
-            &RunId::from("run-1"),
-            seq,
-            yunta_testkit::task_registered(task),
-        )
+    /// The log a run that registered `tasks`, in order, left behind.
+    fn registrations(tasks: &[Task]) -> Vec<StoredEvent> {
+        tasks
+            .iter()
+            .fold(Log::for_run("run-1"), |log, task| {
+                log.event(yunta_testkit::task_registered(task))
+            })
+            .build()
     }
 
     /// The commit a `done` that crossed names. Any commit: what
@@ -281,7 +282,7 @@ mod tests {
     fn a_task_that_crossed_whose_identity_changed_here_starts_over() {
         let doc = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
         let cut_differently = tasks_document(&[("T001", "a.txt", "test -f something-else")]);
-        let prior = prior_registrations(&[registration(1, &cut_differently.tasks[0])]);
+        let prior = prior_registrations(&registrations(&cut_differently.tasks));
 
         let planned = plan_registration(&doc, &prior, &TaskLedger::default(), &carried(&["T001"]));
 
@@ -365,14 +366,7 @@ mod tests {
             };
             let doc = as_document(&declared);
             let before = as_document(&registered);
-            let prior = prior_registrations(
-                &before
-                    .tasks
-                    .iter()
-                    .enumerate()
-                    .map(|(i, task)| registration(i as u64 + 1, task))
-                    .collect::<Vec<_>>(),
-            );
+            let prior = prior_registrations(&registrations(&before.tasks));
             let current = ledger_of(&current);
             let crossed = carried(&crossed);
 

@@ -8,35 +8,21 @@ use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::ArtifactEvent;
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactSubmittedPayload,
-    ArtifactWrittenPayload, EventBody, EventPayload, RecordedOrigin, StoredEvent,
-    SubmissionOutcome,
+    ArtifactWrittenPayload, EventPayload, RecordedOrigin, StoredEvent, SubmissionOutcome,
 };
-use yunta_core::{sha256_hex, ArtifactKind, ContentHash, NodeId, RunId};
+use yunta_core::{sha256_hex, ArtifactKind, ContentHash, NodeId};
+use yunta_testkit_core::Log;
 
 fn hash(content: &str) -> ContentHash {
     sha256_hex(content.as_bytes())
 }
 
-fn event(seq: u64, node: Option<&str>, payload: EventPayload) -> StoredEvent {
-    StoredEvent {
-        seq: seq.into(),
-        run_id: RunId::from("run-1"),
-        node_id: node.map(NodeId::from),
-        timestamp: chrono::DateTime::UNIX_EPOCH,
-        body: EventBody::Known(payload),
-    }
-}
-
-fn accepted(seq: u64, node: Option<&str>, artifact: ArtifactId, content: &str) -> StoredEvent {
-    event(
-        seq,
-        node,
-        EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
-            artifact,
-            hash(content),
-            RecordedOrigin::Submitted,
-        ))),
-    )
+fn accepted(artifact: ArtifactId, content: &str) -> EventPayload {
+    EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
+        artifact,
+        hash(content),
+        RecordedOrigin::Submitted,
+    )))
 }
 
 fn interpreted(kind: ArtifactKind) -> ArtifactId {
@@ -49,25 +35,21 @@ fn opaque(name: &str) -> ArtifactId {
     }
 }
 
-fn written(seq: u64, node: &str, path: &str, kind: Option<ArtifactKind>) -> StoredEvent {
-    event(
-        seq,
-        Some(node),
-        EventPayload::Artifacts(ArtifactEvent::Written(ArtifactWrittenPayload {
-            path: path.into(),
-            content_hash: hash(path),
-            artifact_kind: kind,
-        })),
-    )
+fn written(path: &str, kind: Option<ArtifactKind>) -> EventPayload {
+    EventPayload::Artifacts(ArtifactEvent::Written(ArtifactWrittenPayload {
+        path: path.into(),
+        content_hash: hash(path),
+        artifact_kind: kind,
+    }))
 }
 
 #[test]
 fn the_last_acceptance_of_one_identity_is_what_the_run_holds() {
-    let log = vec![
-        accepted(1, Some("plan"), interpreted(ArtifactKind::Tasks), "first"),
-        accepted(2, Some("plan"), opaque("notes.md"), "notes"),
-        accepted(3, Some("plan"), interpreted(ArtifactKind::Tasks), "second"),
-    ];
+    let log = Log::for_run("run-1")
+        .node("plan", accepted(interpreted(ArtifactKind::Tasks), "first"))
+        .node("plan", accepted(opaque("notes.md"), "notes"))
+        .node("plan", accepted(interpreted(ArtifactKind::Tasks), "second"))
+        .build();
     let ledger = ArtifactLedger::of(&log);
 
     let tasks = ledger
@@ -89,10 +71,10 @@ fn the_last_acceptance_of_one_identity_is_what_the_run_holds() {
 
 #[test]
 fn the_identity_alone_reaches_the_last_producer_of_it() {
-    let log = vec![
-        accepted(1, Some("plan"), interpreted(ArtifactKind::Tasks), "plan's"),
-        accepted(2, Some("fix"), interpreted(ArtifactKind::Tasks), "fix's"),
-    ];
+    let log = Log::for_run("run-1")
+        .node("plan", accepted(interpreted(ArtifactKind::Tasks), "plan's"))
+        .node("fix", accepted(interpreted(ArtifactKind::Tasks), "fix's"))
+        .build();
     let ledger = ArtifactLedger::of(&log);
 
     let latest = ledger
@@ -104,12 +86,12 @@ fn the_identity_alone_reaches_the_last_producer_of_it() {
 
 #[test]
 fn a_named_producer_never_reaches_another_nodes_artifact() {
-    let log = vec![accepted(
-        1,
-        Some("fix"),
-        interpreted(ArtifactKind::Findings),
-        "fix's",
-    )];
+    let log = Log::for_run("run-1")
+        .node(
+            "fix",
+            accepted(interpreted(ArtifactKind::Findings), "fix's"),
+        )
+        .build();
     let ledger = ArtifactLedger::of(&log);
 
     assert!(
@@ -131,12 +113,12 @@ fn a_named_producer_never_reaches_another_nodes_artifact() {
 
 #[test]
 fn a_written_artifact_with_a_kind_folds_as_that_interpreted_identity() {
-    let log = vec![written(
-        1,
-        "plan",
-        "artifacts/plan.yaml",
-        Some(ArtifactKind::Tasks),
-    )];
+    let log = Log::for_run("run-1")
+        .node(
+            "plan",
+            written("artifacts/plan.yaml", Some(ArtifactKind::Tasks)),
+        )
+        .build();
     let ledger = ArtifactLedger::of(&log);
 
     let stood = ledger
@@ -148,7 +130,9 @@ fn a_written_artifact_with_a_kind_folds_as_that_interpreted_identity() {
 
 #[test]
 fn a_written_artifact_without_a_kind_folds_as_its_name_under_artifacts() {
-    let log = vec![written(1, "plan", "artifacts/notes.md", None)];
+    let log = Log::for_run("run-1")
+        .node("plan", written("artifacts/notes.md", None))
+        .build();
     let ledger = ArtifactLedger::of(&log);
 
     assert!(
@@ -159,7 +143,9 @@ fn a_written_artifact_without_a_kind_folds_as_its_name_under_artifacts() {
 
 #[test]
 fn a_written_artifact_under_a_subdirectory_keeps_the_whole_name() {
-    let log = vec![written(1, "plan", "artifacts/sub/dir/x.md", None)];
+    let log = Log::for_run("run-1")
+        .node("plan", written("artifacts/sub/dir/x.md", None))
+        .build();
     let ledger = ArtifactLedger::of(&log);
 
     assert!(ledger.latest(&opaque("sub/dir/x.md"), None).is_some());
@@ -167,12 +153,12 @@ fn a_written_artifact_under_a_subdirectory_keeps_the_whole_name() {
 
 #[test]
 fn a_kind_and_a_producer_each_select_their_own_refs_in_order() {
-    let log = vec![
-        accepted(1, Some("plan"), interpreted(ArtifactKind::Tasks), "t"),
-        accepted(2, Some("plan"), opaque("notes.md"), "n"),
-        accepted(3, Some("review"), interpreted(ArtifactKind::Findings), "f"),
-        accepted(4, Some("review"), interpreted(ArtifactKind::Tasks), "t2"),
-    ];
+    let log = Log::for_run("run-1")
+        .node("plan", accepted(interpreted(ArtifactKind::Tasks), "t"))
+        .node("plan", accepted(opaque("notes.md"), "n"))
+        .node("review", accepted(interpreted(ArtifactKind::Findings), "f"))
+        .node("review", accepted(interpreted(ArtifactKind::Tasks), "t2"))
+        .build();
     let ledger = ArtifactLedger::of(&log);
 
     let of_tasks: Vec<Option<NodeId>> = ledger
@@ -218,12 +204,9 @@ fn a_submission_leaves_the_fold_unmoved() {
 
 #[test]
 fn an_artifact_the_run_acquires_without_a_node_stands_like_any_other() {
-    let log = vec![accepted(
-        1,
-        None,
-        opaque("brief.md"),
-        "what the run was given",
-    )];
+    let log = Log::for_run("run-1")
+        .event(accepted(opaque("brief.md"), "what the run was given"))
+        .build();
     let ledger = ArtifactLedger::of(&log);
 
     let stood = ledger
@@ -248,15 +231,13 @@ proptest! {
         let log: Vec<StoredEvent> = steps
             .iter()
             .enumerate()
-            .map(|(seq, (producer, id))| {
-                accepted(
-                    seq as u64 + 1,
-                    Some(producers[*producer]),
-                    ids[*id].clone(),
-                    &seq.to_string(),
+            .fold(Log::for_run("run-1"), |log, (seq, (producer, id))| {
+                log.node(
+                    producers[*producer],
+                    accepted(ids[*id].clone(), &seq.to_string()),
                 )
             })
-            .collect();
+            .build();
 
         let ledger = ArtifactLedger::of(&log);
         prop_assert_eq!(&ledger, &ArtifactLedger::of(&log));

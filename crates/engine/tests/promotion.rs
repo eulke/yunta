@@ -23,8 +23,7 @@ use yunta_engine::{
 };
 use yunta_storage::Storage;
 use yunta_testkit::{init_repo, ScriptedInteraction};
-use yunta_testkit_core::FixedClock;
-use yunta_testkit_core::SeqIdSource;
+use yunta_testkit_core::{FixedClock, Log, SeqIdSource};
 
 /// Run ids for everything a test run gives birth to — unique across
 /// the binary, so parallel tests never share a run directory.
@@ -778,34 +777,25 @@ fn done_at(
 #[test]
 fn inherited_findings_dedup_the_way_the_frame_counts_them() {
     use yunta_core::events::FindingPostedPayload;
-    let run = RunId::from("run-x");
-    let event = |seq: u64, node: &str, finding: yunta_core::events::Finding| {
-        yunta_testkit::stored_for(
-            &run,
-            seq,
-            node,
-            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload { finding })),
-        )
+    let posted = |finding: yunta_core::events::Finding| {
+        EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload { finding }))
     };
     // Two reviewers complaining about the same place, spelled apart by
     // case and by the space between two words.
-    let events = vec![
-        event(
-            1,
+    let events = Log::for_run("run-x")
+        .node(
             "review-a",
-            finding("f1", "Scope  expansion DENIED", "tasks/T001"),
-        ),
-        event(
-            2,
+            posted(finding("f1", "Scope  expansion DENIED", "tasks/T001")),
+        )
+        .node(
             "review-b",
-            finding("f2", "scope expansion denied", "tasks/T001"),
-        ),
-        event(
-            3,
+            posted(finding("f2", "scope expansion denied", "tasks/T001")),
+        )
+        .node(
             "review-b",
-            finding("f3", "a second complaint", "src/lib.rs"),
-        ),
-    ];
+            posted(finding("f3", "a second complaint", "src/lib.rs")),
+        )
+        .build();
 
     let standing: Vec<yunta_core::events::Finding> =
         yunta_core::events::findings::effective(&events)

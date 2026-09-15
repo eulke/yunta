@@ -24,14 +24,15 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::node::happening::Happening as NodeHappening;
 use yunta_core::events::{
-    ArtifactAcceptedPayload, ArtifactId, ArtifactWrittenPayload, EventBody, EventPayload, Failure,
-    Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload, NodeFinishedPayload,
+    ArtifactAcceptedPayload, ArtifactId, ArtifactWrittenPayload, EventPayload, Failure, Finding,
+    FindingPostedPayload, FindingSeverity, NodeFailedPayload, NodeFinishedPayload,
     NodeStartedPayload, RecordedOrigin, RunPausedPayload, StoredEvent, TaskRegisteredPayload,
     TaskStatus, TaskStatusChangedPayload, TokenUsage,
 };
 use yunta_core::events::{ArtifactEvent, FindingEvent, GateEvent, NodeEvent, RunEvent, TaskEvent};
 use yunta_core::ArtifactKind;
 use yunta_engine::{chronicle, derive, ArtifactIntegrity, Happening, ObjectStore};
+use yunta_testkit_core::Log;
 
 const RUN: &str = "run-prop";
 
@@ -181,28 +182,19 @@ fn entry() -> impl Strategy<Value = (Option<&'static str>, EventPayload)> {
     (node, payload())
 }
 
+/// A whole generated log, stated in the order it was drawn. The clock
+/// stands still across it: a log's derived state must not depend on wall
+/// time.
 fn log() -> impl Strategy<Value = Vec<StoredEvent>> {
     prop::collection::vec(entry(), 0..40).prop_map(|entries| {
         entries
             .into_iter()
-            .enumerate()
-            .map(|(i, (node, payload))| event(i, node, payload))
-            .collect()
+            .fold(Log::for_run(RUN), |log, (node, payload)| match node {
+                Some(node) => log.node(node, payload),
+                None => log.event(payload),
+            })
+            .build()
     })
-}
-
-/// One event at its position in a generated log. Fixed timestamp: a
-/// log's derived state must not depend on wall time.
-fn event(index: usize, node: Option<&'static str>, payload: EventPayload) -> StoredEvent {
-    StoredEvent {
-        run_id: RUN.into(),
-        seq: ((index + 1) as u64).into(),
-        timestamp: chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
-            .expect("valid timestamp")
-            .with_timezone(&chrono::Utc),
-        node_id: node.map(Into::into),
-        body: EventBody::Known(payload),
-    }
 }
 
 /// The artifacts a run accepted, each with the bytes behind it — so a
@@ -217,15 +209,13 @@ fn accepted_artifacts() -> impl Strategy<Value = Vec<(Option<&'static str>, Arti
 fn a_questions_round() -> Vec<StoredEvent> {
     let questions = yunta_core::sha256_hex(b"questions");
     let answers = yunta_core::sha256_hex(b"answers");
-    vec![
-        event(
-            0,
-            Some("grill"),
+    Log::for_run(RUN)
+        .node(
+            "grill",
             EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
-        ),
-        event(
-            1,
-            Some("grill"),
+        )
+        .node(
+            "grill",
             EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
                 ArtifactId::Interpreted {
                     kind: ArtifactKind::Questions,
@@ -233,10 +223,9 @@ fn a_questions_round() -> Vec<StoredEvent> {
                 questions.clone(),
                 RecordedOrigin::Submitted,
             ))),
-        ),
-        event(
-            2,
-            Some("grill"),
+        )
+        .node(
+            "grill",
             EventPayload::Gates(GateEvent::QuestionsAsked(
                 yunta_core::events::QuestionsAskedPayload::new(
                     questions,
@@ -249,10 +238,9 @@ fn a_questions_round() -> Vec<StoredEvent> {
                 )
                 .expect("one question is a question"),
             )),
-        ),
-        event(
-            3,
-            Some("grill"),
+        )
+        .node(
+            "grill",
             EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
                 ArtifactId::Opaque {
                     name: "answers.yaml".to_string(),
@@ -260,10 +248,9 @@ fn a_questions_round() -> Vec<StoredEvent> {
                 answers.clone(),
                 RecordedOrigin::Answered,
             ))),
-        ),
-        event(
-            4,
-            Some("grill"),
+        )
+        .node(
+            "grill",
             EventPayload::Gates(GateEvent::QuestionsAnswered(
                 yunta_core::events::QuestionsAnsweredPayload {
                     answers_hash: answers,
@@ -271,16 +258,15 @@ fn a_questions_round() -> Vec<StoredEvent> {
                     responder: None,
                 },
             )),
-        ),
-        event(
-            5,
-            Some("grill"),
+        )
+        .node(
+            "grill",
             EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
                 "questions answered".to_string(),
                 yunta_core::events::TokenUsage::default(),
             ))),
-        ),
-    ]
+        )
+        .build()
 }
 
 /// What every cut of a round derives, and therefore what a resume does
@@ -499,26 +485,26 @@ proptest! {
     ) {
         let run = tempfile::tempdir().expect("tempdir");
         let store = ObjectStore::at(run.path());
-        let mut log: Vec<StoredEvent> = Vec::new();
+        let mut building = Log::for_run(RUN);
         for (node, artifact, content) in &accepted {
             let content_hash = block_on(store.put(content.as_bytes())).expect("store the bytes");
-            log.push(event(
-                log.len(),
-                *node,
-                EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(artifact.clone(), content_hash, RecordedOrigin::Submitted))),
-            ));
+            let payload = EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(artifact.clone(), content_hash, RecordedOrigin::Submitted)));
+            building = match *node {
+                Some(node) => building.node(node, payload),
+                None => building.event(payload),
+            };
         }
         for name in &older {
-            log.push(event(
-                log.len(),
-                Some("a"),
+            building = building.node(
+                "a",
                 EventPayload::Artifacts(ArtifactEvent::Written(ArtifactWrittenPayload {
                     path: std::path::PathBuf::from(format!("artifacts/{name}.md")),
                     content_hash: yunta_core::sha256_hex(name.as_bytes()),
                     artifact_kind: None,
                 })),
-            ));
+            );
         }
+        let log = building.build();
 
         let before = derive(&log);
         let integrity = block_on(ArtifactIntegrity::of(run.path(), &log));

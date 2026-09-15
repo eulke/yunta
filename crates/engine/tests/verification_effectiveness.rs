@@ -2,14 +2,14 @@
 //! tests over hand-built historical logs, same style `tests/stats.rs`
 //! uses for its own pure derivation.
 
-use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
-    CriteriaCheckedPayload, CriterionResult, EventBody, EventPayload, Failure, GateResolvedPayload,
+    CriteriaCheckedPayload, CriterionResult, EventPayload, Failure, GateResolvedPayload,
     NodeFailedPayload, NodeReroutedPayload, Phase, StoredEvent,
 };
 use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
 use yunta_core::{Node, NodeKind, OnFailure, Workflow};
 use yunta_engine::{analyze_verification_effectiveness as analyze, VERIFICATION_MIN_SAMPLES};
+use yunta_testkit_core::Log;
 
 fn node(id: &str, on_failure: Option<OnFailure>) -> Node {
     Node {
@@ -80,22 +80,6 @@ fn workflow(nodes: Vec<Node>) -> Workflow {
     }
 }
 
-fn base_time() -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap()
-}
-
-/// `index` is the event's 0-based position in the synthetic log; storage
-/// numbers positions from 1.
-fn event(index: u64, node_id: Option<&str>, payload: EventPayload) -> StoredEvent {
-    StoredEvent {
-        run_id: "run-1".into(),
-        seq: (index + 1).into(),
-        timestamp: base_time(),
-        node_id: node_id.map(Into::into),
-        body: EventBody::Known(payload),
-    }
-}
-
 fn criterion(cmd: &str, exit_code: i32) -> CriterionResult {
     CriterionResult {
         cmd: cmd.to_string(),
@@ -107,15 +91,15 @@ fn criterion(cmd: &str, exit_code: i32) -> CriterionResult {
 }
 
 fn pre_check_run(cmd: &str, exit_code: i32) -> Vec<StoredEvent> {
-    vec![event(
-        0,
-        None,
-        EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
-            task_id: "T001".into(),
-            phase: Phase::Pre,
-            results: vec![criterion(cmd, exit_code)],
-        })),
-    )]
+    Log::for_run("run-1")
+        .event(EventPayload::Node(NodeEvent::CriteriaChecked(
+            CriteriaCheckedPayload {
+                task_id: "T001".into(),
+                phase: Phase::Pre,
+                results: vec![criterion(cmd, exit_code)],
+            },
+        )))
+        .build()
 }
 
 #[test]
@@ -166,16 +150,17 @@ fn a_reroute_that_never_fires_across_enough_failures_is_flagged() {
     };
     let wf = workflow(vec![node("lint", Some(on_failure))]);
     let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
-        .map(|i| {
-            vec![event(
-                i as u64,
-                Some("lint"),
-                EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-                    Failure::message("lint failed".to_string()),
-                    true,
-                    Default::default(),
-                ))),
-            )]
+        .map(|_| {
+            Log::for_run("run-1")
+                .node(
+                    "lint",
+                    EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+                        Failure::message("lint failed".to_string()),
+                        true,
+                        Default::default(),
+                    ))),
+                )
+                .build()
             // no node_rerouted in any of these — the re-route this node
             // declares was never observed firing.
         })
@@ -193,43 +178,44 @@ fn a_reroute_that_fires_at_least_once_is_never_flagged() {
     };
     let wf = workflow(vec![node("lint", Some(on_failure))]);
     let mut history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
-        .map(|i| {
-            vec![event(
-                i as u64,
-                Some("lint"),
+        .map(|_| {
+            Log::for_run("run-1")
+                .node(
+                    "lint",
+                    EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+                        Failure::message("lint failed".to_string()),
+                        true,
+                        Default::default(),
+                    ))),
+                )
+                .build()
+        })
+        .collect();
+    // The last sample's failure actually rerouted.
+    history.push(
+        Log::for_run("run-1")
+            .node(
+                "lint",
                 EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                     Failure::message("lint failed".to_string()),
                     true,
                     Default::default(),
                 ))),
-            )]
-        })
-        .collect();
-    // The last sample's failure actually rerouted.
-    history.push(vec![
-        event(
-            100,
-            Some("lint"),
-            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-                Failure::message("lint failed".to_string()),
-                true,
-                Default::default(),
-            ))),
-        ),
-        event(
-            101,
-            Some("lint"),
-            EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
-                "fix".into(),
-                yunta_core::events::RerouteCause(yunta_core::events::Failure::message(
-                    "lint failed",
-                )),
-                yunta_core::events::RerouteOrigin::OnFailure,
-                Some(1),
-                Some(2),
-            ))),
-        ),
-    ]);
+            )
+            .node(
+                "lint",
+                EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+                    "fix".into(),
+                    yunta_core::events::RerouteCause(yunta_core::events::Failure::message(
+                        "lint failed",
+                    )),
+                    yunta_core::events::RerouteOrigin::OnFailure,
+                    Some(1),
+                    Some(2),
+                ))),
+            )
+            .build(),
+    );
     let findings = analyze(&wf, &history);
     assert!(findings.never_triggered_reroutes.is_empty());
 }
@@ -245,15 +231,16 @@ fn a_node_that_always_finishes_clean_is_flagged_even_though_it_never_failed() {
     };
     let wf = workflow(vec![node("lint", Some(on_failure))]);
     let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
-        .map(|i| {
-            vec![event(
-                i as u64,
-                Some("lint"),
-                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                    "clean".to_string(),
-                    Default::default(),
-                ))),
-            )]
+        .map(|_| {
+            Log::for_run("run-1")
+                .node(
+                    "lint",
+                    EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                        "clean".to_string(),
+                        Default::default(),
+                    ))),
+                )
+                .build()
         })
         .collect();
     let findings = analyze(&wf, &history);
@@ -268,15 +255,16 @@ fn a_node_that_always_finishes_clean_is_flagged_even_though_it_never_failed() {
 fn a_gate_always_approved_without_adjustment_is_flagged() {
     let wf = workflow(vec![gate_node("approve")]);
     let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
-        .map(|i| {
-            vec![event(
-                i as u64,
-                Some("approve"),
-                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
-                    by: "reviewer".into(),
-                    sha: "deadbeef".into(),
-                })),
-            )]
+        .map(|_| {
+            Log::for_run("run-1")
+                .node(
+                    "approve",
+                    EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
+                        by: "reviewer".into(),
+                        sha: "deadbeef".into(),
+                    })),
+                )
+                .build()
         })
         .collect();
     let findings = analyze(&wf, &history);
@@ -288,51 +276,48 @@ fn a_gate_always_approved_without_adjustment_is_flagged() {
 fn a_gate_that_ever_needed_adjustment_is_never_flagged() {
     let wf = workflow(vec![gate_node("approve")]);
     let mut history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
-        .map(|i| {
-            vec![event(
-                i as u64,
-                Some("approve"),
-                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
-                    by: "reviewer".into(),
-                    sha: "deadbeef".into(),
-                })),
-            )]
+        .map(|_| {
+            Log::for_run("run-1")
+                .node(
+                    "approve",
+                    EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
+                        by: "reviewer".into(),
+                        sha: "deadbeef".into(),
+                    })),
+                )
+                .build()
         })
         .collect();
-    history.push(vec![event(
-        200,
-        Some("approve"),
-        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::ChangesRequested {
-            by: "reviewer".into(),
-        })),
-    )]);
+    history.push(
+        Log::for_run("run-1")
+            .node(
+                "approve",
+                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::ChangesRequested {
+                    by: "reviewer".into(),
+                })),
+            )
+            .build(),
+    );
     let findings = analyze(&wf, &history);
     assert!(findings.always_approved_gates.is_empty());
 }
 
+/// One run's post-check log: task `i` checked once per attempt in
+/// `task_attempts[i]`, every attempt green.
 fn post_check_run(task_attempts: &[u32]) -> Vec<StoredEvent> {
-    task_attempts
-        .iter()
-        .enumerate()
-        .map(|(i, &attempts)| {
-            let mut events = Vec::new();
-            for a in 0..attempts {
-                events.push(event(
-                    (i as u64) * 10 + a as u64,
-                    None,
-                    EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
-                        task_id: format!("T{i:03}").parse().unwrap(),
-                        phase: Phase::Post,
-                        results: vec![criterion("test -f done", 0)],
-                    })),
-                ));
-            }
-            events
-        })
-        .fold(Vec::new(), |mut acc, mut v| {
-            acc.append(&mut v);
-            acc
-        })
+    let mut log = Log::for_run("run-1");
+    for (i, &attempts) in task_attempts.iter().enumerate() {
+        for _ in 0..attempts {
+            log = log.event(EventPayload::Node(NodeEvent::CriteriaChecked(
+                CriteriaCheckedPayload {
+                    task_id: format!("T{i:03}").parse().unwrap(),
+                    phase: Phase::Post,
+                    results: vec![criterion("test -f done", 0)],
+                },
+            )));
+        }
+    }
+    log.build()
 }
 
 #[test]
@@ -363,19 +348,19 @@ fn no_history_flags_nothing_at_all() {
 // --- signals tied to modes -----------
 
 fn run_created_in_mode(mode: &str) -> Vec<StoredEvent> {
-    vec![event(
-        0,
-        None,
-        EventPayload::Run(RunEvent::Created(yunta_core::events::RunCreatedPayload {
-            manifest_hash: yunta_core::sha256_hex(b"h"),
-            inputs: std::collections::BTreeMap::new(),
-            mode: mode.into(),
-            promoted_from: None,
-            yunta_schema: None,
-            base_branch: "main".to_string(),
-            base_commit: "deadbeef".into(),
-        })),
-    )]
+    Log::for_run("run-1")
+        .event(EventPayload::Run(RunEvent::Created(
+            yunta_core::events::RunCreatedPayload {
+                manifest_hash: yunta_core::sha256_hex(b"h"),
+                inputs: std::collections::BTreeMap::new(),
+                mode: mode.into(),
+                promoted_from: None,
+                yunta_schema: None,
+                base_branch: "main".to_string(),
+                base_commit: "deadbeef".into(),
+            },
+        )))
+        .build()
 }
 
 fn moded_workflow(nodes: Vec<Node>, mode_names: &[&str]) -> Workflow {
@@ -453,15 +438,16 @@ fn an_invariant_node_is_never_the_subject_of_a_remove_shaped_finding() {
     lint.invariant = true;
     let wf = workflow(vec![lint]);
     let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES)
-        .map(|i| {
-            vec![event(
-                i as u64,
-                Some("lint"),
-                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                    "clean".to_string(),
-                    Default::default(),
-                ))),
-            )]
+        .map(|_| {
+            Log::for_run("run-1")
+                .node(
+                    "lint",
+                    EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                        "clean".to_string(),
+                        Default::default(),
+                    ))),
+                )
+                .build()
         })
         .collect();
     let findings = analyze(&wf, &history);

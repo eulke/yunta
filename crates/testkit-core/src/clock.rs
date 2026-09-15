@@ -6,15 +6,22 @@ use yunta_core::Clock;
 /// The instant [`FixedClock`] always reports.
 pub const FIXED_NOW: &str = "2026-01-01T00:00:00Z";
 
+/// [`FIXED_NOW`] as an instant — the fixed origin a test measures from,
+/// whether it takes it through a [`Clock`] or stamps a log with it
+/// directly.
+pub fn fixed_now() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(FIXED_NOW)
+        .expect("FIXED_NOW is a valid RFC3339 timestamp")
+        .with_timezone(&Utc)
+}
+
 /// A [`Clock`] frozen at [`FIXED_NOW`] — the default for a test that only
 /// needs time to be constant, not any particular value.
 pub struct FixedClock;
 
 impl Clock for FixedClock {
     fn now(&self) -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339(FIXED_NOW)
-            .expect("FIXED_NOW is a valid RFC3339 timestamp")
-            .with_timezone(&Utc)
+        fixed_now()
     }
 }
 

@@ -129,13 +129,13 @@ impl Curtain {
 
 #[cfg(test)]
 mod tests {
-    use yunta_core::events::{EventBody, EventPayload, NodeStartedPayload, StoredEvent};
+    use yunta_core::events::{EventPayload, NodeStartedPayload};
     use yunta_core::{
-        Clock, CommitSha, ConfigLayer, ContentHash, Isolation, Manifest, RunId, Seq, SystemClock,
+        CommitSha, ConfigLayer, ContentHash, Isolation, Manifest, RunId, SystemClock,
     };
     use yunta_storage::AsyncStorage;
     use yunta_testkit::wait_until_async;
-    use yunta_testkit_core::{Captured, FixedClock};
+    use yunta_testkit_core::{Captured, Log};
 
     use crate::render::Glyphs;
     use crate::surface::feed::{Beat, Diagnostics, Feed};
@@ -176,16 +176,28 @@ mod tests {
         }
     }
 
-    fn event(seq: u64) -> Beat {
-        Beat::Event(Box::new(StoredEvent {
-            run_id: RUN.clone(),
-            seq: Seq::try_from(seq as i64).expect("a positive seq"),
-            timestamp: Clock::now(&FixedClock),
-            node_id: None,
-            body: EventBody::Known(EventPayload::Node(NodeEvent::Started(
-                NodeStartedPayload::attempt(1),
-            ))),
-        }))
+    /// The run's first `n` events, each in the beat the feed carries it
+    /// in. A test takes as many as it needs, in order: what the surface
+    /// does with an event never depends on which event it is, only on
+    /// when it arrives.
+    fn beats(n: usize) -> std::vec::IntoIter<Beat> {
+        (0..n)
+            .fold(Log::for_run(RUN.as_str()), |log, _| {
+                log.event(EventPayload::Node(NodeEvent::Started(
+                    NodeStartedPayload::attempt(1),
+                )))
+            })
+            .build()
+            .into_iter()
+            .map(|event| Beat::Event(Box::new(event)))
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    /// The run's first event — what a test that only needs the surface
+    /// to have drawn something tells the feed.
+    fn beat() -> Beat {
+        beats(1).next().expect("a log of one event holds it")
     }
 
     /// A painter drawing a run, and everything that talks to it: the
@@ -282,7 +294,7 @@ mod tests {
     async fn the_region_is_off_the_terminal_by_the_time_a_prompt_is_told_it_may_draw() {
         let at = tempfile::tempdir().expect("a directory for this test's store");
         let drawing = Drawing::open(Delivery::Live, at.path()).await;
-        drawing.feed.tell(event(1)).await;
+        drawing.feed.tell(beat()).await;
         wait_until_async(
             || async { !drawing.shown().is_empty() },
             || "the region never drew anything to take down".to_string(),
@@ -301,7 +313,11 @@ mod tests {
     async fn nothing_the_surface_draws_lands_on_a_prompt_that_is_open() {
         let at = tempfile::tempdir().expect("a directory for this test's store");
         let drawing = Drawing::open(Delivery::Live, at.path()).await;
-        drawing.feed.tell(event(1)).await;
+        let mut moves = beats(4);
+        drawing
+            .feed
+            .tell(moves.next().expect("the run's first event"))
+            .await;
         wait_until_async(
             || async { !drawing.shown().is_empty() },
             || "the region never drew anything to take down".to_string(),
@@ -316,8 +332,8 @@ mod tests {
             .screen
             .interject(PROMPT)
             .expect("the terminal takes the prompt's own row");
-        for seq in 2..=4 {
-            drawing.feed.tell(event(seq)).await;
+        for moved in moves {
+            drawing.feed.tell(moved).await;
         }
         let screen = drawing.screen.clone();
         drawing.drained().await;
@@ -335,8 +351,8 @@ mod tests {
         let drawing = Drawing::open(Delivery::Lines { reason: "a test" }, at.path()).await;
         drawing.curtain.lower().await;
         let held = drawing.scrollback.text();
-        for seq in 1..=3 {
-            drawing.feed.tell(event(seq)).await;
+        for moved in beats(3) {
+            drawing.feed.tell(moved).await;
         }
         drawing.taken().await;
         assert_eq!(
@@ -360,8 +376,8 @@ mod tests {
         let drawing = Drawing::open(Delivery::Lines { reason: "a test" }, at.path()).await;
         drawing.curtain.lower().await;
         let held = drawing.scrollback.text();
-        for seq in 1..=3 {
-            drawing.feed.tell(event(seq)).await;
+        for moved in beats(3) {
+            drawing.feed.tell(moved).await;
         }
 
         // A run stopped from outside closes its surface with the prompt
@@ -383,7 +399,7 @@ mod tests {
 
         let at = tempfile::tempdir().expect("a directory for this test's store");
         let drawing = Drawing::open(Delivery::Live, at.path()).await;
-        drawing.feed.tell(event(1)).await;
+        drawing.feed.tell(beat()).await;
         wait_until_async(
             || async { !drawing.shown().is_empty() },
             || "the region never drew anything to take down".to_string(),
@@ -418,7 +434,7 @@ mod tests {
     async fn the_region_comes_back_when_the_prompt_gives_the_terminal_up() {
         let at = tempfile::tempdir().expect("a directory for this test's store");
         let drawing = Drawing::open(Delivery::Live, at.path()).await;
-        drawing.feed.tell(event(1)).await;
+        drawing.feed.tell(beat()).await;
         drawing.curtain.lower().await;
 
         drawing.curtain.raise();

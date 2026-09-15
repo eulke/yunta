@@ -8,21 +8,10 @@
 
 use yunta_core::events::{
     ChildRunCreatedPayload, ChildRunFinishedPayload, EventBody, EventPayload, NodeEvent,
-    NodeFinishedPayload, NodeStartedPayload, NodeState, StoredEvent, TerminalState, TokenUsage,
+    NodeFinishedPayload, NodeStartedPayload, NodeState, TerminalState, TokenUsage,
 };
 use yunta_engine::{chronicle, Happening};
-
-/// One event of `payload`, at `seq` seconds past the epoch, under
-/// `node`.
-fn event(seq: u64, node: Option<&str>, payload: EventPayload) -> StoredEvent {
-    StoredEvent {
-        run_id: yunta_core::RunId::from("run-chronicle"),
-        seq: seq.into(),
-        timestamp: chrono::DateTime::UNIX_EPOCH + chrono::Duration::seconds(seq as i64),
-        node_id: node.map(Into::into),
-        body: EventBody::Known(payload),
-    }
-}
+use yunta_testkit_core::{all_kinds, Log};
 
 fn started() -> EventPayload {
     EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 }))
@@ -39,19 +28,18 @@ fn finished(outcome: &str) -> EventPayload {
 fn every_event_is_one_moment() {
     // Including a kind this binary does not know: a reader not told the
     // log carries more than the binary reads is a reader misled.
-    let mut events: Vec<StoredEvent> = yunta_testkit_core::all_kinds()
-        .into_iter()
-        .enumerate()
-        .map(|(index, payload)| event(index as u64 + 1, Some("only"), payload))
-        .collect();
-    let next = events.len() as u64 + 1;
-    events.push(StoredEvent {
-        body: EventBody::Unknown(yunta_core::events::UnknownEvent {
-            kind: "criteria_checked_v2".to_string(),
-            schema_version: 2,
-            payload: serde_json::Map::new(),
-        }),
-        ..event(next, Some("only"), started())
+    let mut log = Log::for_run("run-chronicle");
+    for payload in all_kinds() {
+        log = log.node("only", payload).after(1);
+    }
+    let mut events = log.node("only", started()).build();
+    let unread = events
+        .last_mut()
+        .expect("the kind the binary does not read");
+    unread.body = EventBody::Unknown(yunta_core::events::UnknownEvent {
+        kind: "criteria_checked_v2".to_string(),
+        schema_version: 2,
+        payload: serde_json::Map::new(),
     });
 
     let moments = chronicle(&events);
@@ -72,21 +60,21 @@ fn every_event_is_one_moment() {
 
 #[test]
 fn a_settled_node_carries_how_long_it_worked_and_the_children_it_bore() {
-    let events = vec![
-        event(1, Some("compose"), started()),
-        event(
-            2,
-            Some("compose"),
+    let events = Log::for_run("run-chronicle")
+        .node("compose", started())
+        .after(1)
+        .node(
+            "compose",
             EventPayload::Children(yunta_core::events::ChildEvent::Created(
                 ChildRunCreatedPayload {
                     child_run_id: yunta_core::RunId::from("child-1"),
                     child_workflow_hash: yunta_core::sha256_hex(b"wf"),
                 },
             )),
-        ),
-        event(
-            3,
-            Some("compose"),
+        )
+        .after(1)
+        .node(
+            "compose",
             EventPayload::Children(yunta_core::events::ChildEvent::Finished(
                 ChildRunFinishedPayload {
                     child_run_id: yunta_core::RunId::from("child-1"),
@@ -95,9 +83,10 @@ fn a_settled_node_carries_how_long_it_worked_and_the_children_it_bore() {
                     tokens: TokenUsage::default(),
                 },
             )),
-        ),
-        event(4, Some("compose"), finished("composed")),
-    ];
+        )
+        .after(1)
+        .node("compose", finished("composed"))
+        .build();
 
     let moments = chronicle(&events);
     let settled = moments.last().expect("the close");
@@ -128,11 +117,11 @@ fn a_node_that_settles_twice_is_two_moments() {
     // The defect a scrollback that remembered "what is gone" had: a
     // node that closes twice is two things that happened, and each
     // moment carries the state it reached, not the one the log ends on.
-    let events = vec![
-        event(1, Some("lint"), started()),
-        event(
-            2,
-            Some("lint"),
+    let events = Log::for_run("run-chronicle")
+        .node("lint", started())
+        .after(1)
+        .node(
+            "lint",
             EventPayload::Node(NodeEvent::Failed(
                 yunta_core::events::NodeFailedPayload::new(
                     yunta_core::events::Failure::Message {
@@ -142,10 +131,12 @@ fn a_node_that_settles_twice_is_two_moments() {
                     TokenUsage::default(),
                 ),
             )),
-        ),
-        event(3, Some("lint"), started()),
-        event(4, Some("lint"), finished("exit 0")),
-    ];
+        )
+        .after(1)
+        .node("lint", started())
+        .after(1)
+        .node("lint", finished("exit 0"))
+        .build();
 
     let reached: Vec<NodeState> = chronicle(&events)
         .into_iter()

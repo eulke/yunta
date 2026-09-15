@@ -79,70 +79,71 @@ impl Folded {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use yunta_core::events::NodeEvent;
-    use yunta_core::events::{EventBody, EventPayload, NodeStartedPayload};
-    use yunta_core::RunId;
-    use yunta_testkit_core::FixedClock;
+    use yunta_core::events::{EventPayload, NodeEvent, NodeStartedPayload};
+    use yunta_testkit_core::Log;
 
-    const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
+    const RUN: &str = "01JBZ5X8K3N7Q2W6E4R9T1Y0P5";
 
-    fn event(seq: u64) -> StoredEvent {
-        StoredEvent {
-            run_id: RUN.clone(),
-            seq: Seq::try_from(seq as i64).expect("a positive seq"),
-            timestamp: yunta_core::Clock::now(&FixedClock),
-            node_id: None,
-            body: EventBody::Known(EventPayload::Node(NodeEvent::Started(
-                NodeStartedPayload::attempt(seq as u32),
-            ))),
-        }
+    /// A run's log of `len` events, every one stamped by the same frozen
+    /// clock: nothing here reads a wall clock, so nothing here can race
+    /// one.
+    fn log(len: u32) -> Vec<StoredEvent> {
+        (1..=len)
+            .fold(Log::for_run(RUN), |log, attempt| {
+                log.event(EventPayload::Node(NodeEvent::Started(
+                    NodeStartedPayload::attempt(attempt),
+                )))
+            })
+            .build()
     }
 
-    /// Every event of these tests is stamped by the same frozen clock:
-    /// nothing here reads a wall clock, so nothing here can race one.
     fn seqs(folded: &Folded) -> Vec<u64> {
         folded.settled().iter().map(|e| e.seq.get()).collect()
     }
 
     #[test]
     fn an_event_at_or_below_what_is_folded_changes_nothing() {
+        let log = log(2);
         let mut folded = Folded::default();
-        folded.fold(event(1));
-        folded.fold(event(2));
-        folded.fold(event(1));
-        folded.fold(event(2));
+        folded.fold(log[0].clone());
+        folded.fold(log[1].clone());
+        folded.fold(log[0].clone());
+        folded.fold(log[1].clone());
         assert_eq!(seqs(&folded), vec![1, 2]);
     }
 
     #[test]
     fn events_that_arrive_out_of_order_are_drawn_in_the_logs_order() {
+        let log = log(3);
         let mut folded = Folded::default();
-        folded.fold(event(3));
-        folded.fold(event(1));
+        folded.fold(log[2].clone());
+        folded.fold(log[0].clone());
         assert_eq!(seqs(&folded), vec![1], "3 waits on the hole at 2");
         assert!(folded.gap());
-        folded.fold(event(2));
+        folded.fold(log[1].clone());
         assert_eq!(seqs(&folded), vec![1, 2, 3]);
         assert!(!folded.gap());
     }
 
     #[test]
     fn a_reading_of_the_log_closes_a_hole_a_dropped_frame_left() {
+        let log = log(4);
         let mut folded = Folded::default();
-        folded.fold(event(1));
-        folded.fold(event(4));
+        folded.fold(log[0].clone());
+        folded.fold(log[3].clone());
         assert!(folded.gap());
-        folded.refill(vec![event(1), event(2), event(3)]);
+        folded.refill(log[..3].to_vec());
         assert_eq!(seqs(&folded), vec![1, 2, 3, 4]);
         assert!(!folded.gap());
     }
 
     #[test]
     fn a_reading_that_knows_less_than_the_surface_is_left_alone() {
+        let log = log(2);
         let mut folded = Folded::default();
-        folded.fold(event(1));
-        folded.fold(event(2));
-        folded.refill(vec![event(1)]);
+        folded.fold(log[0].clone());
+        folded.fold(log[1].clone());
+        folded.refill(log[..1].to_vec());
         assert_eq!(seqs(&folded), vec![1, 2]);
     }
 }

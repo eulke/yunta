@@ -399,27 +399,16 @@ pub(super) async fn paint(mut painter: Painter, mut beats: Receiver<Beat>, stand
 mod tests {
     use yunta_core::events::{ChildEvent, RunEvent};
     use yunta_core::events::{
-        ChildRunCreatedPayload, EventBody, NodeStartedPayload, RunFinishedPayload, RunMetrics,
-        TokenUsage,
+        ChildRunCreatedPayload, NodeStartedPayload, RunFinishedPayload, RunMetrics, TokenUsage,
     };
-    use yunta_core::{ContentHash, Seq};
-    use yunta_testkit_core::FixedClock;
+    use yunta_core::ContentHash;
+    use yunta_testkit_core::Log;
 
     use super::*;
     use yunta_core::events::NodeEvent;
 
-    const DRAWN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
+    const DRAWN: &str = "01JBZ5X8K3N7Q2W6E4R9T1Y0P5";
     const OTHER: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P6");
-
-    fn event(seq: u64, payload: EventPayload) -> StoredEvent {
-        StoredEvent {
-            run_id: DRAWN.clone(),
-            seq: Seq::try_from(seq as i64).expect("a positive seq"),
-            timestamp: Clock::now(&FixedClock),
-            node_id: None,
-            body: EventBody::Known(payload),
-        }
-    }
 
     fn started() -> EventPayload {
         EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1)))
@@ -444,7 +433,7 @@ mod tests {
 
     #[test]
     fn a_run_still_moving_has_no_successor() {
-        let log = [event(1, started())];
+        let log = Log::for_run(DRAWN).event(started()).build();
         assert!(!succeeds(&log, &OTHER));
     }
 
@@ -455,27 +444,30 @@ mod tests {
             TerminalState::Failed,
             TerminalState::Cancelled,
         ] {
-            let log = [event(1, started()), event(2, closed(terminal))];
+            let log = Log::for_run(DRAWN)
+                .event(started())
+                .event(closed(terminal))
+                .build();
             assert!(!succeeds(&log, &OTHER), "{terminal:?}");
         }
     }
 
     #[test]
     fn the_run_appending_after_a_promoted_close_is_the_successor() {
-        let log = [
-            event(1, started()),
-            event(2, closed(TerminalState::Promoted)),
-        ];
+        let log = Log::for_run(DRAWN)
+            .event(started())
+            .event(closed(TerminalState::Promoted))
+            .build();
         assert!(succeeds(&log, &OTHER));
     }
 
     #[test]
     fn a_child_this_run_bore_is_never_mistaken_for_its_successor() {
-        let log = [
-            event(1, started()),
-            event(2, bore(&OTHER)),
-            event(3, closed(TerminalState::Promoted)),
-        ];
+        let log = Log::for_run(DRAWN)
+            .event(started())
+            .event(bore(&OTHER))
+            .event(closed(TerminalState::Promoted))
+            .build();
         assert!(!succeeds(&log, &OTHER));
     }
 }

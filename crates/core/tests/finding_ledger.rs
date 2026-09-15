@@ -6,10 +6,11 @@ use proptest::prelude::*;
 use yunta_core::events::findings::{FindingLedger, Slot};
 use yunta_core::events::FindingEvent;
 use yunta_core::events::{
-    EventBody, EventPayload, Finding, FindingPostedPayload, FindingSeverity, FindingUpdatedPayload,
-    FindingWithdrawnPayload, StoredEvent,
+    EventPayload, Finding, FindingPostedPayload, FindingSeverity, FindingUpdatedPayload,
+    FindingWithdrawnPayload,
 };
-use yunta_core::{FindingId, NodeId, RunId};
+use yunta_core::{FindingId, NodeId};
+use yunta_testkit_core::Log;
 
 fn finding(id: &str, title: &str) -> Finding {
     Finding {
@@ -22,54 +23,32 @@ fn finding(id: &str, title: &str) -> Finding {
     }
 }
 
-fn event(seq: u64, node: &str, payload: EventPayload) -> StoredEvent {
-    StoredEvent {
-        seq: seq.into(),
-        run_id: RunId::from("run-1"),
-        node_id: Some(NodeId::from(node)),
-        timestamp: chrono::DateTime::UNIX_EPOCH,
-        body: EventBody::Known(payload),
-    }
+fn posted(id: &str, title: &str) -> EventPayload {
+    EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
+        finding: finding(id, title),
+    }))
 }
 
-fn posted(seq: u64, node: &str, id: &str, title: &str) -> StoredEvent {
-    event(
-        seq,
-        node,
-        EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
-            finding: finding(id, title),
-        })),
-    )
+fn updated(id: &str, title: &str) -> EventPayload {
+    EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
+        finding: finding(id, title),
+    }))
 }
 
-fn updated(seq: u64, node: &str, id: &str, title: &str) -> StoredEvent {
-    event(
-        seq,
-        node,
-        EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
-            finding: finding(id, title),
-        })),
-    )
-}
-
-fn withdrawn(seq: u64, node: &str, id: &str) -> StoredEvent {
-    event(
-        seq,
-        node,
-        EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
-            id: FindingId::try_from(id.to_string()).expect("a well-formed id"),
-            reason: "no longer stands".to_string(),
-        })),
-    )
+fn withdrawn(id: &str) -> EventPayload {
+    EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
+        id: FindingId::try_from(id.to_string()).expect("a well-formed id"),
+        reason: "no longer stands".to_string(),
+    }))
 }
 
 #[test]
 fn an_update_replaces_the_state_and_keeps_the_place() {
-    let log = vec![
-        posted(1, "review", "a", "first"),
-        posted(2, "review", "b", "second"),
-        updated(3, "review", "a", "sharper"),
-    ];
+    let log = Log::for_run("run-1")
+        .node("review", posted("a", "first"))
+        .node("review", posted("b", "second"))
+        .node("review", updated("a", "sharper"))
+        .build();
     let effective = FindingLedger::of(&log).effective();
     let titles: Vec<&str> = effective.iter().map(|p| p.finding.title.as_str()).collect();
     assert_eq!(
@@ -81,11 +60,11 @@ fn an_update_replaces_the_state_and_keeps_the_place() {
 
 #[test]
 fn a_withdrawal_removes_it_from_the_effective_set() {
-    let log = vec![
-        posted(1, "review", "a", "first"),
-        posted(2, "review", "b", "second"),
-        withdrawn(3, "review", "a"),
-    ];
+    let log = Log::for_run("run-1")
+        .node("review", posted("a", "first"))
+        .node("review", posted("b", "second"))
+        .node("review", withdrawn("a"))
+        .build();
     let ledger = FindingLedger::of(&log);
     let ids: Vec<String> = ledger
         .effective()
@@ -104,12 +83,12 @@ fn a_withdrawal_removes_it_from_the_effective_set() {
 
 #[test]
 fn one_node_never_reaches_another_nodes_finding() {
-    let log = vec![
-        posted(1, "reviewer-a", "dup", "a's own"),
-        posted(2, "reviewer-b", "dup", "b's own"),
+    let log = Log::for_run("run-1")
+        .node("reviewer-a", posted("dup", "a's own"))
+        .node("reviewer-b", posted("dup", "b's own"))
         // `reviewer-b` withdrawing `dup` touches its own, never `a`'s.
-        withdrawn(3, "reviewer-b", "dup"),
-    ];
+        .node("reviewer-b", withdrawn("dup"))
+        .build();
     let effective = FindingLedger::of(&log).effective();
     assert_eq!(effective.len(), 1);
     assert_eq!(effective[0].node, Some(NodeId::from("reviewer-a")));
@@ -118,18 +97,18 @@ fn one_node_never_reaches_another_nodes_finding() {
 
 #[test]
 fn a_sequence_the_engine_never_writes_leaves_the_state_unmoved() {
-    let unreachable = vec![
+    let unreachable = Log::for_run("run-1")
         // An update for an id this node never posted.
-        updated(1, "review", "ghost", "nothing to replace"),
+        .node("review", updated("ghost", "nothing to replace"))
         // A withdrawal of the same.
-        withdrawn(2, "review", "ghost"),
+        .node("review", withdrawn("ghost"))
         // A post on an id already withdrawn, and a second post of a live id.
-        posted(3, "review", "a", "first"),
-        withdrawn(4, "review", "a"),
-        posted(5, "review", "a", "revived"),
-        posted(6, "review", "b", "second"),
-        posted(7, "review", "b", "again"),
-    ];
+        .node("review", posted("a", "first"))
+        .node("review", withdrawn("a"))
+        .node("review", posted("a", "revived"))
+        .node("review", posted("b", "second"))
+        .node("review", posted("b", "again"))
+        .build();
     let ledger = FindingLedger::of(&unreachable);
     let effective = ledger.effective();
     assert_eq!(
@@ -153,25 +132,10 @@ fn a_finding_the_engine_posts_about_the_run_stands_like_any_other() {
     // finish, an artifact a distill did not find — and those carry no
     // node. They are counted; what they have no owner for is being
     // updated or withdrawn.
-    let log = vec![
-        event(
-            1,
-            "review",
-            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
-                finding: finding("a", "a node's own"),
-            })),
-        ),
-        StoredEvent {
-            node_id: None,
-            ..event(
-                2,
-                "unused",
-                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
-                    finding: finding("distill-push", "the run could not push"),
-                })),
-            )
-        },
-    ];
+    let log = Log::for_run("run-1")
+        .node("review", posted("a", "a node's own"))
+        .event(posted("distill-push", "the run could not push"))
+        .build();
     let ledger = FindingLedger::of(&log);
     let effective = ledger.effective();
     assert_eq!(effective.len(), 2, "both stand: {effective:?}");
@@ -231,20 +195,16 @@ proptest! {
         }
 
         let names = ["a", "b", "c", "d"];
-        let log: Vec<StoredEvent> = accepted
+        let log = accepted
             .iter()
-            .enumerate()
-            .map(|(seq, step)| {
-                let seq = seq as u64 + 1;
-                match step {
-                    Step::Post(id, generation) =>
-                        posted(seq, "review", names[*id], &generation.to_string()),
-                    Step::Update(id, generation) =>
-                        updated(seq, "review", names[*id], &generation.to_string()),
-                    Step::Withdraw(id) => withdrawn(seq, "review", names[*id]),
-                }
+            .fold(Log::for_run("run-1"), |log, step| match step {
+                Step::Post(id, generation) =>
+                    log.node("review", posted(names[*id], &generation.to_string())),
+                Step::Update(id, generation) =>
+                    log.node("review", updated(names[*id], &generation.to_string())),
+                Step::Withdraw(id) => log.node("review", withdrawn(names[*id])),
             })
-            .collect();
+            .build();
 
         let effective = FindingLedger::of(&log).effective();
 

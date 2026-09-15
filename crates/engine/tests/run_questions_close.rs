@@ -14,7 +14,7 @@ use yunta_engine::{
     RunEnv, RunTerminal, DEFAULT_MAX_RETRIES,
 };
 use yunta_testkit::{Bench, MOCK_CONFIG};
-use yunta_testkit_core::FixedClock;
+use yunta_testkit_core::{FixedClock, Log};
 
 mod common;
 use common::*;
@@ -148,18 +148,14 @@ async fn a_node_failed_after_a_questions_artifact_derives_failed_not_waiting() {
     // then fails for an unrelated reason. The failure is a failure — a node
     // waits because it asked, never because a `questions` artifact exists.
     let bench = Bench::new();
-    let events = vec![
-        yunta_testkit::stored_for(
-            &bench.run_id,
-            1,
+    let events = Log::for_run(bench.run_id.as_str())
+        .node(
             "grill",
             EventPayload::Node(NodeEvent::Started(
                 yunta_core::events::NodeStartedPayload::attempt(1),
             )),
-        ),
-        yunta_testkit::stored_for(
-            &bench.run_id,
-            2,
+        )
+        .node(
             "grill",
             EventPayload::Artifacts(ArtifactEvent::Accepted(
                 yunta_core::events::ArtifactAcceptedPayload::new(
@@ -170,10 +166,8 @@ async fn a_node_failed_after_a_questions_artifact_derives_failed_not_waiting() {
                     yunta_core::events::RecordedOrigin::Submitted,
                 ),
             )),
-        ),
-        yunta_testkit::stored_for(
-            &bench.run_id,
-            3,
+        )
+        .node(
             "grill",
             EventPayload::Node(NodeEvent::Failed(
                 yunta_core::events::NodeFailedPayload::new(
@@ -182,8 +176,8 @@ async fn a_node_failed_after_a_questions_artifact_derives_failed_not_waiting() {
                     Default::default(),
                 ),
             )),
-        ),
-    ];
+        )
+        .build();
 
     let state = derive(&events);
     assert!(

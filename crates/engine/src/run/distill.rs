@@ -324,22 +324,13 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
 #[cfg(test)]
 mod tests {
     use yunta_core::events::{
-        CriteriaCheckedPayload, CriterionResult, EventBody, Finding, FindingPostedPayload,
+        CriteriaCheckedPayload, CriterionResult, Finding, FindingPostedPayload,
         FindingUpdatedPayload, FindingWithdrawnPayload, Phase,
     };
     use yunta_core::events::{FindingEvent, NodeEvent};
+    use yunta_testkit_core::Log;
 
     use super::*;
-
-    fn event(seq: u64, node: &str, payload: EventPayload) -> StoredEvent {
-        StoredEvent {
-            run_id: "run-1".into(),
-            seq: seq.into(),
-            timestamp: chrono::DateTime::UNIX_EPOCH,
-            node_id: Some(node.into()),
-            body: EventBody::Known(payload),
-        }
-    }
 
     fn finding(id: &str, severity: FindingSeverity) -> Finding {
         Finding {
@@ -354,39 +345,35 @@ mod tests {
 
     #[test]
     fn the_finding_counts_report_the_severities_the_run_still_holds() {
-        let events = vec![
-            event(
-                1,
+        let events = Log::for_run("run-1")
+            .node(
                 "review",
                 EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f1", FindingSeverity::Minor),
                 })),
-            ),
-            event(
-                2,
+            )
+            .node(
                 "review",
                 EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f2", FindingSeverity::Major),
                 })),
-            ),
+            )
             // `f1` turns out to block: it counts once, at the severity it
             // carries now.
-            event(
-                3,
+            .node(
                 "review",
                 EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
                     finding: finding("f1", FindingSeverity::Blocking),
                 })),
-            ),
-            event(
-                4,
+            )
+            .node(
                 "review",
                 EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
                     id: "f2".into(),
                     reason: "the criterion covers it".to_string(),
                 })),
-            ),
-        ];
+            )
+            .build();
 
         let counts = verification(&events).findings;
         assert_eq!(
@@ -400,30 +387,31 @@ mod tests {
 
     #[test]
     fn the_criteria_counts_read_every_result_of_every_check() {
-        let events = vec![event(
-            1,
-            "build",
-            EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
-                task_id: "t1".into(),
-                phase: Phase::Post,
-                results: vec![
-                    CriterionResult {
-                        cmd: "cargo test".to_string(),
-                        exit_code: 0,
-                        r#type: None,
-                        reused: false,
-                        duration_ms: Some(1),
-                    },
-                    CriterionResult {
-                        cmd: "cargo clippy".to_string(),
-                        exit_code: 1,
-                        r#type: None,
-                        reused: true,
-                        duration_ms: None,
-                    },
-                ],
-            })),
-        )];
+        let events = Log::for_run("run-1")
+            .node(
+                "build",
+                EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
+                    task_id: "t1".into(),
+                    phase: Phase::Post,
+                    results: vec![
+                        CriterionResult {
+                            cmd: "cargo test".to_string(),
+                            exit_code: 0,
+                            r#type: None,
+                            reused: false,
+                            duration_ms: Some(1),
+                        },
+                        CriterionResult {
+                            cmd: "cargo clippy".to_string(),
+                            exit_code: 1,
+                            r#type: None,
+                            reused: true,
+                            duration_ms: None,
+                        },
+                    ],
+                })),
+            )
+            .build();
 
         let criteria = verification(&events).criteria;
         assert_eq!(criteria.executed, 2);
