@@ -85,3 +85,19 @@ pub fn child_link(
         terminal,
     }
 }
+
+/// One moment a surface test says words for.
+///
+/// The same reason as [`run_frame`]: a moment is placed by four fields
+/// a test rarely cares about — a seq, an instant, an elapsed, a node —
+/// and spelling all four at every call site is what lets two tests of
+/// the same surface disagree about what an untouched one holds.
+pub fn moment(node: Option<&str>, happening: yunta_engine::Happening) -> yunta_engine::Moment {
+    yunta_engine::Moment {
+        seq: 1.into(),
+        at: chrono::DateTime::UNIX_EPOCH,
+        elapsed: Duration::from_secs(3),
+        node: node.map(NodeId::from),
+        happening,
+    }
+}

@@ -33,7 +33,7 @@ pub use events::{
     accepted, status_changed_carrying, stored, stored_for, task_registered, task_status_changed,
     SourceLog,
 };
-pub use frames::{child_link, node_frame, run_frame};
+pub use frames::{child_link, moment, node_frame, run_frame};
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use observer::{Frame, RecordingObserver};
 pub use repo::{git, git_output, init_repo, write, INITIAL_BRANCH};

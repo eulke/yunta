@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e6094dca5c5787e023e289eafee3b985102e098b43e6446bc138669fda62f779 # shrinks to log = [StoredEvent { run_id: RunId("run-prop"), seq: Seq(1), timestamp: 2026-01-01T00:00:00Z, node_id: None, body: Known(Tasks(StatusChanged(TaskStatusChangedPayload { task_id: TaskId("t1"), new_status: Pending, caused_by: Seq(1), commit: None }))) }, StoredEvent { run_id: RunId("run-prop"), seq: Seq(2), timestamp: 2026-01-01T00:00:00Z, node_id: Some(NodeId("a")), body: Known(Node(Started(NodeStartedPayload { attempt: 1 }))) }]
+cc 24d8744a6547af54cdac552a651c2db4a8b55fecf89dcb5e80a466157aab1466 # shrinks to log = [StoredEvent { run_id: RunId("run-prop"), seq: Seq(1), timestamp: 2026-01-01T00:00:00Z, node_id: Some(NodeId("a")), body: Known(Node(Started(NodeStartedPayload { attempt: 1 }))) }, StoredEvent { run_id: RunId("run-prop"), seq: Seq(2), timestamp: 2026-01-01T00:00:00Z, node_id: Some(NodeId("a")), body: Known(Gates(QuestionsAsked(QuestionsAskedPayload { questions_hash: ContentHash("ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"), questions: [QuestionId("q1")], tokens_used: TokenUsage { input: 0, output: 0, cached: None } }))) }]

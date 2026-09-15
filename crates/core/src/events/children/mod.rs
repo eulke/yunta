@@ -1,5 +1,6 @@
 //! A run this run started, and the iterations of the loop that started it.
 
+pub mod happening;
 pub mod kinds;
 pub mod ledger;
 pub mod payloads;

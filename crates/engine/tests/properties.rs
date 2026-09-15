@@ -22,6 +22,7 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
         .block_on(future)
 }
 use yunta_core::events::artifacts::ArtifactLedger;
+use yunta_core::events::node::happening::Happening as NodeHappening;
 use yunta_core::events::{
     ArtifactAcceptedPayload, ArtifactId, ArtifactWrittenPayload, EventBody, EventPayload, Failure,
     Finding, FindingPostedPayload, FindingSeverity, NodeFailedPayload, NodeFinishedPayload,
@@ -30,7 +31,7 @@ use yunta_core::events::{
 };
 use yunta_core::events::{ArtifactEvent, FindingEvent, GateEvent, NodeEvent, RunEvent, TaskEvent};
 use yunta_core::ArtifactKind;
-use yunta_engine::{derive, ArtifactIntegrity, ObjectStore};
+use yunta_engine::{chronicle, derive, ArtifactIntegrity, Happening, ObjectStore};
 
 const RUN: &str = "run-prop";
 
@@ -417,6 +418,56 @@ proptest! {
                 prop_assert!(cur.nodes.has_state(id), "node {id} disappeared");
             }
             prev = cur;
+        }
+    }
+
+    /// The chronicle of a prefix is a prefix of the chronicle: a reader
+    /// following a run live sees exactly what a reader of the finished
+    /// log sees, in the same order, and nothing a later event reveals
+    /// rewrites a moment already read.
+    #[test]
+    fn the_chronicle_of_a_prefix_is_a_prefix_of_the_chronicle(log in log()) {
+        let whole = chronicle(&log);
+        prop_assert_eq!(whole.len(), log.len(), "one moment per event");
+        for k in 0..=log.len() {
+            prop_assert_eq!(
+                chronicle(&log[..k]),
+                whole[..k].to_vec(),
+                "the chronicle of the first {} events is not its prefix",
+                k
+            );
+        }
+    }
+
+    /// The frame agrees with the chronicle: the state a moment says a
+    /// node reached is the state the log derives at that very event.
+    ///
+    /// Two derivations of one log that disagreed would let a region and
+    /// a scrollback describe the same node two ways, which is the
+    /// defect this pair exists to make impossible. Stated per moment
+    /// rather than per node, because that is what makes it true of a
+    /// node read halfway through the log as well as at its end.
+    #[test]
+    fn the_frame_agrees_with_the_chronicle(log in log()) {
+        for (index, moment) in chronicle(&log).into_iter().enumerate() {
+            let (Some(node), Happening::Node(NodeHappening::Reached { state, .. })) =
+                (moment.node, moment.happening)
+            else {
+                continue;
+            };
+            let at_that_event = derive(&log[..=index]);
+            if at_that_event.broken.is_some() {
+                // A log the replay could not fold that far derives
+                // nothing past its break, and the chronicle stops there
+                // with it: there is no state for the two to agree on.
+                continue;
+            }
+            prop_assert_eq!(
+                at_that_event.nodes.state(&node),
+                Some(&state),
+                "a node is where its own moment says it became, at that moment: {}",
+                node
+            );
         }
     }
 

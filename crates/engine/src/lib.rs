@@ -153,8 +153,8 @@ pub use verification_effectiveness::{
     MIN_SAMPLES as VERIFICATION_MIN_SAMPLES,
 };
 pub use view::{
-    run_frame, ChildLink, Counter, Degradation, NodeFrame, NodeStanding, Reroute, RunFrame,
-    RunPhase, WaitingOn,
+    chronicle, run_frame, ChildLink, Counter, Degradation, Happening, Moment, NodeFrame,
+    NodeStanding, Reroute, RunFrame, RunPhase, WaitingOn,
 };
 pub use worktree::{
     cleanup_worktree, hand_over_worktree, head_commit, prepare_worktree, release_worktree,

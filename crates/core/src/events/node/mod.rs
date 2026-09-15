@@ -2,6 +2,7 @@
 //! what it produced or failed at, what it was re-routed to, and every
 //! mechanical check the engine ran around it.
 
+pub mod happening;
 pub mod kinds;
 pub mod ledger;
 pub mod payloads;
