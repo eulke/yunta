@@ -1,7 +1,7 @@
 ---
 number: D167
 title: "Lo prometido y no construido se construye o se registra; nunca queda como comentario"
-status: accepted
+status: revised
 revises: [D18, D62, D19]
 revised_by: [D172]
 ---

@@ -8,7 +8,7 @@ Orden de autoridad:
 2. [`spec-adapter.md`](spec-adapter.md) — traits `Adapter`/`AgentSession`, capacidades y obligaciones de un adapter.
 3. [`spec-tasks.md`](spec-tasks.md) — schema del documento de tareas, validación y errores.
 4. [`spec-events.md`](spec-events.md) — payloads del event log, versionado y cadena de hashes.
-5. [`adrs.md`](adrs.md) — decisiones aceptadas con racional y alternativas descartadas; fuente de desempate. Las propuestas pendientes viven en [`adr/`](adr/).
+5. [`adr/`](adr/) — una decisión por archivo, con racional y alternativas descartadas; fuente de desempate. [`adrs.md`](adrs.md) es su índice, generado por `cargo xtask adr`.
 6. [`rfc-0001.md`](rfc-0001.md) visión y arquitectura · [`rfc-0002.md`](rfc-0002.md) packs · [`rfc-0003.md`](rfc-0003.md) diferenciales de producto · [`rfc-0004.md`](rfc-0004.md) distribución, licencia y sostenibilidad.
 7. [`referencia-schema.md`](referencia-schema.md) — config y workflows canónicos; los fixtures de parseo del workspace salen de acá.
 8. [`deuda-consciente.md`](deuda-consciente.md) — lo deliberadamente no resuelto; cada ítem se resuelve con una decisión registrada, nunca de facto.

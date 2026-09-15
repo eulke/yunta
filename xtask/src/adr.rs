@@ -1,151 +1,92 @@
 //! The decisions under `docs/design/adr/`, and the index that lists them.
 //!
-//! A decision is a file with front-matter, and the index in `adrs.md` is
-//! derived from those files rather than kept by hand: an index written
-//! twice is an index that disagrees with itself. `--check` proves the
-//! committed index is what the files say, that no number is missing or
-//! used twice, that every citation in the design corpus resolves, and
-//! that a revision is recorded on both sides.
+//! A decision is a file with front-matter, and `adrs.md` is derived from
+//! those files rather than kept by hand: an index written twice is an
+//! index that disagrees with itself. `--check` proves the committed
+//! index is what the files say, that no number is missing or used
+//! twice, that every citation in `docs/` resolves, and that a revision
+//! is recorded on both sides.
+
+mod decision;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use yunta_core::yaml::Value;
-
 use crate::Mode;
+use decision::{by_number, name, numbering, reciprocals, resolve, Decision};
 
-/// One decision, as its file declares itself.
-struct Decision {
-    number: u32,
-    title: String,
-    status: String,
-    revises: Vec<u32>,
-    revised_by: Vec<u32>,
-    file: String,
+/// The workspace root — the parent of this crate's directory.
+fn workspace_root() -> Result<PathBuf, String> {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "the xtask crate sits directly under the workspace root".to_string())
+}
+
+/// Every document a citation may live in.
+fn docs_dir() -> Result<PathBuf, String> {
+    workspace_root().map(|root| root.join("docs"))
 }
 
 /// Where the decisions and their index live.
 fn design_dir() -> Result<PathBuf, String> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(|root| root.join("docs").join("design"))
-        .ok_or_else(|| "the xtask crate sits directly under the workspace root".to_string())
-}
-
-/// `D164` read as `164`, for any citation or front-matter reference.
-fn number_of(text: &str) -> Option<u32> {
-    text.strip_prefix('D')?.parse().ok()
-}
-
-/// The list of decision numbers a front-matter field names.
-fn numbers(value: Option<&Value>, field: &str, file: &str) -> Result<Vec<u32>, String> {
-    let Some(value) = value else {
-        return Err(format!("{file}: front-matter has no `{field}`"));
-    };
-    let Some(items) = value.as_sequence() else {
-        return Err(format!(
-            "{file}: `{field}` is a list of decisions, like `[D13]`"
-        ));
-    };
-    items
-        .iter()
-        .map(|item| {
-            item.as_str()
-                .and_then(number_of)
-                .ok_or_else(|| format!("{file}: `{field}` names something that is not a decision"))
-        })
-        .collect()
-}
-
-/// The text of a front-matter field that must be a non-empty string.
-fn text(value: Option<&Value>, field: &str, file: &str) -> Result<String, String> {
-    value
-        .and_then(Value::as_str)
-        .filter(|found| !found.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| format!("{file}: front-matter has no `{field}`"))
-}
-
-/// Reads one decision file: `---` front-matter, then its prose.
-fn read_decision(path: &Path) -> Result<Decision, String> {
-    let file = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let body = std::fs::read_to_string(path)
-        .map_err(|error| format!("cannot read `{}`: {error}", path.display()))?;
-    let front = body
-        .strip_prefix("---\n")
-        .and_then(|rest| rest.split_once("\n---\n"))
-        .map(|(front, _)| front)
-        .ok_or_else(|| format!("{file}: a decision opens with `---` front-matter"))?;
-    let mapping: Value = yunta_core::yaml::parse(front)
-        .map_err(|error| format!("{file}: front-matter does not parse: {error}"))?;
-    let field = |name: &str| mapping.get(name);
-    let declared = text(field("number"), "number", &file)?;
-    let number = number_of(&declared)
-        .ok_or_else(|| format!("{file}: `number` is a decision, like `D164`"))?;
-    let named = file
-        .split_once('-')
-        .and_then(|(head, _)| number_of(head))
-        .ok_or_else(|| format!("{file}: a decision file is named `D<number>-<slug>.md`"))?;
-    if named != number {
-        return Err(format!(
-            "{file}: the file is named for D{named} and declares D{number}"
-        ));
-    }
-    Ok(Decision {
-        number,
-        title: text(field("title"), "title", &file)?,
-        status: text(field("status"), "status", &file)?,
-        revises: numbers(field("revises"), "revises", &file)?,
-        revised_by: numbers(field("revised_by"), "revised_by", &file)?,
-        file,
-    })
+    docs_dir().map(|docs| docs.join("design"))
 }
 
 /// Every decision that lives in its own file, by number.
 fn decisions(dir: &Path) -> Result<BTreeMap<u32, Decision>, String> {
-    let mut found: BTreeMap<u32, Decision> = BTreeMap::new();
     let entries = std::fs::read_dir(dir)
         .map_err(|error| format!("cannot read `{}`: {error}", dir.display()))?;
+    let mut found = Vec::new();
     for entry in entries {
         let path = entry
             .map_err(|error| format!("cannot read `{}`: {error}", dir.display()))?
             .path();
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        if !name.starts_with('D') || !name.ends_with(".md") {
+        let file = path.file_name().unwrap_or_default().to_string_lossy();
+        if !file.starts_with('D') || !file.ends_with(".md") {
             continue;
         }
-        let decision = read_decision(&path)?;
-        if let Some(earlier) = found.insert(decision.number, decision) {
-            return Err(format!(
-                "D{} is declared twice, once by `{}`",
-                earlier.number, earlier.file
-            ));
-        }
+        let body = std::fs::read_to_string(&path)
+            .map_err(|error| format!("cannot read `{}`: {error}", path.display()))?;
+        found.push(Decision::parse(&file, &body)?);
     }
     if found.is_empty() {
         return Err(format!("`{}` holds no decision", dir.display()));
     }
-    Ok(found)
+    by_number(found)
 }
 
-/// The decisions the register carries in its own prose, by number: what
-/// a citation may also resolve to, and where a revision of one is
-/// recorded.
-fn registered(register: &str) -> BTreeMap<u32, &str> {
-    register
-        .lines()
-        .filter_map(|line| {
-            let rest = line.strip_prefix("**D")?;
-            let (digits, _) = rest.split_once(' ')?;
-            digits.parse().ok().map(|number| (number, line))
-        })
-        .collect()
+/// Every `D<number>` a text cites.
+///
+/// `D1` inside a word (`D1234abc`, `RFD12x`) is not a citation: one
+/// only counts where a non-word character precedes it and follows the
+/// digits.
+fn cited_in(body: &str) -> BTreeSet<u32> {
+    let mut cited = BTreeSet::new();
+    for (index, _) in body.match_indices('D') {
+        let digits: String = body[index + 1..]
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        let before_is_word = index
+            .checked_sub(1)
+            .and_then(|at| body[..=at].chars().next_back())
+            .is_some_and(|char| char.is_alphanumeric() || char == '_');
+        let after = body[index + 1 + digits.len()..].chars().next();
+        if digits.is_empty()
+            || before_is_word
+            || after.is_some_and(|char| char.is_alphanumeric() || char == '_')
+        {
+            continue;
+        }
+        if let Ok(number) = digits.parse() {
+            cited.insert(number);
+        }
+    }
+    cited
 }
 
-/// Every `D<number>` the design corpus cites, with the file that cites it.
+/// Every `D<number>` the documentation cites, with the file that cites it.
 fn citations(dir: &Path) -> Result<BTreeSet<(u32, String)>, String> {
     let mut cited = BTreeSet::new();
     let mut dirs = vec![dir.to_path_buf()];
@@ -170,29 +111,11 @@ fn citations(dir: &Path) -> Result<BTreeSet<(u32, String)>, String> {
                 .unwrap_or(&path)
                 .display()
                 .to_string();
-            for (index, _) in body.match_indices('D') {
-                let digits: String = body[index + 1..]
-                    .chars()
-                    .take_while(char::is_ascii_digit)
-                    .collect();
-                // `D1` in a word (`D1234abc`, `RFD12x`) is not a citation:
-                // one only counts where a non-word character precedes it
-                // and follows the digits.
-                let before_is_word = index
-                    .checked_sub(1)
-                    .and_then(|at| body[..=at].chars().next_back())
-                    .is_some_and(|char| char.is_alphanumeric() || char == '_');
-                let after = body[index + 1 + digits.len()..].chars().next();
-                if digits.is_empty()
-                    || before_is_word
-                    || after.is_some_and(|char| char.is_alphanumeric() || char == '_')
-                {
-                    continue;
-                }
-                if let Ok(number) = digits.parse() {
-                    cited.insert((number, where_from.clone()));
-                }
-            }
+            cited.extend(
+                cited_in(&body)
+                    .into_iter()
+                    .map(|number| (number, where_from.clone())),
+            );
         }
     }
     Ok(cited)
@@ -210,97 +133,53 @@ fn index(decisions: &BTreeMap<u32, Decision>) -> String {
                     " *(Revisada por {}.)*",
                     numbers
                         .iter()
-                        .map(|number| format!("D{number}"))
+                        .map(|number| name(*number))
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
             };
             format!(
-                "**D{} — {}.** `{}`{revised_by} → [`adr/{}`](adr/{})\n",
-                decision.number, decision.title, decision.status, decision.file, decision.file
+                "**{} — {}.** `{}`{revised_by} → [`adr/{}`](adr/{})\n",
+                name(decision.number),
+                decision.title,
+                decision.status.as_str(),
+                decision.file,
+                decision.file
             )
         })
         .collect()
 }
 
-/// The register with its generated section replaced by `rendered`.
+/// The register with its list of decisions replaced by `rendered`: its
+/// heading and the preamble under it are the register's own, and every
+/// line from the first decision on is generated.
 fn with_index(register: &str, rendered: &str) -> Result<String, String> {
-    let (head, rest) = register
-        .split_once(HEADING)
-        .ok_or_else(|| format!("`adrs.md` has no `{}` section", HEADING.trim()))?;
+    let (head, rest) = register.split_once(HEADING).ok_or_else(|| {
+        format!(
+            "`adrs.md` opens with `{}`, and the index follows its preamble",
+            HEADING.trim()
+        )
+    })?;
     let (prose, _) = rest
         .split_once("\n**D")
-        .ok_or_else(|| "the generated section lists no decision".to_string())?;
+        .ok_or_else(|| "`adrs.md` carries no decision line for the index to replace".to_string())?;
     Ok(format!("{head}{HEADING}{prose}\n{rendered}"))
 }
 
-const HEADING: &str = "# Decisiones por archivo\n";
+const HEADING: &str = "# Decisiones y racionales (ADRs)\n";
 
-/// Reads the decisions, proves what they say about each other, and
-/// writes or checks the index the register carries.
+/// Reads the decisions, proves what they say about each other and about
+/// what the documentation cites, and writes or checks the index.
 pub fn run(mode: Mode) -> Result<(), String> {
-    let dir = design_dir()?;
-    let adr_dir = dir.join("adr");
-    let decisions = decisions(&adr_dir)?;
+    let design = design_dir()?;
+    let decisions = decisions(&design.join("adr"))?;
+    numbering(&decisions)?;
+    reciprocals(&decisions)?;
+    resolve(&citations(&docs_dir()?)?, &decisions)?;
 
-    let first = *decisions.keys().next().unwrap_or(&0);
-    let last = *decisions.keys().next_back().unwrap_or(&0);
-    let missing: Vec<String> = (first..=last)
-        .filter(|number| !decisions.contains_key(number))
-        .map(|number| format!("D{number}"))
-        .collect();
-    if !missing.is_empty() {
-        return Err(format!(
-            "the decisions under `adr/` run from D{first} to D{last} with {} missing",
-            missing.join(", ")
-        ));
-    }
-
-    let register_path = dir.join("adrs.md");
+    let register_path = design.join("adrs.md");
     let register = std::fs::read_to_string(&register_path)
         .map_err(|error| format!("cannot read `{}`: {error}", register_path.display()))?;
-    let registered = registered(&register);
-
-    for decision in decisions.values() {
-        for revised in &decision.revises {
-            let reciprocal = match decisions.get(revised) {
-                Some(other) => other.revised_by.contains(&decision.number),
-                None => registered.get(revised).is_some_and(|line| {
-                    line.contains(&format!("Revisada por D{}", decision.number))
-                }),
-            };
-            if !reciprocal {
-                return Err(format!(
-                    "{}: D{} says it revises D{revised}, and D{revised} does not say so back",
-                    decision.file, decision.number
-                ));
-            }
-        }
-        for reviser in &decision.revised_by {
-            let reciprocal = decisions
-                .get(reviser)
-                .is_some_and(|other| other.revises.contains(&decision.number));
-            if !reciprocal {
-                return Err(format!(
-                    "{}: D{} says D{reviser} revises it, and D{reviser} does not say so back",
-                    decision.file, decision.number
-                ));
-            }
-        }
-    }
-
-    let unresolved: Vec<String> = citations(&dir)?
-        .into_iter()
-        .filter(|(number, _)| !decisions.contains_key(number) && !registered.contains_key(number))
-        .map(|(number, file)| format!("D{number} (cited by {file})"))
-        .collect();
-    if !unresolved.is_empty() {
-        return Err(format!(
-            "these citations name no decision: {}",
-            unresolved.join(", ")
-        ));
-    }
-
     let rendered = with_index(&register, &index(&decisions))?;
     match mode {
         Mode::Write => {
@@ -317,5 +196,67 @@ pub fn run(mode: Mode) -> Result<(), String> {
             "`{}` differs from what the decision files say — run `cargo xtask adr`",
             register_path.display()
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decision::Status;
+    use super::*;
+
+    fn decision(number: u32, status: Status, revised_by: &[u32]) -> Decision {
+        Decision {
+            number,
+            title: format!("La decisión {number}"),
+            status,
+            revises: Vec::new(),
+            revised_by: revised_by.to_vec(),
+            file: format!("{}-una-decision.md", name(number)),
+        }
+    }
+
+    fn set(decisions: Vec<Decision>) -> BTreeMap<u32, Decision> {
+        by_number(decisions).expect("the numbers are distinct")
+    }
+
+    #[test]
+    fn a_number_inside_a_word_is_not_a_citation() {
+        assert_eq!(cited_in("D164 y D45."), BTreeSet::from([164, 45]));
+        assert_eq!(cited_in("DO-D42 lo cita"), BTreeSet::from([42]));
+        assert_eq!(cited_in("RFD12x, D1234abc, Dx"), BTreeSet::new());
+        assert_eq!(cited_in("(D01)"), BTreeSet::from([1]));
+    }
+
+    #[test]
+    fn the_index_names_a_decision_its_status_its_revisers_and_its_file() {
+        let rendered = index(&set(vec![
+            decision(6, Status::Accepted, &[]),
+            decision(45, Status::Revised, &[162, 164]),
+        ]));
+        assert_eq!(
+            rendered,
+            "**D06 — La decisión 6.** `accepted` → \
+             [`adr/D06-una-decision.md`](adr/D06-una-decision.md)\n\
+             **D45 — La decisión 45.** `revised` *(Revisada por D162, D164.)* → \
+             [`adr/D45-una-decision.md`](adr/D45-una-decision.md)\n"
+        );
+    }
+
+    #[test]
+    fn the_generated_section_replaces_the_one_the_register_carries() {
+        let register = format!("{HEADING}\nUn párrafo.\n\n**D01 — Vieja.** `accepted`\n");
+        let rendered = with_index(&register, "**D01 — Nueva.** `accepted`\n")
+            .expect("the register has its heading");
+        assert_eq!(
+            rendered,
+            format!("{HEADING}\nUn párrafo.\n\n**D01 — Nueva.** `accepted`\n")
+        );
+    }
+
+    #[test]
+    fn a_register_without_the_generated_section_is_refused() {
+        let refused = with_index("# Otra cosa\n", "**D01 — Nueva.**\n")
+            .expect_err("the heading is not there");
+        assert!(refused.contains("Decisiones y racionales"), "{refused}");
     }
 }

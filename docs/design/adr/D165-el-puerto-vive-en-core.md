@@ -2,7 +2,7 @@
 number: D165
 title: "El puerto de adapters lo define quien lo consume, en `yunta_core::port`"
 status: accepted
-revises: []
+revises: [D118]
 revised_by: []
 ---
 
