@@ -1502,8 +1502,8 @@ impl Decision { pub fn revisers(&self) -> &[u32]; }        // lo que `reciprocal
 pub enum Surprise { TrivialCriterion { cmd: String }, BrokenGuard { cmd: String } }
 /// Everything the pre-check found, in the order the task declares its criteria; empty when every non-guard is red and every guard green. A function of what ran, so replay derives the same verdict from `criteria_checked`.
 pub fn surprises(task: &Task, runs: &[CriterionRun]) -> Vec<Surprise>;
-/// Why a task stopped without being done. One type for the two answers the cycle gives today and the one M31 adds.
-pub enum BlockedCause { PreCheck(NonEmpty<Surprise>), Unmet { attempts: u32 } }
+/// Why a task stopped without being done. One type for cada respuesta que el ciclo da (L-115) y la que M31 agrega.
+pub enum BlockedCause { PreCheck(NonEmpty<Surprise>), Unmet { attempts: u32 }, ScopeDecisionOwed, NonRetryable, CommandDenied { rule: String } }
 pub enum TaskOutcome { Done, Blocked { cause: BlockedCause }, Interrupted, /* … */ }
 //   `pre_check` devuelve `Vec<CriterionRun>` como `post_check` y `PreCheckOutcome` se borra; `run_task` (mod.rs:328-340) hace
 //   `match NonEmpty::new(surprises(task, &pre_runs)) { Some(found) => bloquea con BlockedCause::PreCheck(found), None => sigue al intento }`
