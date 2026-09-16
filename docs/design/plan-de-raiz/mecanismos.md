@@ -2073,7 +2073,10 @@ pub enum Isolation { #[default] Worktree, None }
 hecho del log, y la concurrencia implica aislamiento. D183 fija la palabra única
 de `isolation` —queda `none`, se retiran `inherit` y `WorkflowIsolation`— y dónde
 va cada mitad de «parsear es validar»: el rechazo en el YAML de autor, la
-tolerancia en el manifest congelado.
+tolerancia en el manifest congelado. D184 fija quién es una unidad: recibe un
+árbol propio el nodo que declara `scope:` —el conjunto que `audited_scope` ya
+define, `read-only` incluido— y nadie más, con lo que el aislamiento depende de
+lo que el autor escribió y no de cómo el motor lo corre.
 
 **Archivos.** Nuevo: `engine/src/worktree/unit.rs`,
 `docs/design/adr/D182-*.md`. Modifica: `core/src/ids.rs`,
