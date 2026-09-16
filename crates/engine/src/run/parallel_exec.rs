@@ -3,7 +3,7 @@
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::TokenUsage;
-use yunta_core::{JoinPolicy, Node};
+use yunta_core::{JoinPolicy, Node, NodeId};
 
 use crate::replay::NodeState;
 
@@ -27,9 +27,46 @@ pub(super) async fn execute_parallel(
     let group_cancel = cancel.child_token();
     let state = ctx.run_view().await?.state;
 
+    // An orphan of this group resolves its `on_interrupt` the same way
+    // an orphan of the run does, and the one policy that changes what
+    // the group may do is `fail_if_uncertain`: its work is not safe to
+    // repeat, so the child is recorded failed here rather than run a
+    // second time. `resume_session` needs nothing of the group — a
+    // restarted child that opened a session continues it when the node
+    // itself dispatches.
+    let uncertain: Vec<yunta_core::NodeId> = super::schedule::resume_policies(
+        children.iter(),
+        &state,
+        ctx.manifest.config.resolved_on_interrupt(),
+    )
+    .into_iter()
+    .filter(|policy| policy.on_interrupt == yunta_core::OnInterrupt::FailIfUncertain)
+    .map(|policy| policy.node)
+    .collect();
+    for child in children
+        .iter()
+        .filter(|child| uncertain.contains(&child.id))
+    {
+        fail(
+            ctx,
+            child,
+            format!(
+                "`{}` was running with no terminal event when the engine last stopped — \
+                 `on_interrupt: fail_if_uncertain` refuses to guess whether it finished; \
+                 verify manually before resuming",
+                child.id
+            ),
+            false,
+        )
+        .await?;
+    }
+
     let already_failed: Vec<&Node> = children
         .iter()
-        .filter(|child| matches!(state.nodes.get(&child.id), Some(NodeState::Failed { .. })))
+        .filter(|child| {
+            uncertain.contains(&child.id)
+                || matches!(state.nodes.state(&child.id), Some(NodeState::Failed { .. }))
+        })
         .collect();
     // Fresh children start at attempt 1; a child left `running` with no
     // terminal event (crash, root cancel, or a paused child run under a
@@ -39,7 +76,8 @@ pub(super) async fn execute_parallel(
     // recursively.
     let to_run: Vec<(&Node, u32)> = children
         .iter()
-        .filter_map(|child| match state.nodes.get(&child.id) {
+        .filter(|child| !uncertain.contains(&child.id))
+        .filter_map(|child| match state.nodes.state(&child.id) {
             None => Some((child, 1)),
             Some(NodeState::Running { attempt }) => Some((child, attempt + 1)),
             _ => None,
@@ -66,7 +104,7 @@ pub(super) async fn execute_parallel(
 
             let mut failed_child = None;
             let mut interrupted = false;
-            let mut child_paused: Option<String> = None;
+            let mut child_paused: Option<(NodeId, String)> = None;
             for ((child, _), result) in to_run.iter().zip(results) {
                 match result? {
                     NodeEnd::Failed => {
@@ -81,17 +119,36 @@ pub(super) async fn execute_parallel(
                     NodeEnd::Interrupted => interrupted = true,
                     // Same shape — the group stays open and the
                     // run pauses naming the paused child run.
-                    NodeEnd::ChildPaused { reason } => {
-                        child_paused.get_or_insert(reason);
+                    NodeEnd::ChildPaused { node, reason } => {
+                        child_paused.get_or_insert((node, reason));
                     }
                     NodeEnd::Finished => {}
+                    // `check` refuses a child that produces
+                    // `questions`, because the scheduler puts questions
+                    // to a person one top-level node at a time and a
+                    // group's child never reaches that step. Reaching
+                    // here means a workflow got past `check` that
+                    // should not have.
+                    NodeEnd::Asked => {
+                        return Err(RunError::Broken {
+                            diagnostic: format!(
+                                "child `{}` of parallel group `{}` handed questions over — a \
+                                 node inside a group is never asked; `check` refuses this \
+                                 workflow",
+                                child.id, node.id
+                            ),
+                        })
+                    }
                 }
             }
             if interrupted {
                 return Ok(NodeEnd::Interrupted);
             }
-            if let Some(reason) = child_paused {
-                return Ok(NodeEnd::ChildPaused { reason });
+            if let Some((paused, reason)) = child_paused {
+                return Ok(NodeEnd::ChildPaused {
+                    node: paused,
+                    reason,
+                });
             }
             if let Some(id) = failed_child {
                 return fail(
@@ -116,7 +173,10 @@ pub(super) async fn execute_parallel(
             use futures::stream::{FuturesUnordered, StreamExt};
 
             if let Some(already_won) = children.iter().find(|child| {
-                matches!(state.nodes.get(&child.id), Some(NodeState::Finished { .. }))
+                matches!(
+                    state.nodes.state(&child.id),
+                    Some(NodeState::Finished { .. })
+                )
             }) {
                 return close_node(
                     ctx,
@@ -140,7 +200,7 @@ pub(super) async fn execute_parallel(
                 .collect();
 
             let mut winner = None;
-            let mut child_paused: Option<String> = None;
+            let mut child_paused: Option<(NodeId, String)> = None;
             while winner.is_none() {
                 let Some((child_id, result)) = running.next().await else {
                     break;
@@ -165,8 +225,24 @@ pub(super) async fn execute_parallel(
                     // A paused child run is neither a win nor a
                     // loss — the race stays live: a sibling can still
                     // win the group. Recorded for the no-winner ending.
-                    NodeEnd::ChildPaused { reason } => {
-                        child_paused.get_or_insert(reason);
+                    NodeEnd::ChildPaused { node, reason } => {
+                        child_paused.get_or_insert((node, reason));
+                    }
+                    // `check` refuses a child that produces `questions`
+                    // (see the `join: all` arm): a node inside a group
+                    // is never asked.
+                    NodeEnd::Asked => {
+                        while let Some((_, result)) = running.next().await {
+                            result?;
+                        }
+                        return Err(RunError::Broken {
+                            diagnostic: format!(
+                                "child `{child_id}` of parallel group `{}` handed questions \
+                                 over — a node inside a group is never asked; `check` refuses \
+                                 this workflow",
+                                node.id
+                            ),
+                        });
                     }
                 }
             }
@@ -191,12 +267,15 @@ pub(super) async fn execute_parallel(
                     .await
                 }
                 None => {
-                    if let Some(reason) = child_paused {
+                    if let Some((paused, reason)) = child_paused {
                         // No winner and a child run waiting on its own
                         // pause: the group can't close over an open
                         // child — the run pauses and resume
                         // re-enters the race.
-                        return Ok(NodeEnd::ChildPaused { reason });
+                        return Ok(NodeEnd::ChildPaused {
+                            node: paused,
+                            reason,
+                        });
                     }
                     fail(
                         ctx,

@@ -244,7 +244,7 @@
       ]
     },
     "DefaultOnFailure": {
-      "description": "`defaults.on_failure` values (reference schema). Only `Pause` has an\nimplementation — the enum still parses all three so the reference\nconfig round-trips, and `check` names the unimplemented ones.",
+      "description": "`defaults.on_failure` values (reference schema): `pause` freezes the\nrun resumable, `abort` closes it failed at once, and `continue` skips\nthe failed node's dependents and closes failed once the rest of the\ngraph has run.",
       "type": "string",
       "enum": [
         "pause",
@@ -253,7 +253,7 @@
       ]
     },
     "DefaultsConfig": {
-      "description": "`defaults:` — the reference config's whole group. Each field\nhas its consumer: `isolation`, `max_parallel_nodes`,\n`on_interrupt`, `runner` (a node that declares none),\n`timeout_minutes` (`Budget.timeout`), `on_failure` (only `pause` is\nbuilt — `check` refuses the others rather than accepting them\nsilently).",
+      "description": "`defaults:` — the reference config's whole group. Each field\nhas its consumer: `isolation`, `max_parallel_nodes`,\n`on_interrupt`, `runner` (a node that declares none),\n`timeout_minutes` (`Budget.timeout`), `on_failure` (what a failed\nnode does to the run).",
       "type": "object",
       "properties": {
         "isolation": {
@@ -276,7 +276,7 @@
           "minimum": 0
         },
         "on_failure": {
-          "description": "What a failed node without its own `on_failure:` does. Only\n`pause` (today's behavior) is built; `check` refuses the rest.",
+          "description": "What a failed node without its own `on_failure:` re-route does\nto the run. Absent is `pause`, the schema's own default.",
           "anyOf": [
             {
               "$ref": "#/$defs/DefaultOnFailure"
@@ -534,7 +534,7 @@
       ]
     },
     "PackPermissions": {
-      "description": "`permissions.packs` — governance over pack contents. Parsed\nand merged here; *enforced* at `pack add`/check once pack support\nlands fully — a key without its consumer yet, kept\nbecause the org ceiling file is one document and its schema shouldn't\ndribble in piecemeal.",
+      "description": "`permissions.packs` — governance over pack contents. Parsed and\nmerged here; enforced by `pack add` and `pack update`, which read the\nmerged value and name the layer that declared it when they refuse.",
       "type": "object",
       "properties": {
         "executors": {
@@ -737,6 +737,11 @@
         "max_mode"
       ]
     },
+    "SkillName": {
+      "description": "A skill name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
     "SkillsConfig": {
       "description": "`skills:` — currently carries only `executors`, the one\nsub-field `kind: executor` needs to resolve its own `executor:` name\nto a binary on disk. `paths`/`always` (skill discovery and injection\ninto a node's assembled context) are context-assembly work, with\nno consumer yet.",
       "type": "object",
@@ -746,7 +751,7 @@
           "type": "array",
           "default": [],
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/SkillName"
           }
         },
         "executors": {

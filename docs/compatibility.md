@@ -46,8 +46,9 @@ and a later `yunta resume`, changes nothing about how that run's remaining
 nodes execute: `resume` replays the run's own event log against its own
 frozen manifest, never against whatever the newly-installed binary would
 generate today. The only thing a new binary version can change for an
-existing run is how `status`/`stats`/`graph` *render* information already in
-the log — never the log's content or the run's outcome.
+existing run is how `status`/`stats`/`graph` and the live view a `run` draws
+*render* information already in the log — never the log's content or the run's
+outcome.
 
 Waking a run does verify what it holds: `resume` reads back every artifact
 the run's log accepted, from the object the log names it by, and refuses to
@@ -123,6 +124,27 @@ A pack manifest names the runners it needs under `requires.runners`. The
 accepts `role`, the field's former name, so a log written under it still
 replays. `stats --json` and the JSON receipt name the same value `runner`.
 
+## What this system writes down
+
+Five files outlive the command that wrote them: a run's frozen manifest, the pack
+lock, a run's process registry, the isolation lock and the receipt. Each carries
+`schema_version`, and each is read the same way.
+
+A file stamped with a schema this binary does not know is refused, naming what it
+found and what this binary reads — a manifest interpreted under a shape its own
+creator did not write is a run whose history would mean something else. A file
+stamped lower, or carrying no version at all because it predates one, reads as it
+is: every field this binary needs is either there or optional.
+
+A key this binary does not know is kept rather than dropped, and written back
+when the file is rewritten — so an older binary that reads a file a newer one
+wrote does not silently delete what the newer one recorded. A reader that wants
+to say what it did not understand can name those keys; `yunta status` does.
+
+The receipt is the exception to being read back: nothing reads a `receipt.json`,
+because `yunta receipt` derives it from the log every time. Its `schema_version`
+is for whoever consumes the file outside yunta, who has no log to derive it from.
+
 ## The event log
 
 The engine hands storage a draft — what happened, in which run, for which
@@ -158,12 +180,40 @@ the whole of where it is: a diagnostic carries no line and column, and
 and the receipt — so none of them can disagree about the facts, and nothing has
 to take a sentence apart to recover them.
 
+A finding's `location` is where it is: a path with the lines of it when the
+finder named them (`src/lib.rs`, `src/lib.rs:142`, `src/lib.rs:142-150`). The path
+is relative and never climbs out of what it is under, because a findings document
+is inherited by a successor run that need not be on this host — an absolute path
+is that host's, not the run's. A bare path is in the worktree, which is what every
+finding an agent writes is about; the engine's own findings about the run's
+bookkeeping carry the prefix `run:` and are relative to the run directory
+(`run:scratch/engine.json`). A location that does not read is refused where it is
+read, as a `parse` problem at its own key (`findings[0].location`).
+
+A report names the document it is about: its `path`, and its `kind` — one of the
+artifact kinds, or `workflow` for the file a run is created from. A workflow is
+read the same way every other document is, so a graph that breaks its own rules —
+an id declared twice, a reference that reaches nothing, two `parallel` children
+that can touch the same files, a `parallel` group inside another, a mode that
+leaves the graph unable to run —
+reaches a reader as the same report a tasks document does. A diagnostic's subject,
+under `of`, names the entry the problem is about; for a workflow that is `node`.
+
 A problem is one of two shapes, under the key `problem`. `parse` carries `message`
 and, unless the root itself is at fault, the `path` of the value that stopped the
-read (`tasks[1].manual_review`); its stable code is `parse`. `rule` carries a
-`code` from a closed set and the `detail` a reader acts on. A node fails on an
+read (`tasks[1].scope`); its stable code is `parse`. `rule` carries a `code` from a
+closed set and the `detail` a reader acts on. A node fails on an
 artifact with `retryable: false`: there is no second session to instruct, so
 nothing about the failure asks for one.
+
+The rules a document can break, which is that closed set: `duplicate-id`,
+`empty-title`, `empty-scope`, `no-criteria`, `all-criteria-are-guards`,
+`unknown-dependency`, `dependency-cycle`, `overlapping-scope`, `empty-text`,
+`empty-detail`, `unknown-id`, `withdrawn-id`, `empty-reason`, `missing-values`,
+`missing-answer`, `mismatched-answer` and `incoherent-mode`. Together with
+`parse` and the six an artifact fails under, they are every stable code this
+system reports: a receipt counts by one, `status --json` publishes one, and a log
+is grepped by one.
 
 A log whose `node_failed` events carry `outcome:` on its own — every log written
 before `artifacts:` existed — reads back as exactly that one-sentence failure:
@@ -218,18 +268,48 @@ it is the state it can account for.
 
 `yunta list --runs` orders runs by the timestamp of their first event.
 
+`yunta list --runs` groups runs by what can be done about them — what needs a
+person, what is in flight, what has closed, and last the runs whose log or
+manifest does not read back. The first three groups are ordered by how long a
+run has been where it is, longest first; two runs that have been there equally
+long are ordered by run id, which for a minted one is the order they were
+created in. A run in the last group has no derived state to have been in, so
+that group is ordered by run id alone.
+
 ## The JSON surfaces
 
-`stats --json`, `status --json` and `run --json` carry `schema_version: 2`. The
-three share one stamp, so all of them carry the new number even though only
-`status --json` changed shape.
+`stats --json`, `status --json` and `run --json` carry `schema_version: 5`. The
+three share one stamp, so all of them carry the new number even though only the
+run document changed shape.
+
+`run --json`, `resume --json`, `status --json` and the control plane's
+`workflow_status` all emit one document. It is derived from the run's own event
+log, so the command that drove a run to its stop and the command that reads that
+run afterwards publish the same answer, field for field. `outcome` is the word
+every text surface prints for the run — `created`, `running`, `paused`,
+`finished`, `failed`, `cancelled`, `promoted`, `broken` — so a reader who greps a
+terminal for what `status` said finds the same word in the document. A failed or
+broken run carries `reason`; a parked one carries `waiting_on` and, when its
+pause reconstructs a menu, `decision`. `yunta run --detach --json` publishes that
+same document for the run it just handed off, which its log calls `created` or
+`running`: no surface reports an outcome of `detached`, because detaching is
+something an invocation did and not a state a run is in.
+
+`stats --json` publishes what a run handed over and what it found beside what it
+spent: `submissions` (`{accepted, refused}`) counts every document offered,
+`findings` (`{posted, updated, withdrawn, refused}`) counts every finding call the
+log carries, and `findings_standing` counts the findings that stand now — the
+fold over the whole log, where an update replaces and a withdrawal removes. Each
+node row carries its own `submissions` and `findings`, zeroed for a node the log
+carries none from.
 
 In `status --json`, `diagnostics` maps a failed node to the artifacts its failure
 names — `{"<node>": [{code?, path?, kind?, file?, run?, producer?, artifact?,
 diagnostics?}, ...]}`, one entry per artifact. Every field is absent when the
 failure has nothing to put there, so no consumer meets an invented path: only a
 failure the close opened a file for carries `path`. `code` is the stable name of
-what is wrong with the artifact itself — `artifact-missing`, `artifact-undelivered`,
+what is wrong with the artifact itself — `artifact-missing`, `artifact-empty`,
+`artifact-oversized`, `artifact-unreadable`, `artifact-undelivered`,
 `artifact-unheld` — and is absent for a content failure, whose problems each carry
 a code of their own. A content failure carries `kind`, the artifact kind whose
 shape the content was read against, and `diagnostics`, every problem that document
@@ -246,7 +326,11 @@ always the state the node is in now.
 
 Yunta serves MCP in two places: the per-session tool server the engine starts on
 loopback HTTP for one node's session, and the control plane `yunta mcp` serves over
-stdio. Both announce every protocol revision the SDK implements — `2024-11-05`
+stdio. They are named apart. The per-session server is always `yunta-run`, which is
+the name a CLI writes it under and the prefix its tools carry; the control plane is
+registered by whoever uses it, under whatever name they choose. A CLI merges both
+entries into one table by key, so one name for both would be one server configured
+twice. Both announce every protocol revision the SDK implements — `2024-11-05`
 through `2026-07-28` — and both serve all of them from one set of handlers.
 
 Every result either server builds satisfies the newest revision it announces. A
@@ -265,6 +349,66 @@ on every later request. Which tools a per-session server lists depends on that
 session — its node, its task and the documents it declares — never on the revision
 the client speaks.
 
+`run --json` carries `budget_warning` when the declared cap sits under the
+workflow's historical p90 — the same sentence that goes to stderr, undecorated,
+because how a caution looks is the terminal's word and not the document's.
+Absent otherwise, and always absent from `resume --json`: the estimation belongs
+to whoever *creates* a run.
+
+`status --json` carries `waiting_on` for a parked run, tagged by `on`:
+`{"on": "gate", "node", "external_ref"?, "reason"?}` when a node is parked on a
+gate, `{"on": "questions", "node", "asked": [...], "reason"?}` when it is parked
+on questions nobody answered, and `{"on": "run", "reason"}` when the run itself
+stopped. `summary` says the same thing inside a sentence that also carries the
+run's counters; this is the pause on its own.
+
+`status --json` carries `nodes` as a **list**, in the order the run's frozen
+workflow declares them, each `parallel` group followed by its own children —
+the same list, in the same order, that `status` prints and that `graph --run`
+draws. Every declared node is in it, the ones this run's mode leaves out
+included and marked `skipped`; a node the log never mentioned is in it too,
+because a document that left it out could not say whether the run is still on
+its way there or never going. Each entry is `{id, state, detail?, group?,
+waiting_on?}`: `state` is the word every text surface prints for a node, `detail`
+is what qualifies it, `group` names the enclosing `parallel` group, and
+`waiting_on` carries the wait in the same shape the run-level one uses.
+`tasks` and `diagnostics` stay maps: a reader indexes those by id, and they
+carry no order of their own.
+
+A node that failed because its session ended without ever reporting a terminal
+event carries `session_death`: the `adapter` whose session it was and, when that
+session had a process of its own, its `exit` — `end`, tagged `code`, `signal` or
+`unknown`, and `stderr_tail`, the last lines the process wrote, with every value
+its environment carried replaced by `[redacted]`. `detail` says the same thing in
+a sentence. `diagnostics` gains no entry for it: a dead session names no document,
+the same as a failure stated in one sentence.
+
+A parked run's `decision.evidence` is a list of the facts the engine attached,
+each `{label?, value}` — the escalation as the log holds it, not the lines a
+reader was shown. A fact that names itself, like a failing command's `exit 1`,
+carries no `label`.
+
+In `status --json`, `diagnostics` maps a failed node to the documents its failure
+names — `{"<node>": [{path, kind?, diagnostics?, file?}, ...]}`, one entry per
+file. `path` is always there. A content failure carries `kind`, the artifact kind
+whose shape the file was read against, and `diagnostics`, every problem that
+document has in document order. A file-level failure carries `file` instead,
+naming what went wrong with the file itself: never written, empty, past
+`limits.max_artifact_bytes`, or refused by the filesystem. A node whose most
+recent failure is a plain message has no entry at all, so what the field shows is
+always the state the node is in now.
+
+In `status --json`, `decision` carries what a parked run is waiting on:
+`{node, summary, evidence, options: [{id, label, tradeoff}], external_ref?,
+resolve_with}` — the escalation under the same field names the `gate_waiting`
+event writes, plus the node it belongs to and the command that answers it with
+the option left as `<option>`. Two pauses reconstruct one: a node whose
+re-routes are exhausted, and an unresolved internal gate. Every other pause — a
+budget cap, a scope expansion, an unanswered questions artifact, an external
+gate with no reachable forge — carries no `decision` at all, and `summary` says
+what the run is waiting on instead. The `decision` field itself is additive; the
+stamp moved to `3` for the shape of `decision.evidence`, described above.
+
 ## Message wording
 
 The block that reports what is wrong with a document counts in whole words —
@@ -275,6 +419,13 @@ interpreted artifact that could not be read, a workflow that fails `yunta check`
 `yunta run` and `yunta resume` refuse an unhealthy adapter with ``adapter health
 check failed (run `yunta doctor` for detail): 2 errors`` — the advice sits inside
 the parenthesis so the count lands directly after the heading.
+
+`yunta run`'s live view needs a terminal, and where there isn't one it says so on
+its first line and prints one line per event instead: `live view off (<reason>):
+one line per event`, the reason being `stderr is not a terminal`, `TERM=dumb` or
+`NO_COLOR is set`. The same shape as the line above — what is off, why in the
+parenthesis, what happens instead after the colon. `--quiet` announces nothing,
+because it has no view to stand down.
 
 The `document_shape` tool refuses an unknown kind with the same sentence
 `yunta schema` prints, byte for byte.
@@ -324,14 +475,15 @@ empty: a blank line under the heading, an empty block that shows it is empty.
 ## The schemas as files
 
 `crates/core/schemas/` holds `workflow.json`, `config.json`, `pack.json`,
-`tasks.json`, `findings.json`, `questions.json` and `events.json`: the JSON
-Schema (draft 2020-12) of a workflow file, a config layer, a pack manifest, the
-three artifacts the engine interprets, and one event of the log — the shape of a
-line of `events.jsonl`. They are generated from the types that read those
-documents: `cargo xtask schema` writes them and CI fails when a committed file
-differs from what the types emit, so any change to a format is a visible diff in
-the pull request that makes it. They live inside the crate whose types produce
-them, which is also the crate that ships them: the binary embeds those exact
+`tasks.json`, `findings.json`, `questions.json`, `answers.json`,
+`withdrawal.json` and `events.json`: the JSON Schema (draft 2020-12) of a
+workflow file, a config layer, a pack manifest, the four artifacts the engine
+interprets, the withdrawal that retires a finding, and one event of the log —
+the shape of a line of `events.jsonl`. They are generated from the types that
+read those documents: `cargo xtask schema` writes them and CI fails when a
+committed file differs from what the types emit, so any change to a format is a
+visible diff in the pull request that makes it. They live inside the crate whose
+types produce them, which is also the crate that ships them: the binary embeds those exact
 files, so `yunta schema <kind> --json` prints the bytes CI checked rather than
 deriving a schema of its own at run time. An editor or a validator can use the
 files as they are, with or without a checkout.
@@ -362,7 +514,9 @@ pid reused while the lock stands keeps it until that process ends.
 Individual adapters (CLI integrations like `claude-code`, `codex`) have
 their own version compatibility against the coding-agent CLI they wrap; see
 `yunta doctor`, which checks the installed binary's version against what the
-adapter supports. Pack compatibility (a pack's own `declares:`/`requires:`
+adapter supports — and `yunta doctor --session`, which goes further and opens one
+real session per binding, because a version check never touches the configuration
+a run writes the CLI and so cannot say whether a session opens at all. Pack compatibility (a pack's own `declares:`/`requires:`
 against a given Yunta version) is the pack author's responsibility, checked
 statically at `pack add`/`check` time — this document covers the engine
 itself, not third-party content distributed through it.

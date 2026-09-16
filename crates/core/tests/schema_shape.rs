@@ -48,12 +48,21 @@ fn loop_until_is_an_exhaustive_enum() {
 }
 
 #[test]
-fn node_network_is_none_and_interactive_false_unless_declared() {
+fn node_network_is_none_unless_declared() {
     let wf = workflow(
-        "name: w\nnodes:\n  - id: a\n    kind: prompt\n    prompt: p\n  - id: b\n    kind: prompt\n    prompt: p\n    network: true\n    interactive: true\n",
+        "name: w\nnodes:\n  - id: a\n    kind: prompt\n    prompt: p\n  - id: b\n    kind: prompt\n    prompt: p\n    network: true\n",
     );
-    assert!(wf.nodes[0].network.is_none() && !wf.nodes[0].interactive);
-    assert!(wf.nodes[1].network == Some(true) && wf.nodes[1].interactive);
+    assert!(wf.nodes[0].network.is_none());
+    assert_eq!(wf.nodes[1].network, Some(true));
+}
+
+#[test]
+fn a_node_that_produces_questions_asks() {
+    let wf = workflow(
+        "name: w\nnodes:\n  - id: a\n    kind: prompt\n    prompt: p\n  - id: b\n    kind: prompt\n    prompt: p\n    artifacts: { produces: [questions] }\n",
+    );
+    assert!(!wf.nodes[0].asks());
+    assert!(wf.nodes[1].asks());
 }
 
 #[test]
@@ -101,7 +110,8 @@ fn config_maps_are_ordered_by_key() {
     let text = yaml::to_string(&config).unwrap();
     assert!(text.find("alpha").unwrap() < text.find("zeta").unwrap());
     let _: Option<&BTreeMap<AdapterId, AdapterSettings>> = config.adapters.as_ref();
-    let _: Option<&BTreeMap<String, McpServerConfig>> = config.mcp_servers.as_ref();
+    let _: Option<&BTreeMap<yunta_core::McpServerName, McpServerConfig>> =
+        config.mcp_servers.as_ref();
     let _: Option<&BTreeMap<String, PricingEntry>> = config.pricing.as_ref();
 }
 

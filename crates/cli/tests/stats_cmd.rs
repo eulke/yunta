@@ -108,7 +108,7 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     let fourth = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(fourth.status.success());
     assert!(
-        stdout(&fourth).contains("past run(s)"),
+        stdout(&fourth).contains("past runs"),
         "got: {}",
         stdout(&fourth)
     );
@@ -117,7 +117,7 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     let list = yunta_in!(&repo, &home, &["list"]);
     assert!(list.status.success());
     assert!(
-        stdout(&list).contains("past run(s)"),
+        stdout(&list).contains("past runs"),
         "got: {}",
         stdout(&list)
     );
@@ -129,11 +129,11 @@ fn prior_estimation_only_appears_once_three_runs_exist() {
     let text = stdout(&workflow_stats);
     assert!(
         text.lines()
-            .any(|l| l == "workflow `bash-only-stats` — 4 run(s)"),
+            .any(|l| l == "workflow `bash-only-stats` — 4 runs"),
         "got: {text}"
     );
     assert!(
-        text.lines().any(|l| l.starts_with("4 past run(s) · ")),
+        text.lines().any(|l| l.starts_with("4 past runs · ")),
         "got: {text}"
     );
 }
@@ -166,4 +166,83 @@ fn stats_needs_a_run_id_or_workflow_flag() {
 
     let result = yunta_in!(&repo, &home, &["stats"]);
     assert!(!result.status.success());
+}
+
+/// The same token count reads one way under a node that finished and
+/// another under one that failed, so every node row opens with the state
+/// it is in — in words, which is what the row still says once a terminal
+/// without the glyphs has dropped them.
+#[test]
+fn stats_run_opens_each_node_row_with_that_node_s_state() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: stats-node-states
+nodes:
+  - { id: passes, kind: bash, run: "true" }
+  - { id: breaks, kind: bash, run: "false", depends_on: [passes] }
+"#,
+    );
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    let run_id = run_id_from(&run);
+
+    let stats = yunta_in!(&repo, &home, &["stats", &run_id]);
+    assert!(
+        stats.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&stats.stderr)
+    );
+    let text = stdout(&stats);
+    let row = |id: &str| {
+        text.lines()
+            .find(|line| line.contains(id))
+            .unwrap_or_else(|| panic!("no row for `{id}` in: {text}"))
+            .to_string()
+    };
+    assert!(row("passes").contains("done"), "got: {}", row("passes"));
+    assert!(row("breaks").contains("fail"), "got: {}", row("breaks"));
+}
+
+#[test]
+fn history_sees_a_run_under_the_default_state_root() {
+    // A run is found where a run is found: the project's own runs root,
+    // then the default under the state root. History used to join the
+    // current root itself, so a run created before `paths.runs` moved
+    // was invisible to the sparkline and the estimation — the workflow
+    // looked like it had never run.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(&repo.join("wf.yaml"), bash_only_workflow());
+    for _ in 0..2 {
+        let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+        assert!(run.status.success(), "{}", stdout(&run));
+    }
+
+    // The project now keeps its runs somewhere else. The two already
+    // there are still this workflow's history.
+    let elsewhere = root.path().join("elsewhere");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        &format!("paths:\n  runs: {}\n", elsewhere.display()),
+    );
+
+    let stats = yunta_in!(&repo, &home, &["stats", "--workflow", "bash-only-stats"]);
+    assert!(stats.status.success(), "{}", stdout(&stats));
+    let text = stdout(&stats);
+    assert!(
+        text.lines()
+            .any(|line| line == "workflow `bash-only-stats` — 2 runs"),
+        "the runs under the default root are still this workflow's history: {text}"
+    );
 }

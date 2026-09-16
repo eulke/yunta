@@ -19,7 +19,7 @@ fn a_declared_scope_is_what_the_diff_is_held_to() {
     let node = node("id: build\nkind: prompt\nprompt: go\nscope: [\"src/**\"]\n");
     assert_eq!(
         audited_scope(&node),
-        Some(["src/**".to_string()].as_slice())
+        Some([yunta_core::ScopeGlob::from("src/**")].as_slice())
     );
 }
 

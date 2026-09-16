@@ -9,9 +9,9 @@ repository, human or agent; read it first. Everything below is logistics.
 ## Before you start
 
 For anything beyond a small, obviously-scoped fix, open an issue first
-describing the problem and the approach. Design decisions live in
-`docs/design/adrs.md`; a change that touches one starts as a proposal in
-`docs/design/adr/` and is settled there before any code.
+describing the problem and the approach. Design decisions live one per file in
+`docs/design/adr/`, indexed by the generated `docs/design/adrs.md`; a change
+that touches one is settled there, in the decision's own file, before any code.
 
 ## Building and testing
 
@@ -22,14 +22,17 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 cargo run -p yunta -- test             # the repository's own workflow cases
 cargo xtask schema                     # regenerates crates/core/schemas/ after a change to a document type
+cargo run -p xtask -- smells --check   # the measured smell counts have not risen
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`; rustup installs it on the
 first build.
 
 CI runs the same checks plus `cargo deny check`, `cargo xtask schema --check`
-(the committed schemas must be what the types emit), an isolated `cargo check`
-per crate and the self-tests of every pack under `packs/`.
+(the committed schemas must be what the types emit), `cargo xtask adr --check`,
+the suite on macOS, the suite once under the release profile, an isolated
+`cargo check` per crate and the self-tests of every pack under `packs/`. The
+release gate calls the same workflow, so the two never test different things.
 
 ## Pull requests
 

@@ -1,12 +1,17 @@
 //! `yunta stats`: every number here is derived
 //! from the event log alone — never estimated, never trusting an agent's
 //! own report (the same guarantee [`crate::progress`] and
-//! [`crate::replay`] already give). Two things live here: **CPTV and its
-//! companions** (one run, computed from that run's own log) and
-//! **prior estimation** (a workflow's own run history, computed
-//! from several runs' logs at once). Presentation (terminal bars,
-//! sparklines, `--json`) is the CLI's job; this module only derives
-//! numbers.
+//! [`crate::replay`] already give). **CPTV and its companions** live
+//! here — one run, computed from that run's own log; the comparison
+//! across a workflow's past runs is [`crate::history`]'s. Presentation
+//! (terminal bars, sparklines, `--json`) is the CLI's job; this module
+//! only derives numbers.
+//!
+//! A run is derived **as of an instant**: `compute_run_stats` reads a log
+//! as of its own last event, `compute_run_stats_at` reads it at a caller's
+//! `now`. The second is what a run in progress needs — an attempt that
+//! has not closed has no duration in the log, and the run's clock would
+//! otherwise stop at the last event any node happened to write.
 //!
 //! **CPTV is the headline metric because it optimizes what matters:**
 //! not minimizing tokens — a cheap run that verifies
@@ -38,11 +43,13 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use yunta_core::events::{EventPayload, StoredEvent, SubmissionOutcome, TaskStatus, TokenUsage};
-use yunta_core::{ModeName, Node, NodeId, RunId, RunnerName, Workflow};
+use yunta_core::events::{
+    EventPayload, RunFinishedPayload, StoredEvent, SubmissionOutcome, TerminalState, TokenUsage,
+};
+use yunta_core::{Node, NodeId, RunnerName, Workflow};
 
 use crate::replay::{derive, unknown_kind_counts, RunState, UnknownKindCount};
-use yunta_core::ContentHash;
+use yunta_core::events::{ArtifactEvent, FindingEvent, GateEvent, NodeEvent, RunEvent};
 
 /// One node's contribution to a run's stats — declaration order (`parallel`
 /// children flattened in place, same convention `crate::progress` uses).
@@ -59,8 +66,19 @@ pub struct NodeStat {
     /// that succeeded on its first try, never retried.
     pub attempts: u32,
     /// Sum of (terminal timestamp − start timestamp) across every attempt
-    /// — time actually spent running, not waiting.
+    /// that closed — time actually spent running, not waiting.
     pub active: Duration,
+    /// How long the attempt still open at the observation instant has
+    /// been running. `None` when the node has no open attempt there —
+    /// and always `None` from [`compute_run_stats`], which observes a run
+    /// as of its own last event and so has no later instant to measure
+    /// an open attempt against.
+    ///
+    /// Open means the log has not closed it, which includes an attempt
+    /// parked on a gate: a node waiting on a human is inside its attempt,
+    /// and its elapsed keeps growing. What it is doing there is the
+    /// node's state ([`crate::NodeState`]), not this figure.
+    pub open_attempt: Option<Duration>,
     /// Time between the node becoming ready (its dependencies' last
     /// terminal event, or the run's start for a root node) and its first
     /// `node_started` — see this module's own doc comment on why this is
@@ -69,9 +87,16 @@ pub struct NodeStat {
 }
 
 impl NodeStat {
-    /// This node's own wall-clock: blocked, then active, back to back.
+    /// Time this node has spent running as of the observation instant:
+    /// every attempt that closed, plus the one still open.
+    pub fn active_so_far(&self) -> Duration {
+        self.active + self.open_attempt.unwrap_or(Duration::ZERO)
+    }
+
+    /// This node's own wall-clock: blocked, then active, back to back —
+    /// the attempt still open included.
     pub fn wall_clock(&self) -> Duration {
-        self.blocked + self.active
+        self.blocked + self.active_so_far()
     }
 
     /// `None` when there's no wall-clock to divide by yet (a node with
@@ -86,7 +111,7 @@ impl NodeStat {
 }
 
 /// Whole documents sessions offered, by what the engine answered.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Submissions {
     pub accepted: u64,
     pub refused: u64,
@@ -94,7 +119,7 @@ pub struct Submissions {
 
 /// Finding calls a log carries, by what the engine answered: the three
 /// accepted forms, and the calls it turned down.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct FindingActivity {
     pub posted: u64,
     pub updated: u64,
@@ -120,9 +145,12 @@ pub struct RunStats {
     pub total_tokens: TokenUsage,
     pub tasks_total: usize,
     pub tasks_done: usize,
-    /// Last event's timestamp minus the first's — `None` for an empty
-    /// log. For a run still in progress this is elapsed time so far, not
-    /// a prediction of the total.
+    /// How long the run has been going: from its first event to the
+    /// observation instant while the log carries no `run_finished`, and
+    /// to its last event once it does — a finished run's clock stops
+    /// with it, and a run nobody is observing has only its log to
+    /// measure against. `None` for an empty log; never a prediction of a
+    /// total.
     pub wall_clock: Option<Duration>,
     /// Every node that reached at least one `node_started`, in the
     /// workflow's own declaration order.
@@ -149,10 +177,10 @@ pub struct RunStats {
 impl RunStats {
     /// Tokens grouped by resolved role, node order broken and re-grouped
     /// — the "per role" half of "cost per node, per role, and per
-    /// mode" (mode is a whole-run property today, since `modes:` isn't
-    /// implemented yet — nothing to break out per role *and* per mode
-    /// within one run until it is; `--workflow`'s history view is where
-    /// mode comparison lives).
+    /// mode". Mode is a whole-run property: a run is created in one
+    /// mode, so there is nothing to break out per role *and* per mode
+    /// within one run, and `--workflow`'s history view is where mode
+    /// comparison lives.
     pub fn tokens_by_runner(&self) -> Vec<(RunnerName, TokenUsage)> {
         let mut by_runner: Vec<(RunnerName, TokenUsage)> = Vec::new();
         for node in &self.nodes {
@@ -170,111 +198,65 @@ impl RunStats {
 /// `RunFinished.metrics` and `RunStats` alike report, computed once here
 /// so the two call sites can never disagree.
 pub fn cptv(state: &RunState) -> Option<f64> {
-    let done = state
-        .tasks
-        .values()
-        .filter(|status| matches!(status, TaskStatus::Done))
-        .count();
-    if done == 0 {
-        return None;
-    }
-    Some(state.total_tokens.total() as f64 / done as f64)
+    RunFinishedPayload::closed(TerminalState::Done, state.total_tokens(), tasks_done(state))
+        .metrics
+        .cptv
 }
 
-/// Derives one run's stats from its workflow and event log alone.
-/// Pure: same input, same output, always.
+/// How many of the run's tasks reached `done` — the denominator of cost
+/// per verified task, and the only thing a close needs to know about
+/// the tasks document.
+pub fn tasks_done(state: &RunState) -> usize {
+    state.tasks.done()
+}
+
+/// Derives one run's stats from its workflow and event log alone,
+/// observed as of the log's own last event. Pure: same input, same
+/// output, always.
+///
+/// An attempt still open at that point contributes no elapsed time: with
+/// no instant later than the log to measure against, how long it has
+/// been running is unknown, never zero. [`compute_run_stats_at`] is this
+/// same derivation given one.
 pub fn compute_run_stats(workflow: &Workflow, events: &[StoredEvent]) -> RunStats {
-    let state = derive(events);
+    stats_observed_at(&derive(events), workflow, events, None)
+}
+
+/// Derives one run's stats as they stand at `now` — what a run in
+/// progress needs: the attempt open at `now` reports how long it has
+/// been running ([`NodeStat::open_attempt`]), and a run with no
+/// `run_finished` measures its wall-clock to `now`, so a node that has
+/// been silent for minutes cannot freeze the run's clock at its last
+/// event. `now` is the caller's own instant, injected: this module never
+/// reads a clock.
+pub fn compute_run_stats_at(
+    workflow: &Workflow,
+    events: &[StoredEvent],
+    now: DateTime<Utc>,
+) -> RunStats {
+    stats_observed_at(&derive(events), workflow, events, Some(now))
+}
+
+/// The one derivation behind [`compute_run_stats`] and
+/// [`compute_run_stats_at`]: `observed_at` is the instant the run is
+/// looked at, or `None` to look at it as of its own last event.
+///
+/// `state` is the log already replayed. A caller that reads several
+/// things off one log — a frame reads its stats, its phase and its
+/// tokens — replays it once and hands the answer down, rather than
+/// paying for the same fold again per reader.
+pub(crate) fn stats_observed_at(
+    state: &RunState,
+    workflow: &Workflow,
+    events: &[StoredEvent],
+    observed_at: Option<DateTime<Utc>>,
+) -> RunStats {
     let flat: Vec<&Node> = workflow.iter_nodes().collect();
-    let depends_on: HashMap<&NodeId, &[NodeId]> = flat
-        .iter()
-        .map(|n| (&n.id, n.depends_on.as_slice()))
-        .collect();
-
     let run_start = events.first().map(|e| e.timestamp);
-    let wall_clock = match (events.first(), events.last()) {
-        (Some(first), Some(last)) => (last.timestamp - first.timestamp).to_std().ok(),
-        _ => None,
-    };
+    let walk = walk_attempts(events);
 
-    let mut acc = AttemptAccumulators::default();
-    let mut first_started: HashMap<NodeId, DateTime<Utc>> = HashMap::new();
-    let mut node_max_attempt: HashMap<NodeId, u32> = HashMap::new();
-    let mut node_runner: HashMap<NodeId, RunnerName> = HashMap::new();
-
-    for event in events {
-        match event.payload() {
-            Some(EventPayload::NodeStarted(p)) => {
-                let Some(node_id) = &event.node_id else {
-                    continue;
-                };
-                first_started
-                    .entry(node_id.clone())
-                    .or_insert(event.timestamp);
-                node_max_attempt
-                    .entry(node_id.clone())
-                    .and_modify(|a| *a = (*a).max(p.attempt))
-                    .or_insert(p.attempt);
-                acc.open.insert(
-                    node_id.clone(),
-                    OpenAttempt {
-                        attempt: p.attempt,
-                        started_at: event.timestamp,
-                    },
-                );
-            }
-            Some(EventPayload::NodeFinished(p)) => {
-                close_attempt(&event.node_id, event.timestamp, p.tokens_used, &mut acc);
-            }
-            Some(EventPayload::NodeFailed(p)) => {
-                close_attempt(&event.node_id, event.timestamp, p.tokens_used, &mut acc);
-            }
-            Some(EventPayload::RunnerResolved(p)) => {
-                if let Some(node_id) = &event.node_id {
-                    node_runner.insert(node_id.clone(), p.runner.clone());
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let mut nodes = Vec::new();
-    for node in &flat {
-        let Some(&attempts) = node_max_attempt.get(&node.id) else {
-            continue; // never started — nothing to report.
-        };
-        let deps = depends_on.get(&node.id).copied().unwrap_or(&[]);
-        let ready_at = if deps.is_empty() {
-            run_start
-        } else {
-            deps.iter()
-                .filter_map(|dep| acc.last_terminal.get(dep))
-                .max()
-                .copied()
-                .or(run_start)
-        };
-        let blocked = match (ready_at, first_started.get(&node.id)) {
-            (Some(ready), Some(started)) if *started > ready => {
-                (*started - ready).to_std().unwrap_or(Duration::ZERO)
-            }
-            _ => Duration::ZERO,
-        };
-        nodes.push(NodeStat {
-            node_id: node.id.clone(),
-            runner: node_runner.get(&node.id).cloned(),
-            tokens: acc.node_tokens.get(&node.id).copied().unwrap_or_default(),
-            attempts,
-            active: acc
-                .node_active
-                .get(&node.id)
-                .copied()
-                .unwrap_or(Duration::ZERO),
-            blocked,
-        });
-    }
-
-    let total = state.total_tokens.total();
-    let rework_total = acc.rework_tokens.total();
+    let total = state.total_tokens().total();
+    let rework_total = walk.rework_tokens.total();
     let rework_rate = if total == 0 {
         None
     } else {
@@ -283,9 +265,9 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[StoredEvent]) -> RunStat
     // A rate needs input tokens to divide by; without them the answer is
     // undefined, distinct from `Some(0.0)` (an adapter reported and cached
     // nothing) — never a denominator invented with `.max(1)`.
-    let cache_rate = match state.total_tokens.cached {
-        Some(cached) if state.total_tokens.input > 0 => {
-            Some(cached as f64 / state.total_tokens.input as f64)
+    let cache_rate = match state.total_tokens().cached {
+        Some(cached) if state.total_tokens().input > 0 => {
+            Some(cached as f64 / state.total_tokens().input as f64)
         }
         _ => None,
     };
@@ -293,57 +275,210 @@ pub fn compute_run_stats(workflow: &Workflow, events: &[StoredEvent]) -> RunStat
     let activity = Activity::of(events);
 
     RunStats {
-        unknown_kinds: unknown_kind_counts(&state),
+        unknown_kinds: unknown_kind_counts(state),
         artifact_submissions: activity.submissions,
         submissions_by_node: activity.submissions_by_node,
         findings: activity.findings,
         findings_by_node: activity.findings_by_node,
         findings_effective: yunta_core::events::findings::effective(events).len() as u64,
-        cptv: cptv(&state),
+        cptv: cptv(state),
         rework_rate,
         cache_rate,
-        total_tokens: state.total_tokens,
+        total_tokens: state.total_tokens(),
         tasks_total: state.tasks.len(),
-        tasks_done: state
-            .tasks
-            .values()
-            .filter(|s| matches!(s, TaskStatus::Done))
-            .count(),
-        wall_clock,
-        nodes,
+        tasks_done: state.tasks.done(),
+        wall_clock: run_start
+            .zip(measured_until(events, observed_at))
+            .map(|(start, until)| interval(start, until)),
+        nodes: node_stats(&flat, &walk, run_start, observed_at),
     }
 }
 
-/// The per-node accumulators [`close_attempt`] folds a `NodeFinished`/
-/// `NodeFailed` event into — grouped because every one of them is only
-/// ever touched together, one event at a time, while walking the log.
+/// The time from `from` to `to` — how every duration this module reports
+/// reads an interval. [`Duration::ZERO`] when `to` is the earlier of the
+/// two: nothing a log describes has run for a negative time, and a
+/// caller's clock sitting behind the log still gets a measured answer
+/// rather than one that reads as missing.
+fn interval(from: DateTime<Utc>, to: DateTime<Utc>) -> Duration {
+    (to - from).to_std().unwrap_or(Duration::ZERO)
+}
+
+/// The instant a run's wall-clock is measured to: `observed_at` while
+/// the run has not written its `run_finished` and a caller supplied one,
+/// the log's last event otherwise. A finished run's clock stops where it
+/// stopped, whoever looks at it and whenever.
+fn measured_until(
+    events: &[StoredEvent],
+    observed_at: Option<DateTime<Utc>>,
+) -> Option<DateTime<Utc>> {
+    let finished = events
+        .iter()
+        .rev()
+        .any(|e| matches!(e.payload(), Some(EventPayload::Run(RunEvent::Finished(_)))));
+    match observed_at {
+        Some(now) if !finished => Some(now),
+        _ => events.last().map(|e| e.timestamp),
+    }
+}
+
+/// Every node that reached at least one `node_started`, in the
+/// workflow's own declaration order, with the elapsed of the attempt
+/// open at `observed_at` on top of what the walk measured.
+fn node_stats(
+    flat: &[&Node],
+    walk: &AttemptWalk,
+    run_start: Option<DateTime<Utc>>,
+    observed_at: Option<DateTime<Utc>>,
+) -> Vec<NodeStat> {
+    let depends_on: HashMap<&NodeId, &[NodeId]> = flat
+        .iter()
+        .map(|n| (&n.id, n.depends_on.as_slice()))
+        .collect();
+
+    let mut nodes = Vec::new();
+    for node in flat {
+        let Some(&attempts) = walk.max_attempt.get(&node.id) else {
+            continue; // never started — nothing to report.
+        };
+        let deps = depends_on.get(&node.id).copied().unwrap_or(&[]);
+        nodes.push(NodeStat {
+            node_id: node.id.clone(),
+            runner: walk.runner.get(&node.id).cloned(),
+            tokens: walk.node_tokens.get(&node.id).copied().unwrap_or_default(),
+            attempts,
+            active: walk
+                .node_active
+                .get(&node.id)
+                .copied()
+                .unwrap_or(Duration::ZERO),
+            open_attempt: observed_at.and_then(|now| {
+                walk.open
+                    .get(&node.id)
+                    .map(|open| interval(open.started_at, now))
+            }),
+            blocked: walk.blocked_before_start(&node.id, deps, run_start),
+        });
+    }
+    nodes
+}
+
+/// Everything one pass over a run's log measures per node: the attempt
+/// each node has open, what its closed attempts spent and how long they
+/// ran, when each node first started, the highest attempt it reached and
+/// the runner that resolved for it. Grouped because the walk touches
+/// them together, one event at a time.
 #[derive(Default)]
-struct AttemptAccumulators {
+struct AttemptWalk {
     open: HashMap<NodeId, OpenAttempt>,
     node_tokens: HashMap<NodeId, TokenUsage>,
     rework_tokens: TokenUsage,
     node_active: HashMap<NodeId, Duration>,
     last_terminal: HashMap<NodeId, DateTime<Utc>>,
+    first_started: HashMap<NodeId, DateTime<Utc>>,
+    max_attempt: HashMap<NodeId, u32>,
+    runner: HashMap<NodeId, RunnerName>,
 }
 
-fn close_attempt(
-    node_id: &Option<NodeId>,
-    at: DateTime<Utc>,
-    tokens: TokenUsage,
-    acc: &mut AttemptAccumulators,
-) {
-    let Some(node_id) = node_id else { return };
-    acc.last_terminal.insert(node_id.clone(), at);
-    let entry = acc.node_tokens.entry(node_id.clone()).or_default();
-    *entry += tokens;
-    let Some(opened) = acc.open.remove(node_id) else {
-        return;
-    };
-    let duration = (at - opened.started_at).to_std().unwrap_or(Duration::ZERO);
-    *acc.node_active.entry(node_id.clone()).or_default() += duration;
-    if opened.attempt > 1 {
-        acc.rework_tokens += tokens;
+impl AttemptWalk {
+    /// Folds a `node_started` in: it opens this node's attempt, and the
+    /// node keeps its earliest start and the highest attempt number the
+    /// log has reached for it.
+    fn start_attempt(&mut self, node_id: &NodeId, at: DateTime<Utc>, attempt: u32) {
+        self.first_started.entry(node_id.clone()).or_insert(at);
+        self.max_attempt
+            .entry(node_id.clone())
+            .and_modify(|a| *a = (*a).max(attempt))
+            .or_insert(attempt);
+        self.open.insert(
+            node_id.clone(),
+            OpenAttempt {
+                attempt,
+                started_at: at,
+            },
+        );
     }
+
+    /// Folds a `node_finished`/`node_failed` in: its tokens are the
+    /// node's, and a retry's are rework on top. A terminal that names no
+    /// node closes nothing.
+    fn close_attempt(&mut self, node_id: &Option<NodeId>, at: DateTime<Utc>, tokens: TokenUsage) {
+        let Some(node_id) = node_id else { return };
+        self.last_terminal.insert(node_id.clone(), at);
+        let entry = self.node_tokens.entry(node_id.clone()).or_default();
+        *entry += tokens;
+        let Some(opened) = self.open.remove(node_id) else {
+            return;
+        };
+        let duration = interval(opened.started_at, at);
+        *self.node_active.entry(node_id.clone()).or_default() += duration;
+        if opened.attempt > 1 {
+            self.rework_tokens += tokens;
+        }
+    }
+
+    /// How long a node waited between becoming ready — its dependencies'
+    /// last terminal, or the run's start for a root node — and its own
+    /// first `node_started`. [`Duration::ZERO`] for a node that started
+    /// as soon as it was ready, and for one the log gives no instant to
+    /// measure between.
+    fn blocked_before_start(
+        &self,
+        node_id: &NodeId,
+        deps: &[NodeId],
+        run_start: Option<DateTime<Utc>>,
+    ) -> Duration {
+        let ready_at = if deps.is_empty() {
+            run_start
+        } else {
+            deps.iter()
+                .filter_map(|dep| self.last_terminal.get(dep))
+                .max()
+                .copied()
+                .or(run_start)
+        };
+        match (ready_at, self.first_started.get(node_id)) {
+            (Some(ready), Some(started)) => interval(ready, *started),
+            _ => Duration::ZERO,
+        }
+    }
+}
+
+/// One pass over the log, folding every event that moves a node's
+/// attempts into [`AttemptWalk`]. Everything a node stat needs comes
+/// from here, so the log is walked once however many nodes the workflow
+/// declares.
+fn walk_attempts(events: &[StoredEvent]) -> AttemptWalk {
+    let mut walk = AttemptWalk::default();
+    for event in events {
+        match event.payload() {
+            Some(EventPayload::Node(NodeEvent::Started(p))) => {
+                if let Some(node_id) = &event.node_id {
+                    walk.start_attempt(node_id, event.timestamp, p.attempt);
+                }
+            }
+            Some(EventPayload::Node(NodeEvent::Finished(p))) => {
+                walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used);
+            }
+            Some(EventPayload::Node(NodeEvent::Failed(p))) => {
+                walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used);
+            }
+            // A node that asked closed its attempt there: the session is
+            // over and what it spent is on this event. The
+            // `node_finished` that lands after the answer closes
+            // nothing more — its own `close_attempt` finds no open
+            // attempt and adds the zero it carries.
+            Some(EventPayload::Gates(GateEvent::QuestionsAsked(p))) => {
+                walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used);
+            }
+            Some(EventPayload::Node(NodeEvent::RunnerResolved(p))) => {
+                if let Some(node_id) = &event.node_id {
+                    walk.runner.insert(node_id.clone(), p.runner.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    walk
 }
 
 struct OpenAttempt {
@@ -371,7 +506,7 @@ impl Activity {
         for event in events {
             let node = event.node_id.as_ref();
             match event.payload() {
-                Some(EventPayload::ArtifactSubmitted(p)) => count(
+                Some(EventPayload::Artifacts(ArtifactEvent::Submitted(p))) => count(
                     &mut activity.submissions,
                     &mut activity.submissions_by_node,
                     node,
@@ -380,16 +515,16 @@ impl Activity {
                         SubmissionOutcome::Refused { .. } => |s: &mut Submissions| &mut s.refused,
                     },
                 ),
-                Some(EventPayload::FindingPosted(_)) => {
+                Some(EventPayload::Findings(FindingEvent::Posted(_))) => {
                     activity.count_finding(node, |f| &mut f.posted)
                 }
-                Some(EventPayload::FindingUpdated(_)) => {
+                Some(EventPayload::Findings(FindingEvent::Updated(_))) => {
                     activity.count_finding(node, |f| &mut f.updated)
                 }
-                Some(EventPayload::FindingWithdrawn(_)) => {
+                Some(EventPayload::Findings(FindingEvent::Withdrawn(_))) => {
                     activity.count_finding(node, |f| &mut f.withdrawn)
                 }
-                Some(EventPayload::FindingRefused(_)) => {
+                Some(EventPayload::Findings(FindingEvent::Refused(_))) => {
                     activity.count_finding(node, |f| &mut f.refused)
                 }
                 _ => {}
@@ -422,67 +557,10 @@ fn count<T: Default>(
         *field(by_node.entry(node.clone()).or_default()) += 1;
     }
 }
-// --- History across runs of the same workflow (`--workflow`) --
-
-/// One past run's contribution to a workflow's history — enough to drive
-/// `--workflow`'s comparison table and its prior estimation, without
-/// this module doing any storage I/O itself (that's the CLI's job, same
-/// functional-core/imperative-shell split as everywhere else).
-#[derive(Debug, Clone, PartialEq)]
-pub struct RunSummary {
-    pub run_id: RunId,
-    pub mode: ModeName,
-    pub workflow_hash: ContentHash,
-    pub tokens: u64,
-    pub wall_clock: Option<Duration>,
-    pub tasks_total: usize,
-    pub cptv: Option<f64>,
-}
-
-/// Builds one run's summary from its workflow and event log — the per-run
-/// unit `--workflow`'s aggregate views fold over.
-pub fn run_summary(
-    run_id: RunId,
-    mode: ModeName,
-    workflow_hash: ContentHash,
-    workflow: &Workflow,
-    events: &[StoredEvent],
-) -> RunSummary {
-    let stats = compute_run_stats(workflow, events);
-    RunSummary {
-        run_id,
-        mode,
-        workflow_hash,
-        tokens: stats.total_tokens.total(),
-        wall_clock: stats.wall_clock,
-        tasks_total: stats.tasks_total,
-        cptv: stats.cptv,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Percentiles {
-    pub median: f64,
-    pub p90: f64,
-}
-
-/// Nearest-rank percentile over an already-sorted-ascending slice —
-/// deterministic (no interpolation to disagree about between two
-/// implementations), which is what makes a golden test on this
-/// reproducible. `None` for an empty slice: a percentile of nothing has no
-/// value.
-fn percentile(sorted: &[f64], p: f64) -> Option<f64> {
-    if sorted.is_empty() {
-        return None;
-    }
-    let idx = ((p / 100.0) * (sorted.len() - 1) as f64).round() as usize;
-    sorted.get(idx.min(sorted.len() - 1)).copied()
-}
-
 /// The middle value of an already-sorted-ascending slice, averaging the two
 /// central samples on an even count — the true median, not the nearest-rank
-/// one `percentile` gives. `None` for an empty slice: a median of nothing
-/// is not zero. This is the one median the whole workspace shares.
+/// one a percentile picks. `None` for an empty slice: a median of nothing is
+/// not zero. This is the one median the whole workspace shares.
 pub fn median(sorted: &[f64]) -> Option<f64> {
     let n = sorted.len();
     match (n, n % 2) {
@@ -493,77 +571,4 @@ pub fn median(sorted: &[f64]) -> Option<f64> {
             _ => None,
         },
     }
-}
-
-/// Median and p90 of an already-sorted-ascending slice, or `None` when it
-/// holds no samples to summarize.
-fn percentiles(sorted: &[f64]) -> Option<Percentiles> {
-    Some(Percentiles {
-        median: median(sorted)?,
-        p90: percentile(sorted, 90.0)?,
-    })
-}
-
-/// Prior estimation: median and p90 of tokens, wall-clock and task
-/// count over a workflow's own run history. `None` with fewer than three
-/// samples — "sin datos suficientes, el engine no dice nada": not a
-/// threshold this function invented.
-#[derive(Debug, Clone, PartialEq)]
-pub struct PriorEstimation {
-    pub sample_count: usize,
-    pub tokens: Percentiles,
-    /// `None` when no run in the history reported a measurable wall-clock —
-    /// a run without one contributes no fabricated zero-second sample.
-    pub wall_clock_secs: Option<Percentiles>,
-    pub tasks: Percentiles,
-}
-
-pub const MIN_SAMPLES_FOR_ESTIMATION: usize = 3;
-
-/// The informative — never blocking — line `yunta run`
-/// prints when the declared run budget sits below what history says this
-/// workflow typically needs. `None` without a cap to compare, or without
-/// enough history (the estimation's own ≥3-run floor).
-pub fn budget_p90_warning(
-    cap: Option<u64>,
-    estimation: Option<&PriorEstimation>,
-) -> Option<String> {
-    let cap = cap?;
-    let estimation = estimation?;
-    if (cap as f64) < estimation.tokens.p90 {
-        Some(format!(
-            "warning: `limits.max_tokens_per_run` ({cap}) is below this workflow's \
-             historical p90 ({:.0} tokens over {} run(s)) — the run may pause on its budget",
-            estimation.tokens.p90, estimation.sample_count
-        ))
-    } else {
-        None
-    }
-}
-
-pub fn prior_estimation(history: &[RunSummary]) -> Option<PriorEstimation> {
-    if history.len() < MIN_SAMPLES_FOR_ESTIMATION {
-        return None;
-    }
-
-    let mut tokens: Vec<f64> = history.iter().map(|r| r.tokens as f64).collect();
-    // Only the runs that measured a wall-clock: a missing one is left out,
-    // never counted as zero seconds.
-    let mut wall_clock: Vec<f64> = history
-        .iter()
-        .filter_map(|r| r.wall_clock.map(|d| d.as_secs_f64()))
-        .collect();
-    let mut tasks: Vec<f64> = history.iter().map(|r| r.tasks_total as f64).collect();
-    for series in [&mut tokens, &mut wall_clock, &mut tasks] {
-        series.sort_by(|a, b| a.total_cmp(b));
-    }
-
-    // `tokens` and `tasks` always carry one sample per run (≥ 3 here), so
-    // their percentiles are always present; `wall_clock` may be empty.
-    Some(PriorEstimation {
-        sample_count: history.len(),
-        tokens: percentiles(&tokens)?,
-        wall_clock_secs: percentiles(&wall_clock),
-        tasks: percentiles(&tasks)?,
-    })
 }

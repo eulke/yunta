@@ -47,13 +47,47 @@ pub struct VerifiedArtifact {
     /// or written to — a node's own staging for a file on its way in,
     /// the `artifacts/` view for one the run already holds.
     pub path: PathBuf,
-    /// The bytes as they were read or written, which is what
-    /// `content_hash` is the hash of. What the run stores is their
-    /// canonical rendering, which differs whenever a node wrote an
-    /// interpreted document in its own spelling.
+    /// The bytes as they were read or written. What the run stores is
+    /// their canonical rendering, which differs whenever a node wrote an
+    /// interpreted document in its own spelling — so the hash of what
+    /// the run holds comes from the run's own acceptance, never from
+    /// here.
     pub bytes: Vec<u8>,
-    pub content_hash: ContentHash,
+    /// The hash of the file this node staged, for the one construction
+    /// that read a file. `None` for a document that was never one: an
+    /// artifact the run already holds, a document a session submitted,
+    /// one the engine derived.
+    pub staged: Option<StagedHash>,
     pub content: ArtifactContent,
+}
+
+/// The hash of a file as a node staged it.
+///
+/// Never the hash the run's own store answers for. What the run stores
+/// for an interpreted document is the canonical rendering of what those
+/// bytes parsed as, so a node that wrote a tasks document in its own
+/// spelling staged one hash and the run holds another — and a reader
+/// that compared them would call one of the two wrong. What the store
+/// answers for is the acceptance's to say; this one says what was on
+/// disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedHash(ContentHash);
+
+impl StagedHash {
+    /// The hash of the bytes a node staged.
+    pub fn of(bytes: &[u8]) -> Self {
+        StagedHash(sha256_hex(bytes))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl std::fmt::Display for StagedHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// What a declared `kind:` turned the bytes into. `Opaque` is what "the
@@ -65,6 +99,7 @@ pub enum ArtifactContent {
     Tasks(TasksFile),
     Findings(Vec<Finding>),
     Questions(Vec<Question>),
+    Answers(Vec<yunta_core::Answer>),
 }
 
 impl ArtifactContent {
@@ -77,6 +112,7 @@ impl ArtifactContent {
             ArtifactContent::Tasks(_) => Some(ArtifactKind::Tasks),
             ArtifactContent::Findings(_) => Some(ArtifactKind::Findings),
             ArtifactContent::Questions(_) => Some(ArtifactKind::Questions),
+            ArtifactContent::Answers(_) => Some(ArtifactKind::Answers),
         }
     }
 }
@@ -93,7 +129,7 @@ impl ArtifactContent {
 /// `limits.max_artifact_bytes` when declared — `None` means unbounded,
 /// and it guards a file on its way in, the one thing already settled for
 /// what the run holds.
-pub fn close_artifacts(
+pub async fn close_artifacts(
     node: &Node,
     run_dir: &Path,
     events: &[StoredEvent],
@@ -107,10 +143,9 @@ pub fn close_artifacts(
     let mut verified = Vec::new();
     let mut failures = Vec::new();
     for spec in &artifacts.produces {
-        let answer = if super::answered_by_the_log(&node.kind, spec.kind()) {
-            held_document(&node.id, spec, &held)
-        } else {
-            verify_one(&node.id, spec, run_dir, max_bytes)
+        let answer = match super::answerer(&node.kind, spec.kind()) {
+            super::Answerer::Log => held_document(&node.id, spec, &held).await,
+            super::Answerer::Staging => verify_one(&node.id, spec, run_dir, max_bytes).await,
         };
         match answer {
             Ok(artifact) => verified.push(artifact),
@@ -138,7 +173,7 @@ pub fn close_artifacts(
 /// The node's close and a session's own `yunta_check_artifact` both read
 /// here, which is what keeps the verdict a session can still act on and
 /// the verdict that decides the node one answer.
-pub(crate) fn held_document(
+pub(crate) async fn held_document(
     node: &NodeId,
     spec: &ArtifactSpec,
     held: &super::RunArtifacts<'_>,
@@ -150,7 +185,7 @@ pub(crate) fn held_document(
             artifact,
         });
     };
-    let bytes = held.bytes(found).map_err(|source| {
+    let bytes = held.bytes(found).await.map_err(|source| {
         ArtifactFailure::file(
             view_path(node, &artifact),
             FileProblem::Unreadable {
@@ -168,7 +203,7 @@ pub(crate) fn held_document(
 /// two callers, and that is the point: a verdict a session can ask for
 /// while it can still act, and the verdict that actually decides the node,
 /// have to be the same code or the first one teaches false confidence.
-pub(crate) fn verify_one(
+pub(crate) async fn verify_one(
     node: &NodeId,
     spec: &ArtifactSpec,
     run_dir: &Path,
@@ -181,13 +216,13 @@ pub(crate) fn verify_one(
     let relative = crate::run_dir::staged_path(node, &artifact.view_name());
     let path = relative.display().to_string();
 
-    let bytes = read_file(node, &run_dir.join(&relative), &path, max_bytes)?;
+    let bytes = read_file(node, &run_dir.join(&relative), &path, max_bytes).await?;
     let content = interpret(spec.kind(), &bytes, &path).map_err(ArtifactFailure::Content)?;
 
     Ok(VerifiedArtifact {
         artifact,
         path: relative,
-        content_hash: sha256_hex(&bytes),
+        staged: Some(StagedHash::of(&bytes)),
         bytes,
         content,
     })
@@ -212,7 +247,7 @@ pub(crate) fn interpreted(
     Ok(VerifiedArtifact {
         artifact,
         path,
-        content_hash: sha256_hex(bytes),
+        staged: None,
         bytes: bytes.to_vec(),
         content,
     })
@@ -229,14 +264,14 @@ pub(super) fn view_path(node: &NodeId, artifact: &ArtifactId) -> String {
 /// content, and it is within the declared guard. Nothing a rewrite of
 /// the content reaches, which is why each answer here is a
 /// [`FileProblem`] rather than a diagnostic about a document.
-fn read_file(
+async fn read_file(
     node: &NodeId,
     full_path: &Path,
     path: &str,
     max_bytes: Option<u64>,
 ) -> Result<Vec<u8>, ArtifactFailure> {
     let about = |problem: FileProblem| ArtifactFailure::file(path, problem);
-    let bytes = match std::fs::read(full_path) {
+    let bytes = match tokio::fs::read(full_path).await {
         Ok(bytes) => bytes,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
             return Err(about(FileProblem::Missing { node: node.clone() }))
@@ -282,6 +317,10 @@ pub(super) fn interpret(
         Some(ArtifactKind::Questions) => {
             let file = read::<QuestionsFile>(bytes, path)?;
             ArtifactContent::Questions(file.questions)
+        }
+        Some(ArtifactKind::Answers) => {
+            let file = read::<yunta_core::AnswersFile>(bytes, path)?;
+            ArtifactContent::Answers(file.answers)
         }
     })
 }

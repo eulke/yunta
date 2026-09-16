@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 use yunta_core::{
-    content_hash, CommitSha, ConfigLayer, InvalidId, Manifest, Node, NodeId, NodeKind,
+    content_hash, CommitSha, ConfigLayer, InputName, InvalidId, Manifest, Node, NodeId, NodeKind,
     PromptSource, Workflow,
 };
 
@@ -16,7 +16,6 @@ use crate::inputs::{resolve_inputs, InputsError};
 use crate::run::BirthArtifact;
 
 /// Version of the manifest's own schema.
-const MANIFEST_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Error)]
 pub enum ManifestError {
@@ -27,7 +26,7 @@ pub enum ManifestError {
         #[source]
         source: std::io::Error,
     },
-    #[error("failed to resolve the base commit: git {args} in `{cwd}`: {detail}")]
+    #[error("failed to resolve the base commit: {}", crate::git::failed(.args, .cwd, .detail))]
     Git {
         args: String,
         cwd: PathBuf,
@@ -70,36 +69,37 @@ pub struct FrozenRun {
 /// nowhere else for a relative path to mean. A `document` input is read
 /// and held to its kind here, before the base commit is even asked for,
 /// so a document nobody can use costs no worktree and no baseline.
-pub fn build_manifest(
+pub async fn build_manifest(
     workflow: &Workflow,
     config: &ConfigLayer,
     workflow_dir: &Path,
     repo: &Path,
-    provided_inputs: &HashMap<String, String>,
+    provided_inputs: &HashMap<InputName, String>,
+    supervision: crate::process::Supervision<'_>,
 ) -> Result<FrozenRun, ManifestError> {
     let mut workflow = workflow.clone();
-    expand_runner_fanout(&mut workflow);
-    expand_implicit_dependencies(&mut workflow);
+    yunta_core::workflow::read::expand_runner_fanout(&mut workflow);
+    yunta_core::workflow::read::expand_implicit_dependencies(&mut workflow);
 
-    let resolved = resolve_inputs(&workflow.inputs, provided_inputs, repo)?;
+    let resolved = resolve_inputs(&workflow.inputs, provided_inputs, repo).await?;
     let inputs = resolved.values;
 
     let mut prompts = BTreeMap::new();
     for node in workflow.iter_nodes() {
-        freeze_prompt(node, workflow_dir, &mut prompts)?;
+        freeze_prompt(node, workflow_dir, &mut prompts).await?;
     }
 
-    let base_commit: CommitSha =
-        git_line(repo, &["rev-parse", "HEAD"])?
-            .parse()
-            .map_err(|source| ManifestError::BaseCommit {
-                cwd: repo.to_path_buf(),
-                source,
-            })?;
-    let base_branch = git_line(repo, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    let base_commit: CommitSha = git_line(repo, &["rev-parse", "HEAD"], supervision)
+        .await?
+        .parse()
+        .map_err(|source| ManifestError::BaseCommit {
+            cwd: repo.to_path_buf(),
+            source,
+        })?;
+    let base_branch = git_line(repo, &["rev-parse", "--abbrev-ref", "HEAD"], supervision).await?;
 
     let manifest = Manifest {
-        schema_version: MANIFEST_SCHEMA_VERSION,
+        schema_version: <Manifest as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
         yunta_version: env!("CARGO_PKG_VERSION").to_string(),
         workflow_hash: content_hash(&workflow),
         config_hash: content_hash(config),
@@ -117,7 +117,7 @@ pub fn build_manifest(
         // library callers (tests) on the fallback-to-current-config
         // path, which is also the tolerant reading of old manifests.
         paths: None,
-        pack: pack_provenance(repo, workflow_dir),
+        pack: pack_provenance(repo, workflow_dir).await,
     };
     Ok(FrozenRun {
         manifest,
@@ -136,7 +136,7 @@ pub fn build_manifest(
 /// existing without a readable `pack.yaml`) that this function has no
 /// better answer for than omitting provenance rather than failing the
 /// run.
-fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackProvenance> {
+async fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackProvenance> {
     let crate::catalog::WorkflowOrigin::Pack {
         publisher,
         pack_name,
@@ -148,10 +148,13 @@ fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackP
         .join(".yunta/packs")
         .join(publisher.as_str())
         .join(pack_name.as_str());
-    let manifest_text = std::fs::read_to_string(pack_dir.join("pack.yaml")).ok()?;
+    let manifest_text = tokio::fs::read_to_string(pack_dir.join("pack.yaml"))
+        .await
+        .ok()?;
     let manifest: yunta_core::PackManifest = yunta_core::yaml::parse(&manifest_text).ok()?;
 
-    let commit = std::fs::read_to_string(repo.join(".yunta/yunta.lock"))
+    let commit = tokio::fs::read_to_string(repo.join(".yunta/yunta.lock"))
+        .await
         .ok()
         .and_then(|text| yunta_core::yaml::parse::<yunta_core::PackLock>(&text).ok())
         .and_then(|lock| {
@@ -171,116 +174,12 @@ fn pack_provenance(repo: &Path, workflow_dir: &Path) -> Option<yunta_core::PackP
     })
 }
 
-/// `context: [{ artifact: { node, name } }]` creates an *implicit*
-/// `depends_on` edge onto `node` — folded into the ordinary field here,
-/// once, so `check`'s cycle detection and the scheduler's own readiness
-/// calculation (both already only ever read `Node.depends_on`) need zero
-/// awareness of `context:` existing at all. `check()` calls this too
-/// (its own copy of the workflow, never the manifest's), so a cycle
-/// created purely by two nodes' context-artifact references is still
-/// caught statically rather than deadlocking a real run. Idempotent: a
-/// node that already lists the referenced node explicitly gets no
-/// duplicate.
-/// A node with `runners: [a, b]` becomes one `<id>@<runner>`
-/// node per runner — **statically, in the manifest**, before anything
-/// runs: the fan-out is visible in `status`, each expanded node
-/// resolves its own runner and renders its own `{{runner.role}}`, and
-/// the scheduler needs zero fan-out awareness. Every reference to the
-/// original id follows the expansion: downstream `depends_on` rewires
-/// onto all siblings, and mode include lists name them all (so a mode
-/// that covered `review` still covers the whole review). Re-route and
-/// gate targets onto a fan-out node are check errors — there is no
-/// unambiguous "return control to review" once review is many nodes —
-/// so this function never sees one.
-pub(crate) fn expand_runner_fanout(workflow: &mut Workflow) {
-    let mut expansion: std::collections::HashMap<yunta_core::NodeId, Vec<yunta_core::NodeId>> =
-        std::collections::HashMap::new();
-    let mut nodes = Vec::with_capacity(workflow.nodes.len());
-    for node in workflow.nodes.drain(..) {
-        if node.runners.is_empty() {
-            nodes.push(node);
-            continue;
-        }
-        let mut expanded_ids = Vec::new();
-        for runner in &node.runners {
-            let mut sibling = node.clone();
-            sibling.id = yunta_core::NodeId::fan_out(&node.id, runner);
-            sibling.runner = Some(runner.clone());
-            sibling.runners = Vec::new();
-            expanded_ids.push(sibling.id.clone());
-            nodes.push(sibling);
-        }
-        expansion.insert(node.id.clone(), expanded_ids);
-    }
-    for node in &mut nodes {
-        let mut rewired = Vec::with_capacity(node.depends_on.len());
-        for dep in node.depends_on.drain(..) {
-            match expansion.get(&dep) {
-                Some(siblings) => rewired.extend(siblings.iter().cloned()),
-                None => rewired.push(dep),
-            }
-        }
-        node.depends_on = rewired;
-    }
-    if let Some(modes) = &mut workflow.modes {
-        for spec in modes.values_mut() {
-            if let yunta_core::ModeInclude::Nodes(included) = &mut spec.include {
-                let mut rewritten = Vec::with_capacity(included.len());
-                for id in included.drain(..) {
-                    match expansion.get(&id) {
-                        Some(siblings) => rewritten.extend(siblings.iter().cloned()),
-                        None => rewritten.push(id),
-                    }
-                }
-                *included = rewritten;
-            }
-        }
-    }
-    workflow.nodes = nodes;
-}
-
-pub(crate) fn expand_implicit_dependencies(workflow: &mut Workflow) {
-    for node in &mut workflow.nodes {
-        expand_implicit_dependencies_in(node);
-    }
-}
-
-fn expand_implicit_dependencies_in(node: &mut Node) {
-    if let NodeKind::Parallel { nodes, .. } = &mut node.kind {
-        for child in nodes {
-            expand_implicit_dependencies_in(child);
-        }
-    }
-    // A mount is a read of the referenced node's outcome, so
-    // it orders behind it exactly like a context artifact does — and
-    // it's this edge that guarantees the source node has already
-    // finished at the time the child is born and the copy happens.
-    let mut implied: Vec<NodeId> = Vec::new();
-    if let NodeKind::Workflow { mounts, .. } = &node.kind {
-        implied.extend(mounts.iter().map(|mount| mount.artifact.node.clone()));
-    }
-    for spec in &node.context {
-        if let yunta_core::ContextSpec::Artifact { artifact } = spec {
-            // A node-less reference reads this run's own
-            // artifacts dir — no producer to order behind.
-            if let Some(referenced) = &artifact.node {
-                implied.push(referenced.clone());
-            }
-        }
-    }
-    for referenced in implied {
-        if !node.depends_on.contains(&referenced) {
-            node.depends_on.push(referenced);
-        }
-    }
-}
-
 /// Freezes one node's own file prompt (if any) — `build_manifest` walks
 /// every node (`parallel` children included, via `iter_nodes`): a
 /// child's `prompt: {file: ...}` needs the same freeze-at-creation
 /// guarantee as a top-level node's, since it's dispatched
 /// through the identical `execute_node`.
-fn freeze_prompt(
+async fn freeze_prompt(
     node: &Node,
     workflow_dir: &Path,
     prompts: &mut BTreeMap<NodeId, String>,
@@ -288,21 +187,26 @@ fn freeze_prompt(
     if let NodeKind::Prompt { prompt } | NodeKind::Loop { prompt, .. } = &node.kind {
         if let PromptSource::File(path) = prompt {
             let full_path = workflow_dir.join(path);
-            let content = std::fs::read_to_string(&full_path).map_err(|source| {
-                ManifestError::PromptFile {
+            let content = tokio::fs::read_to_string(&full_path)
+                .await
+                .map_err(|source| ManifestError::PromptFile {
                     node: node.id.clone(),
                     path: full_path.clone(),
                     source,
-                }
-            })?;
+                })?;
             prompts.insert(node.id.clone(), content);
         }
     }
     Ok(())
 }
 
-fn git_line(repo: &Path, args: &[&str]) -> Result<String, ManifestError> {
-    crate::git::output_blocking(repo, args)
+async fn git_line(
+    repo: &Path,
+    args: &[&str],
+    supervision: crate::process::Supervision<'_>,
+) -> Result<String, ManifestError> {
+    crate::git::output(repo, args, supervision)
+        .await
         .map(|stdout| stdout.trim().to_string())
         .map_err(|e| {
             let detail = e.detail();

@@ -74,6 +74,17 @@ impl ArtifactSpec {
             ArtifactSpec::Opaque(_) => None,
         }
     }
+
+    /// Several declarations as a sentence lists them, so a diagnostic
+    /// that names more than one artifact reads the way
+    /// [`ArtifactKind::listed`] reads.
+    pub fn listed(specs: &[ArtifactSpec]) -> String {
+        specs
+            .iter()
+            .map(|spec| format!("`{spec}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 /// How an artifact names itself where a declaration is read back to a
@@ -195,16 +206,28 @@ pub enum ArtifactKind {
     Tasks,
     Findings,
     Questions,
+    Answers,
 }
 
 impl ArtifactKind {
     /// Every kind a door can be asked about, in the order a catalog
     /// lists them.
-    pub const ALL: [ArtifactKind; 3] = [
+    pub const ALL: [ArtifactKind; 4] = [
         ArtifactKind::Tasks,
         ArtifactKind::Findings,
         ArtifactKind::Questions,
+        ArtifactKind::Answers,
     ];
+
+    /// Whether a node may name this kind under `artifacts.produces`.
+    ///
+    /// The answers to a questions document are the engine's: it writes
+    /// them when a person replies, so a node that declared them would
+    /// owe a document nobody can hand it. Every other kind is a node's
+    /// to produce.
+    pub fn declarable(self) -> bool {
+        !matches!(self, ArtifactKind::Answers)
+    }
 
     /// How the kind names itself to a reader.
     pub fn label(self) -> &'static str {
@@ -212,6 +235,7 @@ impl ArtifactKind {
             ArtifactKind::Tasks => "tasks document",
             ArtifactKind::Findings => "findings artifact",
             ArtifactKind::Questions => "questions artifact",
+            ArtifactKind::Answers => "answers artifact",
         }
     }
 
@@ -224,6 +248,7 @@ impl ArtifactKind {
             ArtifactKind::Tasks => "tasks",
             ArtifactKind::Findings => "findings",
             ArtifactKind::Questions => "questions",
+            ArtifactKind::Answers => "answers",
         }
     }
 
@@ -240,7 +265,7 @@ impl ArtifactKind {
         match self {
             ArtifactKind::Tasks => Some("yunta_submit_tasks"),
             ArtifactKind::Questions => Some("yunta_submit_questions"),
-            ArtifactKind::Findings => None,
+            ArtifactKind::Findings | ArtifactKind::Answers => None,
         }
     }
 
@@ -262,12 +287,21 @@ impl ArtifactKind {
     /// The kinds as a sentence lists them, so every door that has to
     /// say "one of ..." says it the same way.
     pub fn listed() -> String {
-        ArtifactKind::ALL
-            .iter()
-            .map(|kind| format!("`{kind}`"))
-            .collect::<Vec<_>>()
-            .join(", ")
+        listed(ArtifactKind::ALL.iter())
     }
+
+    /// The kinds a node may declare it produces, as a sentence lists
+    /// them — what the declaration door offers.
+    pub fn declarable_listed() -> String {
+        listed(ArtifactKind::ALL.iter().filter(|kind| kind.declarable()))
+    }
+}
+
+fn listed<'a>(kinds: impl Iterator<Item = &'a ArtifactKind>) -> String {
+    kinds
+        .map(|kind| format!("`{kind}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl fmt::Display for ArtifactKind {
@@ -301,5 +335,119 @@ impl std::str::FromStr for ArtifactKind {
         ArtifactKind::deserialize(deserializer).map_err(|_| UnknownArtifactKind {
             value: value.to_string(),
         })
+    }
+}
+
+/// A name under a node's artifact view that the engine writes itself,
+/// so an opaque artifact may not claim it.
+///
+/// The run's view of a node holds one file per identity, and an
+/// interpreted artifact is written from the document the engine
+/// accepted. A declared name equal to one of those would put two
+/// writers on one path, and the file a reader opened would say nothing
+/// about which of them wrote it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReservedIdentity {
+    /// The view of the document of this kind: `<kind>.yaml`.
+    Kind(ArtifactKind),
+}
+
+impl ReservedIdentity {
+    /// Every identity the engine writes, in the order a catalog lists
+    /// them: one per kind. Derived from [`ArtifactKind::ALL`], so a kind
+    /// added there is reserved here without anyone remembering to.
+    pub fn all() -> Vec<ReservedIdentity> {
+        ArtifactKind::ALL
+            .into_iter()
+            .map(ReservedIdentity::Kind)
+            .collect()
+    }
+
+    /// The file name this identity takes under a node's view, asked of
+    /// the artifact that carries it — naming a view is
+    /// [`crate::events::ArtifactId::view_name`]'s to answer, here and everywhere.
+    pub fn file_name(&self) -> String {
+        match self {
+            ReservedIdentity::Kind(kind) => {
+                crate::events::ArtifactId::Interpreted { kind: *kind }.view_name()
+            }
+        }
+    }
+
+    /// How a `context:` or `mounts:` entry names this identity:
+    /// `kind: tasks`, for a document the engine writes from what it
+    /// accepted. The one spelling: a diagnostic that tells an author how
+    /// to reference what the engine wrote reads it from here rather than
+    /// writing the name out.
+    pub fn reference(&self) -> String {
+        match self {
+            ReservedIdentity::Kind(kind) => format!("kind: {kind}"),
+        }
+    }
+
+    /// The identity `name` claims, when it claims one.
+    pub fn of(name: &str) -> Option<Self> {
+        ReservedIdentity::all()
+            .into_iter()
+            .find(|identity| identity.file_name() == name)
+    }
+}
+
+impl fmt::Display for ReservedIdentity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ReservedIdentity::Kind(kind) => write!(f, "the `{kind}` document"),
+        }
+    }
+}
+
+/// The name of an opaque artifact: where its file lands under the
+/// node's own directory in the run's view.
+///
+/// Parsed, never assembled. A name reaches the view as a path joined to
+/// the run directory, so one that is absolute or climbs with `..`
+/// writes outside the run the moment it is used, and one that spells a
+/// [`ReservedIdentity`] answers for a document the engine wrote. A name
+/// can carry a template, and what a template renders to is a name like
+/// any other: it is parsed again once it is known.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ArtifactName(String);
+
+impl ArtifactName {
+    /// The name `text` spells, or why it is not one.
+    pub fn parse(text: &str) -> Result<Self, crate::diagnostic::Problem> {
+        if text.is_empty() {
+            return Err(crate::diagnostic::Problem::parse(
+                "",
+                "an artifact is named by a file name, and this one is empty",
+            ));
+        }
+        if !crate::pack::stays_inside(text) {
+            return Err(crate::diagnostic::Problem::parse(
+                "",
+                format!(
+                    "`{text}` reaches outside the run directory — an artifact name is relative, \
+                     with no `..` component"
+                ),
+            ));
+        }
+        if let Some(identity) = ReservedIdentity::of(text) {
+            return Err(crate::diagnostic::Problem::parse(
+                "",
+                format!("`{text}` is how the run's view names {identity}, so an artifact cannot take it"),
+            ));
+        }
+        Ok(ArtifactName(text.to_string()))
+    }
+
+    /// The name, as the view spells it.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ArtifactName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
     }
 }

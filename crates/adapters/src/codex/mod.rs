@@ -32,19 +32,23 @@
 //! justifies on its own.
 
 mod config;
+mod fence;
 mod parse;
-mod permissions;
 mod settings;
 
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use yunta_core::{AdapterError, AdapterId, AdapterSettings, Capabilities, Result, SessionId};
+use yunta_core::{
+    AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, SessionId,
+    Unbuildable,
+};
 
-use crate::session::{
+use yunta_core::fence::Coverage;
+use yunta_core::port::{
     Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
 };
-use crate::subprocess::{self, Launch, LineParser};
+use yunta_core::process::subprocess::{self, Launch, LineParser};
 
 use config::ConfigOverride;
 
@@ -76,19 +80,29 @@ impl CodexAdapter {
         }
     }
 
-    fn build_args(&self, req: &SessionRequest, resume: Option<&SessionId>) -> Vec<String> {
+    fn build_args(
+        &self,
+        req: &SessionRequest,
+        resume: Option<&SessionId>,
+    ) -> std::result::Result<Vec<String>, Unbuildable> {
         let mut args = vec!["exec".to_string(), "--json".to_string()];
         if let Some(model) = &req.model {
             args.push("--model".to_string());
             args.push(model.to_string());
         }
+        // `launch` refused already for settings that do not read, so
+        // the fallback here is a node whose settings named no sandbox.
         let edit_sandbox = self
             .settings
             .as_ref()
             .ok()
             .and_then(|settings| settings.sandbox)
             .unwrap_or_default();
-        args.extend(permissions::sandbox_args(req.permissions, edit_sandbox));
+        args.extend(fence::sandbox_args(
+            &req.fence,
+            req.permissions,
+            edit_sandbox,
+        )?);
         args.extend(config_overrides(req));
         // `exec`'s own options are declared on the parent command and
         // are not `global`, so clap reads one that follows `resume` as
@@ -104,7 +118,7 @@ impl CodexAdapter {
         // `-` makes the CLI read the prompt from stdin, so nothing of
         // it shows in the process list.
         args.push("-".to_string());
-        args
+        Ok(args)
     }
 
     async fn launch(
@@ -112,7 +126,21 @@ impl CodexAdapter {
         req: SessionRequest,
         resume: Option<&SessionId>,
     ) -> Result<Box<dyn AgentSession>> {
-        let args = self.build_args(&req, resume);
+        // Settings that do not read fail the session rather than fall
+        // back: a `sandbox:` nobody could parse would run the agent
+        // under a confinement the team never asked for, and silently.
+        if let Err(unreadable) = &self.settings {
+            return Err(AdapterError::UnreadableSettings {
+                adapter: ID.clone(),
+                detail: unreadable.to_string(),
+            });
+        }
+        let args =
+            self.build_args(&req, resume)
+                .map_err(|source| AdapterError::FenceUnbuildable {
+                    adapter: ID.clone(),
+                    source,
+                })?;
         // The credential the config names, placed where a secret is
         // allowed to travel: the child's own environment.
         let mut env = req.env.clone();
@@ -128,6 +156,7 @@ impl CodexAdapter {
             prompt: &req.prompt,
             parser: Box::new(CodexParser {
                 last_message: String::new(),
+                fence: fence::coverage(&req.fence, &req.cwd),
             }),
         })
         .await
@@ -143,16 +172,13 @@ impl CodexAdapter {
 fn config_overrides(req: &SessionRequest) -> Vec<String> {
     let mut args = Vec::new();
     // `workspace-write` confines writes to the workspace, and the
-    // directory a declared file belongs in sits in the run directory,
-    // which is never inside it. Without this the session is told to
-    // write a file the sandbox then refuses it.
-    if let Some(dir) = &req.artifact_dir {
+    // fence's roots are what sits outside it and stays writable — the
+    // directory a declared file belongs in, first of all. Without this
+    // the session is told to write a file the sandbox then refuses it.
+    let roots = fence::writable_roots(&req.fence);
+    if !roots.is_empty() {
         args.extend(
-            ConfigOverride::list(
-                "sandbox_workspace_write.writable_roots",
-                [dir.display().to_string()],
-            )
-            .into_args(),
+            ConfigOverride::list("sandbox_workspace_write.writable_roots", roots).into_args(),
         );
     }
     if let Some(endpoint) = &req.run_tools_endpoint {
@@ -179,11 +205,14 @@ fn config_overrides(req: &SessionRequest) -> Vec<String> {
 /// line to line.
 struct CodexParser {
     last_message: String,
+    /// What the sandbox this session runs under actually fenced —
+    /// computed once, when the session was built.
+    fence: Coverage,
 }
 
 impl LineParser for CodexParser {
     fn parse(&mut self, line: &str) -> Vec<AgentEvent> {
-        let events = parse::parse_line(line, &self.last_message);
+        let events = parse::parse_line(line, &self.last_message, &self.fence);
         if let Some(text) = events.iter().rev().find_map(|event| match event {
             AgentEvent::Note { text } => Some(text.clone()),
             _ => None,
@@ -208,10 +237,10 @@ impl Adapter for CodexAdapter {
             // so the engine degrades with `capability_degraded` when a
             // node declares skills here.
             skills: false,
-            // No live edit-hook blocking wired — same honest gap as
-            // claude_code, same reason: the engine's own post-hoc scope
-            // check is the real boundary today.
-            edit_hooks: false,
+            // The sandbox the process itself runs under keeps writes
+            // inside a set of directories — by directory, never by glob,
+            // which is what the coverage a session reports says.
+            fence: FenceLevel::Filesystem,
             permission_profiles: true,
             // `codex exec` has no documented `--agent <name>` selector —
             // nothing here to map `agent:` onto, so declaring the

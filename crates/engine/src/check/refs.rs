@@ -13,10 +13,11 @@ pub fn check_workflow_refs(
     config: &ConfigLayer,
     repo_root: &std::path::Path,
     workflow_origin: &crate::catalog::WorkflowOrigin,
-) -> Vec<CheckError> {
+) -> RefsCheck {
     let mut errors = check_declares_ceiling(workflow, workflow_origin, repo_root);
     let max_depth = config.resolved_max_workflow_depth();
     let mut path: Vec<String> = Vec::new();
+    let mut compares = compares_baseline(workflow);
     walk_workflow_refs(
         workflow,
         repo_root,
@@ -24,8 +25,36 @@ pub fn check_workflow_refs(
         max_depth,
         &mut path,
         &mut errors,
+        &mut compares,
     );
-    errors
+    let mut warnings = Vec::new();
+    // Only the walk can answer this: `check` reads no files, so it
+    // cannot know whether a workflow this one composes compares.
+    if let Some(baseline) = &config.baseline {
+        if !compares {
+            warnings.push(CheckWarning::BaselineNeverCompared {
+                suite: baseline.suite.clone(),
+            });
+        }
+    }
+    RefsCheck { errors, warnings }
+}
+
+/// What the composition walk found: the errors that refuse the run, and
+/// the warnings only a reader of the composed files can raise.
+pub struct RefsCheck {
+    pub errors: Vec<CheckError>,
+    pub warnings: Vec<CheckWarning>,
+}
+
+/// Whether any node of `workflow` compares against the baseline.
+fn compares_baseline(workflow: &Workflow) -> bool {
+    workflow.iter_nodes().any(|node| {
+        matches!(
+            &node.kind,
+            NodeKind::Check(yunta_core::CheckBuiltin::BaselineCompare)
+        )
+    })
 }
 
 /// Every `(node, use-name)` reference, `parallel` children included.
@@ -46,6 +75,7 @@ pub(crate) fn walk_workflow_refs(
     max_depth: u32,
     path: &mut Vec<String>,
     errors: &mut Vec<CheckError>,
+    compares: &mut bool,
 ) {
     use crate::catalog::{resolve_workflow, CatalogError, WorkflowOrigin};
 
@@ -130,19 +160,28 @@ pub(crate) fn walk_workflow_refs(
                 continue;
             }
         };
-        let child: Workflow = match yunta_core::yaml::parse(&text) {
+        let child = match yunta_core::workflow::read::read(&text, &resolved.path) {
             Ok(child) => child,
-            Err(e) => {
+            Err(report) => {
                 errors.push(CheckError::WorkflowRefUnparseable {
                     path: resolved.path,
-                    detail: e.to_string(),
+                    detail: report.to_string(),
                 });
                 continue;
             }
         };
         errors.extend(check_declares_ceiling(&child, &resolved.origin, repo_root));
+        *compares |= compares_baseline(&child);
         path.push(name);
-        walk_workflow_refs(&child, repo_root, &resolved.origin, max_depth, path, errors);
+        walk_workflow_refs(
+            &child,
+            repo_root,
+            &resolved.origin,
+            max_depth,
+            path,
+            errors,
+            compares,
+        );
         path.pop();
     }
 }

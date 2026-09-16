@@ -6,12 +6,13 @@ use std::collections::HashMap;
 
 use yunta_core::ConfigLayer;
 use yunta_engine::build_manifest;
-use yunta_testkit::{init_repo, write};
+use yunta_testkit::{init_repo, write, Owner};
 
 const LEAF: &str = "name: leaf\nnodes:\n  - { id: work, kind: bash, run: \"true\" }\n";
 
-#[test]
-fn a_repo_origin_workflow_freezes_no_pack_provenance() {
+#[tokio::test]
+async fn a_repo_origin_workflow_freezes_no_pack_provenance() {
+    let owner = Owner::new();
     let repo = tempfile::tempdir().unwrap();
     init_repo(repo.path());
     let workflow_dir = repo.path().join(".yunta/workflows");
@@ -24,15 +25,18 @@ fn a_repo_origin_workflow_freezes_no_pack_provenance() {
         &workflow_dir,
         repo.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
+    .await
     .unwrap()
     .manifest;
 
     assert!(manifest.pack.is_none());
 }
 
-#[test]
-fn a_pack_origin_workflow_freezes_publisher_name_and_version() {
+#[tokio::test]
+async fn a_pack_origin_workflow_freezes_publisher_name_and_version() {
+    let owner = Owner::new();
     let repo = tempfile::tempdir().unwrap();
     init_repo(repo.path());
     let pack_dir = repo.path().join(".yunta/packs/acme/review-pack");
@@ -50,7 +54,9 @@ fn a_pack_origin_workflow_freezes_publisher_name_and_version() {
         &pack_dir,
         repo.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
+    .await
     .unwrap()
     .manifest;
 
@@ -61,8 +67,9 @@ fn a_pack_origin_workflow_freezes_publisher_name_and_version() {
     assert!(provenance.commit.is_none(), "no yunta.lock entry exists");
 }
 
-#[test]
-fn a_pack_origin_workflow_also_freezes_the_locked_commit_when_one_exists() {
+#[tokio::test]
+async fn a_pack_origin_workflow_also_freezes_the_locked_commit_when_one_exists() {
+    let owner = Owner::new();
     let repo = tempfile::tempdir().unwrap();
     init_repo(repo.path());
     let pack_dir = repo.path().join(".yunta/packs/acme/review-pack");
@@ -86,19 +93,25 @@ fn a_pack_origin_workflow_also_freezes_the_locked_commit_when_one_exists() {
         &pack_dir,
         repo.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
+    .await
     .unwrap()
     .manifest;
 
     let provenance = manifest.pack.expect("pack-origin workflow freezes pack");
     assert_eq!(
-        provenance.commit.as_deref(),
+        provenance
+            .commit
+            .as_ref()
+            .map(yunta_core::CommitSha::as_str),
         Some("abcdef0123456789abcdef0123456789abcdef01")
     );
 }
 
-#[test]
-fn a_pack_with_no_readable_manifest_freezes_no_provenance_rather_than_failing_the_run() {
+#[tokio::test]
+async fn a_pack_with_no_readable_manifest_freezes_no_provenance_rather_than_failing_the_run() {
+    let owner = Owner::new();
     let repo = tempfile::tempdir().unwrap();
     init_repo(repo.path());
     // The directory exists (so origin_of reports Pack) but pack.yaml
@@ -114,7 +127,9 @@ fn a_pack_with_no_readable_manifest_freezes_no_provenance_rather_than_failing_th
         &pack_dir,
         repo.path(),
         &HashMap::new(),
+        owner.supervision(),
     )
+    .await
     .unwrap()
     .manifest;
 

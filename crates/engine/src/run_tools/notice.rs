@@ -115,9 +115,9 @@ fn files_to_write(
     for name in written {
         text.push_str(&format!("\n  `{name}`"));
     }
-    text.push_str(
-        "\nYou may call `yunta_check_artifact` to confirm a file is there before \
-         this session ends.",
-    );
+    text.push_str(&format!(
+        "\nYou may call `{}` to confirm a file is there before this session ends.",
+        super::catalog::RunTool::CheckArtifact.name()
+    ));
     Some(text)
 }

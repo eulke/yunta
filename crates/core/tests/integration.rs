@@ -1,3 +1,10 @@
+//! The YAML the design corpus publishes, read by the types that consume
+//! it: the reference config, the reference workflow and the composed and
+//! promotion workflows beside it.
+//!
+//! Each one parses whole and serializes back to the same value, so an
+//! example a reader copies is one the binary accepts.
+
 // --- The reference YAMLs are real fixtures -----------------------------------
 
 #[test]
@@ -52,13 +59,19 @@ fn the_reference_workflow_parses_and_round_trips() {
     let workflow: yunta_core::Workflow =
         serde_norway::from_str(yaml).expect("build-feature.yaml must parse whole");
 
-    assert_eq!(workflow.yunta_schema.as_deref(), Some(">=1 <2"));
-    assert_eq!(workflow.nodes.len(), 11);
+    assert_eq!(
+        workflow
+            .yunta_schema
+            .as_ref()
+            .map(yunta_core::SchemaRange::as_str),
+        Some(">=1 <2")
+    );
+    assert_eq!(workflow.nodes.len(), 12);
     assert_eq!(workflow.on_finish.len(), 2);
     let grill = &workflow.nodes[0];
     assert_eq!(grill.skills, vec!["grill"]);
-    assert!(grill.interactive);
-    let implement = &workflow.nodes[3];
+    assert!(grill.asks(), "the reference workflow's first node asks");
+    let implement = &workflow.nodes[4];
     assert!(implement.invariant);
     let review = workflow
         .nodes

@@ -76,6 +76,7 @@ use sources::{
     materialize, resolve_artifact, resolve_command, resolve_files, resolve_node_output,
     resolve_run_events, resolve_tasks,
 };
+use yunta_core::events::NodeEvent;
 
 pub(super) use sources::write_node_output;
 
@@ -166,7 +167,7 @@ async fn resolve_all(
     let mut run_stable_blocks = Vec::new();
     let mut volatile_blocks = Vec::new();
 
-    mount_artifact_shapes(ctx, node, &mut stable_blocks, &mut sources)?;
+    mount_artifact_shapes(ctx, node, &mut stable_blocks, &mut sources).await?;
 
     for spec in &node.context {
         let source_id = source_id_for(spec);
@@ -196,12 +197,14 @@ async fn resolve_all(
             }
         };
         let (path, content_hash) =
-            materialize(ctx.run_dir, &content).map_err(|source| ContextResolveError::Io {
-                node: node.id.clone(),
-                source_id: source_id.clone(),
-                action: "materialize resolved context".to_string(),
-                source,
-            })?;
+            materialize(ctx.run_dir, &content)
+                .await
+                .map_err(|source| ContextResolveError::Io {
+                    node: node.id.clone(),
+                    source_id: source_id.clone(),
+                    action: "materialize resolved context".to_string(),
+                    source,
+                })?;
 
         // The configurable threshold: `limits.inline_context_bytes`,
         // reference default 32000 — the resolved value lives in
@@ -267,11 +270,11 @@ async fn assembled(
 
     ctx.emit(
         Some(&node.id),
-        EventPayload::ContextAssembled(ContextAssembledPayload {
+        EventPayload::Node(NodeEvent::ContextAssembled(ContextAssembledPayload {
             task_id: task_id.cloned(),
             sources,
             segment_hashes,
-        }),
+        })),
     )
     .await
     .map_err(|source| ContextResolveError::Io {

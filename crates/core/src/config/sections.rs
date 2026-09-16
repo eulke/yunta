@@ -6,7 +6,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AdapterId, AgentName, ExecutorName, GitHubRepo, ModelName, RunnerName};
+use crate::ids::{
+    AdapterId, AgentName, ExecutorName, GitHubRepo, ModelName, RunnerName, SkillName,
+};
 use crate::workflow::OnInterrupt;
 
 /// One binding candidate for a role in `runners:`.
@@ -130,9 +132,8 @@ pub enum Isolation {
 /// `defaults:` — the reference config's whole group. Each field
 /// has its consumer: `isolation`, `max_parallel_nodes`,
 /// `on_interrupt`, `runner` (a node that declares none),
-/// `timeout_minutes` (`Budget.timeout`), `on_failure` (only `pause` is
-/// built — `check` refuses the others rather than accepting them
-/// silently).
+/// `timeout_minutes` (`Budget.timeout`), `on_failure` (what a failed
+/// node does to the run).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DefaultsConfig {
@@ -145,8 +146,8 @@ pub struct DefaultsConfig {
     /// the granularity the reference schema uses for whole sessions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_minutes: Option<u64>,
-    /// What a failed node without its own `on_failure:` does. Only
-    /// `pause` (today's behavior) is built; `check` refuses the rest.
+    /// What a failed node without its own `on_failure:` re-route does
+    /// to the run. Absent is `pause`, the schema's own default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_failure: Option<DefaultOnFailure>,
     /// How many DAG nodes with no dependency on each other the scheduler
@@ -163,9 +164,10 @@ pub struct DefaultsConfig {
     pub on_interrupt: Option<OnInterrupt>,
 }
 
-/// `defaults.on_failure` values (reference schema). Only `Pause` has an
-/// implementation — the enum still parses all three so the reference
-/// config round-trips, and `check` names the unimplemented ones.
+/// `defaults.on_failure` values (reference schema): `pause` freezes the
+/// run resumable, `abort` closes it failed at once, and `continue` skips
+/// the failed node's dependents and closes failed once the rest of the
+/// graph has run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DefaultOnFailure {
@@ -270,7 +272,7 @@ pub struct SkillsConfig {
     /// Skill names mounted on every session, before any node's own
     /// list.
     #[serde(default)]
-    pub always: Vec<String>,
+    pub always: Vec<SkillName>,
 }
 
 /// One `skills.executors:` entry — `name` is what a `kind: executor`

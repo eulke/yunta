@@ -28,7 +28,7 @@ are valid there. A mistyped key never silently becomes a default.
 - **`loop`** — drives a tasks document (`until: all_tasks_complete`, plus a `prompt:`
   each dispatched task session gets). One mechanically-verified session per `ready`
   task; `concurrency: N` runs up to `N` tasks from the current batch at once (default
-  `1`, sequential). See the [tasks schema](design/spec-ledger.md) for what a task looks
+  `1`, sequential). See the [tasks schema](design/spec-tasks.md) for what a task looks
   like — an earlier `prompt` node produces it as a `kind: tasks` artifact, or
   you write one by hand while you're still designing the workflow. The loop works
   from whichever tasks document the run holds, however it came by one: produced
@@ -141,12 +141,15 @@ the MCP server, or re-read a file outside what was captured at the time.
 
 A node declares what it produces as a list of bare strings —
 `produces: [tasks, notes.md]`.
-`tasks`, `findings` and `questions` name the three documents the engine reads,
-validates and turns into events. Every other string is the name of a file the
-engine only carries: it records that the file exists and what it hashes to, and
-its structure is whatever the session decided. Those three names are therefore
-not available as file names, and `yunta check` says so when a reference spells
-one as a `name:`.
+`tasks`, `findings` and `questions` name the documents a node produces and the
+engine reads, validates and turns into events. `answers` names a fourth the
+engine writes itself, when a person replies to a `questions` document; a node
+cannot declare it, and a node that follows the one that asked reads it with
+`context: [{ artifact: { node: <the node that asked>, kind: answers } }]`. Every
+other string is the name of a file the engine only carries: it records that the
+file exists and what it hashes to, and its structure is whatever the session
+decided. Those four names are therefore not available as file names, and
+`yunta check` says so when a reference spells one as a `name:`.
 
 A node produces at most one document of each kind, so the kind is the whole
 identity: `(node, kind)` is what the run answers by, and declaring the same kind
@@ -172,7 +175,7 @@ registered: ...` — and puts the canonical document into the run: the bytes und
 `objects/`, the acceptance on the log. A refusal lists every
 rule the document breaks, all at once — or, when the
 object does not read into its kind at all, that one problem and the path where it
-sits (`tasks[1].manual_review`), because a value of the wrong type stops the read
+sits (`tasks[1].scope`), because a value of the wrong type stops the read
 before any rule can hold. Either way the session fixes it and submits again: a
 refused document costs a call, not a session. The document the node holds is the
 last one it got accepted, and the node's close asks the log for it — no file
@@ -277,6 +280,11 @@ it's waiting on and the exact option ids available, `yunta resolve-gate <run_id>
 decision up on its own next resume. Nothing about answering a gate requires the
 process that hit it to still be alive.
 
+The live view `yunta run` draws changes nothing about that. It reads the run; it is
+never part of it. A gate waits on the event log, so one raised by a run whose view is
+gone — piped, detached, or in a terminal that closed — is answered exactly the
+same way, from anywhere.
+
 ## The Verified Work Receipt
 
 `yunta receipt <run_id>` closes a finished run out as a certificate: markdown for a
@@ -296,10 +304,11 @@ the receipt the PR description itself, no copy-paste required.
 
 Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:
 
-- **Control plane** (`yunta mcp`): `list_workflows`, `run_workflow`,
-  `workflow_status`, `resume_run`, `resolve_gate` — for an outer agent (e.g. Claude
-  Code itself) driving Yunta as a tool. `run_workflow` always returns immediately; the
-  run keeps going independent of the MCP session that started it.
+- **Control plane** (`yunta mcp`): `document_shape`, `list_workflows`,
+  `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`,
+  `answer_questions` — for an outer agent (e.g. Claude Code itself) driving Yunta as
+  a tool. `run_workflow` always returns immediately; the run keeps going independent
+  of the MCP session that started it.
 - **Per-run tools**: a loopback HTTP MCP endpoint opened for the duration of a single
   agent session that declared `run_tools` capability — `yunta_post_finding`,
   `yunta_update_finding`, `yunta_withdraw_finding`, `yunta_check_artifact`,
@@ -317,7 +326,7 @@ retrofitting once wall-clock or noisy criteria become a problem.
 
 ### Criteria granularity
 
-A task's `criteria` (see the [tasks schema](design/spec-ledger.md#21-criteria)) run
+A task's `criteria` (see the [tasks schema](design/spec-tasks.md#21-criteria)) run
 red-before-green: the pre-check proves the criterion *can* fail before the task
 starts. Keep each task's own criteria narrow and cheap — the specific test or check
 that task's change is supposed to flip, not the whole suite. Re-running the entire

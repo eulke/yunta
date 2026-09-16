@@ -3,6 +3,15 @@ name: CI
 on:
   push:
   pull_request:
+  # The release gate runs these same checks by calling this workflow,
+  # so the two can never drift into testing different things.
+  workflow_call:
+
+# One run per ref: a push that supersedes another cancels it rather than
+# queueing behind it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -10,6 +19,7 @@ env:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       # Installs the toolchain `rust-toolchain.toml` pins, with its
@@ -37,21 +47,34 @@ jobs:
       - name: the audit's smell counts have not risen
         run: cargo xtask smells --check
 
+      - name: the decisions and their index agree
+        run: cargo xtask adr --check
+
       - name: rustdoc has no warnings
         run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 
       - name: test (workspace)
         run: cargo test --workspace --locked
 
-      - name: the repository's own workflows and the factory packs pass check and their cases
+      # The release profile is not the debug one: an overflow check that
+      # only fires in debug, or a panic strategy that only exists there,
+      # is a difference the product ships. One crate is enough to keep
+      # the profile compiling and passing.
+      - name: test (release profile)
+        run: cargo test --workspace --release --locked -p yunta-core
+
+      - name: the repository's own workflows and every pack pass check and their cases
         run: |
           yunta="cargo run --locked -q -p yunta --"
           for wf in .yunta/workflows/*.yaml packs/*/.yunta/workflows/*.yaml; do
             $yunta check "$wf"
           done
           $yunta test
-          $yunta test --dir packs/starter
-          $yunta test --dir packs/fragua
+          for pack in packs/*/; do
+            echo "::group::test --dir $pack"
+            $yunta test --dir "$pack"
+            echo "::endgroup::"
+          done
 
       - name: check each crate in isolation
         run: |
@@ -61,12 +84,26 @@ jobs:
             echo "::endgroup::"
           done
 
+  # The suite runs on the other platform the product ships on: a test
+  # that passes only on Linux is a test about Linux.
+  test-macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ""
+      - name: test (workspace)
+        run: cargo test --workspace --locked
+
   # musl is what makes the Linux release binary a real static binary (no
   # glibc dependency at runtime) — a link failure here is a
   # release-blocking regression, not just a style nit, so it gets its own
   # job rather than riding along inside `ci`.
   musl-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1

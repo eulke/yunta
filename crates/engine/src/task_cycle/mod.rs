@@ -10,24 +10,32 @@
 
 mod attempt;
 mod criteria;
+mod outcome;
 mod session;
+mod stream;
 
 use std::path::{Path, PathBuf};
+use yunta_core::ScopeGlob;
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, Budget, PermissionProfile};
-use yunta_core::events::TokenUsage;
+use yunta_core::events::TaskLedger;
+use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::{AdapterError, Task, TaskId};
 use yunta_storage::StorageError;
 
+pub use outcome::{
+    surprises, AttemptRecord, BlockedCause, DispatchOutcome, Surprise, TaskCycleReport, TaskOutcome,
+};
+
 use crate::process::Supervision;
-use crate::scope::{ScopeCheckError, ScopeCheckResult};
+use crate::scope::ScopeCheckError;
 use attempt::{run_one_attempt, AttemptParams, AttemptStep};
 
-pub use criteria::{post_check, pre_check, Memo};
+pub use criteria::{post_check, pre_check, Memo, Memoized};
 pub(crate) use session::dispatch_session;
-pub use session::{DispatchError, SessionObserver, SessionSetup};
+pub(crate) use session::Dispatched;
+pub use session::{DispatchError, RunToolsNeed, SessionObserver, SessionSetup};
 
 #[derive(Debug, Error)]
 pub enum TaskCycleError {
@@ -50,6 +58,12 @@ pub enum TaskCycleError {
         #[source]
         source: StorageError,
     },
+    #[error("task `{task}`'s session could not hold the run tools its node needs")]
+    RunTools {
+        task: TaskId,
+        #[source]
+        source: crate::run::runner_resolve::RunToolsSetupError,
+    },
     #[error(transparent)]
     ScopeCheck(#[from] ScopeCheckError),
     #[error("failed to evaluate task `{task}`'s scope expansion request: {source}")]
@@ -58,7 +72,18 @@ pub enum TaskCycleError {
         #[source]
         source: crate::scope_expansion::ScopeExpansionError,
     },
-    #[error("failed to compute the working tree's hash for memoization: git {args} in `{cwd}`: {detail}")]
+    /// A memoized command a caller ran that belongs to no task — a
+    /// `baseline_compare` asking the same suite the criteria ask.
+    #[error("failed to run `{cmd}`")]
+    MemoizedCommand {
+        cmd: String,
+        #[source]
+        source: crate::process::SpawnError,
+    },
+    #[error(
+        "failed to compute the working tree's hash for memoization: {}",
+        crate::git::failed(.args, .cwd, .detail)
+    )]
     TreeHash {
         args: String,
         cwd: std::path::PathBuf,
@@ -78,94 +103,6 @@ pub struct CriterionRun {
     /// Wall-clock milliseconds the execution took — what the
     /// learned ordering feeds on. `None` when `reused` (nothing ran).
     pub duration_ms: Option<u64>,
-}
-
-/// The pre-check's verdict: "esta fase valida al
-/// validador" — a non-guard criterion that already passes, or a guard
-/// that's already red, means the criteria themselves are wrong, not that
-/// the (not-yet-started) work is wrong.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PreCheckOutcome {
-    Red,
-    TrivialCriterion { cmd: String },
-    BrokenGuard { cmd: String },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DispatchOutcome {
-    Completed {
-        summary: String,
-    },
-    Failed {
-        message: String,
-        retryable: bool,
-    },
-    /// No terminal event at all — the engine synthesizes this, the
-    /// adapter never emits it.
-    Crashed,
-    /// The dispatch's own `CancellationToken` fired — a
-    /// `join: any` sibling won, or the user cancelled the run. The
-    /// session was cut (interrupt→kill); the *caller* decides what the
-    /// cancellation means, because only it knows which token fired.
-    Cancelled,
-    /// The engine cut the session via `interrupt` → `kill`:
-    /// the token count from `Usage` events or the wall-clock timeout
-    /// demanded it, independent of whether the adapter itself honored
-    /// `SessionRequest.budget`.
-    BudgetExceeded {
-        reason: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct AttemptRecord {
-    pub attempt: u32,
-    pub dispatch: DispatchOutcome,
-    /// Tokens this attempt's session consumed, from its `Usage` events.
-    pub tokens: TokenUsage,
-    pub post_check: Vec<CriterionRun>,
-    pub scope: ScopeCheckResult,
-    pub succeeded: bool,
-    /// The agent's own expansion request this attempt, if
-    /// it wrote one, and what the engine decided — `None` when no request
-    /// file was found, the ordinary case. The caller (`loop_exec.rs`) owns
-    /// emitting `scope_expansion_requested`/`granted`/`denied` and the
-    /// finding conversion from this; `run_task` only decides and
-    /// widens `scope` for this attempt's own check when granted.
-    pub scope_expansion: Option<crate::scope_expansion::ScopeExpansionOutcome>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum TaskOutcome {
-    Done,
-    Blocked {
-        reason: String,
-    },
-    /// The cycle's cancellation token fired mid-attempt — the
-    /// session was cut (interrupt→kill) and the cycle stopped without a
-    /// verdict. What that means for the task's status is the caller's
-    /// call, not this cycle's.
-    Interrupted,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TaskCycleReport {
-    pub task_id: TaskId,
-    pub pre_check: Vec<CriterionRun>,
-    pub attempts: Vec<AttemptRecord>,
-    pub outcome: TaskOutcome,
-    /// `true` when any attempt's scope-expansion request escalated (
-    /// `ask` mode, or `max_per_run` already exhausted) — neither is a
-    /// verdict `run_task` can render alone, so the cycle stops retrying
-    /// and the caller (`loop_exec.rs`) puts the decision to
-    /// `HumanInteraction` — pausing only when no live surface answers —
-    /// rather than burning further sessions while one is owed.
-    pub needs_human_decision: bool,
-    /// What the adapter declared it wrote into the task's worktree for
-    /// its own mechanics during the last attempt — what the scope
-    /// check at integration leaves out, exactly as the cycle's own
-    /// check did.
-    pub staged: Vec<PathBuf>,
 }
 
 /// Default retry cap ("cap configurable, default 2").
@@ -197,7 +134,7 @@ pub struct ScopeGovernance<'a> {
     /// is denied.
     pub max_expansion_files: usize,
     pub grants: &'a crate::scope_expansion::GrantLedger,
-    pub already_granted_paths: &'a [String],
+    pub already_granted_paths: &'a [ScopeGlob],
 }
 
 /// The resources and retry policy one task's attempts run under —
@@ -206,12 +143,23 @@ pub struct ScopeGovernance<'a> {
 /// watching and how it stops).
 pub struct AttemptEnv<'a> {
     pub adapter: &'a dyn Adapter,
+    /// The loop node these task sessions belong to. A task session is
+    /// the node's session: it runs on the node's runner and writes the
+    /// node's declared files.
+    pub node: &'a yunta_core::Node,
     pub cwd: &'a Path,
     pub max_retries: u32,
     pub budget: Budget,
     pub memo: &'a Memo,
-    /// Where every criterion's process registers for the run.
-    pub registry: Option<&'a crate::process_registry::ProcessRegistry>,
+    /// The run's tasks, as its log leaves them — what the pre-check
+    /// reads to run the cheap criteria before the expensive ones,
+    /// derived from the same log every wake derives its state from.
+    pub history: &'a TaskLedger,
+    /// What every subprocess of the cycle is born under: the run's
+    /// registry, the node's token, the run's `subprocess_vars` and the
+    /// run's clock. It reaches the spawn by parameter, so a criterion
+    /// runs under the same governance as the session before it.
+    pub supervision: Supervision<'a>,
 }
 
 /// Runs a task through the full cycle: pre-check once, then
@@ -242,17 +190,14 @@ pub async fn run_task(
     let mut last_staged: Vec<PathBuf> = Vec::new();
     let AttemptEnv {
         adapter,
+        node,
         cwd,
         max_retries,
         budget,
         memo,
-        registry,
+        history,
+        supervision,
     } = env;
-    let supervision = Supervision {
-        registry,
-        cancel: Some(cancel),
-        env: &[],
-    };
     let ScopeGovernance {
         permissions,
         profile,
@@ -268,34 +213,47 @@ pub async fn run_task(
                 staged: last_staged.clone(),
                 pre_check: Vec::new(),
                 attempts: Vec::new(),
-                outcome: TaskOutcome::Blocked { reason: rule },
+                outcome: TaskOutcome::Blocked {
+                    cause: BlockedCause::CommandDenied { rule },
+                },
                 needs_human_decision: false,
             });
         }
     }
 
-    let (pre_runs, pre_outcome) = pre_check(task, cwd, memo, supervision).await?;
+    // A cycle whose token already fired has nothing to verify: every
+    // subprocess the pre-check would run is governed by that same token,
+    // so it would only produce "killed before it could answer" for the
+    // caller to read as a verdict. A `join: any` sibling winning between
+    // the batch starting and this task's first check is exactly that
+    // case: the task was cut, not judged.
+    if supervision.cancel.is_cancelled() {
+        return Ok(TaskCycleReport {
+            task_id: task.id.clone(),
+            staged: last_staged.clone(),
+            pre_check: Vec::new(),
+            attempts: Vec::new(),
+            outcome: TaskOutcome::Interrupted,
+            needs_human_decision: false,
+        });
+    }
 
-    // The pre-check validates the criteria before any work: a non-guard that
-    // already passes, or a guard already red, means the criteria are wrong,
-    // not the task. Only `Red` — nothing prejudged — proceeds to the
-    // attempts; every other verdict blocks the task naming what to fix.
-    let blocked_before_work = match pre_outcome {
-        PreCheckOutcome::Red => None,
-        PreCheckOutcome::TrivialCriterion { cmd } => Some(format!(
-            "criterion `{cmd}` already passes before any work — the criteria need fixing, not the task"
-        )),
-        PreCheckOutcome::BrokenGuard { cmd } => {
-            Some(format!("guard `{cmd}` is already red before any work started"))
-        }
-    };
-    if let Some(reason) = blocked_before_work {
+    let pre_runs = pre_check(task, cwd, memo, history, supervision).await?;
+
+    // The pre-check validates the criteria before any work: a non-guard
+    // that already passes, or a guard already red, means the criteria
+    // are wrong, not the task. Nothing prejudged — the empty verdict —
+    // proceeds to the attempts; anything found blocks the task naming
+    // every one of them.
+    if let Some(found) = yunta_core::NonEmpty::new(surprises(task, &pre_runs)) {
         return Ok(TaskCycleReport {
             task_id: task.id.clone(),
             staged: last_staged.clone(),
             pre_check: pre_runs,
             attempts: Vec::new(),
-            outcome: TaskOutcome::Blocked { reason },
+            outcome: TaskOutcome::Blocked {
+                cause: BlockedCause::PreCheck(found),
+            },
             needs_human_decision: false,
         });
     }
@@ -304,6 +262,7 @@ pub async fn run_task(
         task,
         instruction,
         adapter,
+        node,
         cwd,
         budget,
         memo,
@@ -348,10 +307,9 @@ pub async fn run_task(
         attempts,
         needs_human_decision: false,
         outcome: TaskOutcome::Blocked {
-            reason: format!(
-                "criteria still red or scope violated after {} attempt(s)",
-                max_retries + 1
-            ),
+            cause: BlockedCause::Unmet {
+                attempts: max_retries + 1,
+            },
         },
     })
 }

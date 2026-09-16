@@ -20,26 +20,29 @@
 //! exactly), so a still-unresolved degraded gate asks fresh on every
 //! wake rather than remembering a decision that was never really made.
 
-use yunta_adapters::{Forge, PolledGate, PublishRequest, PublishedGate, ReviewOutcome};
 use yunta_core::events::{
-    EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateOption, GateResolvedPayload,
-    GateWaitingPayload, NodeFinishedPayload, NodeStartedPayload, TokenUsage,
+    Escalation, EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity,
+    GateResolvedPayload, NodeFinishedPayload, NodeStartedPayload, PauseReason, TokenUsage,
 };
-use yunta_core::{CommitSha, ExternalGate, FindingId, Node, OptionId, Responder};
+use yunta_core::port::{Forge, PolledGate, PublishRequest, PublishedGate, ReviewOutcome};
+use yunta_core::{CommitSha, ExternalGate, FindingId, Node, NonEmpty, OptionId, Responder};
 
 use super::node_close::{fail, write_progress};
 use super::node_exec::template_vars;
 use super::step::{GateRender, Step};
 use super::{RunCtx, RunError};
-use crate::reserved::ReservedOption;
+use crate::reserved::{offers, ReservedOption};
+use yunta_core::events::{FindingEvent, GateEvent, NodeEvent};
+use yunta_core::{Location, RelativePath};
 
 /// What a dispatch call decided — the caller (`run/mod.rs`'s own loop)
 /// either keeps going (events already emitted) or pauses and returns.
 pub(super) enum GateStep {
-    StillWaiting { reason: String },
+    Waiting(PauseReason),
     Resolved,
 }
 
+#[tracing::instrument(skip_all, fields(run_id = %ctx.run_id, node_id = %node.id))]
 pub(super) async fn publish_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -89,7 +92,7 @@ pub(super) async fn publish_gate(
             .await?;
             return Ok(GateStep::Resolved);
         };
-        artifacts.push((wanted.view_name(), held.bytes(artifact)?));
+        artifacts.push((wanted.view_name(), held.bytes(artifact).await?));
     }
 
     let summary = format!(
@@ -114,20 +117,25 @@ pub(super) async fn publish_gate(
 
     ctx.emit(
         Some(&node.id),
-        EventPayload::GateWaiting(GateWaitingPayload {
-            summary,
-            evidence: published.url.clone(),
-            options: Vec::new(),
-            external_ref: Some(encode_ref(&published)),
-        }),
+        EventPayload::Gates(GateEvent::Waiting(
+            Escalation::published_to(
+                summary,
+                vec![Fact::labelled("published at", published.url.clone())].into(),
+                encode_ref(&published),
+            )
+            .map_err(|source| RunError::Broken {
+                diagnostic: format!("node `{}`'s external gate: {source}", node.id),
+            })?
+            .into_payload(),
+        )),
     )
     .await?;
-    pause(ctx, format!("waiting on external gate: {}", published.url)).await?;
-    Ok(GateStep::StillWaiting {
-        reason: published.url,
-    })
+    Ok(GateStep::Waiting(PauseReason::ExternalGate {
+        url: published.url,
+    }))
 }
 
+#[tracing::instrument(skip_all, fields(run_id = %ctx.run_id, node_id = %node.id))]
 pub(super) async fn poll_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -156,7 +164,7 @@ pub(super) async fn poll_gate(
             source,
         })?;
 
-    resolve_from_poll(ctx, node, &polled).await
+    resolve_from_poll(ctx, node, &polled, &published).await
 }
 
 /// The review→outcome mapping, applied uniformly whether resolving a
@@ -177,18 +185,18 @@ async fn resolve_approved(
     emit_started(ctx, node).await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::GateResolved(GateResolvedPayload::Approved {
+        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Approved {
             by: by.clone(),
             sha: approved_sha.clone(),
-        }),
+        })),
     )
     .await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::NodeFinished(NodeFinishedPayload {
+        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
             outcome,
             tokens_used: TokenUsage::default(),
-        }),
+        })),
     )
     .await?;
     write_progress(ctx).await?;
@@ -199,6 +207,7 @@ async fn resolve_from_poll(
     ctx: &RunCtx<'_>,
     node: &Node,
     polled: &PolledGate,
+    published: &PublishedGate,
 ) -> Result<GateStep, RunError> {
     match &polled.review {
         ReviewOutcome::Approved { by, reviewed_sha } if *reviewed_sha == polled.head_sha => {
@@ -217,27 +226,27 @@ async fn resolve_from_poll(
             emit_started(ctx, node).await?;
             ctx.emit(
                 Some(&node.id),
-                EventPayload::GateResolved(GateResolvedPayload::ChangesRequested {
+                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::ChangesRequested {
                     by: by.clone(),
-                }),
+                })),
             )
             .await?;
             for (i, comment) in comments.iter().enumerate() {
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::FindingPosted(FindingPostedPayload {
+                    EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                         finding: Finding {
                             id: FindingId::try_from(format!("{}-review-{i}", node.id))?,
                             severity: FindingSeverity::Major,
                             title: format!("changes requested by {}", comment.author),
-                            location: comment
-                                .path
-                                .clone()
-                                .unwrap_or_else(|| "(pull request)".to_string()),
+                            location: Location::work(
+                                RelativePath::of(comment.path.as_deref()),
+                                None,
+                            ),
                             detail: comment.body.clone(),
                             proposed_criterion: None,
                         },
-                    }),
+                    })),
                 )
                 .await?;
             }
@@ -257,7 +266,7 @@ async fn resolve_from_poll(
             emit_started(ctx, node).await?;
             ctx.emit(
                 Some(&node.id),
-                EventPayload::GateResolved(GateResolvedPayload::Closed),
+                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Closed)),
             )
             .await?;
             fail(
@@ -273,14 +282,9 @@ async fn resolve_from_poll(
         // head — the engine detects that by comparing SHAs — not a
         // decision.
         ReviewOutcome::Pending | ReviewOutcome::Approved { .. } => {
-            pause(
-                ctx,
-                format!("waiting on external gate for node `{}`", node.id),
-            )
-            .await?;
-            Ok(GateStep::StillWaiting {
-                reason: node.id.to_string(),
-            })
+            Ok(GateStep::Waiting(PauseReason::ExternalGate {
+                url: published.url.clone(),
+            }))
         }
     }
 }
@@ -318,16 +322,17 @@ pub(super) async fn recheck_approved_gates(
         if !matches!(node.kind, yunta_core::NodeKind::Gate { .. }) {
             continue;
         }
-        let Some(crate::replay::NodeState::Finished { .. }) = state.nodes.get(&node.id) else {
+        let Some(crate::replay::NodeState::Finished { .. }) = state.nodes.state(&node.id) else {
             continue;
         };
-        let Some(approved_sha) = last_approved_sha(&events, &node.id) else {
+        let state = crate::replay::derive(&events);
+        let Some(approved_sha) = state.gates.approved_sha(&node.id).cloned() else {
             continue;
         };
-        let Some(external_ref) = last_external_ref(&events, &node.id) else {
+        let Some(external_ref) = state.gates.last_external_ref(&node.id) else {
             continue;
         };
-        let published: PublishedGate = decode_ref(&external_ref)?;
+        let published: PublishedGate = decode_ref(external_ref)?;
         let polled = forge
             .poll(&published)
             .await
@@ -348,32 +353,6 @@ pub(super) async fn recheck_approved_gates(
     Ok(())
 }
 
-fn last_approved_sha(
-    events: &[yunta_core::events::StoredEvent],
-    node_id: &yunta_core::NodeId,
-) -> Option<CommitSha> {
-    events.iter().rev().find_map(|e| match e.payload() {
-        Some(EventPayload::GateResolved(GateResolvedPayload::Approved { sha, .. }))
-            if e.node_id.as_ref() == Some(node_id) =>
-        {
-            Some(sha.clone())
-        }
-        _ => None,
-    })
-}
-
-fn last_external_ref(
-    events: &[yunta_core::events::StoredEvent],
-    node_id: &yunta_core::NodeId,
-) -> Option<String> {
-    events.iter().rev().find_map(|e| match e.payload() {
-        Some(EventPayload::GateWaiting(p)) if e.node_id.as_ref() == Some(node_id) => {
-            p.external_ref.clone()
-        }
-        _ => None,
-    })
-}
-
 /// Resolves an internal gate (`external: None`): builds the escalation
 /// object from the node's own `message`/`options`/`on` and puts it to
 /// `HumanInteraction`. Semantics: an option mapped in `on` re-routes
@@ -381,9 +360,10 @@ fn last_external_ref(
 /// transfers, and once the target's subgraph completes the gate asks
 /// again; an unmapped option finishes the gate with that choice as its
 /// outcome; the engine-appended `abort` pauses the run (same convention
-/// as every other escalation). No surface → `StillWaiting`, with
+/// as every other escalation). No surface → `Waiting`, with
 /// nothing recorded, so a resume re-asks (the same rule every
 /// unresolved question follows).
+#[tracing::instrument(skip_all, fields(run_id = %ctx.run_id, node_id = %node.id))]
 pub(super) async fn resolve_internal_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -397,26 +377,30 @@ pub(super) async fn resolve_internal_gate(
     // reconstructs the identical object instead of a second copy that
     // could drift.
     let escalation =
-        super::escalation::build_internal_gate_escalation(&node.id, assignee, message, options, on);
+        super::escalation::build_internal_gate_escalation(&node.id, assignee, message, options, on)
+            .map_err(|source| RunError::Broken {
+                diagnostic: format!("node `{}`'s gate: {source}", node.id),
+            })?;
     // A decision `resolve_gate` pre-seeded onto the log while
     // this run was parked is consumed here, by this same consequence
     // code — never re-asked, and its escalation pair is already
     // recorded so it is never re-emitted. Re-validated against the
     // re-derived menu: a mismatch means ask normally.
     let events = ctx.load_events().await?;
-    let pre_seeded = super::escalation::pre_seeded_resolution(&events, &node.id, &escalation);
+    let pre_seeded = super::escalation::pre_seeded_resolution(
+        &crate::replay::derive(&events),
+        &node.id,
+        &escalation,
+    );
     let already_recorded = pre_seeded.is_some();
     let choice = match pre_seeded {
         Some(choice) => choice,
         None => match ctx.ask_human(&escalation).await? {
             Some(choice) => choice,
             None => {
-                return Ok(GateStep::StillWaiting {
-                    reason: format!(
-                        "gate `{}` (assignee: {assignee}) awaits a decision",
-                        node.id
-                    ),
-                });
+                return Ok(GateStep::Waiting(PauseReason::Escalation(Box::new(
+                    escalation.clone(),
+                ))));
             }
         },
     };
@@ -432,34 +416,37 @@ pub(super) async fn resolve_internal_gate(
         // interaction, pause the run, leave the node stateless so a
         // resume re-asks if the human changes their mind.
         if !already_recorded {
-            ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
-                .await?;
             ctx.emit(
                 Some(&node.id),
-                EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
+                EventPayload::Gates(GateEvent::Waiting(escalation.clone().into_payload())),
+            )
+            .await?;
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
+                    choice.clone(),
+                ))),
             )
             .await?;
         }
-        return Ok(GateStep::StillWaiting {
-            reason: format!(
-                "gate `{}` was resolved to abort{}",
-                node.id,
-                choice
-                    .free_text
-                    .as_deref()
-                    .map(|text| format!(": {text}"))
-                    .unwrap_or_default()
-            ),
-        });
+        return Ok(GateStep::Waiting(PauseReason::GateAborted {
+            node: node.id.clone(),
+            free_text: choice.free_text.clone(),
+        }));
     }
 
     emit_started(ctx, node).await?;
     if !already_recorded {
-        ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
-            .await?;
         ctx.emit(
             Some(&node.id),
-            EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
+            EventPayload::Gates(GateEvent::Waiting(escalation.clone().into_payload())),
+        )
+        .await?;
+        ctx.emit(
+            Some(&node.id),
+            EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
+                choice.clone(),
+            ))),
         )
         .await?;
     }
@@ -480,25 +467,27 @@ pub(super) async fn resolve_internal_gate(
             .await?;
             ctx.emit(
                 Some(&node.id),
-                EventPayload::NodeRerouted(yunta_core::events::NodeReroutedPayload {
-                    to_node: target.clone(),
-                    cause: format!("gate `{}` chose `{chosen}`", node.id),
-                    // A gate choice is a routing decision, not a bounded
-                    // retry: it has no attempt or cap to report.
-                    attempt: None,
-                    max_reroutes: None,
-                    origin: yunta_core::events::RerouteOrigin::GateChoice,
-                }),
+                EventPayload::Node(NodeEvent::Rerouted(
+                    yunta_core::events::NodeReroutedPayload::new(
+                        target.clone(),
+                        yunta_core::events::RerouteCause(yunta_core::events::Failure::message(
+                            format!("gate `{}` chose `{chosen}`", node.id),
+                        )),
+                        yunta_core::events::RerouteOrigin::GateChoice,
+                        None,
+                        None,
+                    ),
+                )),
             )
             .await?;
         }
         None => {
             ctx.emit(
                 Some(&node.id),
-                EventPayload::NodeFinished(NodeFinishedPayload {
-                    outcome: chosen.to_string(),
-                    tokens_used: TokenUsage::default(),
-                }),
+                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                    chosen.to_string(),
+                    TokenUsage::default(),
+                ))),
             )
             .await?;
             write_progress(ctx).await?;
@@ -509,24 +498,18 @@ pub(super) async fn resolve_internal_gate(
 
 async fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
     let events = ctx.load_events().await?;
-    let attempt = events
-        .iter()
-        .filter(|e| {
-            e.node_id.as_ref() == Some(&node.id)
-                && matches!(e.payload(), Some(EventPayload::NodeStarted(_)))
-        })
-        .count() as u32
-        + 1;
+    let attempts = crate::replay::derive(&events)
+        .nodes
+        .get(&node.id)
+        .map_or(0, |record| record.attempts);
     ctx.emit(
         Some(&node.id),
-        EventPayload::NodeStarted(NodeStartedPayload { attempt }),
+        EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(
+            attempts + 1,
+        ))),
     )
     .await?;
     Ok(())
-}
-
-async fn pause(ctx: &RunCtx<'_>, reason: String) -> Result<(), RunError> {
-    super::record_pause(ctx, &reason).await
 }
 
 fn encode_ref(published: &PublishedGate) -> String {
@@ -549,43 +532,43 @@ async fn degrade_to_console(
     node: &Node,
     summary: String,
 ) -> Result<GateStep, RunError> {
-    let escalation = GateWaitingPayload {
-        summary: summary.clone(),
-        evidence: "no forge reachable from this machine".to_string(),
-        options: vec![
-            GateOption {
-                id: ReservedOption::Approve.id(),
-                label: "Approve".to_string(),
-                tradeoff: "Marks the gate as passed; the run continues".to_string(),
-            },
-            GateOption {
-                id: ReservedOption::Reject.id(),
-                label: "Reject".to_string(),
-                tradeoff: "Fails the node; its declared re-route (if any) takes over".to_string(),
-            },
-        ],
-        external_ref: None,
-    };
+    let escalation = Escalation::new(
+        summary.clone(),
+        vec![Fact::bare("no forge reachable from this machine")].into(),
+        NonEmpty::from((
+            offers::approve_from_console(),
+            vec![offers::reject_from_console()],
+        )),
+    )
+    .map_err(|source| RunError::Broken {
+        diagnostic: format!("node `{}`'s gate: {source}", node.id),
+    })?;
     let Some(choice) = ctx.ask_human(&escalation).await? else {
-        pause(ctx, summary.clone()).await?;
-        return Ok(GateStep::StillWaiting { reason: summary });
+        return Ok(GateStep::Waiting(PauseReason::Escalation(Box::new(
+            escalation,
+        ))));
     };
 
-    ctx.emit(Some(&node.id), EventPayload::GateWaiting(escalation))
-        .await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
+        EventPayload::Gates(GateEvent::Waiting(escalation.into_payload())),
+    )
+    .await?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
+            choice.clone(),
+        ))),
     )
     .await?;
     emit_started(ctx, node).await?;
     if ReservedOption::of(&choice.option) == Some(ReservedOption::Approve) {
         ctx.emit(
             Some(&node.id),
-            EventPayload::NodeFinished(NodeFinishedPayload {
-                outcome: format!("approved from the console by {}", choice.by),
-                tokens_used: TokenUsage::default(),
-            }),
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                format!("approved from the console by {}", choice.by),
+                TokenUsage::default(),
+            ))),
         )
         .await?;
         write_progress(ctx).await?;
@@ -603,7 +586,7 @@ async fn render_or_fail_here(
     node: &Node,
     input: &str,
 ) -> Result<GateRender, RunError> {
-    match crate::template::render_template(input, &template_vars(ctx, node)) {
+    match yunta_core::template::render_template(input, &template_vars(ctx, node)) {
         Ok(rendered) => Ok(Step::Value(rendered)),
         Err(e) => {
             emit_started(ctx, node).await?;

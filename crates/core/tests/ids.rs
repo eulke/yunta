@@ -2,6 +2,7 @@
 //! on construction and on deserialization, so an invalid identifier is
 //! unrepresentable past the frontier that read it.
 
+use yunta_core::events::NodeEvent;
 use yunta_core::events::{EventPayload, RunnerResolvedPayload};
 use yunta_core::{
     AdapterId, AgentName, ExecutorName, FindingId, InvalidId, ModeName, ModelName, NodeId,
@@ -296,16 +297,18 @@ fn runner_resolved_names_its_runner_and_still_reads_logs_written_with_role() {
         "discarded": []
     });
     let payload: EventPayload = serde_json::from_value(former).unwrap();
-    let EventPayload::RunnerResolved(resolved) = payload else {
+    let EventPayload::Node(NodeEvent::RunnerResolved(resolved)) = payload else {
         panic!("expected runner_resolved");
     };
     assert_eq!(resolved.runner.as_str(), "planner");
 
-    let written = serde_json::to_value(EventPayload::RunnerResolved(RunnerResolvedPayload {
-        runner: "planner".parse().unwrap(),
-        chosen: serde_json::from_value(candidate).unwrap(),
-        discarded: Vec::new(),
-    }))
+    let written = serde_json::to_value(EventPayload::Node(NodeEvent::RunnerResolved(
+        RunnerResolvedPayload {
+            runner: "planner".parse().unwrap(),
+            chosen: serde_json::from_value(candidate).unwrap(),
+            discarded: Vec::new(),
+        },
+    )))
     .unwrap();
     assert_eq!(written["runner"], "planner");
     assert!(written.get("role").is_none());

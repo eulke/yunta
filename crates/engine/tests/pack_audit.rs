@@ -102,7 +102,10 @@ fn the_inventory_is_exhaustive_against_the_packs_own_content() {
     assert!(draft.context[0].contains("src/lib.rs"));
     assert!(draft.context[1].contains("git log -1"));
     assert!(draft.context[2].contains("internal-docs"));
-    assert_eq!(draft.mcp_servers, vec!["internal-docs".to_string()]);
+    assert_eq!(
+        draft.mcp_servers,
+        vec![yunta_core::McpServerName::from("internal-docs")]
+    );
 
     let package = &workflow.nodes[3];
     assert_eq!(package.kind, "executor");

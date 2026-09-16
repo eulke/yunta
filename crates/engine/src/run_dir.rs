@@ -21,6 +21,55 @@ pub const SCRATCH_DIR: &str = "scratch";
 /// Where nodes' staging directories live under [`SCRATCH_DIR`].
 const STAGING_DIR: &str = "staging";
 
+/// The manifest a run froze when it was created: what it runs, which
+/// runners it resolves against, which limits it is held to.
+pub fn manifest_path(run_dir: &Path) -> PathBuf {
+    run_dir.join("manifest.yaml")
+}
+
+/// The run's progress note, rewritten at every node close — the file a
+/// person opens to see where a live run is.
+pub fn progress_path(run_dir: &Path) -> PathBuf {
+    run_dir.join("progress.md")
+}
+
+/// Where a session's own transcript directory goes, under the scratch.
+pub fn sessions_root(run_dir: &Path) -> PathBuf {
+    run_dir.join(SCRATCH_DIR).join("sessions")
+}
+
+/// Where a loop's tasks get a worktree each, so two tasks of one run
+/// never share a checkout.
+pub fn task_worktrees(run_dir: &Path) -> PathBuf {
+    run_dir.join("task-worktrees")
+}
+
+/// The run's baseline: what its suite wrote on the tree the run woke
+/// on. Only a run that measured has one — a run born holding its
+/// lineage's measurement reads the bytes under the run its origin
+/// names, and a lineage whose root declared no suite has none at all.
+pub(crate) fn baseline_dir(run_dir: &Path) -> PathBuf {
+    run_dir.join("baseline")
+}
+
+/// Everything the baseline suite wrote on the run's first wake.
+///
+/// The log states what the suite did — its command, its exit code, a
+/// summary and the hash of all of it — and the bytes that hash names sit
+/// here, so a reader of a comparison against the baseline can read the
+/// output it is against and not only its summary. Every comparison in
+/// the lineage names this one file: a descendant's log carries the fact
+/// and the run that holds the bytes.
+pub fn baseline_capture(run_dir: &Path) -> PathBuf {
+    baseline_dir(run_dir).join("suite.out")
+}
+
+/// The run's view of what it holds: one file per artifact, written from
+/// the acceptance that named it.
+pub fn artifacts_view(run_dir: &Path) -> PathBuf {
+    run_dir.join(yunta_core::ARTIFACTS_DIR)
+}
+
 /// Where every node's staging sits, one directory per node id.
 pub fn staging_root(run_dir: &Path) -> PathBuf {
     run_dir.join(SCRATCH_DIR).join(STAGING_DIR)

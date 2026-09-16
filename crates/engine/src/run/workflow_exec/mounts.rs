@@ -24,6 +24,7 @@ use yunta_core::{ArtifactRefId, MountSpec, NodeKind, RunId};
 use super::runs_root;
 use crate::run::promote::birth_artifact;
 use crate::run::{read_manifest, BirthArtifact, RunCtx};
+use yunta_core::events::ChildEvent;
 
 /// Why the parent's node fails instead of giving birth to the child, in
 /// the two shapes a node failure has.
@@ -137,7 +138,9 @@ async fn resolve_one(
     let source_run = match target.map(|candidate| &candidate.kind) {
         Some(NodeKind::Workflow { .. }) => {
             let child = events.iter().rev().find_map(|e| match e.payload() {
-                Some(EventPayload::ChildRunFinished(p)) if e.node_id.as_ref() == Some(&m.node) => {
+                Some(EventPayload::Children(ChildEvent::Finished(p)))
+                    if e.node_id.as_ref() == Some(&m.node) =>
+                {
                     Some(p.child_run_id.clone())
                 }
                 _ => None,
@@ -164,14 +167,14 @@ async fn resolve_one(
     let (source_events, producer) = if source_run == *ctx.run_id {
         (events.to_vec(), Some(m.node.clone()))
     } else {
-        read_manifest(&source_dir.join("manifest.yaml")).map_err(|source| {
-            MountError::Unfrozen {
+        read_manifest(&crate::run_dir::manifest_path(&source_dir))
+            .await
+            .map_err(|source| MountError::Unfrozen {
                 artifact: m.id.clone(),
                 node: m.node.clone(),
                 run: source_run.clone(),
                 detail: yunta_core::describe(&source),
-            }
-        })?;
+            })?;
         let child_events = ctx
             .storage
             .events_for_run(source_run.clone())
@@ -201,6 +204,7 @@ async fn resolve_one(
         .clone();
     let bytes = held
         .bytes(&found)
+        .await
         .map_err(|source| MountError::Unreadable {
             artifact: m.id.clone(),
             node: m.node.clone(),

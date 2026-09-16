@@ -23,14 +23,3 @@ tasks:                                  # required, at least one
                                         #   context for a runner with no history
     criteria:
       - cmd: "grep -q 'dark mode' README.md"
-
-  - id: review-contrast
-    title: "Check the dark palette reads at AA contrast"
-    scope: ["src/theme/tokens.css"]
-    depends_on: [add-dark-mode]
-    manual_review: true              # optional. An audit node judges whether
-                                     #   this task is complete.
-    justification: "Contrast against the new palette is a judgement no command makes."
-                                     #   say why a command cannot settle it
-    criteria:
-      - cmd: "test -f src/theme/tokens.css"

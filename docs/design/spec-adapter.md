@@ -35,9 +35,12 @@ pub struct SessionId(String);
 pub struct Capabilities {
     /// Puede reanudar una conversación previa vía `resume()`.
     pub resume_session: bool,
-    /// Puede bloquear ediciones fuera de un conjunto de globs
-    /// en el momento en que ocurren (enforcement en caliente de scope).
-    pub edit_hooks: bool,
+    /// Qué puede construir este adapter para mantener las escrituras
+    /// de una sesión dentro de su cerco. `None` es nada: el diff del
+    /// post-check es lo único que atrapa una escritura fuera del scope.
+    /// Un log escrito antes del cerco lleva `edit_hooks` y se lee como
+    /// `None` (D172).
+    pub fence: FenceLevel,   // None | ToolCalls | Filesystem
     /// Distingue perfiles de permisos (read_only / edit / full).
     /// Sin esta capacidad, todo nodo corre con los permisos del CLI
     /// y los nodos que exigen `read_only` fallan en `yunta check`.
@@ -49,9 +52,21 @@ pub struct Capabilities {
     /// distingue tokens leídos de caché, se reportan en `Usage`
     /// (habilita la tasa de cache de Contrato §8.4).
     pub usage_reporting: bool,
+    /// Puede montar directorios de skill (`SessionRequest.skills`) por
+    /// el mecanismo nativo del CLI. Una skill es instrucción agregada,
+    /// nunca corrección: su ausencia degrada con `capability_degraded`,
+    /// jamás falla.
+    pub skills: bool,
     /// Puede conectarse al servidor MCP por-run de Yunta como cliente
     /// (blackboard, tareas, findings, solicitud de ampliación de scope).
     pub run_tools: bool,
+    /// Puede confinar el proceso de la sesión sin acceso a red, que es
+    /// lo que hace cumplir el `network: false` de un nodo. Una política
+    /// declarativa no es un sandbox del sistema operativo (D105): donde
+    /// esta capacidad falta, `network: false` degrada con
+    /// `capability_degraded` — queda registrado para política y
+    /// auditoría, nunca exigido.
+    pub network_isolation: bool,
 }
 
 pub struct SessionRequest {
@@ -78,10 +93,19 @@ pub struct SessionRequest {
     /// `Secret`: `Debug` imprime `[redacted]` y el valor se expone una
     /// sola vez, al construir el entorno del hijo.
     pub env: HashMap<String, Secret<String>>,
-    /// Globs de scope si el nodo/tarea los declara y el adapter
-    /// tiene `edit_hooks`. El adapter DEBE ignorarlo (no fallar)
-    /// si no declaró la capacidad: el engine ya degradó y avisó.
-    pub edit_constraints: Option<Vec<Glob>>,
+    /// Lo que esta sesión puede escribir: la única fuente de permiso de
+    /// escritura, siempre presente. `allowed` es `None` cuando el nodo
+    /// no declaró scope (todo bajo el worktree) y `Some([])` bajo
+    /// `read_only` (nada bajo el worktree; las raíces siguen escribibles).
+    /// El adapter construye tanto de él como su CLI permita y reporta
+    /// cuánto fue; uno que no puede construir nada lo ignora, sin fallar
+    /// — el engine ya degradó y avisó (D172).
+    pub fence: Fence,   // { allowed: Option<Vec<ScopeGlob>>, roots: Vec<PathBuf>, advice }
+    /// El comando que un CLI ejecuta para preguntarle al juez por una
+    /// escritura. `None` solo en un arnés sin binario que correr; un
+    /// adapter cuyo cerco lo necesita y no lo tiene falla la sesión con
+    /// `AdapterError::FenceUnbuildable(HookUnavailable)`.
+    pub fence_hook: Option<FenceHook>,
     /// Endpoint del MCP por-run de Yunta, si `run_tools`. Forma
     /// concreta (HTTP loopback + token bearer, ciclo de vida por
     /// sesión) en Contrato §6.5 — el adapter solo debe traducirlo
@@ -156,10 +180,17 @@ pub trait AgentSession: Send {
 pub enum AgentEvent {
     /// OBLIGATORIO como primer evento de toda sesión. `model` es el que
     /// el CLI reportó; ausente cuando no reporta ninguno — nunca el pedido.
-    SessionOpened { session_id: SessionId, model: Option<ModelName> },
-    /// Actividad resumida: qué herramienta usó, sobre qué (digest).
-    /// Nunca contenido completo ni secretos (§4, O3).
-    ToolUse { name: String, target_digest: String },
+    /// `fence` es cuánto de la sesión cercó realmente lo que el adapter
+    /// construyó, calculado —nunca declarado—; ausente cuando no
+    /// construyó ninguno.
+    SessionOpened { session_id: SessionId, model: Option<ModelName>, fence: Option<Coverage> },
+    /// Una escritura que el cerco rechazó antes de ocurrir. Crónica y
+    /// conteo, nunca estado del nodo: la sesión siguió.
+    WriteRefused { target: ToolTarget },
+    /// Actividad resumida: qué herramienta usó, sobre qué. `display`
+    /// solo cuando el argumento nombra el repositorio; el digest,
+    /// siempre. Nunca contenido completo ni secretos (§4, O3).
+    ToolUse { name: String, target: ToolTarget },
     /// Uso acumulable de tokens. Frecuencia: al menos al cierre;
     /// idealmente incremental. Requerido si `usage_reporting`.
     /// `cached_input_tokens` es opcional: se puebla solo si el CLI
@@ -184,8 +215,13 @@ telemetría, no evidencia.
   resumibilidad de nivel nodo; un adapter que no puede obtenerlo emite un id
   sintético propio y declara `resume_session: false`.
 - **O2. Terminación única**: el stream termina con exactamente un `Completed` o
-  `Failed`. Muerte del proceso sin evento = el engine sintetiza
-  `Failed {retryable: true}` (crash ≠ error del agente).
+  `Failed`. Un stream que termina sin ninguno de los dos no es un error del
+  agente: el adapter nunca inventa un terminal, el engine le pregunta a esa
+  sesión —y sólo a esa— cómo salió su proceso (`AgentSession::exit`) y registra
+  la muerte con esa salida, `retryable: true`. Preguntar es matar primero: el
+  grupo muere, las cañerías se cierran y recién después se recoge la salida, de
+  modo que la espera está acotada y nada sobrevive al run. Una sesión sin
+  proceso propio responde `None` (D180).
 - **O3. Nada sensible en eventos**: los payloads llevan digests y resúmenes, jamás
   contenido de archivos, prompts completos ni valores de env. El engine además
   redacta todo valor de secreto conocido antes de persistir (I12): defensa en
@@ -198,9 +234,14 @@ telemetría, no evidencia.
 - **O4. Presupuesto colaborativo, enforcement del engine**: el adapter pasa los
   límites al CLI si el CLI los soporta; el engine corta por `interrupt → kill`
   cuando el conteo de `Usage` o el timeout lo exigen, tenga o no ayuda del CLI.
-- **O5. `edit_constraints` es best-effort declarado**: con `edit_hooks`, el adapter
-  instala el bloqueo antes de la primera edición posible y reporta cada bloqueo como
-  `ToolUse` con marca; sin la capacidad, ignora el campo sin error.
+- **O5. El cerco se construye o se declara ausente**: el adapter instala tanto del
+  cerco como su CLI permita antes de la primera escritura posible, calcula la
+  cobertura de lo que construyó (nunca la declara) y la reporta en `SessionOpened`;
+  cada rechazo viaja como `WriteRefused`. Un adapter con nivel `None` ignora el
+  campo sin error. Un adapter que necesita un mecanismo que no tiene —el hook, o
+  raíces escribibles bajo un sandbox de solo lectura— falla la sesión antes de
+  spawn con `AdapterError::FenceUnbuildable`, porque una capacidad ausente falla
+  en vez de gastar la sesión (D172).
 - **O6. Sin estado propio**: un adapter no persiste nada entre sesiones fuera de lo
   que el CLI ya persiste. Todo lo que el engine necesita recordar viaja en eventos.
 
@@ -215,35 +256,89 @@ y dinámicamente al despachar cada nodo. La degradación dinámica emite un even
 | Capacidad ausente | Política |
 |---|---|
 | `resume_session` | `on_interrupt: resume_session` degrada a `restart_node` · warning |
-| `edit_hooks` | scope solo post-check + warning |
+| `fence` | scope solo post-check + warning, una vez por run |
 | `permission_profiles` | nodo `read_only` → error en check; `edit`/`full` corren con permisos del CLI |
 | `custom_agents` | runner con `agent:` sobre este adapter, o nodo con `agent:` que lo use → error en check, nunca ignorado |
 | `usage_reporting` | presupuesto de tokens no exigible → solo timeout y max_turns; warning por run |
-| `run_tools` | nodos que requieren blackboard/findings en caliente fallan en check; findings solo vía artifacts |
+| `skills` | la sesión corre sin las skills que el nodo declara · `capability_degraded` |
+| `run_tools` | un nodo que declara un artifact interpretado o que está en un grupo `coordination: blackboard` falla: no tiene otra puerta, y correrlo sin lo que declaró sería emular en silencio. El resto de los nodos corre; sus findings llegan sólo por artifacts |
+| `network_isolation` | `network: false` queda registrado para política y auditoría, no exigido · `capability_degraded` |
 | `run_tools` montado y sin efecto | el adapter reporta cuántas tools del servidor por sesión trae la sesión; cero con endpoint entregado emite `capability_degraded` al abrir la sesión, antes de gastarla |
 
 ## 6. Adapters builtin
 
-- **`claude-code`**: declara todas las capacidades. Lanza `claude -p` headless con
-  salida en streaming JSON y traduce ese stream a `AgentEvent`; `resume` reutiliza
-  la sesión vía el flag de reanudación del CLI con el `SessionId` persistido;
-  `edit_hooks` se implementa instalando hooks de pre-edición en la configuración de
-  la sesión que validan contra `edit_constraints`; `custom_agents` mapea `agent:` a
-  los agentes definidos por el equipo en su configuración de Claude Code,
-  verificando su existencia en `probe()`; `permission_profiles` mapea a los modos de
-  permisos del CLI; skills y MCP por-run se inyectan por la configuración de sesión.
-  Los detalles de flags viven en el adapter y se validan en `probe()` contra la
-  versión instalada; el engine no conoce ninguno.
-- **`codex`**: `codex exec` headless con salida JSON; `permission_profiles` mapea a
-  sus modos de sandbox; `resume_session: false` salvo que `probe()` detecte soporte
-  en la versión instalada (las capacidades pueden calcularse en el constructor a
-  partir del probe, nunca cambiar después).
-- **`mock`**: pieza de primera clase, no un helper de tests: reproduce sesiones desde
-  fixtures (guiones YAML de eventos + efectos sobre el filesystem), con fallos y
-  latencias inyectables, y puede simular solicitudes de ampliación de scope y
-  posteos al blackboard. Es lo que permite testear el engine completo (ciclo de
-  tareas, degradación, cancelación, resume, paralelismo) en CI sin ningún LLM, y
-  validar workflows nuevos sin gastar presupuesto (`yunta run --adapter mock`).
+Cada adapter construido declara sus capacidades como una tabla fija: es lo que
+`yunta check` juzga contra el `permissions:` y el `agent:` de cada nodo, y lo que
+el engine consulta antes de pedir nada (§5).
+
+### `claude-code`
+
+| capacidad | valor |
+|---|---|
+| `resume_session` | `true` |
+| `fence` | `tool_calls` |
+| `permission_profiles` | `true` |
+| `custom_agents` | `true` |
+| `usage_reporting` | `true` |
+| `skills` | `true` |
+| `run_tools` | `true` |
+| `network_isolation` | `false` |
+
+Lanza `claude -p` headless con salida en streaming JSON y traduce ese stream a
+`AgentEvent`; `resume` reutiliza la sesión vía el flag de reanudación del CLI con el
+`SessionId` persistido; el cerco es `FenceLevel::ToolCalls`: un hook `PreToolUse`
+sobre cada herramienta de escritura ejecuta `yunta fence claude-code`, y las raíces
+del cerco entran por `--add-dir`. Cobertura `Exact` bajo `edit` y `read_only` (que no
+exponen shell), `ToolsOnly` bajo `full`. `read_only` conserva `Write`/`Edit` solo
+cuando el cerco tiene raíces, que es donde van los archivos declarados. Límite
+declarado: si el hook no responde en su timeout, el CLI deja pasar la llamada; el
+post-check la atrapa y `fence_breach` la nombra. `custom_agents` mapea `agent:` a los
+agentes definidos por el equipo en su configuración de Claude Code, verificando su
+existencia en `probe()`; `permission_profiles` mapea a los modos de permisos del CLI;
+skills y MCP por-run se inyectan por la configuración de sesión. Ninguna red se
+confina: la auditoría posterior del engine es la frontera, así que `network: false`
+queda declarativo. Los detalles de flags viven en el adapter y se validan en
+`probe()` contra la versión instalada; el engine no conoce ninguno.
+
+### `codex`
+
+| capacidad | valor |
+|---|---|
+| `resume_session` | `true` |
+| `fence` | `filesystem` |
+| `permission_profiles` | `true` |
+| `custom_agents` | `false` |
+| `usage_reporting` | `true` |
+| `skills` | `false` |
+| `run_tools` | `true` |
+| `network_isolation` | `false` |
+
+`codex exec` headless con salida JSON; `permission_profiles` mapea a sus modos de
+sandbox. El cerco es `FenceLevel::Filesystem`: `--sandbox workspace-write` más las
+raíces del cerco en `sandbox_workspace_write.writable_roots`, de modo que la
+cobertura es `WidenedToRoots { [cwd, …raíces] }` —el sandbox es por directorio en los
+dos canales, y el post-check cubre la diferencia con los globs. Un perfil `read_only`
+con raíces que mantener escribibles no se puede construir: el sandbox tiene una sola
+política para todo el filesystem, y el adapter falla antes de spawn con
+`FenceUnbuildable(SealedRoots)`. Límite declarado: la política partida del sandbox
+(`/repo=write`, `/repo/a=none`) no se usa —no expresa globs. `custom_agents` y
+`skills` no se declaran porque `codex exec` no tiene selector de agente ni mecanismo
+de skills al que mapearlos, y `network_isolation` porque no aísla red: declarar
+cualquiera de los tres sería prometer lo que no está construido.
+
+### `mock`
+
+Pieza de primera clase, no un helper de tests: reproduce sesiones desde fixtures
+(guiones YAML de eventos + efectos sobre el filesystem), con fallos y latencias
+inyectables, y puede simular solicitudes de ampliación de scope y posteos al
+blackboard. No lleva tabla fija porque no tiene capacidades fijas: las declara el
+fixture (`capabilities`, `fence_coverage`), que es lo que permite ejercitar una
+capacidad ausente sin un CLI que la niegue. Cada efecto pasa por el mismo
+`Fence::judge` que los adapters reales: un fixture ejercita la regla, nunca una
+segunda implementación de ella. Es lo que permite testear el engine completo (ciclo
+de tareas, degradación, cancelación, resume, paralelismo) en CI sin ningún LLM, y
+validar workflows nuevos sin gastar presupuesto (`yunta run --adapter mock`). El
+binario no lo construye para una corrida real: los fixtures entran por `yunta test`.
 
 ## 7. Invariantes
 

@@ -1,3 +1,10 @@
+//! The workflow schema, node kind by node kind.
+//!
+//! Every field a workflow may declare parses into its type with the
+//! default the schema states when it is absent, survives a serialization
+//! round trip, and is refused by name when its value is outside the
+//! closed set it belongs to.
+
 use yunta_core::{
     ArtifactKind, ArtifactSpec, CheckBuiltin, HookFailurePolicy, JoinPolicy, LoopUntil, NodeKind,
     NodePermissions, OnInterrupt, PromptSource, Workflow,
@@ -39,7 +46,7 @@ fn parses_the_reference_schema_excerpt_without_loss() {
     assert_eq!(on_failure.max_reroutes, 2);
 
     let fix_lint = &workflow.nodes[2];
-    assert_eq!(fix_lint.scope, vec!["src/**".to_string()]);
+    assert_eq!(fix_lint.scope, vec![yunta_core::ScopeGlob::from("src/**")]);
     let hooks = fix_lint.hooks.as_ref().unwrap();
     assert_eq!(hooks.after[0].run, "cargo fmt");
     assert!(hooks.before.is_empty());
@@ -466,7 +473,7 @@ scope_expansion:
         } => {
             let se = scope_expansion.unwrap();
             assert_eq!(se.mode, yunta_core::ScopeExpansionMode::Ask);
-            assert_eq!(se.within, vec!["src/**".to_string()]);
+            assert_eq!(se.within, vec![yunta_core::ScopeGlob::from("src/**")]);
             assert_eq!(se.max_per_run, Some(3));
         }
         other => panic!("expected Loop, got {other:?}"),
@@ -956,7 +963,7 @@ nodes:
     );
 }
 
-// --- Reference-schema fields (interactive, yunta_schema, skills,
+// --- Reference-schema fields (yunta_schema, skills,
 // on_finish) ------------------------------------------------------------------
 
 #[test]
@@ -969,7 +976,6 @@ nodes:
     kind: prompt
     runner: planner
     skills: [grill]
-    interactive: true
     prompt: "Ask the questions."
   - id: implement
     kind: loop
@@ -982,9 +988,13 @@ on_finish:
   - distill: [{ node: plan, kind: tasks }]
 "#;
     let wf: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
-    assert_eq!(wf.yunta_schema.as_deref(), Some(">=1 <2"));
+    assert_eq!(
+        wf.yunta_schema
+            .as_ref()
+            .map(yunta_core::SchemaRange::as_str),
+        Some(">=1 <2")
+    );
     assert_eq!(wf.nodes[0].skills, vec!["grill"]);
-    assert!(wf.nodes[0].interactive);
     assert_eq!(
         wf.on_finish,
         vec![
@@ -1022,7 +1032,7 @@ nodes:
     let wf: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
     assert_eq!(
         wf.node_defaults.unwrap().skills,
-        vec!["conventions".to_string()]
+        vec![yunta_core::SkillName::from("conventions")]
     );
 }
 
@@ -1045,4 +1055,238 @@ nodes:
         text.contains("go ahead") && text.contains("option id"),
         "the refusal names the value and what it had to be: {text}"
     );
+}
+
+/// A `scope:` pattern globset cannot compile is refused where it is
+/// read, not carried as a string until something tries to match with
+/// it: a ceiling nobody can evaluate is not a ceiling.
+#[test]
+fn an_invalid_glob_is_refused_at_parse() {
+    let yaml = r#"
+name: broken-scope
+nodes:
+  - id: edit
+    kind: prompt
+    prompt: do the thing
+    scope: ["src/[unclosed"]
+"#;
+    let error = serde_norway::from_str::<Workflow>(yaml)
+        .expect_err("a scope that does not compile should not parse");
+
+    let text = error.to_string();
+    assert!(
+        text.contains("src/[unclosed"),
+        "the refusal names the pattern: {text}"
+    );
+    assert!(
+        text.contains("scope glob"),
+        "the refusal names what it was reading: {text}"
+    );
+}
+
+// --- the reading door: a workflow comes with its rules ---------------
+
+mod reading {
+    use std::path::Path;
+
+    use yunta_core::workflow::read::read;
+
+    const PATH: &str = ".yunta/workflows/ship.yaml";
+
+    fn refuse(yaml: &str) -> String {
+        read(yaml, Path::new(PATH))
+            .expect_err("this workflow breaks a rule")
+            .to_string()
+    }
+
+    fn reads(yaml: &str) {
+        read(yaml, Path::new(PATH)).expect("this workflow is well formed");
+    }
+
+    #[test]
+    fn a_workflow_cannot_be_obtained_without_its_rules() {
+        // The defect this door closes: a workflow used to parse without
+        // anyone asking the graph anything, so a file with two nodes of
+        // one id reached a run and was found out at replay.
+        let two_of_one = "\
+name: ship
+nodes:
+  - { id: a, kind: bash, run: \"true\" }
+  - { id: a, kind: bash, run: \"false\" }
+";
+        assert!(serde_norway::from_str::<yunta_core::Workflow>(two_of_one).is_ok());
+        let text = refuse(two_of_one);
+        assert!(
+            text.contains("duplicate-id") || text.contains("already carries this id"),
+            "{text}"
+        );
+        assert!(
+            text.contains(PATH),
+            "a report names the file to fix: {text}"
+        );
+        assert!(text.contains("node `a`"), "and the node: {text}");
+    }
+
+    #[test]
+    fn a_reference_that_reaches_nothing_is_refused_wherever_it_is_written() {
+        for (yaml, field) in [
+            (
+                "name: ship\nnodes:\n  - { id: a, kind: bash, run: \"true\", depends_on: [ghost] }\n",
+                "depends_on",
+            ),
+            (
+                "name: ship\nnodes:\n  - id: a\n    kind: bash\n    run: \"true\"\n    \
+                 on_failure: { goto: ghost, max_reroutes: 1 }\n",
+                "on_failure.goto",
+            ),
+            (
+                "name: ship\nnodes:\n  - id: a\n    kind: gate\n    assignee: me\n    \
+                 options: [retry]\n    on: { retry: ghost }\n",
+                "on",
+            ),
+        ] {
+            let text = refuse(yaml);
+            assert!(text.contains("`ghost`"), "names what is missing: {text}");
+            assert!(text.contains(field), "and where it was written: {text}");
+        }
+    }
+
+    #[test]
+    fn two_parallel_children_never_reach_for_the_same_files() {
+        let text = refuse(
+            "\
+name: ship
+nodes:
+  - id: group
+    kind: parallel
+    nodes:
+      - { id: a, kind: bash, run: \"true\", scope: [\"src/**\"] }
+      - { id: b, kind: bash, run: \"true\", scope: [\"src/lib.rs\"] }
+",
+        );
+        assert!(text.contains("`a`") && text.contains("`b`"), "{text}");
+        assert!(text.contains("same files"), "{text}");
+
+        reads(
+            "\
+name: ship
+nodes:
+  - id: group
+    kind: parallel
+    nodes:
+      - { id: a, kind: bash, run: \"true\", scope: [\"src/**\"] }
+      - { id: b, kind: bash, run: \"true\", scope: [\"docs/**\"] }
+",
+        );
+    }
+
+    #[test]
+    fn a_mode_leaves_a_graph_that_still_runs() {
+        let nodes = "\
+nodes:
+  - { id: lint, kind: bash, run: \"true\", invariant: true }
+  - { id: ship, kind: bash, run: \"true\" }
+";
+        // A mode naming a node nobody declared.
+        let text = refuse(&format!(
+            "name: ship\n{nodes}modes:\n  quick:\n    include: [lint, ghost]\n"
+        ));
+        assert!(text.contains("`ghost`"), "{text}");
+
+        // A mode leaving out what the workflow cannot run without.
+        let text = refuse(&format!(
+            "name: ship\n{nodes}modes:\n  quick:\n    include: [ship]\n"
+        ));
+        assert!(
+            text.contains("invariant") && text.contains("quick"),
+            "{text}"
+        );
+
+        // A mode that keeps a node keeps what it reroutes to.
+        let text = refuse(
+            "\
+name: ship
+nodes:
+  - id: lint
+    kind: bash
+    run: \"true\"
+    on_failure: { goto: fix, max_reroutes: 2 }
+  - { id: fix, kind: bash, run: \"true\" }
+modes:
+  quick:
+    include: [lint]
+",
+        );
+        assert!(text.contains("`fix`") && text.contains("quick"), "{text}");
+
+        // `include: all` holds every one of those vacuously, and a mode
+        // that keeps both ends is fine.
+        reads(&format!(
+            "name: ship\n{nodes}modes:\n  full:\n    include: all\n  quick:\n    \
+             include: [lint, ship]\n"
+        ));
+    }
+
+    #[test]
+    fn a_reroute_from_a_node_the_mode_leaves_out_is_not_that_modes_problem() {
+        reads(
+            "\
+name: ship
+nodes:
+  - id: lint
+    kind: bash
+    run: \"true\"
+    on_failure: { goto: fix, max_reroutes: 2 }
+  - { id: fix, kind: bash, run: \"true\" }
+  - { id: ship, kind: bash, run: \"true\" }
+modes:
+  quick:
+    include: [ship]
+",
+        );
+    }
+
+    #[test]
+    fn a_fan_out_is_expanded_before_the_rules_read_the_graph() {
+        // `review` becomes one node per runner, and what depended on
+        // `review` depends on all of them — so the rules see the graph a
+        // run would build rather than the one the author typed.
+        let workflow = read(
+            "\
+name: ship
+nodes:
+  - { id: review, kind: prompt, runners: [a, b], prompt: \"look\" }
+  - { id: ship, kind: bash, run: \"true\", depends_on: [review] }
+",
+            Path::new(PATH),
+        )
+        .expect("a fan-out reads");
+        let ids: Vec<String> = workflow
+            .iter_nodes()
+            .map(|node| node.id.to_string())
+            .collect();
+        assert_eq!(ids, ["review@a", "review@b", "ship"]);
+        let ship = workflow
+            .nodes
+            .iter()
+            .find(|node| node.id.as_str() == "ship")
+            .expect("ship stands");
+        assert_eq!(
+            ship.depends_on
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>(),
+            ["review@a", "review@b"]
+        );
+    }
+
+    #[test]
+    fn bytes_that_are_not_a_workflow_fail_as_the_document_they_are_not() {
+        let text = refuse("name: ship\nnodes: \"not a list\"\n");
+        assert!(text.contains(PATH), "{text}");
+        assert!(
+            text.contains("nodes"),
+            "at the value that stopped it: {text}"
+        );
+    }
 }

@@ -133,7 +133,7 @@ fn intra_pack_composition_is_allowed_in_check() {
     let parent: Workflow =
         serde_norway::from_str(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
     let origin = origin_of(root.path(), &parent_path);
-    let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin);
+    let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin).errors;
     assert!(errors.is_empty(), "got: {errors:?}");
 }
 
@@ -164,7 +164,7 @@ fn cross_pack_composition_is_rejected_in_check() {
     let parent: Workflow =
         serde_norway::from_str(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
     let origin = origin_of(root.path(), &parent_path);
-    let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin);
+    let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin).errors;
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -196,7 +196,7 @@ fn a_pack_workflow_referencing_back_to_the_repo_is_also_rejected() {
     let parent: Workflow =
         serde_norway::from_str(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
     let origin = origin_of(root.path(), &parent_path);
-    let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin);
+    let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin).errors;
     assert!(
         errors
             .iter()
@@ -284,7 +284,8 @@ fn a_malformed_pack_manifest_fails_the_ceiling_check() {
         pack_name: "review-pack".parse().unwrap(),
     };
 
-    let errors = check_workflow_refs(&workflow, &ConfigLayer::default(), root.path(), &origin);
+    let errors =
+        check_workflow_refs(&workflow, &ConfigLayer::default(), root.path(), &origin).errors;
     assert!(
         errors.iter().any(|e| matches!(
             e,

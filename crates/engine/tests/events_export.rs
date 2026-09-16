@@ -4,54 +4,40 @@
 //! replay desde la DB."
 
 use yunta_core::events::{
-    EventBody, EventPayload, NodeFinishedPayload, NodeStartedPayload, RunCreatedPayload,
-    StoredEvent, TokenUsage,
+    EventPayload, NodeFinishedPayload, NodeStartedPayload, RunCreatedPayload, StoredEvent,
+    TokenUsage,
 };
+use yunta_core::events::{NodeEvent, RunEvent};
 use yunta_engine::{derive, render_events_jsonl};
-
-fn event(seq: u64, node_id: Option<&str>, payload: EventPayload) -> StoredEvent {
-    StoredEvent {
-        run_id: "run-1".into(),
-        seq: seq.into(),
-        timestamp: chrono::Utc::now(),
-        node_id: node_id.map(Into::into),
-        body: EventBody::Known(payload),
-    }
-}
+use yunta_testkit_core::Log;
 
 fn sample_events() -> Vec<StoredEvent> {
-    vec![
-        event(
-            1,
-            None,
-            EventPayload::RunCreated(RunCreatedPayload {
-                manifest_hash: yunta_core::sha256_hex(b"deadbeef"),
-                inputs: Default::default(),
-                mode: "default".into(),
-                promoted_from: None,
-                yunta_schema: None,
-                base_branch: "main".to_string(),
-                base_commit: "deadbeef".into(),
-            }),
-        ),
-        event(
-            2,
-            Some("lint"),
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
-        ),
-        event(
-            3,
-            Some("lint"),
-            EventPayload::NodeFinished(NodeFinishedPayload {
-                outcome: "criteria green".to_string(),
-                tokens_used: TokenUsage {
+    Log::for_run("run-1")
+        .event(EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+            manifest_hash: yunta_core::sha256_hex(b"deadbeef"),
+            inputs: Default::default(),
+            mode: "default".into(),
+            promoted_from: None,
+            yunta_schema: None,
+            base_branch: "main".to_string(),
+            base_commit: "deadbeef".into(),
+        })))
+        .node(
+            "lint",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .node(
+            "lint",
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "criteria green".to_string(),
+                TokenUsage {
                     input: 10,
                     output: 5,
                     cached: None,
                 },
-            }),
-        ),
-    ]
+            ))),
+        )
+        .build()
 }
 
 #[test]
@@ -83,14 +69,15 @@ fn deriving_from_the_jsonl_round_trip_matches_deriving_from_the_original_events(
     // uses (no proptest/quickcheck dependency in this workspace).
     let fixtures: Vec<Vec<StoredEvent>> = vec![
         sample_events(),
-        vec![event(
-            1,
-            Some("a"),
-            EventPayload::NodeFinished(NodeFinishedPayload {
-                outcome: "broken from the start".to_string(),
-                tokens_used: TokenUsage::default(),
-            }),
-        )],
+        Log::for_run("run-1")
+            .node(
+                "a",
+                EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                    "broken from the start".to_string(),
+                    TokenUsage::default(),
+                ))),
+            )
+            .build(),
         vec![],
     ];
 

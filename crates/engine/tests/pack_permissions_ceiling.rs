@@ -35,7 +35,7 @@ fn check(root: &Path, publisher: &str, pack_name: &str, workflow_yaml: &str) -> 
     write(&path, workflow_yaml);
     let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
     let origin = origin_of(root, &path);
-    check_workflow_refs(&workflow, &ConfigLayer::default(), root, &origin)
+    check_workflow_refs(&workflow, &ConfigLayer::default(), root, &origin).errors
 }
 
 #[test]
@@ -123,7 +123,8 @@ fn a_repo_origin_workflow_has_no_ceiling_to_enforce() {
     let workflow: Workflow = serde_norway::from_str(text).unwrap();
     let origin = origin_of(root.path(), &path);
 
-    let errors = check_workflow_refs(&workflow, &ConfigLayer::default(), root.path(), &origin);
+    let errors =
+        check_workflow_refs(&workflow, &ConfigLayer::default(), root.path(), &origin).errors;
     assert!(errors.is_empty(), "got: {errors:?}");
 }
 
@@ -147,7 +148,7 @@ fn a_node_exceeding_the_ceiling_inside_a_composed_child_is_also_caught() {
     let parent: Workflow = serde_norway::from_str(parent_text).unwrap();
     let origin = origin_of(root.path(), &parent_path);
 
-    let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin);
+    let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin).errors;
     assert!(
         errors.iter().any(|e| matches!(
             e,

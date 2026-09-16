@@ -10,7 +10,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::TaskId;
-use crate::{FindingId, QuestionId};
+use crate::{FindingId, NodeId, QuestionId};
 
 /// One entry of a document: by name when its id parsed, by position
 /// when the id is the thing that could not be read.
@@ -66,9 +66,10 @@ pub enum Subject {
     },
     Finding(Named<FindingId>),
     Question(Named<QuestionId>),
+    /// A node of a workflow, for a rule about the graph the file
+    /// declares.
+    Node(Named<NodeId>),
 }
-
-impl Subject {}
 
 /// `the first task`, `the 5th finding` — how an entry is named when its
 /// own id could not be read.
@@ -103,6 +104,7 @@ impl fmt::Display for Subject {
             }
             Subject::Finding(finding) => f.write_str(&finding.render("finding")),
             Subject::Question(question) => f.write_str(&question.render("question")),
+            Subject::Node(node) => f.write_str(&node.render("node")),
         }
     }
 }

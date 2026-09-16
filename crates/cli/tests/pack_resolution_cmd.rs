@@ -59,7 +59,7 @@ fn setup() -> (
 fn yunta_run_resolves_a_bare_publisher_slash_name_against_an_installed_pack() {
     let (_root, _upstream, repo, home) = setup();
 
-    let run_out = yunta_in!(&repo, &home, &["run", "acme/review", "--follow"]);
+    let run_out = yunta_in!(&repo, &home, &["run", "acme/review"]);
     assert!(run_out.status.success(), "{}", stderr(&run_out));
     assert!(
         stdout(&run_out).contains("finished"),

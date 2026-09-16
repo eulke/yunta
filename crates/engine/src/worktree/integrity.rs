@@ -41,6 +41,7 @@ use std::path::{Path, PathBuf};
 use yunta_core::{CommitSha, Isolation, RunId};
 
 use super::{head_commit, run_branch, WorktreeError};
+use crate::process::Supervision;
 
 /// The worktree a run works in, exactly as the run's manifest froze it.
 #[derive(Debug, Clone, Copy)]
@@ -82,9 +83,12 @@ impl WorktreeIntegrity {
     /// Errors when there is no working tree at the frozen path to ask —
     /// the run's own evidence is untouched in that case, so the remedy is
     /// to put the checkout back, which the error says how to do.
-    pub async fn of(run: RunWorktree<'_>) -> Result<Self, WorktreeError> {
-        require_working_tree(run).await?;
-        let head = head_commit(run.path).await?;
+    pub async fn of(
+        run: RunWorktree<'_>,
+        supervision: Supervision<'_>,
+    ) -> Result<Self, WorktreeError> {
+        require_working_tree(run, supervision).await?;
+        let head = head_commit(run.path, supervision).await?;
         // A non-zero exit is the answer "no", not a failure: git says the
         // same when the base commit is not an ancestor and when this
         // repository does not have that commit at all, and both mean the
@@ -97,16 +101,10 @@ impl WorktreeIntegrity {
                 run.base_commit.as_str(),
                 head.as_str(),
             ],
+            supervision,
         )
         .await
-        .map_err(|e| {
-            let detail = e.detail();
-            WorktreeError::Git {
-                args: e.args,
-                cwd: e.cwd,
-                detail,
-            }
-        })?;
+        .map_err(WorktreeError::Git)?;
         Ok(WorktreeIntegrity {
             run_id: run.run_id.clone(),
             path: run.path.to_path_buf(),
@@ -175,7 +173,10 @@ impl WorktreeIntegrity {
 
 /// The identity half: there is a directory at the frozen path, and git
 /// knows it as a working tree.
-async fn require_working_tree(run: RunWorktree<'_>) -> Result<(), WorktreeError> {
+async fn require_working_tree(
+    run: RunWorktree<'_>,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
     let present = tokio::fs::try_exists(run.path)
         .await
         .map_err(|source| WorktreeError::Io {
@@ -184,7 +185,13 @@ async fn require_working_tree(run: RunWorktree<'_>) -> Result<(), WorktreeError>
             source,
         })?;
     let detail = if present {
-        match crate::git::output(run.path, &["rev-parse", "--is-inside-work-tree"]).await {
+        match crate::git::output(
+            run.path,
+            &["rev-parse", "--is-inside-work-tree"],
+            supervision,
+        )
+        .await
+        {
             Ok(answer) if answer.trim() == "true" => return Ok(()),
             Ok(answer) => format!("git answers `{}` there, not `true`", answer.trim()),
             Err(e) => e.detail(),

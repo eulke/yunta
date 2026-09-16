@@ -29,7 +29,7 @@ fn a_node_refuses_an_unknown_key_and_names_every_one_at_once() {
     );
     assert_eq!(
         text,
-        "`nodes[0]`: nodes: node `plan`: unknown key(s) `depend_on`, `scpe` for a `prompt` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `interactive`, `invariant`, `kind`, `prompt` at line 3 column 3"
+        "`nodes[0]`: nodes: node `plan`: unknown key(s) `depend_on`, `scpe` for a `prompt` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `invariant`, `kind`, `prompt` at line 3 column 3"
     );
 }
 
@@ -39,7 +39,7 @@ fn a_node_key_that_belongs_to_another_kind_is_refused() {
         err::<Workflow>("name: w\nnodes:\n  - id: a\n    kind: bash\n    run: x\n    prompt: p\n");
     assert_eq!(
         text,
-        "`nodes[0]`: nodes: node `a`: unknown key(s) `prompt` for a `bash` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `interactive`, `invariant`, `kind`, `run` at line 3 column 3"
+        "`nodes[0]`: nodes: node `a`: unknown key(s) `prompt` for a `bash` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `invariant`, `kind`, `run` at line 3 column 3"
     );
 }
 
@@ -50,7 +50,22 @@ fn role_and_fresh_context_are_refused_with_the_key_that_replaces_them() {
     );
     assert_eq!(
         text,
-        "`nodes[0]`: nodes: node `a`: unknown key(s) `role`, `fresh_context` for a `prompt` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `interactive`, `invariant`, `kind`, `prompt`; `role`: a node names its runner with `runner:`; `fresh_context`: every session starts fresh; `on_interrupt: resume_session` reuses one only when a run resumes at line 3 column 3"
+        "`nodes[0]`: nodes: node `a`: unknown key(s) `role`, `fresh_context` for a `prompt` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `invariant`, `kind`, `prompt`; `role`: a node names its runner with `runner:`; `fresh_context`: every session starts fresh; `on_interrupt: resume_session` reuses one only when a run resumes at line 3 column 3"
+    );
+}
+
+/// `interactive` said how a node's questions were presented; a node that
+/// declares `questions` says everything there is to say, and whichever
+/// surface is watching decides the rest.
+#[test]
+fn interactive_is_refused_with_the_reason_it_no_longer_exists() {
+    let text = err::<Workflow>(
+        "name: w\nnodes:\n  - id: a\n    kind: prompt\n    prompt: p\n    interactive: true\n",
+    );
+    assert!(
+        text.contains("unknown key(s) `interactive`")
+            && text.contains("a node that declares `questions` asks them"),
+        "{text}"
     );
 }
 
@@ -93,8 +108,8 @@ fn an_artifact_and_a_prompt_file_refuse_unknown_keys() {
     assert_eq!(
         text,
         "`nodes[0]`: nodes: node `a`: `artifacts.produces[0]`: an artifact is a file name, or \
-         one of `tasks`, `findings`, `questions` for a document the engine reads, not a \
-         mapping at line 3 column 3"
+         one of `tasks`, `findings`, `questions`, `answers` for a document the engine reads, \
+         not a mapping at line 3 column 3"
     );
 }
 
@@ -159,12 +174,26 @@ fn a_tasks_document_refuses_unknown_keys_on_tasks_and_criteria() {
     );
     assert_eq!(
         text,
-        "`tasks[0].titel`: tasks[0]: unknown field `titel`, expected one of `id`, `title`, `scope`, `criteria`, `depends_on`, `notes`, `manual_review`, `justification` at line 3 column 5"
+        "`tasks[0].titel`: tasks[0]: unknown field `titel`, expected one of `id`, `title`, `scope`, `criteria`, `depends_on`, `notes` at line 3 column 5"
     );
     let text = err::<TasksFile>("tasks:\n  - id: t\n    title: x\n    scope: [a]\n    criteria: [{ cmd: true, typ: guard }]\n");
     assert_eq!(
         text,
         "`tasks[0].criteria[0].typ`: tasks[0].criteria[0]: unknown field `typ`, expected `cmd` or `type` at line 5 column 29"
+    );
+}
+
+/// A task's `criteria` are its whole verification, and what no command can
+/// settle goes behind a `gate`, where a person decides. A document that asks
+/// for a judge instead is refused with the key it wrote.
+#[test]
+fn a_task_that_asks_to_be_reviewed_by_hand_is_refused_with_the_key_it_wrote() {
+    let text = err::<TasksFile>(
+        "tasks:\n  - id: t\n    title: x\n    scope: [a]\n    criteria: [{ cmd: \"cargo test\" }]\n    manual_review: true\n    justification: \"no command reads prose\"\n",
+    );
+    assert_eq!(
+        text,
+        "`tasks[0].manual_review`: tasks[0]: unknown field `manual_review`, expected one of `id`, `title`, `scope`, `criteria`, `depends_on`, `notes` at line 6 column 5"
     );
 }
 

@@ -2,11 +2,8 @@
 //! every one of them, so an author fixes the file in one pass.
 
 use std::path::PathBuf;
-use std::process::Command;
 
-fn yunta() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_yunta"))
-}
+use yunta_testkit::yunta_in;
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -16,15 +13,22 @@ fn fixture(name: &str) -> PathBuf {
 
 #[test]
 fn check_names_every_unknown_key_of_a_node_with_the_key_that_replaces_it() {
-    let out = yunta()
-        .args(["check", fixture("typo-keys.yaml").to_str().unwrap()])
-        .output()
-        .unwrap();
+    // The file names itself: the command runs from an empty directory
+    // with a home of its own, so nothing the developer's machine holds
+    // — a project config beside the invocation, a `~/.yunta` — decides
+    // what the parser sees.
+    let dir = tempfile::tempdir().unwrap();
+    let path = fixture("typo-keys.yaml");
+    let out = yunta_in!(
+        dir.path(),
+        &dir.path().join("home"),
+        &["check", path.to_str().unwrap()]
+    );
     assert!(
         !out.status.success(),
         "a workflow with unknown keys must not pass check"
     );
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let stderr = yunta_testkit::stderr(&out);
     assert!(
         stderr.contains("typo-keys.yaml"),
         "the file is named: {stderr}"

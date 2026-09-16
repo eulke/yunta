@@ -11,7 +11,8 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::{
-    EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload, TokenUsage,
+    EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload,
+    QuestionsAskedPayload, TokenUsage,
 };
 use yunta_core::{HookFailurePolicy, Node, RunId};
 
@@ -19,11 +20,12 @@ use crate::artifacts::close_artifacts;
 use crate::scope::scope_check;
 
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};
-use super::node_artifacts::{
-    acquire_from_child, derive_findings, pending_questions, record_artifacts,
-};
+use super::node_artifacts::{acquire_from_child, asked, derive_findings, record_artifacts};
 use super::node_exec::{render_artifact_names, NodeEnd};
 use super::{RunCtx, RunError};
+use yunta_core::events::ArtifactId;
+use yunta_core::events::{GateEvent, NodeEvent};
+use yunta_core::{ArtifactKind, ContentHash, NodeId};
 
 /// The child run a `kind: workflow` node closes on: what it produced is
 /// what that node produced, and the run's log is where that is stated.
@@ -113,7 +115,7 @@ pub(super) async fn close_node(
     }
 
     // An opaque artifact's name can carry a template
-    // (`report-{{runner.role}}.md`) — rendered per node so every fan-out
+    // (`report-{{runner.name}}.md`) — rendered per node so every fan-out
     // sibling verifies its own file. A document the engine reads has no
     // name to render: its kind is its identity, in every sibling.
     let node_rendered = match render_artifact_names(ctx, node) {
@@ -151,7 +153,8 @@ pub(super) async fn close_node(
     let (verified, standing) = match &acquired {
         Some(acquired) => (acquired.verified.as_slice(), Some(&acquired.standing)),
         None => {
-            own = match close_artifacts(node, ctx.run_dir, &ctx.load_events().await?, ceiling) {
+            own = match close_artifacts(node, ctx.run_dir, &ctx.load_events().await?, ceiling).await
+            {
                 Ok(verified) => verified,
                 Err(failures) => {
                     return fail_with(ctx, node, Failure::artifacts(failures), false, tokens).await
@@ -162,29 +165,85 @@ pub(super) async fn close_node(
     };
 
     record_artifacts(ctx, node, verified, standing).await?;
-    let pending = pending_questions(verified);
-    if !pending.is_empty() {
-        return fail_with_tokens(
-            ctx,
-            node,
-            format!(
-                "node `{}` asked {} question(s) awaiting an answer: {}",
-                node.id,
-                pending.len(),
-                pending.join(", ")
-            ),
-            false,
-            tokens,
-        )
-        .await;
+    // A node that asked has done its work: what is left is an answer,
+    // and that is a person's to give. It closed here like every other
+    // node — hooks, scope, artifacts — and the fact it records instead
+    // of a terminal is what makes the wait a wait rather than a failure
+    // read as one.
+    match asked(verified) {
+        Some(questions) => {
+            // The hash the fact names is the one the run's own store
+            // answers for, read back off the log rather than taken from
+            // the bytes the close happened to hold: the round that
+            // follows resolves the same acceptance, and one number that
+            // came from two places is one that can disagree with itself.
+            let questions_hash = held_questions(ctx, &node.id).await?;
+            match QuestionsAskedPayload::new(questions_hash, questions, tokens) {
+                Some(payload) => {
+                    ctx.emit(
+                        Some(&node.id),
+                        EventPayload::Gates(GateEvent::QuestionsAsked(payload)),
+                    )
+                    .await?;
+                    write_progress(ctx).await?;
+                    Ok(NodeEnd::Asked)
+                }
+                // A questions document with no questions asked nothing.
+                // Its answers still exist, empty and the engine's own,
+                // so the node after it mounts what it declared to mount.
+                None => {
+                    crate::answers::record_nothing_asked(&ctx.log(), ctx.run_dir, &node.id)
+                        .await
+                        .map_err(|source| RunError::Broken {
+                            diagnostic: source.to_string(),
+                        })?;
+                    finish_node(ctx, node, close.outcome, tokens).await
+                }
+            }
+        }
+        None => finish_node(ctx, node, close.outcome, tokens).await,
     }
+}
 
+/// The hash the run holds `node`'s questions document under.
+///
+/// Read from the log, which is the run's only answer to what it holds:
+/// the round that answers these questions resolves the same acceptance
+/// and compares the two, so both have to come from there.
+async fn held_questions(ctx: &RunCtx<'_>, node: &NodeId) -> Result<ContentHash, RunError> {
+    let events = ctx.load_events().await?;
+    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
+    held.held(
+        &ArtifactId::Interpreted {
+            kind: ArtifactKind::Questions,
+        },
+        Some(node),
+    )
+    .map(|found| found.content_hash.clone())
+    .ok_or_else(|| RunError::Broken {
+        diagnostic: format!("node `{node}` handed over a questions document the run does not hold"),
+    })
+}
+
+/// The one place `node_finished` is written.
+///
+/// Every way a node reaches its end passes through here — the close that
+/// verified what it declared, and the round that recorded the answer a
+/// node was waiting on — so a node has exactly one terminal however it
+/// got there, and `progress.md` is regenerated in one place rather than
+/// at each site that could finish something.
+pub(super) async fn finish_node(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    outcome: impl Into<String>,
+    tokens: TokenUsage,
+) -> Result<NodeEnd, RunError> {
     ctx.emit(
         Some(&node.id),
-        EventPayload::NodeFinished(NodeFinishedPayload {
-            outcome: close.outcome,
-            tokens_used: tokens,
-        }),
+        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+            outcome.into(),
+            tokens,
+        ))),
     )
     .await?;
     write_progress(ctx).await?;
@@ -209,18 +268,30 @@ async fn scope_violation(
     let Some(scope) = crate::audited_scope(node) else {
         return Ok(None);
     };
-    let result = scope_check(ctx.worktree, scope, staged).await?;
+    let result = scope_check(ctx.worktree, scope, staged, ctx.root_supervision()).await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::ScopeChecked(yunta_core::events::ScopeCheckedPayload {
-            task_id: None,
-            diff: result.diff.clone(),
-            violations: result.violations.clone(),
-        }),
+        EventPayload::Node(NodeEvent::ScopeChecked(
+            yunta_core::events::ScopeCheckedPayload {
+                task_id: None,
+                diff: result.diff.clone(),
+                violations: result.violations.clone(),
+            },
+        )),
     )
     .await?;
     if result.violations.is_empty() {
         return Ok(None);
+    }
+    // A write the adapter said it judged before it happened, and which
+    // reached the diff anyway: the adapter answers for it, beside the
+    // failure the violation causes either way.
+    let coverage = ctx.last_coverage(&node.id).await?;
+    if let Some(breach) = crate::scope::fence_breach(coverage.as_ref(), &result) {
+        let adapter = ctx.resolved_adapter(&node.id).await?;
+        if let Some(adapter) = adapter {
+            ctx.record_breach(&node.id, &adapter, &breach).await?;
+        }
     }
     Ok(Some(
         fail_with_tokens(
@@ -252,10 +323,12 @@ pub(super) async fn fail(
 pub(super) async fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     let events = ctx.load_events().await?;
     let markdown = crate::progress::render_progress(&ctx.manifest.workflow, &events);
-    std::fs::write(ctx.run_dir.join("progress.md"), markdown).map_err(|source| RunError::Io {
-        context: "write progress.md".to_string(),
-        source,
-    })
+    tokio::fs::write(crate::run_dir::progress_path(ctx.run_dir), markdown)
+        .await
+        .map_err(|source| RunError::Io {
+            context: "write progress.md".to_string(),
+            source,
+        })
 }
 
 /// Fails a node with a failure the engine states in one sentence — a
@@ -285,7 +358,9 @@ pub(super) async fn fail_with(
 ) -> Result<NodeEnd, RunError> {
     ctx.emit(
         Some(&node.id),
-        EventPayload::NodeFailed(NodeFailedPayload::new(failure, retryable, tokens)),
+        EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+            failure, retryable, tokens,
+        ))),
     )
     .await?;
     Ok(NodeEnd::Failed)

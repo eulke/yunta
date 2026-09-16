@@ -37,45 +37,80 @@
 //! could be, not wider than what's confirmed.
 
 use serde_json::Value;
-use yunta_core::{sha256_hex, SessionId};
+use yunta_core::SessionId;
 
 use crate::failure;
-use crate::session::{AgentError, AgentEvent, AgentOutcome};
+use yunta_core::events::ToolTarget;
+use yunta_core::fence::Coverage;
+use yunta_core::port::{AgentError, AgentEvent, AgentOutcome};
 
-pub(super) fn parse_line(line: &str, last_message: &str) -> Vec<AgentEvent> {
-    let Ok(value) = serde_json::from_str::<Value>(line) else {
+/// One `codex exec --json` event, by the `type` it declares — the same
+/// closed set `ThreadEvent` defines, as this module's own doc
+/// transcribes it.
+///
+/// Tagged rather than matched on a string, so a line outside the set has
+/// a name. `Unknown` is that name: `turn.started`, `item.started` and
+/// `item.updated` are kinds this adapter deliberately does not act on,
+/// and a kind the CLI adds later lands here too — tolerated and named,
+/// never mistaken for something else.
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "type")]
+enum ThreadEvent {
+    #[serde(rename = "thread.started")]
+    ThreadStarted(Value),
+    #[serde(rename = "item.completed")]
+    ItemCompleted(Value),
+    #[serde(rename = "turn.completed")]
+    TurnCompleted(Value),
+    #[serde(rename = "turn.failed")]
+    TurnFailed { error: Option<Value> },
+    #[serde(rename = "error")]
+    Error(Value),
+    #[serde(other)]
+    Unknown,
+}
+
+pub(super) fn parse_line(line: &str, last_message: &str, fence: &Coverage) -> Vec<AgentEvent> {
+    // A line that is not JSON at all is not this protocol: the stream
+    // carries whatever the CLI wrote to stdout, warnings included.
+    let Ok(parsed) = serde_json::from_str::<ThreadEvent>(line) else {
         return Vec::new();
     };
-    match value.get("type").and_then(Value::as_str) {
-        Some("thread.started") => thread_started(&value).into_iter().collect(),
-        Some("item.completed") => item_completed(&value).into_iter().collect(),
-        Some("turn.completed") => turn_completed(&value, last_message),
-        Some("turn.failed") => vec![failed(value.get("error"), "turn failed")],
-        Some("error") => vec![failed(Some(&value), "the CLI reported an error")],
-        // "turn.started", "item.started"/"item.updated" (this adapter
-        // only acts once an item is done) and anything future: nothing
-        // this adapter needs.
-        _ => Vec::new(),
+    match parsed {
+        ThreadEvent::ThreadStarted(value) => thread_started(&value, fence).into_iter().collect(),
+        ThreadEvent::ItemCompleted(value) => item_completed(&value).into_iter().collect(),
+        ThreadEvent::TurnCompleted(value) => turn_completed(&value, last_message),
+        ThreadEvent::TurnFailed { error } => vec![failed(error.as_ref(), "turn failed")],
+        ThreadEvent::Error(value) => vec![failed(Some(&value), "the CLI reported an error")],
+        ThreadEvent::Unknown => Vec::new(),
     }
 }
 
 /// `thread.started` names the session; a thread id that cannot be one
 /// fails the session explicitly instead of opening it under a name
 /// nothing can resume.
-fn thread_started(value: &Value) -> Option<AgentEvent> {
+fn thread_started(value: &Value, fence: &Coverage) -> Option<AgentEvent> {
     let thread_id = value.get("thread_id")?.as_str()?;
     Some(match thread_id.parse::<SessionId>() {
         Ok(session_id) => AgentEvent::SessionOpened {
             session_id,
             model: None,
+            fence: Some(fence.clone()),
         },
         Err(error) => AgentEvent::Failed {
-            error: AgentError {
-                message: format!("the CLI's `thread.started` line is malformed: {error}"),
-            },
+            // The failure keeps what rejected the id, so a reader
+            // following the chain reaches the rule the value broke.
+            error: AgentError::caused_by("the CLI's `thread.started` line is malformed", error),
             retryable: false,
         },
     })
+}
+
+/// Whether a finished process item is one the sandbox refused. The CLI
+/// says so in the item's own status; a command that merely exited
+/// non-zero did run.
+fn sandbox_denied(item: &Value) -> bool {
+    item.get("status").and_then(Value::as_str) == Some("sandbox_denied")
 }
 
 fn item_completed(value: &Value) -> Option<AgentEvent> {
@@ -84,21 +119,26 @@ fn item_completed(value: &Value) -> Option<AgentEvent> {
         "agent_message" => Some(AgentEvent::Note {
             text: item.get("text")?.as_str()?.to_string(),
         }),
+        // A command the sandbox refused is a write that did not
+        // happen, not activity to chronicle as a tool call.
+        "command_execution" if sandbox_denied(item) => Some(AgentEvent::WriteRefused {
+            target: opaque_field(item, "command"),
+        }),
         "command_execution" => Some(AgentEvent::ToolUse {
             name: "command_execution".to_string(),
-            target_digest: field_or_hash(item, "command"),
+            target: opaque_field(item, "command"),
         }),
         "file_change" => Some(AgentEvent::ToolUse {
             name: "file_change".to_string(),
-            target_digest: file_change_digest(item),
+            target: file_change_target(item),
         }),
         "mcp_tool_call" => Some(AgentEvent::ToolUse {
             name: "mcp_tool_call".to_string(),
-            target_digest: mcp_tool_call_digest(item),
+            target: mcp_tool_call_target(item),
         }),
         "web_search" => Some(AgentEvent::ToolUse {
             name: "web_search".to_string(),
-            target_digest: field_or_hash(item, "query"),
+            target: opaque_field(item, "query"),
         }),
         // "reasoning", "todo_list", "error" (mid-turn, non-fatal): not
         // operator-facing tool activity — see this module's own doc.
@@ -106,34 +146,42 @@ fn item_completed(value: &Value) -> Option<AgentEvent> {
     }
 }
 
-fn field_or_hash(item: &Value, key: &str) -> String {
+/// The field this kind of item acts on, identified and never shown: it
+/// is the session's own text, which the engine cannot vouch for. The
+/// whole item stands in when the field is absent.
+fn opaque_field(item: &Value, key: &str) -> ToolTarget {
     match item.get(key).and_then(Value::as_str) {
-        Some(s) => s.to_string(),
-        None => sha256_hex(item.to_string().as_bytes()).to_string(),
+        Some(found) => ToolTarget::opaque(found.as_bytes()),
+        None => ToolTarget::opaque(item.to_string().as_bytes()),
     }
 }
 
 /// `changes` is a list (a single `file_change` item can touch several
-/// paths at once) — the first path is the representative digest, same
-/// "pick one meaningful field" convention `claude_code::parse` uses for
-/// its own multi-field tool inputs.
-fn file_change_digest(item: &Value) -> String {
+/// paths at once) — the first path represents the call, the same "pick
+/// one meaningful field" convention `claude_code::parse` uses. A path
+/// names the repository, so it is shown.
+fn file_change_target(item: &Value) -> ToolTarget {
     item.get("changes")
         .and_then(Value::as_array)
         .and_then(|changes| changes.first())
         .and_then(|change| change.get("path"))
         .and_then(Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(|| sha256_hex(item.to_string().as_bytes()).to_string())
+        .map(|path| ToolTarget::of_path(std::path::Path::new(path)))
+        .unwrap_or_else(|| ToolTarget::opaque(item.to_string().as_bytes()))
 }
 
-fn mcp_tool_call_digest(item: &Value) -> String {
+/// Which server and which tool — names the workflow itself declares, so
+/// a reader may see them.
+fn mcp_tool_call_target(item: &Value) -> ToolTarget {
     match (
         item.get("server").and_then(Value::as_str),
         item.get("tool").and_then(Value::as_str),
     ) {
-        (Some(server), Some(tool)) => format!("{server}:{tool}"),
-        _ => sha256_hex(item.to_string().as_bytes()).to_string(),
+        (Some(server), Some(tool)) => ToolTarget {
+            digest: yunta_core::sha256_hex(format!("{server}:{tool}").as_bytes()),
+            display: Some(format!("{server}:{tool}")),
+        },
+        _ => ToolTarget::opaque(item.to_string().as_bytes()),
     }
 }
 
@@ -141,8 +189,8 @@ fn turn_completed(value: &Value, last_message: &str) -> Vec<AgentEvent> {
     let mut events = Vec::new();
     if let Some(usage) = value.get("usage") {
         events.push(AgentEvent::Usage {
-            input_tokens: field_u64(usage, "input_tokens"),
-            output_tokens: field_u64(usage, "output_tokens"),
+            input_tokens: usage.get("input_tokens").and_then(Value::as_u64),
+            output_tokens: usage.get("output_tokens").and_then(Value::as_u64),
             // The real `Usage` struct always sends this field (no
             // `#[serde(default)]` on it, unlike `cache_write_input_tokens`)
             // — `Option` here is yunta's own `Usage` type accommodating
@@ -172,11 +220,7 @@ fn failed(carrier: Option<&Value>, fallback: &str) -> AgentEvent {
         );
     let retryable = failure::classify(&message).retryable();
     AgentEvent::Failed {
-        error: AgentError { message },
+        error: AgentError::message(message),
         retryable,
     }
-}
-
-fn field_u64(value: &Value, key: &str) -> u64 {
-    value.get(key).and_then(Value::as_u64).unwrap_or(0)
 }

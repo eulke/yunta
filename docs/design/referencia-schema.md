@@ -82,12 +82,12 @@ permissions:                        # techo; las capas inferiores solo estrechan
     default: true
 
 limits:
-  max_tokens_per_run: 2_000_000
+  max_tokens_per_run: 2000000
   max_loop_iterations: 12
   max_concurrent_runs: 3
   max_workflow_depth: 4
-  max_artifact_bytes: 50_000_000    # guardia contra accidentes (§4)
-  inline_context_bytes: 32_000      # sobre este umbral, el contexto se monta por referencia (§9.1)
+  max_artifact_bytes: 50000000    # guardia contra accidentes (§4)
+  inline_context_bytes: 32000      # sobre este umbral, el contexto se monta por referencia (§9.1)
 
 pricing:                            # opcional — sin esto, stats y recibo son solo tokens (§8.4)
   claude-opus-4-8: { cost_per_1k_tokens: 0.015 }
@@ -111,8 +111,8 @@ inputs:
 
 modes:                              # nombres y cantidad libres del autor (§10.1);
                                     # el orden declara la escalera de promoción
-  quick:    { include: [grill, plan, implement, lint, fix-lint, tests, ship, pr] }
-  standard: { include: [grill, plan, approve-plan, implement, lint, fix-lint, tests, review, fix-findings, ship, pr] }
+  quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, ship, pr] }
+  standard: { include: [grill, brief, plan, approve-plan, implement, lint, fix-lint, tests, review, fix-findings, ship, pr] }
   full:     { include: all }
 
 node_defaults:
@@ -125,20 +125,32 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     kind: prompt
     runner: planner
     skills: [grill]
-    interactive: true               # §4.1 — dato de presentación: cómo se muestran las preguntas
     prompt: |
       Identificá las ambigüedades de "{{inputs.idea}}" y escribí las preguntas
-      necesarias como artifact; no converses. Con las respuestas, escribí el brief.
+      necesarias como artifact; no converses.
     artifacts:
-      produces: [questions, brief.md]
+      produces: [questions]         # §4.1 — un nodo que pregunta no declara nada más
+
+  - id: brief
+    kind: prompt
+    runner: planner
+    depends_on: [grill]
+    context:
+      - artifact: { node: grill, kind: questions }
+      - artifact: { node: grill, kind: answers }
+    prompt: |
+      Escribí el brief de "{{inputs.idea}}" a partir de las preguntas y sus
+      respuestas.
+    artifacts:
+      produces: [brief.md]
 
   - id: plan
     kind: prompt
     runner: planner
     permissions: read-only
-    depends_on: [grill]
+    depends_on: [brief]
     context:
-      - artifact: { node: grill, name: brief.md }
+      - artifact: { node: brief, name: brief.md }
       - knowledge: {}
       - files: ["docs/architecture.md"]
       - command: "git log --oneline -20"
@@ -279,8 +291,9 @@ nodes:
 El cliente lanza `yunta mcp` como subproceso por stdio; tools expuestas:
 `list_workflows` (catálogo vivo del repo y de packs: nombre, descripción, inputs,
 modos), `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`. Además
-existe el **MCP por-run** (endpoint que el engine pasa en
-`SessionRequest.run_tools_endpoint`) con tools de scope de run: `yunta_post_finding`,
+existe el **MCP por-run**, que el engine monta él mismo en cada sesión bajo el
+nombre `yunta-run` (endpoint que pasa en `SessionRequest.run_tools_endpoint`), con
+tools de scope de run: `yunta_post_finding`,
 `yunta_get_blackboard`, `yunta_task_status`, `yunta_request_scope_expansion`.
 
 Para que el agente cliente sepa **cuándo** usar todo esto, `yunta init` instala una
@@ -317,13 +330,17 @@ que siempre está al día.
   kind en todo run que lo tenga, así que `as:` al lado de un `kind:` se rechaza al
   leer el workflow.
 - **Variables de template**: lo que un nodo puede escribir entre `{{ }}` en su
-  prompt, su `run:`, sus hooks y sus patrones de `context:` — `{{run.dir}}`,
-  `{{run.worktree}}`, `{{run.branch}}`, `{{node.artifacts}}` (el directorio propio
-  del nodo, donde escribe lo que declara), `{{runner.role}}` cuando el nodo declara
-  un runner, `{{project.name}}`/`{{project.base_branch}}`/`{{project.branch_prefix}}`
-  según lo que declare `project:`, y un `{{inputs.<nombre>}}` por input declarado.
-  Una variable que no está definida ahí falla el nodo nombrándola; `yunta check`
-  además rechaza estáticamente todo `{{inputs.x}}` que `inputs:` no declare.
+  prompt, su `run:`, sus hooks y sus patrones de `context:`. El conjunto es cerrado
+  (`TemplateVar`): `{{run.dir}}`, `{{run.worktree}}`, `{{run.branch}}`,
+  `{{run.staging}}` (la raíz bajo la que cuelga el staging de cada nodo),
+  `{{node.artifacts}}` (el directorio propio del nodo, donde escribe lo que
+  declara), `{{node.id}}`, `{{runner.name}}` cuando el nodo declara un runner,
+  `{{project.name}}`/`{{project.base_branch}}`/`{{project.branch_prefix}}` según lo
+  que declare `project:`, y un `{{inputs.<nombre>}}` por input declarado. Un nombre
+  que no es ninguna de esas no es una variable y se rechaza al leer el template,
+  nombrando las que existen; una variable del conjunto que nadie definió en ese
+  sitio falla el nodo nombrándola; `yunta check` además rechaza estáticamente todo
+  `{{inputs.x}}` que `inputs:` no declare.
 - **`skills:` vs `context:`**: propiedades separadas por diseño. `context:` inyecta
   datos (sobre qué trabajar) vía `ContextSource`; `skills:` monta instrucciones y
   capacidades (cómo trabajar) por el mecanismo nativo del adapter. La sintaxis
@@ -337,6 +354,7 @@ que siempre está al día.
     runner: reviewer
     agent: security-auditor
     permissions: read-only
+    prompt: "Auditá los cambios y reportá cada hallazgo de seguridad."
   ```
 
   En workflows compartidos, preferir el agente en los candidatos del runner

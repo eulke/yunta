@@ -37,10 +37,38 @@ tokio = { workspace = true, features = ["rt", "macros", "signal", "time", "proce
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+# Every column a rendered line draws is measured in display cells, which
+# is not the number of characters: a CJK node id takes two cells per
+# character, most emoji take two, and a combining mark takes none. This
+# is the table that says which, so a label cut to fit stays exactly as
+# wide as the column it sits in and every column after it stays aligned.
+unicode-width.workspace = true
+# The live view's pinned region: a few lines of plain text held at the
+# bottom of the terminal while finished work scrolls above them into the
+# terminal's own history. It draws to stderr, leaving stdout for whatever
+# a caller pipes, and it goes silent by itself when that stream is not a
+# terminal. It takes no alternate screen, no raw mode and no mouse
+# capture, which is what leaves the operator's scrollback, text selection
+# and typed Ctrl-C exactly as they were.
+indicatif.workspace = true
+# The prompts a gate and a questions artifact need: a list whose options
+# each carry their tradeoff, answerable by arrow or by typing, and a
+# line of free text. `fuzzy-select` is the variant that accepts both at
+# once. It re-raises SIGINT on Ctrl-C, so the interrupt keeps arriving
+# through the one cancellation bridge instead of becoming a second
+# source of truth about whether a person stopped the run.
+dialoguer = { workspace = true, features = ["fuzzy-select"] }
 # `ConsoleInteraction` implements `yunta_engine::HumanInteraction`, whose
 # method is dyn-safe async — same reason yunta-engine/yunta-adapters
 # already depend on this.
 async-trait.workspace = true
+# A prompt's key read turns the terminal's line discipline off, and a
+# read abandoned mid-key never turns it back on: this is what reads the
+# mode the console was handed and sets it back, on the one path the read
+# itself cannot reach. `term` alone — the signal and process halves stay
+# behind `yunta-adapters`, which already puts this crate in the binary,
+# so nothing new is linked in.
+nix = { workspace = true, features = ["term"] }
 # `yunta mcp`: the control-plane MCP server, stdio. `server` +
 # `transport-io` only — no HTTP transport, no client features: the
 # per-run MCP server is a separate, later concern with its own
@@ -48,12 +76,17 @@ async-trait.workspace = true
 rmcp = { workspace = true, features = ["server", "transport-io"] }
 
 [dev-dependencies]
+# The same region, drawn into a buffer instead of a terminal, so a test
+# asserts on what a reader would see with nothing to wait for and no
+# terminal to stand up.
+indicatif = { workspace = true, features = ["in_memory"] }
 yunta-core = { workspace = true, features = ["testkit"] }
 # `verify`'s broken-chain test corrupts a stored event behind the store's
 # back through the same fault injector storage's own tests use.
 yunta-storage = { workspace = true, features = ["testkit"] }
 # The shared test harness: git-repo fixture, `yunta_in!`, fixed clock.
 yunta-testkit.workspace = true
+yunta-testkit-core.workspace = true
 tempfile.workspace = true
 # Tests write their workflows and configs as YAML literals.
 serde_norway.workspace = true
@@ -64,7 +97,3 @@ rmcp = { workspace = true, features = [
     "client",
     "transport-child-process",
 ] }
-# The console-interaction test drives `yunta run` with a real terminal on
-# stdin (openpty) so the console surface engages, then signals it (SIGINT)
-# to prove the runtime stays responsive while a prompt waits.
-nix = { workspace = true, features = ["term", "signal"] }

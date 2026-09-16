@@ -99,8 +99,8 @@ fn executors_deny_refuses_even_with_yes() {
     assert!(!out.status.success());
     assert_eq!(
         stderr(&out).trim_end(),
-        "error: this pack declares 1 executor(s) and `permissions.packs.executors` is `deny` \
-         (declared by the repo config layer) — `--yes` cannot override a permissions ceiling. \
+        "error: this pack declares 1 executor and `permissions.packs.executors` is `deny` \
+         (declared by the repo config) — `--yes` cannot override a permissions ceiling. \
          Change the policy there, or install a pack without executors.",
         "the refusal names the deny policy, the declaring layer and that --yes cannot override it"
     );

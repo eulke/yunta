@@ -8,13 +8,16 @@
 //! non-interactive with a warning when stdin isn't a TTY — `init` must
 //! never hang waiting for input that isn't coming.
 
-use std::io::IsTerminal;
 use std::path::Path;
 
-use yunta_adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter, ProbeReport};
-use yunta_core::AdapterSettings;
+use yunta_core::port::ProbeReport;
+use yunta_core::{AdapterId, AdapterSettings};
+use yunta_engine::process::Supervision;
 
+use crate::ask::{ask_line, Console, Escape};
 use crate::error::{warn, CliError, Outcome};
+use crate::interrupt::Interrupt;
+use crate::surface::Diagnostics;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
 
@@ -81,12 +84,16 @@ fn detect_ecosystem(repo: &Path) -> Option<Ecosystem> {
         .map(|(_, ecosystem)| ecosystem)
 }
 
-fn detect_base_branch(repo: &Path) -> String {
+async fn detect_base_branch(repo: &Path, supervision: Supervision<'_>) -> String {
     // Both probes are best-effort: a git that can't answer (no remote
     // HEAD, detached head, no repo) falls through to the next, then to
     // the conventional default.
-    if let Ok(raw) =
-        yunta_engine::git::output_blocking(repo, &["symbolic-ref", "refs/remotes/origin/HEAD"])
+    if let Ok(raw) = yunta_engine::git::output(
+        repo,
+        &["symbolic-ref", "refs/remotes/origin/HEAD"],
+        supervision,
+    )
+    .await
     {
         if let Some(branch) = raw.trim().strip_prefix("refs/remotes/origin/") {
             if !branch.is_empty() {
@@ -94,7 +101,9 @@ fn detect_base_branch(repo: &Path) -> String {
             }
         }
     }
-    if let Ok(name) = yunta_engine::git::output_blocking(repo, &["branch", "--show-current"]) {
+    if let Ok(name) =
+        yunta_engine::git::output(repo, &["branch", "--show-current"], supervision).await
+    {
         let name = name.trim();
         if !name.is_empty() {
             return name.to_string();
@@ -104,20 +113,19 @@ fn detect_base_branch(repo: &Path) -> String {
 }
 
 struct ProbedAdapter {
-    id: &'static str,
+    id: AdapterId,
     healthy: bool,
     detail: String,
 }
 
+/// Probes every adapter this binary builds, in the order the
+/// composition root declares them — the id each reports about itself,
+/// never one re-spelled here.
 async fn probe_known_adapters() -> Vec<ProbedAdapter> {
-    let claude_code = ClaudeCodeAdapter::new(&AdapterSettings::default());
-    let codex = CodexAdapter::new(&AdapterSettings::default());
     let mut probed = Vec::new();
-    for (id, report) in [
-        ("claude-code", claude_code.probe().await),
-        ("codex", codex.probe().await),
-    ] {
-        probed.push(match report {
+    for adapter in super::built_adapters(|_| AdapterSettings::default()) {
+        let id = adapter.id().clone();
+        probed.push(match adapter.probe().await {
             Ok(ProbeReport::Healthy { version }) => ProbedAdapter {
                 id,
                 healthy: true,
@@ -171,7 +179,10 @@ fn render_config_yaml(project_name: &str, base_branch: &str, probed: &[ProbedAda
             healthy.id
         ));
     } else {
-        out.push_str("#     - { adapter: claude-code, model: <model-name> }\n");
+        out.push_str(&format!(
+            "#     - {{ adapter: {}, model: <model-name> }}\n",
+            super::first_built_adapter()
+        ));
     }
     out
 }
@@ -266,23 +277,31 @@ fn claude_md_suggestion() -> &'static str {
      tool) for an existing verified workflow that already covers it."
 }
 
-fn prompt_line(prompt: &str, default: &str) -> String {
-    print!("{prompt} [{default}]: ");
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    let mut line = String::new();
-    if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
-        return default.to_string();
-    }
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        default.to_string()
-    } else {
-        trimmed.to_string()
+/// One setting asked for on `console`, or `default` when nobody
+/// answers.
+///
+/// Answered on the one line every prompt in this binary is answered on
+/// — same editing, same Escape, same Ctrl-C, same terminal handed back
+/// — so a person who has answered a run answers `init` the same way.
+/// An empty line takes the default, and so does Escape: "not me, not
+/// now" about a setting that already has a detected value is that
+/// value.
+fn asked(console: &Console, prompt: &str, default: &str) -> String {
+    match ask_line(console, &format!("{prompt} [{default}]: ")) {
+        Ok(typed) if !typed.value.is_empty() => typed.value,
+        _ => default.to_string(),
     }
 }
 
 pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
     let repo = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    // `init` is the command that makes a project, so there is no
+    // `Context` to resolve yet — and its probes still spawn git, so it
+    // owns the interruption itself, like any other invocation.
+    let interrupt = Interrupt::ctrl_c()
+        .map_err(|source| CliError::io("install the interrupt handler for", "init", source))?;
+    let clock = yunta_core::SystemClock;
+    let supervision = Supervision::outside_any_run(interrupt.stop(), &clock);
 
     let config_path = repo.join(".yunta/config.yaml");
     if config_path.exists() && !force {
@@ -292,29 +311,36 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         )));
     }
 
-    // `-i` degrades to non-interactive with a warning rather than
-    // hanging on a stdin that will never produce a line.
-    let interactive = if interactive && !std::io::stdin().is_terminal() {
-        warn("--interactive given but stdin isn't a TTY — using detected defaults");
-        false
-    } else {
-        interactive
+    // `-i` degrades with a warning rather than hanging on a terminal
+    // that will never produce a line. There is no run drawing here, so
+    // what opening the console has to say goes out through a door onto
+    // nothing, which is stderr.
+    let console = match interactive {
+        true => Console::open(&Diagnostics::none(), Escape::KeepsDefault).await,
+        false => None,
     };
+    if interactive && console.is_none() {
+        warn("--interactive given but there is no terminal to ask on — using detected defaults");
+    }
 
     let default_name = repo
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "workflow-project".to_string());
-    let default_branch = detect_base_branch(&repo);
+    let default_branch = detect_base_branch(&repo, supervision).await;
     let ecosystem = detect_ecosystem(&repo);
 
-    let (project_name, base_branch) = if interactive {
-        (
-            prompt_line("project name", &default_name),
-            prompt_line("base branch", &default_branch),
-        )
-    } else {
-        (default_name, default_branch)
+    let (project_name, base_branch) = match &console {
+        Some(console) => {
+            // What Escape does, said once above the prompts it applies
+            // to — the same place every other surface says it.
+            let _ = console.say(console.escape().said());
+            (
+                asked(console, "project name", &default_name),
+                asked(console, "base branch", &default_branch),
+            )
+        }
+        None => (default_name, default_branch),
     };
 
     let probed = probe_known_adapters().await;

@@ -46,10 +46,10 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
     ChildRunCreatedPayload, ChildRunFinishedPayload, EventPayload, TerminalState,
 };
-use yunta_core::{Isolation, Manifest, MountSpec, Node, RunId, Workflow, WorkflowIsolation};
+use yunta_core::{InputName, Isolation, Manifest, MountSpec, Node, RunId, WorkflowIsolation};
 
 use crate::replay::derive;
-use crate::template::render_template;
+use yunta_core::template::render_template;
 
 use mounts::resolve_mounts;
 
@@ -57,6 +57,7 @@ use super::node_close::{close_node, fail, fail_with, ChildRun, Close};
 use super::node_exec::{cancelled_end, template_vars, NodeEnd};
 use super::CreateRunParams;
 use super::{RunCtx, RunError, RunTerminal};
+use yunta_core::events::ChildEvent;
 
 /// Where this parent's runs live — the parent's own run.dir sits inside
 /// it, so no configuration lookup can ever disagree with where the
@@ -87,7 +88,7 @@ fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
 /// because it is one clause of the node, read together and never apart.
 pub(super) struct WorkflowCall<'a> {
     pub use_name: &'a str,
-    pub inputs: &'a BTreeMap<String, String>,
+    pub inputs: &'a BTreeMap<InputName, String>,
     pub isolation: WorkflowIsolation,
     pub mounts: &'a [MountSpec],
 }
@@ -129,23 +130,8 @@ pub(super) async fn execute_workflow(
     // dangling reference from a crash between the parent's event and
     // the child's run_created has no events, and is superseded below).
     let events = ctx.load_events().await?;
-    let created: Vec<RunId> = events
-        .iter()
-        .filter(|e| e.node_id.as_ref() == Some(&node.id))
-        .filter_map(|e| match e.payload() {
-            Some(EventPayload::ChildRunCreated(p)) => Some(p.child_run_id.clone()),
-            _ => None,
-        })
-        .collect();
-    let finished: Vec<RunId> = events
-        .iter()
-        .filter(|e| e.node_id.as_ref() == Some(&node.id))
-        .filter_map(|e| match e.payload() {
-            Some(EventPayload::ChildRunFinished(p)) => Some(p.child_run_id.clone()),
-            _ => None,
-        })
-        .collect();
-    if let Some(open_child) = created.iter().rev().find(|child| !finished.contains(child)) {
+    let state = crate::replay::derive(&events);
+    if let Some(open_child) = state.children.open_under(&node.id).map(|link| &link.run_id) {
         if !ctx
             .storage
             .events_for_run(open_child.clone())
@@ -171,7 +157,7 @@ pub(super) async fn execute_workflow(
             .await;
         }
     };
-    let text = match std::fs::read_to_string(&resolved.path) {
+    let text = match tokio::fs::read_to_string(&resolved.path).await {
         Ok(text) => text,
         Err(e) => {
             return fail(
@@ -186,25 +172,20 @@ pub(super) async fn execute_workflow(
             .await;
         }
     };
-    let child_workflow: Workflow = match yunta_core::yaml::parse(&text) {
+    let child_workflow = match yunta_core::workflow::read::read(&text, &resolved.path) {
         Ok(workflow) => workflow,
-        Err(e) => {
-            return fail(
-                ctx,
-                node,
-                format!(
-                    "child workflow `{}` does not parse: {e}",
-                    resolved.path.display()
-                ),
-                false,
-            )
-            .await;
+        Err(report) => {
+            return fail(ctx, node, report.to_string(), false).await;
         }
     };
     // The same static gate `yunta run` applies before spending anything
     // — a child born broken is refused at birth, with the check's own
     // diagnostics.
-    let check_errors = crate::check::check(&child_workflow, &ctx.manifest.config);
+    let check_errors = crate::check::check(&child_workflow, &ctx.manifest.config, &|adapter| {
+        ctx.adapters
+            .get(adapter)
+            .map(|adapter| adapter.capabilities())
+    });
     if !check_errors.is_empty() {
         let listed = check_errors
             .iter()
@@ -223,7 +204,7 @@ pub(super) async fn execute_workflow(
     // The parent's frozen contribution: the declared inputs, rendered
     // in the parent's own template scope.
     let vars = template_vars(ctx, node);
-    let mut provided: std::collections::HashMap<String, String> = Default::default();
+    let mut provided: std::collections::HashMap<InputName, String> = Default::default();
     for (name, template) in inputs {
         match render_template(template, &vars) {
             Ok(value) => {
@@ -268,7 +249,7 @@ pub(super) async fn execute_workflow(
     if !ctx.budget_lifted.load(std::sync::atomic::Ordering::Relaxed) {
         if let Some(limits) = child_config.limits.as_mut() {
             if let Some(cap) = limits.max_tokens_per_run {
-                let spent = derive(&events).total_tokens.total();
+                let spent = derive(&events).total_tokens().total();
                 limits.max_tokens_per_run = Some(cap.saturating_sub(spent));
             }
         }
@@ -291,7 +272,10 @@ pub(super) async fn execute_workflow(
         &workflows_dir,
         ctx.worktree,
         &provided,
-    ) {
+        ctx.supervision(cancel),
+    )
+    .await
+    {
         Ok(frozen) => frozen,
         Err(e) => {
             return fail(
@@ -339,10 +323,17 @@ pub(super) async fn execute_workflow(
                 &child_manifest.base_commit,
                 &crate::worktree::run_branch(&child_id),
                 Isolation::Worktree,
+                ctx.root_supervision(),
             )
             .await
             {
                 Ok(_) => tree,
+                // Somebody stopped the run while its child's tree was
+                // being made: that is not the node failing, it is the
+                // node being cut.
+                Err(e) if e.cancelled() => {
+                    return crate::run::node_exec::cancelled_end(ctx, node).await;
+                }
                 Err(e) => {
                     return fail(
                         ctx,
@@ -370,10 +361,10 @@ pub(super) async fn execute_workflow(
     born.extend(documents);
     ctx.emit(
         Some(&node.id),
-        EventPayload::ChildRunCreated(ChildRunCreatedPayload {
+        EventPayload::Children(ChildEvent::Created(ChildRunCreatedPayload {
             child_run_id: child_id.clone(),
             child_workflow_hash: child_manifest.workflow_hash.clone(),
-        }),
+        })),
     )
     .await?;
 
@@ -385,7 +376,7 @@ pub(super) async fn execute_workflow(
         .as_ref()
         .and_then(|modes| modes.keys().next().cloned())
         .unwrap_or_default();
-    let child_run_dir = super::create_run(
+    let child_run_dir = match super::create_run(
         CreateRunParams {
             run_id: &child_id,
             manifest: &child_manifest,
@@ -394,11 +385,23 @@ pub(super) async fn execute_workflow(
             worktree: &child_tree,
             promoted_from: None,
             artifacts: &born,
+            // The lineage measures once: the child is born holding what
+            // its root measured, so its comparisons see what its parent
+            // did to the tree.
+            baseline: crate::run::baseline::inherited(ctx.run_id, &state).as_ref(),
         },
         ctx.storage,
-        ctx.clock.as_ref(),
+        ctx.supervision(cancel),
     )
-    .await?;
+    .await
+    {
+        Ok(run_dir) => run_dir,
+        // A birth the cancellation cut has no log of its own to pause:
+        // it says so to the node that asked for it, which ends cut
+        // like any other, and the loop's next turn pauses the run.
+        Err(RunError::Cancelled) => return crate::run::node_exec::cancelled_end(ctx, node).await,
+        Err(other) => return Err(other),
+    };
 
     drive_child(
         ctx,
@@ -423,9 +426,9 @@ async fn resume_child(
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let child_run_dir = runs_root(ctx).join(child_id.as_str());
-    let manifest_path = child_run_dir.join("manifest.yaml");
-    let child_manifest: Manifest = match super::read_manifest(&manifest_path) {
-        Ok(manifest) => manifest,
+    let manifest_path = crate::run_dir::manifest_path(&child_run_dir);
+    let child_manifest: Manifest = match super::read_manifest(&manifest_path).await {
+        Ok(manifest) => manifest.doc,
         Err(error) => {
             return fail(
                 ctx,
@@ -533,9 +536,18 @@ async fn drive_child(
                     max_task_retries: ctx.max_task_retries,
                     human_interaction: ctx.human_interaction,
                     forge: ctx.forge,
-                    cancel: Some(cancel),
+                    cancel,
                     adapter_override: ctx.adapter_override,
                     ambient: ctx.ambient,
+                    secrets: ctx.secrets.clone(),
+                    // A child run's sessions ask the same judge the
+                    // parent's do: the hook is the binary, not the run.
+                    fence_hook: ctx.fence_hook.clone(),
+                    // One observer serves the whole invocation, this
+                    // child included: its frames name the child's own
+                    // run_id, because the child emits through its own
+                    // `RunCtx`.
+                    observer: ctx.observer.clone(),
                 },
                 ctx.depth + 1,
             ));
@@ -546,12 +558,12 @@ async fn drive_child(
             RunTerminal::Finished => {
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::ChildRunFinished(ChildRunFinishedPayload {
-                        child_run_id: current_id.clone(),
-                        child_workflow_hash: current_manifest.workflow_hash.clone(),
-                        terminal_state: TerminalState::Done,
-                        tokens: report.state.total_tokens,
-                    }),
+                    EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
+                        current_id.clone(),
+                        current_manifest.workflow_hash.clone(),
+                        TerminalState::Done,
+                        report.state.total_tokens(),
+                    ))),
                 )
                 .await?;
                 // Only a child that reached `Done` hands anything over.
@@ -581,12 +593,12 @@ async fn drive_child(
                 // becomes the node's next linked child.
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::ChildRunFinished(ChildRunFinishedPayload {
-                        child_run_id: current_id.clone(),
-                        child_workflow_hash: current_manifest.workflow_hash.clone(),
-                        terminal_state: TerminalState::Promoted,
-                        tokens: report.state.total_tokens,
-                    }),
+                    EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
+                        current_id.clone(),
+                        current_manifest.workflow_hash.clone(),
+                        TerminalState::Promoted,
+                        report.state.total_tokens(),
+                    ))),
                 )
                 .await?;
                 let successor = match super::promote::create_promotion_successor(
@@ -602,9 +614,11 @@ async fn drive_child(
                         runs: &runs_root(ctx),
                         worktrees: &worktrees_root(ctx),
                     },
-                    ctx.storage,
-                    ctx.clock.as_ref(),
-                    ctx.ids,
+                    super::promote::CallerInfra {
+                        storage: ctx.storage,
+                        ids: ctx.ids,
+                        supervision: ctx.root_supervision(),
+                    },
                 )
                 .await
                 {
@@ -624,10 +638,10 @@ async fn drive_child(
                 };
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::ChildRunCreated(ChildRunCreatedPayload {
+                    EventPayload::Children(ChildEvent::Created(ChildRunCreatedPayload {
                         child_run_id: successor.run_id.clone(),
                         child_workflow_hash: successor.manifest.workflow_hash.clone(),
-                    }),
+                    })),
                 )
                 .await?;
                 current_id = successor.run_id;
@@ -641,12 +655,12 @@ async fn drive_child(
                 // its spend, and the diagnostic names the child.
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::ChildRunFinished(ChildRunFinishedPayload {
-                        child_run_id: current_id.clone(),
-                        child_workflow_hash: current_manifest.workflow_hash.clone(),
-                        terminal_state: TerminalState::Failed,
-                        tokens: report.state.total_tokens,
-                    }),
+                    EventPayload::Children(ChildEvent::Finished(ChildRunFinishedPayload::new(
+                        current_id.clone(),
+                        current_manifest.workflow_hash.clone(),
+                        TerminalState::Failed,
+                        report.state.total_tokens(),
+                    ))),
                 )
                 .await?;
                 // The child's reason keeps its own lines under this
@@ -674,6 +688,7 @@ async fn drive_child(
                     return cancelled_end(ctx, node).await;
                 }
                 return Ok(NodeEnd::ChildPaused {
+                    node: node.id.clone(),
                     reason: format!(
                         "child run `{current_id}` paused, and resuming this run resumes \
                          it:\n  {}",

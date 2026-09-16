@@ -9,36 +9,29 @@
 //! field by field rather than as one giant string so a fixture tweak
 //! doesn't need to reprint an entire golden blob.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
-
-use yunta_adapters::{Adapter, MockAdapter};
 use yunta_core::diagnostic::ArtifactFailure;
+use yunta_core::diagnostic::{ArtifactCode, DiagnosticCode, FileCode, ParseCode, RuleCode};
 use yunta_core::events::{
     ArtifactId, EventBody, EventPayload, Failure, NodeFailedPayload, RunFinishedPayload,
     RunMetrics, StoredEvent, TerminalState, TokenUsage,
 };
-use yunta_core::SeqIdSource;
-use yunta_core::{AdapterId, ArtifactKind, ConfigLayer, NodeId, RunId, Workflow};
+use yunta_core::events::{NodeEvent, RunEvent};
+use yunta_core::{ArtifactKind, NodeId, RunId};
 use yunta_engine::{
-    build_manifest, build_receipt, create_run, execute_run, render_receipt_json,
-    render_receipt_markdown, BaselineSummary, CostSummary, CriteriaSummary, CriterionEntry,
-    DiagnosticCount, EventChainStatus, Receipt, ReceiptError, RunEnv, RunnerUsage, ScopeSummary,
+    build_receipt, render_receipt_json, render_receipt_markdown, BaselineSummary, CostSummary,
+    CriteriaSummary, CriterionEntry, DiagnosticCount, EventChainStatus, Receipt, ReceiptError,
+    RunReport, RunnerUsage, ScopeSummary,
 };
-use yunta_storage::Storage;
-use yunta_testkit::{init_repo, FixedClock};
-
-/// Run ids for everything a test run gives birth to — unique across
-/// the binary, so parallel tests never share a run directory.
-static IDS: SeqIdSource = SeqIdSource::new("minted");
+use yunta_testkit::Bench;
+use yunta_testkit_core::FixedClock;
 
 // --- formatters: golden output over a hand-built Receipt --------------------
 
 fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
     Receipt {
+        schema_version: Receipt::SCHEMA_VERSION,
         run_id: RunId::from("run-2026-08-21-0001"),
-        workflow: "release-cycle".to_string(),
+        workflow: "release-cycle".into(),
         mode: "default".into(),
         terminal_state: TerminalState::Done,
         criteria: CriteriaSummary {
@@ -67,6 +60,7 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
             hash: yunta_core::sha256_hex(b"make test"),
             compared: 2,
             regressions: 0,
+            origin: yunta_core::events::BaselineOrigin::Measured,
         }),
         scope: ScopeSummary {
             files_touched: 4,
@@ -197,6 +191,31 @@ fn baseline_absent_never_invents_a_zero_regression_line() {
     );
 }
 
+/// A run of a lineage compares against a measurement another run took,
+/// and its receipt says which one — so a reader of the child's receipt
+/// can open the output the comparisons are against.
+#[test]
+fn the_receipt_names_the_run_that_measured_an_inherited_baseline() {
+    let mut receipt = sample_receipt(EventChainStatus::Intact { events: 10 });
+    receipt.baseline = Some(BaselineSummary {
+        suite: "make test".to_string(),
+        hash: yunta_core::sha256_hex(b"make test"),
+        compared: 2,
+        regressions: 0,
+        origin: yunta_core::events::BaselineOrigin::Inherited {
+            run: RunId::from("run-2026-08-21-0001"),
+        },
+    });
+    assert!(
+        render_receipt_markdown(&receipt).contains(
+            "0 regression(s) vs baseline across 2 comparison(s) (suite `make test`, \
+             hash `22cc66aa7d26`, measured by run run-2026-08-21-0001)"
+        ),
+        "{}",
+        render_receipt_markdown(&receipt)
+    );
+}
+
 // --- derivation: build_receipt over a real run's own log --------------------
 
 const CONFIG: &str = r#"
@@ -214,9 +233,9 @@ baseline:
 "#;
 
 /// Exercises every receipt section in one run: a task with two
-/// criteria (`plan`/`implement`), a baseline capture-then-compare pair
-/// (`capture`/`compare`), a re-route (`lint` fails once, `fix-lint`
-/// corrects it), and a fan-out review (`runners: [reviewer,
+/// criteria (`plan`/`implement`), two baseline comparisons
+/// (`compare-early`/`compare`), a re-route (`lint` fails once,
+/// `fix-lint` corrects it), and a fan-out review (`runners: [reviewer,
 /// reviewer-alt]`) whose effects stay inside its own declared `scope`.
 const WORKFLOW: &str = r#"
 name: receipt-fixture
@@ -233,14 +252,14 @@ nodes:
     depends_on: [plan]
     until: all_tasks_complete
     prompt: "implement your task"
-  - id: capture
+  - id: compare-early
     kind: check
     builtin: baseline_compare
     depends_on: [implement]
   - id: compare
     kind: check
     builtin: baseline_compare
-    depends_on: [capture]
+    depends_on: [compare-early]
   - id: lint
     kind: bash
     depends_on: [compare]
@@ -295,95 +314,12 @@ sessions:
     outcome: { type: completed, summary: "reviewed" }
 "#;
 
-struct Bench {
-    _root: tempfile::TempDir,
-    worktree: PathBuf,
-    runs_root: PathBuf,
-    storage: Storage,
-    run_id: RunId,
-}
-
-impl Bench {
-    fn new() -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let worktree = root.path().join("worktree");
-        std::fs::create_dir_all(&worktree).unwrap();
-        init_repo(&worktree);
-        let runs_root = root.path().join("runs");
-        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        Bench {
-            _root: root,
-            worktree,
-            runs_root,
-            storage,
-            run_id: RunId::from("run-receipt-1"),
-        }
-    }
-
-    async fn run(
-        &self,
-        workflow_yaml: &str,
-        fixture_yaml: &str,
-    ) -> (yunta_core::Manifest, Vec<StoredEvent>) {
-        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-        let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-        let manifest = build_manifest(
-            &workflow,
-            &config,
-            &self.worktree,
-            &self.worktree,
-            &HashMap::new(),
-        )
-        .unwrap()
-        .manifest;
-        let run_dir = create_run(
-            yunta_engine::CreateRunParams {
-                run_id: &self.run_id,
-                manifest: &manifest,
-                runs_root: &self.runs_root,
-                mode: &"default".into(),
-                worktree: &self.worktree,
-                promoted_from: None,
-                artifacts: &[],
-            },
-            &self.storage.async_handle(),
-            &FixedClock,
-        )
-        .await
-        .unwrap();
-
-        let adapter = MockAdapter::from_yaml(fixture_yaml).unwrap();
-        let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".into(), Arc::new(adapter));
-
-        execute_run(RunEnv {
-            run_id: &self.run_id,
-            manifest: &manifest,
-            run_dir: &run_dir,
-            worktree: &self.worktree,
-            adapters: &adapters,
-            storage: &self.storage.async_handle(),
-            clock: std::sync::Arc::new(FixedClock),
-            ids: &IDS,
-            max_task_retries: yunta_engine::DEFAULT_MAX_RETRIES,
-            human_interaction: &yunta_engine::NoInteraction,
-            forge: None,
-            cancel: None,
-            adapter_override: None,
-            ambient: None,
-        })
-        .await
-        .unwrap();
-
-        let events = self.storage.events_for_run(&self.run_id).unwrap();
-        (manifest, events)
-    }
-}
-
 #[tokio::test]
 async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     let bench = Bench::new();
-    let (manifest, events) = bench.run(WORKFLOW, FIXTURE).await;
+    let RunReport { .. } = bench.run_with_config(WORKFLOW, FIXTURE, CONFIG).await;
+    let manifest = bench.manifest();
+    let events = bench.events();
 
     let chain = EventChainStatus::Intact {
         events: events.len(),
@@ -398,7 +334,10 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
 
     let baseline = receipt.baseline.clone().expect("baseline_compare was used");
     assert_eq!(baseline.suite, "true");
-    assert_eq!(baseline.compared, 1, "capture doesn't count, compare does");
+    assert_eq!(
+        baseline.compared, 2,
+        "every `baseline_compare` compares against the capture the run's birth took"
+    );
     assert_eq!(baseline.regressions, 0);
 
     assert!(
@@ -440,53 +379,12 @@ nodes:
     kind: bash
     run: "false"
 "#;
-    let workflow_parsed: Workflow = serde_norway::from_str(workflow).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow_parsed,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
-    let run_dir = create_run(
-        yunta_engine::CreateRunParams {
-            run_id: &bench.run_id,
-            manifest: &manifest,
-            runs_root: &bench.runs_root,
-            mode: &"default".into(),
-            worktree: &bench.worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &bench.storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-    let adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    execute_run(RunEnv {
-        run_id: &bench.run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &bench.worktree,
-        adapters: &adapters,
-        storage: &bench.storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: yunta_engine::DEFAULT_MAX_RETRIES,
-        human_interaction: &yunta_engine::NoInteraction,
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: None,
-    })
-    .await
-    .unwrap();
+    let RunReport { .. } = bench
+        .run_with_config(workflow, "sessions: []\n", CONFIG)
+        .await;
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let manifest = bench.manifest();
+    let events = bench.events();
     let err = build_receipt(
         &bench.run_id,
         &manifest,
@@ -497,7 +395,16 @@ nodes:
     )
     .unwrap_err();
     assert!(matches!(err, ReceiptError::NotFinished(_)));
-    assert!(err.to_string().contains("yunta status"));
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "run `{}` hasn't reached a terminal state yet — a receipt is only generated \
+             once a run finishes",
+            bench.run_id
+        ),
+        "the engine names the run's state; which command shows where it stands is the \
+         caller's vocabulary"
+    );
 }
 
 /// A receipt that had to read prose could only reprint it. Counting is
@@ -509,13 +416,13 @@ fn the_receipt_counts_artifact_problems_by_their_stable_code() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![
         DiagnosticCount {
-            kind: Some(ArtifactKind::Tasks),
-            code: "parse".to_string(),
+            kind: Some(ArtifactKind::Tasks.into()),
+            code: DiagnosticCode::Parse(ParseCode::Parse),
             occurrences: 2,
         },
         DiagnosticCount {
-            kind: Some(ArtifactKind::Tasks),
-            code: "no-criteria".to_string(),
+            kind: Some(ArtifactKind::Tasks.into()),
+            code: DiagnosticCode::Rule(RuleCode::NoCriteria),
             occurrences: 1,
         },
     ];
@@ -536,19 +443,9 @@ fn the_receipt_counts_artifact_problems_by_their_stable_code() {
 /// fails on an artifact leaves its run paused, and a receipt certifies
 /// closed work only. What is under test is the derivation from
 /// `node_failed`, and that is exactly what the log carries.
-fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Receipt {
+async fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Receipt {
     let bench = Bench::new();
-    let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-    let manifest = build_manifest(
-        &workflow,
-        &config,
-        &bench.worktree,
-        &bench.worktree,
-        &HashMap::new(),
-    )
-    .unwrap()
-    .manifest;
+    let manifest = bench.manifest_for(workflow_yaml, CONFIG).await;
 
     let events = vec![
         StoredEvent {
@@ -556,10 +453,8 @@ fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Rece
             seq: 1_u64.into(),
             timestamp: yunta_core::Clock::now(&FixedClock),
             node_id: Some(NodeId::from(node)),
-            body: EventBody::Known(EventPayload::NodeFailed(NodeFailedPayload::new(
-                failure,
-                false,
-                TokenUsage::default(),
+            body: EventBody::Known(EventPayload::Node(NodeEvent::Failed(
+                NodeFailedPayload::new(failure, false, TokenUsage::default()),
             ))),
         },
         StoredEvent {
@@ -567,13 +462,13 @@ fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Rece
             seq: 2_u64.into(),
             timestamp: yunta_core::Clock::now(&FixedClock),
             node_id: None,
-            body: EventBody::Known(EventPayload::RunFinished(RunFinishedPayload {
+            body: EventBody::Known(EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
                 terminal_state: TerminalState::Failed,
                 metrics: RunMetrics {
                     cptv: None,
                     tokens: TokenUsage::default(),
                 },
-            })),
+            }))),
         },
     ];
 
@@ -592,8 +487,8 @@ fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -> Rece
 /// fails on the artifact itself, and the receipt counts that like any
 /// other artifact failure — by its stable code, with no document kind,
 /// because nothing ever read a document.
-#[test]
-fn the_receipt_counts_an_artifact_no_run_holds_as_an_artifact_failure() {
+#[tokio::test]
+async fn the_receipt_counts_an_artifact_no_run_holds_as_an_artifact_failure() {
     let receipt = receipt_of_failure(
         r#"
 name: unheld-fixture
@@ -609,13 +504,14 @@ nodes:
             producer: None,
             artifact: ArtifactId::of("report.md", None),
         }]),
-    );
+    )
+    .await;
 
     assert_eq!(
         receipt.diagnostics,
         vec![DiagnosticCount {
             kind: None,
-            code: "artifact-unheld".to_string(),
+            code: DiagnosticCode::Artifact(ArtifactCode::Unheld),
             occurrences: 1,
         }],
         "an artifact no run holds is counted by its own code, under no kind"
@@ -629,8 +525,8 @@ nodes:
 /// A session node that ended owing the document it declared fails on the
 /// artifact itself too: the receipt counts it by its own code, under no
 /// kind, because nothing ever read a document either.
-#[test]
-fn the_receipt_counts_a_document_nobody_handed_over_as_an_artifact_failure() {
+#[tokio::test]
+async fn the_receipt_counts_a_document_nobody_handed_over_as_an_artifact_failure() {
     let receipt = receipt_of_failure(
         r#"
 name: undelivered-fixture
@@ -647,13 +543,14 @@ nodes:
             node: NodeId::from("plan"),
             artifact: ArtifactId::of("plan.yaml", Some(ArtifactKind::Tasks)),
         }]),
-    );
+    )
+    .await;
 
     assert_eq!(
         receipt.diagnostics,
         vec![DiagnosticCount {
             kind: None,
-            code: "artifact-undelivered".to_string(),
+            code: DiagnosticCode::Artifact(ArtifactCode::Undelivered),
             occurrences: 1,
         }],
         "a document nobody handed over is counted by its own code, under no kind"
@@ -672,18 +569,18 @@ fn the_same_rule_in_two_documents_counts_as_two_facts() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![
         DiagnosticCount {
-            kind: Some(ArtifactKind::Tasks),
-            code: "duplicate-id".to_string(),
+            kind: Some(ArtifactKind::Tasks.into()),
+            code: DiagnosticCode::Rule(RuleCode::DuplicateId),
             occurrences: 3,
         },
         DiagnosticCount {
-            kind: Some(ArtifactKind::Findings),
-            code: "duplicate-id".to_string(),
+            kind: Some(ArtifactKind::Findings.into()),
+            code: DiagnosticCode::Rule(RuleCode::DuplicateId),
             occurrences: 1,
         },
         DiagnosticCount {
             kind: None,
-            code: "artifact-missing".to_string(),
+            code: DiagnosticCode::File(FileCode::Missing),
             occurrences: 1,
         },
     ];
@@ -710,8 +607,8 @@ fn the_same_rule_in_two_documents_counts_as_two_facts() {
 fn the_json_receipt_carries_the_counts_as_data() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
     receipt.diagnostics = vec![DiagnosticCount {
-        kind: Some(ArtifactKind::Tasks),
-        code: "parse".to_string(),
+        kind: Some(ArtifactKind::Tasks.into()),
+        code: DiagnosticCode::Parse(ParseCode::Parse),
         occurrences: 3,
     }];
     let rendered = render_receipt_json(&receipt).expect("the receipt renders");

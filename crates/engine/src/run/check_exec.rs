@@ -1,20 +1,18 @@
-//! `kind: check` execution — split out of
-//! `node_exec.rs` once that file passed the ~500-line soft
-//! ceiling; kept as its own module since a check builtin's shape (run a
-//! command, parse or compare, never touch an agent) is distinct enough
-//! from bash/prompt/parallel dispatch to stand alone.
+//! `kind: check` execution. A check builtin's shape — run a command,
+//! parse or compare, never touch an agent — is distinct enough from
+//! bash/prompt/parallel dispatch to stand on its own, and the one way
+//! the engine runs a verification command of its own lives here, for the
+//! checks and for the baseline a run's lineage measures.
 
 use std::path::Path;
 
-use yunta_core::events::{
-    BaselineCapturedPayload, BaselineResults, EventPayload, FindingSeverity, TokenUsage,
-};
+use yunta_core::events::{FindingSeverity, TokenUsage};
 use yunta_core::{CheckBuiltin, Node};
 
 use super::node_close::{close_node, fail, Close};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
-use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
+use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
 
 /// `kind: check`: the engine evaluates its own data,
 /// never a person — no session, no tokens spent. Each builtin's config
@@ -38,131 +36,110 @@ pub(super) async fn execute_check(
     }
 }
 
-struct CommandOutput {
-    exit_code: i32,
-    stdout: String,
+pub(super) struct CommandOutput {
+    pub(super) exit_code: i32,
+    pub(super) stdout: String,
 }
 
-/// A check command's run: done with its output, or cut by cancellation —
-/// the caller turns the latter into the node's own fate.
-enum CommandRun {
+/// A verification command's run: done with its output, or cut short —
+/// the caller turns the latter into the fate of whatever asked for it.
+pub(super) enum CommandRun {
     Done(CommandOutput),
     Cancelled,
 }
 
-/// Runs `cmd` to completion and captures its stdout — unlike a bash
-/// *node*, a check builtin's command is the engine's own verification
-/// step, not agent-visible work, so its stdout is data to parse, not a
-/// stream to relay. Cancel-aware: the command runs in its own
-/// process group, registered in `engine.json`, and a fired token kills
-/// the whole tree.
-async fn run_command(
-    ctx: &RunCtx<'_>,
+/// Runs `cmd` in `cwd` to completion and captures its stdout — unlike a
+/// bash *node*, a command the engine runs to verify something is not
+/// agent-visible work, so its stdout is data to parse, not a stream to
+/// relay. The command runs in its own process group and dies with its
+/// whole tree when `supervision` is cancelled.
+pub(super) async fn run_command(
+    supervision: Supervision<'_>,
     cwd: &Path,
     cmd: &str,
-    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<CommandRun, RunError> {
     let command = GovernedCommand::shell(cwd, cmd).stderr(Capture::Discard);
-    match spawn_governed(command, ctx.supervision(cancel)).await? {
+    match spawn_governed(command, supervision).await? {
         Outcome::Exited { status, stdout, .. } => Ok(CommandRun::Done(CommandOutput {
             exit_code: status.code().unwrap_or(-1),
             stdout: String::from_utf8_lossy(&stdout).into_owned(),
         })),
-        // A check command has no timeout of its own: stopping early
-        // means the run was cancelled.
+        // A verification command has no timeout of its own: stopping
+        // early means the run was cancelled.
         Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => Ok(CommandRun::Cancelled),
     }
 }
 
-/// `baseline_compare`: capture is lazy, on this builtin's own first
-/// invocation in the run, rather than eagerly at worktree creation —
-/// capturing eagerly would make `create_run` async across its four call
-/// sites for a builtin most workflows never use. The first
-/// `baseline_compare` node always passes (it has nothing yet to compare
-/// against) and every later one compares against that first run's result.
+/// `baseline_compare`: re-runs the suite this run's lineage measured and
+/// fails if something that passed then stops passing. Every such node
+/// compares against that one measurement — taken before any node of the
+/// lineage ran — so the first comparison covers the work before it like
+/// any later one, a parent's included.
+///
+/// The suite is the measured one, read off the run's own fold rather
+/// than resolved from config again: what the comparison is against is
+/// what actually ran.
 async fn execute_baseline_compare(
     ctx: &RunCtx<'_>,
     node: &Node,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    let Some(baseline) = &ctx.manifest.config.baseline else {
+    let held = ctx.run_view().await?.state.run.baseline().cloned();
+    let Some(captured) = held else {
         return fail(
             ctx,
             node,
-            "check `baseline_compare` needs `baseline.suite` configured".to_string(),
+            "check `baseline_compare` has nothing to compare against: this run holds no \
+             baseline because its lineage's root declared none — declare `baseline.suite` \
+             in config"
+                .to_string(),
             false,
         )
         .await;
     };
 
-    let already_captured =
-        ctx.load_events()
-            .await?
-            .into_iter()
-            .find_map(|event| match event.payload() {
-                Some(EventPayload::BaselineCaptured(payload)) => Some(payload.clone()),
-                _ => None,
-            });
+    // The same memo the criteria use: two comparisons of one suite on a
+    // tree nothing changed in between run it once, and the second says
+    // so rather than paying for an answer this invocation already has.
+    let ran = ctx
+        .memo
+        .exit_code(&captured.command, ctx.worktree, ctx.supervision(cancel))
+        .await?;
+    if cancel.is_cancelled() {
+        return super::node_exec::cancelled_end(ctx, node).await;
+    }
 
-    let output = match run_command(ctx, ctx.worktree, &baseline.suite, cancel).await? {
-        CommandRun::Done(output) => output,
-        CommandRun::Cancelled => return super::node_exec::cancelled_end(ctx, node).await,
-    };
+    if captured.results.exit_code == 0 && ran.exit_code != 0 {
+        fail(
+            ctx,
+            node,
+            format!(
+                "regression: `{}` passed at baseline (exit 0) but now exits {}",
+                captured.command, ran.exit_code
+            ),
+            false,
+        )
+        .await
+    } else {
+        close_node(
+            ctx,
+            node,
+            Close::new(no_regression(&ran), TokenUsage::default()),
+        )
+        .await
+    }
+}
 
-    match already_captured {
-        None => {
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::BaselineCaptured(BaselineCapturedPayload {
-                    command: baseline.suite.clone(),
-                    results: BaselineResults {
-                        exit_code: output.exit_code,
-                        summary: output
-                            .stdout
-                            .lines()
-                            .rev()
-                            .take(5)
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    },
-                    hash: yunta_core::sha256_hex(output.stdout.as_bytes()),
-                }),
-            )
-            .await?;
-            close_node(
-                ctx,
-                node,
-                Close::new(
-                    format!("baseline captured (exit {})", output.exit_code),
-                    TokenUsage::default(),
-                ),
-            )
-            .await
-        }
-        Some(captured) => {
-            if captured.results.exit_code == 0 && output.exit_code != 0 {
-                fail(
-                    ctx,
-                    node,
-                    format!(
-                        "regression: `{}` passed at baseline (exit 0) but now exits {}",
-                        baseline.suite, output.exit_code
-                    ),
-                    false,
-                )
-                .await
-            } else {
-                close_node(
-                    ctx,
-                    node,
-                    Close::new(
-                        format!("no regression vs baseline (exit {})", output.exit_code),
-                        TokenUsage::default(),
-                    ),
-                )
-                .await
-            }
-        }
+/// What a comparison that found no regression closes with: the suite's
+/// exit code, and where the answer came from when this invocation
+/// already had it.
+fn no_regression(ran: &crate::task_cycle::Memoized) -> String {
+    match ran.reused {
+        false => format!("no regression vs baseline (exit {})", ran.exit_code),
+        true => format!(
+            "no regression vs baseline (exit {}, reused: same tree since an earlier compare)",
+            ran.exit_code
+        ),
     }
 }
 
@@ -186,7 +163,7 @@ async fn execute_coverage_gate(
         .await;
     };
 
-    let output = match run_command(ctx, ctx.worktree, &coverage.cmd, cancel).await? {
+    let output = match run_command(ctx.supervision(cancel), ctx.worktree, &coverage.cmd).await? {
         CommandRun::Done(output) => output,
         CommandRun::Cancelled => return super::node_exec::cancelled_end(ctx, node).await,
     };
@@ -274,8 +251,8 @@ async fn execute_findings_gate(
     max_severity: FindingSeverity,
 ) -> Result<NodeEnd, RunError> {
     let state = ctx.run_view().await?.state;
-    let offending: Vec<&str> = state
-        .findings
+    let effective = state.effective_findings();
+    let offending: Vec<&str> = effective
         .iter()
         .filter(|finding| severity_rank(finding.severity) <= severity_rank(max_severity))
         .map(|finding| finding.id.as_str())

@@ -43,14 +43,18 @@
       }
     },
     "version": {
-      "description": "Semver — no comparison logic lives here; a pack's own\nversion is never auto-resolved (`update` always names an exact\ntarget ref), so nothing in v1 needs to *compare* versions,\nonly record and display them. Kept a plain string rather than a\n`semver` dependency for the same reason `yunta_schema` (below)\nstays a hand-rolled range check instead of one (see\n`engine/src/check.rs`'s own `yunta_schema_satisfied` doc comment)\n— add the dependency the day something actually needs to compare\ntwo versions, not ahead of that need.",
+      "description": "Semver — no comparison logic lives here; a pack's own\nversion is never auto-resolved (`update` always names an exact\ntarget ref), so nothing in v1 needs to *compare* versions,\nonly record and display them. Kept a plain string rather than a\n`semver` dependency for the same reason [`SchemaRange`] is a\nhand-rolled comparator range instead of one — add the dependency\nthe day something actually needs to compare two full versions,\nnot ahead of that need.",
       "type": "string"
     },
     "yunta_schema": {
-      "description": "`\">=1 <2\"` — the same comparator-range syntax and the same\nbinary schema major (`yunta_core::YUNTA_SCHEMA`) a workflow's own\n`yunta_schema:` is checked against; `check_yunta_schema`'s\nrange parser is reused verbatim once compatibility is actually\nenforced, not duplicated here.",
-      "type": [
-        "string",
-        "null"
+      "description": "`\">=1 <2\"` — the same range a workflow's own `yunta_schema:`\nstates, read by the same parser and checked against the same\nbinary schema major (`yunta_core::YUNTA_SCHEMA`). `pack add`\nrefuses a pack whose range this binary does not satisfy.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SchemaRange"
+        },
+        {
+          "type": "null"
+        }
       ]
     }
   },
@@ -62,6 +66,11 @@
     "declares"
   ],
   "$defs": {
+    "McpServerName": {
+      "description": "A MCP server name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
     "NodePermissions": {
       "type": "string",
       "enum": [
@@ -154,7 +163,7 @@
           "type": "array",
           "default": [],
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/McpServerName"
           }
         },
         "runners": {
@@ -197,6 +206,11 @@
     },
     "RunnerName": {
       "description": "A runner name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "SchemaRange": {
+      "description": "a schema range: whitespace-separated comparators (`>=`, `<=`, `>`, `<`, `=`) over whole schema majors, e.g. `>=1 <2`",
       "type": "string",
       "minLength": 1
     }

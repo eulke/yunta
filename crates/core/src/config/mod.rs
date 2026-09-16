@@ -21,12 +21,14 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AdapterId, RunnerName};
+use crate::ids::{AdapterId, McpServerName, RunnerName};
 use crate::workflow::OnInterrupt;
 use env::expand_path;
 use merge::merge;
 
-pub use env::{user_state_root, Env, HomeExpansionError};
+pub use env::{
+    user_state_root, Env, HomeExpansionError, ProcessSecrets, Redactor, SecretSource, REDACTED,
+};
 pub use permissions::{
     permission_layer_conflicts, CommandPermissions, NetworkPermissions, PackExecutorPolicy,
     PackPermissions, PermissionsConfig, PublisherPermissions,
@@ -53,7 +55,7 @@ pub struct ConfigLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapters: Option<BTreeMap<AdapterId, AdapterSettings>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mcp_servers: Option<BTreeMap<String, McpServerConfig>>,
+    pub mcp_servers: Option<BTreeMap<McpServerName, McpServerConfig>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

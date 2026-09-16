@@ -10,12 +10,26 @@
 //! only ever go down — the day one does, the baseline moves with it in the
 //! same change.
 //!
+//! Beside them it counts the rules this repository states about itself:
+//! the words it retired, the tense its texts are written in, the sites
+//! that own a capability ([`sites`]), the shape of a test, and a
+//! threshold with no decision behind it. A rule nothing measures is a
+//! rule a change is free to break.
+//!
 //! Counting is line-based (a line matching the pattern), the same measure
 //! the rebuild's own acceptance commands used, so a contributor and CI see
 //! the same number `grep -c` would.
 
+mod prose;
+mod shape;
+mod sites;
+mod thresholds;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+
+use shape::{functions_over, has_inner_space_run, production_only, strip_noise, sync_fs_in_async};
+use thresholds::numeric_consts_without_decision;
 
 /// Where the committed baseline lives, next to this crate.
 fn baseline_path() -> PathBuf {
@@ -54,17 +68,30 @@ fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 /// The `src` directory of every crate under `crates/`.
-fn crate_src_dirs() -> Vec<PathBuf> {
-    crate_subdirs("src")
+fn crate_src_dirs(root: &Path) -> Vec<PathBuf> {
+    crate_subdirs(root, "src")
 }
 
 /// The `tests` directory of every crate under `crates/`.
-fn crate_test_dirs() -> Vec<PathBuf> {
-    crate_subdirs("tests")
+fn crate_test_dirs(root: &Path) -> Vec<PathBuf> {
+    crate_subdirs(root, "tests")
 }
 
-fn crate_subdirs(name: &str) -> Vec<PathBuf> {
-    let crates = workspace_root().join("crates");
+/// The files the ratchet reads about code: the sources of every crate and
+/// the tests that drive them. One corpus, so two counters naming the same
+/// pattern never disagree about where they looked.
+pub(super) fn ratchet_corpus(root: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = crate_src_dirs(root)
+        .iter()
+        .chain(crate_test_dirs(root).iter())
+        .flat_map(|dir| rs_files(dir))
+        .collect();
+    files.sort();
+    files
+}
+
+fn crate_subdirs(root: &Path, name: &str) -> Vec<PathBuf> {
+    let crates = root.join("crates");
     let mut dirs = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&crates) {
         for entry in entries.flatten() {
@@ -87,98 +114,18 @@ fn count_lines(files: &[PathBuf], matches: impl Fn(&str) -> bool) -> usize {
         .sum()
 }
 
-/// A source file with its inline `#[cfg(test)]` modules blanked, so a
-/// production counter never sees the unit tests that live beside the code:
-/// the audit measured these patterns *outside* tests.
-fn production_only(text: &str) -> String {
-    let mask = test_mod_mask(text);
-    text.lines()
-        .zip(mask)
-        .map(|(line, in_test)| {
-            if in_test {
-                String::new()
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// One flag per line: whether it sits inside a `#[cfg(test)]` module (the
-/// attribute line, the `mod … {` header, and the body through its matching
-/// `}`). Braces inside strings and comments are ignored via [`strip_noise`],
-/// so a `{` in a string never opens a phantom module.
-fn test_mod_mask(text: &str) -> Vec<bool> {
-    let lines: Vec<&str> = text.lines().collect();
-    let blanked = {
-        let mut in_block = false;
-        lines
-            .iter()
-            .map(|line| {
-                let (out, next) = strip_noise(line, in_block);
-                in_block = next;
-                out
-            })
-            .collect::<Vec<_>>()
-    };
-    let mut mask = vec![false; lines.len()];
-    let mut i = 0;
-    while i < lines.len() {
-        if blanked[i].contains("#[cfg(test)]") {
-            // Find the block this attribute guards (a `mod`) and its opening
-            // brace; a `#[cfg(test)]` on anything else is left alone.
-            let mut j = i;
-            let mut is_mod = false;
-            while j < lines.len() {
-                if blanked[j].contains(" mod ") || blanked[j].trim_start().starts_with("mod ") {
-                    is_mod = true;
-                }
-                if blanked[j].contains('{') {
-                    break;
-                }
-                if blanked[j].contains(';') {
-                    break;
-                }
-                j += 1;
-            }
-            if is_mod && j < lines.len() && blanked[j].contains('{') {
-                let mut depth = 0i32;
-                for (k, line) in blanked.iter().enumerate().skip(j) {
-                    for ch in line.chars() {
-                        if ch == '{' {
-                            depth += 1;
-                        } else if ch == '}' {
-                            depth -= 1;
-                        }
-                    }
-                    for flag in mask.iter_mut().take(k + 1).skip(i) {
-                        *flag = true;
-                    }
-                    if depth == 0 {
-                        i = k + 1;
-                        break;
-                    }
-                }
-                continue;
-            }
-        }
-        i += 1;
-    }
-    mask
-}
-
 /// Every counter, by name, computed fresh from the tree.
 fn measure() -> BTreeMap<String, usize> {
-    let src_files: Vec<PathBuf> = crate_src_dirs()
+    let root = workspace_root();
+    let src_files: Vec<PathBuf> = crate_src_dirs(&root)
         .iter()
         .flat_map(|dir| rs_files(dir))
         .collect();
-    let tests: Vec<PathBuf> = crate_test_dirs()
+    let tests: Vec<PathBuf> = crate_test_dirs(&root)
         .iter()
         .flat_map(|dir| rs_files(dir))
         .collect();
-    let cli_src = rs_files(&workspace_root().join("crates/cli/src"));
+    let cli_src = rs_files(&root.join("crates/cli/src"));
 
     // Production text (unit-test modules blanked) for the counters the audit
     // measured outside tests.
@@ -222,42 +169,21 @@ fn measure() -> BTreeMap<String, usize> {
             })
             .count(),
     );
-    // The wall clock is read in exactly one place — `SystemClock`.
-    counts.insert(
-        "utc_now_outside_clock".to_string(),
-        count_lines(
-            &src_files
-                .iter()
-                .filter(|p| !p.ends_with("clock.rs"))
-                .cloned()
-                .collect::<Vec<_>>(),
-            |line| line.contains("Utc::now"),
-        ),
-    );
-    // Git runs from one module per crate that needs it — the engine's and
-    // the test harness's, never scattered. Counted by file, so a third site
-    // is what trips it.
-    counts.insert(
-        "git_command_new_files".to_string(),
-        src_files
-            .iter()
-            .filter(|path| {
-                std::fs::read_to_string(path)
-                    .map(|text| text.contains("Command::new(\"git\")"))
-                    .unwrap_or(false)
-            })
-            .count(),
-    );
     // The CLI has one error translator; `main` maps the exit code.
     counts.insert(
         "exit_failure_in_cli".to_string(),
         count_lines(&cli_src, |line| line.contains("ExitCode::FAILURE")),
     );
     // Test infrastructure lives in the support crate, never copied into a
-    // test file.
+    // test that needs it. Counted over `src` as well as `tests`, because
+    // a `#[cfg(test)]` module inside a crate is a test that needs it too,
+    // and a copy there drifts from the one place just as quietly — the
+    // one this found had dropped the initial-branch pin that makes the
+    // support crate's version hermetic.
+    let test_code: Vec<PathBuf> = tests.iter().chain(src_files.iter()).cloned().collect();
     counts.insert(
         "copied_test_helpers".to_string(),
-        count_lines(&tests, |line| {
+        count_lines(&test_code, |line| {
             let t = line.trim_start();
             t.starts_with("fn git(")
                 || t.starts_with("fn yunta_in(")
@@ -265,6 +191,24 @@ fn measure() -> BTreeMap<String, usize> {
                 || t.starts_with("struct FixedClock")
         }),
     );
+
+    // A `_ =>` inside a ledger's fold is a kind that derives nothing
+    // with nothing saying so: the arm exists, the reader sees no
+    // diagnostic, and the state is simply wrong. Every kind is named,
+    // and one that moves nothing says `is_audit`.
+    counts.insert(
+        "wildcard_in_ledger_apply".to_string(),
+        wildcards_in_folds(&root),
+    );
+
+    // A word this repository retired still naming the thing it retired it
+    // for, and a text that describes a plan or a past instead of what the
+    // repository does. Both read prose, over a corpus wider than `.rs`.
+    counts.insert(
+        "banned_vocabulary".to_string(),
+        prose::banned_vocabulary(&root),
+    );
+    counts.insert("tense_markers".to_string(), prose::tense_markers(&root));
 
     // A run of spaces inside a message is a `\` continuation that went
     // missing: the reader gets the source's indentation in the text.
@@ -276,214 +220,77 @@ fn measure() -> BTreeMap<String, usize> {
             .count(),
     );
 
+    // The shape of a test, the thread an async body holds, the threshold
+    // with no decision behind it, and every capability written outside the
+    // site that owns it. Each of these is a function of the tree alone.
+    for (name, count) in COUNTERS.iter().chain(sites::COUNTERS) {
+        counts.insert((*name).to_string(), count(&root));
+    }
+
     counts
 }
 
-/// Whether `line` carries a string literal with eight or more spaces
-/// between two visible characters — the trace a `\` line continuation
-/// leaves when it goes missing: the message reaches its reader with a
-/// source line's indentation inside it, never shallower than two
-/// nesting levels. Alignment an author writes into a message (a table
-/// column, a commented YAML template) uses a few spaces, and spaces a
-/// literal opens with or that follow a `\n` escape are layout; comment
-/// lines are not messages.
-fn has_inner_space_run(line: &str) -> bool {
-    if line.trim_start().starts_with("//") {
-        return false;
-    }
-    let Some(open) = line.find('"') else {
-        return false;
-    };
-    let bytes = line.as_bytes();
-    let mut i = open + 1;
-    while let Some(&byte) = bytes.get(i) {
-        if byte != b' ' {
-            i += 1;
-            continue;
-        }
-        let start = i;
-        while bytes.get(i) == Some(&b' ') {
-            i += 1;
-        }
-        let before = start.checked_sub(1).and_then(|j| bytes.get(j));
-        let after_escape = start >= 2 && bytes.get(start - 2..start) == Some(b"\\n".as_slice());
-        let visible_before = before.is_some_and(|&b| b != b'"' && b != b'\\');
-        let visible_after = bytes.get(i).is_some_and(|&b| b != b'"');
-        if i - start >= 8 && visible_before && !after_escape && visible_after {
-            return true;
-        }
-    }
-    false
+/// The counters that read the corpus of code and nothing else, beside the
+/// ones [`sites`] declares.
+const COUNTERS: &[sites::Counter] = &[
+    ("sync_fs_in_async", count_sync_fs_in_async),
+    ("test_files_over_500_lines", count_test_files_over_500_lines),
+    ("test_fns_over_50_lines", count_test_fns_over_50_lines),
+    ("numeric_const_without_adr", count_numeric_const_without_adr),
+];
+
+/// A synchronous file call inside an async body: it holds the thread the
+/// runtime gave the task until the disk answers.
+fn count_sync_fs_in_async(root: &Path) -> usize {
+    ratchet_corpus(root)
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|text| sync_fs_in_async(&text))
+        .sum()
 }
 
-/// How many function bodies in `source` exceed `max` lines, measured from
-/// the line after the body's opening `{` to its matching `}` — the span a
-/// reader scrolls. String and char literals and comments are blanked first
-/// so a brace inside them never opens or closes a body. A deliberate
-/// heuristic, not a parser: it only ever gates *growth* against a baseline,
-/// so an occasional miscount is stable and harmless.
-fn functions_over(source: &str, max: usize) -> usize {
-    let blanked: Vec<String> = {
-        let mut in_block = false;
-        source
-            .lines()
-            .map(|line| {
-                let (out, next) = strip_noise(line, in_block);
-                in_block = next;
-                out
-            })
-            .collect()
-    };
-    let mut over = 0;
-    let mut i = 0;
-    while i < blanked.len() {
-        // A function header is a line whose code contains `fn <name>(`.
-        if find_fn(&blanked[i]).is_some() {
-            // Walk to the body's opening brace (it may be on a later line
-            // for a multi-line signature or `where` clause).
-            let mut j = i;
-            let mut opened = false;
-            while j < blanked.len() {
-                if blanked[j].contains('{') {
-                    opened = true;
-                    break;
-                }
-                if blanked[j].contains(';') {
-                    break; // a `fn` declaration with no body (trait method).
-                }
-                j += 1;
-            }
-            if opened {
-                let mut depth = 0i32;
-                let open_line = j;
-                let mut close_line = j;
-                'body: for (k, line) in blanked.iter().enumerate().skip(j) {
-                    for ch in line.chars() {
-                        if ch == '{' {
-                            depth += 1;
-                        } else if ch == '}' {
-                            depth -= 1;
-                            if depth == 0 {
-                                close_line = k;
-                                break 'body;
-                            }
-                        }
-                    }
-                }
-                let body_lines = close_line.saturating_sub(open_line + 1);
-                if body_lines > max {
-                    over += 1;
-                }
-                i = close_line + 1;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    over
+/// A test file past the budget a source file has. What a reader scrolls
+/// to understand a failure is the test as well as the code it drives.
+fn count_test_files_over_500_lines(root: &Path) -> usize {
+    test_files(root)
+        .iter()
+        .filter(|path| {
+            std::fs::read_to_string(path)
+                .map(|text| text.lines().count() > 500)
+                .unwrap_or(false)
+        })
+        .count()
 }
 
-/// The column where a `fn` keyword introduces a function, or `None`. Only a
-/// `fn` at a word boundary counts, so `transfn` or a `fn` inside an
-/// already-blanked string never matches.
-fn find_fn(code: &str) -> Option<usize> {
-    let bytes = code.as_bytes();
-    let mut idx = 0;
-    while let Some(pos) = code[idx..].find("fn ") {
-        let at = idx + pos;
-        let before_ok = at == 0 || !is_ident(bytes[at - 1]);
-        if before_ok {
-            return Some(at);
-        }
-        idx = at + 2;
-    }
-    None
+/// A test function past the budget a production function has. A test that
+/// long names more than one behaviour, and a failure in it says which
+/// line broke rather than which promise.
+fn count_test_fns_over_50_lines(root: &Path) -> usize {
+    test_files(root)
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|text| functions_over(&text, 50))
+        .sum()
 }
 
-fn is_ident(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
+/// A threshold with no decision behind it, over `src`, which is where
+/// D170 states the rule: a number a test writes is read beside the
+/// assertion it serves, while a number the code carries governs what the
+/// binary does to somebody's run.
+fn count_numeric_const_without_adr(root: &Path) -> usize {
+    crate_src_dirs(root)
+        .iter()
+        .flat_map(|dir| rs_files(dir))
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|text| numeric_consts_without_decision(&text))
+        .sum()
 }
 
-/// Blanks string/char literals and comments in `line` (replacing them with
-/// spaces) so only structural braces survive; returns the blanked line and
-/// whether a block comment is still open at its end.
-fn strip_noise(line: &str, mut in_block: bool) -> (String, bool) {
-    let mut out = String::with_capacity(line.len());
-    let chars: Vec<char> = line.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        if in_block {
-            if c == '*' && chars.get(i + 1) == Some(&'/') {
-                in_block = false;
-                out.push_str("  ");
-                i += 2;
-                continue;
-            }
-            out.push(' ');
-            i += 1;
-            continue;
-        }
-        if c == '/' && chars.get(i + 1) == Some(&'/') {
-            break; // line comment — the rest is noise.
-        }
-        if c == '/' && chars.get(i + 1) == Some(&'*') {
-            in_block = true;
-            out.push_str("  ");
-            i += 2;
-            continue;
-        }
-        if c == '"' {
-            out.push(' ');
-            i += 1;
-            while i < chars.len() {
-                if chars[i] == '\\' {
-                    out.push_str("  ");
-                    i += 2;
-                    continue;
-                }
-                if chars[i] == '"' {
-                    out.push(' ');
-                    i += 1;
-                    break;
-                }
-                out.push(' ');
-                i += 1;
-            }
-            continue;
-        }
-        if c == '\'' {
-            // A char literal is `'x'` or `'\n'`/`'\u{..}'`; anything else
-            // opening with `'` is a lifetime (`'static`, `'a`), emitted
-            // verbatim so the code and braces after it are still seen.
-            let is_char = chars.get(i + 1) == Some(&'\\') || chars.get(i + 2) == Some(&'\'');
-            if !is_char {
-                out.push(c);
-                i += 1;
-                continue;
-            }
-            out.push(' ');
-            i += 1;
-            while i < chars.len() {
-                if chars[i] == '\\' {
-                    out.push_str("  ");
-                    i += 2;
-                    continue;
-                }
-                if chars[i] == '\'' {
-                    out.push(' ');
-                    i += 1;
-                    break;
-                }
-                out.push(' ');
-                i += 1;
-            }
-            continue;
-        }
-        out.push(c);
-        i += 1;
-    }
-    (out, in_block)
+fn test_files(root: &Path) -> Vec<PathBuf> {
+    crate_test_dirs(root)
+        .iter()
+        .flat_map(|dir| rs_files(dir))
+        .collect()
 }
 
 fn render(counts: &BTreeMap<String, usize>) -> String {
@@ -500,6 +307,58 @@ fn parse_baseline(text: &str) -> BTreeMap<String, usize> {
             Some((name.to_string(), count.trim().parse().ok()?))
         })
         .collect()
+}
+
+/// Wildcard match arms inside the functions that fold the log: every
+/// `ledger.rs` under `crates/core/src/events/`, plus the engine's own
+/// derivation. A `_ =>` there is a kind that derives nothing with
+/// nothing saying so.
+fn wildcards_in_folds(root: &Path) -> usize {
+    let mut folds: Vec<PathBuf> = Vec::new();
+    if let Ok(domains) = std::fs::read_dir(root.join("crates/core/src/events")) {
+        for domain in domains.flatten() {
+            let ledger = domain.path().join("ledger.rs");
+            if ledger.is_file() {
+                folds.push(ledger);
+            }
+        }
+    }
+    folds.push(root.join("crates/engine/src/replay.rs"));
+    folds.sort();
+    folds
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .map(|text| wildcards_in_apply(&text))
+        .sum()
+}
+
+/// Wildcard arms inside a fold's `apply`, and nowhere else in the file:
+/// a `match` over an `Option` or a pair of them is ordinary reading, and
+/// what this measures is a kind of event nothing names.
+fn wildcards_in_apply(source: &str) -> usize {
+    let mut count = 0;
+    let mut depth = 0usize;
+    let mut inside = false;
+    let mut block = false;
+    for line in source.lines() {
+        let (code, next) = strip_noise(line, block);
+        block = next;
+        if !inside && code.contains("fn apply") {
+            inside = true;
+            depth = 0;
+        }
+        if inside {
+            if code.trim_start().starts_with("_ =>") {
+                count += 1;
+            }
+            let before = depth;
+            depth = depth + code.matches(['{', '(']).count() - code.matches(['}', ')']).count();
+            if before > 0 && depth == 0 {
+                inside = false;
+            }
+        }
+    }
+    count
 }
 
 /// `cargo xtask smells`: measure and write the baseline.
@@ -550,56 +409,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn inner_space_runs_are_the_trace_of_a_lost_continuation() {
-        assert!(has_inner_space_run(
-            r#"    "the adapter declares no                 session resume""#
-        ));
-        // A few spaces align a column; the trace is a source line's indentation.
-        assert!(!has_inner_space_run(
-            r#"    "  {} {:>3} run(s)    median CPTV {}    median tokens {}","#
-        ));
-        // Indentation a literal opens with is layout, not a trace.
-        assert!(!has_inner_space_run(
-            r#"    println!("      tradeoff: {}", x);"#
-        ));
-        // So is indentation after a `\n` escape, and a comment is not a message.
-        assert!(!has_inner_space_run(
-            r#"    "add e.g.:\n      runners:\n        \"#
-        ));
-        assert!(!has_inner_space_run("    // a          comment"));
-        assert!(!has_inner_space_run("    let x = 1;"));
+    fn the_ratchet_measures_the_vocabulary_and_the_tense_the_repository_rules_on() {
+        let counts = measure();
+        for name in ["banned_vocabulary", "tense_markers"] {
+            assert!(
+                counts.contains_key(name),
+                "`{name}` is a rule this repository states and the ratchet does not count, \
+                 so a change is free to raise it"
+            );
+        }
     }
 
     #[test]
-    fn functions_over_counts_only_bodies_past_the_budget() {
-        let short = "fn a() {\n    let x = 1;\n}\n";
-        assert_eq!(functions_over(short, 5), 0);
-        let long = format!("fn b() {{\n{}}}\n", "    let x = 1;\n".repeat(10));
-        assert_eq!(functions_over(&long, 5), 1);
-    }
-
-    #[test]
-    fn functions_over_ignores_a_brace_inside_a_string() {
-        // The `{` in the string must not open a body, and the trait method
-        // declaration with no body must not count.
-        let source =
-            "fn a() -> &'static str {\n    \"} not a brace {\"\n}\ntrait T { fn m(&self); }\n";
-        assert_eq!(functions_over(source, 0), 1);
-    }
-
-    #[test]
-    fn test_mod_mask_covers_a_cfg_test_module() {
-        let source =
-            "fn prod() {}\n#[cfg(test)]\nmod tests {\n    fn t() {}\n}\nfn also_prod() {}\n";
-        let mask = test_mod_mask(source);
-        assert_eq!(
-            mask,
-            vec![false, true, true, true, true, false],
-            "the attribute, header and body are masked; production lines are not"
+    fn the_baseline_holds_a_number_for_every_counter_the_ratchet_measures() {
+        let counts = measure();
+        let baseline = parse_baseline(
+            &std::fs::read_to_string(baseline_path()).expect("the baseline is committed"),
         );
-        // Production-only text keeps prod, drops the test module's contents.
-        let prod = production_only(source);
-        assert!(prod.contains("fn prod()") && prod.contains("fn also_prod()"));
-        assert!(!prod.contains("fn t()"));
+        let measured: Vec<&String> = counts.keys().collect();
+        let held: Vec<&String> = baseline.keys().collect();
+        assert_eq!(
+            measured, held,
+            "a counter enters with the number it measures when it lands — one with no line in \
+             the baseline gates nothing, and a line with no counter gates a pattern nobody reads"
+        );
     }
 }

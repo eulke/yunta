@@ -2,11 +2,11 @@
 //! it changed, and what it tells `run_task` to do next.
 
 use std::path::{Path, PathBuf};
+use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, Budget, PermissionProfile, SessionRequest};
-use yunta_core::events::{CapabilityDegradedPayload, EventPayload, TokenUsage};
-use yunta_core::Capability;
+use yunta_core::events::{SessionDeath, TokenUsage};
+use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::Task;
 
 use super::criteria::{post_check, Memo};
@@ -22,6 +22,7 @@ pub(super) struct AttemptParams<'a> {
     pub(super) task: &'a Task,
     pub(super) instruction: &'a str,
     pub(super) adapter: &'a dyn Adapter,
+    pub(super) node: &'a yunta_core::Node,
     pub(super) cwd: &'a Path,
     pub(super) budget: Budget,
     pub(super) memo: &'a Memo,
@@ -29,7 +30,7 @@ pub(super) struct AttemptParams<'a> {
     pub(super) scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
     pub(super) max_expansion_files: usize,
     pub(super) grants: &'a crate::scope_expansion::GrantLedger,
-    pub(super) already_granted_paths: &'a [String],
+    pub(super) already_granted_paths: &'a [ScopeGlob],
     pub(super) audit: Option<(&'a dyn SessionObserver, &'a yunta_core::NodeId)>,
     pub(super) cancel: &'a CancellationToken,
     pub(super) setup: &'a SessionSetup,
@@ -57,7 +58,7 @@ pub(super) async fn run_one_attempt(
     params: &AttemptParams<'_>,
     attempt: u32,
 ) -> Result<(Vec<PathBuf>, AttemptStep), TaskCycleError> {
-    let (last_staged, dispatch_outcome, tokens) = open_and_dispatch(params).await?;
+    let (last_staged, dispatch_outcome, tokens, covered) = open_and_dispatch(params).await?;
     let &AttemptParams {
         task,
         cwd,
@@ -71,11 +72,21 @@ pub(super) async fn run_one_attempt(
     // verdict, no retry. The attempt is on record; what the cancellation
     // means for the task is the caller's decision, because only it knows
     // which token fired.
-    if matches!(dispatch_outcome, DispatchOutcome::Cancelled) {
+    //
+    // The token is read as well as the outcome: a `join: any` sibling can
+    // win between the session closing and the verdict starting, and every
+    // subprocess the verdict would run is already governed by that same
+    // token — so running it would only produce a "killed before it could
+    // answer" to interpret as a failure. This attempt lost; it did not
+    // fail.
+    let cancelled =
+        matches!(dispatch_outcome, DispatchOutcome::Cancelled) || supervision.cancel.is_cancelled();
+    if cancelled {
         let record = AttemptRecord {
             attempt,
-            dispatch: dispatch_outcome,
+            dispatch: DispatchOutcome::Cancelled,
             tokens,
+            fence_breach: None,
             post_check: Vec::new(),
             scope: crate::scope::ScopeCheckResult::default(),
             succeeded: false,
@@ -92,12 +103,12 @@ pub(super) async fn run_one_attempt(
     }
 
     let expansion_outcome = evaluate_scope_expansion(params).await?;
-    let granted_paths: &[String] = expansion_outcome
+    let granted_paths: &[ScopeGlob] = expansion_outcome
         .as_ref()
         .filter(|outcome| outcome.decision == crate::scope_expansion::Decision::Granted)
         .map(|outcome| outcome.request.paths.as_slice())
         .unwrap_or(&[]);
-    let effective_scope: Vec<String> = task
+    let effective_scope: Vec<ScopeGlob> = task
         .scope
         .iter()
         .cloned()
@@ -109,7 +120,7 @@ pub(super) async fn run_one_attempt(
     // The final diff is evaluated against the declared scope plus any
     // authorized expansions — never against a denied or escalated request's
     // paths.
-    let scope = scope_check(cwd, &effective_scope, &last_staged).await?;
+    let scope = scope_check(cwd, &effective_scope, &last_staged, supervision).await?;
 
     let criteria_green = post_runs.iter().all(|r| r.exit_code == 0);
     let succeeded = criteria_green && scope.violations.is_empty();
@@ -126,11 +137,23 @@ pub(super) async fn run_one_attempt(
             ..
         }
     );
+    // The same, for a session that never reported anything at all: it
+    // left no work behind and said how its process went, and the next
+    // attempt would open the same session against the same
+    // configuration. Captured here for the same reason.
+    let session_death = match &dispatch_outcome {
+        DispatchOutcome::Crashed { exit } => Some(SessionDeath {
+            adapter: params.adapter.id().clone(),
+            exit: exit.clone(),
+        }),
+        _ => None,
+    };
 
     let record = AttemptRecord {
         attempt,
         dispatch: dispatch_outcome,
         tokens,
+        fence_breach: crate::scope::fence_breach(covered.as_ref(), &scope),
         post_check: post_runs,
         scope,
         succeeded,
@@ -155,9 +178,23 @@ pub(super) async fn run_one_attempt(
             AttemptStep::Stop {
                 record,
                 outcome: TaskOutcome::Blocked {
-                    reason: "a scope expansion request needs a human decision".to_string(),
+                    cause: super::BlockedCause::ScopeDecisionOwed,
                 },
                 needs_human_decision: true,
+            },
+        ));
+    }
+    // A session that died says so instead of leaving the tail to report
+    // criteria that were never run.
+    if let Some(died) = session_death {
+        return Ok((
+            last_staged,
+            AttemptStep::Stop {
+                record,
+                outcome: TaskOutcome::Blocked {
+                    cause: super::BlockedCause::SessionDied(died),
+                },
+                needs_human_decision: false,
             },
         ));
     }
@@ -171,9 +208,7 @@ pub(super) async fn run_one_attempt(
             AttemptStep::Stop {
                 record,
                 outcome: TaskOutcome::Blocked {
-                    reason: "the session reported a non-retryable failure and the criteria \
-                             are still red"
-                        .to_string(),
+                    cause: super::BlockedCause::NonRetryable,
                 },
                 needs_human_decision: false,
             },
@@ -189,100 +224,66 @@ pub(super) async fn run_one_attempt(
 /// tokens it spent.
 async fn open_and_dispatch(
     params: &AttemptParams<'_>,
-) -> Result<(Vec<PathBuf>, DispatchOutcome, TokenUsage), TaskCycleError> {
+) -> Result<
+    (
+        Vec<PathBuf>,
+        DispatchOutcome,
+        TokenUsage,
+        Option<yunta_core::fence::Coverage>,
+    ),
+    TaskCycleError,
+> {
     let &AttemptParams {
         task,
         instruction,
         adapter,
+        node,
         cwd,
         budget,
         profile,
         audit,
         cancel,
         setup,
+        already_granted_paths,
         ..
     } = params;
-    // A fresh listener + credential per attempt — held across the dispatch,
-    // dead with it. A bind failure degrades (the session runs without run
-    // tools) rather than sinking the attempt: the tools are an offer, the
-    // task's own criteria are the contract.
-    let run_tools = match &setup.run_tools {
-        Some(access) => match crate::run_tools::open_session_listener(
-            access.clone(),
-            Some(task.id.clone()),
-            cwd.to_path_buf(),
-        )
-        .await
-        {
-            Ok(session) => Some(session),
-            Err(e) => {
-                // Recorded, not warned: the attempt runs without run tools,
-                // and the log says so and why.
-                if let Some((observer, obs_node)) = audit {
-                    observer
-                        .emit_session_event(
-                            obs_node,
-                            EventPayload::CapabilityDegraded(CapabilityDegradedPayload {
-                                capability: Capability::RunTools,
-                                adapter: adapter.id().clone(),
-                                policy_applied: format!("the attempt runs without run tools: {e}"),
-                            }),
-                        )
-                        .await
-                        .map_err(|source| TaskCycleError::Audit {
-                            task: task.id.clone(),
-                            source,
-                        })?;
-                }
-                None
-            }
+    // One door for every session: the per-attempt listener (its bind
+    // failure degrades to no tools, recorded, never fatal), the brief,
+    // and the request itself.
+    let crate::run::session_plan::OpenedSession {
+        request,
+        run_tools: _run_tools,
+    } = crate::run::session_plan::open_session(
+        setup,
+        crate::run::session_plan::SessionPlan {
+            node,
+            task: Some(task),
+            prompt: crate::run::session_plan::task_brief(instruction, task),
+            cwd: cwd.to_path_buf(),
+            profile,
+            budget,
+            granted: already_granted_paths.to_vec(),
         },
-        None => None,
-    };
-    // Minimal brief — the node's instruction plus which task is this
-    // session's, never the plan as prose. Every attempt is a fresh session
-    // with the same request.
-    let mut prompt = format!(
-        "{instruction}\n\nYour task: `{}` — {}. Stay within its declared scope.",
-        task.id, task.title
-    );
-    // The node's own declared artifacts are this session's to hand over:
-    // the file a `loop` node closes on is written from what its task
-    // sessions submit and report.
-    if let Some(notice) = crate::run_tools::submission_notice(
-        run_tools.as_ref(),
-        setup
-            .run_tools
-            .as_ref()
-            .map(|access| access.declared.as_slice())
-            .unwrap_or_default(),
-        None,
-    ) {
-        prompt.push_str(&notice);
-    }
-    let request = SessionRequest {
-        prompt,
-        cwd: cwd.to_path_buf(),
-        model: None,
-        agent: None,
-        permissions: profile,
-        env: setup.env.clone(),
-        edit_constraints: Some(task.scope.clone()),
-        budget,
-        adapter_settings: setup.adapter_settings.clone(),
-        skills: setup.skills.clone(),
-        run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
-        // A task session produces no declared artifact of its own:
-        // the tasks document it works from was written by the node that
-        // declared it, and its work lands in the worktree.
-        artifact_dir: None,
-        scratch_dir: Some(
-            crate::session_dir::SessionSlot::Task(&setup.node, &task.id)
-                .scratch_dir(&setup.run_dir),
-        ),
-    };
+        adapter,
+        audit,
+    )
+    .await
+    .map_err(|error| match error {
+        crate::run::session_plan::OpenSessionError::Audit(source) => TaskCycleError::Audit {
+            task: task.id.clone(),
+            source,
+        },
+        crate::run::session_plan::OpenSessionError::RunTools(source) => TaskCycleError::RunTools {
+            task: task.id.clone(),
+            source,
+        },
+    })?;
     let last_staged = adapter.staged_paths(&request);
-    let (dispatch_outcome, tokens) = dispatch_session(adapter, request, cancel, audit, None)
+    let crate::task_cycle::Dispatched {
+        outcome: dispatch_outcome,
+        tokens,
+        fence,
+    } = dispatch_session(adapter, request, cancel, audit, None)
         .await
         .map_err(|error| match error {
             DispatchError::Adapter(source) => TaskCycleError::Spawn {
@@ -294,7 +295,7 @@ async fn open_and_dispatch(
                 source,
             },
         })?;
-    Ok((last_staged, dispatch_outcome, tokens))
+    Ok((last_staged, dispatch_outcome, tokens, fence))
 }
 
 /// Reads the agent's own scope-expansion request from this attempt's
@@ -313,12 +314,13 @@ async fn evaluate_scope_expansion(
         supervision,
         ..
     } = params;
-    let Some(expansion_request) = crate::scope_expansion::load_request(cwd).map_err(|source| {
-        TaskCycleError::ScopeExpansion {
-            task: task.id.clone(),
-            source,
-        }
-    })?
+    let Some(expansion_request) =
+        crate::scope_expansion::load_request(cwd)
+            .await
+            .map_err(|source| TaskCycleError::ScopeExpansion {
+                task: task.id.clone(),
+                source,
+            })?
     else {
         return Ok(None);
     };

@@ -40,12 +40,31 @@ codex: unhealthy — `codex` not found on PATH
 The diagnostic names the actual problem: binary missing, version
 incompatible, or auth invalid. Fix that specific thing and re-run — `doctor`
 runs the identical probe `yunta run` runs before spending anything, so a
-healthy `doctor` means a run won't fail on setup for that adapter. See
-[adapters](adapters.md#yunta-doctor).
+healthy `doctor` means the binary is there, answers and authenticates.
+
+It does not mean a session opens. The probe asks for a version, which never
+touches the configuration a run writes the CLI; a CLI that refuses that
+configuration is healthy to a probe and dead to a run. `yunta doctor
+--session` opens one real session per binding and reports how each ended,
+at the cost of a prompt each. See [adapters](adapters.md#yunta-doctor).
 
 If `doctor` reports a pack's `requires:` unmet (a role, an `mcp_servers:`
 name, or a command not on `PATH`), it names the pack — add what's missing to
 your own config, you don't need to touch the pack itself.
+
+## A node failed with "session `<adapter>` exited with code N before any terminal event"
+
+The CLI started and stopped without ever opening a session. The line carries
+how its process ended and the last thing it wrote to stderr, which is
+normally the whole answer: a configuration key it does not accept, a
+credential it could not read, a flag it does not know.
+
+`yunta status <run_id>` shows the rest of what the CLI said on its way out,
+up to its last twenty lines. Values that came from the session's own
+environment — the run tools' token among them — read as `[redacted]`.
+
+`yunta doctor --session` reproduces it outside any run, once per binding, so
+you can fix the configuration and check it without spending a workflow.
 
 ## A node failed with "scope violated: N file(s) outside the declared globs"
 
@@ -116,7 +135,7 @@ once. A document that does not read into its kind is refused with that one probl
 and the path where it sits:
 
 ```
-  1. does not parse at `tasks[1].manual_review`: invalid type: string "yes", expected a boolean
+  1. does not parse at `tasks[1].scope`: invalid type: string "src/**", expected a sequence
 ```
 
 A value of the wrong type stops the read, and the rules only hold over a document

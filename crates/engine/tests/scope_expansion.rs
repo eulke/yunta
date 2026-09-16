@@ -5,9 +5,8 @@
 
 use yunta_core::ProposedCriterionEntry;
 use yunta_core::ScopeExpansionMode;
-use yunta_engine::process::Supervision;
 use yunta_engine::scope_expansion::{evaluate, Decision, GrantLedger, ScopeExpansionRequest};
-use yunta_testkit::init_repo;
+use yunta_testkit::{init_repo, Owner};
 
 fn repo() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -17,7 +16,7 @@ fn repo() -> tempfile::TempDir {
 
 fn request(paths: &[&str], criterion: Option<&str>) -> ScopeExpansionRequest {
     ScopeExpansionRequest {
-        paths: paths.iter().map(|s| s.to_string()).collect(),
+        paths: paths.iter().map(|s| (*s).into()).collect(),
         reason: "small adjacent fix".to_string(),
         proposed_criterion: criterion.map(|cmd| ProposedCriterionEntry {
             cmd: cmd.to_string(),
@@ -27,6 +26,7 @@ fn request(paths: &[&str], criterion: Option<&str>) -> ScopeExpansionRequest {
 
 #[tokio::test]
 async fn a_proposed_criterion_that_already_passes_is_denied_without_consulting_any_mode() {
+    let owner = Owner::new();
     // ✓ del Plan: "criterio propuesto que ya pasa → rechazo automático sin
     // consultar" — cierto incluso en `ask`, que de otro modo escalaría.
     let dir = repo();
@@ -39,7 +39,7 @@ async fn a_proposed_criterion_that_already_passes_is_denied_without_consulting_a
         &GrantLedger::new(0),
         &req,
         dir.path(),
-        Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -55,6 +55,7 @@ async fn a_proposed_criterion_that_already_passes_is_denied_without_consulting_a
 
 #[tokio::test]
 async fn deny_mode_denies_without_running_any_rule() {
+    let owner = Owner::new();
     let dir = repo();
     let req = request(&["src/x.rs"], None);
     let (_precheck, decision) = evaluate(
@@ -65,7 +66,7 @@ async fn deny_mode_denies_without_running_any_rule() {
         &GrantLedger::new(0),
         &req,
         dir.path(),
-        Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -79,6 +80,7 @@ async fn deny_mode_denies_without_running_any_rule() {
 
 #[tokio::test]
 async fn ask_mode_escalates_instead_of_deciding() {
+    let owner = Owner::new();
     let dir = repo();
     let req = request(&["src/x.rs"], Some("false"));
     let (_precheck, decision) = evaluate(
@@ -89,7 +91,7 @@ async fn ask_mode_escalates_instead_of_deciding() {
         &GrantLedger::new(0),
         &req,
         dir.path(),
-        Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -98,18 +100,19 @@ async fn ask_mode_escalates_instead_of_deciding() {
 
 #[tokio::test]
 async fn rules_mode_grants_a_small_in_bounds_request_with_a_red_criterion() {
+    let owner = Owner::new();
     let dir = repo();
     std::fs::write(dir.path().join("src.rs"), "small change").unwrap();
     let req = request(&["src.rs"], Some("test -f nonexistent-marker"));
     let (precheck, decision) = evaluate(
         ScopeExpansionMode::Rules,
-        &["src.rs".to_string()],
+        &["src.rs".into()],
         None,
         5,
         &GrantLedger::new(0),
         &req,
         dir.path(),
-        Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -119,25 +122,26 @@ async fn rules_mode_grants_a_small_in_bounds_request_with_a_red_criterion() {
 
 #[tokio::test]
 async fn rules_mode_denies_a_path_outside_within() {
+    let owner = Owner::new();
     let dir = repo();
     std::fs::write(dir.path().join("outside.rs"), "x").unwrap();
     let req = request(&["outside.rs"], Some("test -f nonexistent-marker"));
     let (_precheck, decision) = evaluate(
         ScopeExpansionMode::Rules,
-        &["src/**".to_string()],
+        &["src/**".into()],
         None,
         5,
         &GrantLedger::new(0),
         &req,
         dir.path(),
-        Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
     match decision {
         Decision::Denied(reason) => assert_eq!(
             reason,
-            "requested path(s) fall outside the declared `within` ceiling: [\"outside.rs\"]"
+            "requested path(s) fall outside the declared `within` ceiling: outside.rs"
         ),
         other => panic!("expected Denied, got {other:?}"),
     }
@@ -145,18 +149,19 @@ async fn rules_mode_denies_a_path_outside_within() {
 
 #[tokio::test]
 async fn rules_mode_requires_a_proposed_criterion() {
+    let owner = Owner::new();
     let dir = repo();
     std::fs::write(dir.path().join("src.rs"), "x").unwrap();
     let req = request(&["src.rs"], None);
     let (_precheck, decision) = evaluate(
         ScopeExpansionMode::Rules,
-        &["src.rs".to_string()],
+        &["src.rs".into()],
         None,
         5,
         &GrantLedger::new(0),
         &req,
         dir.path(),
-        Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -170,6 +175,7 @@ async fn rules_mode_requires_a_proposed_criterion() {
 
 #[tokio::test]
 async fn rules_mode_denies_a_request_touching_too_many_files() {
+    let owner = Owner::new();
     let dir = repo();
     for n in 0..10 {
         std::fs::write(dir.path().join(format!("f{n}.rs")), "x").unwrap();
@@ -177,13 +183,13 @@ async fn rules_mode_denies_a_request_touching_too_many_files() {
     let req = request(&["f*.rs"], Some("test -f nonexistent-marker"));
     let (_precheck, decision) = evaluate(
         ScopeExpansionMode::Rules,
-        &["f*.rs".to_string()],
+        &["f*.rs".into()],
         None,
         5,
         &GrantLedger::new(0),
         &req,
         dir.path(),
-        Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -198,18 +204,19 @@ async fn rules_mode_denies_a_request_touching_too_many_files() {
 
 #[tokio::test]
 async fn an_exhausted_cap_escalates_even_under_rules_mode() {
+    let owner = Owner::new();
     let dir = repo();
     std::fs::write(dir.path().join("src.rs"), "x").unwrap();
     let req = request(&["src.rs"], Some("test -f nonexistent-marker"));
     let (_precheck, decision) = evaluate(
         ScopeExpansionMode::Rules,
-        &["src.rs".to_string()],
+        &["src.rs".into()],
         Some(2),
         5,
         &GrantLedger::new(2), // already at the cap
         &req,
         dir.path(),
-        Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();
@@ -222,18 +229,19 @@ async fn an_exhausted_cap_escalates_even_under_rules_mode() {
 
 #[tokio::test]
 async fn a_cap_not_yet_reached_does_not_escalate() {
+    let owner = Owner::new();
     let dir = repo();
     std::fs::write(dir.path().join("src.rs"), "x").unwrap();
     let req = request(&["src.rs"], Some("test -f nonexistent-marker"));
     let (_precheck, decision) = evaluate(
         ScopeExpansionMode::Rules,
-        &["src.rs".to_string()],
+        &["src.rs".into()],
         Some(3),
         5,
         &GrantLedger::new(2),
         &req,
         dir.path(),
-        Supervision::none(),
+        owner.supervision(),
     )
     .await
     .unwrap();

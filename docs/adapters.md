@@ -32,6 +32,28 @@ itself, which wins) names a custom agent definition, for adapters that
 support one (`custom_agents` capability) — an adapter that doesn't declares
 this openly rather than silently ignoring the field.
 
+## What a session may write
+
+A node declares a `scope:`, and every session runs behind a **fence**: the
+globs it may write under the worktree, plus the run's own directories, which
+stay writable wherever the session sits. One function decides whether a path
+is inside it, and every adapter asks that same function — what differs is how
+much of the fence each CLI can be made to enforce, and each session's opening
+says which:
+
+| Adapter | How it fences | What it covers |
+|---|---|---|
+| `claude-code` | A `PreToolUse` hook on every writing tool runs `yunta fence`, which answers before the write happens. | Exact under `edit` and `read-only`; tool calls only under `full`, which also exposes a shell. |
+| `codex` | The sandbox the process itself runs under, by directory. | The worktree and the run's directories — by directory, never by glob. |
+| `mock` | The fixture says which of the three levels it builds, and every scripted effect goes through the same judge. | Whatever the fixture declares. |
+
+A refusal reaches the model with the reason and the way out — ask for more
+scope, or report the need as a finding — and reaches the log as
+`write_refused`. The fence is what keeps a write outside the scope from
+happening; the diff Yunta takes after the session is still the guarantee, and
+a write that reaches that diff despite an exact fence is reported as a finding
+against the adapter.
+
 Whatever the adapter, the session's prompt reaches the CLI on its standard
 input, never as a command-line argument, so it is not readable from the
 process list; and the values of the secrets a config declares live only in
@@ -105,3 +127,52 @@ installed and configured later, the same way an adapter that isn't set up
 yet doesn't stop `yunta init`. Run `yunta doctor` after adding a pack, or
 whenever a run fails in a way that looks like a missing binary or an
 unresolved role.
+
+### `--session`: opening one for real
+
+A probe asks the CLI for its version. That tells you the binary is there,
+answers and authenticates; it does not tell you a session opens, because
+`--version` never touches the configuration a run writes the CLI. A CLI
+that refuses that configuration says so on stderr and exits before its
+first line — from the outside, a node that failed with no exit and no
+tokens.
+
+```bash
+yunta doctor --session
+```
+
+opens the smallest run there is — one `kind: prompt` node, run tools
+mounted, driven through the same machinery a workflow is — once per
+*binding*: an adapter, a model and an agent that some runner names. The
+binding and not the runner name, because a session exercises a binding:
+two runners naming the same one are not two things to check, and one a
+runner falls back to is checked too, since a run reaches it exactly when
+the first is down.
+
+```
+claude-code/claude-sonnet-5 (executor, reviewer): ok — 812 tokens
+codex/gpt-5-codex (planner fallback): session died — session `codex` exited with code 2 before any terminal event — url is not supported for stdio
+```
+
+It spends one prompt per binding, which is why it is opt-in. It runs in a
+sandbox of its own — nothing of your tree is touched, and your
+`baseline:` suite is never measured, because the question is whether a
+session opens, not what the tree measures.
+
+## The two MCP servers
+
+Two different servers carry the name of this system, and they are not the
+same thing:
+
+- **The control plane**, `yunta mcp`, which you register in your own
+  CLI's configuration, under whatever name you give it. It talks over
+  stdio and offers `list_workflows`, `run_workflow`, `workflow_status`
+  and the rest.
+- **The per-run server**, which the engine mounts into each session
+  itself and always calls `yunta-run`. It talks over streamable HTTP,
+  lives as long as the run does, and carries the tools a node uses to
+  post findings and submit documents.
+
+A CLI merges both entries into one table by key, so the per-run server
+carries a name of its own: registering the control plane as `yunta` — the
+natural thing to call it — leaves both intact.

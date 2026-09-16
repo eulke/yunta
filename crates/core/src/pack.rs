@@ -17,8 +17,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::hash::ContentHash;
-use crate::ids::{PackName, PackRef, Publisher, RunnerName};
+use crate::hash::{CommitSha, ContentHash};
+use crate::ids::{McpServerName, PackName, PackRef, Publisher, RunnerName};
+use crate::schema_range::SchemaRange;
 use crate::workflow::NodePermissions;
 
 /// The pack's own identity: `publisher/name`, invoked as
@@ -38,23 +39,21 @@ pub struct PackManifest {
     /// version is never auto-resolved (`update` always names an exact
     /// target ref), so nothing in v1 needs to *compare* versions,
     /// only record and display them. Kept a plain string rather than a
-    /// `semver` dependency for the same reason `yunta_schema` (below)
-    /// stays a hand-rolled range check instead of one (see
-    /// `engine/src/check.rs`'s own `yunta_schema_satisfied` doc comment)
-    /// — add the dependency the day something actually needs to compare
-    /// two versions, not ahead of that need.
+    /// `semver` dependency for the same reason [`SchemaRange`] is a
+    /// hand-rolled comparator range instead of one — add the dependency
+    /// the day something actually needs to compare two full versions,
+    /// not ahead of that need.
     pub version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<String>,
-    /// `">=1 <2"` — the same comparator-range syntax and the same
-    /// binary schema major (`yunta_core::YUNTA_SCHEMA`) a workflow's own
-    /// `yunta_schema:` is checked against; `check_yunta_schema`'s
-    /// range parser is reused verbatim once compatibility is actually
-    /// enforced, not duplicated here.
+    /// `">=1 <2"` — the same range a workflow's own `yunta_schema:`
+    /// states, read by the same parser and checked against the same
+    /// binary schema major (`yunta_core::YUNTA_SCHEMA`). `pack add`
+    /// refuses a pack whose range this binary does not satisfy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub yunta_schema: Option<String>,
+    pub yunta_schema: Option<SchemaRange>,
     #[serde(default)]
     pub requires: PackRequires,
     pub declares: PackDeclares,
@@ -72,7 +71,7 @@ pub struct PackRequires {
     pub runners: Vec<RequiredRunner>,
     /// Names the installer must define under its own `mcp_servers:`.
     #[serde(default)]
-    pub mcp_servers: Vec<String>,
+    pub mcp_servers: Vec<McpServerName>,
     /// Binaries the pack's `bash` nodes assume are on `PATH`.
     #[serde(default)]
     pub commands: Vec<String>,
@@ -150,7 +149,7 @@ pub struct PackLockEntry {
     /// actually cloned, independent of whether `ref` later moves (a
     /// branch does; a tag by convention shouldn't, but nothing here
     /// trusts that).
-    pub commit: String,
+    pub commit: CommitSha,
     /// Content hash of the vendored tree (sha256 over sorted
     /// relative-path + file-content pairs, `.git` excluded) — what an
     /// offline `add`/CI verifies the vendoring on disk against,
@@ -168,6 +167,14 @@ pub struct PackLock {
     pub packs: BTreeMap<PackRef, PackLockEntry>,
 }
 
+impl crate::persisted::Persisted for PackLock {
+    /// 1 from the first version that stamps one. A lock written before
+    /// this reads as 0, which is older than this binary and therefore
+    /// readable — which is what tolerance means here.
+    const SCHEMA_VERSION: u32 = 1;
+    const NAME: &'static str = "pack lock";
+}
+
 /// A manifest field whose value would reach outside the pack once it
 /// is vendored under `.yunta/packs/<publisher>/<name>/`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -178,7 +185,7 @@ pub enum PackManifestError {
 
 /// Whether `path` stays inside the directory it is relative to: not
 /// absolute, and no `..` component anywhere.
-pub fn stays_inside(path: &str) -> bool {
+pub(crate) fn stays_inside(path: &str) -> bool {
     let path = std::path::Path::new(path);
     !path.is_absolute()
         && !path

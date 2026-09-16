@@ -7,6 +7,7 @@ members = [
     "crates/engine",
     "crates/cli",
     "crates/testkit",
+    "crates/testkit-core",
     "xtask",
 ]
 
@@ -30,6 +31,7 @@ yunta-engine = { path = "crates/engine", version = "0.0.4" }
 # carries a version like the other internal crates so it is not a wildcard
 # path dependency.
 yunta-testkit = { path = "crates/testkit", version = "0.0.4" }
+yunta-testkit-core = { path = "crates/testkit-core", version = "0.0.4" }
 async-trait = "0.1"
 axum = { version = "0.8", default-features = false }
 base64 = "0.22"
@@ -37,7 +39,9 @@ chrono = "0.4"
 clap = "4"
 futures = "0.3"
 globset = "0.4"
+dialoguer = { version = "0.12", default-features = false }
 indexmap = "2"
+indicatif = "0.18"
 nix = { version = "0.31", features = ["signal", "process"] }
 proptest = "1"
 regex = "1"
@@ -48,6 +52,7 @@ schemars = "1"
 serde = "1"
 serde_json = "1"
 serde_path_to_error = "0.1"
+subtle = { version = "2", default-features = false }
 serde_norway = "0.9"
 sha2 = "0.10"
 tempfile = "3"
@@ -58,6 +63,7 @@ tokio-util = "0.7"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 ulid = "3"
+unicode-width = "0.2"
 uuid = "1"
 
 # Lints apply to every crate, tests included, through `[lints]
