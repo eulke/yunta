@@ -2054,21 +2054,26 @@ pub enum Landing { Landed { commit: CommitSha }, Rejected { conflicts: Vec<PathB
 
 // core/src/workflow/node.rs — `isolation:` deja de ser exclusivo de `kind: workflow`
 pub struct Node { /* … */ pub isolation: Option<Isolation> }
-// core/src/config/sections.rs — un solo vocabulario (P11)
-pub enum Isolation { #[default] Worktree, /* la palabra la fija P11 */ }
-//   `WorkflowIsolation { Worktree, Inherit }` se borra: dos enums y dos palabras
-//   (`none` en config, `inherit` en el nodo) para «comparte el árbol de quien lo
-//   parió». Agregar `isolation:` al nodo sin unificar sería V4 —la declaración
-//   dispersa— generado por este mecanismo, así que la unificación no es alcance
-//   arrastrado sino forzado. Cuál palabra queda y qué pasa con la que se retira
-//   es **P11**: rompe YAML de autor y el plan no la toma por defecto.
+// core/src/config/sections.rs — un solo vocabulario (D183)
+pub enum Isolation { #[default] Worktree, None }
+//   `WorkflowIsolation { Worktree, Inherit }` se borra, y con él el diccionario de
+//   `run/workflow_exec/mod.rs:295` (`Inherit => None`): dos enums con un traductor
+//   en el medio es la forma que «un lugar» existe para prohibir. Agregar
+//   `isolation:` al nodo sin unificar sería V4 —la declaración dispersa— generado
+//   por este mecanismo, así que unificar no es alcance arrastrado sino forzado.
+//   Queda `none` porque es cierta en todos los niveles y `inherit` sólo en
+//   algunos: un run de primer nivel no tiene unidad padre, tiene un checkout, y el
+//   rustdoc de `Isolation` ya lo decía. `isolation: inherit` en YAML de autor deja
+//   de parsear, con un error que nombra el reemplazo; un manifest ya congelado que
+//   lo lleve se lee como `none` — el rechazo en la entrada de autor, la tolerancia
+//   en lo persistido (D183).
 ```
 
 **Decisión.** D182 registra la regla: el punto de partida de una auditoría es un
-hecho del log, y la concurrencia implica aislamiento. **P11** queda abierta y
-bloquea 9-04: la palabra única de `isolation` y qué se hace con la que se
-retira, que es un cambio visible para quien ya escribió `isolation: inherit` o
-`defaults.isolation: none`.
+hecho del log, y la concurrencia implica aislamiento. D183 fija la palabra única
+de `isolation` —queda `none`, se retiran `inherit` y `WorkflowIsolation`— y dónde
+va cada mitad de «parsear es validar»: el rechazo en el YAML de autor, la
+tolerancia en el manifest congelado.
 
 **Archivos.** Nuevo: `engine/src/worktree/unit.rs`,
 `docs/design/adr/D182-*.md`. Modifica: `core/src/ids.rs`,
@@ -2086,7 +2091,7 @@ como vocabulario de `loop`.
 
 **Prerequisitos.** Ninguno para 9-01 y 9-02. 9-03 depende de 9-02 (el aterrizaje
 tiene que existir antes de que un hijo de `parallel` lo use). 9-04 depende de
-9-03 y está `bloqueado(P11)`.
+9-03 y de D183.
 
 **Tests.** `engine/tests/scope.rs`:
 `a_node_is_not_blamed_for_what_a_predecessor_left_behind` (rojo: hoy falla
@@ -2104,7 +2109,9 @@ fallan),
 `two_units_landing_on_one_branch_serialize`;
 `engine/tests/worktree.rs`: `a_landing_that_conflicts_reports_its_paths`;
 `core/tests/events.rs`:
-`a_node_started_without_a_tree_reads_as_the_runs_own_base`.
+`a_node_started_without_a_tree_reads_as_the_runs_own_base`;
+`core/tests/shape.rs`: `isolation_inherit_no_longer_parses_and_the_error_names_none`;
+`core/tests/persisted.rs`: `a_frozen_manifest_that_says_inherit_reads_as_none`.
 La suite de `loop` entera sigue verde sin cambios: 9-02 es la generalización del
 mecanismo que ya funciona, no una reimplementación.
 
