@@ -73,7 +73,7 @@ pub use findings::{
     RelativePath, Withdrawal,
 };
 pub use glob::{listed_globs, might_overlap, scope_globset, InvalidScopeGlob, ScopeGlob};
-pub use hash::{sha256_hex, CommitSha, ContentHash};
+pub use hash::{sha256_hex, CommitSha, ContentHash, TreeId};
 pub use id_source::{IdSource, SystemIdSource};
 pub use ids::{
     is_path_segment, AdapterId, AgentName, ExecutorName, FindingId, GitHubRepo, InputName,

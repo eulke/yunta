@@ -137,7 +137,8 @@ pub use run_tools::{
 };
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{
-    audited_scope, fence_breach, scope_check, Breach, ScopeCheckError, ScopeCheckResult,
+    audit, audited_scope, capture_tree, changed_since, fence_breach, head_tree, violations, Breach,
+    ScopeCheckError, ScopeCheckResult,
 };
 pub use stats::{
     compute_run_stats, compute_run_stats_at, median, FindingActivity, NodeStat, RunStats,

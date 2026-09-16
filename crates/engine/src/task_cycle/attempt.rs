@@ -13,7 +13,7 @@ use super::criteria::{post_check, Memo};
 use super::session::{dispatch_session, DispatchError, SessionObserver, SessionSetup};
 use super::{AttemptRecord, DispatchOutcome, TaskCycleError, TaskOutcome};
 use crate::process::Supervision;
-use crate::scope::scope_check;
+use crate::scope::audit;
 
 /// Everything one attempt of [`run_task`] reads: the per-cycle context that
 /// never changes between attempts, so an attempt takes just this and its
@@ -120,7 +120,18 @@ pub(super) async fn run_one_attempt(
     // The final diff is evaluated against the declared scope plus any
     // authorized expansions — never against a denied or escalated request's
     // paths.
-    let scope = scope_check(cwd, &effective_scope, &last_staged, supervision).await?;
+    // A task works in a tree of its own, so what it began with is the
+    // commit that tree was made from.
+    let from = crate::scope::head_tree(cwd, supervision).await?;
+    let scope = audit(
+        cwd,
+        &from,
+        &crate::run_dir::task_index(&params.setup.run_dir, &task.id),
+        &effective_scope,
+        &last_staged,
+        supervision,
+    )
+    .await?;
 
     let criteria_green = post_runs.iter().all(|r| r.exit_code == 0);
     let succeeded = criteria_green && scope.violations.is_empty();

@@ -2252,6 +2252,17 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0
+        },
+        "from_tree": {
+          "description": "The tree this attempt starts from — what its own diff is judged\nagainst when it closes, so a node answers for what it changed and\nnot for what the run's worktree already held.\n\nAbsent in a log written before the audit had a recorded starting\npoint, and read then as the run's own base: the tolerance every\npersisted field here gives a reader older than its writer.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TreeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -3122,6 +3133,11 @@
       "required": [
         "digest"
       ]
+    },
+    "TreeId": {
+      "description": "A tree id: 7 to 64 lowercase hex digits: a git object id, abbreviated or full",
+      "type": "string",
+      "minLength": 1
     },
     "WriteRefusedPayload": {
       "description": "A write the fence refused before it happened.",

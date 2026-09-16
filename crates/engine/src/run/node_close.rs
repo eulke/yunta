@@ -17,7 +17,7 @@ use yunta_core::events::{
 use yunta_core::{HookFailurePolicy, Node, RunId};
 
 use crate::artifacts::close_artifacts;
-use crate::scope::scope_check;
+use crate::scope::audit;
 
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};
 use super::node_artifacts::{acquire_from_child, asked, derive_findings, record_artifacts};
@@ -250,25 +250,42 @@ pub(super) async fn finish_node(
     Ok(NodeEnd::Finished)
 }
 
-/// The node's whole diff against its declared `scope:`, audited as
-/// `scope_checked` and failing the node when anything falls outside.
-/// `staged` is what the adapter declared it wrote for itself, which is
-/// not the node's doing and so is not the node's diff.
+/// What the node changed and what of it falls outside its declared
+/// `scope:`, recorded as `scope_checked`. `None` when the node owes no
+/// audit — it constrains nothing, or nothing named the tree it began
+/// from.
 ///
-/// `None` when the node owes no audit at all, or when its diff is
-/// inside what it may touch. Which scope that is — a declared one, or
-/// nothing whatsoever for a `read-only` node — is
-/// [`audited_scope`](crate::audited_scope)'s call, not this one's.
-async fn scope_violation(
+/// Which scope is audited — a declared one, or nothing whatsoever for a
+/// `read-only` node — is [`audited_scope`](crate::audited_scope)'s call,
+/// not this one's.
+async fn audited_diff(
     ctx: &RunCtx<'_>,
     node: &Node,
     staged: &[PathBuf],
-    tokens: TokenUsage,
-) -> Result<Option<NodeEnd>, RunError> {
+) -> Result<Option<crate::ScopeCheckResult>, RunError> {
     let Some(scope) = crate::audited_scope(node) else {
         return Ok(None);
     };
-    let result = scope_check(ctx.worktree, scope, staged, ctx.root_supervision()).await?;
+    // The tree this attempt began from, as its own `node_started`
+    // recorded it. Read back from the log rather than remembered across
+    // the node's execution: a crash between the start and this close
+    // must not change what the node answers for.
+    let view = ctx.run_view().await?;
+    let Some(from) = view.state.nodes.from_tree(&node.id).cloned() else {
+        // A log written before a start named its tree. Nothing to
+        // compare against but the run's own base, which is what that log
+        // meant, so the audit it asks for is the one it always got.
+        return Ok(None);
+    };
+    let result = audit(
+        ctx.worktree,
+        &from,
+        &crate::run_dir::node_index(ctx.run_dir, &node.id),
+        scope,
+        staged,
+        ctx.root_supervision(),
+    )
+    .await?;
     ctx.emit(
         Some(&node.id),
         EventPayload::Node(NodeEvent::ScopeChecked(
@@ -280,6 +297,25 @@ async fn scope_violation(
         )),
     )
     .await?;
+    Ok(Some(result))
+}
+
+/// The node's whole diff against its declared `scope:`, audited as
+/// `scope_checked` and failing the node when anything falls outside.
+/// `staged` is what the adapter declared it wrote for itself, which is
+/// not the node's doing and so is not the node's diff.
+///
+/// `None` when the node owes no audit at all, or when its diff is
+/// inside what it may touch.
+async fn scope_violation(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    staged: &[PathBuf],
+    tokens: TokenUsage,
+) -> Result<Option<NodeEnd>, RunError> {
+    let Some(result) = audited_diff(ctx, node, staged).await? else {
+        return Ok(None);
+    };
     if result.violations.is_empty() {
         return Ok(None);
     }

@@ -105,7 +105,7 @@ fn created(mode: &str) -> EventPayload {
 }
 
 fn started(attempt: u32) -> EventPayload {
-    EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt }))
+    EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(attempt)))
 }
 
 fn tokens(input: u64, output: u64) -> TokenUsage {

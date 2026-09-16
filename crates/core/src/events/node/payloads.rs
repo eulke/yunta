@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::RunnerCandidate;
 use crate::events::session::payloads::TokenUsage;
 use crate::events::Failure;
-use crate::hash::ContentHash;
+use crate::hash::{ContentHash, TreeId};
 use crate::ids::{NodeId, RunnerName, TaskId};
 
 /// A tasks document criterion, frozen into `task_registered` — the same shape
@@ -117,17 +117,40 @@ pub struct RunnerResolvedPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NodeStartedPayload {
     pub attempt: u32,
+    /// The tree this attempt starts from — what its own diff is judged
+    /// against when it closes, so a node answers for what it changed and
+    /// not for what the run's worktree already held.
+    ///
+    /// Absent in a log written before the audit had a recorded starting
+    /// point, and read then as the run's own base: the tolerance every
+    /// persisted field here gives a reader older than its writer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_tree: Option<TreeId>,
 }
 
 impl NodeStartedPayload {
-    /// A node beginning its `n`th attempt, counted from one.
+    /// A node beginning its `n`th attempt, counted from one, from the
+    /// tree it finds.
     ///
-    /// The number is the whole payload, and every kind of node that
-    /// starts — a session, a gate, a round of questions — counts it the
-    /// same way, so no surface has to know which sort of node it is
-    /// reading to know which try it is on.
+    /// The attempt number and the tree are the whole payload, and every
+    /// kind of node that starts — a session, a gate, a round of
+    /// questions — counts and captures the same way, so no surface has
+    /// to know which sort of node it is reading.
+    pub fn attempt_from(n: u32, from: TreeId) -> Self {
+        NodeStartedPayload {
+            attempt: n,
+            from_tree: Some(from),
+        }
+    }
+
+    /// The same, for a start with no tree to name: a test that asserts
+    /// on the count alone, and the shape a log written before the
+    /// starting point was recorded reads back as.
     pub fn attempt(n: u32) -> Self {
-        NodeStartedPayload { attempt: n }
+        NodeStartedPayload {
+            attempt: n,
+            from_tree: None,
+        }
     }
 }
 

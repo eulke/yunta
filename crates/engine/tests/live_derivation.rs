@@ -75,7 +75,7 @@ fn tokens(input: u64, output: u64) -> TokenUsage {
 }
 
 fn started(attempt: u32) -> EventPayload {
-    EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt }))
+    EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(attempt)))
 }
 
 fn finished(tokens_used: TokenUsage) -> EventPayload {

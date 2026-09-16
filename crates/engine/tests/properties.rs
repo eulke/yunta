@@ -106,9 +106,9 @@ fn payload() -> impl Strategy<Value = EventPayload> {
 /// wire.
 fn parameterized() -> impl Strategy<Value = EventPayload> {
     prop_oneof![
-        (1u32..4).prop_map(
-            |attempt| EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt }))
-        ),
+        (1u32..4).prop_map(|attempt| EventPayload::Node(NodeEvent::Started(
+            NodeStartedPayload::attempt(attempt)
+        ))),
         ("[a-z]{0,6}", tokens()).prop_map(|(outcome, tokens_used)| EventPayload::Node(
             NodeEvent::Finished(NodeFinishedPayload {
                 outcome,

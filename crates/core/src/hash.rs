@@ -33,10 +33,12 @@ const fn is_content_hash(bytes: &[u8]) -> bool {
 }
 
 /// Git prints an object id abbreviated to no fewer than 7 digits, in
-/// full as 40 (SHA-1) or 64 (SHA-256).
-const COMMIT_SHA_RULE: &str = "7 to 64 lowercase hex digits: a git object id, abbreviated or full";
+/// full as 40 (SHA-1) or 64 (SHA-256). A commit and a tree are both
+/// objects and are named by the same shape, so one rule serves the two
+/// types that carry them.
+const GIT_OBJECT_RULE: &str = "7 to 64 lowercase hex digits: a git object id, abbreviated or full";
 
-const fn is_commit_sha(bytes: &[u8]) -> bool {
+const fn is_git_object(bytes: &[u8]) -> bool {
     bytes.len() >= 7 && bytes.len() <= 64 && is_lower_hex(bytes)
 }
 
@@ -50,7 +52,18 @@ string_id!(
     /// A git object id as git or a forge reports it: the commit a run
     /// starts from, the head a review covers, the merge commit an
     /// approval landed as.
-    CommitSha, what = "commit sha", rule = COMMIT_SHA_RULE, check = is_commit_sha
+    CommitSha, what = "commit sha", rule = GIT_OBJECT_RULE, check = is_git_object
+);
+
+string_id!(
+    /// The id of a git tree, as `git write-tree` prints it: the state a
+    /// unit of work started from, which its own diff is judged against.
+    ///
+    /// Its own type and not a [`CommitSha`]: a tree is what a commit
+    /// points at, and a caller that hands one where the other belongs is
+    /// a mistake the compiler catches rather than a diff against the
+    /// wrong thing.
+    TreeId, what = "tree id", rule = GIT_OBJECT_RULE, check = is_git_object
 );
 
 fn lower_hex(bytes: &[u8]) -> String {

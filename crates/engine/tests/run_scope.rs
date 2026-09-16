@@ -779,3 +779,141 @@ nodes:
         "the done names the commit the run's tree carried after integrating the task"
     );
 }
+
+// --- de qué árbol parte una auditoría (M32) ------------------------------
+
+/// Lo que un nodo escribió es lo que su propio árbol de partida dice que
+/// escribió. Un nodo anterior que dejó trabajo sin commitear es el estado
+/// del que este parte, no algo de lo que responda.
+#[tokio::test]
+async fn a_node_is_not_blamed_for_what_a_predecessor_left_behind() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: predecessor
+nodes:
+  - id: first
+    kind: bash
+    run: "echo one > loose.txt"
+  - id: second
+    kind: bash
+    depends_on: [first]
+    scope: ["bar/**"]
+    run: "mkdir -p bar && echo two > bar/x.txt"
+"#;
+
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "`second` escribió sólo dentro de su scope: {terminal:?}"
+    );
+    assert!(
+        matches!(
+            state.nodes.state("second"),
+            Some(yunta_engine::NodeState::Finished { .. })
+        ),
+        "got {:?}",
+        state.nodes.state("second")
+    );
+}
+
+/// Y el reverso, que es lo que un punto de partida por lista de paths
+/// —en vez de por árbol— dejaría pasar: un archivo que el predecesor dejó
+/// sucio y que este nodo *también* toca sigue siendo suyo.
+#[tokio::test]
+async fn a_node_that_touches_what_a_predecessor_left_is_still_judged_for_it() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: predecessor-touched
+nodes:
+  - id: first
+    kind: bash
+    run: "echo one > loose.txt"
+  - id: second
+    kind: bash
+    depends_on: [first]
+    scope: ["bar/**"]
+    run: "mkdir -p bar && echo two > bar/x.txt && echo mine > loose.txt"
+"#;
+
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+
+    assert!(
+        !matches!(terminal, RunTerminal::Finished),
+        "escribir fuera de scope sigue fallando aunque el archivo ya estuviera sucio: {terminal:?}"
+    );
+    assert!(
+        matches!(
+            state.nodes.state("second"),
+            Some(yunta_engine::NodeState::Failed { .. })
+        ),
+        "got {:?}",
+        state.nodes.state("second")
+    );
+}
+
+/// El punto de partida es un hecho del log, no memoria de una
+/// invocación: un intento que reinicia se juzga desde donde arrancó el
+/// primero, porque su propio trabajo parcial es obra suya.
+#[tokio::test]
+async fn an_attempt_that_restarts_is_judged_from_where_its_first_attempt_began() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: restarted
+nodes:
+  - id: flaky
+    kind: bash
+    scope: ["ok/**"]
+    run: "mkdir -p ok && echo a > ok/a.txt && echo stray > stray.txt"
+"#;
+
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+
+    // La escritura fuera de scope es suya y falla, con `stray.txt`
+    // nombrado — no con el árbol entero del run.
+    assert!(!matches!(terminal, RunTerminal::Finished), "{terminal:?}");
+    let scoped = bench
+        .events()
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Node(
+                yunta_core::events::NodeEvent::ScopeChecked(p),
+            )) => Some(p.clone()),
+            _ => None,
+        })
+        .expect("el nodo se auditó");
+    assert_eq!(
+        scoped.violations,
+        vec![std::path::PathBuf::from("stray.txt")],
+        "diff: {:?}",
+        scoped.diff
+    );
+    assert!(matches!(
+        state.nodes.state("flaky"),
+        Some(yunta_engine::NodeState::Failed { .. })
+    ));
+}
+
+/// Y el árbol de partida queda en el log, donde un replay lo encuentra.
+#[tokio::test]
+async fn a_start_records_the_tree_its_attempt_began_from() {
+    let bench = Bench::new();
+    let workflow = "name: recorded\nnodes:\n  - id: work\n    kind: bash\n    run: \"true\"\n";
+    bench.run(workflow, "sessions: []").await;
+
+    let started = bench
+        .events()
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Node(
+                yunta_core::events::NodeEvent::Started(p),
+            )) => Some(p.clone()),
+            _ => None,
+        })
+        .expect("el nodo arrancó");
+    assert!(
+        started.from_tree.is_some(),
+        "un arranque nombra el árbol del que parte: {started:?}"
+    );
+}

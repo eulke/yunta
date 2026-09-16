@@ -71,17 +71,26 @@ pub enum RunToolsNeed {
 }
 
 impl SessionSetup {
-    /// A setup that carries nothing but the node its sessions belong
-    /// to and the runner they run on: no skills, no settings, no
-    /// secrets, no per-run tools and no declared files.
-    pub fn bare(node: yunta_core::NodeId, chosen: yunta_core::RunnerCandidate) -> Self {
+    /// A setup that carries nothing but the run it belongs to, the node
+    /// its sessions are of and the runner they run on: no skills, no
+    /// settings, no secrets, no per-run tools and no declared files.
+    ///
+    /// The run directory is not among what a bare setup leaves out: a
+    /// session writes its working files under it, and a path that names
+    /// nowhere is one every such write resolves against the current
+    /// directory instead.
+    pub fn bare(
+        run_dir: PathBuf,
+        node: yunta_core::NodeId,
+        chosen: yunta_core::RunnerCandidate,
+    ) -> Self {
         Self {
             skills: Vec::new(),
             adapter_settings: serde_json::Map::new(),
             env: std::collections::HashMap::new(),
             run_tools: None,
             fence_hook: None,
-            run_dir: PathBuf::new(),
+            run_dir,
             node,
             chosen,
             artifact_dir: None,

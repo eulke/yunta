@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::NodeId;
+use yunta_core::{NodeId, TaskId};
 
 /// The run directory's working space: everything the engine and its
 /// sessions need on disk while a run is alive, and nothing a reader of
@@ -50,6 +50,31 @@ pub fn task_worktrees(run_dir: &Path) -> PathBuf {
 /// names, and a lineage whose root declared no suite has none at all.
 pub(crate) fn baseline_dir(run_dir: &Path) -> PathBuf {
     run_dir.join("baseline")
+}
+
+/// The private git index `node` captures its tree through.
+pub fn node_index(run_dir: &Path, node: &NodeId) -> PathBuf {
+    index_for(run_dir, &format!("node/{node}"))
+}
+
+/// The private git index `task` captures its tree through.
+pub fn task_index(run_dir: &Path, task: &TaskId) -> PathBuf {
+    index_for(run_dir, &format!("task/{task}"))
+}
+
+/// The private git index one unit of work captures its tree through.
+///
+/// Under the run's scratch and never in the checkout, and named by the
+/// unit rather than by the directory: two units working in one tree at
+/// the same moment share the `cwd` and must not share the index, so what
+/// makes the path unique is whose capture it is. The label carries what
+/// kind of unit it names as well as its id, because a node and a task of
+/// one run may be called the same thing and still run side by side.
+fn index_for(run_dir: &Path, unit: &str) -> PathBuf {
+    run_dir
+        .join(SCRATCH_DIR)
+        .join("index")
+        .join(yunta_core::sha256_hex(unit.as_bytes()).as_str())
 }
 
 /// Everything the baseline suite wrote on the run's first wake.

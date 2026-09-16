@@ -17,7 +17,7 @@ use crate::events::node::kinds::NodeEvent;
 use crate::events::node::payloads::{DiscardedCandidate, NodeReroutedPayload, RerouteOrigin};
 use crate::events::{Failure, TokenUsage};
 use crate::ids::{NodeId, QuestionId, RunnerName, Seq};
-use crate::{NonEmpty, RunnerCandidate};
+use crate::{NonEmpty, RunnerCandidate, TreeId};
 
 /// One node's derived lifecycle state. An enum, not booleans: there is
 /// no combination of flags to get wrong.
@@ -121,6 +121,11 @@ pub struct NodeRecord {
     pub state: Option<NodeState>,
     /// Where and when the open attempt started; `None` once it closed.
     pub open_since: Option<(Seq, DateTime<Utc>)>,
+    /// The tree the open attempt started from — what its diff is judged
+    /// against. `None` for an attempt that recorded none, which is what
+    /// a log written before the audit had a starting point carries, and
+    /// what a reader takes as the run's own base.
+    pub from_tree: Option<TreeId>,
     pub last_terminal: Option<Seq>,
     pub last_failed: Option<Seq>,
     pub last_finished: Option<Seq>,
@@ -216,6 +221,18 @@ impl NodeLedger {
         self.per_node.get(node)
     }
 
+    /// The tree `node`'s open attempt started from, as its own
+    /// `node_started` recorded it — what its diff is judged against.
+    /// `None` for a node that never started, and for one whose start
+    /// named no tree.
+    pub fn from_tree<Q>(&self, node: &Q) -> Option<&TreeId>
+    where
+        NodeId: std::borrow::Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
+        self.per_node.get(node).and_then(|r| r.from_tree.as_ref())
+    }
+
     /// `node`'s derived state; `None` for a node with none yet.
     pub fn state<Q>(&self, node: &Q) -> Option<&NodeState>
     where
@@ -303,6 +320,7 @@ impl NodeLedger {
         record.last_event_at = Some(meta.at);
         match event {
             NodeEvent::Started(p) => {
+                record.from_tree = p.from_tree.clone();
                 // A start while the previous attempt is still open means
                 // nothing closed it: whatever session it had is the
                 // orphan a resume has to deal with.

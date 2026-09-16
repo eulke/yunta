@@ -68,6 +68,34 @@ pub(super) async fn cancelled_end(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeE
     .await
 }
 
+/// Writes the one `node_started` this engine ever writes, with the tree
+/// the attempt begins from.
+///
+/// The starting point is captured here and nowhere else, because a fact
+/// derived from the log has to be written at exactly one moment: the
+/// audit that reads it back at close is only as true as the single
+/// instant this call names.
+pub(super) async fn emit_started(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    attempt: u32,
+) -> Result<(), RunError> {
+    let from = crate::scope::capture_tree(
+        ctx.worktree,
+        &crate::run_dir::node_index(ctx.run_dir, &node.id),
+        ctx.root_supervision(),
+    )
+    .await?;
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Node(NodeEvent::Started(
+            yunta_core::events::NodeStartedPayload::attempt_from(attempt, from),
+        )),
+    )
+    .await?;
+    Ok(())
+}
+
 /// `cancel` only ever fires for a child of a `join: any` parallel group
 /// once a sibling has won — every other call site passes a token
 /// nothing ever cancels, so this is a no-op parameter for them.
@@ -81,13 +109,7 @@ pub(super) async fn execute_node(
     attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Node(NodeEvent::Started(yunta_core::events::NodeStartedPayload {
-            attempt,
-        })),
-    )
-    .await?;
+    emit_started(ctx, node, attempt).await?;
 
     // A node that continues no session opens on an empty directory of
     // its own, and `node_started` is the one point every one of its

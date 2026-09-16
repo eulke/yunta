@@ -10,7 +10,7 @@ use yunta_core::events::{
 };
 use yunta_core::{CommitSha, Node, Seq, Task};
 
-use crate::scope::scope_check;
+use crate::scope::audit;
 use crate::task_cycle::{post_check, CriterionRun, Memo, TaskCycleReport, TaskOutcome};
 use crate::worktree::head_commit;
 
@@ -287,7 +287,18 @@ async fn integrate_task(
             })),
         )
         .await?;
-    let scope = scope_check(task_worktree, &task.scope, staged, supervision).await?;
+    // Re-verified on the rebased tree, so what the task answers for is
+    // what it added on top of the base it landed against.
+    let from = crate::scope::head_tree(task_worktree, supervision).await?;
+    let scope = audit(
+        task_worktree,
+        &from,
+        &crate::run_dir::task_index(ctx.run_dir, &task.id),
+        &task.scope,
+        staged,
+        supervision,
+    )
+    .await?;
     ctx.emit(
         Some(&node.id),
         EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {

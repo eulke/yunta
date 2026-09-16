@@ -664,3 +664,23 @@ fn a_session_end_this_build_does_not_know_reads_back_as_unknown() {
         serde_json::from_value(serde_json::json!({"type": "stopped", "by": "a debugger"})).unwrap();
     assert_eq!(end, SessionEnd::Unknown);
 }
+
+#[test]
+fn a_node_started_without_a_tree_reads_as_the_runs_own_base() {
+    // A log written before a start named the tree it began from: the
+    // field is absent, and a reader takes the run's own base, which is
+    // what that log always meant.
+    let payload: NodeStartedPayload =
+        serde_json::from_value(serde_json::json!({"attempt": 1})).unwrap();
+    assert_eq!(payload.attempt, 1);
+    assert_eq!(payload.from_tree, None);
+
+    // And a start that named one round-trips carrying it.
+    let named = NodeStartedPayload::attempt_from(2, "a1b2c3d4e5f6".parse().unwrap());
+    let json = serde_json::to_value(&named).unwrap();
+    assert_eq!(json["from_tree"], "a1b2c3d4e5f6");
+    assert_eq!(
+        serde_json::from_value::<NodeStartedPayload>(json).unwrap(),
+        named
+    );
+}

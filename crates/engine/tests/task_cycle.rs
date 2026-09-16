@@ -25,14 +25,29 @@ use yunta_testkit_core::Log;
 
 /// The setup a task session of node `build` runs under: the mock
 /// runner every fixture here answers as, and nothing else.
-fn bare_setup() -> yunta_engine::SessionSetup {
+/// The setup those task sessions run under, rooted at a run directory
+/// of its own: what a capture writes goes under the run, never inside
+/// the checkout it measures.
+fn bare_setup(run_dir: &std::path::Path) -> yunta_engine::SessionSetup {
     yunta_engine::SessionSetup::bare(
+        run_dir.to_path_buf(),
         yunta_core::NodeId::from_static("build"),
         yunta_core::RunnerCandidate {
             adapter: "mock".into(),
             model: "mock-model".into(),
             agent: None,
         },
+    )
+}
+
+/// A checkout to work in and the run directory beside it, which is
+/// where a session's working files go — the private index a scope audit
+/// captures through among them, and it must not sit in the tree it
+/// measures.
+fn checkout_and_run() -> (tempfile::TempDir, tempfile::TempDir) {
+    (
+        tempfile::tempdir().expect("a checkout"),
+        tempfile::tempdir().expect("a run directory"),
     )
 }
 
@@ -119,7 +134,7 @@ fn task(id: &str, scope: &[&str], criteria: Vec<Criterion>) -> Task {
 #[tokio::test]
 async fn a_session_that_makes_the_criterion_pass_reaches_done() {
     let owner = Owner::new();
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, run) = checkout_and_run();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
@@ -153,7 +168,7 @@ outcome: { type: completed, summary: "wrote it" }
         ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -172,7 +187,7 @@ outcome: { type: completed, summary: "wrote it" }
 #[tokio::test]
 async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_done() {
     let owner = Owner::new();
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, run) = checkout_and_run();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
@@ -204,7 +219,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
         ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -217,7 +232,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
 #[tokio::test]
 async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
     let owner = Owner::new();
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, run) = checkout_and_run();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
@@ -241,7 +256,7 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
         ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -262,7 +277,7 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
 #[tokio::test]
 async fn a_broken_guard_blocks_before_any_attempt_runs() {
     let owner = Owner::new();
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, run) = checkout_and_run();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
@@ -290,7 +305,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
         ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -310,7 +325,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
 #[tokio::test]
 async fn an_edit_outside_scope_is_a_violation_even_if_criteria_pass() {
     let owner = Owner::new();
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, run) = checkout_and_run();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
@@ -348,7 +363,7 @@ outcome: { type: completed, summary: "done" }
         ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -364,7 +379,7 @@ outcome: { type: completed, summary: "done" }
 #[tokio::test]
 async fn retries_run_exactly_max_retries_plus_one_attempts_before_blocking() {
     let owner = Owner::new();
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, run) = checkout_and_run();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
@@ -401,7 +416,7 @@ sessions:
         ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -413,7 +428,7 @@ sessions:
 #[tokio::test]
 async fn a_non_retryable_failure_ends_the_cycle() {
     let owner = Owner::new();
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, run) = checkout_and_run();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
@@ -450,7 +465,7 @@ sessions:
         ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -473,7 +488,7 @@ sessions:
 #[tokio::test]
 async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
     let owner = Owner::new();
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, run) = checkout_and_run();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
@@ -496,7 +511,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
         ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -516,7 +531,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
 #[tokio::test]
 async fn a_task_whose_session_died_blocks_naming_the_exit() {
     let owner = Owner::new();
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, run) = checkout_and_run();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
     let t = task("crash", &["output.txt"], vec![cmd("test -f output.txt")]);
@@ -538,7 +553,7 @@ async fn a_task_whose_session_died_blocks_naming_the_exit() {
         ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -656,7 +671,7 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
 #[tokio::test]
 async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
     let owner = Owner::new();
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, run) = checkout_and_run();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
@@ -688,7 +703,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
             ungoverned(&GrantLedger::new(0)),
             None,
             &tokio_util::sync::CancellationToken::new(),
-            &bare_setup(),
+            &bare_setup(run.path()),
         ),
     )
     .await
@@ -706,7 +721,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
 #[tokio::test]
 async fn exceeding_max_tokens_cuts_the_session_before_its_outcome() {
     let owner = Owner::new();
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, run) = checkout_and_run();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
@@ -747,7 +762,7 @@ outcome: { type: completed, summary: "should never be reached" }
         ungoverned(&GrantLedger::new(0)),
         None,
         &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap();
@@ -897,7 +912,7 @@ async fn a_lost_session_audit_event_fails_the_task() {
     // A session's audit event that cannot be appended is not dropped
     // with a warning: the storage cause travels back and fails the task,
     // so the trail never silently loses an event.
-    let dir = tempfile::tempdir().unwrap();
+    let (dir, run) = checkout_and_run();
     init_repo(dir.path());
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
@@ -933,7 +948,7 @@ outcome: { type: completed, summary: "wrote it" }
         ungoverned(&GrantLedger::new(0)),
         Some((&observer as &dyn yunta_engine::SessionObserver, &node)),
         &tokio_util::sync::CancellationToken::new(),
-        &bare_setup(),
+        &bare_setup(run.path()),
     )
     .await
     .unwrap_err();

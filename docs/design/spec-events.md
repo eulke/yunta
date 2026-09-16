@@ -160,6 +160,19 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `attempt` | `u32` | sí | 1-indexado; sube con cada reintento |
+| `from_tree` | `TreeId` | no | el árbol del que parte este intento: contra él se mide su propio diff al cerrar |
+
+**De qué árbol parte.** `from_tree` es el id del objeto `tree` que el árbol de
+trabajo tenía cuando el intento arrancó, capturado con un índice privado para no
+disputarle `.git/index` a nadie. Es lo que hace que una auditoría de `scope:` diga
+qué cambió *este* nodo y no qué hay de distinto desde que nació el run: lo que un
+nodo anterior dejó sin commitear es el estado del que este parte, no algo de lo
+que responda. Que sea un hecho del log y no memoria del proceso es lo que lo
+sostiene a través de un replay, y que sea un árbol —y no una lista de paths— es lo
+que impide el reverso: un archivo que ya estaba sucio y que este intento *también*
+tocó difiere del árbol de partida y sigue siendo suyo. Un evento escrito antes de
+que el arranque nombrara su árbol no lo lleva, y se lee contra la base del run,
+que es lo que ese log significaba (D182).
 
 ### 5.5 `agent_session_opened` — adapter
 **Fuente:** session_id, agente, modelo, capacidades

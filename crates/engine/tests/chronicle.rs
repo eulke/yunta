@@ -14,7 +14,7 @@ use yunta_engine::{chronicle, Happening};
 use yunta_testkit_core::{all_kinds, Log};
 
 fn started() -> EventPayload {
-    EventPayload::Node(NodeEvent::Started(NodeStartedPayload { attempt: 1 }))
+    EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1)))
 }
 
 fn finished(outcome: &str) -> EventPayload {
