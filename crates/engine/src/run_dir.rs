@@ -11,7 +11,9 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{NodeId, TaskId};
+use yunta_core::NodeId;
+
+use crate::worktree::UnitId;
 
 /// The run directory's working space: everything the engine and its
 /// sessions need on disk while a run is alive, and nothing a reader of
@@ -38,10 +40,10 @@ pub fn sessions_root(run_dir: &Path) -> PathBuf {
     run_dir.join(SCRATCH_DIR).join("sessions")
 }
 
-/// Where a loop's tasks get a worktree each, so two tasks of one run
+/// Where the run's units get a worktree each, so two units of one run
 /// never share a checkout.
-pub fn task_worktrees(run_dir: &Path) -> PathBuf {
-    run_dir.join("task-worktrees")
+pub fn unit_worktrees(run_dir: &Path) -> PathBuf {
+    run_dir.join("unit-worktrees")
 }
 
 /// The run's baseline: what its suite wrote on the tree the run woke
@@ -52,29 +54,19 @@ pub(crate) fn baseline_dir(run_dir: &Path) -> PathBuf {
     run_dir.join("baseline")
 }
 
-/// The private git index `node` captures its tree through.
-pub fn node_index(run_dir: &Path, node: &NodeId) -> PathBuf {
-    index_for(run_dir, &format!("node/{node}"))
-}
-
-/// The private git index `task` captures its tree through.
-pub fn task_index(run_dir: &Path, task: &TaskId) -> PathBuf {
-    index_for(run_dir, &format!("task/{task}"))
-}
-
 /// The private git index one unit of work captures its tree through.
 ///
 /// Under the run's scratch and never in the checkout, and named by the
 /// unit rather than by the directory: two units working in one tree at
 /// the same moment share the `cwd` and must not share the index, so what
-/// makes the path unique is whose capture it is. The label carries what
-/// kind of unit it names as well as its id, because a node and a task of
-/// one run may be called the same thing and still run side by side.
-fn index_for(run_dir: &Path, unit: &str) -> PathBuf {
+/// makes the path unique is whose capture it is. A [`UnitId`] renders
+/// its kind as well as its id, because a node and a task of one run may
+/// be called the same thing and still run side by side.
+pub fn index_for(run_dir: &Path, who: &UnitId) -> PathBuf {
     run_dir
         .join(SCRATCH_DIR)
         .join("index")
-        .join(yunta_core::sha256_hex(unit.as_bytes()).as_str())
+        .join(yunta_core::sha256_hex(who.to_string().as_bytes()).as_str())
 }
 
 /// Everything the baseline suite wrote on the run's first wake.

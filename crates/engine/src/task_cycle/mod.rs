@@ -14,7 +14,7 @@ mod outcome;
 mod session;
 mod stream;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use yunta_core::ScopeGlob;
 
 use thiserror::Error;
@@ -147,7 +147,11 @@ pub struct AttemptEnv<'a> {
     /// the node's session: it runs on the node's runner and writes the
     /// node's declared files.
     pub node: &'a yunta_core::Node,
-    pub cwd: &'a Path,
+    /// The tree this task works in and the tree it started from. Every
+    /// attempt runs in the same checkout and is judged against the same
+    /// starting point, which is what makes one attempt answerable for
+    /// what an earlier one of its own left behind.
+    pub unit: &'a crate::worktree::Unit,
     pub max_retries: u32,
     pub budget: Budget,
     pub memo: &'a Memo,
@@ -191,7 +195,7 @@ pub async fn run_task(
     let AttemptEnv {
         adapter,
         node,
-        cwd,
+        unit,
         max_retries,
         budget,
         memo,
@@ -238,7 +242,7 @@ pub async fn run_task(
         });
     }
 
-    let pre_runs = pre_check(task, cwd, memo, history, supervision).await?;
+    let pre_runs = pre_check(task, &unit.worktree, memo, history, supervision).await?;
 
     // The pre-check validates the criteria before any work: a non-guard
     // that already passes, or a guard already red, means the criteria
@@ -263,7 +267,7 @@ pub async fn run_task(
         instruction,
         adapter,
         node,
-        cwd,
+        unit,
         budget,
         memo,
         profile,

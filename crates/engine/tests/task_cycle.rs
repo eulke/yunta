@@ -18,7 +18,7 @@ use yunta_core::Task;
 use yunta_engine::scope_expansion::GrantLedger;
 use yunta_engine::{
     run_task, surprises, AttemptEnv, BlockedCause, CriterionRun, DispatchOutcome, Memo,
-    ScopeGovernance, Surprise, TaskOutcome,
+    ScopeGovernance, Surprise, TaskOutcome, Unit, UnitId,
 };
 use yunta_testkit::{init_repo, Owner};
 use yunta_testkit_core::Log;
@@ -40,15 +40,23 @@ fn bare_setup(run_dir: &std::path::Path) -> yunta_engine::SessionSetup {
     )
 }
 
-/// A checkout to work in and the run directory beside it, which is
-/// where a session's working files go — the private index a scope audit
-/// captures through among them, and it must not sit in the tree it
-/// measures.
-fn checkout_and_run() -> (tempfile::TempDir, tempfile::TempDir) {
-    (
-        tempfile::tempdir().expect("a checkout"),
-        tempfile::tempdir().expect("a run directory"),
-    )
+/// A unit to work in — an initialised checkout and the tree it starts
+/// from — and the run directory beside it, which is where a session's
+/// working files go: the private index a scope audit captures through
+/// among them, and it must not sit in the tree it measures.
+async fn a_unit(owner: &Owner) -> (tempfile::TempDir, tempfile::TempDir, Unit) {
+    let dir = tempfile::tempdir().expect("a checkout");
+    let run = tempfile::tempdir().expect("a run directory");
+    init_repo(dir.path());
+    let from = yunta_engine::head_tree(dir.path(), owner.supervision())
+        .await
+        .expect("the checkout says where it stands");
+    let unit = Unit {
+        who: UnitId::Task("test-unit".into()),
+        worktree: dir.path().to_path_buf(),
+        from,
+    };
+    (dir, run, unit)
 }
 
 /// The node those task sessions belong to: a `loop` node named `build`,
@@ -134,8 +142,7 @@ fn task(id: &str, scope: &[&str], criteria: Vec<Criterion>) -> Task {
 #[tokio::test]
 async fn a_session_that_makes_the_criterion_pass_reaches_done() {
     let owner = Owner::new();
-    let (dir, run) = checkout_and_run();
-    init_repo(dir.path());
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task(
@@ -158,7 +165,7 @@ outcome: { type: completed, summary: "wrote it" }
         AttemptEnv {
             node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
+            unit: &unit,
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
@@ -187,8 +194,7 @@ outcome: { type: completed, summary: "wrote it" }
 #[tokio::test]
 async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_done() {
     let owner = Owner::new();
-    let (dir, run) = checkout_and_run();
-    init_repo(dir.path());
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task(
@@ -209,7 +215,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
         AttemptEnv {
             node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
+            unit: &unit,
             max_retries: 0,
             budget: Budget::default(),
             memo: &memo,
@@ -232,8 +238,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
 #[tokio::test]
 async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
     let owner = Owner::new();
-    let (dir, run) = checkout_and_run();
-    init_repo(dir.path());
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     // `true` always exits 0 — a non-guard criterion that already passes.
@@ -246,7 +251,7 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
         AttemptEnv {
             node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
+            unit: &unit,
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
@@ -277,8 +282,7 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
 #[tokio::test]
 async fn a_broken_guard_blocks_before_any_attempt_runs() {
     let owner = Owner::new();
-    let (dir, run) = checkout_and_run();
-    init_repo(dir.path());
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     // `false` always exits 1 — a guard that's already red.
@@ -295,7 +299,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
         AttemptEnv {
             node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
+            unit: &unit,
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
@@ -325,8 +329,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
 #[tokio::test]
 async fn an_edit_outside_scope_is_a_violation_even_if_criteria_pass() {
     let owner = Owner::new();
-    let (dir, run) = checkout_and_run();
-    init_repo(dir.path());
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     // The criterion only cares about marker.txt (in scope) — but the
@@ -353,7 +356,7 @@ outcome: { type: completed, summary: "done" }
         AttemptEnv {
             node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
+            unit: &unit,
             max_retries: 0,
             budget: Budget::default(),
             memo: &memo,
@@ -379,8 +382,7 @@ outcome: { type: completed, summary: "done" }
 #[tokio::test]
 async fn retries_run_exactly_max_retries_plus_one_attempts_before_blocking() {
     let owner = Owner::new();
-    let (dir, run) = checkout_and_run();
-    init_repo(dir.path());
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task(
@@ -406,7 +408,7 @@ sessions:
         AttemptEnv {
             node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
+            unit: &unit,
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
@@ -428,8 +430,7 @@ sessions:
 #[tokio::test]
 async fn a_non_retryable_failure_ends_the_cycle() {
     let owner = Owner::new();
-    let (dir, run) = checkout_and_run();
-    init_repo(dir.path());
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     // Criteria stay red (nothing writes the file) and the session reports a
@@ -455,7 +456,7 @@ sessions:
         AttemptEnv {
             node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
+            unit: &unit,
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
@@ -488,8 +489,7 @@ sessions:
 #[tokio::test]
 async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
     let owner = Owner::new();
-    let (dir, run) = checkout_and_run();
-    init_repo(dir.path());
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task("crash", &["output.txt"], vec![cmd("test -f output.txt")]);
@@ -501,7 +501,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
         AttemptEnv {
             node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
+            unit: &unit,
             max_retries: 0,
             budget: Budget::default(),
             memo: &memo,
@@ -531,8 +531,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
 #[tokio::test]
 async fn a_task_whose_session_died_blocks_naming_the_exit() {
     let owner = Owner::new();
-    let (dir, run) = checkout_and_run();
-    init_repo(dir.path());
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
     let t = task("crash", &["output.txt"], vec![cmd("test -f output.txt")]);
     let adapter = MockAdapter::from_yaml("outcome: { type: crash }").unwrap();
@@ -543,7 +542,7 @@ async fn a_task_whose_session_died_blocks_naming_the_exit() {
         AttemptEnv {
             node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
+            unit: &unit,
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
@@ -671,8 +670,7 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
 #[tokio::test]
 async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
     let owner = Owner::new();
-    let (dir, run) = checkout_and_run();
-    init_repo(dir.path());
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task("timeout", &["output.txt"], vec![cmd("test -f output.txt")]);
@@ -693,7 +691,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
             AttemptEnv {
                 node: &build_node(),
                 adapter: &adapter,
-                cwd: dir.path(),
+                unit: &unit,
                 max_retries: 0,
                 budget,
                 memo: &memo,
@@ -721,8 +719,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
 #[tokio::test]
 async fn exceeding_max_tokens_cuts_the_session_before_its_outcome() {
     let owner = Owner::new();
-    let (dir, run) = checkout_and_run();
-    init_repo(dir.path());
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task(
@@ -752,7 +749,7 @@ outcome: { type: completed, summary: "should never be reached" }
         AttemptEnv {
             node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
+            unit: &unit,
             max_retries: 0,
             budget,
             memo: &memo,
@@ -912,8 +909,7 @@ async fn a_lost_session_audit_event_fails_the_task() {
     // A session's audit event that cannot be appended is not dropped
     // with a warning: the storage cause travels back and fails the task,
     // so the trail never silently loses an event.
-    let (dir, run) = checkout_and_run();
-    init_repo(dir.path());
+    let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     let t = task(
@@ -938,7 +934,7 @@ outcome: { type: completed, summary: "wrote it" }
         AttemptEnv {
             node: &build_node(),
             adapter: &adapter,
-            cwd: dir.path(),
+            unit: &unit,
             max_retries: 2,
             budget: Budget::default(),
             memo: &memo,

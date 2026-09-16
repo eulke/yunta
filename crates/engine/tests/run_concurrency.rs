@@ -656,7 +656,11 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
             // and task-q left `Running` with no terminal event — an orphan.
             // The same branch the loop's own dispatch would have made for this
             // run's attempt at `task-p`, composed the one way the engine does.
-            let task_p_branch = yunta_engine::task_branch(&bench.run_id, &"task-p".into(), 1);
+            let task_p_branch = yunta_engine::unit_branch(
+                &bench.run_id,
+                &yunta_engine::UnitId::Task("task-p".into()),
+                1,
+            );
             git(&bench.worktree, &["checkout", "-b", &task_p_branch]);
             std::fs::write(bench.worktree.join("p.txt"), "p").unwrap();
             git(&bench.worktree, &["add", "-A"]);

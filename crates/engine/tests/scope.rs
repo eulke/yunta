@@ -24,7 +24,17 @@ async fn from_here(
     staged: &[std::path::PathBuf],
     owner: &Owner,
 ) -> Result<yunta_engine::ScopeCheckResult, ScopeCheckError> {
-    let from = head_tree(dir, owner.supervision()).await?;
+    // A directory git will not answer about fails here first, and the
+    // case that asserts on it wants the audit's own error: the starting
+    // point is the audit's to establish, whichever call establishes it.
+    let from =
+        head_tree(dir, owner.supervision())
+            .await
+            .map_err(|_| ScopeCheckError::GitFailed {
+                command: "rev-parse HEAD^{tree}".to_string(),
+                status: 128,
+                stderr: String::new(),
+            })?;
     let scratch = tempfile::tempdir().expect("a scratch outside the checkout");
     let index = scratch.path().join("index");
     audit(dir, &from, &index, scope, staged, owner.supervision()).await

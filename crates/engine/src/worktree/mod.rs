@@ -27,19 +27,21 @@
 
 mod branches;
 mod integrity;
+mod unit;
 
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use yunta_core::process::signal::Liveness;
-use yunta_core::{CommitSha, InvalidId, Isolation, Pid};
+use yunta_core::{CommitSha, InvalidId, Isolation, Pid, TreeId};
 
 use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
 
 use crate::process::Supervision;
-pub use branches::{run_branch, task_branch};
+pub use branches::{run_branch, unit_branch};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
+pub use unit::{commit_work, land, open_unit, rebase_onto, Rebase, Unit, UnitHome, UnitId};
 
 #[derive(Debug, Error)]
 pub enum WorktreeError {
@@ -129,6 +131,25 @@ pub enum WorktreeError {
          works directly on the checkout it was created in; resume it from there"
     )]
     NotACheckout { path: PathBuf, detail: String },
+    /// git answered, and its answer is not what it names: `rev-parse`
+    /// promised a tree and returned something else.
+    #[error("git answered `{args}` in `{}` with something that is not a tree id", .cwd.display())]
+    NotATree {
+        args: String,
+        cwd: PathBuf,
+        #[source]
+        source: InvalidId,
+    },
+    /// The shared tree moved between a unit replaying its work onto it
+    /// and that unit landing. This engine is the only writer of that
+    /// tree in between, so the invariant broke rather than the unit
+    /// misbehaving.
+    #[error(
+        "landing `{unit}` in `{}`: git refused a fast-forward onto a head this engine is \
+         the only writer of",
+        .path.display()
+    )]
+    NotFastForward { unit: String, path: PathBuf },
     /// The common git dir has no parent directory, so there is no
     /// checkout to run `git worktree` from.
     #[error("the git common dir `{common_dir}` has no parent directory to run `git worktree` in")]
@@ -396,6 +417,26 @@ pub async fn head_commit(
         .parse()
         .map_err(|source: InvalidId| WorktreeError::NotACommit {
             args: "rev-parse HEAD".to_string(),
+            cwd: repo.to_path_buf(),
+            source,
+        })
+}
+
+/// The tree `repo`'s `HEAD` points at — the same question
+/// [`head_commit`] asks, answered as the object a diff takes as an end.
+///
+/// What a unit that was handed a clean checkout of its own started
+/// from: the commit it was branched from is exactly what it began with,
+/// so its starting tree needs no capture. A unit sharing a tree it did
+/// not receive clean uses [`scope::capture_tree`](crate::scope::capture_tree)
+/// instead.
+pub async fn head_tree(repo: &Path, supervision: Supervision<'_>) -> Result<TreeId, WorktreeError> {
+    let output = run_git(repo, &["rev-parse", "HEAD^{tree}"], supervision).await?;
+    output
+        .trim()
+        .parse()
+        .map_err(|source: InvalidId| WorktreeError::NotATree {
+            args: "rev-parse HEAD^{tree}".to_string(),
             cwd: repo.to_path_buf(),
             source,
         })

@@ -82,7 +82,7 @@ pub(super) async fn emit_started(
 ) -> Result<(), RunError> {
     let from = crate::scope::capture_tree(
         ctx.worktree,
-        &crate::run_dir::node_index(ctx.run_dir, &node.id),
+        &crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone())),
         ctx.root_supervision(),
     )
     .await?;

@@ -18,6 +18,7 @@ use yunta_core::{HookFailurePolicy, Node, RunId};
 
 use crate::artifacts::close_artifacts;
 use crate::scope::audit;
+use crate::worktree::UnitId;
 
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};
 use super::node_artifacts::{acquire_from_child, asked, derive_findings, record_artifacts};
@@ -280,7 +281,7 @@ async fn audited_diff(
     let result = audit(
         ctx.worktree,
         &from,
-        &crate::run_dir::node_index(ctx.run_dir, &node.id),
+        &crate::run_dir::index_for(ctx.run_dir, &UnitId::Node(node.id.clone())),
         scope,
         staged,
         ctx.root_supervision(),

@@ -1,14 +1,13 @@
 //! Dispatching one task of a batch in its own worktree, with the
 //! attempt number and the expansions already granted to it.
 
-use std::path::PathBuf;
 use yunta_core::ScopeGlob;
 
 use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload};
-use yunta_core::{CommitSha, Isolation, Node, Task};
+use yunta_core::{CommitSha, Node, Task};
 
 use crate::task_cycle::{run_task, AttemptEnv, ScopeGovernance, TaskCycleReport};
-use crate::worktree::prepare_worktree;
+use crate::worktree::{open_unit, Unit, UnitHome, UnitId};
 
 use crate::replay::RunState;
 use crate::run::{RunCtx, RunError};
@@ -59,7 +58,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     env: &BatchDispatchEnv<'_>,
     task: &'a Task,
     instruction: &str,
-) -> Result<(&'a Task, PathBuf, TaskCycleReport), RunError> {
+) -> Result<(&'a Task, Unit, TaskCycleReport), RunError> {
     let BatchDispatchEnv {
         events,
         base_commit,
@@ -71,15 +70,15 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     } = *env;
     let state = crate::replay::derive(events);
     let attempt = attempt_number(&state, &task.id);
-    let task_worktree =
-        crate::run_dir::task_worktrees(ctx.run_dir).join(format!("{}-{attempt}", task.id));
-    let branch = crate::worktree::task_branch(ctx.run_id, &task.id, attempt);
-    prepare_worktree(
-        ctx.worktree,
-        &task_worktree,
-        base_commit,
-        &branch,
-        Isolation::Worktree,
+    let unit = open_unit(
+        UnitHome {
+            repo: ctx.worktree,
+            run_dir: ctx.run_dir,
+            run_id: ctx.run_id,
+            base: base_commit,
+        },
+        UnitId::Task(task.id.clone()),
+        attempt,
         ctx.root_supervision(),
     )
     .await?;
@@ -115,7 +114,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         AttemptEnv {
             adapter,
             node,
-            cwd: &task_worktree,
+            unit: &unit,
             max_retries: ctx.max_task_retries,
             budget: ctx.session_budget().await?,
             memo: &ctx.memo,
@@ -136,5 +135,5 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     )
     .await?;
 
-    Ok((task, task_worktree, report))
+    Ok((task, unit, report))
 }

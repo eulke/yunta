@@ -107,25 +107,6 @@ pub async fn capture_tree(
         .map_err(|source| ScopeCheckError::NotATree { source })
 }
 
-/// The tree `cwd`'s `HEAD` points at: the starting point of a unit that
-/// was given a tree of its own, where the commit it was branched from is
-/// exactly what it began with.
-///
-/// The counterpart of [`capture_tree`], which a unit sharing a tree it
-/// did not receive clean needs instead. The two say the same thing about
-/// different situations, and once every unit owns its tree only this one
-/// is left.
-pub async fn head_tree(
-    cwd: &Path,
-    supervision: Supervision<'_>,
-) -> Result<TreeId, ScopeCheckError> {
-    let printed = git_bytes(cwd, &["rev-parse", "HEAD^{tree}"], supervision).await?;
-    String::from_utf8_lossy(&printed)
-        .trim()
-        .parse()
-        .map_err(|source| ScopeCheckError::NotATree { source })
-}
-
 /// What changed in `cwd` since `from`: the paths a unit of work is
 /// answerable for, and nothing that was already there when it began.
 ///
@@ -134,6 +115,10 @@ pub async fn head_tree(
 /// file that was already lying there untracked is in both. Asking git
 /// for untracked paths separately would answer about the checkout rather
 /// than about the unit, which is the whole distinction this makes.
+///
+/// The counterpart of [`worktree::head_tree`](crate::worktree::head_tree),
+/// which a unit that was handed a clean tree of its own uses instead: it
+/// asks its checkout where it stands and needs no capture at all.
 pub async fn changed_since(
     cwd: &Path,
     from: &TreeId,
@@ -210,7 +195,7 @@ async fn git_bytes(
 /// turns off git's own path quoting — byte-for-byte, so a non-ASCII path
 /// reaches the globs unescaped instead of as a `"caf\303\251.rs"` string
 /// no glob would match.
-fn nul_separated_paths(bytes: &[u8]) -> Vec<PathBuf> {
+pub(crate) fn nul_separated_paths(bytes: &[u8]) -> Vec<PathBuf> {
     use std::os::unix::ffi::OsStrExt;
     bytes
         .split(|byte| *byte == 0)

@@ -1,7 +1,7 @@
 //! One attempt of a task: the session it opens, the scope check on what
 //! it changed, and what it tells `run_task` to do next.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
@@ -23,7 +23,7 @@ pub(super) struct AttemptParams<'a> {
     pub(super) instruction: &'a str,
     pub(super) adapter: &'a dyn Adapter,
     pub(super) node: &'a yunta_core::Node,
-    pub(super) cwd: &'a Path,
+    pub(super) unit: &'a crate::worktree::Unit,
     pub(super) budget: Budget,
     pub(super) memo: &'a Memo,
     pub(super) profile: PermissionProfile,
@@ -61,12 +61,13 @@ pub(super) async fn run_one_attempt(
     let (last_staged, dispatch_outcome, tokens, covered) = open_and_dispatch(params).await?;
     let &AttemptParams {
         task,
-        cwd,
+        unit,
         memo,
         already_granted_paths,
         supervision,
         ..
     } = params;
+    let cwd = unit.worktree.as_path();
 
     // A cancelled dispatch ends the cycle right here — no post-check, no
     // verdict, no retry. The attempt is on record; what the cancellation
@@ -120,13 +121,13 @@ pub(super) async fn run_one_attempt(
     // The final diff is evaluated against the declared scope plus any
     // authorized expansions — never against a denied or escalated request's
     // paths.
-    // A task works in a tree of its own, so what it began with is the
-    // commit that tree was made from.
-    let from = crate::scope::head_tree(cwd, supervision).await?;
+    // What this unit began with, recorded when it opened — the same
+    // starting point for every attempt, so an attempt answers for what
+    // an earlier one of its own left in the tree.
     let scope = audit(
         cwd,
-        &from,
-        &crate::run_dir::task_index(&params.setup.run_dir, &task.id),
+        &unit.from,
+        &crate::run_dir::index_for(&params.setup.run_dir, &unit.who),
         &effective_scope,
         &last_staged,
         supervision,
@@ -249,7 +250,7 @@ async fn open_and_dispatch(
         instruction,
         adapter,
         node,
-        cwd,
+        unit,
         budget,
         profile,
         audit,
@@ -258,6 +259,7 @@ async fn open_and_dispatch(
         already_granted_paths,
         ..
     } = params;
+    let cwd = unit.worktree.as_path();
     // One door for every session: the per-attempt listener (its bind
     // failure degrades to no tools, recorded, never fatal), the brief,
     // and the request itself.
@@ -318,13 +320,14 @@ async fn evaluate_scope_expansion(
 ) -> Result<Option<crate::scope_expansion::ScopeExpansionOutcome>, TaskCycleError> {
     let &AttemptParams {
         task,
-        cwd,
+        unit,
         scope_expansion,
         max_expansion_files,
         grants,
         supervision,
         ..
     } = params;
+    let cwd = unit.worktree.as_path();
     let Some(expansion_request) =
         crate::scope_expansion::load_request(cwd)
             .await
