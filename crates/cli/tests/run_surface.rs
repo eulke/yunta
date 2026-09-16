@@ -718,7 +718,13 @@ fn the_live_view_indents_a_groups_children_under_it() {
     // starts first is drawn in a painting the other is missing from.
     // What this asserts on is where the rows sit relative to each other,
     // which only a painting that holds them all can answer.
-    let headline = |id: &str| format!("> run {id} ·");
+    //
+    // A row is found by the node it is about and not by the mark in
+    // front of it: that mark says how the node is doing and changes
+    // while it works, and what this is about is the indentation, which
+    // sits before the mark either way. The trailing separator is part of
+    // the needle because `sweep` is a prefix of `sweep-a`.
+    let headline = |id: &str| format!("run {id} ·");
     let wanted = ["sweep", "sweep-a", "sweep-b"].map(headline);
     let rows = yunta_testkit::wait_for(
         || painting_with(&terminal.drawn(), &wanted),
@@ -732,7 +738,7 @@ fn the_live_view_indents_a_groups_children_under_it() {
     let depth = |id: &str| {
         let row = rows
             .iter()
-            .find(|row| row.trim_start().starts_with(&headline(id)))
+            .find(|row| row.contains(&headline(id)))
             .unwrap_or_else(|| panic!("`{id}` has a row of its own:\n{rows:#?}"));
         row.len() - row.trim_start().len()
     };
