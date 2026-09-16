@@ -1951,3 +1951,173 @@ cualquier otro. M28: el run de una prueba no mide baseline, porque su
 veredicto no es sobre el árbol. M29: `BlockedCause` reúne lo que bloquea
 una tarea; D178 y D180 revisan D147 en ese orden. §8: `Failure` y
 `node_close::fail_with` se generalizan, nunca se reimplementan.
+
+---
+
+## M32 · Una unidad de trabajo, un árbol
+
+**Vicio V2** (una pregunta se responde en muchos lugares), con **V7** (la
+capacidad declarada y no consultada) y **V10** (los caminos duplicados).
+
+El engine responde «¿qué cambió esta unidad de trabajo?» por dos caminos que no
+coinciden. Una tarea de `kind: loop` corre en un árbol propio
+(`loop_exec/dispatch.rs:74-75`) y aterriza por `integrate_task`, así que su diff
+es suyo. Un nodo corre en el árbol compartido del run, y `node_close.rs:271` lo
+audita con `scope_check` contra `HEAD` —el commit base del run—, mientras nada
+commitea entre nodos de nivel superior. El nodo hereda entonces el diff
+acumulado de todo el run y falla por lo que escribió otro.
+
+Evidencia, binario real y `events.jsonl` crudo: un nodo `second` con
+`scope: ["bar/**"]` que depende de `first` y escribe sólo dentro de su scope —
+
+```
+second   diff: ['bar/x.txt', 'loose.txt']   violations: ['loose.txt']
+```
+
+— falla por `loose.txt`, que escribió `first`. Sin concurrencia ninguna. Bajo
+concurrencia el mismo defecto es simétrico: dos hijos de un `parallel` con scope
+disjunto declarado, cada uno escribiendo sólo dentro del suyo, se culpan
+mutuamente (`sweep-a violations: ['b/out.txt']`, `sweep-b violations:
+['a/out.txt']`).
+
+**V7**: `RuleCode::OverlappingScope` (`core/src/workflow/read.rs:173`, parse
+time) y `CheckError::OverlappingFanOutScope` (`check/scopes.rs:101`) exigen
+disjunción entre escritores concurrentes, y el runtime nunca la consulta: es
+una garantía verificada que nadie cobra. `CheckWarning::UndeclaredParallelScope`
+va más lejos y promete que declarar scope «to make the check real» — hoy
+declararlo es exactamente lo que lo rompe.
+
+**V10**: dos auditorías para la misma pregunta,
+`node_close.rs::scope_violation` y `task_cycle/attempt.rs:123`.
+
+**Regla.** Una unidad de trabajo se audita contra el árbol del que partió, y ese
+árbol es un hecho del log, no el estado ambiente del disco. Donde dos unidades
+corren a la vez, cada una tiene el suyo — porque si no, «el árbol del que
+partió» es una frase sin referente. Una tarea deja de ser el caso especial que
+aísla y pasa a ser la primera instancia de la regla; un nodo concurrente es la
+segunda. La disjunción que los checks estáticos ya exigen es lo que hace que un
+aterrizaje sea sin conflicto por construcción: estático y runtime pasan a decir
+lo mismo.
+
+**Firmas.**
+
+```rust
+// core/src/ids.rs — junto a `CommitSha`, por su misma razón: un id de git que el
+// log persiste no viaja como `String`
+string_id!(
+    /// A git tree object's id, as `git write-tree` prints it.
+    TreeId, what = "tree id", rule = HEX40_RULE, check = is_hex40
+);
+
+// core/src/events/node/payloads.rs
+pub struct NodeStartedPayload {
+    pub attempt: u32,
+    /// The tree this attempt starts from — what its diff is judged against.
+    /// Absent in a log written before the audit had a recorded starting point,
+    /// which reads as the run's own base: the tolerance §3.1 gives every
+    /// persisted field, so an older log keeps deriving.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_tree: Option<TreeId>,
+}
+impl NodeStartedPayload { pub fn attempt_from(attempt: u32, from: TreeId) -> Self; }
+
+// engine/src/scope.rs — la cáscara y el núcleo, separados
+/// The tree a unit starts from. Captured through a private index
+/// (`GIT_INDEX_FILE`), so a concurrent sibling never races this one on
+/// `.git/index`.
+pub async fn capture_tree(cwd: &Path, scratch: &Path, supervision: Supervision<'_>)
+    -> Result<TreeId, ScopeCheckError>;
+/// What this unit changed: its diff against the tree it started from.
+pub async fn changed_since(cwd: &Path, from: &TreeId, supervision: Supervision<'_>)
+    -> Result<Vec<PathBuf>, ScopeCheckError>;
+/// Pure: what a diff and a scope mean together. `staged` is what the adapter
+/// declared it wrote for its own mechanics, which is not the unit's doing.
+pub fn violations(diff: &[PathBuf], scope: &[ScopeGlob], staged: &[PathBuf]) -> Vec<PathBuf>;
+//   `scope_check` se borra (§0.15, reemplazado): mezclaba la llamada a git con el
+//   juicio, y su punto de partida —`HEAD`— no era un parámetro sino un supuesto.
+
+// engine/src/worktree/unit.rs (nuevo) — el aterrizaje, generalizado desde `loop_exec`
+/// The tree one unit of work owns while it works.
+pub struct Unit { pub worktree: PathBuf, pub from: TreeId }
+pub async fn open_unit(run_dir: &Path, who: &UnitId, attempt: u32, supervision: Supervision<'_>)
+    -> Result<Unit, WorktreeError>;
+/// Rebase onto the shared tree as it stands now and fast-forward it. Where two
+/// units of one run can run at once, the static checks already proved their
+/// scopes disjoint, so a conflict here is a workflow that got past `check`.
+pub async fn land(unit: &Unit, into: &Path, supervision: Supervision<'_>)
+    -> Result<Landing, WorktreeError>;
+pub enum Landing { Landed { commit: CommitSha }, Rejected { conflicts: Vec<PathBuf> } }
+//   `loop_exec/integrate.rs::integrate_task` conserva lo suyo —re-verificar
+//   criterios y scope sobre el árbol rebasado, emitir `task_status_changed`— y
+//   delega el aterrizaje acá: el rebase y el fast-forward dejan de ser código de
+//   `loop`. `run_dir::task_worktrees` pasa a `run_dir::unit_worktrees`.
+
+// core/src/workflow/node.rs — `isolation:` deja de ser exclusivo de `kind: workflow`
+pub struct Node { /* … */ pub isolation: Option<Isolation> }
+// core/src/config/sections.rs — un solo vocabulario (P11)
+pub enum Isolation { #[default] Worktree, /* la palabra la fija P11 */ }
+//   `WorkflowIsolation { Worktree, Inherit }` se borra: dos enums y dos palabras
+//   (`none` en config, `inherit` en el nodo) para «comparte el árbol de quien lo
+//   parió». Agregar `isolation:` al nodo sin unificar sería V4 —la declaración
+//   dispersa— generado por este mecanismo, así que la unificación no es alcance
+//   arrastrado sino forzado. Cuál palabra queda y qué pasa con la que se retira
+//   es **P11**: rompe YAML de autor y el plan no la toma por defecto.
+```
+
+**Decisión.** D182 registra la regla: el punto de partida de una auditoría es un
+hecho del log, y la concurrencia implica aislamiento. **P11** queda abierta y
+bloquea 9-04: la palabra única de `isolation` y qué se hace con la que se
+retira, que es un cambio visible para quien ya escribió `isolation: inherit` o
+`defaults.isolation: none`.
+
+**Archivos.** Nuevo: `engine/src/worktree/unit.rs`,
+`docs/design/adr/D182-*.md`. Modifica: `core/src/ids.rs`,
+`core/src/events/node/payloads.rs`, `core/schemas/events.json`,
+`engine/src/scope.rs`, `engine/src/run/node_close.rs:262-290`,
+`engine/src/run/node_exec.rs`, `engine/src/task_cycle/attempt.rs:123`,
+`engine/src/run/loop_exec/{dispatch.rs, integrate.rs}`,
+`engine/src/run/parallel_exec.rs`, `engine/src/run_dir.rs`,
+`engine/src/check/warning.rs` (el texto que promete de más),
+`core/src/workflow/{node.rs, node_kind.rs}`, `core/src/config/sections.rs`,
+`core/schemas/{workflow.json, config.json}`, `docs/guide.md:75-83`,
+`docs/compatibility.md`, `docs/design/spec-events.md` §5.4. Borra:
+`engine::scope::scope_check`, `WorkflowIsolation`, `run_dir::task_worktrees`
+como vocabulario de `loop`.
+
+**Prerequisitos.** Ninguno para 9-01 y 9-02. 9-03 depende de 9-02 (el aterrizaje
+tiene que existir antes de que un hijo de `parallel` lo use). 9-04 depende de
+9-03 y está `bloqueado(P11)`.
+
+**Tests.** `engine/tests/scope.rs`:
+`a_node_is_not_blamed_for_what_a_predecessor_left_behind` (rojo: hoy falla
+nombrando el archivo del predecesor),
+`a_node_that_touches_what_a_predecessor_left_is_still_judged_for_it` (el falso
+negativo que un punto de partida por lista de paths —y no por árbol— dejaría
+pasar), `an_attempt_that_restarts_is_judged_from_where_its_first_attempt_began`
+(el hecho está en el log, así que el resume lo deriva),
+`a_write_outside_every_glob_still_fails_the_node`;
+`engine/tests/run_concurrency.rs`:
+`two_parallel_children_with_disjoint_scope_both_finish_clean` (rojo: hoy los dos
+fallan),
+`a_parallel_child_that_writes_outside_every_scope_fails_alone`,
+`fan_out_nodes_under_max_parallel_two_do_not_blame_each_other` (rojo),
+`two_units_landing_on_one_branch_serialize`;
+`engine/tests/worktree.rs`: `a_landing_that_conflicts_reports_its_paths`;
+`core/tests/events.rs`:
+`a_node_started_without_a_tree_reads_as_the_runs_own_base`.
+La suite de `loop` entera sigue verde sin cambios: 9-02 es la generalización del
+mecanismo que ya funciona, no una reimplementación.
+
+**Cierra.** El hallazgo del humo de fase 8 (§11 L-121); la promesa de
+`docs/guide.md:77-79`; V7 sobre `OverlappingScope` y `OverlappingFanOutScope`.
+
+**Encastre.** M04/M05: `from_tree` es un campo de un payload que ya existe, con
+la tolerancia de §3.1; `NodeLedger::apply` no gana rama. M07: `violations` es
+puro y `capture_tree`/`changed_since` son cáscara — la separación que
+`scope_check` no tenía. M10/M27: las dos llamadas nuevas a git van por
+`Supervision`, como todo lo que este repo gobierna. M18: `yunta test` corre el
+mismo camino, así que un caso ejercita el aterrizaje real. M22: ninguna
+definición de contador cambia; `src_files_over_500_lines` se vigila al partir
+`integrate.rs`. M28: el baseline se mide al nacer el run, antes de la primera
+unidad; no lo toca. M24 §8: `integrate_task` está marcado «se conserva» — este
+mecanismo lo generaliza y nunca lo reimplementa.

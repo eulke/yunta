@@ -159,20 +159,20 @@ en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
 
 ---
 
-## 2. Los doce vicios y los treinta y un mecanismos
+## 2. Los doce vicios y los treinta y dos mecanismos
 
 | vicio | síntoma principal | mecanismos |
 |---|---|---|
 | V1 un hecho se construye en muchos lugares | `GateWaiting` ×7, `capability_degraded` ×8, `SessionRequest` ×2 divergentes, lo escribible ×4 | M03 M08 M25 |
-| V2 una pregunta se responde en muchos lugares | `last_external_ref` ×2, attempt ×6, dedup ×2, run dir ×6, `RunPhase`→palabras ×5, el baseline por run, los nodos de un run por superficie, dos servidores con un nombre | M04 M15 M16 M28 M30 M31 |
+| V2 una pregunta se responde en muchos lugares | `last_external_ref` ×2, attempt ×6, dedup ×2, run dir ×6, `RunPhase`→palabras ×5, el baseline por run, los nodos de un run por superficie, dos servidores con un nombre, lo que una unidad de trabajo cambió por dos caminos | M04 M15 M16 M28 M30 M31 M32 |
 | V3 el catch-all silencioso | `replay::apply` `_ => Ok(())`, `phase.rs` `_ => Created`, `Waiting` derivado de cualquier `node_failed` | M05 M26 |
 | V4 la declaración dispersa | un kind = 9+2 lugares | M02 |
 | V5 prosa congelada en el log, texto en la capa equivocada | `run_paused.reason`, `{:?}` al usuario ×9, MCP re-bordea ×17, una sesión que muere sin exit ni stderr | M06 M17 M31 |
 | V6 la disciplina que el tipo no impone | globs `String`, `Legacy` fresco, nombre de artifact que escapa, versión no leída, un nodo que pregunta y debe otra cosa | M12 M13 M14 M26 |
-| V7 la capacidad declarada y no consultada | 3 capacidades sin consulta, 5 comportamientos prometidos-no-construidos, la memoización de D61, el corto-circuito de D62 | M09 M24 M25 M28 M29 |
+| V7 la capacidad declarada y no consultada | 3 capacidades sin consulta, 5 comportamientos prometidos-no-construidos, la memoización de D61, el corto-circuito de D62, la disjunción que `check` exige y el runtime nunca cobra | M09 M24 M25 M28 M29 M32 |
 | V8 la cáscara que no gobierna | git sin grupo, 15 `std::fs` en async, 3 `SystemClock`, `target_digest` crudo, `Supervision::none` ×8, la pareja sincrónica de git | M10 M11 M27 |
 | V9 el puerto del lado equivocado | el engine importa su interfaz desde `yunta-adapters` | M01 |
-| V10 los caminos duplicados | `yunta test` sin `check`, `mcp::tool_resolve_gate`, 8 `Bench` sombra, la ronda de preguntas cierra sin `close_node`, `status` y la vista viva listan nodos por dos caminos | M18 M19 M20 M26 M30 |
+| V10 los caminos duplicados | `yunta test` sin `check`, `mcp::tool_resolve_gate`, 8 `Bench` sombra, la ronda de preguntas cierra sin `close_node`, `status` y la vista viva listan nodos por dos caminos, una tarea y un nodo se auditan por dos | M18 M19 M20 M26 M30 M32 |
 | V11 la documentación sin atar | `docs/design/` invisible a `docs_sync`; la config de referencia no parsea; D147 `revised` sin revisor | M23 M29 |
 | V12 el ratchet que mide el síntoma | `copied_test_helpers 0` falso; propiedad de resume tautológica | M21 M22 |
 
@@ -419,6 +419,15 @@ en el CLI; `wait.rs` y `Terminal` en el testkit; la calidad de los ADRs.
   el stderr redactado, `Failure::SessionDied` por los dos caminos que
   abren sesiones, `doctor --session` por binding, los stubs en
   `testkit-core`; D180. Fase 8.
+- **M32 · Una unidad de trabajo, un árbol.** El punto de partida de una
+  auditoría es un hecho del log (`node_started.from_tree`), no el estado
+  ambiente del disco; `scope_check` se parte en cáscara (`capture_tree`,
+  `changed_since`) y núcleo puro (`violations`); el aterrizaje sale de
+  `loop_exec` y se generaliza (`worktree::{open_unit, land}`); donde dos
+  unidades corren a la vez cada una tiene su árbol, con lo que la
+  disjunción que `check` ya exige pasa a ser lo que la hace sin
+  conflicto; `isolation:` en el nodo, con una sola palabra; D182, P11.
+  Fase 9.
 
 ---
 
@@ -755,11 +764,14 @@ aprobación explícita del dueño del repo, junto con L-106 a L-109.
 | 6 | M20 M21 M22 | que el ratchet signifique lo que dice | P7, fase 2 |
 | 7 | M23 M24 | el primer tag | acompaña 2–6 |
 | 8 | M27 M28 M29 M30 M31 | lo que las fases 3–7 dejaron levantado (L-67, L-87, L-91, L-92, L-93, L-95, L-105) y el reporte de Codex (L-106), cerrados con sus formas | 7 |
+| 9 | M32 | que `scope:` signifique lo que promete, y que la disjunción que `check` exige la cobre el runtime (L-121) | 8 |
 | M26 | W-11 ahora; el resto reparte en 2-01…2-04, 3-01, 3-02, 3-05, 4-02, 4-03, 5-05, 5-06, 6-04 | que un nodo que pregunta corra de punta a punta en toda superficie | P10 |
 
 Orden estricto W → 0 → 1 → 2 → 3; 4, 5 y 6 dependen de 2 y pueden ir en
 paralelo entre sí; 7 acompaña. M26 no es una fase: su prerequisito es W-11 y
 cada parte restante entra en el ítem de su mecanismo. El primer tag se publica después de la 8.
+La 9 nace de lo que el humo de la 8 encontró y no de la auditoría original: es
+la única fase cuyo vicio se descubrió corriendo el binario, no leyéndolo.
 
 ---
 
@@ -883,6 +895,10 @@ especificación de cada mecanismo —firmas, archivos, tests— es
 | 8-03 | M29: `Status` con revisores, rechazado en `parse`; «Retirada por» en el índice; `Surprise`/`surprises`; `TaskOutcome::Blocked { cause: BlockedCause }` (cinco causas, L-115); Contrato §5.2/§5.4 | — | cerrado (`559707f`) |
 | 8-04 | M30: `NodeState::Waiting { on: NodeWait }`; `text::{listed, asked_questions}`; `status`, `--json`, `graph --run` por el frame; `nodes` como lista, `schema_version: 5`; `graph` con una sola fuente; `ParallelInsideParallel` (en `check/gates.rs`, L-116); D179 | — | cerrado (`cdd8f7f`) |
 | 8-05 | M31: `yunta-run`; `AgentSession::exit` que mata antes de recoger (y espera al drenaje de stderr, L-118); `SessionEnd`; stderr redactado; `Failure::SessionDied` por prompt y por `loop`; `doctor --session` por binding; stubs en `testkit-core` (`STDERR_FILE`, L-117); D180 | 8-01, 8-03 | cerrado (`801a012`) |
+| 9-01 | M32: `TreeId`; `node_started.from_tree`; `scope.rs` partido en cáscara (`capture_tree`, `changed_since`) y núcleo puro (`violations`); `scope_check` borrado; nodo y tarea auditan contra el árbol del que partieron; D182 | — | pendiente |
+| 9-02 | M32: `worktree::{Unit, open_unit, land, Landing}` extraído de `loop_exec`; `integrate_task` conserva su re-verificación y delega el aterrizaje; `task_worktrees` → `unit_worktrees`. Sin cambio observable: la suite de `loop` sigue verde | 9-01 | pendiente |
+| 9-03 | M32: hijos de `parallel` y nodos de fan-out abren su unidad y aterrizan; `OverlappingScope` y `OverlappingFanOutScope` pasan a ser load-bearing; el texto de `UndeclaredParallelScope` deja de prometer de más | 9-02 | pendiente |
+| 9-04 | M32: `Node.isolation`; `WorkflowIsolation` borrado; una sola palabra; resume de una unidad con árbol sin aterrizar | 9-03 | bloqueado(P11) |
 
 Ya cerrado en esta rama, antes del plan: merge de `main` con la costura del
 observer en `RunLog` (`6fe9ccc`), `Evidence` como hechos etiquetados
@@ -1018,6 +1034,8 @@ uno están en el commit que lo escribió.
 | L-118 | 8-05 | M31 fija para `exit()` el orden `kill_group()` → `close_pipes()` → `child.wait()`, y `close_pipes` aborta el drenaje de stderr: la cola que `exit()` existe para devolver se pierde cuando el hijo escribió su última línea y el drenaje todavía no la leyó. Medido: el test de redacción devolvía `[]` con ese orden | el grupo muere primero, como manda; se aborta el lector de stdout —su stream ya está agotado, que es por qué alguien pregunta— y se **espera** al de stderr, que termina solo porque el único escritor de esa cañería es un proceso ya muerto; la salida se recoge al final. La invariante que `close_pipes` protege —que nadie quede sentado sobre una cañería que nadie lee— la cumple mejor leerla hasta el EOF que cortarla | fila 8-05 (§10); M31; D180 §2 |
 | L-119 | 8-05 | M31 firma `fn sandboxed_checkout(cwd) -> Result<SandboxedCheckout, CliError>` —sincrónica— y su rustdoc dice que arma «un repo git, y el contexto enraizado ahí», que son un `await` y un `Context`. Las dos cosas no caben en esa firma | queda sincrónica y arma lo que puede sin I/O gobernada: el root temporal y el worktree sembrado con el catálogo. `init_git` y `ctx.sandboxed` los llama quien la usa —`run_case` siembra su propio `worktree:` entre medio, y `doctor --session` escribe su workflow—, que es justamente por qué la costura va ahí. Aparecido al hacerlo: `copy_dir_all` escribía en un destino que nadie creaba y funcionaba sólo cuando el catálogo empezaba por un directorio; un `.yunta` de puros archivos fallaba. Corregido en el mismo ítem | fila 8-05 (§10); M31; §0.1 |
 | L-120 | 8-05 | `cli/tests/console_interaction.rs::a_keystroke_in_the_list_goes_back_over_the_rows_the_list_drew_and_no_further` falló una vez en una corrida de `cargo test --workspace` y pasa siempre sola y en corridas repetidas de su propio archivo: cuenta filas dibujadas contra filas borradas leyendo un pty, y bajo carga lee un repintado a medio escribir. Nada de este ítem toca la región ni la lista | queda dicho, no corregido: la sincronización del test es `wait_for("> 2  abort")`, que dice que la lista se movió pero no que terminó de moverse, y el arreglo —esperar a que el repintado cierre, no a que empiece— es una lectura nueva del terminal en el testkit, que es un ítem propio y no éste. Decide el humano si abre uno o si prefiere que se mida primero cuántas veces en cien | fila 8-05 (§10); `crates/testkit/src/terminal.rs` |
+| L-121 | humo de la 8 | Corriendo el binario real sobre seis proyectos aparte apareció que `scope:` en un nodo de nivel superior se audita contra el diff acumulado de TODO el run, no contra lo que ese nodo cambió: `scope_check` diffea contra `HEAD` y nada commitea entre nodos. Un nodo con scope declarado falla por archivos de un nodo anterior, sin concurrencia ninguna (`second diff: ['bar/x.txt', 'loose.txt'] violations: ['loose.txt']`); bajo concurrencia dos hijos de un `parallel` con scope disjunto se culpan mutuamente. Las tareas de `kind: loop` no lo sufren: corren en su propio árbol y aterrizan. `docs/guide.md:77-79` promete «the engine diffs what actually changed», así que la documentación gana | no es un borde de `parallel` sino una pregunta —«¿qué cambió esta unidad?»— respondida por dos caminos, uno roto (V2), con la disjunción que `check` exige sin cobrar (V7) y dos auditorías para lo mismo (V10). Se corrige generalizando el mecanismo que ya funciona —un árbol por unidad, un aterrizaje— y no agregando un segundo. Es M32 y abre la fase 9. Descartado en el camino: un snapshot en memoria por nodo (no sobrevive al replay y no cubre el fan-out, donde los concurrentes son un conjunto de runtime) y un commit por nodo (no arregla la concurrencia y cambia la historia visible de la rama) | fase 9 (§7); filas 9-01…9-04 (§10); M32; D182; P11 |
+| P11 | 9-04 | `Isolation { Worktree, None }` (config) y `WorkflowIsolation { Worktree, Inherit }` (nodo) son dos enums con dos palabras —`none`, `inherit`— para «comparte el árbol de quien lo parió». M32 pone `isolation:` en el nodo en general, así que dejar las dos sería la declaración dispersa (V4) generada por el propio mecanismo: unificar no es alcance arrastrado, es forzado | cuál palabra queda y qué pasa con la que se retira rompe YAML de autor que ya existe (`defaults.isolation: none`, `isolation: inherit`), y el YAML de autor de este repo rechaza claves desconocidas a propósito. Tres salidas: (a) queda `none` —la del nivel más general— y `inherit` se retira con un error que nombra el reemplazo; (b) queda `inherit` —la más descriptiva de lo que hace un hijo— y se retira `none`; (c) una palabra nueva para las dos y las dos viejas se retiran. Recomiendo (a) con el error que nombra el reemplazo, porque `none` ya gobierna el nivel que incluye al otro; pero rompe documentos de usuario y §0 dice que nadie toma una P por defecto: decide el humano | fila 9-04 (§10); M32; V4 |
 | L-113 | 8-01 | M27 pone `Owner` en `testkit-core`, que por su propia doc no conoce al engine y no lo tiene como dependencia (`testkit-core/Cargo.toml`): no puede nombrar `Supervision`. Y los unit tests del engine tampoco pueden usarlo desde `testkit`, porque la lib bajo test es otra construcción del mismo crate y los tipos no son el mismo | `Owner` vive en `yunta-testkit`, que ya depende del engine, y los cinco unit tests de `crossing.rs` arman la supervisión con `Supervision::outside_any_run` —el constructor, no una copia del helper—. Levantado sin detener el ítem: la ubicación es lo único que cambia | fila 8-01 (§10); M27; `testkit/src/owner.rs` |
 | L-114 | 8-01 | D181 dice que el segundo Ctrl-C «devuelve la señal a la disposición por defecto del proceso». Restaurar `SIG_DFL` es `unsafe` y `[workspace.lints.rust] unsafe_code = "forbid"` (Cargo.toml:72) no admite excepción; además tokio deja su handler instalado aunque se suelte el `Signal`, así que una tercera señal tampoco llegaría al default. Salir desde el listener saltearía `ask::restore_terminal` y dejaría la terminal en raw | las dos etapas se implementan; la tercera señal no vuelve al default y el comando desenrolla y sale. Falta decidir entre: aceptar el límite y decirlo en D181, traer una dependencia que emule el default de forma segura, o levantar el `forbid` para el módulo de señales de core | fila 8-01 (§10); M27; D181; `cli/src/interrupt.rs` |
 | L-110 | 8-02 | M28 dice que `run_all_criteria` consume `Memo::exit_code`. Cada criterio pasaría entonces por el hash del árbol —una llamada a git por criterio en vez de una por tarea (`criteria.rs`)— y la duración que el evento registra incluiría esa vuelta, así que un criterio reusado mediría lo que no corrió | `Memo::exit_code` existe con la firma que el plan fija y `baseline_compare` la consume; el lazo de criterios sigue con su huella compartida y su duración propia. Levantado sin detener el ítem porque no cambia ninguna firma ni ningún evento: es qué lector usa la puerta nueva | fila 8-02 (§10); M28; `task_cycle/criteria.rs` |
