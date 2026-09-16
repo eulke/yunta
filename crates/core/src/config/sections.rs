@@ -112,21 +112,63 @@ pub struct PathsConfig {
     pub worktrees: Option<PathBuf>,
 }
 
-/// How a first-level run isolates its working tree from the checkout
-/// that started it. `worktree` (default) gives each run its
-/// own `git worktree`; `none` operates directly on the given checkout,
-/// legitimate for watching an agent edit live or for CI already inside
-/// an ephemeral container. `inherit` (sub-runs only) isn't a value
-/// here — a first-level run has no parent to inherit from — and
-/// `container` isn't a schema value at all (not yet designed).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
-)]
+/// Whether a unit of work gets a working tree of its own, or works in
+/// the one it was handed.
+///
+/// `worktree` (the default) gives it its own `git worktree`; `none`
+/// works directly in the checkout it was given — legitimate for watching
+/// an agent edit live, or for CI already inside an ephemeral container.
+///
+/// One word for every level, run and `kind: workflow` node alike (D183):
+/// `none` is true wherever it is written, while a word naming a parent
+/// would not be — a first-level run has no parent unit, it has a
+/// person's checkout. `container` is not a value at all; it is not
+/// designed. (A node that wants a tree of its own for the sake of its
+/// own diff declares `scope:` instead, which is what asks for one:
+/// D184.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Isolation {
     #[default]
     Worktree,
     None,
+}
+
+impl Isolation {
+    /// The word this repository retired, and what it is now called.
+    ///
+    /// Read by whoever tolerates it — a manifest frozen while that word
+    /// was current — so the retirement is stated once and the two halves
+    /// of it cannot disagree.
+    pub const RETIRED: (&'static str, &'static str) = ("inherit", "none");
+}
+
+impl<'de> Deserialize<'de> for Isolation {
+    /// Author input is held to the one vocabulary, and a document that
+    /// uses the retired word is told what replaced it rather than what
+    /// the alternatives are: `inherit` said "the tree of whoever made
+    /// me", which is what `none` says at every level.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let word = String::deserialize(deserializer)?;
+        let (retired, replacement) = Isolation::RETIRED;
+        match word.as_str() {
+            "worktree" => Ok(Isolation::Worktree),
+            "none" => Ok(Isolation::None),
+            other if other == retired => Err(serde::de::Error::custom(format!(
+                "`{retired}` is no longer an isolation — write `{replacement}`, which says \
+                 the same thing at every level"
+            ))),
+            other => Err(serde::de::Error::custom(format!(
+                "unknown isolation `{other}` — expected `worktree` or `none`"
+            ))),
+        }
+    }
+}
+
+/// Whether this isolation is the one a document that says nothing gets,
+/// so the default is never written down.
+pub fn is_default_isolation(isolation: &Isolation) -> bool {
+    *isolation == Isolation::default()
 }
 
 /// `defaults:` — the reference config's whole group. Each field

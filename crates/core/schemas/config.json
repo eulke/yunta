@@ -393,7 +393,7 @@
       "pattern": "^[^/]+/[^/]+$"
     },
     "Isolation": {
-      "description": "How a first-level run isolates its working tree from the checkout\nthat started it. `worktree` (default) gives each run its\nown `git worktree`; `none` operates directly on the given checkout,\nlegitimate for watching an agent edit live or for CI already inside\nan ephemeral container. `inherit` (sub-runs only) isn't a value\nhere — a first-level run has no parent to inherit from — and\n`container` isn't a schema value at all (not yet designed).",
+      "description": "Whether a unit of work gets a working tree of its own, or works in\nthe one it was handed.\n\n`worktree` (the default) gives it its own `git worktree`; `none`\nworks directly in the checkout it was given — legitimate for watching\nan agent edit live, or for CI already inside an ephemeral container.\n\nOne word for every level, run and `kind: workflow` node alike (D183):\n`none` is true wherever it is written, while a word naming a parent\nwould not be — a first-level run has no parent unit, it has a\nperson's checkout. `container` is not a value at all; it is not\ndesigned. (A node that wants a tree of its own for the sake of its\nown diff declares `scope:` instead, which is what asks for one:\nD184.)",
       "type": "string",
       "enum": [
         "worktree",

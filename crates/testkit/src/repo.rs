@@ -65,3 +65,11 @@ pub fn write(path: &Path, contents: &str) {
     }
     std::fs::write(path, contents).expect("write file");
 }
+
+/// What `path` holds, for a test that asserts on a file a run wrote —
+/// the counterpart of [`write`](fn@write), so neither end reaches for `std::fs`
+/// inside an async test of its own.
+pub fn read(path: &Path) -> String {
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("read `{}`: {error}", path.display()))
+}

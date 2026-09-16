@@ -25,9 +25,10 @@
 //!   the parent's cap bounds the whole tree; the child's spend
 //!   aggregates back up through this node's own close.
 //! - `isolation: worktree` (default) branches the child's tree off the
-//!   parent's HEAD; `inherit` runs the child directly in the parent's
-//!   tree as manifest `isolation: none` — the child never owns (nor
-//!   cleans up, nor commits) a tree that isn't its own.
+//!   HEAD of the tree this node works in; `none` runs the child
+//!   directly in that tree — the child never owns (nor cleans up, nor
+//!   commits) a tree that isn't its own. One word at every level, so
+//!   what the node declares is what the child's manifest freezes.
 //!
 //! Artifacts cross that boundary in both directions, and by the log at
 //! each end. [`mounts`] is the way in: what the child is born holding,
@@ -46,7 +47,7 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
     ChildRunCreatedPayload, ChildRunFinishedPayload, EventPayload, TerminalState,
 };
-use yunta_core::{InputName, Isolation, Manifest, MountSpec, Node, RunId, WorkflowIsolation};
+use yunta_core::{InputName, Isolation, Manifest, MountSpec, Node, RunId};
 
 use crate::replay::derive;
 use yunta_core::template::render_template;
@@ -89,7 +90,7 @@ fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
 pub(super) struct WorkflowCall<'a> {
     pub use_name: &'a str,
     pub inputs: &'a BTreeMap<InputName, String>,
-    pub isolation: WorkflowIsolation,
+    pub isolation: Isolation,
     pub mounts: &'a [MountSpec],
 }
 
@@ -287,13 +288,9 @@ pub(super) async fn execute_workflow(
             .await;
         }
     };
-    child_manifest.isolation = match isolation {
-        WorkflowIsolation::Worktree => Isolation::Worktree,
-        // `inherit` shares the parent's tree: manifest `none` is the
-        // honest reading — the engine never commits, cleans up or locks
-        // a tree this run doesn't own.
-        WorkflowIsolation::Inherit => Isolation::None,
-    };
+    // One word all the way down: what the node declares is what the
+    // child's manifest freezes, with nothing in between to translate.
+    child_manifest.isolation = isolation;
     let runs = runs_root(ctx);
     let trees = worktrees_root(ctx);
     child_manifest.paths = match yunta_core::FrozenPaths::new(runs.clone(), trees.clone()) {
@@ -314,8 +311,10 @@ pub(super) async fn execute_workflow(
     let child_id = ctx.ids.mint_run_id(ctx.clock.now());
 
     let child_tree = match isolation {
-        WorkflowIsolation::Inherit => ctx.worktree.to_path_buf(),
-        WorkflowIsolation::Worktree => {
+        // `none` shares the tree this node works in: the engine never
+        // commits, cleans up or locks a tree this run does not own.
+        Isolation::None => ctx.worktree.to_path_buf(),
+        Isolation::Worktree => {
             let tree = trees.join(child_id.as_str());
             match crate::worktree::prepare_worktree(
                 ctx.worktree,

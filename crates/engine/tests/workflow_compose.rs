@@ -289,7 +289,7 @@ nodes:
     run: "echo done > child-out.txt"
 "#,
     );
-    // `isolation: inherit`: the child works in the parent's own tree, so
+    // `isolation: none`: the child works in the parent's own tree, so
     // the child's write is visible right there after the close.
     let parent = r#"
 name: parent
@@ -297,7 +297,7 @@ nodes:
   - id: feat
     kind: workflow
     use: gated
-    isolation: inherit
+    isolation: none
 "#;
     // No interaction surface: the child's internal gate has nobody to
     // ask, so the child pauses waiting — and the parent pauses with it,
@@ -1367,7 +1367,7 @@ nodes:
   - id: feat
     kind: workflow
     use: plan-and-do
-    isolation: inherit
+    isolation: none
     artifacts: { produces: [tasks] }
 "#;
 
@@ -1718,7 +1718,7 @@ nodes:
   - id: feat
     kind: workflow
     use: child-wf
-    isolation: inherit
+    isolation: none
     depends_on: [break]
 "#;
 

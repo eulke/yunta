@@ -684,24 +684,26 @@ nodes:
       - { id: sweep-b, kind: bash, scope: ["b/**"], run: "sleep 30" }
 "#;
 
-/// The rows of the last painting that carried every one of `headlines`.
+/// The last painting that carried every one of `headlines`, and `None`
+/// while no painting has carried them all.
 ///
 /// A painting goes out as one run of text between escape sequences, each
 /// row padded to the terminal's full width, so cutting that run into
 /// widths gives back the rows a reader was looking at — leading spaces
 /// and all.
-fn painted_rows(drawn: &str, headlines: &[String]) -> Vec<String> {
+fn painting_with(drawn: &str, headlines: &[String]) -> Option<Vec<String>> {
     let painting = drawn
         .split('\u{1b}')
         .filter_map(|chunk| chunk.find(char::is_alphabetic).map(|end| &chunk[end + 1..]))
-        .rfind(|text| headlines.iter().all(|headline| text.contains(headline)))
-        .unwrap_or_else(|| panic!("one painting carrying {headlines:?}:\n{drawn}"));
-    painting
-        .chars()
-        .collect::<Vec<char>>()
-        .chunks(usize::from(Terminal::COLUMNS))
-        .map(|row| row.iter().collect())
-        .collect()
+        .rfind(|text| headlines.iter().all(|headline| text.contains(headline)))?;
+    Some(
+        painting
+            .chars()
+            .collect::<Vec<char>>()
+            .chunks(usize::from(Terminal::COLUMNS))
+            .map(|row| row.iter().collect())
+            .collect(),
+    )
 }
 
 #[test]
@@ -710,15 +712,23 @@ fn the_live_view_indents_a_groups_children_under_it() {
     let (repo, home) = project(root.path(), GROUPED);
     let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
 
-    // Both children, because the region draws a node once it is working
-    // and the two start in whichever order the scheduler reaches them:
-    // one of them alone is a painting the other is missing from.
-    for child in ["sweep-a", "sweep-b"] {
-        terminal.wait_for(child, "the region never drew the group's children");
-    }
-    let drawn = terminal.drawn();
+    // One painting carrying all three, not three paintings carrying one
+    // each: the region draws a node once it is working, the two children
+    // start in whichever order the scheduler reaches them, and whichever
+    // starts first is drawn in a painting the other is missing from.
+    // What this asserts on is where the rows sit relative to each other,
+    // which only a painting that holds them all can answer.
     let headline = |id: &str| format!("> run {id} ·");
-    let rows = painted_rows(&drawn, &["sweep", "sweep-a", "sweep-b"].map(headline));
+    let wanted = ["sweep", "sweep-a", "sweep-b"].map(headline);
+    let rows = yunta_testkit::wait_for(
+        || painting_with(&terminal.drawn(), &wanted),
+        || {
+            format!(
+                "the region never drew one painting carrying {wanted:?}\ndrawn so far:\n{}",
+                terminal.drawn()
+            )
+        },
+    );
     let depth = |id: &str| {
         let row = rows
             .iter()

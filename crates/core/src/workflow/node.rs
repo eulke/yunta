@@ -422,7 +422,7 @@ nodes:
     kind: workflow
     use: child
     inputs: { a: b }
-    isolation: inherit
+    isolation: none
     mounts: [{ artifact: { node: p, name: n, as: m } }]
 "#;
 

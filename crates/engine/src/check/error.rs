@@ -288,15 +288,15 @@ pub enum CheckError {
     )]
     WorkflowNodeRunnerBinding { node: NodeId, field: &'static str },
 
-    /// A parallel child with `isolation: inherit` shares the parent's
+    /// A parallel child with `isolation: none` shares the parent's
     /// one tree with every concurrent sibling, so an undeclared scope
     /// makes disjointness unverifiable: refused, same rank as
     /// `OverlappingParallelScope` (which catches the declared-overlap
     /// half of the same rule).
     #[error(
         "parallel group `{group}`: child `{node}` is `kind: workflow` with `isolation: \
-         inherit` and no `scope` — inherit children share the parent's tree, so each must \
-         declare a disjoint scope"
+         none` and no `scope` — a child sharing the tree writes where its siblings do, so \
+         each must declare a disjoint scope"
     )]
     InheritChildWithoutScope { group: NodeId, node: NodeId },
 

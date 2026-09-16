@@ -2052,15 +2052,14 @@ pub enum Landing { Landed { commit: CommitSha }, Rejected { conflicts: Vec<PathB
 //   delega el aterrizaje acá: el rebase y el fast-forward dejan de ser código de
 //   `loop`. `run_dir::task_worktrees` pasa a `run_dir::unit_worktrees`.
 
-// core/src/workflow/node.rs — `isolation:` deja de ser exclusivo de `kind: workflow`
-pub struct Node { /* … */ pub isolation: Option<Isolation> }
 // core/src/config/sections.rs — un solo vocabulario (D183)
 pub enum Isolation { #[default] Worktree, None }
 //   `WorkflowIsolation { Worktree, Inherit }` se borra, y con él el diccionario de
 //   `run/workflow_exec/mod.rs:295` (`Inherit => None`): dos enums con un traductor
-//   en el medio es la forma que «un lugar» existe para prohibir. Agregar
-//   `isolation:` al nodo sin unificar sería V4 —la declaración dispersa— generado
-//   por este mecanismo, así que unificar no es alcance arrastrado sino forzado.
+//   en el medio es la forma que «un lugar» existe para prohibir. `isolation:` se
+//   queda donde está, en el nodo `kind: workflow`, porque ahí decide si el run hijo
+//   recibe un árbol nuevo o el que ese nodo ya usa; si *ese* nodo se aísla lo decide
+//   su `scope:` (D184, L-137).
 //   Queda `none` porque es cierta en todos los niveles y `inherit` sólo en
 //   algunos: un run de primer nivel no tiene unidad padre, tiene un checkout, y el
 //   rustdoc de `Isolation` ya lo decía. `isolation: inherit` en YAML de autor deja

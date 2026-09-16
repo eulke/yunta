@@ -7,6 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::parse::{describe, nested, take};
 use super::{ArtifactRefId, ArtifactSpec, LoopUntil, Node, ScopeExpansion};
+use crate::config::Isolation;
 use crate::ids::{ExecutorName, InputName, NodeId, OptionId};
 use crate::yaml::Value;
 
@@ -147,11 +148,11 @@ pub enum NodeKind {
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         inputs: BTreeMap<InputName, String>,
         /// `worktree` (default) gives the child its own tree branched
-        /// off the parent's HEAD; `inherit` shares the parent's tree
-        /// for phases of one piece of work — parallel `inherit`
-        /// siblings must declare disjoint `scope` (checked).
-        #[serde(default, skip_serializing_if = "is_default_workflow_isolation")]
-        isolation: WorkflowIsolation,
+        /// off the tree this node works in; `none` shares that tree, for
+        /// phases of one piece of work — parallel children sharing a
+        /// tree must declare disjoint `scope` (checked).
+        #[serde(default, skip_serializing_if = "crate::config::is_default_isolation")]
+        isolation: Isolation,
         /// `mounts:` — artifacts of the parent's own graph
         /// copied into the child's `run.dir/artifacts/` at birth: the
         /// promotion inheritance mechanism generalized (promotion is
@@ -266,23 +267,6 @@ impl<'de> Deserialize<'de> for MountArtifact {
         }
         Ok(MountArtifact { node, id, rename })
     }
-}
-
-fn is_default_workflow_isolation(isolation: &WorkflowIsolation) -> bool {
-    *isolation == WorkflowIsolation::default()
-}
-
-/// A `kind: workflow` node's `isolation:` — deliberately its own
-/// enum, not [`crate::Isolation`]: `inherit` only exists for workflow
-/// nodes, and a run-level `none` is not a per-node choice.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowIsolation {
-    #[default]
-    Worktree,
-    Inherit,
 }
 
 /// `kind: gate`'s `external:` block.

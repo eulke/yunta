@@ -153,6 +153,38 @@ impl crate::persisted::Persisted for Manifest {
     /// without them still resumes.
     const SCHEMA_VERSION: u32 = 2;
     const NAME: &'static str = "run manifest";
+
+    /// A manifest frozen while `inherit` was still a word reads as what
+    /// that word meant: this unit does not isolate (D183). The run's own
+    /// `isolation` and every `kind: workflow` node's alike, wherever
+    /// that key sits in the document, because a frozen manifest is not
+    /// rewritten to be readable.
+    fn reconcile(value: &mut serde_json::Value) {
+        let (retired, replacement) = crate::Isolation::RETIRED;
+        rename_isolation(value, retired, replacement);
+    }
+}
+
+/// Rewrites every `isolation: <retired>` in `value`, at any depth.
+fn rename_isolation(value: &mut serde_json::Value, retired: &str, replacement: &str) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            if let Some(found) = fields.get_mut("isolation") {
+                if found.as_str() == Some(retired) {
+                    *found = serde_json::Value::from(replacement);
+                }
+            }
+            for nested in fields.values_mut() {
+                rename_isolation(nested, retired, replacement);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                rename_isolation(item, retired, replacement);
+            }
+        }
+        _ => {}
+    }
 }
 
 impl Manifest {

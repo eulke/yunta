@@ -70,6 +70,24 @@ nodes:
     );
 }
 
+/// Leaves `node` on the log the way a killed engine does: started, with
+/// no terminal event after it.
+fn orphan_a_node(bench: &Bench, node: &str) {
+    bench
+        .storage
+        .append(
+            &yunta_core::events::EventDraft {
+                run_id: bench.run_id.clone(),
+                node_id: Some(node.into()),
+                payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                    yunta_core::events::NodeStartedPayload::attempt(1),
+                )),
+            },
+            &yunta_core::SystemClock,
+        )
+        .expect("the log takes the start a crash left behind");
+}
+
 #[tokio::test]
 async fn a_run_interrupted_mid_node_resumes_by_restarting_the_orphan() {
     let bench = Bench::new();
@@ -84,23 +102,8 @@ nodes:
 
     let RunReport { terminal, .. } = bench
         .run_sabotaged(workflow, "sessions: []", |_run_dir| {
-            // Simulate a crash mid-node: the log has node_started with no
-            // terminal event — exactly what a killed engine leaves behind.
-            bench
-                .storage
-                .append(
-                    &yunta_core::events::EventDraft {
-                        run_id: bench.run_id.clone(),
-                        node_id: Some("only".into()),
-                        payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
-                            yunta_core::events::NodeStartedPayload::attempt(1),
-                        )),
-                    },
-                    &yunta_core::SystemClock,
-                )
-                .unwrap();
-
-            std::fs::write(bench.worktree.join("present.txt"), "here").unwrap();
+            orphan_a_node(&bench, "only");
+            yunta_testkit::write(&bench.worktree.join("present.txt"), "here");
         })
         .await;
 
@@ -1270,5 +1273,49 @@ nodes:
             Some(NodeState::Finished { .. })
         ),
         "what a node with no declared scope leaves is still there for the next one"
+    );
+}
+
+/// A node with a tree of its own that the engine left running never
+/// landed it, so the run's tree does not carry what it wrote. The
+/// restart opens a fresh unit — its attempt is part of the name — over
+/// the run's tree as it actually stands, and lands from there: what an
+/// interrupted attempt left behind is never mistaken for work the run
+/// accepted.
+#[tokio::test]
+async fn a_unit_whose_attempt_was_interrupted_restarts_over_the_tree_that_landed() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: resumable
+nodes:
+  - id: only
+    kind: bash
+    scope: ["out/**"]
+    run: "mkdir -p out && echo second > out/done.txt"
+"#;
+
+    let RunReport { terminal, state } = bench
+        .run_sabotaged(workflow, "sessions: []", |_run_dir| {
+            orphan_a_node(&bench, "only");
+        })
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(
+        matches!(state.nodes.state("only"), Some(NodeState::Finished { .. })),
+        "the orphan restarts and closes, got {:?}",
+        state.nodes.state("only")
+    );
+    assert_eq!(
+        yunta_testkit::read(&bench.worktree.join("out/done.txt")),
+        "second\n",
+        "the run's tree carries what the attempt that landed wrote"
+    );
+    assert!(
+        git_output(&bench.worktree, &["status", "--porcelain"])
+            .trim()
+            .is_empty(),
+        "and nothing of the interrupted attempt is lying in it"
     );
 }

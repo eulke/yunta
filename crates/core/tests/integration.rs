@@ -107,7 +107,7 @@ fn the_composed_reference_workflow_parses_and_round_trips() {
         inputs.get("rfc").map(String::as_str),
         Some("{{inputs.rfc}}")
     );
-    assert_eq!(*isolation, yunta_core::WorkflowIsolation::Worktree);
+    assert_eq!(*isolation, yunta_core::Isolation::Worktree);
 
     // `qa` declares no `inputs:` at all — the field is optional.
     let qa = workflow
@@ -182,7 +182,27 @@ fn the_promote_knowledge_reference_workflow_parses_and_round_trips() {
 }
 
 #[test]
-fn workflow_node_isolation_inherit_parses() {
+fn workflow_node_isolation_none_parses() {
+    let yaml = r#"
+name: phased
+nodes:
+  - id: phase-1
+    kind: workflow
+    use: implement-phase
+    isolation: none
+    scope: ["src/a/**"]
+"#;
+    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
+    let yunta_core::NodeKind::Workflow { isolation, .. } = &workflow.nodes[0].kind else {
+        panic!("expected a workflow node");
+    };
+    assert_eq!(*isolation, yunta_core::Isolation::None);
+}
+
+/// One word for the tree a unit does not isolate, at every level: the
+/// retired one does not parse, and what it says instead is in the error.
+#[test]
+fn isolation_inherit_no_longer_parses_and_the_error_names_none() {
     let yaml = r#"
 name: phased
 nodes:
@@ -190,13 +210,14 @@ nodes:
     kind: workflow
     use: implement-phase
     isolation: inherit
-    scope: ["src/a/**"]
 "#;
-    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
-    let yunta_core::NodeKind::Workflow { isolation, .. } = &workflow.nodes[0].kind else {
-        panic!("expected a workflow node");
-    };
-    assert_eq!(*isolation, yunta_core::WorkflowIsolation::Inherit);
+    let error = serde_norway::from_str::<yunta_core::Workflow>(yaml)
+        .expect_err("a retired word is author input this reader refuses")
+        .to_string();
+    assert!(
+        error.contains("`inherit`") && error.contains("`none`"),
+        "the error has to say what replaced it: {error}"
+    );
 }
 
 // --- Cross-run artifact mounts ------------------------------------------------

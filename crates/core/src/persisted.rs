@@ -38,6 +38,16 @@ pub trait Persisted: Serialize + DeserializeOwned {
     /// YAML reads JSON — but what a file is written as is what its name
     /// promises whoever opens it.
     const ENCODING: Encoding = Encoding::Yaml;
+
+    /// What a value written under a vocabulary this binary retired reads
+    /// as now, applied before the document takes its own shape.
+    ///
+    /// Author input is refused when it uses a retired word — that is
+    /// what "parse is validate" means on the way in. A persisted file is
+    /// the other direction: this binary wrote that word itself, so the
+    /// file is read under its replacement rather than refused. Documents
+    /// that have retired nothing leave this alone.
+    fn reconcile(_value: &mut serde_json::Value) {}
 }
 
 /// What a persisted document is written as.
@@ -117,7 +127,9 @@ impl<T: Persisted> PersistedDoc<T> {
                 supported: T::SCHEMA_VERSION,
             });
         }
-        let doc: T = serde_json::from_value(value.clone()).map_err(|error| {
+        let mut reconciled = value.clone();
+        T::reconcile(&mut reconciled);
+        let doc: T = serde_json::from_value(reconciled).map_err(|error| {
             unreadable(crate::yaml::YamlError::Parse {
                 path: String::new(),
                 message: error.to_string(),

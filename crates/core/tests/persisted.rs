@@ -89,3 +89,43 @@ fn a_file_that_is_not_the_document_is_refused_as_that_document() {
     assert!(matches!(error, PersistedError::Unreadable { .. }));
     assert!(error.to_string().contains("pack lock"));
 }
+
+/// A manifest frozen while `inherit` was still a word reads as what that
+/// word meant, at the run's own level and at a node's alike: refusing it
+/// would strand a run that is mid-flight, and a frozen file is never
+/// rewritten to be readable.
+#[test]
+fn a_frozen_manifest_that_says_inherit_reads_as_none() {
+    let frozen = format!(
+        "schema_version: {}\n\
+         yunta_version: \"0.0.4\"\n\
+         isolation: inherit\n\
+         base_branch: main\n\
+         base_commit: deadbeef\n\
+         max_parallel_nodes: 1\n\
+         workflow_hash: {}\n\
+         config_hash: {}\n\
+         inputs: {{}}\n\
+         prompts: {{}}\n\
+         config: {{}}\n\
+         workflow:\n\
+         \x20 name: ship\n\
+         \x20 nodes:\n\
+         \x20   - id: phase-1\n\
+         \x20     kind: workflow\n\
+         \x20     use: implement-phase\n\
+         \x20     isolation: inherit\n",
+        <yunta_core::Manifest as Persisted>::SCHEMA_VERSION,
+        yunta_core::sha256_hex(b"workflow"),
+        yunta_core::sha256_hex(b"config"),
+    );
+
+    let read: PersistedDoc<yunta_core::Manifest> =
+        PersistedDoc::read(frozen.as_bytes()).expect("a manifest this binary can still act on");
+
+    assert_eq!(read.doc.isolation, yunta_core::Isolation::None);
+    let yunta_core::NodeKind::Workflow { isolation, .. } = &read.doc.workflow.nodes[0].kind else {
+        panic!("expected a workflow node");
+    };
+    assert_eq!(*isolation, yunta_core::Isolation::None);
+}

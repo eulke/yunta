@@ -630,6 +630,14 @@
         }
       ]
     },
+    "Isolation": {
+      "description": "Whether a unit of work gets a working tree of its own, or works in\nthe one it was handed.\n\n`worktree` (the default) gives it its own `git worktree`; `none`\nworks directly in the checkout it was given — legitimate for watching\nan agent edit live, or for CI already inside an ephemeral container.\n\nOne word for every level, run and `kind: workflow` node alike (D183):\n`none` is true wherever it is written, while a word naming a parent\nwould not be — a first-level run has no parent unit, it has a\nperson's checkout. `container` is not a value at all; it is not\ndesigned. (A node that wants a tree of its own for the sake of its\nown diff declares `scope:` instead, which is what asks for one:\nD184.)",
+      "type": "string",
+      "enum": [
+        "worktree",
+        "none"
+      ]
+    },
     "JoinPolicy": {
       "description": "`parallel.join`. `all` (default): the group finishes only\nonce every child does, and one failed child fails the group. `any`:\nthe group finishes with the first child to *succeed*; the engine\nsends the rest `interrupt`, escalating to `kill` if they don't close\nin time (same ordered-then-forceful mechanism as an agent session's\nown cancellation).",
       "type": "string",
@@ -1156,8 +1164,8 @@
               }
             },
             "isolation": {
-              "description": "`worktree` (default) gives the child its own tree branched\noff the parent's HEAD; `inherit` shares the parent's tree\nfor phases of one piece of work — parallel `inherit`\nsiblings must declare disjoint `scope` (checked).",
-              "$ref": "#/$defs/WorkflowIsolation"
+              "description": "`worktree` (default) gives the child its own tree branched\noff the tree this node works in; `none` shares that tree, for\nphases of one piece of work — parallel children sharing a\ntree must declare disjoint `scope` (checked).",
+              "$ref": "#/$defs/Isolation"
             },
             "kind": {
               "type": "string",
@@ -1413,14 +1421,6 @@
       "description": "`tasks: {}` — no parameters in the current resolution\n(the aggregate task-status view; see the node's own doc\ncomment on `context` for the task-scoped variant this doesn't cover\nyet).",
       "type": "object",
       "additionalProperties": false
-    },
-    "WorkflowIsolation": {
-      "description": "A `kind: workflow` node's `isolation:` — deliberately its own\nenum, not [`crate::Isolation`]: `inherit` only exists for workflow\nnodes, and a run-level `none` is not a per-node choice.",
-      "type": "string",
-      "enum": [
-        "worktree",
-        "inherit"
-      ]
     },
     "WorkflowName": {
       "description": "A workflow name: a letter followed by letters, digits, `_` or `-`",

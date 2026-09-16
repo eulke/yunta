@@ -57,8 +57,8 @@ are valid there. A mistyped key never silently becomes a default.
   stdout.
 - **`workflow`** — runs another workflow as a full, independent sub-run (`use:
   <name>`, `inputs: {...}`). `isolation: worktree` (default) gives it its own tree;
-  `isolation: inherit` shares the parent's for tightly related phases, and siblings
-  doing that must declare disjoint `scope`.
+  `isolation: none` shares the tree the node works in, for tightly related phases,
+  and siblings doing that must declare disjoint `scope`.
 
 ## `depends_on` and re-routing
 

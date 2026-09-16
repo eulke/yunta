@@ -1085,15 +1085,15 @@ nodes:
 }
 
 #[test]
-fn inherit_children_of_a_parallel_group_must_declare_scope() {
+fn tree_sharing_children_of_a_parallel_group_must_declare_scope() {
     let yaml = r#"
 name: composed
 nodes:
   - id: build
     kind: parallel
     nodes:
-      - { id: feat-a, kind: workflow, use: build-feature, isolation: inherit }
-      - { id: feat-b, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/b/**"] }
+      - { id: feat-a, kind: workflow, use: build-feature, isolation: none }
+      - { id: feat-b, kind: workflow, use: build-feature, isolation: none, scope: ["src/b/**"] }
 "#;
     let wf: Workflow = serde_norway::from_str(yaml).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
@@ -1116,20 +1116,20 @@ nodes:
 }
 
 #[test]
-fn inherit_children_with_disjoint_scopes_pass_and_overlapping_fail() {
+fn tree_sharing_children_with_disjoint_scopes_pass_and_overlapping_fail() {
     let disjoint = r#"
 name: composed
 nodes:
   - id: build
     kind: parallel
     nodes:
-      - { id: feat-a, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/a/**"] }
-      - { id: feat-b, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/b/**"] }
+      - { id: feat-a, kind: workflow, use: build-feature, isolation: none, scope: ["src/a/**"] }
+      - { id: feat-b, kind: workflow, use: build-feature, isolation: none, scope: ["src/b/**"] }
 "#;
     let wf: Workflow = serde_norway::from_str(disjoint).unwrap();
     assert!(
         check(&wf, &ConfigLayer::default()).is_empty(),
-        "disjoint inherit siblings must pass"
+        "disjoint siblings sharing one tree must pass"
     );
 
     let overlapping = r#"
@@ -1138,12 +1138,12 @@ nodes:
   - id: build
     kind: parallel
     nodes:
-      - { id: feat-a, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/**"] }
-      - { id: feat-b, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/b/**"] }
+      - { id: feat-a, kind: workflow, use: build-feature, isolation: none, scope: ["src/**"] }
+      - { id: feat-b, kind: workflow, use: build-feature, isolation: none, scope: ["src/b/**"] }
 "#;
     assert!(
         yunta_core::workflow::read::read(overlapping, std::path::Path::new("wf.yaml")).is_err(),
-        "overlapping inherit siblings must be refused"
+        "overlapping siblings sharing one tree must be refused"
     );
 }
 

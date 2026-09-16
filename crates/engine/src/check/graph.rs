@@ -12,8 +12,9 @@ pub(crate) fn find_depends_on_cycle(nodes: &[Node]) -> Option<Vec<NodeId>> {
 
 /// Per-file workflow-node rules: no runner bindings (a workflow
 /// node opens no session — the child's nodes bind their own), and an
-/// `inherit` child of a `parallel` group must declare scope so the
-/// disjointness demand is verifiable at all.
+/// a child of a `parallel` group that shares the group's tree
+/// (`isolation: none`) must declare scope so the disjointness demand is
+/// verifiable at all.
 pub(crate) fn check_workflow_nodes(
     nodes: &[Node],
     group: Option<&Node>,
@@ -33,7 +34,7 @@ pub(crate) fn check_workflow_nodes(
                     });
                 }
             }
-            if *isolation == yunta_core::WorkflowIsolation::Inherit && node.scope.is_empty() {
+            if *isolation == yunta_core::Isolation::None && node.scope.is_empty() {
                 if let Some(group) = group {
                     errors.push(CheckError::InheritChildWithoutScope {
                         group: group.id.clone(),

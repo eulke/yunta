@@ -39,7 +39,7 @@ pub use hooks::{HookFailurePolicy, HookStep, Hooks, OnFailure};
 pub use node::{LoopUntil, Node, NodeDefaults, NodePermissions, OnInterrupt};
 pub use node_kind::{
     CheckBuiltin, Coordination, ExternalGate, ForgeKind, JoinPolicy, MountArtifact, MountSpec,
-    NodeKind, PromptSource, WorkflowIsolation,
+    NodeKind, PromptSource,
 };
 
 /// A workflow definition.

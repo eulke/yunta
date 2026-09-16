@@ -34,10 +34,10 @@ pub use permissions::{
     PackPermissions, PermissionsConfig, PublisherPermissions,
 };
 pub use sections::{
-    AdapterSettings, BaselineConfig, CoverageConfig, DefaultOnFailure, DefaultsConfig,
-    ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, Isolation, LimitsConfig,
-    McpServerConfig, PathsConfig, PricingEntry, ProjectConfig, RunnerCandidate, SkillsConfig,
-    StorageConfig,
+    is_default_isolation, AdapterSettings, BaselineConfig, CoverageConfig, DefaultOnFailure,
+    DefaultsConfig, ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, Isolation,
+    LimitsConfig, McpServerConfig, PathsConfig, PricingEntry, ProjectConfig, RunnerCandidate,
+    SkillsConfig, StorageConfig,
 };
 
 /// One config layer as parsed from a single file (project/user/org), and

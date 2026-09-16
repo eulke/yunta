@@ -43,7 +43,7 @@ adapters:
 
 defaults:
   runner: executor
-  isolation: worktree               # worktree | none (§7.3; `inherit` solo en nodos workflow)
+  isolation: worktree               # worktree | none (§7.3; la misma palabra en un nodo workflow)
   timeout_minutes: 45
   max_parallel_nodes: 4
   on_failure: pause                 # pause | abort | continue
