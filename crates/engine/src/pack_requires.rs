@@ -9,7 +9,7 @@
 //! lookup for `requires.commands` (that needs real filesystem access,
 //! `yunta doctor`'s job, not this pure function's).
 
-use yunta_core::{ConfigLayer, PackManifest, PackRef, RunnerName};
+use yunta_core::{ConfigLayer, McpServerName, PackManifest, PackRef, RunnerName};
 
 /// One pack's requirements the local config can't currently satisfy —
 /// empty in every field means the pack is fully resolvable as installed.
@@ -23,7 +23,7 @@ pub struct PackRequiresGap {
     /// `runner:` field.
     pub missing_runners: Vec<RunnerName>,
     /// `requires.mcp_servers` names absent from `mcp_servers:`.
-    pub missing_mcp_servers: Vec<String>,
+    pub missing_mcp_servers: Vec<McpServerName>,
     /// `requires.commands` — passed through untouched; presence on
     /// `PATH` is the caller's own concern (`yunta doctor`).
     pub required_commands: Vec<String>,

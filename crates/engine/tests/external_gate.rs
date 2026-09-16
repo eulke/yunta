@@ -7,21 +7,12 @@
 //! machine picks up the approval on a completely separate `execute_run`
 //! call, simulating `yunta resume`.
 
-use std::collections::HashMap;
+use std::sync::Arc;
 
-use yunta_adapters::{Adapter, MockForge, MockForgeState};
-use yunta_core::SeqIdSource;
-use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
-    RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::{init_repo, FixedClock};
-
-/// Run ids for everything a test run gives birth to — unique across
-/// the binary, so parallel tests never share a run directory.
-static IDS: SeqIdSource = SeqIdSource::new("minted");
+use yunta_adapters::{MockForge, MockForgeState};
+use yunta_core::events::{FindingEvent, GateEvent, NodeEvent};
+use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_testkit::Bench;
 
 const GATE_ONLY_WORKFLOW: &str = r#"
 name: gate-scenario
@@ -60,103 +51,21 @@ nodes:
     run: "false"
 "#;
 
-struct Bench {
-    _root: tempfile::TempDir,
-    worktree: std::path::PathBuf,
-    storage: Storage,
-    run_id: RunId,
-    manifest: yunta_core::Manifest,
-    run_dir: std::path::PathBuf,
-}
-
-impl Bench {
-    async fn new() -> Self {
-        Self::with_workflow(GATE_ONLY_WORKFLOW).await
-    }
-
-    async fn with_workflow(workflow_yaml: &str) -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let worktree = root.path().join("worktree");
-        std::fs::create_dir_all(&worktree).unwrap();
-        init_repo(&worktree);
-        let runs_root = root.path().join("runs");
-        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        let run_id = RunId::from("run-gate-1");
-
-        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-        let manifest = build_manifest(
-            &workflow,
-            &ConfigLayer::default(),
-            &worktree,
-            &worktree,
-            &HashMap::new(),
-        )
-        .unwrap()
-        .manifest;
-        let run_dir = create_run(
-            CreateRunParams {
-                run_id: &run_id,
-                manifest: &manifest,
-                runs_root: &runs_root,
-                mode: &"default".into(),
-                worktree: &worktree,
-                promoted_from: None,
-                artifacts: &[],
-            },
-            &storage.async_handle(),
-            &FixedClock,
-        )
-        .await
-        .unwrap();
-
-        Bench {
-            _root: root,
-            worktree,
-            storage,
-            run_id,
-            manifest,
-            run_dir,
-        }
-    }
-
-    /// One `execute_run` invocation — a fresh call each time, exactly
-    /// like a separate `yunta run`/`yunta resume` process would make;
-    /// nothing here carries state across calls except the log itself.
-    async fn wake(
-        &self,
-        forge: Option<&dyn yunta_adapters::Forge>,
-    ) -> (RunTerminal, yunta_engine::RunState) {
-        let adapters: HashMap<AdapterId, std::sync::Arc<dyn Adapter>> = HashMap::new();
-        let report = execute_run(RunEnv {
-            run_id: &self.run_id,
-            manifest: &self.manifest,
-            run_dir: &self.run_dir,
-            worktree: &self.worktree,
-            adapters: &adapters,
-            storage: &self.storage.async_handle(),
-            clock: std::sync::Arc::new(FixedClock),
-            ids: &IDS,
-            max_task_retries: DEFAULT_MAX_RETRIES,
-            human_interaction: &NoInteraction,
-            forge,
-            cancel: None,
-            adapter_override: None,
-            ambient: None,
-        })
-        .await
-        .unwrap();
-        (report.terminal, report.state)
-    }
+/// A bench whose every wake reads one forge, alongside that forge's
+/// state — the handle person B acts through, with no Yunta on their end.
+fn bench_on_a_forge() -> (Bench, MockForgeState) {
+    let forge_state = MockForgeState::new();
+    let bench =
+        Bench::with_run_id("run-gate-1").with_forge(Arc::new(MockForge::new(forge_state.clone())));
+    (bench, forge_state)
 }
 
 #[tokio::test]
 async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
-    let bench = Bench::new().await;
-    let forge_state = MockForgeState::new();
-    let forge = MockForge::new(forge_state.clone());
+    let (bench, forge_state) = bench_on_a_forge();
 
     // Person A's machine: first wake reaches the gate, publishes, pauses.
-    let (terminal, state) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, state } = bench.run(GATE_ONLY_WORKFLOW, "sessions: []\n").await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "got {terminal:?}"
@@ -165,13 +74,15 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
     // never "absent" and never running/failed.
     assert!(
         matches!(
-            state.nodes.get("approve"),
+            state.nodes.state("approve"),
             Some(NodeState::Waiting {
-                external_ref: Some(_)
+                on: yunta_engine::NodeWait::Gate {
+                    external_ref: Some(_)
+                }
             })
         ),
         "a published unresolved gate must derive Waiting with its PR ref, got {:?}",
-        state.nodes.get("approve")
+        state.nodes.state("approve")
     );
     assert!(
         forge_state.pr_number(bench.run_id.as_str()).is_some(),
@@ -184,16 +95,16 @@ async fn an_external_gate_publishes_pauses_and_resolves_on_a_separate_wake() {
 
     // Person A's machine, a second, wholly separate `execute_run` call
     // (simulating `yunta resume`): picks the approval up on its own.
-    let (terminal, state) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, state } = bench.wake().await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let resolved = events.iter().find_map(|e| match e.payload() {
-        Some(yunta_core::events::EventPayload::GateResolved(p)) => Some(p),
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Resolved(p))) => Some(p),
         _ => None,
     });
     let Some(yunta_core::events::GateResolvedPayload::Approved { by, .. }) = resolved else {
@@ -207,20 +118,20 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
     // Needs a still-open run (see this workflow's own doc comment) —
     // `after` fails with no `on_failure`, so the run pauses rather than
     // reaching `run_finished` once the gate resolves.
-    let bench = Bench::with_workflow(GATE_THEN_UNRESOLVED_WORKFLOW).await;
-    let forge_state = MockForgeState::new();
-    let forge = MockForge::new(forge_state.clone());
+    let (bench, forge_state) = bench_on_a_forge();
 
-    let (terminal, _) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, .. } = bench
+        .run(GATE_THEN_UNRESOLVED_WORKFLOW, "sessions: []\n")
+        .await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     forge_state.approve(bench.run_id.as_str(), &"person-b".into());
-    let (terminal, state) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, state } = bench.wake().await;
     // The gate itself resolved (Finished), but `after` failed on its own
     // with nowhere to reroute — the run as a whole is still Paused, not
     // Finished, which is exactly what keeps it open to recheck.
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
 
@@ -230,21 +141,26 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
 
     // A third wake must notice the approval no longer covers the
     // current head and go back to waiting.
-    let (terminal, state) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, state } = bench.wake().await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(
-        !matches!(state.nodes.get("approve"), Some(NodeState::Finished { .. })),
+        !matches!(
+            state.nodes.state("approve"),
+            Some(NodeState::Finished { .. })
+        ),
         "a stale approval must return the gate to waiting, not stay silently Finished"
     );
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let started_count = events
         .iter()
         .filter(|e| {
             e.node_id.as_ref().map(|id| id.as_str()) == Some("approve")
                 && matches!(
                     e.payload(),
-                    Some(yunta_core::events::EventPayload::NodeStarted(_))
+                    Some(yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                        _
+                    )))
                 )
         })
         .count();
@@ -256,46 +172,46 @@ async fn a_commit_after_approval_returns_the_gate_to_waiting() {
     // A fresh approval at the new head resolves it again, same as the
     // first time.
     forge_state.approve(bench.run_id.as_str(), &"person-b".into());
-    let (_, state) = bench.wake(Some(&forge)).await;
+    let RunReport { state, .. } = bench.wake().await;
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
 }
 
 #[tokio::test]
 async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
-    let bench = Bench::new().await;
-    let forge_state = MockForgeState::new();
-    let forge = MockForge::new(forge_state.clone());
+    let (bench, forge_state) = bench_on_a_forge();
 
-    bench.wake(Some(&forge)).await;
+    bench.run(GATE_ONLY_WORKFLOW, "sessions: []\n").await;
     forge_state.request_changes(
         bench.run_id.as_str(),
         &"person-b".into(),
-        vec![yunta_adapters::ReviewComment {
+        vec![yunta_core::port::ReviewComment {
             author: "person-b".to_string(),
             body: "please add a test".to_string(),
             path: Some("src/lib.rs".to_string()),
         }],
     );
 
-    let (terminal, state) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, state } = bench.wake().await;
     // No `on_failure` declared on this workflow's gate, so a retryable
     // failure with nowhere to reroute to just pauses — the same rule
     // any other failed node without `on_failure` already follows.
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Failed {
             retryable: true,
             ..
         })
     ));
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let finding = events.iter().find_map(|e| match e.payload() {
-        Some(yunta_core::events::EventPayload::FindingPosted(p)) => Some(&p.finding),
+        Some(yunta_core::events::EventPayload::Findings(FindingEvent::Posted(p))) => {
+            Some(&p.finding)
+        }
         _ => None,
     });
     assert_eq!(
@@ -306,25 +222,23 @@ async fn changes_requested_posts_findings_and_fails_the_node_retryably() {
 
 #[tokio::test]
 async fn a_merged_pr_resolves_the_gate_as_approved_by_the_merger() {
-    let bench = Bench::new().await;
-    let forge_state = MockForgeState::new();
-    let forge = MockForge::new(forge_state.clone());
+    let (bench, forge_state) = bench_on_a_forge();
 
-    bench.wake(Some(&forge)).await;
+    bench.run(GATE_ONLY_WORKFLOW, "sessions: []\n").await;
     // Person B merges the PR outright: an approval that also landed.
     let merge_sha = forge_state.merge(bench.run_id.as_str(), &"person-b".into());
 
-    let (terminal, state) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, state } = bench.wake().await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let resolved = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::GateResolved(p)) => Some(p),
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Resolved(p))) => Some(p),
             _ => None,
         })
         .expect("the gate resolves");
@@ -342,35 +256,37 @@ async fn a_merged_pr_resolves_the_gate_as_approved_by_the_merger() {
 async fn a_merged_gate_stays_resolved_on_later_wakes() {
     // Needs a still-open run (see this workflow's own doc comment): the
     // drift recheck only runs while the run is open.
-    let bench = Bench::with_workflow(GATE_THEN_UNRESOLVED_WORKFLOW).await;
-    let forge_state = MockForgeState::new();
-    let forge = MockForge::new(forge_state.clone());
+    let (bench, forge_state) = bench_on_a_forge();
 
-    bench.wake(Some(&forge)).await;
+    bench
+        .run(GATE_THEN_UNRESOLVED_WORKFLOW, "sessions: []\n")
+        .await;
     forge_state.merge(bench.run_id.as_str(), &"person-b".into());
-    let (terminal, state) = bench.wake(Some(&forge)).await;
+    let RunReport { terminal, state } = bench.wake().await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
 
     // A merged pull request cannot move, and its evidence is the merge
     // commit, not the branch head. A later wake leaves the gate as it
     // resolved instead of reading the difference as drift.
-    let (_, state) = bench.wake(Some(&forge)).await;
+    let RunReport { state, .. } = bench.wake().await;
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Finished { .. })
     ));
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     let resolutions = events
         .iter()
         .filter(|e| {
             e.node_id.as_ref().map(|id| id.as_str()) == Some("approve")
                 && matches!(
                     e.payload(),
-                    Some(yunta_core::events::EventPayload::GateResolved(_))
+                    Some(yunta_core::events::EventPayload::Gates(
+                        GateEvent::Resolved(_)
+                    ))
                 )
         })
         .count();
@@ -382,16 +298,14 @@ async fn a_merged_gate_stays_resolved_on_later_wakes() {
 
 #[tokio::test]
 async fn a_closed_pr_fails_the_node_non_retryably() {
-    let bench = Bench::new().await;
-    let forge_state = MockForgeState::new();
-    let forge = MockForge::new(forge_state.clone());
+    let (bench, forge_state) = bench_on_a_forge();
 
-    bench.wake(Some(&forge)).await;
+    bench.run(GATE_ONLY_WORKFLOW, "sessions: []\n").await;
     forge_state.close(bench.run_id.as_str());
 
-    let (_, state) = bench.wake(Some(&forge)).await;
+    let RunReport { state, .. } = bench.wake().await;
     assert!(matches!(
-        state.nodes.get("approve"),
+        state.nodes.state("approve"),
         Some(NodeState::Failed {
             retryable: false,
             ..
@@ -401,21 +315,23 @@ async fn a_closed_pr_fails_the_node_non_retryably() {
 
 #[tokio::test]
 async fn with_no_forge_the_gate_degrades_to_console_and_never_publishes() {
-    let bench = Bench::new().await;
-    // `NoInteraction` always reports "can't interact" — the same
-    // degrade-to-pause path a headless console already takes.
-    let (terminal, state) = bench.wake(None).await;
+    // A bench with no forge and no human answering: the gate takes the
+    // same degrade-to-pause path a headless console already takes.
+    let bench = Bench::with_run_id("run-gate-1");
+    let RunReport { terminal, state } = bench.run(GATE_ONLY_WORKFLOW, "sessions: []\n").await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     assert!(
-        !state.nodes.contains_key("approve"),
+        !state.nodes.has_state("approve"),
         "no forge and no answer from the console must not fabricate a resolution"
     );
 
-    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let events = bench.events();
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::GateWaiting(_))
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(
+                _
+            )))
         )),
         "an unresolved degraded gate must not be recorded as published"
     );

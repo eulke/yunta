@@ -26,5 +26,3 @@ defaults:
   timeout_minutes: 45
   on_failure: pause
 
-baseline:
-  suite: "cargo test --workspace"

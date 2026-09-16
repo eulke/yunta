@@ -40,6 +40,32 @@ orden; ninguno se cierra antes.
 7. **Commiteá un tema.** Mensaje convencional; el porqué cuando el diff no lo dice.
    Listo cuando el commit se entiende sin esta conversación.
 
+## Plan vigente
+
+`docs/design/plan-de-raiz/README.md` es la especificación de todo el trabajo en curso y
+manda sobre cualquier otra lectura del repo mientras esté abierto. Su §0 rige a
+quien implementa, y no admite interpretación:
+
+- **Al pie de la letra.** Un ítem se implementa con los nombres, archivos y
+  tests que el plan nombra. No se renombra, no se reubica, no se "mejora".
+- **Lo que el plan no dice, no se inventa.** Contradicción, imposibilidad,
+  diseño mejor, dependencia oculta o alcance mayor: te detenés, escribís el
+  levantamiento en el §11 del plan con evidencia, alternativas y recomendación,
+  y esperás. Nada "mientras tanto", nada parcial, nada decidido solo.
+- **Leer antes de tocar.** El README del plan entero, `mecanismos.md` en la
+  sección del ítem, y la auditoría del frente en `plan-de-raiz/auditoria/`.
+- **Nada fuera del ítem.** Un PR cierra ítems del tablero (§10) y actualiza su
+  estado en el mismo commit. Sin mecanismos, tipos, archivos, dependencias ni
+  refactors que el plan no nombre.
+- **Las decisiones P1–P10 bloquean.** Un ítem `bloqueado(Pn)` no se empieza
+  hasta que el ADR de Pn existe. Nadie toma una P por defecto.
+- **Lo marcado "se conserva" no se toca.** Se generaliza; nunca se reimplementa.
+- **Rojo primero, gate completo después.** El test del ítem falla por su razón
+  antes del código; el ítem cierra con el gate de §0.6 ejecutado entero.
+- **Lo reemplazado se borra** en el mismo commit (§0.15); lo construido y no
+  conectado se termina o se levanta, y lo que el plan agenda para otra fase se
+  deja. Un ítem no deja atrás lo que reemplazó ni borra lo que falta terminar.
+
 ## Juicio
 
 Los criterios con los que se decide. Entre dos opciones, gana la que los cumple
@@ -77,6 +103,14 @@ mejor.
 - **Un lugar.** Cada convención, umbral, mensaje y helper vive en un único sitio y
   todo lo demás lo consume. La segunda copia señala el lugar que falta, y se crea en
   el mismo PR.
+- **Sin basura, con criterio.** Lo reemplazado se borra en el mismo commit que
+  lo dejó sin uso: el tipo, la función sin llamador, el campo que nadie lee, el
+  archivo huérfano, el test de algo que ya no existe, el párrafo que describe lo
+  que el repo no tiene. Un envoltorio que sólo delega y un alias "por
+  compatibilidad" son deuda con otro nombre. Pero sin uso no prueba que sobre:
+  lo que está construido y todavía no conectado se termina o se levanta, nunca
+  se borra —borrarlo esconde el trabajo que falta—, y lo que espera a su
+  consumidor en una decisión registrada se deja donde está.
 - **La documentación gana** al código cuando difieren, salvo decisión registrada en
   contra. Su silencio es un paso 2.
 

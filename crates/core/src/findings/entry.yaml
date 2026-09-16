@@ -1,0 +1,15 @@
+# One finding, as a session reports it — the same entry a findings
+# document carries, handed over on its own.
+
+id: null-deref-on-resize              # required, unique among this node's findings
+severity: blocking                    # required, one of:
+                                      #   blocking | major | minor | note
+title: "Resize handler dereferences a null pointer"   # required, one line
+location: "src/ui/resize.rs:142-150"                  # required: a path in
+                                      #   the worktree, never absolute,
+                                      #   optionally with a line range
+detail: >-                            # required: what goes wrong, and when
+  When the window is resized before the first paint, `surface` is still
+  null and the handler dereferences it.
+proposed_criterion:                   # optional: a command that is red today
+  cmd: "cargo test -p ui resize_before_paint"

@@ -64,48 +64,7 @@ pub struct AnswersFile {
     pub answers: Vec<Answer>,
 }
 
-/// Validates a reply against its questions: every `required`
-/// question answered, every answer names a declared question, `choice`
-/// values within the declared list, `boolean` values parseable. All
-/// violations reported together, never just the first (same principle
-/// as the tasks document's own registration).
-pub fn validate_answers(file: &QuestionsFile, answers: &[Answer]) -> Vec<String> {
-    let mut violations = Vec::new();
-    for answer in answers {
-        let Some(question) = file.questions.iter().find(|q| q.id == answer.id) else {
-            violations.push(format!("answer `{}` names no declared question", answer.id));
-            continue;
-        };
-        match question.answer_type {
-            AnswerType::Choice => {
-                if !question.values.contains(&answer.value) {
-                    violations.push(format!(
-                        "answer `{}`: `{}` is not one of [{}]",
-                        answer.id,
-                        answer.value,
-                        question.values.join(", ")
-                    ));
-                }
-            }
-            AnswerType::Boolean => {
-                if answer.value != "true" && answer.value != "false" {
-                    violations.push(format!(
-                        "answer `{}`: `{}` is not `true`/`false`",
-                        answer.id, answer.value
-                    ));
-                }
-            }
-            AnswerType::Text => {}
-        }
-    }
-    for question in &file.questions {
-        if question.required && !answers.iter().any(|a| a.id == question.id) {
-            violations.push(format!("required question `{}` has no answer", question.id));
-        }
-    }
-    violations
-}
-
+mod answers;
 mod rules;
 
 /// The shape this document publishes, as the YAML it is.

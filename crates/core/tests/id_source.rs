@@ -3,7 +3,8 @@
 //! given; tests inject a sequential source and get reproducible ids.
 
 use chrono::{DateTime, Utc};
-use yunta_core::{IdSource, SeqIdSource, SystemIdSource};
+use yunta_core::{IdSource, SystemIdSource};
+use yunta_testkit_core::SeqIdSource;
 
 fn instant(rfc3339: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(rfc3339)

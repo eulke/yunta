@@ -12,10 +12,10 @@ su parser.
 
 ## 0. Conteo de eventos
 
-La tabla de eventos del Contrato del Run tiene 30 filas y **36 `kind` distintos**
-(25 filas de 1 kind, 4 filas de 2 kinds y 1 fila de 3 kinds). La tabla es el
-contenido normativo; este documento especifica esos 36 kinds tal como la tabla los
-enumera.
+La tabla de eventos del Contrato del Run tiene 31 filas y **38 `kind` distintos**
+(25 filas de 1 kind, 4 filas de 2 kinds, 1 fila de 3 kinds y 1 fila de 2 kinds para
+el par de preguntas). La tabla es el contenido normativo; este documento especifica
+esos 38 kinds tal como la tabla los enumera.
 
 ## 1. Envelope común
 
@@ -27,7 +27,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | uno de los 36 nombres de este documento, con su sufijo `_vN` si no es la v1 |
+| `kind` | string | uno de los 38 nombres de este documento, con su sufijo `_vN` si no es la v1 |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
 
@@ -115,7 +115,7 @@ atribuidos al adapter: `agent_session_opened` y
 Si esta lectura no es la intención original, es exactamente el tipo de cosa a
 corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
-## 5. Los 36 tipos de evento, campo por campo
+## 5. Los 38 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -150,8 +150,9 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `command` | string | sí | `baseline.suite` resuelto de config |
-| `results` [inferido] | `{exit_code, summary}` | sí | resultado crudo de correr la suite una vez al abrir el run |
+| `results` [inferido] | `{exit_code, summary}` | sí | resultado crudo de correr la suite una vez, en el primer despertar del run que la mide |
 | `hash` | string | sí | hash del resultado, insumo de `baseline_compare` |
+| `origin` | `{type: measured}` \| `{type: inherited, run}` | sí | de quién es la medición: `measured`, este run la tomó; `inherited`, nació teniéndola y `run` nombra a la raíz del linaje que la midió. Un log sin el campo se lee `measured` |
 
 ### 5.4 `node_started` — engine
 **Fuente:** node_id, intento N
@@ -159,6 +160,19 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `attempt` | `u32` | sí | 1-indexado; sube con cada reintento |
+| `from_tree` | `TreeId` | no | el árbol del que parte este intento: contra él se mide su propio diff al cerrar |
+
+**De qué árbol parte.** `from_tree` es el id del objeto `tree` que el árbol de
+trabajo tenía cuando el intento arrancó, capturado con un índice privado para no
+disputarle `.git/index` a nadie. Es lo que hace que una auditoría de `scope:` diga
+qué cambió *este* nodo y no qué hay de distinto desde que nació el run: lo que un
+nodo anterior dejó sin commitear es el estado del que este parte, no algo de lo
+que responda. Que sea un hecho del log y no memoria del proceso es lo que lo
+sostiene a través de un replay, y que sea un árbol —y no una lista de paths— es lo
+que impide el reverso: un archivo que ya estaba sucio y que este intento *también*
+tocó difiere del árbol de partida y sigue siendo suyo. Un evento escrito antes de
+que el arranque nombrara su árbol no lo lleva, y se lee contra la base del run,
+que es lo que ese log significaba (D182).
 
 ### 5.5 `agent_session_opened` — adapter
 **Fuente:** session_id, agente, modelo, capacidades
@@ -167,8 +181,9 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 |---|---|---|---|
 | `session_id` | `SessionId` (opaco) | sí | persiste para `resume` |
 | `agent` | `Option<String>` | no | agente nombrado del adapter, si se pidió (`agent:`) |
-| `model` | string | sí | modelo efectivamente usado |
-| `capabilities` | `Capabilities` (bools: resume_session, edit_hooks, permission_profiles, custom_agents, usage_reporting, run_tools) | sí | snapshot de capacidades del adapter en ese momento — constantes tras construcción |
+| `model` | `Option<ModelName>` | no | el modelo que el CLI reportó para la sesión; ausente cuando no reportó ninguno — nunca el pedido |
+| `capabilities` | `Capabilities` (`fence`: `none \| tool_calls \| filesystem`; el resto bools: resume_session, permission_profiles, custom_agents, usage_reporting, skills, run_tools, network_isolation) | sí | snapshot de capacidades del adapter en ese momento — constantes tras construcción. Un log viejo lleva `edit_hooks` en vez de `fence`, y el lector lo lee como `none` |
+| `fence` | `Coverage` (`{"coverage": "exact"}` · `{"coverage": "widened_to_roots", "roots": [...]}` · `{"coverage": "tools_only"}`) | no | cuánto del canal de escritura cercó realmente la sesión, derivado de lo que el adapter construyó; ausente cuando no construyó ninguno. El nivel viaja una vez, en `capabilities.fence` |
 
 ### 5.6 `agent_message` — adapter
 **Fuente:** resumen/uso de tokens (nunca el texto completo)
@@ -177,7 +192,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 |---|---|---|---|
 | `message_type` [inferido] | enum `tool_use \| usage \| note` | sí | distingue cuál variante de `AgentEvent` originó el mensaje |
 | `tool_name` [inferido] | `Option<string>` | solo si `tool_use` | de `ToolUse.name` |
-| `target_digest` [inferido] | `Option<string>` | solo si `tool_use` | de `ToolUse.target_digest` — nunca contenido completo |
+| `target` [inferido] | `Option<ToolTarget>` | solo si `tool_use` | de `ToolUse.target`: `digest` siempre, `display` solo cuando el argumento nombra el repositorio — nunca contenido completo |
 | `input_tokens` / `output_tokens` [inferido] | `Option<u64>` | solo si `usage` | de `Usage` |
 | `cached_input_tokens` [inferido] | `Option<u64>` | no | opcional incluso dentro de `usage` — solo si el CLI distingue lectura de caché |
 | `text` [inferido] | `Option<string>` | solo si `note` | resumen mecánico `N bytes, sha256 <prefijo>` del texto de `Note` — jamás el contenido: el log no debe poder portar un secreto que la nota contenía, así que el resumen es contenido-cero, no meramente acotado |
@@ -215,7 +230,7 @@ registra.
 | `task_id` | string (mismo patrón de id que en el schema del documento de tareas) | sí | — |
 | `criteria` | lista de `{cmd, type?}` | sí | copia congelada del documento de tareas |
 | `scope` | lista de globs | sí | — |
-| `depends_on` | lista de `task_id` | no | default vacío |
+| `depends_on` | lista de `task_id` | sí (puede ser vacía) | vacía cuando la tarea no depende de ninguna |
 
 ### 5.10 `criteria_checked` — engine
 **Fuente:** task_id, fase pre/post, exit code por criterio, ejecutado o reutilizado de caché
@@ -227,13 +242,14 @@ registra.
 | `results` | lista de `{cmd, exit_code, type?, reused: bool, duration_ms?}` | sí | `reused=true` cuando la memoización (fuera de alcance de una implementación completa, salvo lo mínimo necesario) sirvió el resultado sin re-ejecutar; `duration_ms` es el costo observado de la ejecución — ausente en `reused=true` y en eventos emitidos antes de que este campo se agregara |
 
 ### 5.11 `task_status_changed` — engine
-**Fuente:** task_id, estado nuevo, evento que lo justifica
+**Fuente:** task_id, estado nuevo, evento que lo justifica, commit donde aterrizó el trabajo
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `task_id` | string | sí | — |
 | `new_status` | enum `pending \| ready \| running \| done \| blocked \| failed` [inferido, valores exactos a confirmar contra la implementación del scheduler] | sí | solo el engine emite este evento — ningún agente tiene vía para marcarlo |
 | `caused_by` | referencia a `seq` de otro evento | sí | el evento (p. ej. `criteria_checked`) que justifica la transición |
+| `commit` | `Option<CommitSha>` | no | dónde aterrizó el trabajo de la tarea, en un `done` y en ningún otro estado: el commit que el árbol del run llevaba tras integrarlo. Es lo que vuelve a un `done` respondible desde otro run — un árbol desciende de ese commit o no tiene el trabajo |
 
 ### 5.12 `scope_checked` — engine
 **Fuente:** task_id/node_id, diff observado, violaciones
@@ -264,7 +280,8 @@ registra.
 | `decided_by` | enum `rule \| person` + identificador | sí | — |
 | `mode` | enum `rules \| ask \| deny` | sí | modo vigente en el momento de la decisión |
 | `count_this_run` | `u32` | sí | para el cap `max_per_run` |
-| `denial_reason` | `Option<string>` | solo en `denied` | toda denegación produce además un `finding_posted` — no lo reemplaza, lo acompaña |
+| `paths` | lista de globs | solo en `scope_expansion_granted` | los paths exactos que la concesión autorizó: el scope efectivo de un intento posterior se deriva del log sin volver a aparear la concesión con el pedido que la precedió. Un log escrito antes del campo lo lee vacío |
+| `denial_reason` | `Option<string>` | solo en `scope_expansion_denied` | toda denegación produce además un `finding_posted` — no lo reemplaza, lo acompaña |
 
 ### 5.15 `node_finished` / `node_failed` — engine
 **Fuente:** resultado, tokens, ¿reintentable?
@@ -272,13 +289,14 @@ registra.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `outcome` [inferido] | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter | solo en `node_finished` | el outcome del agente es telemetría, esto es el veredicto |
-| `failure` | `{outcome}` \| `{artifacts}` | solo en `node_failed` | por qué falló, como dato; ver abajo |
+| `outcome` / `artifacts` / `died` | frase \| lista de artifacts que no cerraron \| la sesión que murió | solo en `node_failed` | por qué falló, como dato: uno de los tres, plano sobre el payload; ver abajo |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage` |
 | `retryable` | `bool` | solo en `node_failed` | guía la política de reintento; lo fija quien gobierna el presupuesto, de modo que un intento terminal nunca se registra como reintentable |
 
-**La falla es dato, no prosa.** `failure` toma una de dos formas, planas sobre el
-payload: `outcome: <frase>`, una falla que el engine enuncia en una oración, o
-`artifacts: [...]`, un elemento por artifact declarado que no cerró. Cada elemento
+**La falla es dato, no prosa.** La falla toma una de tres formas, planas sobre el
+payload: `outcome: <frase>`, una falla que el engine enuncia en una oración,
+`artifacts: [...]`, un elemento por artifact declarado que no cerró, o `died:
+{adapter, exit?}`, una sesión que terminó sin evento terminal. Cada elemento
 es una de cuatro: el archivo — `path` y uno de `artifact-missing`, `artifact-empty`,
 `artifact-oversized` (con bytes y techo) o `artifact-unreadable` —, un documento que
 nadie entregó (`artifact-undelivered`): el `node` que lo declaró y el `artifact`
@@ -292,6 +310,14 @@ composición no escriben archivo, así que sus elementos no nombran ninguno. El 
 produce al leer el evento, nunca al escribirlo (D133). Un payload que lleva
 `outcome:` solo se lee como la falla de una frase, sin migración: es la tolerancia
 de lectura de §3.1 del Contrato aplicada a este campo.
+
+**Una sesión que muere dice cómo salió.** `died` nombra el `adapter` que la abrió
+y, cuando esa sesión tenía proceso propio, su `exit`: `end`, una unión cerrada
+—`{type: code, code}` o `{type: signal, signal}`, y `unknown` para un `type` que
+este binario no conoce—, y `stderr_tail`, las últimas 20 líneas que el hijo
+escribió, con todo valor del entorno de la sesión reemplazado por `[redacted]`.
+Una sesión sin proceso propio no lleva `exit`. El engine pregunta sólo a la sesión
+cuyo stream terminó sin decir nada; el adapter nunca inventa un terminal (D180).
 
 ### 5.16 `hook_executed` — engine
 **Fuente:** node_id, fase before/after, comando, exit code
@@ -309,7 +335,7 @@ de lectura de §3.1 del Contrato aplicada a este campo.
 |---|---|---|---|
 | `to_node` | `NodeId` | sí | destino — el nodo que reruteó es el `node_id` del envelope |
 | `cause` | string | sí | — |
-| `origin` | enum `on_failure \| gate_choice` | no (default `on_failure`) | qué mecanismo reruteó; logs viejos sin el campo leen `on_failure` |
+| `origin` | enum `on_failure \| gate_choice` | sí | qué mecanismo reruteó; un log viejo sin el campo lo lee como `on_failure` |
 | `attempt` | `Option<u32>` | solo en `on_failure` | N de `max_reroutes` (M); ausente en una elección de gate, que no es un reintento |
 | `max_reroutes` | `Option<u32>` | solo en `on_failure` | — |
 
@@ -319,14 +345,34 @@ de lectura de §3.1 del Contrato aplicada a este campo.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `summary` | string | solo en `gate_waiting` | objeto de escalación |
-| `evidence` | estructura del engine | solo en `gate_waiting` | nunca prosa generada por agente |
-| `options` | lista de `{option, tradeoff}` | solo en `gate_waiting` | `tradeoff` es obligatorio por opción |
+| `evidence` | lista de `{label?, value}` | solo en `gate_waiting` | la adjunta el engine desde el log; nunca prosa generada por agente. Un hecho que se nombra solo (`exit 1`) no lleva `label`. Un log anterior a la estructura trae un string y se lee como el único hecho sin etiqueta que siempre fue |
+| `options` | lista de `{id, label, tradeoff}` | solo en `gate_waiting` | `tradeoff` es obligatorio por opción |
+| `external_ref` | `Option<string>` | solo en `gate_waiting` | la referencia propia del forge para este gate: la URL del pull request (Contrato §5.6); ausente en la escalación interna, que no sale del run |
 | `chosen_option` | `Option<string>` | solo en `gate_resolved` | — |
 | `resolved_by` | `Option<string>` | solo en `gate_resolved` | usuario o identificador de quien resolvió |
-| `free_text` | `Option<string>` | no | siempre disponible como canal |
+| `approved_sha` | `Option<CommitSha>` | solo en `gate_resolved` | el commit que cubre la aprobación del forge: contra él se compara la cabeza del pull request para decidir si la aprobación sigue en pie |
+| `free_text` | `Option<string>` | solo en `gate_resolved` | siempre disponible como canal para quien resuelve |
 
-### 5.19 `questions_answered` — engine
-**Fuente:** node_id, hash del artifact de respuestas, canal (tty\|mcp\|pr), respondiente si se conoce
+### 5.19 `questions_asked` / `questions_answered` — engine
+**Fuente:** node_id; hash e ids del documento `questions` y tokens de la sesión que
+preguntó / hash del artifact de respuestas, canal (tty\|mcp), respondiente si se
+conoce
+
+Un nodo que declara `questions` cierra entero —hooks, scope, artifacts— y registra
+`questions_asked` en vez de un terminal; entre ese hecho y `questions_answered` el
+nodo espera, y el `node_finished` que el cierre difirió llega después de la
+respuesta. Un `questions_asked` sin preguntas es irrepresentable: un nodo que no
+preguntó nada termina en el mismo cierre.
+
+`questions_asked`:
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `questions_hash` | string | sí | hash del documento `questions` que el nodo entregó |
+| `questions` | `[string]` | sí | los ids que esperan respuesta; nunca vacío |
+| `tokens_used` | `TokenUsage` | sí | lo que gastó la sesión que preguntó; la contabilidad del intento cierra acá |
+
+`questions_answered`:
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
@@ -456,8 +502,8 @@ tuvo el artifact y el log no dice cómo.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `reason` | string | sí | — |
-| `evidence` | estructura del engine | sí | — |
+| `reason` | string | sí | la afirmación y los hechos detrás, en una línea — es el único campo que un lector del evento en sí recibe |
+| `evidence` | lista de `{label?, value}` | sí | la misma estructura que `gate_waiting`, con la misma tolerancia de lectura |
 | `suggested_mode` | string | sí | debe respetar la escalera de promoción |
 
 ### 5.23 `child_run_created` / `child_run_finished` — engine
@@ -479,7 +525,15 @@ tuvo el artifact y el log no dice cómo.
 | `adapter` | string (`id()` del adapter) | sí | — |
 | `policy_applied` | string | sí | de la tabla de degradación de capacidades del adapter, o —cuando el listener MCP de `run_tools` no puede abrir, o cuando abrió y la sesión no recibió ninguna de sus tools— el texto que dice que la sesión corre sin run tools y por qué |
 
-### 5.25 `run_paused` / `run_resumed` / `run_finished` — engine
+### 5.25 `write_refused` — adapter (por el engine)
+**Fuente:** la sesión que la rechazó, y qué iba a escribir
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `session_id` | `SessionId` | sí | la sesión abierta cuando el cerco rechazó la escritura |
+| `target` | `ToolTarget` | sí | el path, relativo al worktree cuando está bajo él — el mismo tipo que `agent_message.target` |
+
+### 5.26 `run_paused` / `run_resumed` / `run_finished` — engine
 **Fuente:** razón / estado terminal, métricas
 
 | Campo | Tipo | Oblig. | Notas |

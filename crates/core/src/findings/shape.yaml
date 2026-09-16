@@ -7,8 +7,10 @@ findings:                               # required; an empty list is valid and
     severity: blocking                  # required, one of:
                                         #   blocking | major | minor | note
     title: "Resize handler dereferences a null pointer"   # required, one line
-    location: "src/ui/resize.rs:142-150"                  # required: a path,
+    location: "src/ui/resize.rs:142-150"                  # required: a path in
+                                        #   the worktree, never absolute,
                                         #   optionally with a line range
+                                        #   (`142` or `142-150`)
     detail: >-                          # required: what goes wrong, and when
       When the window is resized before the first paint, `surface` is still
       null and the handler dereferences it.

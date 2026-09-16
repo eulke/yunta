@@ -1,3 +1,7 @@
+//! [`AdapterError::Unsupported`] names the adapter and the capability it
+//! does not have, and is a `std::error::Error` a caller can carry as a
+//! source.
+
 use yunta_core::{AdapterError, Capability};
 
 #[test]

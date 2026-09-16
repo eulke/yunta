@@ -1,0 +1,33 @@
+# One script per session the planner spawns, selected by prompt: the
+# three that run before `approve-plan`. `standard` and `full` both stop
+# at that gate, so neither ever opens the executor's task — which is
+# why they read this fixture and not `build-feature.yaml`.
+#
+# The planner hands its interpreted artifacts over through run tools, so
+# the fixture declares that capability; only `brief.md`, an opaque
+# artifact, is a file a session writes itself. `grill` asks nothing, so
+# nobody has to answer for the case to run to its end.
+capabilities: { run_tools: true }
+sessions:
+  - match_prompt_contains: "ambiguities"
+    steps:
+      - { type: run_tool, tool: yunta_submit_questions, arguments: { document: { questions: [] } } }
+    outcome: { type: completed, summary: "nothing to ask" }
+  - match_prompt_contains: "Write the brief"
+    effects:
+      - { path: "{{run.staging}}/brief/brief.md", content: "# Brief\n\nAdd dark mode.\n" }
+    outcome: { type: completed, summary: "brief written" }
+  - match_prompt_contains: "tasks document"
+    steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            tasks:
+              - id: T001
+                title: "Bootstrap the crate"
+                scope: ["Cargo.toml", "src/**"]
+                criteria:
+                  - cmd: "test -f Cargo.toml"
+                  - cmd: "test -f src/lib.rs"
+    outcome: { type: completed, summary: "tasks document registered" }

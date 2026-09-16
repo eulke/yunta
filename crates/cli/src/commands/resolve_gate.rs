@@ -11,27 +11,28 @@
 //! for the run's own duration.
 
 use yunta_core::events::HumanChoice;
-use yunta_core::{Manifest, OptionId, Responder, RunId};
+use yunta_core::{OptionId, Responder, RunId};
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::load_yaml;
 
-pub async fn resolve_gate(
+/// Records the decision and hands the run back, returning the sentence
+/// that says so.
+///
+/// The one path a gate is answered through, whichever door asked: the
+/// command below prints this sentence on stdout, and the control
+/// plane's `resolve_gate` tool returns it in a tool result. Two doors,
+/// one decision, one wording — and one place that knows a decision
+/// recorded is not a decision undone when the hand-off fails.
+pub(crate) async fn resolve(
+    ctx: &Context,
     run_id: &RunId,
     option: &OptionId,
     resolved_by: Option<&Responder>,
     free_text: Option<&str>,
-) -> Result<Outcome, CliError> {
-    let ctx = Context::load()?;
-    let Some(run_dir) = ctx.project.run_dir(run_id.as_str()) else {
-        return Err(CliError::msg(format!(
-            "no run `{run_id}` under {} (or the default state root)",
-            ctx.project.runs_root.display()
-        )));
-    };
-    let manifest: Manifest = load_yaml(&run_dir.join("manifest.yaml"), "run manifest")?;
-
+) -> Result<String, CliError> {
+    let open = ctx.open_run(run_id).await?;
+    let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let storage = ctx.async_storage().await?;
 
     yunta_engine::resolve_gate(
@@ -45,15 +46,29 @@ pub async fn resolve_gate(
             free_text: free_text.map(str::to_string),
         },
     )
-    .await?;
+    .await
+    .map_err(|refusal| CliError::gate_refused(run_id, refusal))?;
 
     super::spawn_detached_resume(&run_dir, run_id.as_str(), &ctx.cwd)
         .await
-        .map_err(|e| {
-            CliError::msg(format!(
-                "decision recorded, but cannot spawn a detached `yunta resume {run_id}`: {e}"
-            ))
+        .map_err(|source| CliError::GateRecordedNotResumed {
+            source: super::DetachedResumeError::new(run_id, source),
         })?;
-    println!("run {run_id}: resolved `{option}`, driving forward independently");
+    Ok(format!(
+        "run {run_id}: resolved `{option}`, driving forward independently"
+    ))
+}
+
+pub async fn resolve_gate(
+    run_id: &RunId,
+    option: &OptionId,
+    resolved_by: Option<&Responder>,
+    free_text: Option<&str>,
+) -> Result<Outcome, CliError> {
+    let ctx = Context::load()?;
+    println!(
+        "{}",
+        resolve(&ctx, run_id, option, resolved_by, free_text).await?
+    );
     Ok(Outcome::Success)
 }

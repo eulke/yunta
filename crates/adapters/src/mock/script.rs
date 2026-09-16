@@ -15,14 +15,15 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
+use yunta_core::fence::Coverage;
 
 use tokio::sync::{mpsc, Notify};
 use yunta_core::{ModelName, SessionId};
 
 use super::run_tool::call_run_tool;
 use super::{MockOutcome, MockStep, OnInterrupt, ToolExpectation};
-use crate::session::{AgentError, AgentEvent, AgentOutcome};
-use crate::RunToolsEndpoint;
+use yunta_core::port::RunToolsEndpoint;
+use yunta_core::port::{AgentError, AgentEvent, AgentOutcome};
 
 /// One session's script, cut loose from the fixture it was claimed from.
 pub(super) struct Script {
@@ -31,7 +32,8 @@ pub(super) struct Script {
     /// The edits this session's effects would have made and the request's
     /// constraints blocked — reported as tool use, which is how a
     /// hook-capable CLI reports an edit it refused.
-    pub(super) blocked_markers: Vec<PathBuf>,
+    pub(super) refused: Vec<PathBuf>,
+    pub(super) fence: Option<Coverage>,
     pub(super) steps: Vec<MockStep>,
     pub(super) outcome: MockOutcome,
     pub(super) run_tools_endpoint: Option<RunToolsEndpoint>,
@@ -89,17 +91,17 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
         .send(AgentEvent::SessionOpened {
             session_id: script.session_id,
             model: Some(script.model),
+            fence: script.fence,
         })
         .is_err()
     {
         return;
     }
 
-    for path in script.blocked_markers {
+    for path in script.refused {
         if events
-            .send(AgentEvent::ToolUse {
-                name: "edit".to_string(),
-                target_digest: format!("blocked:{}", path.display()),
+            .send(AgentEvent::WriteRefused {
+                target: yunta_core::events::ToolTarget::of_path(&path),
             })
             .is_err()
         {
@@ -115,7 +117,7 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
             Ok(event) => event,
             Err(message) => {
                 let _ = events.send(AgentEvent::Failed {
-                    error: AgentError { message },
+                    error: AgentError::message(message),
                     retryable: false,
                 });
                 return;
@@ -136,13 +138,9 @@ async fn played(
     endpoint: Option<&RunToolsEndpoint>,
 ) -> std::result::Result<AgentEvent, String> {
     Ok(match step {
-        MockStep::ToolUse {
+        MockStep::ToolUse { name, target, .. } => AgentEvent::ToolUse {
             name,
-            target_digest,
-            ..
-        } => AgentEvent::ToolUse {
-            name,
-            target_digest,
+            target: yunta_core::events::ToolTarget::opaque(target.as_bytes()),
         },
         MockStep::Usage {
             input_tokens,
@@ -150,8 +148,8 @@ async fn played(
             cached_input_tokens,
             ..
         } => AgentEvent::Usage {
-            input_tokens,
-            output_tokens,
+            input_tokens: Some(input_tokens),
+            output_tokens: Some(output_tokens),
             cached_input_tokens,
         },
         MockStep::Note { text, .. } => AgentEvent::Note { text },
@@ -180,13 +178,12 @@ async fn called(
     endpoint: Option<&RunToolsEndpoint>,
 ) -> std::result::Result<AgentEvent, String> {
     match (call_run_tool(endpoint, &tool, arguments).await, expect) {
-        (Ok(digest), ToolExpectation::Accepted) => Ok(AgentEvent::ToolUse {
+        (Ok(answer), ToolExpectation::Accepted) => Ok(AgentEvent::ToolUse {
             name: tool,
-            target_digest: digest,
+            target: yunta_core::events::ToolTarget::opaque(answer.as_bytes()),
         }),
         (Err(error), ToolExpectation::Refused) => Ok(AgentEvent::ToolUse {
-            target_digest: yunta_core::sha256_hex(yunta_core::describe(&error).as_bytes())
-                .to_string(),
+            target: yunta_core::events::ToolTarget::opaque(yunta_core::describe(&error).as_bytes()),
             name: tool,
         }),
         (Err(error), ToolExpectation::Accepted) => Err(yunta_core::describe(&error)),
@@ -206,7 +203,7 @@ async fn end(outcome: MockOutcome, events: &mpsc::UnboundedSender<AgentEvent>, s
         }
         MockOutcome::Failed { message, retryable } => {
             let _ = events.send(AgentEvent::Failed {
-                error: AgentError { message },
+                error: AgentError::message(message),
                 retryable,
             });
         }

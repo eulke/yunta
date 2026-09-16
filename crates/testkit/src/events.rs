@@ -1,12 +1,15 @@
 //! Reading a run's log the way a test asks about it, and writing the
 //! events a run would have written.
 
+use std::sync::Arc;
+
 use yunta_core::events::artifacts::ArtifactRef;
+use yunta_core::events::{ArtifactEvent, BaselineCapturedPayload, RunEvent, TaskEvent};
 use yunta_core::events::{
-    EventBody, EventDraft, EventPayload, RunCreatedPayload, StoredEvent, TaskRegisteredPayload,
-    TaskStatus, TaskStatusChangedPayload,
+    EventDraft, EventPayload, RunCreatedPayload, StoredEvent, TaskRegisteredPayload, TaskStatus,
+    TaskStatusChangedPayload,
 };
-use yunta_core::{CommitSha, RunId, Seq, Task, TaskId};
+use yunta_core::{Clock, CommitSha, RunId, Seq, Task, TaskId};
 use yunta_storage::Storage;
 
 /// Every `artifact_accepted` on `events`, in log order — one entry per
@@ -16,7 +19,7 @@ pub fn accepted(events: &[StoredEvent]) -> Vec<ArtifactRef> {
     events
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::ArtifactAccepted(p)) => Some(ArtifactRef {
+            Some(EventPayload::Artifacts(ArtifactEvent::Accepted(p))) => Some(ArtifactRef {
                 producer: event.node_id.clone(),
                 artifact: p.artifact.clone(),
                 content_hash: p.content_hash.clone(),
@@ -28,45 +31,75 @@ pub fn accepted(events: &[StoredEvent]) -> Vec<ArtifactRef> {
         .collect()
 }
 
+/// Every `baseline_captured` on `events`, in log order — one entry per
+/// event, so a test sees whether a run measured, was born holding a
+/// measurement, or did both.
+pub fn baselines(events: &[StoredEvent]) -> Vec<BaselineCapturedPayload> {
+    events
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Run(RunEvent::BaselineCaptured(payload))) => Some(payload.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 /// The `task_registered` a run writes for `task` — what the run has to
 /// do about it, in the task's own terms.
 pub fn task_registered(task: &Task) -> EventPayload {
-    EventPayload::TaskRegistered(TaskRegisteredPayload {
+    EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
         task_id: task.id.clone(),
         criteria: task.criteria.iter().map(Into::into).collect(),
         scope: task.scope.clone(),
         depends_on: task.depends_on.clone(),
-    })
+    }))
 }
 
 /// The `task_status_changed` a run writes about `task`: the status it
 /// reached, the commit its work landed at — which a `done` names and no
 /// other status does — and the event that justifies the transition.
+///
+/// The status decides, not the commit: a `done` carries the one it is
+/// given, and every other status carries none, exactly as the payload's
+/// own constructors allow. A test about a log that carries one anyway —
+/// written by something that is not this engine — builds that event with
+/// [`status_changed_carrying`].
 pub fn task_status_changed(
     task: &TaskId,
     status: TaskStatus,
     commit: Option<&CommitSha>,
     caused_by: Seq,
 ) -> EventPayload {
-    EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
-        task_id: task.clone(),
-        new_status: status,
-        caused_by,
-        commit: commit.cloned(),
-    })
+    let changed = match (status, commit) {
+        (TaskStatus::Done, Some(commit)) => {
+            TaskStatusChangedPayload::done(task.clone(), caused_by, commit.clone())
+        }
+        (status, _) => TaskStatusChangedPayload::to(task.clone(), status, caused_by),
+    };
+    EventPayload::Tasks(TaskEvent::StatusChanged(changed))
 }
 
-/// One event as a log holds it: position `seq` of `run`, with no node
-/// behind it — what a test hands a function that reads a log without
-/// storing one.
-pub fn stored(run: &RunId, seq: u64, payload: EventPayload) -> StoredEvent {
-    StoredEvent {
-        run_id: run.clone(),
-        seq: seq.into(),
-        timestamp: chrono::DateTime::UNIX_EPOCH,
-        node_id: None,
-        body: EventBody::Known(payload),
-    }
+/// A `task_status_changed` carrying a commit under a status that has no
+/// business naming one — the shape this engine's constructors refuse and
+/// a persisted log may still hold, because a log is read from whatever
+/// wrote it.
+///
+/// Built through the wire form, which is how such an event actually
+/// reaches a reader: off disk, never out of a constructor.
+pub fn status_changed_carrying(
+    task: &TaskId,
+    status: TaskStatus,
+    commit: &CommitSha,
+    caused_by: Seq,
+) -> EventPayload {
+    let wire = serde_json::json!({
+        "kind": "task_status_changed",
+        "task_id": task.as_str(),
+        "new_status": serde_json::to_value(status).expect("a status is a string on the wire"),
+        "caused_by": caused_by.get(),
+        "commit": commit.as_str(),
+    });
+    serde_json::from_value(wire).expect("the wire shape of a task_status_changed")
 }
 
 /// Another run's log, written by hand: what a run that hands something
@@ -74,19 +107,26 @@ pub fn stored(run: &RunId, seq: u64, payload: EventPayload) -> StoredEvent {
 ///
 /// A run's first event is always its `run_created` — the hash chain's
 /// genesis — so opening one writes that before anything a test states.
+///
+/// The clock is the one the surrounding test runs on, so every event
+/// this log holds is stamped by the same reading of time the run under
+/// test is stamped by — a planted log dated from the wall clock is one
+/// no assertion about order can trust.
 pub struct SourceLog<'a> {
     storage: &'a Storage,
     run_id: RunId,
+    clock: Arc<dyn Clock>,
 }
 
 impl<'a> SourceLog<'a> {
-    /// Opens `run_id`'s log on `storage`, born.
-    pub fn open(storage: &'a Storage, run_id: &RunId) -> Self {
+    /// Opens `run_id`'s log on `storage`, born, stamped by `clock`.
+    pub fn open(storage: &'a Storage, run_id: &RunId, clock: Arc<dyn Clock>) -> Self {
         let log = SourceLog {
             storage,
             run_id: run_id.clone(),
+            clock,
         };
-        log.record(EventPayload::RunCreated(RunCreatedPayload {
+        log.record(EventPayload::Run(RunEvent::Created(RunCreatedPayload {
             manifest_hash: yunta_core::sha256_hex(run_id.as_str().as_bytes()),
             inputs: Default::default(),
             mode: Default::default(),
@@ -94,7 +134,7 @@ impl<'a> SourceLog<'a> {
             yunta_schema: None,
             base_branch: "main".to_string(),
             base_commit: yunta_core::sha256_hex(b"base").as_str().into(),
-        }));
+        })));
         log
     }
 
@@ -108,7 +148,7 @@ impl<'a> SourceLog<'a> {
                     node_id: None,
                     payload,
                 },
-                &yunta_core::SystemClock,
+                self.clock.as_ref(),
             )
             .expect("append to the source log")
     }

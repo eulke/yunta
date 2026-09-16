@@ -19,6 +19,7 @@ use yunta_core::{
 use yunta_engine::audit_pack;
 
 use super::pack_audit::{count_pack_tests, print_report, print_test_summary, run_pack_tests};
+use crate::context::Context;
 use crate::error::{note, warn, CliError, Outcome};
 use crate::pack::{
     clone_pack, clone_url, current_branch, hash_tree, head_commit, load_lock, lock_path,
@@ -93,6 +94,27 @@ fn load_pack_policy(cwd: &std::path::Path) -> Result<PackPolicy, CliError> {
     })
 }
 
+/// The schema gate: a pack states the schema major it needs, and a
+/// binary outside that range cannot run its workflows. Refused before
+/// anything is vendored — a pack on disk that no run can use is a
+/// failure discovered later, with a tree to clean up.
+fn enforce_schema_range(manifest: &PackManifest) -> Result<(), CliError> {
+    let Some(range) = &manifest.yunta_schema else {
+        return Ok(());
+    };
+    if range.holds_for(yunta_core::YUNTA_SCHEMA) {
+        return Ok(());
+    }
+    Err(CliError::msg(format!(
+        "`{}/{}` declares `yunta_schema: \"{range}\"`, and this binary speaks schema {} — \
+         install a version of yunta inside that range, or a release of the pack that \
+         accepts this one.",
+        manifest.publisher,
+        manifest.name,
+        yunta_core::YUNTA_SCHEMA,
+    )))
+}
+
 /// The publisher allow-list gate: a non-empty
 /// `permissions.packs.publishers.allow` in the merged config refuses
 /// any publisher outside it, naming the declaring layer(s).
@@ -134,27 +156,22 @@ fn enforce_executor_policy(
     match policy.executors {
         PackExecutorPolicy::Allow => Ok(()),
         PackExecutorPolicy::Deny => Err(CliError::msg(format!(
-            "this pack declares {} executor(s) and `permissions.packs.executors` \
-             is `deny` (declared by the {} config layer{}) — `--yes` cannot override a \
+            "this pack declares {} and `permissions.packs.executors` \
+             is `deny` (declared by the {} config) — `--yes` cannot override a \
              permissions ceiling. Change the policy there, or {verb} a pack \
              without executors.",
-            manifest.declares.executors.len(),
+            yunta_core::text::counted(manifest.declares.executors.len(), "executor"),
             policy.executors_declared_by.join("/"),
-            if policy.executors_declared_by.len() == 1 {
-                ""
-            } else {
-                "s"
-            },
         ))),
         PackExecutorPolicy::Prompt => {
             if confirmed {
                 return Ok(());
             }
             Err(CliError::msg(format!(
-                "this pack declares {} executor(s) — executable code, not just \
+                "this pack declares {} — executable code, not just \
                  declarative YAML. Review the inventory above, then re-run with `--yes` to \
                  confirm the {verb}.",
-                manifest.declares.executors.len()
+                yunta_core::text::counted(manifest.declares.executors.len(), "executor")
             )))
         }
     }
@@ -171,7 +188,10 @@ pub async fn add(
     confirmed_executors: bool,
     run_tests: bool,
 ) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    // The invocation's own composition root: `pack add` clones, and a
+    // clone is a subprocess that answers to whoever ran the command.
+    let ctx = Context::load()?;
+    let cwd = ctx.cwd.clone();
 
     let (source_part, ref_arg) = split_source_and_ref(source);
     let url = clone_url(source_part);
@@ -181,7 +201,7 @@ pub async fn add(
         source,
     })?;
 
-    clone_pack(&url, ref_arg, clone_dir.path()).await?;
+    clone_pack(&url, ref_arg, clone_dir.path(), ctx.supervision()).await?;
 
     let manifest = read_manifest(clone_dir.path())?;
 
@@ -197,6 +217,7 @@ pub async fn add(
 
     // Policy first: a refused publisher or a denied executor leaves no
     // decision for a person to make, so the audit is not even printed.
+    enforce_schema_range(&manifest)?;
     let policy = load_pack_policy(&cwd)?;
     enforce_publisher_allowed(&policy, &manifest.publisher)?;
     if policy.executors == PackExecutorPolicy::Deny && !manifest.declares.executors.is_empty() {
@@ -210,10 +231,10 @@ pub async fn add(
     println!();
     enforce_executor_policy(&policy, &manifest, confirmed_executors, "install")?;
 
-    let commit = head_commit(clone_dir.path()).await?;
+    let commit = head_commit(clone_dir.path(), ctx.supervision()).await?;
     let resolved_ref = match ref_arg {
         Some(ref_arg) => ref_arg.to_string(),
-        None => current_branch(clone_dir.path()).await?,
+        None => current_branch(clone_dir.path(), ctx.supervision()).await?,
     };
 
     // The lock is loaded before anything is written, so a lock that
@@ -251,14 +272,14 @@ pub async fn add(
         manifest.publisher,
         manifest.name,
         manifest.version,
-        &commit[..commit.len().min(12)],
+        commit.abbreviated(),
         dest.display()
     );
 
     // The pack's own cases run last, on the vendored copy, and only on
     // request — after the confirmation, never as part of deciding it.
     let tests = if run_tests {
-        run_pack_tests(&dest).await
+        run_pack_tests(&dest, &ctx).await
     } else {
         count_pack_tests(&dest)
     };
@@ -284,7 +305,8 @@ pub async fn update(
     new_ref: &str,
     confirmed_executors: bool,
 ) -> Result<Outcome, CliError> {
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    let ctx = Context::load()?;
+    let cwd = ctx.cwd.clone();
     let mut lock = load_lock(&cwd)?;
     let Some(entry) = lock.packs.get(pack).cloned() else {
         return Err(CliError::msg(format!(
@@ -296,7 +318,13 @@ pub async fn update(
         context: "create a temp directory to clone into".to_string(),
         source,
     })?;
-    clone_pack(&entry.source, Some(new_ref), clone_dir.path()).await?;
+    clone_pack(
+        &entry.source,
+        Some(new_ref),
+        clone_dir.path(),
+        ctx.supervision(),
+    )
+    .await?;
     let manifest = read_manifest(clone_dir.path())?;
     if manifest.reference() != *pack {
         return Err(CliError::msg(format!(
@@ -309,6 +337,7 @@ pub async fn update(
     // The same policy gates as `add` — a new ref is where new executor
     // code first appears, and an allow-list narrowed since the install
     // must stop pulling from a publisher it no longer trusts.
+    enforce_schema_range(&manifest)?;
     let policy = load_pack_policy(&cwd)?;
     enforce_publisher_allowed(&policy, pack.publisher())?;
     if !manifest.declares.executors.is_empty() {
@@ -320,7 +349,7 @@ pub async fn update(
     }
     enforce_executor_policy(&policy, &manifest, confirmed_executors, "update")?;
 
-    let commit = head_commit(clone_dir.path()).await?;
+    let commit = head_commit(clone_dir.path(), ctx.supervision()).await?;
 
     // The new ref is vendored beside the installed tree and swapped in
     // only once it is complete: a ref that cannot be vendored leaves the
@@ -343,10 +372,7 @@ pub async fn update(
     );
     save_lock(&cwd, &lock)?;
 
-    println!(
-        "updated {pack} -> {new_ref} ({})",
-        &commit[..commit.len().min(12)]
-    );
+    println!("updated {pack} -> {new_ref} ({})", commit.abbreviated());
     Ok(Outcome::Success)
 }
 
@@ -391,7 +417,7 @@ pub fn list() -> Result<Outcome, CliError> {
         println!(
             "{key} @ {} ({}) — {status}",
             entry.r#ref,
-            &entry.commit[..entry.commit.len().min(12)]
+            entry.commit.abbreviated()
         );
     }
     println!("lock: {}", lock_path(&cwd).display());
@@ -536,7 +562,7 @@ pub async fn new_pack(pack: &PackRef) -> Result<Outcome, CliError> {
             .into_iter()
             .map(|(_, layer)| layer),
     );
-    let errors = yunta_engine::check(&workflow, &config);
+    let errors = yunta_engine::check(&workflow, &config, &super::declared_capabilities);
     if !errors.is_empty() {
         note(problems(
             dir.join(".yunta/workflows/example.yaml").display(),

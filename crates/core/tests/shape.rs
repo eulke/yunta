@@ -3,11 +3,16 @@
 //! should have had available to whoever writes one.
 
 use yunta_core::shape::{read, Document};
-use yunta_core::{FindingsFile, QuestionsFile, TasksFile};
+use yunta_core::{
+    Answer, AnswersFile, FindingEntry, FindingsFile, QuestionsFile, TasksFile, Withdrawal,
+};
 
 const PLAN: &str = "artifacts/plan.yaml";
 const FINDINGS: &str = "artifacts/findings.yaml";
 const QUESTIONS: &str = "artifacts/questions.yaml";
+const ANSWERS: &str = "artifacts/answers.yaml";
+const POST: &str = "yunta_post_finding";
+const WITHDRAW: &str = "yunta_withdraw_finding";
 
 // --- the example is the shape, and it stays true -----------------------
 //
@@ -68,7 +73,7 @@ fn a_tasks_document_that_breaks_two_rules_reports_both_in_one_read() {
     let codes: Vec<&str> = report
         .diagnostics
         .iter()
-        .map(|d| d.problem.code())
+        .map(|d| d.problem.code().as_str())
         .collect();
     assert!(
         codes.contains(&"unknown-dependency") && codes.contains(&"overlapping-scope"),
@@ -97,12 +102,12 @@ fn a_rule_names_its_subject_the_way_the_document_names_it() {
 #[test]
 fn a_value_of_the_wrong_type_is_located_by_its_path() {
     let report = read::<TasksFile>(
-        b"tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    manual_review: yes please\n    criteria:\n      - cmd: \"cargo test\"\n",
+        b"tasks:\n  - id: t1\n    title: Work\n    scope: \"src/**\"\n    criteria:\n      - cmd: \"cargo test\"\n",
         PLAN,
     )
-    .expect_err("a string where a boolean belongs");
+    .expect_err("a string where a sequence belongs");
     let text = report.to_string();
-    assert!(text.contains("tasks[0].manual_review"), "{text}");
+    assert!(text.contains("tasks[0].scope"), "{text}");
 }
 
 #[test]
@@ -117,6 +122,93 @@ fn a_key_the_type_does_not_declare_is_named() {
 }
 
 #[test]
+fn answers_read_through_the_same_door_as_every_document() {
+    // The engine writes the answers, and reads them back the way it
+    // reads what an agent wrote: one door, one report. A document whose
+    // shape is wrong says so at the value, and a rule it breaks says so
+    // at the entry that broke it.
+    read::<AnswersFile>(<AnswersFile as Document>::EXAMPLE.as_bytes(), ANSWERS)
+        .expect("the published shape parses");
+
+    let report = read::<AnswersFile>(
+        b"answers:\n  - id: theme\n    value: dark\n  - id: theme\n    value: light\n",
+        ANSWERS,
+    )
+    .expect_err("one id answers one question");
+    let text = report.to_string();
+    assert_eq!(
+        report.diagnostics[0].problem.code().as_str(),
+        "duplicate-id"
+    );
+    assert!(text.contains("theme"), "{text}");
+
+    let report = read::<AnswersFile>(b"answers:\n  - id: theme\n", ANSWERS)
+        .expect_err("an answer carries a value");
+    assert_eq!(report.diagnostics[0].problem.code().as_str(), "parse");
+    assert!(report.to_string().contains("answers[0]"), "{report}");
+}
+
+#[test]
+fn a_reply_is_judged_against_the_questions_it_answers() {
+    // `read` sees one document; the questions are another, so what a
+    // reply owes them is asked where both are in hand. Every violation
+    // together, never the first.
+    let questions: QuestionsFile = read(
+        br#"
+questions:
+  - id: theme
+    text: Which theme?
+    answer_type: choice
+    values: [dark, light]
+    required: true
+  - id: ship
+    text: Ship it?
+    answer_type: boolean
+    required: true
+"#,
+        QUESTIONS,
+    )
+    .expect("the questions read");
+
+    let report = AnswersFile::against(
+        &questions,
+        vec![
+            Answer {
+                id: "theme".into(),
+                value: "purple".to_string(),
+            },
+            Answer {
+                id: "ghost".into(),
+                value: "x".to_string(),
+            },
+        ],
+    )
+    .expect_err("three ways at once");
+    let text = report.to_string();
+    assert!(text.contains("purple"), "the value off the list: {text}");
+    assert!(text.contains("ghost"), "the question nobody asked: {text}");
+    assert!(
+        text.contains("ship"),
+        "the required question unanswered: {text}"
+    );
+
+    AnswersFile::against(
+        &questions,
+        vec![
+            Answer {
+                id: "theme".into(),
+                value: "dark".to_string(),
+            },
+            Answer {
+                id: "ship".into(),
+                value: "true".to_string(),
+            },
+        ],
+    )
+    .expect("a reply that answers its questions");
+}
+
+#[test]
 fn a_value_outside_a_closed_set_lists_the_set() {
     let report = read::<FindingsFile>(
         b"findings:\n  - id: f1\n    severity: high\n    title: T\n    location: a.rs:1\n    detail: D\n",
@@ -127,6 +219,73 @@ fn a_value_outside_a_closed_set_lists_the_set() {
     assert!(text.contains("findings[0].severity"), "{text}");
     for rung in ["blocking", "major", "minor", "note"] {
         assert!(text.contains(rung), "the ladder, in full: {text}");
+    }
+}
+
+#[test]
+fn a_finding_entry_reads_through_the_document_door() {
+    // A session reports one finding at a time, so a single entry is a
+    // document at that frontier — read by the same door, refused with
+    // the same report, and publishing the same shape.
+    read::<FindingEntry>(<FindingEntry as Document>::EXAMPLE.as_bytes(), POST)
+        .expect("the published entry shape parses");
+
+    let report = read::<FindingEntry>(
+        b"id: f1\nseverity: major\ntitle: \"\"\nlocation: src/lib.rs\ndetail: D\n",
+        POST,
+    )
+    .expect_err("a title says something");
+    assert_eq!(
+        report.diagnostics[0].problem.code().as_str(),
+        "empty-title",
+        "{report}"
+    );
+
+    let report = read::<FindingEntry>(b"id: f1\nseverity: major\nnote: x\n", POST)
+        .expect_err("a key nobody declared");
+    assert_eq!(report.diagnostics[0].problem.code().as_str(), "parse");
+    assert!(report.to_string().contains("note"), "{report}");
+
+    // And a withdrawal the same way.
+    read::<Withdrawal>(<Withdrawal as Document>::EXAMPLE.as_bytes(), WITHDRAW)
+        .expect("the published withdrawal shape parses");
+    let report = read::<Withdrawal>(b"id: f1\nreason: \"  \"\n", WITHDRAW)
+        .expect_err("a withdrawal says why");
+    assert_eq!(
+        report.diagnostics[0].problem.code().as_str(),
+        "empty-reason",
+        "{report}"
+    );
+}
+
+#[test]
+fn a_location_that_does_not_read_is_a_parse_problem_at_its_path() {
+    // A location is parsed where it arrives, so what does not read is
+    // reported like any other value the door refuses: named at its own
+    // key, with the reason the type gives — never a rule of its own
+    // over a string that was let in.
+    for (location, reason) in [
+        (
+            "/etc/passwd",
+            "an absolute path is this host's, not this run's",
+        ),
+        ("../../etc/passwd", "climbs out"),
+        ("a.rs:14-10", "ends before it starts"),
+    ] {
+        let yaml = format!(
+            "findings:\n  - id: f1\n    severity: major\n    title: T\n    location: \"{location}\"\n    detail: D\n"
+        );
+        let report = read::<FindingsFile>(yaml.as_bytes(), FINDINGS)
+            .expect_err("a location that does not read");
+        assert_eq!(report.diagnostics.len(), 1, "{report}");
+        assert_eq!(
+            report.diagnostics[0].problem.code().as_str(),
+            "parse",
+            "{report}"
+        );
+        let text = report.to_string();
+        assert!(text.contains("findings[0].location"), "at its key: {text}");
+        assert!(text.contains(reason), "with the reason: {text}");
     }
 }
 
@@ -160,7 +319,7 @@ fn bytes_that_are_not_yaml_at_all_still_fail_with_a_diagnostic() {
     let report = read::<TasksFile>(b"```yaml\ntasks: []\n```\n", PLAN)
         .expect_err("a fenced document is not YAML");
     assert_eq!(report.diagnostics.len(), 1, "{report}");
-    assert_eq!(report.diagnostics[0].problem.code(), "parse");
+    assert_eq!(report.diagnostics[0].problem.code().as_str(), "parse");
 }
 
 #[test]

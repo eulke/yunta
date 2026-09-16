@@ -5,8 +5,6 @@
 //! is the reading that only a log can answer: which findings a
 //! successor starts from.
 
-use std::collections::HashSet;
-
 use yunta_core::events::findings::effective;
 use yunta_core::events::{Finding, StoredEvent};
 
@@ -19,55 +17,30 @@ use yunta_core::events::{Finding, StoredEvent};
 /// promotion close accepts exactly this as the run's own findings
 /// artifact.
 pub fn inherited_findings(events: &[StoredEvent]) -> Vec<Finding> {
-    let mut seen: HashSet<(String, String)> = HashSet::new();
-    let mut inherited = Vec::new();
-    for posted in effective(events) {
-        let key = (
-            posted.finding.location.clone(),
-            normalized_title(&posted.finding.title),
-        );
-        if seen.insert(key) {
-            inherited.push(posted.finding);
-        }
-    }
-    inherited
-}
-
-/// Case- and whitespace-insensitive: "Scope  expansion DENIED" and
-/// "scope expansion denied" are the same complaint about the same place.
-fn normalized_title(title: &str) -> String {
-    title
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
+    let standing: Vec<Finding> = effective(events)
+        .into_iter()
+        .map(|posted| posted.finding)
+        .collect();
+    crate::replay::dedup_findings(&standing)
 }
 
 #[cfg(test)]
 mod tests {
     use yunta_core::events::{
-        EventBody, EventPayload, Finding, FindingPostedPayload, FindingSeverity,
-        FindingUpdatedPayload, FindingWithdrawnPayload, StoredEvent,
+        EventPayload, Finding, FindingPostedPayload, FindingSeverity, FindingUpdatedPayload,
+        FindingWithdrawnPayload,
     };
+    use yunta_testkit_core::Log;
 
     use super::*;
-
-    fn event(seq: u64, node: &str, payload: EventPayload) -> StoredEvent {
-        StoredEvent {
-            run_id: "run-1".into(),
-            seq: seq.into(),
-            timestamp: chrono::DateTime::UNIX_EPOCH,
-            node_id: Some(node.into()),
-            body: EventBody::Known(payload),
-        }
-    }
+    use yunta_core::events::FindingEvent;
 
     fn finding(id: &str, title: &str, location: &str) -> Finding {
         Finding {
             id: id.into(),
             severity: FindingSeverity::Major,
             title: title.to_string(),
-            location: location.to_string(),
+            location: location.into(),
             detail: "detail".to_string(),
             proposed_criterion: None,
         }
@@ -75,25 +48,23 @@ mod tests {
 
     #[test]
     fn an_updated_finding_is_inherited_with_its_new_content() {
-        let events = vec![
-            event(
-                1,
+        let events = Log::for_run("run-1")
+            .node(
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f1", "Scope expansion denied", "tasks/T001"),
-                }),
-            ),
-            event(
-                2,
+                })),
+            )
+            .node(
                 "review",
-                EventPayload::FindingUpdated(FindingUpdatedPayload {
+                EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
                     finding: Finding {
                         detail: "the denial was narrowed to one file".to_string(),
                         ..finding("f1", "Scope expansion narrowed", "tasks/T001")
                     },
-                }),
-            ),
-        ];
+                })),
+            )
+            .build();
 
         let inherited = inherited_findings(&events);
         assert_eq!(inherited.len(), 1, "one id, one inherited finding");
@@ -103,31 +74,28 @@ mod tests {
 
     #[test]
     fn an_updated_title_collapses_duplicates_of_the_title_it_now_carries() {
-        let events = vec![
-            event(
-                1,
+        let events = Log::for_run("run-1")
+            .node(
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f1", "Scope expansion denied", "tasks/T001"),
-                }),
-            ),
-            event(
-                2,
+                })),
+            )
+            .node(
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f2", "Missing rollback", "tasks/T001"),
-                }),
-            ),
+                })),
+            )
             // `f1` now says what `f2` says: they are one complaint about
             // one place, and `f1` was posted first.
-            event(
-                3,
+            .node(
                 "review",
-                EventPayload::FindingUpdated(FindingUpdatedPayload {
+                EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
                     finding: finding("f1", "missing  ROLLBACK", "tasks/T001"),
-                }),
-            ),
-        ];
+                })),
+            )
+            .build();
 
         let inherited = inherited_findings(&events);
         assert_eq!(inherited.len(), 1, "got: {inherited:?}");
@@ -136,30 +104,27 @@ mod tests {
 
     #[test]
     fn a_withdrawn_finding_is_not_inherited() {
-        let events = vec![
-            event(
-                1,
+        let events = Log::for_run("run-1")
+            .node(
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f1", "Scope expansion denied", "tasks/T001"),
-                }),
-            ),
-            event(
-                2,
+                })),
+            )
+            .node(
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f2", "Missing rollback", "tasks/T002"),
-                }),
-            ),
-            event(
-                3,
+                })),
+            )
+            .node(
                 "review",
-                EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+                EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
                     id: "f1".into(),
                     reason: "the scope was approved after all".to_string(),
-                }),
-            ),
-        ];
+                })),
+            )
+            .build();
 
         let inherited = inherited_findings(&events);
         assert_eq!(inherited.len(), 1, "got: {inherited:?}");
@@ -168,30 +133,27 @@ mod tests {
 
     #[test]
     fn a_withdrawal_frees_the_dedup_key_for_the_finding_that_still_stands() {
-        let events = vec![
-            event(
-                1,
+        let events = Log::for_run("run-1")
+            .node(
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f1", "Scope expansion denied", "tasks/T001"),
-                }),
-            ),
-            event(
-                2,
+                })),
+            )
+            .node(
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f2", "scope  expansion DENIED", "tasks/T001"),
-                }),
-            ),
-            event(
-                3,
+                })),
+            )
+            .node(
                 "review",
-                EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+                EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
                     id: "f1".into(),
                     reason: "posted against the wrong task".to_string(),
-                }),
-            ),
-        ];
+                })),
+            )
+            .build();
 
         let inherited = inherited_findings(&events);
         assert_eq!(inherited.len(), 1, "got: {inherited:?}");

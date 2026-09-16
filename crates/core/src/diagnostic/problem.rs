@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::Subject;
+use super::{ArtifactCode, FileCode};
 
 /// The stable name of a rule that only holds across a whole document.
 ///
@@ -84,9 +84,7 @@ rule_codes! {
     DependencyCycle => "dependency-cycle",
     /// Two independent tasks reach for the same files.
     OverlappingScope => "overlapping-scope",
-    ManualReviewWithoutJustification => "manual-review-without-justification",
     EmptyText => "empty-text",
-    EmptyLocation => "empty-location",
     EmptyDetail => "empty-detail",
     /// An update or a withdrawal names a finding this node never posted.
     UnknownId => "unknown-id",
@@ -97,6 +95,13 @@ rule_codes! {
     EmptyReason => "empty-reason",
     /// `answer_type` is `choice` and `values` is empty.
     MissingValues => "missing-values",
+    /// A `required` question has no answer.
+    MissingAnswer => "missing-answer",
+    /// An answer's value is not what its question's `answer_type` allows.
+    MismatchedAnswer => "mismatched-answer",
+    /// A `mode` leaves out a node the workflow cannot run without, or a
+    /// node a node it includes reroutes to.
+    IncoherentMode => "incoherent-mode",
 }
 
 impl std::fmt::Display for RuleCode {
@@ -128,10 +133,10 @@ pub struct Rule {
 pub enum Problem {
     /// The document does not parse into its kind: an unknown key, a
     /// value of the wrong type, an id that is not one. `path` locates
-    /// the offending value from the document's root
-    /// (`tasks[1].manual_review`), and is empty when the root itself is
-    /// the problem; `message` is what the deserializer said about that
-    /// value, which names the key and what it expected.
+    /// the offending value from the document's root (`tasks[1].scope`),
+    /// and is empty when the root itself is the problem; `message` is
+    /// what the deserializer said about that value, which names the key
+    /// and what it expected.
     Parse {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         path: String,
@@ -168,26 +173,94 @@ impl Problem {
 
     /// The stable name of this kind of problem: what a receipt counts
     /// and a log is grepped by, unaffected by any rewording.
-    pub fn code(&self) -> &'static str {
+    pub fn code(&self) -> DiagnosticCode {
         match self {
-            Problem::Parse { .. } => "parse",
-            Problem::Rule { code, .. } => code.as_str(),
+            Problem::Parse { .. } => DiagnosticCode::Parse(ParseCode::Parse),
+            Problem::Rule { code, .. } => DiagnosticCode::Rule(*code),
         }
     }
+}
 
-    /// The sentence a reader acts on.
-    ///
-    /// Takes the subject rather than a noun: two of the sentences below
-    /// differ for the document itself, and deciding that by comparing a
-    /// noun against `"document"` makes rewording the noun silently
-    /// switch them off.
-    pub(super) fn render(&self, _subject: &Subject) -> String {
+/// The stable name of anything this system reports as wrong: what a
+/// receipt counts, what `status --json` publishes, and what a log is
+/// grepped by, unaffected by any rewording.
+///
+/// Closed, so a code cannot be minted by typing a string. The four arms
+/// are the four ways something can be wrong: a rule a readable document
+/// broke, a document that did not read at all, a file the close could
+/// not take, and an artifact nobody handed over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DiagnosticCode {
+    Rule(RuleCode),
+    Parse(ParseCode),
+    File(FileCode),
+    Artifact(ArtifactCode),
+}
+
+impl DiagnosticCode {
+    /// Every code this system can report, which is what the published
+    /// vocabulary is checked against.
+    pub fn all() -> Vec<DiagnosticCode> {
+        RuleCode::ALL
+            .iter()
+            .map(|code| DiagnosticCode::Rule(*code))
+            .chain([DiagnosticCode::Parse(ParseCode::Parse)])
+            .chain(FileCode::ALL.map(DiagnosticCode::File))
+            .chain(ArtifactCode::ALL.map(DiagnosticCode::Artifact))
+            .collect()
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DiagnosticCode::Rule(code) => code.as_str(),
+            DiagnosticCode::Parse(code) => code.as_str(),
+            DiagnosticCode::File(code) => code.as_str(),
+            DiagnosticCode::Artifact(code) => code.as_str(),
+        }
+    }
+}
+
+impl std::fmt::Display for DiagnosticCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// One published name, one wire form: every surface carries the flat
+/// string, never the shape the union has in Rust.
+impl Serialize for DiagnosticCode {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+/// The one way a document fails before any rule can be asked of it: its
+/// bytes are not the document.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ParseCode {
+    Parse,
+}
+
+impl ParseCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ParseCode::Parse => "parse",
+        }
+    }
+}
+
+/// What is wrong, as one clause. A reader that has no document to name
+/// — a rule about a value the engine holds rather than about a file it
+/// read — takes the clause on its own, and takes it from here rather
+/// than composing its own from the variants.
+impl std::fmt::Display for Problem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Problem::Parse { path, message } => match path.as_str() {
-                "" | "." => format!("does not parse: {message}"),
-                path => format!("does not parse at `{path}`: {message}"),
+                "" | "." => write!(f, "does not parse: {message}"),
+                path => write!(f, "does not parse at `{path}`: {message}"),
             },
-            Problem::Rule { detail, .. } => detail.clone(),
+            Problem::Rule { detail, .. } => f.write_str(detail),
         }
     }
 }

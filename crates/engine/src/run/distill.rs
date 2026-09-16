@@ -32,16 +32,18 @@ use serde::Serialize;
 use yunta_core::events::findings::effective;
 use yunta_core::events::ArtifactId;
 use yunta_core::events::{EventPayload, FindingSeverity, StoredEvent};
-use yunta_core::{DistillArtifact, Isolation, ModeName, OnFinishStep};
+use yunta_core::{DistillArtifact, Isolation, ModeName, OnFinishStep, WorkflowName};
 
 use super::{RunCtx, RunError};
+use yunta_core::events::NodeEvent;
+use yunta_core::{Location, RelativePath};
 
 /// `provenance.yaml`'s whole document — serialized from structs so the
 /// field order is fixed and the same inputs always give the same bytes.
 #[derive(Serialize)]
 struct Provenance {
     source_run: String,
-    workflow: String,
+    workflow: WorkflowName,
     workflow_hash: String,
     mode: String,
     distilled_at: String,
@@ -90,7 +92,7 @@ fn verification(events: &[StoredEvent]) -> ProvenanceVerification {
         reused: 0,
     };
     for event in events {
-        if let Some(EventPayload::CriteriaChecked(p)) = event.payload() {
+        if let Some(EventPayload::Node(NodeEvent::CriteriaChecked(p))) = event.payload() {
             for result in &p.results {
                 criteria.executed += 1;
                 if result.exit_code == 0 {
@@ -146,12 +148,14 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
     let dest_dir = ctx
         .worktree
         .join(".yunta/knowledge/distilled")
-        .join(&ctx.manifest.workflow.name)
+        .join(ctx.manifest.workflow.name.as_str())
         .join(ctx.run_id.as_str());
-    std::fs::create_dir_all(&dest_dir).map_err(|source| RunError::Io {
-        context: format!("create `{}`", dest_dir.display()),
-        source,
-    })?;
+    tokio::fs::create_dir_all(&dest_dir)
+        .await
+        .map_err(|source| RunError::Io {
+            context: format!("create `{}`", dest_dir.display()),
+            source,
+        })?;
 
     // What the run holds, so the distillate is the bytes the log names
     // and its provenance carries that same hash — never a second reading
@@ -167,18 +171,22 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
         let name = wanted.view_name();
         match held.held(&wanted, Some(&declaration.node)) {
             Some(artifact) => {
-                let bytes = held.bytes(artifact)?;
+                let bytes = held.bytes(artifact).await?;
                 let dest = dest_dir.join(&name);
                 if let Some(parent) = dest.parent() {
-                    std::fs::create_dir_all(parent).map_err(|source| RunError::Io {
-                        context: format!("create `{}`", parent.display()),
+                    tokio::fs::create_dir_all(parent)
+                        .await
+                        .map_err(|source| RunError::Io {
+                            context: format!("create `{}`", parent.display()),
+                            source,
+                        })?;
+                }
+                tokio::fs::write(&dest, &bytes)
+                    .await
+                    .map_err(|source| RunError::Io {
+                        context: format!("write `{}`", dest.display()),
                         source,
                     })?;
-                }
-                std::fs::write(&dest, &bytes).map_err(|source| RunError::Io {
-                    context: format!("write `{}`", dest.display()),
-                    source,
-                })?;
                 artifacts.push(ProvenanceArtifact {
                     name,
                     content_hash: Some(format!("sha256:{}", artifact.content_hash)),
@@ -195,9 +203,13 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
                     &format!("distill-missing-{}-{}", declaration.node, declaration.id),
                     FindingSeverity::Minor,
                     format!("distill: declared artifact {declaration} was never produced"),
-                    crate::artifacts::store::view_path(Some(&declaration.node), &name)
-                        .display()
-                        .to_string(),
+                    Location::run(
+                        RelativePath::of([crate::artifacts::store::view_path(
+                            Some(&declaration.node),
+                            &name,
+                        )]),
+                        None,
+                    ),
                     "the workflow's `on_finish.distill` names this artifact \
                      but the node that produces it never did in this run"
                         .to_string(),
@@ -225,10 +237,12 @@ pub(super) async fn run_distill(ctx: &RunCtx<'_>, mode: &ModeName) -> Result<(),
         diagnostic: format!("failed to serialize distill provenance: {e}"),
     })?;
     let provenance_path = dest_dir.join("provenance.yaml");
-    std::fs::write(&provenance_path, yaml).map_err(|source| RunError::Io {
-        context: format!("write `{}`", provenance_path.display()),
-        source,
-    })?;
+    tokio::fs::write(&provenance_path, yaml)
+        .await
+        .map_err(|source| RunError::Io {
+            context: format!("write `{}`", provenance_path.display()),
+            source,
+        })?;
 
     if ctx.manifest.isolation == Isolation::Worktree {
         commit_and_maybe_push(ctx).await?;
@@ -247,31 +261,38 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     // Best-effort: a git that can't spawn or exits non-zero is a `false`,
     // recorded as a finding — never a hard error that would un-close the
     // run the log is about to close.
-    async fn ran(worktree: &std::path::Path, args: &[&str]) -> bool {
-        crate::git::success(worktree, args).await.unwrap_or(false)
+    async fn ran(
+        worktree: &std::path::Path,
+        args: &[&str],
+        supervision: crate::process::Supervision<'_>,
+    ) -> bool {
+        crate::git::success(worktree, args, supervision)
+            .await
+            .unwrap_or(false)
     }
+    let supervision = ctx.root_supervision();
 
-    if !ran(ctx.worktree, &["add", DISTILLED_DIR]).await {
+    if !ran(ctx.worktree, &["add", DISTILLED_DIR], supervision).await {
         return ctx
             .engine_finding(
                 None,
                 "distill-add",
                 FindingSeverity::Minor,
                 "distill: `git add` failed".to_string(),
-                DISTILLED_DIR.to_string(),
+                Location::work(RelativePath::of([DISTILLED_DIR]), None),
                 "the distilled files stay uncommitted in the run's worktree".to_string(),
             )
             .await;
     }
     let message = format!("docs(knowledge): distill from {}", ctx.run_id.as_str());
-    if !ran(ctx.worktree, &["commit", "-m", &message]).await {
+    if !ran(ctx.worktree, &["commit", "-m", &message], supervision).await {
         return ctx
             .engine_finding(
                 None,
                 "distill-commit",
                 FindingSeverity::Minor,
                 "distill: `git commit` failed".to_string(),
-                DISTILLED_DIR.to_string(),
+                Location::work(RelativePath::of([DISTILLED_DIR]), None),
                 "the distilled files stay uncommitted in the run's worktree".to_string(),
             )
             .await;
@@ -282,16 +303,17 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     let has_upstream = ran(
         ctx.worktree,
         &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        supervision,
     )
     .await;
-    if has_upstream && !ran(ctx.worktree, &["push"]).await {
+    if has_upstream && !ran(ctx.worktree, &["push"], supervision).await {
         return ctx
             .engine_finding(
                 None,
                 "distill-push",
                 FindingSeverity::Minor,
                 "distill: `git push` failed".to_string(),
-                DISTILLED_DIR.to_string(),
+                Location::work(RelativePath::of([DISTILLED_DIR]), None),
                 "the distill commit stays on the run's local branch".to_string(),
             )
             .await;
@@ -302,28 +324,20 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
 #[cfg(test)]
 mod tests {
     use yunta_core::events::{
-        CriteriaCheckedPayload, CriterionResult, EventBody, Finding, FindingPostedPayload,
+        CriteriaCheckedPayload, CriterionResult, Finding, FindingPostedPayload,
         FindingUpdatedPayload, FindingWithdrawnPayload, Phase,
     };
+    use yunta_core::events::{FindingEvent, NodeEvent};
+    use yunta_testkit_core::Log;
 
     use super::*;
-
-    fn event(seq: u64, node: &str, payload: EventPayload) -> StoredEvent {
-        StoredEvent {
-            run_id: "run-1".into(),
-            seq: seq.into(),
-            timestamp: chrono::DateTime::UNIX_EPOCH,
-            node_id: Some(node.into()),
-            body: EventBody::Known(payload),
-        }
-    }
 
     fn finding(id: &str, severity: FindingSeverity) -> Finding {
         Finding {
             id: id.into(),
             severity,
             title: format!("finding {id}"),
-            location: format!("tasks/{id}"),
+            location: format!("tasks/{id}").as_str().into(),
             detail: "detail".to_string(),
             proposed_criterion: None,
         }
@@ -331,39 +345,35 @@ mod tests {
 
     #[test]
     fn the_finding_counts_report_the_severities_the_run_still_holds() {
-        let events = vec![
-            event(
-                1,
+        let events = Log::for_run("run-1")
+            .node(
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f1", FindingSeverity::Minor),
-                }),
-            ),
-            event(
-                2,
+                })),
+            )
+            .node(
                 "review",
-                EventPayload::FindingPosted(FindingPostedPayload {
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                     finding: finding("f2", FindingSeverity::Major),
-                }),
-            ),
+                })),
+            )
             // `f1` turns out to block: it counts once, at the severity it
             // carries now.
-            event(
-                3,
+            .node(
                 "review",
-                EventPayload::FindingUpdated(FindingUpdatedPayload {
+                EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
                     finding: finding("f1", FindingSeverity::Blocking),
-                }),
-            ),
-            event(
-                4,
+                })),
+            )
+            .node(
                 "review",
-                EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+                EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
                     id: "f2".into(),
                     reason: "the criterion covers it".to_string(),
-                }),
-            ),
-        ];
+                })),
+            )
+            .build();
 
         let counts = verification(&events).findings;
         assert_eq!(
@@ -377,30 +387,31 @@ mod tests {
 
     #[test]
     fn the_criteria_counts_read_every_result_of_every_check() {
-        let events = vec![event(
-            1,
-            "build",
-            EventPayload::CriteriaChecked(CriteriaCheckedPayload {
-                task_id: "t1".into(),
-                phase: Phase::Post,
-                results: vec![
-                    CriterionResult {
-                        cmd: "cargo test".to_string(),
-                        exit_code: 0,
-                        r#type: None,
-                        reused: false,
-                        duration_ms: Some(1),
-                    },
-                    CriterionResult {
-                        cmd: "cargo clippy".to_string(),
-                        exit_code: 1,
-                        r#type: None,
-                        reused: true,
-                        duration_ms: None,
-                    },
-                ],
-            }),
-        )];
+        let events = Log::for_run("run-1")
+            .node(
+                "build",
+                EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
+                    task_id: "t1".into(),
+                    phase: Phase::Post,
+                    results: vec![
+                        CriterionResult {
+                            cmd: "cargo test".to_string(),
+                            exit_code: 0,
+                            r#type: None,
+                            reused: false,
+                            duration_ms: Some(1),
+                        },
+                        CriterionResult {
+                            cmd: "cargo clippy".to_string(),
+                            exit_code: 1,
+                            r#type: None,
+                            reused: true,
+                            duration_ms: None,
+                        },
+                    ],
+                })),
+            )
+            .build();
 
         let criteria = verification(&events).criteria;
         assert_eq!(criteria.executed, 2);

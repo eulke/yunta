@@ -1,28 +1,25 @@
+//! `yunta check`: everything a workflow and its config can be refused
+//! for before a run exists.
+//!
+//! Each case builds the smallest workflow that breaks one rule and
+//! asserts the error that names it — a cycle, an undefined runner, a
+//! gate with no forge, an artifact nobody produces, a template variable
+//! nothing binds — so a refusal a person reads is tied to the shape that
+//! earns it.
+
 use std::collections::BTreeMap;
 
-use indexmap::IndexMap;
 use yunta_core::{
-    ConfigLayer, JoinPolicy, ModeInclude, ModeName, ModeSpec, Node, NodeKind, OnFailure,
-    PromptSource, RunnerCandidate, Workflow,
+    ArtifactSpec, ConfigLayer, JoinPolicy, Node, NodeKind, OnFailure, PromptSource,
+    RunnerCandidate, Workflow,
 };
-use yunta_engine::{check, check_warnings, CheckError, CheckWarning, SchemaRangeError};
+use yunta_engine::{check as check_against, check_warnings, CheckError, CheckWarning};
 
-fn modes(entries: &[(&str, ModeInclude)]) -> IndexMap<ModeName, ModeSpec> {
-    entries
-        .iter()
-        .map(|(name, include)| {
-            (
-                (*name).into(),
-                ModeSpec {
-                    include: include.clone(),
-                },
-            )
-        })
-        .collect()
-}
-
-fn included(ids: &[&str]) -> ModeInclude {
-    ModeInclude::Nodes(ids.iter().map(|&id| id.into()).collect())
+/// The rules under test here are about the workflow, not about which
+/// adapter would run it: these check against a binary that builds none,
+/// so a capability nothing declares is a capability nothing can refuse.
+fn check(workflow: &yunta_core::Workflow, config: &yunta_core::ConfigLayer) -> Vec<CheckError> {
+    check_against(workflow, config, &|_| None)
 }
 
 fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
@@ -44,7 +41,6 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -69,7 +65,6 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -77,7 +72,7 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
 
 fn bash_with_scope(id: &str, run: &str, scope: &[&str]) -> Node {
     let mut node = bash(id, run, &[]);
-    node.scope = scope.iter().map(|s| s.to_string()).collect();
+    node.scope = scope.iter().map(|s| (*s).into()).collect();
     node
 }
 
@@ -102,7 +97,6 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -135,7 +129,6 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -168,7 +161,7 @@ fn workflow(nodes: Vec<Node>) -> Workflow {
 
 fn workflow_with_inputs(
     nodes: Vec<Node>,
-    inputs: std::collections::BTreeMap<String, yunta_core::InputSpec>,
+    inputs: std::collections::BTreeMap<yunta_core::InputName, yunta_core::InputSpec>,
 ) -> Workflow {
     Workflow {
         name: "fixture".into(),
@@ -208,45 +201,6 @@ fn a_well_formed_workflow_has_no_errors() {
     ]);
     let errors = check(&wf, &config_with_runner("planner", 1));
     assert_eq!(errors, Vec::new());
-}
-
-#[test]
-fn duplicate_node_id_is_reported() {
-    let wf = workflow(vec![bash("a", "true", &[]), bash("a", "false", &[])]);
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(errors, vec![CheckError::DuplicateNodeId { id: "a".into() }]);
-}
-
-#[test]
-fn unknown_dependency_is_reported() {
-    let wf = workflow(vec![bash("a", "true", &["ghost"])]);
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::BrokenReference {
-            node: "a".into(),
-            field: "depends_on".to_string(),
-            target: "ghost".into(),
-        }]
-    );
-}
-
-#[test]
-fn unknown_goto_target_is_reported() {
-    let mut node = bash("a", "true", &[]);
-    node.on_failure = Some(OnFailure {
-        goto: "ghost".into(),
-        max_reroutes: 1,
-    });
-    let errors = check(&workflow(vec![node]), &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::BrokenReference {
-            node: "a".into(),
-            field: "on_failure.goto".to_string(),
-            target: "ghost".into(),
-        }]
-    );
 }
 
 #[test]
@@ -347,154 +301,6 @@ fn external_gate_with_forge_configured_is_accepted() {
     );
 }
 
-fn workflow_with_modes(nodes: Vec<Node>, modes: IndexMap<ModeName, ModeSpec>) -> Workflow {
-    let mut wf = workflow(nodes);
-    wf.modes = Some(modes);
-    wf
-}
-
-#[test]
-fn a_mode_including_all_nodes_has_no_mode_errors() {
-    let wf = workflow_with_modes(
-        vec![bash("a", "true", &[]), bash("b", "true", &["a"])],
-        modes(&[("full", ModeInclude::All)]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        !errors.iter().any(|e| matches!(
-            e,
-            CheckError::ModeReferencesUnknownNode { .. }
-                | CheckError::InvariantNodeExcludedFromMode { .. }
-                | CheckError::RerouteTargetExcludedFromMode { .. }
-        )),
-        "got: {errors:?}"
-    );
-}
-
-#[test]
-fn a_mode_referencing_an_unknown_node_is_reported() {
-    let wf = workflow_with_modes(
-        vec![bash("a", "true", &[])],
-        modes(&[("quick", included(&["a", "ghost"]))]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::ModeReferencesUnknownNode {
-            mode: "quick".into(),
-            node: "ghost".into(),
-        }]
-    );
-}
-
-#[test]
-fn an_invariant_node_excluded_from_a_mode_is_reported() {
-    let mut lint = bash("lint", "cargo clippy", &[]);
-    lint.invariant = true;
-    let wf = workflow_with_modes(
-        vec![lint, bash("ship", "true", &[])],
-        modes(&[("quick", included(&["ship"]))]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::InvariantNodeExcludedFromMode {
-            node: "lint".into(),
-            mode: "quick".into(),
-        }]
-    );
-}
-
-#[test]
-fn an_invariant_node_present_in_every_mode_has_no_error() {
-    let mut lint = bash("lint", "cargo clippy", &[]);
-    lint.invariant = true;
-    let wf = workflow_with_modes(
-        vec![lint, bash("ship", "true", &[])],
-        modes(&[
-            ("quick", included(&["lint", "ship"])),
-            ("full", ModeInclude::All),
-        ]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        !errors
-            .iter()
-            .any(|e| matches!(e, CheckError::InvariantNodeExcludedFromMode { .. })),
-        "got: {errors:?}"
-    );
-}
-
-#[test]
-fn a_reroute_target_excluded_from_a_mode_is_reported() {
-    // A node in-mode whose on_failure.goto
-    // lands on a node that mode leaves out.
-    let mut lint = bash("lint", "cargo clippy", &[]);
-    lint.on_failure = Some(OnFailure {
-        goto: "fix-lint".into(),
-        max_reroutes: 2,
-    });
-    let wf = workflow_with_modes(
-        vec![lint, bash("fix-lint", "true", &[])],
-        modes(&[("quick", included(&["lint"]))]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::RerouteTargetExcludedFromMode {
-            mode: "quick".into(),
-            node: "lint".into(),
-            goto: "fix-lint".into(),
-        }]
-    );
-}
-
-#[test]
-fn a_reroute_target_included_in_the_same_mode_has_no_error() {
-    let mut lint = bash("lint", "cargo clippy", &[]);
-    lint.on_failure = Some(OnFailure {
-        goto: "fix-lint".into(),
-        max_reroutes: 2,
-    });
-    let wf = workflow_with_modes(
-        vec![lint, bash("fix-lint", "true", &[])],
-        modes(&[("quick", included(&["lint", "fix-lint"]))]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        !errors
-            .iter()
-            .any(|e| matches!(e, CheckError::RerouteTargetExcludedFromMode { .. })),
-        "got: {errors:?}"
-    );
-}
-
-#[test]
-fn a_re_route_from_a_node_excluded_from_the_mode_is_never_checked() {
-    // The failing node itself isn't in "quick" at all — its goto target
-    // being missing from the same mode isn't this mode's problem.
-    let mut lint = bash("lint", "cargo clippy", &[]);
-    lint.on_failure = Some(OnFailure {
-        goto: "fix-lint".into(),
-        max_reroutes: 2,
-    });
-    let wf = workflow_with_modes(
-        vec![
-            lint,
-            bash("fix-lint", "true", &[]),
-            bash("ship", "true", &[]),
-        ],
-        modes(&[("quick", included(&["ship"]))]),
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        !errors
-            .iter()
-            .any(|e| matches!(e, CheckError::RerouteTargetExcludedFromMode { .. })),
-        "got: {errors:?}"
-    );
-}
-
 fn internal_gate(id: &str, options: &[&str], on: &[(&str, &str)]) -> Node {
     let mut node = gate(id, &[]);
     let NodeKind::Gate {
@@ -543,43 +349,158 @@ fn a_gate_on_mapping_an_undeclared_option_is_reported() {
     );
 }
 
+/// A node that asks ends when it asks: whatever depended on the answers
+/// belongs to a node that follows it and mounts them as context.
 #[test]
-fn a_gate_on_targeting_an_unknown_node_is_reported() {
-    let wf = workflow(vec![internal_gate(
-        "approve",
-        &["ajustar"],
-        &[("ajustar", "ghost")],
-    )]);
-    let errors = check(&wf, &ConfigLayer::default());
+fn a_node_that_asks_questions_declares_nothing_else() {
+    let mut node = prompt("grill", "planner", &[]);
+    node.artifacts = Some(yunta_core::Artifacts {
+        produces: vec![
+            ArtifactSpec::Interpreted(yunta_core::ArtifactKind::Questions),
+            ArtifactSpec::Opaque("brief.md".to_string()),
+        ],
+    });
+    let errors = check(&workflow(vec![node]), &config_with_runner("planner", 1));
     assert_eq!(
         errors,
-        vec![CheckError::BrokenReference {
-            node: "approve".into(),
-            field: "on.ajustar".to_string(),
-            target: "ghost".into(),
+        vec![CheckError::QuestionsAlongsideOtherArtifacts {
+            node: "grill".into(),
+            others: vec![ArtifactSpec::Opaque("brief.md".to_string())],
         }]
     );
 }
 
 #[test]
-fn a_mode_excluding_a_gate_option_target_is_reported() {
-    // "un modo que incluye un nodo cuyo `goto`
-    // u opción de gate apunta a un nodo excluido" — now checkable since
-    // gate options exist in the schema.
-    let wf = workflow_with_modes(
-        vec![
-            bash("plan", "true", &[]),
-            internal_gate("approve", &["ajustar"], &[("ajustar", "plan")]),
-        ],
-        modes(&[("quick", included(&["approve"]))]),
+fn the_refusal_spells_the_split_and_how_to_read_the_answers() {
+    let refusal = CheckError::QuestionsAlongsideOtherArtifacts {
+        node: "grill".into(),
+        others: vec![ArtifactSpec::Opaque("brief.md".to_string())],
+    }
+    .to_string();
+    assert!(
+        refusal.contains("`brief.md`"),
+        "the refusal names what has to move: {refusal}"
     );
+    assert!(
+        refusal.contains("a node that follows it"),
+        "the refusal says where it goes: {refusal}"
+    );
+    assert!(
+        refusal.contains("kind: answers"),
+        "the refusal spells how the next node reads the answers: {refusal}"
+    );
+}
+
+#[test]
+fn a_node_cannot_owe_the_answers_the_engine_writes() {
+    // The answers arrive when a person replies, so a node that declared
+    // them would end owing a document nobody can hand it.
+    let mut node = bash("a", "true", &[]);
+    node.artifacts = Some(yunta_core::Artifacts {
+        produces: vec![yunta_core::ArtifactSpec::Interpreted(
+            yunta_core::ArtifactKind::Answers,
+        )],
+    });
+    let errors = check(&workflow(vec![node]), &ConfigLayer::default());
+    let refusal = errors
+        .iter()
+        .find_map(|e| match e {
+            CheckError::AnswersDeclaredAsProduced { node } if node.as_str() == "a" => {
+                Some(e.to_string())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("`answers` is not a node's to produce, got {errors:?}"));
+    assert!(
+        refusal.contains("kind: answers"),
+        "the refusal spells how the answers are read instead: {refusal}"
+    );
+}
+
+#[test]
+fn answers_are_read_from_the_node_that_asks() {
+    // A node that never produced a `questions` document has no answers,
+    // so a source that reads them resolves to nothing — said here rather
+    // than at run time.
+    let asking = r#"
+name: answers-source
+nodes:
+  - id: grill
+    kind: prompt
+    runner: planner
+    prompt: "ask"
+    artifacts: { produces: [questions] }
+  - id: build
+    kind: bash
+    depends_on: [grill]
+    run: "true"
+  - id: use
+    kind: bash
+    depends_on: [build]
+    run: "true"
+    context:
+      - artifact: { node: build, kind: answers }
+"#;
+    let wf: Workflow = serde_norway::from_str(asking).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::AnswersFromNodeThatNeverAsks { node, .. } if node.as_str() == "build"
+        )),
+        "`build` asks nothing, so it leaves no answers: {errors:?}"
+    );
+
+    // The same source aimed at the node that does ask is fine.
+    let wf: Workflow = serde_norway::from_str(
+        &asking.replace("node: build, kind: answers", "node: grill, kind: answers"),
+    )
+    .unwrap();
+    assert!(
+        !check(&wf, &ConfigLayer::default())
+            .iter()
+            .any(|e| matches!(e, CheckError::AnswersFromNodeThatNeverAsks { .. })),
+        "`grill` asks, so its answers are there to read"
+    );
+}
+
+/// Only a `prompt` node holds the session that hands questions over and
+/// the close that waits on them.
+#[test]
+fn only_a_prompt_node_asks() {
+    let mut node = bash("ask", "echo hi", &[]);
+    node.artifacts = Some(yunta_core::Artifacts {
+        produces: vec![ArtifactSpec::Interpreted(
+            yunta_core::ArtifactKind::Questions,
+        )],
+    });
+    let errors = check(&workflow(vec![node]), &ConfigLayer::default());
     assert_eq!(
         errors,
-        vec![CheckError::RerouteTargetExcludedFromMode {
-            mode: "quick".into(),
-            node: "approve".into(),
-            goto: "plan".into(),
+        vec![CheckError::QuestionsOnKind {
+            node: "ask".into(),
+            kind: "bash",
+        }]
+    );
+}
+
+/// The scheduler asks one top-level node at a time, so a group's child
+/// would wait forever.
+#[test]
+fn a_node_that_asks_is_refused_inside_a_parallel_group() {
+    let mut child = prompt("grill", "planner", &[]);
+    child.artifacts = Some(yunta_core::Artifacts {
+        produces: vec![ArtifactSpec::Interpreted(
+            yunta_core::ArtifactKind::Questions,
+        )],
+    });
+    let wf = workflow(vec![parallel("group", JoinPolicy::All, vec![child])]);
+    let errors = check(&wf, &config_with_runner("planner", 1));
+    assert_eq!(
+        errors,
+        vec![CheckError::QuestionsInsideParallel {
+            node: "grill".into(),
+            group: "group".into(),
         }]
     );
 }
@@ -598,44 +519,6 @@ fn a_gate_cannot_be_a_parallel_child() {
             node: "approve".into(),
             group: "group".into(),
         }]
-    );
-}
-
-#[test]
-fn a_parallel_group_s_child_id_colliding_with_another_node_is_a_duplicate() {
-    // Global uniqueness, not per-group: replay derives node state from a
-    // single flat NodeId -> NodeState map, so a child reusing an id in
-    // use elsewhere would corrupt derivation, not just read oddly.
-    let wf = workflow(vec![
-        bash("shared", "true", &[]),
-        parallel("group", JoinPolicy::All, vec![bash("shared", "true", &[])]),
-    ]);
-    let errors = check(&wf, &ConfigLayer::default());
-    assert_eq!(
-        errors,
-        vec![CheckError::DuplicateNodeId {
-            id: "shared".into()
-        }]
-    );
-}
-
-#[test]
-fn two_children_with_overlapping_declared_scope_is_an_error() {
-    let wf = workflow(vec![parallel(
-        "group",
-        JoinPolicy::All,
-        vec![
-            bash_with_scope("a", "true", &["src/**"]),
-            bash_with_scope("b", "true", &["src/lib.rs"]),
-        ],
-    )]);
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        errors.iter().any(|e| matches!(
-            e,
-            CheckError::OverlappingParallelScope { group, .. } if group.as_str() == "group"
-        )),
-        "expected an OverlappingParallelScope error, got {errors:?}"
     );
 }
 
@@ -685,28 +568,6 @@ fn a_single_child_group_never_warns_about_collision() {
 #[test]
 fn every_error_message_names_its_rule() {
     assert_eq!(
-        CheckError::DuplicateNodeId { id: "a".into() }.to_string(),
-        "duplicate node id `a`"
-    );
-    assert_eq!(
-        CheckError::BrokenReference {
-            node: "a".into(),
-            field: "depends_on".to_string(),
-            target: "b".into()
-        }
-        .to_string(),
-        "node `a`: `depends_on` references unknown node `b`"
-    );
-    assert_eq!(
-        CheckError::BrokenReference {
-            node: "a".into(),
-            field: "on_failure.goto".to_string(),
-            target: "b".into()
-        }
-        .to_string(),
-        "node `a`: `on_failure.goto` references unknown node `b`"
-    );
-    assert_eq!(
         CheckError::DependsOnCycle {
             path: "a -> b -> a".to_string()
         }
@@ -720,14 +581,6 @@ fn every_error_message_names_its_rule() {
         }
         .to_string(),
         "node `a` references runner `planner`, which `runners:` does not define"
-    );
-    assert_eq!(
-        CheckError::RunnerHasNoCandidates {
-            node: "a".into(),
-            runner: "planner".into()
-        }
-        .to_string(),
-        "node `a` references runner `planner`, which `runners:` defines with zero candidates"
     );
 }
 
@@ -918,7 +771,7 @@ fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
 #[test]
 fn an_enum_input_with_no_values_is_a_check_error() {
     let inputs = std::collections::BTreeMap::from([(
-        "severity".to_string(),
+        "severity".into(),
         input_spec("type: enum\nvalues: []\ndefault: x\n"),
     )]);
     let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
@@ -931,7 +784,7 @@ fn an_enum_input_with_no_values_is_a_check_error() {
 #[test]
 fn a_number_input_with_min_above_max_is_a_check_error() {
     let inputs = std::collections::BTreeMap::from([(
-        "n".to_string(),
+        "n".into(),
         input_spec("type: number\nmin: 10\nmax: 1\ndefault: 5\n"),
     )]);
     let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
@@ -944,7 +797,7 @@ fn a_number_input_with_min_above_max_is_a_check_error() {
 #[test]
 fn a_string_input_with_an_invalid_regex_pattern_is_a_check_error() {
     let inputs = std::collections::BTreeMap::from([(
-        "branch".to_string(),
+        "branch".into(),
         input_spec("type: string\npattern: \"[\"\ndefault: main\n"),
     )]);
     let wf = workflow_with_inputs(vec![bash("plan", "true", &[])], inputs);
@@ -971,7 +824,7 @@ fn a_template_referencing_an_undeclared_input_is_a_check_error() {
 #[test]
 fn a_template_referencing_a_declared_input_passes_check() {
     let inputs = std::collections::BTreeMap::from([(
-        "idea".to_string(),
+        "idea".into(),
         input_spec("type: string\nrequired: true\n"),
     )]);
     let node = bash("plan", "echo {{inputs.idea}}", &[]);
@@ -1009,7 +862,7 @@ fn config_with_fanout(max_parallel_nodes: u32) -> ConfigLayer {
 
 fn scoped(id: &str, scope: &[&str], depends_on: &[&str]) -> Node {
     let mut node = bash(id, "true", depends_on);
-    node.scope = scope.iter().map(|s| s.to_string()).collect();
+    node.scope = scope.iter().map(|s| (*s).into()).collect();
     node
 }
 
@@ -1086,30 +939,32 @@ fn scopeless_independent_writers_warn_once_per_component() {
 #[test]
 fn a_yunta_schema_range_covering_this_binary_passes_and_one_outside_fails() {
     let mut wf = workflow(vec![bash("a", "true", &[])]);
-    wf.yunta_schema = Some(">=1 <2".to_string());
+    wf.yunta_schema = Some(">=1 <2".into());
     assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
 
-    wf.yunta_schema = Some(">=2".to_string());
+    wf.yunta_schema = Some(">=2".into());
     let errors = check(&wf, &ConfigLayer::default());
     assert!(
         errors.iter().any(
-            |e| matches!(e, CheckError::YuntaSchemaOutside { range, .. } if range == ">=2")
+            |e| matches!(e, CheckError::YuntaSchemaOutside { range, .. } if range.as_str() == ">=2")
                 && e.to_string().contains("yunta_schema")
         ),
         "an out-of-range requirement must fail check: {errors:?}"
     );
+}
 
-    wf.yunta_schema = Some("not-a-range".to_string());
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        errors.iter().any(|e| matches!(
-            e,
-            CheckError::YuntaSchemaUnreadable {
-                source: SchemaRangeError::NoVersion { comparator },
-                ..
-            } if comparator == "not-a-range"
-        )),
-        "an unparseable range must fail loudly, naming the comparator: {errors:?}"
+/// A range nobody can read never reaches `check`: it is refused where
+/// the workflow is read, naming the comparator that stopped it.
+#[test]
+fn a_yunta_schema_range_that_does_not_parse_is_refused_at_read() {
+    let error = "not-a-range"
+        .parse::<yunta_core::SchemaRange>()
+        .expect_err("a range with no version number should not parse");
+    assert_eq!(
+        error,
+        yunta_core::SchemaRangeError::NoVersion {
+            comparator: "not-a-range".to_string()
+        }
     );
 }
 
@@ -1230,15 +1085,15 @@ nodes:
 }
 
 #[test]
-fn inherit_children_of_a_parallel_group_must_declare_scope() {
+fn tree_sharing_children_of_a_parallel_group_must_declare_scope() {
     let yaml = r#"
 name: composed
 nodes:
   - id: build
     kind: parallel
     nodes:
-      - { id: feat-a, kind: workflow, use: build-feature, isolation: inherit }
-      - { id: feat-b, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/b/**"] }
+      - { id: feat-a, kind: workflow, use: build-feature, isolation: none }
+      - { id: feat-b, kind: workflow, use: build-feature, isolation: none, scope: ["src/b/**"] }
 "#;
     let wf: Workflow = serde_norway::from_str(yaml).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
@@ -1261,20 +1116,20 @@ nodes:
 }
 
 #[test]
-fn inherit_children_with_disjoint_scopes_pass_and_overlapping_fail() {
+fn tree_sharing_children_with_disjoint_scopes_pass_and_overlapping_fail() {
     let disjoint = r#"
 name: composed
 nodes:
   - id: build
     kind: parallel
     nodes:
-      - { id: feat-a, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/a/**"] }
-      - { id: feat-b, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/b/**"] }
+      - { id: feat-a, kind: workflow, use: build-feature, isolation: none, scope: ["src/a/**"] }
+      - { id: feat-b, kind: workflow, use: build-feature, isolation: none, scope: ["src/b/**"] }
 "#;
     let wf: Workflow = serde_norway::from_str(disjoint).unwrap();
     assert!(
         check(&wf, &ConfigLayer::default()).is_empty(),
-        "disjoint inherit siblings must pass"
+        "disjoint siblings sharing one tree must pass"
     );
 
     let overlapping = r#"
@@ -1283,15 +1138,12 @@ nodes:
   - id: build
     kind: parallel
     nodes:
-      - { id: feat-a, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/**"] }
-      - { id: feat-b, kind: workflow, use: build-feature, isolation: inherit, scope: ["src/b/**"] }
+      - { id: feat-a, kind: workflow, use: build-feature, isolation: none, scope: ["src/**"] }
+      - { id: feat-b, kind: workflow, use: build-feature, isolation: none, scope: ["src/b/**"] }
 "#;
-    let wf: Workflow = serde_norway::from_str(overlapping).unwrap();
     assert!(
-        check(&wf, &ConfigLayer::default())
-            .iter()
-            .any(|e| matches!(e, CheckError::OverlappingParallelScope { .. })),
-        "overlapping inherit siblings must be refused"
+        yunta_core::workflow::read::read(overlapping, std::path::Path::new("wf.yaml")).is_err(),
+        "overlapping siblings sharing one tree must be refused"
     );
 }
 
@@ -1322,7 +1174,8 @@ fn a_missing_composition_reference_is_a_check_error() {
         &ConfigLayer::default(),
         root.path(),
         &yunta_engine::WorkflowOrigin::Repo,
-    );
+    )
+    .errors;
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -1345,7 +1198,8 @@ fn a_composition_cycle_is_a_check_error_naming_the_chain() {
         &ConfigLayer::default(),
         root.path(),
         &yunta_engine::WorkflowOrigin::Repo,
-    );
+    )
+    .errors;
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -1369,7 +1223,8 @@ fn composition_deeper_than_the_limit_is_a_check_error() {
         &config,
         root.path(),
         &yunta_engine::WorkflowOrigin::Repo,
-    );
+    )
+    .errors;
     assert!(
         errors.iter().any(|e| matches!(
             e,
@@ -1389,6 +1244,7 @@ fn composition_deeper_than_the_limit_is_a_check_error() {
         root.path(),
         &yunta_engine::WorkflowOrigin::Repo
     )
+    .errors
     .is_empty());
 }
 
@@ -1402,7 +1258,67 @@ fn a_healthy_composition_graph_passes_check_workflow_refs() {
         root.path(),
         &yunta_engine::WorkflowOrigin::Repo
     )
+    .errors
     .is_empty());
+}
+
+/// A suite is measured on every run under this config. A workflow that
+/// never compares against it pays for a measurement nothing reads, and
+/// only the walk can say so — `check` reads no files, so it cannot see
+/// what the composed workflows do.
+#[test]
+fn a_suite_nothing_compares_is_a_warning() {
+    let root = catalog_root(&[("a", LEAF)]);
+    let wf: Workflow = serde_norway::from_str(&uses("parent", "a")).unwrap();
+    let config: ConfigLayer = serde_norway::from_str("baseline: { suite: \"make test\" }").unwrap();
+    let warnings = yunta_engine::check_workflow_refs(
+        &wf,
+        &config,
+        root.path(),
+        &yunta_engine::WorkflowOrigin::Repo,
+    )
+    .warnings;
+    assert!(
+        warnings.iter().any(|w| matches!(
+            w,
+            CheckWarning::BaselineNeverCompared { suite } if suite == "make test"
+        )),
+        "got: {warnings:?}"
+    );
+
+    // No suite, nothing to read: no warning either way.
+    assert!(yunta_engine::check_workflow_refs(
+        &wf,
+        &ConfigLayer::default(),
+        root.path(),
+        &yunta_engine::WorkflowOrigin::Repo
+    )
+    .warnings
+    .is_empty());
+}
+
+/// The measurement is the lineage's, so a comparison anywhere in the
+/// composition reads it — including one the entry workflow only reaches
+/// through a `use:`.
+#[test]
+fn a_suite_a_composed_workflow_compares_is_not() {
+    let root = catalog_root(&[(
+        "a",
+        "name: a\nnodes:\n  - { id: no-regressions, kind: check, builtin: baseline_compare }\n",
+    )]);
+    let wf: Workflow = serde_norway::from_str(&uses("parent", "a")).unwrap();
+    let config: ConfigLayer = serde_norway::from_str("baseline: { suite: \"make test\" }").unwrap();
+    assert!(
+        yunta_engine::check_workflow_refs(
+            &wf,
+            &config,
+            root.path(),
+            &yunta_engine::WorkflowOrigin::Repo,
+        )
+        .warnings
+        .is_empty(),
+        "the child compares against the measurement its parent's run took"
+    );
 }
 
 // --- `context:` allowed on loops ------------------------------------------------
@@ -1485,6 +1401,19 @@ nodes:
             .any(|w| matches!(w, CheckWarning::PushToBaseWithoutGate { node, .. } if node.as_str() == "pr")),
         "got: {:?}",
         check_warnings(&wf, &config)
+    );
+    // The remedy the warning proposes is a variable, so it is spelled
+    // the way the renderer reads it — the warning's own text is the one
+    // copy a compile-time format string forces, and this is what keeps
+    // it honest.
+    let warned = check_warnings(&wf, &config)
+        .into_iter()
+        .find(|w| matches!(w, CheckWarning::PushToBaseWithoutGate { .. }))
+        .expect("the ungated push warns")
+        .to_string();
+    assert!(
+        warned.contains(&yunta_core::template::TemplateVar::RunBranch.braced()),
+        "{warned}"
     );
 
     // The same push behind a gate is deliberate — no warning: a gate
@@ -1615,30 +1544,6 @@ nodes:
 
 fn parsed(yaml: &str) -> Workflow {
     serde_norway::from_str(yaml).unwrap()
-}
-
-#[test]
-fn a_mount_naming_an_unknown_node_is_refused() {
-    let wf = parsed(
-        r#"
-name: parent
-nodes:
-  - id: cons
-    kind: workflow
-    use: consumer
-    mounts:
-      - artifact: { node: ghost, name: report.md }
-"#,
-    );
-    let errors = check(&wf, &ConfigLayer::default());
-    assert!(
-        errors.iter().any(|e| matches!(
-            e,
-            CheckError::BrokenReference { node, field, target }
-                if node.as_str() == "cons" && field == "mounts" && target.as_str() == "ghost"
-        )),
-        "got: {errors:?}"
-    );
 }
 
 #[test]
@@ -1875,8 +1780,14 @@ nodes:
 }
 
 #[test]
-fn an_artifact_name_that_climbs_out_of_the_run_is_refused() {
-    for name in ["../escape.md", "/tmp/escape.md", "notes/../../escape.md"] {
+fn an_artifact_name_the_run_could_not_take_is_refused() {
+    for name in [
+        "../escape.md",
+        "/tmp/escape.md",
+        "notes/../../escape.md",
+        "tasks.yaml",
+        "answers.yaml",
+    ] {
         let mut node = bash("a", "true", &[]);
         node.artifacts = Some(yunta_core::Artifacts {
             produces: vec![yunta_core::ArtifactSpec::Opaque(name.to_string())],
@@ -1885,8 +1796,8 @@ fn an_artifact_name_that_climbs_out_of_the_run_is_refused() {
         assert!(
             errors.iter().any(|e| matches!(
                 e,
-                CheckError::ArtifactNameEscapes { node, name: offending }
-                    if node.as_str() == "a" && offending == name
+                CheckError::ArtifactNameRefused { node, said }
+                    if node.as_str() == "a" && said.contains(name)
             )),
             "`{name}` must be refused, got {errors:?}"
         );
@@ -1895,13 +1806,13 @@ fn an_artifact_name_that_climbs_out_of_the_run_is_refused() {
     let mut node = bash("a", "true", &[]);
     node.artifacts = Some(yunta_core::Artifacts {
         produces: vec![yunta_core::ArtifactSpec::Opaque(
-            "reports/report-{{runner.role}}.md".to_string(),
+            "reports/report-{{runner.name}}.md".to_string(),
         )],
     });
     assert!(
         !check(&workflow(vec![node]), &ConfigLayer::default())
             .iter()
-            .any(|e| matches!(e, CheckError::ArtifactNameEscapes { .. })),
+            .any(|e| matches!(e, CheckError::ArtifactNameRefused { .. })),
         "a relative name, subdirectory and template included, is fine"
     );
 }
@@ -1966,4 +1877,174 @@ fn every_node_kind_may_declare_an_interpreted_artifact() {
             "`{node_kind}` may declare a tasks document"
         );
     }
+}
+
+// --- what a workflow asks of its adapters ------------------------------
+
+/// A capability set with one flag on and everything else off.
+fn only(capability: yunta_core::Capability) -> yunta_core::Capabilities {
+    let mut declared = yunta_core::Capabilities::default();
+    match capability {
+        yunta_core::Capability::PermissionProfiles => declared.permission_profiles = true,
+        yunta_core::Capability::CustomAgents => declared.custom_agents = true,
+        yunta_core::Capability::ResumeSession => declared.resume_session = true,
+        yunta_core::Capability::Fence => declared.fence = yunta_core::FenceLevel::ToolCalls,
+        yunta_core::Capability::UsageReporting => declared.usage_reporting = true,
+        yunta_core::Capability::Skills => declared.skills = true,
+        yunta_core::Capability::RunTools => declared.run_tools = true,
+        yunta_core::Capability::NetworkIsolation => declared.network_isolation = true,
+    }
+    declared
+}
+
+/// A `bash`-free node on runner `planner`, declaring `permissions:` or
+/// `agent:` as the caller asks.
+fn asking_node(yaml: &str) -> Workflow {
+    workflow(vec![serde_norway::from_str(yaml).expect("the node parses")])
+}
+
+#[test]
+fn check_refuses_read_only_on_an_adapter_without_permission_profiles() {
+    let wf = asking_node(
+        "{ id: audit, kind: prompt, runner: planner, prompt: \"look\", permissions: read-only }",
+    );
+    let config = config_with_runner("planner", 1);
+
+    let errors = check_against(&wf, &config, &|_| Some(yunta_core::Capabilities::default()));
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::CapabilityUnsupported { capability, .. }
+                if *capability == yunta_core::Capability::PermissionProfiles
+        )),
+        "a profile the adapter cannot distinguish is refused before a run: {errors:?}"
+    );
+
+    let allowed = check_against(&wf, &config, &|_| {
+        Some(only(yunta_core::Capability::PermissionProfiles))
+    });
+    assert!(
+        allowed.is_empty(),
+        "an adapter that has it runs the same workflow: {allowed:?}"
+    );
+}
+
+#[test]
+fn check_refuses_an_agent_on_an_adapter_without_custom_agents() {
+    let wf = asking_node(
+        "{ id: audit, kind: prompt, runner: planner, prompt: \"look\", agent: reviewer }",
+    );
+    let config = config_with_runner("planner", 1);
+
+    let errors = check_against(&wf, &config, &|_| Some(yunta_core::Capabilities::default()));
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::CapabilityUnsupported { capability, .. }
+                if *capability == yunta_core::Capability::CustomAgents
+        )),
+        "an agent the adapter cannot select is refused before a run: {errors:?}"
+    );
+
+    let allowed = check_against(&wf, &config, &|_| {
+        Some(only(yunta_core::Capability::CustomAgents))
+    });
+    assert!(allowed.is_empty(), "{allowed:?}");
+}
+
+/// A binary that does not build the adapter judges nothing: a capability
+/// it cannot see is not one it can call absent.
+#[test]
+fn an_adapter_this_binary_does_not_build_refuses_nothing() {
+    let wf = asking_node("{ id: audit, kind: prompt, runner: planner, prompt: \"look\", permissions: read-only, agent: reviewer }");
+    let errors = check_against(&wf, &config_with_runner("planner", 1), &|_| None);
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// A runner that fans out is refused only when not one of its adapters
+/// can do what the node asks: the run takes the first available
+/// candidate, so one that cannot is not a workflow that cannot run.
+#[test]
+fn a_fan_out_is_refused_only_when_no_candidate_can_do_it() {
+    let wf = asking_node(
+        "{ id: audit, kind: prompt, runner: planner, prompt: \"look\", permissions: read-only }",
+    );
+    let config = ConfigLayer {
+        runners: Some(BTreeMap::from([(
+            "planner".into(),
+            vec![
+                RunnerCandidate {
+                    adapter: "plain".into(),
+                    model: "m".into(),
+                    agent: None,
+                },
+                RunnerCandidate {
+                    adapter: "fancy".into(),
+                    model: "m".into(),
+                    agent: None,
+                },
+            ],
+        )])),
+        ..Default::default()
+    };
+
+    let one_can = check_against(&wf, &config, &|adapter| {
+        Some(if adapter.as_str() == "fancy" {
+            only(yunta_core::Capability::PermissionProfiles)
+        } else {
+            yunta_core::Capabilities::default()
+        })
+    });
+    assert!(
+        one_can.is_empty(),
+        "one candidate can, so the run can: {one_can:?}"
+    );
+
+    let neither_can = check_against(&wf, &config, &|_| Some(yunta_core::Capabilities::default()));
+    assert_eq!(neither_can.len(), 1, "{neither_can:?}");
+}
+
+/// A group inside a group. Every surface draws a group's children one
+/// step under it and the scheduler pairs each node with the group that
+/// holds it — both are exact at one level and false at two (D179).
+#[test]
+fn a_parallel_inside_a_parallel_is_refused() {
+    let nested = r#"
+name: nested
+nodes:
+  - id: outer
+    kind: parallel
+    nodes:
+      - id: inner
+        kind: parallel
+        nodes:
+          - { id: work, kind: bash, run: "true" }
+"#;
+    let wf: Workflow = serde_norway::from_str(nested).unwrap();
+    let errors = check(&wf, &ConfigLayer::default());
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::ParallelInsideParallel { node, group }
+                if node.as_str() == "inner" && group.as_str() == "outer"
+        )),
+        "got: {errors:?}"
+    );
+
+    let flat = r#"
+name: flat
+nodes:
+  - id: outer
+    kind: parallel
+    nodes:
+      - { id: a, kind: bash, run: "true" }
+      - { id: b, kind: bash, run: "true" }
+"#;
+    let wf: Workflow = serde_norway::from_str(flat).unwrap();
+    assert!(
+        !check(&wf, &ConfigLayer::default())
+            .iter()
+            .any(|e| matches!(e, CheckError::ParallelInsideParallel { .. })),
+        "one level of grouping is what the whole surface is exact about"
+    );
 }

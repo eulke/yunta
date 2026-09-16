@@ -17,7 +17,7 @@
 use serde_json::Value;
 use yunta_core::diagnostic::ArtifactFailure;
 use yunta_core::events::{
-    ArtifactId, ArtifactOrigin, ArtifactSubmittedPayload, EventPayload, SubmissionOutcome,
+    ArtifactId, ArtifactSubmittedPayload, EventPayload, RecordedOrigin, SubmissionOutcome,
 };
 use yunta_core::{ArtifactKind, ArtifactSpec};
 
@@ -25,6 +25,7 @@ use crate::artifacts::{accept, VerifiedArtifact};
 
 use super::session::{RunToolError, SessionTools};
 use super::verdicts::{failure_heading, numbered, read_as, submission_refusal};
+use yunta_core::events::ArtifactEvent;
 
 impl SessionTools {
     /// The verdict this node's close will reach, while the session can
@@ -50,7 +51,10 @@ impl SessionTools {
         }
         let events = self.events().await?;
         let held = crate::artifacts::RunArtifacts::of(&self.host.run_dir, &events);
-        let verdicts: Vec<String> = specs.iter().map(|spec| self.verdict(spec, &held)).collect();
+        let mut verdicts: Vec<String> = Vec::with_capacity(specs.len());
+        for spec in &specs {
+            verdicts.push(self.verdict(spec, &held).await);
+        }
         Ok(verdicts.join("\n\n"))
     }
 
@@ -64,15 +68,24 @@ impl SessionTools {
     /// the close reaches, through these same two functions — which is
     /// what keeps the verdict a session can still act on and the verdict
     /// that decides the node one answer.
-    fn verdict(&self, spec: &ArtifactSpec, held: &crate::artifacts::RunArtifacts<'_>) -> String {
-        let verified = match spec.kind() {
-            Some(_) => crate::artifacts::held_document(&self.node, spec, held),
-            None => crate::artifacts::verify_one(
-                &self.node,
-                spec,
-                &self.host.run_dir,
-                self.host.max_artifact_bytes,
-            ),
+    async fn verdict(
+        &self,
+        spec: &ArtifactSpec,
+        held: &crate::artifacts::RunArtifacts<'_>,
+    ) -> String {
+        let verified = match crate::artifacts::answerer(&self.node_kind, spec.kind()) {
+            crate::artifacts::Answerer::Log => {
+                crate::artifacts::held_document(&self.node, spec, held).await
+            }
+            crate::artifacts::Answerer::Staging => {
+                crate::artifacts::verify_one(
+                    &self.node,
+                    spec,
+                    &self.host.run_dir,
+                    self.host.max_artifact_bytes,
+                )
+                .await
+            }
         };
         render_verdict(&spec.to_string(), verified)
     }
@@ -139,20 +152,34 @@ impl SessionTools {
         offered: Result<crate::artifacts::VerifiedArtifact, crate::artifacts::SubmitError>,
     ) -> Result<String, RunToolError> {
         let name = ArtifactId::Interpreted { kind }.view_name();
-        let (outcome, answer, accepted) = match offered {
-            Ok(verified) => (
-                SubmissionOutcome::Accepted {
-                    content_hash: verified.content_hash.clone(),
-                },
-                Ok(format!("{name} — accepted. {}", read_as(&verified))),
-                Some(verified),
-            ),
+        // The acceptance comes first, because the hash the submission
+        // names is the one the run's own store answers for — a session
+        // handed bytes over, and what the run holds for them is
+        // `accept`'s to say. A store that cannot take them is a log that
+        // cannot take either fact.
+        let (outcome, answer) = match offered {
+            Ok(verified) => {
+                let accepted = accept(
+                    &self.log(),
+                    &self.host.run_dir,
+                    Some(&self.node),
+                    verified.artifact.clone(),
+                    &verified.bytes,
+                    RecordedOrigin::Submitted,
+                )
+                .await?;
+                (
+                    SubmissionOutcome::Accepted {
+                        content_hash: accepted.content_hash,
+                    },
+                    Ok(format!("{name} — accepted. {}", read_as(&verified))),
+                )
+            }
             Err(crate::artifacts::SubmitError::Refused(report)) => {
                 let text = submission_refusal(&report, &name);
                 (
                     SubmissionOutcome::Refused { report },
                     Err(RunToolError::Refused { text }),
-                    None,
                 )
             }
             Err(other) => {
@@ -161,23 +188,14 @@ impl SessionTools {
                 })
             }
         };
-        self.append(EventPayload::ArtifactSubmitted(ArtifactSubmittedPayload {
-            name: name.clone(),
-            artifact_kind: kind,
-            outcome,
-        }))
+        self.append(EventPayload::Artifacts(ArtifactEvent::Submitted(
+            ArtifactSubmittedPayload {
+                name: name.clone(),
+                artifact_kind: kind,
+                outcome,
+            },
+        )))
         .await?;
-        if let Some(verified) = accepted {
-            accept(
-                &self.log(),
-                &self.host.run_dir,
-                Some(&self.node),
-                verified.artifact.clone(),
-                &verified.bytes,
-                ArtifactOrigin::Submitted,
-            )
-            .await?;
-        }
         answer
     }
 

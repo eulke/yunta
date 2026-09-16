@@ -6,16 +6,17 @@
 **La palabra del agente nunca es evidencia.** Los agentes aportan inteligencia; los veredictos sobre su trabajo — completitud, criterios, scope, coverage, regresiones — los emite el engine ejecutando comandos y comparando datos propios. Un sistema donde el ejecutor certifica su propia obra no es determinista por más reglas que se le escriban; Yunta elimina la posibilidad estructural, no la conducta.
 De estos dos principios se derivan todas las capacidades del contrato: resumibilidad, horizonte largo, verificación e inyección de contexto son la misma propiedad — el estado es externo, auditable y derivable — vista desde distintos ángulos.
 # 2. Anatomía de un run
-Un run es la ejecución de un workflow con inputs concretos, identificado por un `run_id` (ULID — ordenable por tiempo, único sin coordinación). Materialización:\`javascript
-~/.yunta/runs/<run_id>/          # run.dir — \{\{run.dir\}\} en templates
+Un run es la ejecución de un workflow con inputs concretos, identificado por un `run_id` (ULID — ordenable por tiempo, único sin coordinación). Materialización:
+```text
+~/.yunta/runs/<run_id>/          # run.dir — {{run.dir}} en templates
 ├── manifest.yaml                # inmutable tras la creación (§2.1)
-├── [progress.md](http://progress.md)                  # generado por el engine tras cada nodo (§8.2)
+├── progress.md                  # generado por el engine tras cada nodo (§8.2)
 ├── objects/                     # los bytes de todo lo que el run tiene, por sha256 (§4, §9)
 ├── artifacts/                   # vista que el engine escribe de lo que el run tiene (§4)
-├── baseline/                    # snapshot de suite al abrir el run (§7)
+├── baseline/                    # lo que la suite escribió en el primer despertar (§7)
 └── scratch/                     # espacio de trabajo del run; sin garantías
     └── staging/<node_id>/       # donde ese nodo escribe lo que declara (§4)
-~/.yunta/worktrees/<run_id>/     # \{\{run.worktree\}\} — el código
+~/.yunta/worktrees/<run_id>/     # {{run.worktree}} — el código
 ```
 Las rutas mostradas son los **defaults**; su ubicación es configurable (§2.2) y queda congelada en el manifest de cada run.
 El worktree vive en un árbol paralelo, nunca dentro del run.dir: las operaciones de git de un agente (clean, reset) no pueden alcanzar el estado del run.
@@ -37,41 +38,41 @@ Dos reglas de potestad distintas, deliberadamente:
 Un workflow declara sus inputs como **mapa de nombre a especificación** — el nombre es la identidad, así que el formato garantiza unicidad sin validarla, y es coherente con las demás colecciones nombradas del schema (`runners:`, `modes:`, `mcp_servers:`):
 ```
 inputs:
-	idea:
-		type: string
-		required: true
-		description: "What to build — becomes the brief"
-	target_branch:
-		type: string
-		default: "\{\{project.base_branch\}\}"
-		pattern: "\^\[a-zA-Z0-9._/-\]+\$"
-	severity_floor:
-		type: enum
-		values: \[blocking, major, minor\]
-		default: major
-	max_tasks:
-		type: number
-		min: 1
-		max: 200
-		default: 40
-	changelog:
-		type: path            # debe existir al crear el run
-	tasks:
-		type: document        # se lee como su kind al crear el run
-		kind: tasks
+  idea:
+    type: string
+    required: true
+    description: "What to build — becomes the brief"
+  target_branch:
+    type: string
+    default: "{{project.base_branch}}"
+    pattern: "^[a-zA-Z0-9._/-]+$"
+  severity_floor:
+    type: enum
+    values: [blocking, major, minor]
+    default: major
+  max_tasks:
+    type: number
+    min: 1
+    max: 200
+    default: 40
+  changelog:
+    type: path            # debe existir al crear el run
+  tasks:
+    type: document        # se lee como su kind al crear el run
+    kind: tasks
 ```
 Tipos: `string`, `number`, `boolean`, `enum`, `path`, `document`. `required` y `default` son mutuamente excluyentes — tener default implica no requerido. Validaciones por tipo: `values` (enum), `pattern` y `min_length` (string), `min`/`max` (number), `kind` (document). **`path`**** valida existencia siempre**, sin flag y sin distinguir archivo de directorio: un path inexistente va a fallar de todos modos, y hacerlo al crear el run convierte un error caro y confuso — tras worktree, baseline y quizá tokens gastados — en uno inmediato y claro. Quien necesite nombrar un archivo que aún no existe está pidiendo un `string`, no un `path`.
 
-**Un `document` entra al run como artifact, no como ruta.** El tipo declara el `kind` con el que el archivo se lee, y al crear el run —antes del worktree y del baseline, por el mismo racional que `path`— el engine lo lee por la única puerta de ese kind, que corre forma y reglas juntas: un documento inválido se rechaza ahí, con todos sus problemas nombrados o con el problema estructural y su ruta adentro, y el run no llega a existir. Uno válido se rinde canónico y **nace como artifact del run**, con identidad `kind`, origen `input` nombrando el input, y sin nodo productor: es exactamente lo que el run tendría si un nodo lo hubiera producido, con lo cual todo lector —una fuente de contexto, el `loop` que busca su documento de tareas, un mount, la destilación— lo encuentra por el log como a cualquier otro (§4). Un documento de tareas registra además sus tareas, y esa es la regla general de todo documento de tareas, no una particularidad del input: la aceptación dice qué tiene el run, y el `task_registered` qué tiene que hacer con eso, así que todo documento de tareas que entra a un run registra sus tareas por la puerta por la que entró —al nacer si lo trae un input, un mount o una promoción; al cierre del nodo que lo produce o que lo adquiere de un hijo—. Qué estado sigue a cada registro lo dice §5.7. El valor congelado de un input `document` es la identidad del documento, `sha256:<hash>`, no la ruta: el run sobrevive al archivo del que se leyó, así que `{{inputs.<nombre>}}` rinde el hash. Como un input y un nodo que produzcan el mismo kind serían dos productores de una identidad sin nada que los ordene, `yunta check` rechaza esa combinación nombrando a los dos.
+**Un `document` entra al run como artifact, no como ruta.** El tipo declara el `kind` con el que el archivo se lee, y al crear el run —antes del worktree, por el mismo racional que `path`— el engine lo lee por la única puerta de ese kind, que corre forma y reglas juntas: un documento inválido se rechaza ahí, con todos sus problemas nombrados o con el problema estructural y su ruta adentro, y el run no llega a existir. Uno válido se rinde canónico y **nace como artifact del run**, con identidad `kind`, origen `input` nombrando el input, y sin nodo productor: es exactamente lo que el run tendría si un nodo lo hubiera producido, con lo cual todo lector —una fuente de contexto, el `loop` que busca su documento de tareas, un mount, la destilación— lo encuentra por el log como a cualquier otro (§4). Un documento de tareas registra además sus tareas, y esa es la regla general de todo documento de tareas, no una particularidad del input: la aceptación dice qué tiene el run, y el `task_registered` qué tiene que hacer con eso, así que todo documento de tareas que entra a un run registra sus tareas por la puerta por la que entró —al nacer si lo trae un input, un mount o una promoción; al cierre del nodo que lo produce o que lo adquiere de un hijo—. Qué estado sigue a cada registro lo dice §5.7. El valor congelado de un input `document` es la identidad del documento, `sha256:<hash>`, no la ruta: el run sobrevive al archivo del que se leyó, así que `{{inputs.<nombre>}}` rinde el hash. Como un input y un nodo que produzcan el mismo kind serían dos productores de una identidad sin nada que los ordene, `yunta check` rechaza esa combinación nombrando a los dos.
 `description` no es decorativa: es lo que `list_workflows` le muestra a un agente cliente y lo que `--help` muestra a una persona. Un catálogo sin descripciones es una lista de nombres sin sentido.
 Reglas: todo se valida **al crear el run, antes del primer token**; los defaults se resuelven en ese momento y quedan congelados en el manifest (resolverlos por nodo introduciría estado no determinista); y `yunta check` verifica que todo `{{inputs.x}}` de los templates refiera a un input declarado.
 # 3. Modelo de eventos
-El event log es append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`. El estado actual no se guarda: se **deriva** por replay del log (snapshots solo como optimización, jamás como fuente de verdad). Los 36 tipos de evento (30 filas; varias agrupan variantes emparentadas):
+El event log es append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`. El estado actual no se guarda: se **deriva** por replay del log (snapshots solo como optimización, jamás como fuente de verdad). Los 38 tipos de evento (31 filas; varias agrupan variantes emparentadas):
 | Evento | Emisor | Payload relevante |
 |---|---|---|
 | `run_created` | engine | manifest hash, inputs, modo, `promoted_from?` |
 | `runner_resolved` | engine | rol, candidato elegido, candidatos descartados y causa |
-| `baseline_captured` | engine | comando de suite, resultados, hash |
+| `baseline_captured` | engine | comando de suite, resultados, hash, origen (`measured` \| `inherited` con el run que midió) |
 | `node_started` | engine | node_id, intento N |
 | `agent_session_opened` | adapter | session_id, agente, modelo, capacidades |
 | `agent_message` | adapter | resumen/uso de tokens (nunca el texto completo) |
@@ -87,7 +88,7 @@ El event log es append-only: `(run_id, seq, timestamp, node_id?, kind, payload_j
 | `hook_executed` | engine | node_id, fase before/after, comando, exit code |
 | `node_rerouted` | engine | nodo fallido, destino, causa, reintento N de M |
 | `gate_waiting` / `gate_resolved` | engine/adapter | opciones, elección, quién, feedback |
-| `questions_answered` | engine | node_id, hash del artifact de respuestas, canal (tty\\|mcp\\|pr), respondiente si se conoce |
+| `questions_asked` / `questions_answered` | engine | node_id; hash e ids del documento `questions` y tokens de la sesión que preguntó / hash del artifact de respuestas, canal (tty\\|mcp), respondiente si se conoce |
 | `loop_iteration` | engine | iteración N, evaluación de `until` |
 | `artifact_submitted` | engine | node_id, nombre y kind del artifact, veredicto: aceptado con su content hash, o rechazado con el reporte entero (§4.1) |
 | `artifact_accepted` | engine | node_id del productor (ausente para lo que el run adquiere sin nodo), identidad del artifact (kind interpretado o nombre opaco), content hash y origen |
@@ -98,6 +99,7 @@ El event log es append-only: `(run_id, seq, timestamp, node_id?, kind, payload_j
 | `promotion_signaled` | engine | razón, evidencia, modo sugerido |
 | `child_run_created` / `child_run_finished` | engine | node_id, child run_id, `workflow_hash` del hijo, estado terminal |
 | `capability_degraded` | engine | capacidad, adapter, política aplicada |
+| `write_refused` | adapter | sesión que la rechazó, y el path que la escritura nombraba (§6) |
 | `run_paused` / `run_resumed` / `run_finished` | engine | razón / estado terminal, métricas |
 
 Dos decisiones incorporadas al modelo. Primera: `agent_session_opened` es obligatorio para los adapters y transporta el session_id — es lo que hace posible reanudar conversaciones (§8.1). Segunda: el uso de tokens viaja en eventos, así que los presupuestos (`limits.*`) se evalúan en el engine contra el log, nunca contra el autorreporte del agente.
@@ -117,7 +119,7 @@ Derivados del log: `pending → ready → running → done | failed | skipped`, 
 Cada evento persiste un `event_hash` que encadena con el anterior — lo que RFC-0003 promete en el recibo ("342 events, hash-linked, replayable") tiene aquí su definición exacta:
 
 ```
-event_hash = SHA-256(prev_event_hash \|\| campos_estructurales_en_orden_fijo)
+event_hash = SHA-256(prev_event_hash || campos_estructurales_en_orden_fijo)
 ```
 
 **Campos que participan**, en el orden declarado del schema (nunca orden alfabético de mapa — evita ambigüedad de serialización): `run_id, seq, timestamp, node_id, kind, payload_json, schema_version`. El `event_hash` se calcula sobre **los bytes exactamente como se persistieron**, antes de cualquier normalización en lectura (§3.1): la integridad de la cadena es así completamente ortogonal a la evolución del schema — un evento `_v2` futuro no invalida hashes ya calculados sobre eventos `_v1` existentes.
@@ -136,14 +138,14 @@ Un artifact es un output que un nodo **declara** producir (`artifacts.produces`)
 Por default un artifact es **opaco**: el engine sabe que existe y qué hash tiene, y su estructura interna es la que el agente haya decidido — dos runs del mismo workflow pueden producir formatos distintos y ambos son válidos. Eso alcanza para todo lo que el engine transporta sin necesitar entender.
 El campo `kind` marca lo contrario: que el engine **interpreta** el contenido. No describe el formato del archivo, declara que hay un parser, un schema y una validación detrás, y que un archivo mal formado falla el nodo. La vara para agregar un `kind` es alta: solo cuando el engine necesita los datos para decidir o contar, nunca cuando alcanza con verificar que el archivo está.
 **Un documento también puede entrar sin nodo que lo produzca**: un input `type: document` (§2.3) se lee por la puerta de su kind al crear el run y el run nace teniéndolo, con origen `input` y sin productor. La única diferencia con un documento que un nodo produce es de dónde viene: se lee por la misma puerta, se guarda canónico, se resuelve por el log y —siendo `tasks`— registra sus tareas igual. Por eso un input de un kind y un nodo que produce ese mismo kind son error de `check`: serían dos productores de una identidad sin nada que los ordene.
-**La forma de un `kind:` se publica a quien la escribe, y el documento entra por una herramienta tipada.** Un `kind` declara que hay un parser detrás; declararlo sin mostrar la forma deja al que escribe adivinando una gramática que el engine tiene en tipos. Un nodo que declara `artifacts.produces: [<k>]` recibe la forma de `<k>` como fuente de contexto derivada de esa misma declaración, en el segmento `stable`, y nombra la herramienta que lleva el documento en lugar de una ruta. Fuera de un run la misma forma sale por la tool `document_shape` del plano de control y por `yunta schema <kind>`; las cuatro puertas rinden de una sola constante por kind, nombrada por un único tipo y con un test que la lee de vuelta por el mismo parser (D129, D132). **Leer un artifact interpretado es una sola puerta**: la misma lectura corre la forma y las reglas que solo valen sobre el documento entero —un id usado dos veces, una dependencia hacia una tarea que nadie declaró, dos tareas que alcanzan los mismos archivos—, así que nadie obtiene un documento sin ellas (D136). **Dentro de un run el documento se entrega, no se escribe**: una sesión de un nodo que declara un artifact entregable recibe una tool `yunta_submit_<kind>` por cada kind que declara, con `document` —su único argumento— igual al schema publicado de esa kind: el nodo declaró el kind, así que no queda nada que nombrar; la entrega deserializa al mismo tipo y corre el mismo `check()` que el cierre, el engine acepta el YAML canónico —bytes en el store, `artifact_accepted` en el log, vista bajo el nodo— y responde lo que leyó (D156). **El cierre de un documento pregunta al log**: para un artifact interpretado de un nodo de sesión, lo que el cierre resuelve es la aceptación que ese nodo tiene en pie, y los bytes salen del store; no hay archivo de por medio, ni uno que el engine se escriba a sí mismo para releerlo. El archivo del staging es lo que un nodo de comando entrega, y ahí sí es la fuente: el cierre lo lee, lo ingresa al store y lo acepta. El rechazo vuelve en la misma llamada: todos los problemas de regla cuando el documento parsea, o el problema estructural con su ruta (`tasks[1].manual_review`) cuando no, y la sesión corrige y entrega de nuevo cuantas veces haga falta — un error cuesta una llamada, no una sesión. Un documento que nadie entrega falla el nodo con `retryable: false` y un solo `node_started`: no hay a quién reinstruir, y un archivo de ese nombre que quede en el staging no lo salva, porque ninguna aceptación lo explica. Un nodo de sesión cuyo adapter no monta run tools falla antes de despachar, porque el documento no tiene por dónde entrar; un nodo de comando —`bash`, `check`, `gate`, `executor`— escribe el archivo él mismo y el cierre lo lee con el mismo código. Cuando un archivo así no cierra, el log registra la falla como dato y no como frase: un reporte por artifact que falló, con su path, su kind y todos sus problemas nombrados en el vocabulario del documento; el texto lo produce cada superficie al leerlo (D130, D133). Lo que no es contenido — un artifact ausente, vacío, por encima de `limits.max_artifact_bytes` o que el filesystem no entrega — es una falla del archivo, y eso lo dice el tipo de la falla, no un predicado (D134).
+**La forma de un `kind:` se publica a quien la escribe, y el documento entra por una herramienta tipada.** Un `kind` declara que hay un parser detrás; declararlo sin mostrar la forma deja al que escribe adivinando una gramática que el engine tiene en tipos. Un nodo que declara `artifacts.produces: [<k>]` recibe la forma de `<k>` como fuente de contexto derivada de esa misma declaración, en el segmento `stable`, y nombra la herramienta que lleva el documento en lugar de una ruta. Fuera de un run la misma forma sale por la tool `document_shape` del plano de control y por `yunta schema <kind>`; las cuatro puertas rinden de una sola constante por kind, nombrada por un único tipo y con un test que la lee de vuelta por el mismo parser (D129, D132). **Leer un artifact interpretado es una sola puerta**: la misma lectura corre la forma y las reglas que solo valen sobre el documento entero —un id usado dos veces, una dependencia hacia una tarea que nadie declaró, dos tareas que alcanzan los mismos archivos—, así que nadie obtiene un documento sin ellas (D136). **Dentro de un run el documento se entrega, no se escribe**: una sesión de un nodo que declara un artifact entregable recibe una tool `yunta_submit_<kind>` por cada kind que declara, con `document` —su único argumento— igual al schema publicado de esa kind: el nodo declaró el kind, así que no queda nada que nombrar; la entrega deserializa al mismo tipo y corre el mismo `check()` que el cierre, el engine acepta el YAML canónico —bytes en el store, `artifact_accepted` en el log, vista bajo el nodo— y responde lo que leyó (D156). **El cierre de un documento pregunta al log**: para un artifact interpretado de un nodo de sesión, lo que el cierre resuelve es la aceptación que ese nodo tiene en pie, y los bytes salen del store; no hay archivo de por medio, ni uno que el engine se escriba a sí mismo para releerlo. El archivo del staging es lo que un nodo de comando entrega, y ahí sí es la fuente: el cierre lo lee, lo ingresa al store y lo acepta. El rechazo vuelve en la misma llamada: todos los problemas de regla cuando el documento parsea, o el problema estructural con su ruta (`tasks[1].scope`) cuando no, y la sesión corrige y entrega de nuevo cuantas veces haga falta — un error cuesta una llamada, no una sesión. Un documento que nadie entrega falla el nodo con `retryable: false` y un solo `node_started`: no hay a quién reinstruir, y un archivo de ese nombre que quede en el staging no lo salva, porque ninguna aceptación lo explica. Un nodo de sesión cuyo adapter no monta run tools falla antes de despachar, porque el documento no tiene por dónde entrar; un nodo de comando —`bash`, `check`, `gate`, `executor`— escribe el archivo él mismo y el cierre lo lee con el mismo código. Cuando un archivo así no cierra, el log registra la falla como dato y no como frase: un reporte por artifact que falló, con su path, su kind y todos sus problemas nombrados en el vocabulario del documento; el texto lo produce cada superficie al leerlo (D130, D133). Lo que no es contenido — un artifact ausente, vacío, por encima de `limits.max_artifact_bytes` o que el filesystem no entrega — es una falla del archivo, y eso lo dice el tipo de la falla, no un predicado (D134).
 **`kind: tasks`** (§5) — el engine lo parsea, valida y convierte en tareas que viven en el event log. Una sesión lo entrega por `yunta_submit_tasks`; un nodo de comando escribe el archivo.
 **`kind: findings`** — hallazgos estructurados. Cada entrada declara `id`, `severity` (`blocking | major | minor | note`), `title`, `location` (path y rango opcional) y `detail`; opcionalmente `proposed_criterion` para los que ameriten volverse tarea. La unidad de validación es el hallazgo y no el documento —ninguna regla de esta kind cruza entradas—, así que no se entrega entero: se reporta de a uno con `yunta_post_finding`, cada uno validado solo y cada rechazo acotado a ese (D156). El engine emite un `finding_posted` por entrada aceptada — con lo cual los hallazgos dejan de ser prosa que alguien debe interpretar y pasan a ser datos del run: se cuentan, se agrupan por severidad, se deduplican entre reviewers por `location` + título normalizado, aparecen en `status` y en el recibo (*"3 findings: 1 blocking, 2 minor"*), y sobreviven al run para el gate de promoción o la destilación. Un nodo consolidador sigue existiendo para el juicio — qué corregir, qué diferir — pero recibe datos, no tres documentos con estructuras distintas.
 **Un solo schema de hallazgo, una sola vía de entrada, y el archivo como proyección.** Todo hallazgo entra igual, lo encuentre un review o una tarea a mitad de camino: por `yunta_post_finding` del MCP por-run (§6.4), validado contra el mismo `FindingEntry` y rechazado en el acto si le falta algo — reportar mal es un error visible y corregible, no un texto libre que después nadie puede procesar. Un hallazgo se corrige con `yunta_update_finding`, que lo reemplaza entero por id, y se retira con motivo por `yunta_withdraw_finding`, solo por el nodo que lo posteó y con el retiro como estado final. El artifact `findings` de un nodo `prompt` o `loop` es la **proyección** de lo que ese nodo reportó, derivada y aceptada por el engine al cierre —antes de que el cierre pregunte por ella—, con lo que un hallazgo sobrevive a la sesión que lo encontró; un nodo que no reporta nada obtiene una lista vacía, que es el resultado de una revisión sin hallazgos. Un nodo `kind: workflow` recibe el archivo de su child run y reemite sus entradas. El **conjunto efectivo** —último estado de cada par `(nodo, id)`, sin los retirados, en el orden en que cada uno se posteó por primera vez— lo calcula un único pliegue, `events::findings::FindingLedger`, del que leen la derivación del archivo, la herencia entre nodos, la destilación y las estadísticas: con tres eventos por hallazgo, un segundo pliegue es una segunda respuesta.
 Destino: todo finding vive en el event log y en el `events.jsonl` que el run exporta al cerrar (§8.3), sin depender de que el workflow declare nada. El engine **no impone** un artifact de cierre ni un formato de reporte: qué hacer con los hallazgos — consolidarlos, promoverlos, destilarlos, ignorarlos — es decisión del workflow. Lo que el engine garantiza es que no se pierdan y que sean consultables.
-**`kind: questions`** — preguntas para una persona. Cada entrada declara `id`, `text`, `answer_type` (`text | choice | boolean`), `values` cuando es `choice`, y `required`. Un nodo que necesita información del usuario **no conversa**: entrega este documento por `yunta_submit_questions` y termina. El engine lo lee y lo renderiza — en terminal con TTY, pregunta por pregunta; sin TTY o desde MCP, como el mismo objeto que ya renderizan los gates (§5.3), respondible por consola, tool MCP o pull request. Las respuestas se materializan como artifact y emiten `questions_answered` (hash del artifact, canal, respondiente si se conoce) — auditable igual que un `gate_resolved`; el nodo siguiente las consume como contexto normal.
+**`kind: questions`** — preguntas para una persona. Cada entrada declara `id`, `text`, `answer_type` (`text | choice | boolean`), `values` cuando es `choice`, y `required`. **Un nodo que pregunta, pregunta**: entrega este documento por `yunta_submit_questions`, cierra entero —hooks `after`, scope, artifacts— y registra `questions_asked` (hash e ids del documento, tokens de la sesión que preguntó) en vez de un terminal. Entre ese hecho y `questions_answered` el nodo espera, sin segundo `node_started`, y el `node_finished` que el cierre difirió llega después de la respuesta. Por eso un nodo que declara `questions` no declara ningún otro artifact, es `kind: prompt` y no vive dentro de un `parallel`: `yunta check` rechaza las tres cosas nombrando el corte, porque lo que depende de las respuestas es del nodo siguiente. El engine renderiza las preguntas en la superficie que haya — en terminal con TTY, pregunta por pregunta; sin ninguna, el run se estaciona con las preguntas registradas hasta que una la alcance (consola al reanudar, tool MCP; por pull request es deuda). Las respuestas se materializan como artifact del nodo que preguntó y emiten `questions_answered` (hash del artifact, canal, respondiente si se conoce) — auditable igual que un `gate_resolved`; el nodo siguiente las consume como contexto normal, junto a las preguntas que contestan. Un documento sin preguntas no pregunta: el nodo termina en el mismo cierre y el engine deja unas respuestas vacías, derivadas, para que el nodo siguiente monte siempre lo que declaró montar.
 
-Consecuencias del diseño: nada de esto es una conversación, así que el run sigue siendo reanudable y desatendible, porque si muere durante la espera las preguntas están en disco y se vuelven a hacer al reanudar, sin conversación a medias que reconstruir; y en CI, sin nadie que responda, el run queda `waiting` con las preguntas registradas, igual que ante un gate. `interactive: true` deja de ser un modo de ejecución y pasa a ser lo que siempre fue: **un dato de presentación** — cómo el engine muestra las preguntas, no cómo corre el nodo.
+Consecuencias del diseño: nada de esto es una conversación, así que el run sigue siendo reanudable y desatendible, porque si muere durante la espera las preguntas están en disco y se vuelven a hacer al reanudar, sin conversación a medias que reconstruir; y en CI, sin nadie que responda, el run queda `waiting` con las preguntas registradas, igual que ante un gate. Un corte después de la respuesta tampoco cuesta una sesión: el nodo ya cerró cuando preguntó, así que lo único que queda por escribir es su terminal. Cómo se presentan las preguntas es de la superficie, no del nodo: un nodo que declara `questions` ya dijo todo lo que tenía que decir.
 
 El conocimiento durable (`knowledge/`, §9.2) permanece deliberadamente **opaco**: su valor es ser prosa que una persona y un agente leen: estructurarlo lo empobrecería sin darle al engine nada que necesite decidir.
 # 5. Documento de tareas: criterios ejecutables y verificación en rojo
@@ -151,22 +153,22 @@ Los workflows de implementación giran alrededor de un **documento de tareas**: 
 ## 5.1 Formato de tarea
 ```
 tasks:
-	- id: T001
-		title: "Extraer middleware de auth"
-		depends_on: \[\]
-		scope: \["src/auth/"\]           # globs que la tarea puede tocar — obligatorio
-		criteria:                        # ejecutables; exit 0 = pasa
-			- cmd: "test -f src/auth/[middleware.rs](http://middleware.rs)"
-			- cmd: "cargo test -p auth"
-			- cmd: "! grep -rn 'auth_legacy' src/"
-				type: guard                  # guard: debe pasar antes Y después
-		notes: ""                        # contexto mínimo para un runner sin historial
+  - id: T001
+    title: "Extraer middleware de auth"
+    depends_on: []
+    scope: ["src/auth/"]           # globs que la tarea puede tocar — obligatorio
+    criteria:                        # ejecutables; exit 0 = pasa
+      - cmd: "test -f src/auth/middleware.rs"
+      - cmd: "cargo test -p auth"
+      - cmd: "! grep -rn 'auth_legacy' src/"
+        type: guard                  # guard: debe pasar antes Y después
+    notes: ""                        # contexto mínimo para un runner sin historial
 ```
-Toda tarea requiere al menos un criterio `cmd`. Lo no verificable por comando se reformula hasta que lo sea, o excepcionalmente se marca `manual_review: true` con justificación — el único punto del ciclo donde un LLM juzga completitud, acotado a un nodo de auditoría con rúbrica fija.
+Toda tarea requiere al menos un criterio `cmd`: los criterios son la única verificación de una tarea, y ningún LLM juzga completitud en ningún punto del ciclo. Lo no verificable por comando se reformula hasta que lo sea, o sale del documento de tareas y va detrás de un nodo `gate`, donde lo cierra una persona.
 Los criterios deben ser **deterministas respecto del árbol de trabajo**: dado el mismo árbol, el mismo resultado. Un comando cuyo veredicto depende de la hora, la red o un servicio externo no es un criterio — es un nodo `bash` (los nodos nunca se memoizan, §5.4), donde además queda visible en el DAG con su evento y su re-ruta, en lugar de escondido en un documento de doscientas tareas. `yunta check` no puede probar determinismo, pero el ciclo lo delata: un criterio no determinista produce pre-checks azarosos y rebotes inexplicables.
 ## 5.2 Ciclo de vida de una tarea (ejecutado íntegramente por el engine)
 1. **Elegibilidad**: `pending` con todas sus deps `done` (derivado del log).
-2. **Pre-check en rojo**: el engine ejecuta los criterios (con memoización y short-circuit, §5.4). Los no-`guard` deben FALLAR — un criterio que ya pasa antes del trabajo no prueba nada, y la tarea rebota a re-plan con evento que identifica el criterio trivial. Los `guard` deben pasar (son la línea de no-regresión local). Esta fase valida al validador: sin ella, un plan de criterios vacuos produciría un run verde donde no se hizo nada, y el post-check no podría distinguir "lo logré" de "ya estaba".
+2. **Pre-check en rojo**: el engine ejecuta los criterios (con memoización y en el orden aprendido, §5.4). Los no-`guard` deben FALLAR — un criterio que ya pasa antes del trabajo no prueba nada, y la tarea rebota a re-plan con evento que identifica el criterio trivial. Los `guard` deben pasar (son la línea de no-regresión local). Esta fase valida al validador: sin ella, un plan de criterios vacuos produciría un run verde donde no se hizo nada, y el post-check no podría distinguir "lo logré" de "ya estaba".
 3. El engine lanza el nodo de implementación con brief mínimo: ruta al documento de tareas + task_id. El agente lee **su** tarea en el momento; no recibe el plan como prosa ni historial conversacional.
 4. **Post-check**: criterios de nuevo — todos verdes — más scope check (§6). Solo entonces el engine emite `task_status_changed: done`, con el commit en el que quedó el árbol del run al integrar la tarea: es el hecho por el que otro run puede después decidir si su propio árbol tiene ese trabajo (§5.7). **No existe API por la cual un agente marque estado de tarea**: la verificación no es un rol que alguien cumple, es una fase que el engine ejecuta.
 5. Fallo → reintento (cap configurable, default 2, siempre con sesión nueva), luego pasada de diagnóstico si el workflow la define, luego `blocked` + gate de escalación (§5.3).
@@ -175,21 +177,22 @@ Los loops con `until: all_tasks_complete` consultan este estado derivado. Un pla
 Cuando el sistema necesita una decisión humana por agotamiento — tarea `blocked` (§5.2 paso 5), re-rutas agotadas (§11.2), límite de presupuesto (§8.3) — el gate llega empaquetado: **el que escala hace el trabajo de armar la decisión, no el que decide**. Estructura normativa:
 ```
 escalation:
-	summary: "T007 failed 3 times: the auth middleware test expects a session store that doesn't exist"
-	evidence:                        # mecánica, adjuntada por el ENGINE desde el log
-		- criteria_checked: T007 post (attempt 3) — 2/3 green, failing: cargo test -p auth
-		- node-output: tests digest (last 20 lines)
-	options:                         # de juicio — las redacta el nodo de diagnóstico
-		- id: add-store
-			label: "Add an in-memory session store"
-			tradeoff: "Unblocks now; +1 task to tasks document; touches src/session/ (outside current scope)"
-		- id: descope
-			label: "Defer T007, ship without session persistence"
-			tradeoff: "Ships today; creates known-gap finding for next run"
-		- id: abort
-			label: "Abort the run"
-	free_text: true                  # siempre disponible
-	default_on_timeout: none         # jamás auto-decide; esperar es un estado válido
+  summary: "T007 failed 3 times: the auth middleware test expects a session store that doesn't exist"
+  evidence:                        # mecánica, adjuntada por el ENGINE desde el log
+    - criteria_checked: "T007 post (attempt 3) — 2/3 green, failing: cargo test -p auth"
+    - node-output: "tests digest (last 20 lines)"
+  options:                         # de juicio — las redacta el nodo de diagnóstico
+    - id: add-store
+      label: "Add an in-memory session store"
+      tradeoff: "Unblocks now; +1 task to tasks document; touches src/session/ (outside current scope)"
+    - id: descope
+      label: "Defer T007, ship without session persistence"
+      tradeoff: "Ships today; creates known-gap finding for next run"
+    - id: abort
+      label: "Abort the run"
+      tradeoff: "Pauses here; nothing further executes"
+  free_text: true                  # siempre disponible
+  default_on_timeout: none         # jamás auto-decide; esperar es un estado válido
 ```
 Reglas: la `evidence` la adjunta el engine directo del log — el humano audita en el mismo gate si el `summary` del LLM es fiel a los hechos certificados; toda opción lleva `tradeoff` obligatorio y las que amplían trabajo lo declaran — elegirlas autoriza la ampliación, que el engine registra en `gate_resolved` y traduce en re-plan o promoción; `free_text` siempre existe — el menú acelera el caso común, no encierra; ningún timeout decide — auto-decidir sería degradación silenciosa con otro nombre. El mismo objeto se renderiza en toda superficie (consola, tool MCP `resolve_gate`) vía el trait `HumanInteraction`; sus textos son de cara al usuario y van en inglés.
 ## 5.4 Memoización de criterios
@@ -199,15 +202,15 @@ key = hash(comando + tree_hash + env declarado + versión de config resuelta)
 ```
 `tree_hash` es el hash del árbol de trabajo (git lo calcula gratis: árbol del índice, o commit más diff sucio). Si nadie modificó un byte desde la ejecución anterior, la clave coincide y el resultado se reutiliza; si algo cambió — una edición del agente, un hook que corrió un formatter, un `before` que instaló dependencias — la clave cambia y el criterio se ejecuta de verdad. La clave *es* el estado: no existe forma de que un cambio pase inadvertido.
 Esto elimina la única redundancia real del ciclo: los criterios `guard` (suite global, baseline) que el post-check de una tarea acaba de ejecutar y el pre-check de la siguiente volvería a pedir. Los criterios propios de cada tarea tienen comando distinto — clave distinta — y se ejecutan siempre, que es exactamente lo que debe pasar.
-Reglas: la memoización vive **dentro del run** (nunca cross-run: otra máquina, otro entorno u otro día invalidan las suposiciones); no hay opt-out por criterio, porque los criterios son deterministas por definición (§5.1) y lo no determinista pertenece a nodos `bash`, que nunca se memoizan; y `criteria_checked` registra si hubo ejecución o reutilización, de modo que recibo y replay muestran qué se corrió y qué se reutilizó — nada se da por verificado en silencio.
-Complemento del pre-check: **short-circuit con orden aprendido**. Basta que un criterio no-`guard` falle para que la fase concluya; y el engine ordena los criterios de menor a mayor duración histórica (dato que el log ya tiene de ejecuciones previas del mismo comando), de modo que el pre-check típico termina en el primer comando barato en rojo sin llegar a la suite. La heurística solo afecta el orden de evaluación — nunca qué se verifica ni el veredicto.
+Reglas: la cache de resultados vive **dentro de una invocación** (nunca cross-run: otra máquina, otro entorno u otro día invalidan las suposiciones; y una reanudación arranca con la cache fría, de modo que verifica de más antes que de menos); del log se deriva el **orden**, no el veredicto: `criteria_checked` registra lo que costó cada comando y el pliegue de tareas lo devuelve, así que la reanudación hereda el orden aprendido sin heredar ningún resultado; no hay opt-out por criterio, porque los criterios son deterministas por definición (§5.1) y lo no determinista pertenece a nodos `bash`, que nunca se memoizan; y `criteria_checked` registra si hubo ejecución o reutilización, de modo que recibo y replay muestran qué se corrió y qué se reutilizó — nada se da por verificado en silencio.
+Complemento del pre-check: **orden aprendido**. El engine evalúa todos los criterios, de menor a mayor duración histórica (dato que el log ya tiene de ejecuciones previas del mismo comando), de modo que la evidencia barata llega primero; el veredicto es sobre el conjunto completo, nombra cada sorpresa en orden de declaración, y no depende del orden de ejecución.
 ## 5.5 Ejecución paralela de tareas
 Un loop de implementación puede ejecutar varias tareas a la vez:
 ```
 - id: implement
-	kind: loop
-	until: all_tasks_complete
-	concurrency: 4        # tareas simultáneas; default 1 (secuencial)
+  kind: loop
+  until: all_tasks_complete
+  concurrency: 4        # tareas simultáneas; default 1 (secuencial)
 ```
 **Formación del lote.** El engine toma hasta N tareas `ready` cuyos scopes sean disjuntos entre sí — la validación de scopes del §5 deja de ser advertencia y pasa a ser criterio de agrupamiento. Si el documento de tareas es una cadena de dependencias, el lote es de 1 y el comportamiento coincide con el secuencial: no hay caso especial.
 **Aislar para trabajar.** Cada tarea del lote recibe su propio worktree derivado del commit base actual. Trabaja sola: su `git diff` contiene solo lo suyo, su tree_hash es estable y la memoización (§5.4) sigue siendo válida. Sin esto, dos runners sobre un mismo árbol se invalidan los checks mutuamente y ni el scope ni la caché significan nada.
@@ -219,12 +222,12 @@ Un loop de implementación puede ejecutar varias tareas a la vez:
 Un gate puede resolverse **fuera de Yunta**, delegando en la forja del equipo el sustrato multi-persona que el engine no provee en v1 (identidad, permisos, notificaciones y estado compartido ya existen ahí):
 ```
 - id: approve-spec
-	kind: gate
-	assignee: arquitectura
-	external:
-		kind: pull_request
-		artifacts: \[[spec.md](http://spec.md)\]        # qué se publica para revisar
-		branch: "\{\{run.branch\}\}"
+  kind: gate
+  assignee: arquitectura
+  external:
+    kind: pull_request
+    artifacts: [spec.md]        # qué se publica para revisar
+    branch: "{{run.branch}}"
 ```
 Al llegar al gate, el engine **publica**: cada entrada de `artifacts:` nombra un artifact de este run igual que `produces:` —un kind, o un nombre opaco—, el engine commitea en la rama los bytes que el run tiene para cada uno con el nombre que su identidad les da (§4), abre un PR cuyo cuerpo lleva el summary del gate, el `run_id` y el enlace al run, y emite `gate_waiting` con la URL. Ahí termina — sin proceso corriendo, como cualquier `waiting`. La persona que aprueba **no necesita Yunta instalado ni acceso a la máquina del run**: revisa un PR normal, comenta y decide donde el equipo ya trabaja.
 La resolución es **pull, no push**: no hay webhooks ni daemon: el engine consulta el estado del PR cuando alguien lo despierta (`resume`, `status`, o un job programado del CI). Así el modelo "sin infraestructura" queda intacto. Mapeo: aprobado → el gate continúa; cambios pedidos → los comentarios entran como `finding_posted` y el gate ofrece la re-ruta declarada; PR cerrado sin mergear → abort; PR mergeado → el gate continúa como aprobado por quien mergeó, con el SHA del merge como evidencia. Los comentarios se montan como contexto del nodo correctivo, igual que `node-output`: quien corrige lee lo que la persona escribió, sin transcripciones intermedias.
@@ -236,7 +239,7 @@ Regla: **una tarea conserva su estado ****`done`**** solo si su identidad verifi
 El trabajo commiteado no se revierte: el worktree conserva lo hecho, y las tareas invalidadas vuelven a correr sobre ese estado — su pre-check en rojo dirá si seguían siendo necesarias. Todo el rebalanceo queda visible: el engine emite `task_status_changed` por cada tarea invalidada con el re-plan como causa, y el recibo lo declara (*"re-plan at node plan: 3 tasks preserved, 2 invalidated"*). Un re-plan nunca descarta trabajo en silencio.
 **Lo que cruza entre runs.** Un documento con `origin: inherited` —el que trae una promoción, un mount o la adquisición desde un hijo— registra sus tareas con el mismo reset por identidad. Además, **una tarea que el log del run fuente deja `done` nace `done` acá si, y solo si, el commit donde su trabajo aterrizó es ancestro del HEAD del árbol en el que este run va a trabajar** (`git merge-base --is-ancestor`, una llamada por commit distinto). El reset sigue ganando: un `done` ajeno sobre una tarea que este run cortó distinto no dice nada sobre la tarea nueva.
 
-Decide la ascendencia y no la puerta por la que entró el documento: un run puede responder por un `done` ajeno exactamente cuando el trabajo que ese `done` nombra está en el árbol donde va a trabajar, y eso es lo que la ascendencia afirma. La puerta es un proxy que vale o no según cómo esté aislado cada run, y con el que cada forma nueva de heredar un documento hay que volver a decidir. Por caso: una **promoción** ramifica del head del antecesor, así que todo lo que ese run integró es ancestro y cruza; un hijo con `isolation: inherit` comparte el árbol del padre y cruza; un hijo con `isolation: worktree` —el default— trabaja en un árbol propio y sus commits quedan en su rama, que nadie mergea de vuelta, así que lo que hizo no cruza al padre que adquiere su documento ni a un hermano que lo monta; y un mount desde un nodo del propio padre sí cruza, porque el hijo ramifica del árbol del padre y lo que el padre integró es ancestro.
+Decide la ascendencia y no la puerta por la que entró el documento: un run puede responder por un `done` ajeno exactamente cuando el trabajo que ese `done` nombra está en el árbol donde va a trabajar, y eso es lo que la ascendencia afirma. La puerta es un proxy que vale o no según cómo esté aislado cada run, y con el que cada forma nueva de heredar un documento hay que volver a decidir. Por caso: una **promoción** ramifica del head del antecesor, así que todo lo que ese run integró es ancestro y cruza; un hijo con `isolation: none` comparte el árbol del padre y cruza; un hijo con `isolation: worktree` —el default— trabaja en un árbol propio y sus commits quedan en su rama, que nadie mergea de vuelta, así que lo que hizo no cruza al padre que adquiere su documento ni a un hermano que lo monta; y un mount desde un nodo del propio padre sí cruza, porque el hijo ramifica del árbol del padre y lo que el padre integró es ancestro.
 
 Un `done` cuyo commit el log no nombra no cruza y la tarea se re-hace: el log no distingue ahí «no hubo trabajo que commitear» de «este log nunca dijo dónde quedó», y de las dos lecturas posibles solo una pierde trabajo. Re-verificar cuesta una sesión; suponer cuesta el trabajo.
 
@@ -247,11 +250,11 @@ Un `done` cuyo commit el log no nombra no cruza y la tarea se re-hace: el log no
 
 ```
 - id: pre-launch
-	kind: parallel
-	join: all              # all (default) \| any
-	nodes:
-		- \{ id: write-docs, kind: prompt, ... \}
-		- \{ id: load-test, kind: bash, ... \}
+  kind: parallel
+  join: all              # all (default) | any
+  nodes:
+    - { id: write-docs, kind: prompt, ... }
+    - { id: load-test, kind: bash, ... }
 ```
 
 **`join`** define cuándo el grupo termina. `all` (default): el grupo completa cuando completan todos los hijos; si uno falla, el grupo falla — formaliza el comportamiento que antes era implícito. `any`: el grupo completa con el primer hijo que termina con éxito; a los demás el engine les envía `interrupt` (mismo mecanismo de cancelación ordenada de la Spec del Adapter, escalando a `kill` si no cierran a tiempo).
@@ -262,7 +265,7 @@ Un `done` cuyo commit el log no nombra no cruza y la tarea se re-hace: el log no
 
 Con `coordination: blackboard` (D49), un nodo puede **postear** en cualquier momento de su ejecución — `yunta_post_finding` está siempre disponible para todo nodo con `run_tools` (§6.4). Pero **leer** el blackboard de otros nodos del grupo está restringido a después del `join`: mientras el grupo sigue corriendo, `yunta_get_blackboard` no devuelve posteos de hermanos, solo los propios si los hubiera.
 
-La razón es determinismo de corrida, no de replay: dos ejecuciones del mismo workflow con inputs idénticos pueden tener sesiones cuyo timing real difiere, y si un hermano pudiera leer en caliente lo que otro fue posteando, el resultado dependera de en qué orden llegaron los posts — no solo de su contenido. Al cerrar el join, el engine consolida todos los posteos del grupo en un artifact/evento de cierre, consumible por un nodo **posterior** al `parallel` (`context: [{ node-output: { node: <parallel_id> } }]`) — nunca entre hermanos en caliente. La coordinación cooperativa sigue resuelta; ocurre después del grupo, no adentro.
+La razón es determinismo de corrida, no de replay: dos ejecuciones del mismo workflow con inputs idénticos pueden tener sesiones cuyo timing real difiere, y si un hermano pudiera leer en caliente lo que otro fue posteando, el resultado dependera de en qué orden llegaron los posts — no solo de su contenido. Al cerrar el join, el engine consolida el blackboard del grupo en un artifact/evento de cierre —el contenido vigente de cada hallazgo que su autor sostiene, sin los retirados ni las versiones superadas, ordenado por `(nodo, id, título)` y nunca por orden de llegada—, consumible por un nodo **posterior** al `parallel` (`context: [{ node-output: { node: <parallel_id> } }]`) — nunca entre hermanos en caliente. La coordinación cooperativa sigue resuelta; ocurre después del grupo, no adentro.
 
 Esto es distinto de por qué `independent` es el default de §6.4: ahí la razón es sesgo de anclaje (un reviewer que ve el hallazgo de otro deja de mirar con ojos frescos), específico de grupos evaluativos. `blackboard` sigue siendo para grupos cooperativos, donde no hay juicio que anclar — la restricción de esta sección es sobre *cuándo* se puede leer, no sobre si conviene ver lo ajeno.
 
@@ -270,23 +273,23 @@ Esto es distinto de por qué `independent` es el default de §6.4: ahí la razó
 El scope existe porque el ejecutor es **no determinístico**. Un agente puede decidir tocar algo que nadie le pidió, y la única forma de saberlo es comparar lo que hizo contra lo que podía hacer. Por eso el scope es obligatorio en las tareas del documento de tareas — donde hay un agente decidiendo — y no en los nodos determinísticos: el alcance de un comando es el que su autor escribió, y verificarlo sería overhead sin información. Un nodo `bash` o `executor` puede declarar `scope` si su autor lo quiere (el engine lo verifica igual), pero no declararlo no produce error ni warning: exigirlo saltaría en casi todo nodo legítimo — `git push`, `gh pr create`, correr una suite — y un aviso que salta siempre es ruido que se aprende a ignorar. Quien quiera exigirlo tiene la palanca correcta en `permissions` (§6.1), donde es una política elegida y no un default molesto.
 Cada tarea (y opcionalmente cada nodo) declara `scope` como globs. Sin scope declarado, el desvío es opinable; con scope, es computable. Verificación en dos niveles:
 - **Post-nodo (garantizado)**: el engine computa `git diff --name-only` desde el inicio de la tarea y lo contrasta con los globs. Archivos fuera → tarea `failed` con la lista completa (`scope_checked` con violaciones).
-- **En caliente (mejor esfuerzo)**: si el adapter declara la capacidad `edit_hooks`, el engine le pide bloquear ediciones fuera de scope en el momento en que ocurren. Capacidad declarable en el trait `Adapter`; si no está, degradación explícita a solo-post-check con warning.
+- **En caliente (el cerco)**: toda sesión corre detrás de un **cerco** — los globs que puede escribir bajo el worktree (el scope declarado más las ampliaciones ya concedidas) y las raíces del run que quedan escribibles fuera de él. Un solo juez decide si un path está dentro; cada adapter construye tanto del cerco como su CLI permita (`Capabilities::fence`: nada, un juicio por llamada de herramienta, o un sandbox de filesystem) y reporta en `agent_session_opened.fence` cuánto cercó realmente. Un adapter que no puede construir ninguno degrada explícitamente a solo-post-check, una vez por run. Cada escritura rechazada queda como `write_refused`, y una que llega al diff bajo una cobertura exacta es además un `engine_finding` contra el adapter (D172).
 El scope hace además verificable la no-colisión del paralelismo: tareas simultáneas requieren scopes disjuntos, validado al registrar el documento de tareas.
 Lo que un runner encuentra fuera de su scope no se parchea ni se ignora: se reporta como finding con el schema de §4.1 — vía `yunta_post_finding` o, automáticamente, cuando se le deniega una ampliación (§6.2) — y queda en el event log del run, disponible para el gate de promoción (§10.2), para la destilación al cierre o para consulta posterior. Diferir un hallazgo es una decisión registrada con evidencia y fecha, nunca un olvido.
 ## 6.1 Permisos: modelo unificado
-`permissions` es UN modelo con varios niveles, no mecanismos sueltos. Semántica común a todos: **cada nivel es un techo; los niveles inferiores solo pueden estrechar, jamás aflojar.** La escalera: org → repo/usuario → pack (`declares.permissions`) → nodo (`permissions: read-only|edit|full`) → scope de tarea (globs). El scope (§6) es el peldaño más fino del mismo modelo.
+`permissions` es UN modelo con varios niveles, no mecanismos sueltos. Semántica común a todos: **cada nivel es un techo; los niveles inferiores solo pueden estrechar, jamás aflojar.** La escalera: org → repo/usuario → pack (`declares.permissions`) → nodo (`permissions: read-only|edit|full`) → scope de tarea (globs). El scope (§6) es el peldaño más fino del mismo modelo, y el cerco es cómo ese peldaño se sostiene mientras la sesión corre: un `read_only` es un cerco que no admite nada bajo el worktree, con las raíces del run intactas, porque los archivos que el nodo declara son su salida y no el proyecto.
 Niveles org/repo en config — nótese la **inversión de precedencia deliberada**: para todo lo demás la config resuelve repo > usuario > org; para `permissions` la capa org manda y las inferiores solo restringen más (sin esta inversión, la gobernanza es teatro: cualquier repo la anularía):
 ```
 # /etc/yunta/config.yaml (capa org — techo)
 permissions:
-	commands:
-		deny: \["curl * \| *", "wget * \| *", "sudo \*"\]   # patrones sobre bash/hooks/criterios/executors
-		allow: \[\]                                       # vacío = todo lo no denegado (denylist default)
-	packs:
-		executors: prompt                               # allow \| prompt \| deny
-		publishers: \{ allow: \[acme, internal\] \}         # vacío = todos
-	network:
-		default: true                                   # false = sin red salvo declaración explícita
+  commands:
+    deny: ["curl * | *", "wget * | *", "sudo *"]   # patrones sobre bash/hooks/criterios/executors
+    allow: []                                       # vacío = todo lo no denegado (denylist default)
+  packs:
+    executors: prompt                               # allow | prompt | deny
+    publishers: { allow: [acme, internal] }         # vacío = todos
+  network:
+    default: true                                   # false = sin red salvo declaración explícita
 ```
 Enforcement en dos momentos: `yunta check` atrapa lo estático (el comando escrito en el YAML, el pack que excede su techo), y el engine valida **en runtime** cada comando de hook/criterio/bash/executor contra el modelo justo antes de ejecutarlo — un template puede construir en runtime lo que el YAML no mostraba. Violación en runtime = nodo `failed` citando la regla, con evento.
 Límite honesto, normativo: esto es **gobernanza, no sandbox**. Un agente con permisos de escritura puede rodear un patrón textual escribiendo un script y ejecutándolo. El modelo detiene el accidente y el pack descuidado, y deja rastro auditable del intento deliberado; el aislamiento real (container, VM) pertenece al entorno de ejecución, no a Yunta. Prometer más sería seguridad aparente — peor que ninguna.
@@ -296,16 +299,16 @@ Límite honesto, normativo: esto es **gobernanza, no sandbox**. Un agente con pe
 Entre "esto no me corresponde" (`finding_posted`) y "esto excede el modo" (`promotion_signaled`) existe un caso frecuente: un arreglo chico, adyacente, que sale más barato hacer ahora que registrar y retomar después. Ampliar el scope por decisión propia sería la puerta trasera al drift, así que la ampliación se **solicita** y se **concede**:
 ```
 - id: implement
-	kind: loop
-	scope_expansion:
-		mode: ask                    # rules \| ask \| deny (default)
-		within: \["src/"\]           # techo: jamás fuera de esto
-		max_per_run: 3
+  kind: loop
+  scope_expansion:
+    mode: ask                    # rules | ask | deny (default)
+    within: ["src/"]           # techo: jamás fuera de esto
+    max_per_run: 3
 ```
 **La solicitud es un objeto único, idéntico en los tres modos** — el agente entrega siempre lo mismo, cambia quién decide: paths pedidos, razón, criterio verificable propuesto, y qué pasa si se deniega. Que la información no dependa del destinatario evita que existan dos calidades de decisión.
 **Modos.** `rules`: el engine concede si se cumplen las condiciones declaradas (dentro de `within`, tamaño acotado, criterio presente y en rojo). `ask`: se resuelve como gate (§5.3) por consola, MCP o PR. `deny` (default): no hay ampliaciones — toda solicitud se vuelve `finding_posted` sin interrumpir. El modo puede endurecerse desde capas superiores y nunca aflojarse, como todo `permissions` (§6.1).
 **El engine agrega lo que el agente no puede saber ni debe autoevaluar**: si el path está dentro de `within`, cuántas ampliaciones lleva el run, si otra tarea toca ese path, el tamaño del diff propuesto, y — clave — **el resultado de correr el criterio propuesto**: si ya pasa, es trivial y la solicitud se rechaza sin consultar a nadie (misma lógica del pre-check en rojo, §5.2).
-**Nada es invisible.** `scope_expansion_requested` y `scope_expansion_granted|denied` registran solicitud, decisor y modo; el conteo vive en el run (`max_per_run`, cuyo agotamiento pausa con escalación — diez concesiones seguidas no son readecuación, son un plan mal cortado); y el recibo lo declara: *"1 expansion granted (task T007, +2 −2, authorized by …)"*. Una ampliación concedida no borra el scope original: el diff se evalúa contra scope declarado más ampliaciones autorizadas, cada una con su traza.
+**Nada es invisible.** `scope_expansion_requested` y `scope_expansion_granted|denied` registran solicitud, decisor y modo; el conteo vive en el run (`max_per_run`, cuyo agotamiento pausa con escalación — diez concesiones seguidas no son readecuación, son un plan mal cortado); y el recibo lo declara: *"1 expansion granted (task T007, +2 −2, authorized by …)"*. Una ampliación concedida no borra el scope original: el diff se evalúa contra scope declarado más ampliaciones autorizadas, cada una con su traza, y el cerco de la sesión lleva exactamente esa suma. Una ampliación pedida durante un intento se evalúa cuando ese intento termina, así que **rige desde el intento siguiente**: el flujo pedir-y-escribir en el mismo intento no existe con un cerco — la escritura se rechaza, el pedido queda registrado, y el reintento la hace.
 **Toda denegación deja finding, en cualquier modo.** Cuando una solicitud se rechaza — por regla, por persona, por cap agotado o por modo `deny` — el engine la convierte automáticamente en `finding_posted` con el schema de §4.1, usando la razón y el criterio propuesto que el agente ya escribió. Esto cubre el caso más frecuente de hallazgo en caliente sin depender de que el agente además se acuerde de reportarlo: ya está pidiendo permiso, la evidencia ya está armada. Lo encontrado no se pierde por haberse denegado el arreglo.
 
 ## 6.3 Secretos: env vars y nada más
@@ -318,7 +321,7 @@ Integrarlos significaría mantener un adapter por gestor, cada uno con su autent
 
 ### Superficie de control (`yunta mcp`)
 
-Tools: `list_workflows`, `run_workflow`, `resume_run`, `resolve_gate`, `workflow_status`. **Ninguna bloquea por la duración del run.** `run_workflow` crea el run y retorna de inmediato con `run_id` — internamente dispara `yunta run --detach`, un proceso **desacoplado** de la sesión MCP que sigue vivo aunque el cliente MCP cierre: un run nunca depende de la vida de ningún proceso en particular (§1), y `yunta mcp` en sí mismo no es un daemon (§6) — si `run_workflow` bloqueara o el run muriera con la sesión, sería un daemon disfrazado mientras dura el run. El agente cliente hace seguimiento del progreso llamando `workflow_status(run_id)` — **pull, sin notificaciones push**, mismo modelo que los gates externos (§5.6). `resolve_gate` y las respuestas a `kind: questions` (§4.1) son llamadas de control independientes, no parte de la sesión que creó el run.
+Tools: `document_shape`, `list_workflows`, `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`, `answer_questions`. **Ninguna bloquea por la duración del run.** `run_workflow` crea el run y retorna de inmediato con `run_id` — internamente dispara `yunta run --detach`, un proceso **desacoplado** de la sesión MCP que sigue vivo aunque el cliente MCP cierre: un run nunca depende de la vida de ningún proceso en particular (§1), y `yunta mcp` en sí mismo no es un daemon (§6) — si `run_workflow` bloqueara o el run muriera con la sesión, sería un daemon disfrazado mientras dura el run. El agente cliente hace seguimiento del progreso llamando `workflow_status(run_id)` — **pull, sin notificaciones push**, mismo modelo que los gates externos (§5.6). `document_shape` devuelve la forma exacta de un documento que Yunta lee y valida, con un ejemplo completo y cada campo anotado: es la única puerta por la que un cliente aprende el formato antes de escribirlo, y la validación es estricta. `resolve_gate` y `answer_questions` —las respuestas a `kind: questions` (§4.1)— son llamadas de control independientes, no parte de la sesión que creó el run.
 
 ### MCP por-run
 
@@ -330,7 +333,7 @@ La comunicación entre nodos es siempre mediada por el engine (§12, D26): nunca
 - **`yunta_check_artifact`** — el veredicto del cierre, pedido mientras la sesión todavía puede actuar (D146): confirma un archivo que la sesión escribió y lee lo que el engine escribió de un documento entregado.
 - **`yunta_request_scope_expansion`** — emite la solicitud de §6.2; solo se monta en una sesión de tarea, que es a lo que la ampliación de scope está atada.
 - **`yunta_task_status`** — consulta de solo lectura del estado de las tareas, equivalente a la fuente de contexto `tasks` pero invocable en caliente.
-- **`yunta_get_blackboard`** / posteo implícito de `yunta_post_finding` — el **blackboard**: solo se monta cuando el nodo pertenece a un grupo `parallel` con `coordination: blackboard` (D49). Es append-only y **scopeado al grupo**: un nodo de un grupo distinto, o de un grupo `independent`, no recibe la tool ni puede leerlo. Cada posteo al blackboard es un `finding_posted` mediado por el engine — mismo evento, mismo schema — con el `node_id` del autor como único dato de scoping adicional; no existe un evento separado para el blackboard porque no es un canal distinto, es una vista filtrada del mismo mecanismo de findings.
+- **`yunta_get_blackboard`** / posteo implícito de `yunta_post_finding` — el **blackboard**: solo se monta cuando el nodo pertenece a un grupo `parallel` con `coordination: blackboard` (D49). Es **scopeado al grupo**: un nodo de un grupo distinto, o de un grupo `independent`, no recibe la tool ni puede leerlo. La lectura es el pliegue vigente, no el historial: `yunta_get_blackboard` devuelve el contenido de la última versión de cada hallazgo que su autor sostiene, y omite los que retiró. Cada posteo al blackboard es un `finding_posted` mediado por el engine — mismo evento, mismo schema — con el `node_id` del autor como único dato de scoping adicional; no existe un evento separado para el blackboard porque no es un canal distinto, es una vista filtrada del mismo mecanismo de findings.
 
 Y una tool por cada kind entregable que el nodo declara en `artifacts.produces`, con el documento como único argumento (D156):
 
@@ -350,7 +353,7 @@ Nada de esto abre un canal directo agente-a-agente: cada llamada pasa por el eng
 
 **Scoping por construcción, no por parámetro.** La credencial encapsula `(run_id, node_id, intento N)` en el momento de emitirse; ninguna tool acepta un `run_id` como argumento del llamador — el engine siempre lo deriva del token que autentica la llamada. Por diseño, no existe ni puede existir una tool tipo "leé el run que yo te diga": la sesión del run A no tiene forma de nombrar al run B, ni con un token robado le serviría para nada fuera de su propio scope.
 
-**Crashes.** Adapter cae en medio de una llamada: mismo tratamiento que cualquier muerte de sesión sin evento terminal (O2 de la Spec, sintetiza `Failed`); el listener se cierra como parte de la misma limpieza. El proceso del run entero cae (§8.1): al hacer `resume`, el nodo huérfano se retoma según su `on_interrupt`, y si vuelve a correr, nace con listener y credencial nuevos — nunca hay un listener "colgado" esperando a un proceso que ya no existe, porque el listener vive dentro del mismo proceso `yunta run` que ejecuta el nodo.
+**Crashes.** Adapter cae en medio de una llamada: mismo tratamiento que cualquier muerte de sesión sin evento terminal (O2 de la Spec: el engine le pregunta a esa sesión cómo salió su proceso y registra la muerte con esa salida y las últimas líneas redactadas de su stderr, `retryable: true`); el listener se cierra como parte de la misma limpieza. El proceso del run entero cae (§8.1): al hacer `resume`, el nodo huérfano se retoma según su `on_interrupt`, y si vuelve a correr, nace con listener y credencial nuevos — nunca hay un listener "colgado" esperando a un proceso que ya no existe, porque el listener vive dentro del mismo proceso `yunta run` que ejecuta el nodo.
 
 **Sin la capacidad, ningún endpoint.** Si el runner resuelto no declara `run_tools`, `SessionRequest.run_tools_endpoint` es `None` y no se levanta nada. Qué pasa cuando el workflow *necesita* la capacidad y el runner no la tiene ya está resuelto en la Spec del Adapter §5 (tabla de degradación): error en `check`, no sorpresa en runtime.
 # 7. Verificación automática: checks, baseline y coverage
@@ -361,9 +364,9 @@ Nada de esto abre un canal directo agente-a-agente: cada llamada pasa por el eng
 
 ```
 - id: no-regressions
-	kind: check
-	builtin: baseline_compare
-	invariant: true
+  kind: check
+  builtin: baseline_compare
+  invariant: true
 ```
 
 Los builtin son una **lista cerrada y corta**, porque un check builtin es por definición algo que el engine ya sabe evaluar con datos que ya tiene; lo extensible es un `executor`, que existe para eso:
@@ -376,16 +379,18 @@ Cualquier otra verificación se expresa con un nodo `bash` (exit code) o un `exe
 
 ## 7.2 Baseline y coverage
 
-Al crear el run (después del worktree), el engine ejecuta la suite declarada en config (`baseline.suite`), persiste resultados y hash (`baseline_captured`). `baseline_compare` — como nodo `check` o en el cierre implícito — re-ejecuta y falla si algo que pasaba dejó de pasar. Coverage análogo: `coverage.cmd` + umbral, medido y comparado por el engine. "Cero regresiones" y "coverage ≥ N" son comparaciones de datos, nunca afirmaciones.
+El baseline es del linaje. Antes de su primer nodo, en su primer despertar, el run ejecuta la suite declarada en config (`baseline.suite`) y persiste resultados y hash (`baseline_captured`); un run que nace de otro —hijo `kind: workflow`, sucesor de una promoción— nace teniendo la medición de la raíz, con origen `inherited` que la nombra, y no consulta su propia config. Así toda comparación del linaje responde la misma pregunta —qué pasaba antes de que la invocación empezara—, y una regresión que introdujo un padre es una regresión que ve su hijo. `baseline_compare` — como nodo `check` o en el cierre implícito — re-ejecuta la suite sobre su propio árbol y falla si algo que pasaba dejó de pasar. Coverage análogo: `coverage.cmd` + umbral, medido y comparado por el engine. "Cero regresiones" y "coverage ≥ N" son comparaciones de datos, nunca afirmaciones.
 
-Ambos comandos entran en la memoización de §5.4 — son deterministas respecto del árbol y caros: si el árbol no cambió desde la última ejecución de esa suite dentro del run, el resultado se reutiliza y se registra como tal. Un workflow con varios `baseline_compare` no paga la suite varias veces sobre el mismo árbol.
+Un linaje mide la suite una vez; cada `baseline_compare` la vuelve a correr sobre su árbol, y una invocación no la repite sobre un árbol que no cambió desde otra comparación —la memoización de §5.4—, que es lo que su cierre dice. Coverage se mide en cada gate, porque su veredicto lee la salida y no el código.
+
+`yunta check` avisa cuando la config declara una suite y ni el workflow ni los workflows que compone comparan: medir es minutos gastados en una respuesta que nadie lee.
 
 ## 7.3 Aislamiento del árbol de trabajo
 `isolation` se declara en config (`defaults.isolation`), por workflow o por nodo, y admite dos valores en runs de primer nivel:
 - **`worktree`**** (default)**: worktree de git dedicado por run, en árbol paralelo al run.dir (§2). Habilita runs concurrentes sobre el mismo repo y aisla al usuario del trabajo del agente.
 - **`none`**: el run opera directo sobre el checkout actual. Legítimo para tres casos — ver los cambios en el editor mientras el agente trabaja, CI que ya corre en un contenedor efímero (donde el worktree es puro overhead), y proyectos cuyo setup de árbol es prohibitivo. Condiciones: el engine **exige árbol limpio** al arrancar (no negociable: sin eso, el scope por diff no distingue el trabajo del agente de los cambios del usuario), no admite runs concurrentes sobre ese repo, y el modo queda registrado en el manifest y en el recibo — un run sin aislamiento ofrece menos garantías de reproducibilidad y eso no se oculta.
 El costo dominante de wall-clock en muchos proyectos no son los checks sino la preparación del árbol nuevo (instalación de dependencias, build desde cero). La palanca correcta no es saltear aislamiento sino **compartir cachés de build entre worktrees** — directorio de artefactos común por variable de entorno, dependencias enlazadas, o worktrees reutilizables por proyecto. `yunta init` detecta el ecosistema y propone la configuración correspondiente; la guía de autoría lo documenta.
-Los nodos `kind: workflow` admiten además un tercer valor, `inherit` (§12): el sub-run comparte el árbol del padre en lugar de crear el suyo. Solo aplica a sub-runs — un run de primer nivel no tiene de quién heredar.
+Un nodo `kind: workflow` declara lo mismo con las mismas dos palabras (§12): `none` ahí significa que el sub-run comparte el árbol en el que ese nodo trabaja en lugar de crear el suyo. Una sola palabra sirve a los dos niveles porque `none` es cierta en cualquiera —esta unidad no se aísla del árbol que recibió—, mientras que una que nombrara al padre no lo sería: un run de primer nivel no tiene unidad padre, tiene el checkout de una persona (D183).
 # 8. Resumibilidad y horizonte largo
 ## 8.1 Dos niveles de reanudación
 **Nivel run**: `yunta resume <run_id>` hace replay del log, reconstruye estados, verifica que el run siga teniendo lo que su historia dice —los artifacts de run.dir y el worktree— y retoma cada nodo `running` huérfano según su política. No hay "estado corrupto": o los eventos alcanzan para derivar un estado, o el run se marca `broken` con diagnóstico. Crash del engine, reinicio de máquina y `Ctrl-C` son el mismo caso.
@@ -404,7 +409,7 @@ Los nodos `kind: workflow` admiten además un tercer valor, `inherit` (§12): el
 Un nodo nunca asume historia. Su contexto al arrancar es exactamente: (1) su prompt renderizado, (2) sus fuentes de contexto resueltas (§9), (3) `progress.md`, y (4) sus skills. Nada más. Esto hace equivalentes "primera ejecución", "iteración 7 del loop" y "resume tras tres días": todas nacen igual.
 `progress.md` lo genera el engine — no un agente — tras cada `node_finished`, derivándolo del log: qué corrió, qué produjo cada nodo (con la descripción de una línea declarada en el workflow), qué falló, qué sigue. Al ser mecánico, no acumula deriva narrativa.
 ## 8.3 Presupuestos y cierre
-`max_tokens` por nodo y `max_iterations` por loop son contrato: al excederse, el engine emite `run_paused` (razón: límite) y espera decisión humana — nunca degrada en silencio. Al cierre, `on_finish.distill` destila el conocimiento durable (ADRs, [CONTEXT.md](http://CONTEXT.md) bajo `.yunta/knowledge/`) **antes** de cualquier cleanup, y el engine exporta los eventos del run como `events.jsonl` dentro del run.dir: el run archivado queda autocontenido — historia completa más artifacts en un directorio copiable, con vida independiente de la retención. El event log en base se conserva según `storage.retention_days` aunque run.dir se borre. Las specs de un run son efímeras; sus decisiones no.
+`max_tokens` por nodo y `max_iterations` por loop son contrato: al excederse, el engine emite `run_paused` (razón: límite) y espera decisión humana — nunca degrada en silencio. Al cierre, `on_finish.distill` destila el conocimiento durable (ADRs, CONTEXT.md bajo `.yunta/knowledge/`) **antes** de cualquier cleanup, y el engine exporta los eventos del run como `events.jsonl` dentro del run.dir: el run archivado queda autocontenido — historia completa más artifacts en un directorio copiable, con vida independiente de la retención. El event log en base se conserva según `storage.retention_days` aunque run.dir se borre. Las specs de un run son efímeras; sus decisiones no.
 ## 8.4 Contabilidad de costos: costo por tarea verificada
 Los `Usage` de adapter se atribuyen al nodo — y, dentro del ciclo de tareas, a la tarea — que los generó. Sobre esa atribución el engine deriva del log, sin estimaciones: **CPTV (costo por tarea verificada)** = tokens totales del run / tareas `done`; **tasa de re-trabajo** = tokens gastados en reintentos y re-rutas / totales; **tasa de cache** = tokens leídos de cache / input totales (si el adapter los distingue en `Usage`, extensión opcional de `usage_reporting`); y costo por nodo, por rol y por modo. `yunta stats <run_id>` las muestra; `yunta stats --workflow X` agrega histórico para comparar modos, runners y versiones del workflow con datos. La métrica de cabecera es CPTV porque optimiza lo que importa: no minimizar tokens — un run barato que no verifica nada es carísimo — sino el costo de cada unidad de trabajo demostrada.
 
@@ -412,12 +417,12 @@ Los `Usage` de adapter se atribuyen al nodo — y, dentro del ciclo de tareas, a
 ## 8.5 Progreso observable
 El progreso es un dato derivado del log — nunca una estimación ni un reporte de agente. Dos niveles, porque miden cosas distintas: **flujo** (nodos terminados sobre el DAG congelado en el manifest, con `waiting` distinguido: un run esperando un gate no está estancado, está esperando a una persona) y **tarea** (tareas `done`/total del documento de tareas — la medida honesta durante los nodos largos de implementación, donde el nivel flujo se quedaría quieto por horas).
 Presentación normativa: **contadores con contexto, no porcentajes** — `14/23 tasks · 3/9 nodes · 2 reroutes · waiting on gate approve-plan`. Los porcentajes mienten en cuanto hay re-rutas (el denominador crece), loops sin cota fija o promociones (el sucesor resetea). El progreso nunca cambia en silencio: si una re-ruta o un re-plan agranda el denominador, el cambio es visible y atribuible a su evento.
-Superficies: `yunta status <run>` (snapshot), `yunta run --follow` (en vivo, consumiendo el stream de eventos) y la tool MCP `workflow_status` (estructurado, para que el agente cliente lo comunique). Composición: el padre presenta el progreso de los hijos **como árbol, jamás promediado en un número único** — promediar hijos heterogéneos es otra forma de porcentaje mentiroso.
+Superficies: `yunta status <run>` (snapshot), la vista viva de `yunta run` (en vivo, sobre los eventos que el engine entrega a quien dibuja en el momento en que los escribe) y la tool MCP `workflow_status` (estructurado, para que el agente cliente lo comunique). La vista viva es el default sobre una terminal: una región anclada de varias líneas de texto plano en stderr, con el trabajo terminado subiendo al scrollback del usuario; `--quiet` la reduce a la línea del run id. El contenido común es la crónica derivada del log: un momento por evento, en los mismos tipos que el frame. Sobre una terminal, lo que cerró algo o pidió algo a una persona sube al scrollback con esas palabras, y lo abierto vive en la región; sin terminal —pipe, CI, `TERM=dumb`, `NO_COLOR`— la crónica sale entera como líneas append-only, una por evento, y la primera anuncia la degradación nombrando qué faltó. Composición: el padre presenta el progreso de los hijos **como árbol, jamás promediado en un número único** — promediar hijos heterogéneos es otra forma de porcentaje mentiroso.
 ## 8.6 Estimación previa
 
 El histórico responde qué costó; la misma data responde qué va a costar. Antes de arrancar, el engine deriva de los runs pasados del mismo workflow la distribución observada — mediana y p90 de tokens, wall-clock, tareas — y la muestra: *"12 past runs · median 340k tokens, p90 520k · median wall-clock 22 min"*. No es una predicción: es lo que ya pasó, que es la única estimación honesta que un sistema puede ofrecer.
 
-Es **informativa, nunca bloqueante**: se muestra en `yunta run` al crear el run y viaja en `list_workflows`, donde puede cambiar qué workflow elige un agente cliente. Lo que sí es accionable: cuando el presupuesto declarado queda por debajo del p90 histórico, el engine advierte antes de gastar — *"budget 200k is below the p90 of past runs (520k); this run will likely pause"* — porque un run que se detiene a mitad por un límite mal elegido es el desperdicio más caro que hay.
+Es **informativa, nunca bloqueante**: se muestra en `yunta run` al crear el run y viaja en `list_workflows`, donde puede cambiar qué workflow elige un agente cliente. Por informativa, `--quiet` la suprime: quien pide solo el run id no pidió contexto. Lo que sí es accionable: cuando el presupuesto declarado queda por debajo del p90 histórico, el engine advierte antes de gastar — *"budget 200k is below the p90 of past runs (520k); this run will likely pause"* — porque un run que se detiene a mitad por un límite mal elegido es el desperdicio más caro que hay. Esa advertencia sobrevive a `--quiet`: la distribución describe lo que pasó y se calla, la advertencia pide una decisión antes de gastar y callarla sería decidir por el usuario.
 
 Sin datos suficientes (menos de tres runs del mismo workflow), el engine **no dice nada**. Un número sin distribución detrás es adivinanza con apariencia de dato; tampoco se estima de forma estática contando nodos y multiplicando por un promedio genérico, por la misma razón por la que el progreso se expresa en contadores y no en porcentajes (§8.5).
 
@@ -455,11 +460,11 @@ Config (`telemetry:`): `enabled`, `endpoint` (OTLP, default un collector local),
 
 # 9. Inyección de contexto
 Trait del engine:
-```
-trait ContextSource \{
-	fn id(&self) -> &str;
-	async fn resolve(&self, ctx: &RunCtx) -> Result<ResolvedContext>;
-\}
+```rust
+trait ContextSource {
+  fn id(&self) -> &str;
+  async fn resolve(&self, ctx: &RunCtx) -> Result<ResolvedContext>;
+}
 // ResolvedContext = objetos bajo objects/<hash> + modo de montaje
 ```
 Builtin: `files` (globs del repo o run.dir), `command` (stdout con timeout), `artifact` (output de un nodo previo — crea dependencia implícita en el DAG), `mcp` (query a un server MCP externo), `run-events` (consulta de solo lectura al log), `tasks` (la tarea propia, o el estado agregado para nodos de auditoría), `knowledge` (conocimiento durable, ver §9.2) y `node-output` (stdout/stderr capturado de un nodo, ver §11.2). Los equipos agregan fuentes propias como executors, sin tocar el core.
@@ -469,25 +474,25 @@ Reglas: las fuentes se resuelven **antes** de abrir la sesión; el resultado se 
 Sintaxis por nodo — cada entrada de `context:` es una fuente con sus parámetros:
 ```
 - id: plan
-	context:
-		- files: \["docs/[architecture.md](http://architecture.md)"\]
-		- command: "git log --oneline -20"           # stdout → contexto, con timeout
-		- mcp: \{ server: internal-docs, query: "\{\{inputs.idea\}\}" \}  # server declarado en config (mcp_servers)
-		- artifact: \{ node: grill, name: [brief.md](http://brief.md) \}   # crea dependencia implícita grill → plan
-		- tasks: \{\}                                   # la tarea propia (executors) o estado agregado (auditoría)
-		- knowledge: \{\}                               # conocimiento durable en capas (§9.2)
-		- node-output: \{ node: lint \}                 # stdout/stderr capturado de un nodo
-		- run-events: \{ filter: failed \}              # consulta de solo lectura al log
+  context:
+    - files: ["docs/architecture.md"]
+    - command: "git log --oneline -20"           # stdout → contexto, con timeout
+    - mcp: { server: internal-docs, query: "{{inputs.idea}}" }  # server declarado en config (mcp_servers)
+    - artifact: { node: grill, name: brief.md }   # crea dependencia implícita grill → plan
+    - tasks: {}                                   # la tarea propia (executors) o estado agregado (auditoría)
+    - knowledge: {}                               # conocimiento durable en capas (§9.2)
+    - node-output: { node: lint }                 # stdout/stderr capturado de un nodo
+    - run-events: { filter: failed }              # consulta de solo lectura al log
 ```
 Demarcación normativa: `context:` inyecta **datos** (sobre qué trabajar); `skills:` monta **instrucciones y capacidades** (cómo trabajar) por el mecanismo nativo del adapter. Son propiedades separadas del nodo deliberadamente — un skill no es una fuente de contexto y no pasa por `ContextSource`.
 ## 9.1 Ensamblado estable-primero
-El costo por token de la rehidratación (§8.2) depende de que el proveedor pueda reutilizar prefijos ya procesados (prompt caching). El engine no gestiona el cache — es del proveedor/CLI — pero garantiza la condición que lo habilita: **prefijos byte-estables entre sesiones**. Cada fuente tiene una clase de estabilidad, declarada o inferida por el engine: `stable` (skills, knowledge, archivos del repo que el run no toca), `run-stable` (artifacts congelados: brief, plan, lo derivado del manifest) y `volatile` (node-output, run-events, command, [progress.md](http://progress.md), la tarea del documento de tareas). El engine ensambla el contexto SIEMPRE en ese orden — estable → run-estable → volátil → prompt del nodo — con serialización canónica: mismo orden de fuentes, mismos separadores, sin timestamps ni contenido no determinista dentro de los segmentos estables. Así, la iteración 7 de un loop y el resume de mañana comparten prefijo byte-idéntico con la iteración 1, y el cache del proveedor hace el resto. El evento `context_assembled` registra los hashes por segmento: comparar hashes entre sesiones es la verificación mecánica de que el prefijo se mantuvo estable — y el diagnóstico exacto cuando no.
+El costo por token de la rehidratación (§8.2) depende de que el proveedor pueda reutilizar prefijos ya procesados (prompt caching). El engine no gestiona el cache — es del proveedor/CLI — pero garantiza la condición que lo habilita: **prefijos byte-estables entre sesiones**. Cada fuente tiene una clase de estabilidad, declarada o inferida por el engine: `stable` (skills, knowledge, archivos del repo que el run no toca), `run-stable` (artifacts congelados: brief, plan, lo derivado del manifest) y `volatile` (node-output, run-events, command, progress.md, la tarea del documento de tareas). El engine ensambla el contexto SIEMPRE en ese orden — estable → run-estable → volátil → prompt del nodo — con serialización canónica: mismo orden de fuentes, mismos separadores, sin timestamps ni contenido no determinista dentro de los segmentos estables. Así, la iteración 7 de un loop y el resume de mañana comparten prefijo byte-idéntico con la iteración 1, y el cache del proveedor hace el resto. El evento `context_assembled` registra los hashes por segmento: comparar hashes entre sesiones es la verificación mecánica de que el prefijo se mantuvo estable — y el diagnóstico exacto cuando no.
 ## 9.2 Knowledge: capas y alcance multi-proyecto
 El conocimiento durable que `distill` produce (§8.3) se consume por la fuente `knowledge`, que resuelve **en capas, igual que config y skills**: `repo` (`.yunta/knowledge/`, lo destilado acá) > `user` (`~/.yunta/knowledge/`) > `org`. Precedencia local: lo del repo pisa a lo general ante conflicto.
 ```
 context:
-	- knowledge: \{\}                     # todas las capas disponibles
-	- knowledge: \{ layers: \[repo\] \}     # solo local — para nodos que no deben contaminarse
+  - knowledge: {}                     # todas las capas disponibles
+  - knowledge: { layers: [repo] }     # solo local — para nodos que no deben contaminarse
 ```
 La **capa org es un pack** (RFC-0002 íntegro, sin mecanismo nuevo): ADRs transversales y convenciones curadas se publican como `<publisher>/org-knowledge@vN`, se vendorean con lockfile y quedan congelados por run. Actualizar conocimiento compartido es una decisión explícita y versionada, jamás una sincronización automática.
 La promoción de conocimiento local a org **no es automática y no la hace el engine**: es un workflow de Yunta como cualquier otro (candidatos desde los `knowledge/` de los repos → gate con `assignee` curador → nueva versión del pack). Para volúmenes que exceden lo que conviene montar como archivos, la válvula es la fuente `mcp` apuntando a un RAG interno — explícita en el workflow, nunca una capa implícita.
@@ -495,7 +500,7 @@ La promoción de conocimiento local a org **no es automática y no la hace el en
 `prompt` acepta dos formas, sin claves adicionales:
 ```
 prompt: "Implementá la siguiente tarea del documento de tareas"   # inline
-prompt: \{ file: prompts/[plan.md](http://plan.md) \}                    # desde archivo
+prompt: { file: prompts/plan.md }                    # desde archivo
 ```
 Un valor escalar es el prompt; un mapa declara de dónde sale — el mismo idioma que usan las fuentes de contexto para expresar procedencia. No hay heurística de "si parece una ruta": la forma del valor lo dice, de modo que un prompt de una línea que casualmente se parezca a un path nunca se interpreta como archivo. La extensión futura (otras procedencias, composición por partes) es un campo más en ese mapa, no una clave nueva por caso.
 La ruta se resuelve relativa al workflow que la declara; el contenido se renderiza con los mismos templates que el inline y **entra al hash del manifest igual que él**: editar el archivo a mitad de run no altera ese run (I3). `yunta check` valida existencia y no-vacuidad antes del primer token. Prompts largos en archivo son además contenido `stable` para el ensamblado de §9.1, y quedan legibles en un diff de PR y en el inventario de `pack audit` (RFC-0002 §6) — revisables como archivos, no como bloques YAML.
@@ -504,9 +509,9 @@ La ruta se resuelve relativa al workflow que la declara; el contenido se renderi
 Un workflow puede declarar variantes de modo. Los nombres y la cantidad son **libres y del autor del workflow**: `modes:` es un mapa ordenado abierto, no un conjunto fijo del schema — quick/standard/full son convención de los workflows de referencia, no palabras reservadas:
 ```
 modes:
-	hotfix:   \{ include: \[implement, lint, tests, ship\] \}
-	standard: \{ include: \[grill, plan, implement, lint, tests, review, ship\] \}
-	audit:    \{ include: all \}
+  hotfix:   { include: [implement, lint, tests, ship] }
+  standard: { include: [grill, plan, implement, lint, tests, review, ship] }
+  audit:    { include: all }
 ```
 El **orden de declaración define la escalera**: la promoción (§10.2) va de un modo a cualquiera posterior en la declaración. Reglas verificadas por `yunta check`, invariantes al nombre y al número de modos: los nodos `invariant: true` (verificación, scope, baseline, higiene) presentes en **todas** las variantes — un modo recorta deliberación, jamás verificación —; todo modo referencia nodos existentes; y la clasificación la propone un nodo temprano **entre los modos declarados** y la confirma un gate, quedando congelada en el manifest.
 **Dependencias sobre nodos excluidos.** Un nodo incluido que declara `depends_on` hacia un nodo que el modo excluye espera lo que ese nodo esperaba: hereda sus dependencias incluidas, transitivamente. En un modo sin `approve-plan`, `implement` espera a `plan`; en un modo sin `review` ni `fix-findings`, `ship` espera a `tests`. Un modo recorta deliberación, nunca el orden del trabajo que queda; una única derivación pura produce el grafo de cada modo para el scheduler, la escalación y `status`.
@@ -518,13 +523,13 @@ Cuando el trabajo revela que el problema excede el modo (scope insuficiente, hal
 Todo nodo puede declarar comandos determinísticos alrededor de la sesión — pegamento que no amerita un nodo propio (instalar dependencias, levantar servicios, formatear, limpiar temporales). Van agrupados bajo `hooks:`, porque `before` y `after` solo tienen sentido juntos y comparten las mismas reglas:
 ```
 - id: implement
-	hooks:
-		before:
-			- run: "npm ci --prefer-offline"
-		after:
-			- run: "cargo fmt"
-			- run: "rm -rf .tmp-fixtures"
-				on_failure: warn            # fail (default) \| warn
+  hooks:
+    before:
+      - run: "npm ci --prefer-offline"
+    after:
+      - run: "cargo fmt"
+      - run: "rm -rf .tmp-fixtures"
+        on_failure: warn            # fail (default) | warn
 ```
 Secuencia del nodo: resolver contexto → `hooks.before` → sesión del agente → `hooks.after` → verificación (criterios post, scope, artifacts). Consecuencias deliberadas del orden: un `before` que falla aborta el nodo sin gastar tokens, y el `after` corre antes de la verificación, de modo que los criterios evalúan el estado final real. Las ediciones de los hooks cuentan dentro del diff del nodo: el scope también las gobierna — un hook no es una puerta trasera al drift.
 Reglas: solo comandos, nunca IA (para eso existen los nodos); idempotencia obligatoria — los hooks re-corren en cada reintento y cada resume; timeout corto configurable; cada ejecución emite `hook_executed`. `node_defaults.hooks` a nivel workflow evita repetición. Prohibido inyectar hooks desde capas de configuración que no sean visibles en el workflow que el equipo lee: si una organización quiere imponer hooks, lo hace vía workflows compartidos, donde se ven. Criterio de demarcación: si el comando tiene lógica de negocio o duración significativa, es un nodo `bash` con estado y visibilidad propios, no un hook.
@@ -532,40 +537,40 @@ Reglas: solo comandos, nunca IA (para eso existen los nodos); idempotencia oblig
 El grafo de `depends_on` es acíclico y lo sigue siendo. Las **aristas de re-ruta** son un segundo conjunto de aristas, separado, que expresa ciclos controlados de corrección:
 ```
 - id: lint
-	kind: bash
-	depends_on: \[implement\]
-	run: "npm run lint"
-	on_failure: \{ goto: fix-lint, max_reroutes: 2 \}
+  kind: bash
+  depends_on: [implement]
+  run: "npm run lint"
+  on_failure: { goto: fix-lint, max_reroutes: 2 }
 ```
 Semántica: al fallar el nodo, el engine emite `node_rerouted` y transfiere control al destino (que puede ser un nodo fuera del camino principal, existente solo para esto). Cuando el destino y su subgrafo completan, **el nodo fallido vuelve a ****`ready`**** y re-corre**. El contador `max_reroutes` es por nodo fallido; al agotarse, `run_paused` + gate de escalación en formato cuestionario — el ciclo jamás es infinito ni silencioso. `yunta check` valida que todo `goto` apunte a un nodo existente y que el subgrafo de corrección no dependa del nodo fallido.
 El output del nodo fallido (stdout/stderr, acotado) se captura como artifact automático, y el nodo de corrección lo monta con la fuente builtin `node-output`:
 ```
 - id: fix-lint
-	kind: prompt
-	context:
-		- node-output: \{ node: lint \}
-	prompt: "Corregí exclusivamente los errores del reporte de lint."
-	scope: \["src/"\]
+  kind: prompt
+  context:
+    - node-output: { node: lint }
+  prompt: "Corregí exclusivamente los errores del reporte de lint."
+  scope: ["src/"]
 ```
 Escalera de corrección — usar el peldaño más bajo que alcance: (1) fix mecánico → hook `after` (p. ej. `lint --fix`), sin IA; (2) fallo de una tarea puntual → los `criteria` del documento de tareas lo rebotan dentro del ciclo de tareas; (3) validación transversal al final del flujo → re-ruta con nodo correctivo.
 # 12. Composición: workflows como nodos y runs vinculados
 Un nodo `kind: workflow` ejecuta otro workflow como sub-run:
 ```
 - id: qa
-	kind: workflow
-	use: qa-review
-	inputs: \{ branch: "\{\{run.branch\}\}" \}
-	isolation: inherit            # worktree (default) \| inherit
+  kind: workflow
+  use: qa-review
+  inputs: { branch: "{{run.branch}}" }
+  isolation: none               # worktree (default) | none
 ```
 **Cada sub-workflow es un run completo**, con run_id, manifest, event log y run.dir propios — nunca una expansión inline. El padre emite `child_run_created` (con `workflow_hash` del hijo, además del `child run_id`, para que la identidad efectiva quede en el evento sin ir a buscar el manifest), espera el estado terminal del hijo (`child_run_finished`) y trata ese resultado como el resultado del nodo. Consecuencias: cada pieza conserva resumibilidad, auditoría y presupuestos propios; `yunta resume` del padre retoma hijos huérfanos recursivamente; y un proceso de semanas es un run padre que pasa la mayor parte de su vida en `waiting` sin ningún proceso corriendo.
 
 **Reproducibilidad histórica, explícita.** El padre congela **nombres e inputs** del hijo (más abajo), nunca su manifest — pero eso no deja un hueco de reproducibilidad, porque **el `child_run_id` es la referencia inmutable y el manifest congelado del hijo es su propia fuente histórica de verdad** (I3 ya lo garantiza para *cualquier* run, el hijo incluido). Reproducir un run padre de hace seis meses nunca vuelve a resolver `nombre-del-workflow@versión-actual`: sigue el `child_run_id` grabado en `child_run_created` hasta el manifest de ese run específico, que está congelado desde que nació y no le importa que el workflow del hijo haya cambiado después. No hace falta duplicar el manifest del hijo dentro del padre — alcanza con la referencia, porque el hijo ya es inmutable por sí mismo.
 
-**Lo que un nodo `kind: workflow` produce es lo que su hijo produjo.** Un nodo de composición no escribe ningún archivo: lo que declara en `artifacts.produces` lo adquiere del log del run hijo cuando ese hijo termina `done`. Cada cosa que el nodo declara ya es una identidad —el kind, o el nombre— y esa identidad se busca en el ledger del hijo; el hijo puede tener más artifacts, que son asunto de ese run y se quedan ahí, y tiene que tener estos, porque un nodo no cierra debiendo lo que declaró. Un artifact que el hijo no tiene falla el nodo nombrando el artifact y el run hijo, y nada se adquiere: o entran todos o no entra ninguno. Cada adquisición entra por la misma puerta que cualquier otro artifact (§4) con `origin: inherited`, que nombra el run hijo y el nodo que lo produjo ahí; el productor en el padre es el nodo de composición, así que el artifact es suyo para todo lo que lo lea después. Un hijo promovido no entrega nada —la composición sigue en su sucesor, que hereda todo lo que el antecesor tenía— y uno fallido tampoco: un run que abandonó su trabajo no declara artifacts para que otro los tome. Cuando el artifact adquirido es de kind `findings`, sus hallazgos quedan posteados en el log del padre bajo ese nodo, de modo que el conjunto efectivo del padre (§5) incluye lo que la composición encontró. Cuando es de kind `tasks`, sus tareas quedan registradas en el log del padre bajo ese nodo, `done` las que el árbol del padre tiene (§5.7): con el aislamiento por default no es ninguna, porque el hijo trabaja en un árbol propio y sus commits se quedan en su rama; con `isolation: inherit` el hijo trabajó en el árbol del padre y son todas las que dio por hechas. El padre se hace cargo del documento que adquirió, igual que de los hallazgos.
+**Lo que un nodo `kind: workflow` produce es lo que su hijo produjo.** Un nodo de composición no escribe ningún archivo: lo que declara en `artifacts.produces` lo adquiere del log del run hijo cuando ese hijo termina `done`. Cada cosa que el nodo declara ya es una identidad —el kind, o el nombre— y esa identidad se busca en el ledger del hijo; el hijo puede tener más artifacts, que son asunto de ese run y se quedan ahí, y tiene que tener estos, porque un nodo no cierra debiendo lo que declaró. Un artifact que el hijo no tiene falla el nodo nombrando el artifact y el run hijo, y nada se adquiere: o entran todos o no entra ninguno. Cada adquisición entra por la misma puerta que cualquier otro artifact (§4) con `origin: inherited`, que nombra el run hijo y el nodo que lo produjo ahí; el productor en el padre es el nodo de composición, así que el artifact es suyo para todo lo que lo lea después. Un hijo promovido no entrega nada —la composición sigue en su sucesor, que hereda todo lo que el antecesor tenía— y uno fallido tampoco: un run que abandonó su trabajo no declara artifacts para que otro los tome. Cuando el artifact adquirido es de kind `findings`, sus hallazgos quedan posteados en el log del padre bajo ese nodo, de modo que el conjunto efectivo del padre (§5) incluye lo que la composición encontró. Cuando es de kind `tasks`, sus tareas quedan registradas en el log del padre bajo ese nodo, `done` las que el árbol del padre tiene (§5.7): con el aislamiento por default no es ninguna, porque el hijo trabaja en un árbol propio y sus commits se quedan en su rama; con `isolation: none` el hijo trabajó en el árbol del padre y son todas las que dio por hechas. El padre se hace cargo del documento que adquirió, igual que de los hallazgos.
 
 **Runs vinculados.** Los vínculos declarados (`parent/child`, `promoted_from`) forman un grafo auditado. La fuente de contexto `artifact` cross-run opera exclusivamente a través de vínculos: un hijo puede montar artifacts del padre o de hermanos terminados; nadie monta artifacts de runs ajenos. La promoción (§10.2) es un caso particular de este mecanismo general.
 **Manifests.** El padre congela los **nombres e inputs** de sus hijos, no sus manifests: cada hijo resuelve y congela su propio workflow al nacer. Un proceso largo incorpora mejoras a los workflows hijos entre ejecuciones, sin violar la inmutabilidad de ningún run individual.
-**Aislamiento.** `worktree` (default) da a cada hijo su árbol; `inherit` comparte el del padre para fases de una misma pieza de trabajo — hijos paralelos con `inherit` exigen scopes disjuntos, validado en check.
+**Aislamiento.** `worktree` (default) da a cada hijo su árbol; `none` comparte el del padre para fases de una misma pieza de trabajo — hijos paralelos con `none` exigen scopes disjuntos, validado en check.
 **Personas.** Los gates llevan `assignee` (rol o identidad): `gate_waiting` notifica a esa audiencia por los canales de config y `gate_resolved` registra quién resolvió. La coordinación entre personas es estado del run, no convención externa.
 **Presupuestos en cascada.** El `Usage` de los hijos agrega hacia arriba; los límites del padre pueden pausar el árbol entero.
 **Límites deliberados.** `yunta check` valida que el grafo de referencias entre workflows sea acíclico y respete una profundidad máxima configurable. Los triggers asincrónicos entre workflows sin padre común ("cuando termine X, disparar Y") quedan fuera del engine: son territorio del CI del equipo o del proyecto de servidor separado.
@@ -577,12 +582,12 @@ Nota terminológica normativa: "rol" es vocabulario descriptivo de esta spec y *
 Un rol puede resolver a una **lista ordenada de candidatos**, mezclando adapters, modelos y agentes libremente:
 ```
 runners:
-	planner:
-		- \{ adapter: claude-code, model: claude-opus-4-8 \}
-		- \{ adapter: codex, model: gpt-5-codex \}              # fallback
-	reviewer:
-		- \{ adapter: claude-code, model: claude-sonnet-4-6, agent: benito \}
-		- \{ adapter: codex, model: gpt-5-codex \}
+  planner:
+    - { adapter: claude-code, model: claude-opus-4-8 }
+    - { adapter: codex, model: gpt-5-codex }              # fallback
+  reviewer:
+    - { adapter: claude-code, model: claude-sonnet-4-6, agent: benito }
+    - { adapter: codex, model: gpt-5-codex }
 ```
 La resolución ocurre **una vez, al crear el run**: el engine recorre los candidatos en orden y elige el primero cuyo `probe()` pasa (incluida la existencia del agente pedido) y cuyas capacidades satisfacen todos los nodos que usan el rol. La elección — y cada candidato descartado con su causa — se registra (`runner_resolved`) y queda congelada en el manifest: un run no cambia de runner a mitad de camino, y un resume reutiliza la resolución. `yunta check` valida estáticamente que todo rol usado esté definido y que al menos un candidato satisfaga lo exigido.
 Restricción deliberada: la resolución es por run, jamás por nodo en runtime. "Probá con un modelo barato y si falla escalá a uno caro" no es fallback de disponibilidad sino escalación de calidad, y se expresa con re-rutas `on_failure.goto` hacia un nodo equivalente con rol más caro — visible en el DAG en vez de escondido en la resolución.
@@ -590,21 +595,21 @@ Restricción deliberada: la resolución es por run, jamás por nodo en runtime. 
 Para los casos donde el valor está en la diversidad — reviews, segundas opiniones — un nodo puede declarar varios roles y el engine lo expande en instancias paralelas del mismo nodo, una por rol, en la creación del manifest:
 ```
 - id: review
-	kind: prompt
-	runners: \[reviewer, reviewer-alt\]     # expande a review@reviewer ∥ review@reviewer-alt
-	permissions: read-only
-	prompt: "Auditá los cambios y reportá lo que encuentres"
-	artifacts:
-		produces: \[findings\]
+  kind: prompt
+  runners: [reviewer, reviewer-alt]     # expande a review@reviewer ∥ review@reviewer-alt
+  permissions: read-only
+  prompt: "Auditá los cambios y reportá lo que encuentres"
+  artifacts:
+    produces: [findings]
 ```
 Cada instancia es un nodo pleno (eventos, artifacts, presupuesto propios); la consolidación de hallazgos es un nodo posterior normal. La expansión es estática — el DAG resultante queda en el manifest, no hay dinamismo en runtime.
 ## 13.3 Agente a nivel nodo
 Un nodo puede declarar `agent:` directamente, y **prevalece sobre el ****`agent`**** del runner resuelto**:
 ```
 - id: review-security
-	kind: prompt
-	runner: reviewer
-	agent: security-auditor    # override del agente del binding para este nodo
+  kind: prompt
+  runner: reviewer
+  agent: security-auditor    # override del agente del binding para este nodo
 ```
 La resolución de candidatos (§13.1) lo incorpora: un candidato solo satisface un rol si su adapter declara `custom_agents` y `probe()` verifica la existencia de **todos** los agentes pedidos — los de los candidatos y los declarados a nivel nodo por quienes usan ese rol. Consecuencia de portabilidad: un `agent:` a nivel nodo nombra un agente de un adapter concreto y por lo tanto restringe qué candidatos pueden resolver el rol. Guía: en workflows compartidos entre equipos, preferir el agente en los candidatos del runner (donde cada adapter empareja su propio equivalente); reservar el override por nodo para workflows internos. El runner conserva su campo `agent:` precisamente por eso — es lo que permite que candidatos de adapters distintos aporten cada uno su agente nombrado.
 # 14. Tests de workflow
@@ -617,19 +622,19 @@ Un caso de test declara qué correr, con qué guión de mock, y qué debe haber 
 # .yunta/tests/lint-recovery.yaml
 workflow: build-feature
 mode: quick
-inputs: \{ idea: "test" \}
+inputs: { idea: "test" }
 fixture: fixtures/lint-fails-twice.yaml   # guión de eventos y efectos del adapter mock
 expect:
-	final_state: finished
-	nodes:
-		lint: \{ reroutes: 2 \}
-		fix-lint: \{ runs: 2 \}
-	tasks:
-		T001: done
-	events:
-		- node_rerouted: \{ count: 2 \}
-	never:
-		- task_status_changed: \{ task: T002, to: done \}
+  final_state: finished
+  nodes:
+    lint: { reroutes: 2 }
+    fix-lint: { runs: 2 }
+  tasks:
+    T001: done
+  events:
+    - node_rerouted: { count: 2 }
+  never:
+    - task_status_changed: { task: T002, to: done }
 ```
 
 `yunta test` ejecuta cada caso con el adapter `mock`, deriva el estado por replay y lo compara contra `expect`. Sin LLM, sin red, determinístico y rápido — apto para correr en cada commit. No hay maquinaria nueva: el mock con fixtures, la derivación por replay y el estado del run ya existen; `test` es un comparador sobre datos que el engine ya produce.
@@ -669,4 +674,3 @@ I27. Cada endpoint MCP por-run está scopeado por construcción a `(run_id, node
 I28. Un `child_run_id` es la referencia histórica inmutable de una composición; reproducir un run padre nunca vuelve a resolver la versión actual de un workflow hijo, siempre sigue al manifest congelado del hijo que efectivamente corrió.
 I29. `permissions.network` es declarativa: el engine no provee ni promete aislamiento de red a nivel de sistema operativo: eso, si existe, es responsabilidad de un executor o del entorno de ejecución.
 I30. Toda fuente de contexto que participó en una sesión queda con su contenido efectivo materializado, no solo su hash; reconstruir el contexto de una sesión pasada nunca requiere volver a consultar el origen.
-```

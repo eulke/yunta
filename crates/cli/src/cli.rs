@@ -47,7 +47,7 @@ enum Command {
         /// Runs every session with this adapter instead of `runners:`'s
         /// own resolution: each role resolves to its candidate on it, and
         /// the log records every candidate passed over. `mock` needs
-        /// `--fixture`.
+        /// `--fixture` and runs attached, never with `--detach`.
         #[arg(long)]
         adapter: Option<AdapterId>,
         /// With `--adapter mock`: the fixture that scripts every session,
@@ -59,23 +59,23 @@ enum Command {
         /// `modes:` at all ignores this entirely.
         #[arg(long)]
         mode: Option<ModeName>,
-        /// Prints progress as the run advances, polling the event log
-        /// every 500ms instead of only at the end.
-        #[arg(long)]
-        follow: bool,
+        /// Prints the run id and nothing else: no progress, and no
+        /// closing block. The verdict travels in the exit code. A
+        /// diagnostic and the budget warning are printed either way —
+        /// quiet is about progress, not about problems.
+        #[arg(long, conflicts_with = "json")]
+        quiet: bool,
         /// Creates the run, then hands it off to a detached `yunta
         /// resume` child and returns immediately with the run id — the
         /// workflow keeps running independent of this invocation (the
         /// same thing `run_workflow` triggers internally so the MCP
-        /// control plane never blocks for a run's duration). Mutually
-        /// exclusive with `--follow` (there is nothing left in this
-        /// process to follow).
-        #[arg(long, conflicts_with = "follow")]
+        /// control plane never blocks for a run's duration).
+        #[arg(long)]
         detach: bool,
         /// Prints the run's outcome as one versioned JSON document
-        /// instead of the human progress lines — the same DTO the MCP
-        /// control plane returns. Suppresses `--follow`'s streaming.
-        #[arg(long, conflicts_with = "follow")]
+        /// instead of the human progress and closing block — the same
+        /// DTO the MCP control plane returns.
+        #[arg(long)]
         json: bool,
     },
     /// Shows a run's derived state: nodes, tasks and tokens.
@@ -92,6 +92,14 @@ enum Command {
     Resume {
         /// The run id to resume.
         run_id: RunId,
+        /// Prints the run id and nothing else, the same way `run` does.
+        #[arg(long, conflicts_with = "json")]
+        quiet: bool,
+        /// Prints the run's outcome as one versioned JSON document —
+        /// the same document `run --json` prints, because the two
+        /// commands execute the same thing.
+        #[arg(long)]
+        json: bool,
     },
     /// Answers a paused run's gate decision from a separate process — no
     /// live surface attached to the run itself. Records the decision
@@ -129,12 +137,20 @@ enum Command {
     },
     /// Health-checks every adapter this project's `runners:` names —
     /// binary present, version compatible, auth valid.
-    Doctor,
-    /// Runs the control-plane MCP server over stdio: `list_workflows`,
-    /// `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`
-    /// — none of which ever blocks for a run's own duration. Not a
-    /// daemon: exits when the client closes stdin, and no run's own
-    /// life depends on this process staying up.
+    Doctor {
+        /// Also opens one real session per binding any runner names —
+        /// the smallest run there is, through the same machinery a
+        /// workflow uses, run tools mounted — and reports how each one
+        /// ended. Spends one prompt per binding.
+        #[arg(long)]
+        session: bool,
+    },
+    /// Runs the control-plane MCP server over stdio: `document_shape`,
+    /// `list_workflows`, `run_workflow`, `workflow_status`,
+    /// `resume_run`, `resolve_gate`, `answer_questions` — none of which
+    /// ever blocks for a run's own duration. Not a daemon: exits when
+    /// the client closes stdin, and no run's own life depends on this
+    /// process staying up.
     Mcp,
     /// Removes orphaned run and worktree directories, respecting
     /// `storage.retention_days`.
@@ -146,9 +162,11 @@ enum Command {
     /// Renders a workflow's DAG as Mermaid or DOT (`--format`) —
     /// optionally annotated with a run's derived state.
     Graph {
-        /// Path to the workflow YAML file.
-        workflow: PathBuf,
-        /// Annotate each node with its derived state from this run.
+        /// Path to the workflow YAML file, or a catalog name. Omitted
+        /// with `--run`, which draws the workflow that run froze.
+        workflow: Option<PathBuf>,
+        /// Draw the workflow this run froze, each node annotated with
+        /// the state its own log derives.
         #[arg(long)]
         run: Option<RunId>,
         /// Diagram language: `mermaid` (default) or `dot`.
@@ -192,7 +210,7 @@ enum Command {
         run_id: Option<RunId>,
         /// Aggregates every past run of this workflow instead of one run.
         #[arg(long, conflicts_with = "run_id")]
-        workflow: Option<String>,
+        workflow: Option<yunta_core::WorkflowName>,
         /// Prints machine-readable JSON instead of the terminal view.
         #[arg(long)]
         json: bool,
@@ -209,10 +227,19 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+    /// The hook an agent's CLI runs before it writes: reads the call on
+    /// stdin, answers whether the fence allows it. Hidden because no
+    /// person invokes it — a session's own CLI does, and the adapter
+    /// that opened the session is what put the command there.
+    #[command(name = yunta_core::fence::SUBCOMMAND, hide = true)]
+    Fence {
+        /// The adapter whose codec reads this call.
+        adapter: yunta_core::AdapterId,
+    },
     /// Prints the shape of a document Yunta reads and validates, so
     /// nobody has to guess it. With no arguments, lists the kinds.
     Schema {
-        /// Which document: `tasks`, `findings` or `questions`.
+        /// Which document: `tasks`, `findings`, `questions` or `answers`.
         kind: Option<String>,
         /// Emits the JSON Schema instead of the annotated example — what
         /// an editor's language server validates against.
@@ -299,14 +326,16 @@ enum PackAction {
 /// caller turns into a line on stderr and a failing exit code.
 async fn dispatch(command: Command) -> Result<Outcome, CliError> {
     match command {
-        Command::Check { workflow, config } => commands::check::check(&workflow, config.as_deref()),
+        Command::Check { workflow, config } => {
+            commands::check::check(&workflow, config.as_deref()).await
+        }
         Command::Run {
             workflow,
             input,
             adapter,
             fixture,
             mode,
-            follow,
+            quiet,
             detach,
             json,
         } => {
@@ -316,14 +345,18 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
                 adapter.as_ref(),
                 fixture.as_deref(),
                 mode.as_ref(),
-                follow,
+                quiet,
                 detach,
                 json,
             )
             .await
         }
-        Command::Status { run_id, json } => commands::status::status(&run_id, json),
-        Command::Resume { run_id } => commands::resume::resume(&run_id).await,
+        Command::Status { run_id, json } => commands::status::status(&run_id, json).await,
+        Command::Resume {
+            run_id,
+            quiet,
+            json,
+        } => commands::resume::resume(&run_id, quiet, json).await,
         Command::ResolveGate {
             run_id,
             option,
@@ -343,20 +376,20 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             if runs {
                 commands::list::list_runs()
             } else {
-                commands::list::list_workflows()
+                commands::list::list_workflows().await
             }
         }
-        Command::Doctor => commands::doctor::doctor().await,
+        Command::Doctor { session } => commands::doctor::doctor(session).await,
         Command::Mcp => commands::mcp::mcp().await,
         Command::Gc { dry_run } => commands::gc::gc(dry_run),
         Command::Graph {
             workflow,
             run,
             format,
-        } => graph::graph(&workflow, run.as_ref(), format),
+        } => graph::graph(workflow.as_deref(), run.as_ref(), format).await,
         Command::Test { dir } => commands::test::test(dir.as_deref()).await,
-        Command::Verify { run_id } => commands::verify::verify(&run_id),
-        Command::Receipt { run_id, json } => commands::receipt::receipt(&run_id, json),
+        Command::Verify { run_id } => commands::verify::verify(&run_id).await,
+        Command::Receipt { run_id, json } => commands::receipt::receipt(&run_id, json).await,
         Command::Pack { action } => match action {
             PackAction::Add {
                 source,
@@ -375,14 +408,46 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             run_id,
             workflow,
             json,
-        } => commands::stats::stats(run_id.as_ref(), workflow.as_deref(), json),
+        } => commands::stats::stats(run_id.as_ref(), workflow.as_ref(), json).await,
         Command::Init { interactive, force } => commands::init::init(interactive, force).await,
+        Command::Fence { adapter } => fence_hook(&adapter),
         Command::Schema { kind, json } => commands::schema::schema(kind.as_deref(), json),
         Command::New {
             name,
             shape,
             interactive,
             force,
-        } => commands::new::new_workflow(&name, shape.as_deref(), interactive, force),
+        } => commands::new::new_workflow(&name, shape.as_deref(), interactive, force).await,
     }
+}
+
+/// Runs the hook and leaves the CLI that called it exactly what its own
+/// protocol expects: the streams, and the exit code as the outcome.
+///
+/// Reading stdin happens here and the environment at the shell's one
+/// boundary; the judgement itself is a pure function below both.
+fn fence_hook(adapter: &yunta_core::AdapterId) -> Result<Outcome, CliError> {
+    use std::io::{Read, Write};
+
+    let mut stdin = Vec::new();
+    std::io::stdin().read_to_end(&mut stdin).map_err(|source| {
+        CliError::msg(format!("the fence hook cannot read its call: {source}"))
+    })?;
+    let built = commands::built_adapter(adapter);
+    let env = crate::project::process_env();
+    let reply = commands::fence::run(
+        built.as_ref().and_then(|built| built.fence_codec()),
+        env.fence_var.as_deref(),
+        &stdin,
+    );
+    // A hook that cannot deliver its answer has not answered, and the
+    // exit code alone is what the calling CLI then reads: a failure
+    // here leaves the refusal, which is the safe side of it.
+    std::io::stdout()
+        .write_all(&reply.stdout)
+        .and_then(|()| std::io::stderr().write_all(&reply.stderr))
+        .map_err(|source| {
+            CliError::msg(format!("the fence hook cannot answer its call: {source}"))
+        })?;
+    Ok(Outcome::Code(u8::try_from(reply.exit).unwrap_or(1)))
 }

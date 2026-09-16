@@ -3,12 +3,13 @@
 //! full run.
 
 use yunta_core::events::{
-    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventBody,
-    EventPayload, Failure, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, StoredEvent,
-    TokenUsage,
+    ArtifactAcceptedPayload, ArtifactId, ArtifactWrittenPayload, EventPayload, Failure,
+    NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, RecordedOrigin, TokenUsage,
 };
+use yunta_core::events::{ArtifactEvent, NodeEvent};
 use yunta_core::{Node, NodeKind, PromptSource, Workflow};
 use yunta_engine::render_progress;
+use yunta_testkit_core::Log;
 
 fn node(id: &str, description: Option<&str>) -> Node {
     Node {
@@ -29,7 +30,6 @@ fn node(id: &str, description: Option<&str>) -> Node {
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: false,
         runners: Vec::new(),
         agent: None,
     }
@@ -57,16 +57,6 @@ fn workflow(nodes: Vec<Node>) -> Workflow {
     }
 }
 
-fn event(seq: u64, node_id: &str, payload: EventPayload) -> StoredEvent {
-    StoredEvent {
-        run_id: "run-1".into(),
-        seq: seq.into(),
-        timestamp: chrono::Utc::now(),
-        node_id: Some(node_id.into()),
-        body: EventBody::Known(payload),
-    }
-}
-
 fn tokens() -> TokenUsage {
     TokenUsage {
         input: 1,
@@ -89,41 +79,37 @@ fn a_workflow_with_no_events_yet_lists_every_node_as_next() {
 #[test]
 fn a_finished_node_shows_its_description_outcome_and_artifacts() {
     let wf = workflow(vec![node("plan", Some("Writes the tasks document"))]);
-    let events = vec![
-        event(
-            1,
+    let events = Log::for_run("run-1")
+        .node(
             "plan",
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
-        ),
-        event(
-            2,
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .node(
             "plan",
-            EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
-                artifact: ArtifactId::Interpreted {
+            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
+                ArtifactId::Interpreted {
                     kind: yunta_core::ArtifactKind::Tasks,
                 },
-                content_hash: yunta_core::sha256_hex(b"deadbeef"),
-                origin: ArtifactOrigin::Submitted,
-            }),
-        ),
-        event(
-            3,
+                yunta_core::sha256_hex(b"deadbeef"),
+                RecordedOrigin::Submitted,
+            ))),
+        )
+        .node(
             "plan",
-            EventPayload::ArtifactWritten(ArtifactWrittenPayload {
+            EventPayload::Artifacts(ArtifactEvent::Written(ArtifactWrittenPayload {
                 path: "artifacts/notes.md".into(),
                 content_hash: yunta_core::sha256_hex(b"notes"),
                 artifact_kind: None,
-            }),
-        ),
-        event(
-            4,
+            })),
+        )
+        .node(
             "plan",
-            EventPayload::NodeFinished(NodeFinishedPayload {
-                outcome: "planned".to_string(),
-                tokens_used: tokens(),
-            }),
-        ),
-    ];
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "planned".to_string(),
+                tokens(),
+            ))),
+        )
+        .build();
 
     let markdown = render_progress(&wf, &events);
 
@@ -145,22 +131,20 @@ fn a_finished_node_shows_its_description_outcome_and_artifacts() {
 #[test]
 fn a_failed_node_appears_under_failed_with_its_outcome() {
     let wf = workflow(vec![node("lint", None)]);
-    let events = vec![
-        event(
-            1,
+    let events = Log::for_run("run-1")
+        .node(
             "lint",
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
-        ),
-        event(
-            2,
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .node(
             "lint",
-            EventPayload::NodeFailed(NodeFailedPayload::new(
+            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 Failure::message("clippy: 3 warnings".to_string()),
                 false,
                 TokenUsage::default(),
-            )),
-        ),
-    ];
+            ))),
+        )
+        .build();
 
     let markdown = render_progress(&wf, &events);
     assert_eq!(
@@ -172,11 +156,12 @@ fn a_failed_node_appears_under_failed_with_its_outcome() {
 #[test]
 fn a_running_node_appears_under_next_marked_running() {
     let wf = workflow(vec![prompt_node("implement")]);
-    let events = vec![event(
-        1,
-        "implement",
-        EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
-    )];
+    let events = Log::for_run("run-1")
+        .node(
+            "implement",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .build();
 
     let markdown = render_progress(&wf, &events);
     assert_eq!(
@@ -196,21 +181,19 @@ fn parallel_children_are_listed_on_the_same_terms_as_top_level_nodes() {
         ..node("pre-launch", None)
     }]);
 
-    let events = vec![
-        event(
-            1,
+    let events = Log::for_run("run-1")
+        .node(
             "write-docs",
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
-        ),
-        event(
-            2,
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .node(
             "write-docs",
-            EventPayload::NodeFinished(NodeFinishedPayload {
-                outcome: "exit 0".to_string(),
-                tokens_used: TokenUsage::default(),
-            }),
-        ),
-    ];
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "exit 0".to_string(),
+                TokenUsage::default(),
+            ))),
+        )
+        .build();
 
     let markdown = render_progress(&wf, &events);
     assert_eq!(
@@ -229,22 +212,20 @@ fn a_multi_problem_failure_is_fenced_so_neither_reader_has_to_guess() {
     let outcome = "artifacts/plan.yaml: 2 errors\n  \
                    task `t1`: unknown key `description`\n  \
                    task `t1`, criterion 1: expected a mapping, found a string";
-    let events = vec![
-        event(
-            1,
+    let events = Log::for_run("run-1")
+        .node(
             "plan",
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
-        ),
-        event(
-            2,
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .node(
             "plan",
-            EventPayload::NodeFailed(NodeFailedPayload::new(
+            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 Failure::message(outcome.to_string()),
                 false,
                 TokenUsage::default(),
-            )),
-        ),
-    ];
+            ))),
+        )
+        .build();
     let markdown = render_progress(&wf, &events);
     assert!(markdown.contains("```"), "{markdown}");
     assert!(markdown.contains("unknown key `description`"), "{markdown}");

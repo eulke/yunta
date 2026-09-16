@@ -7,6 +7,7 @@ use yunta_core::ContentHash;
 use yunta_core::{Clock, NodeId, RunId, Seq};
 
 use crate::error::{Cause, Result, StorageError};
+use yunta_core::events::RunEvent;
 
 /// The schema migration, embedded in the binary rather than shipped as a
 /// file — the whole schema is one append-only table, so there is nothing
@@ -242,7 +243,7 @@ impl Storage {
         // assigns `seq` — the previous event's stored hash (or the
         // manifest-derived genesis for the run's first event) anchors it.
         let prev_hash = if seq == 1 {
-            let EventPayload::RunCreated(created) = &draft.payload else {
+            let EventPayload::Run(RunEvent::Created(created)) = &draft.payload else {
                 return Err(StorageError::GenesisMissing {
                     run_id: draft.run_id.clone(),
                 });

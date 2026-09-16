@@ -1,40 +1,24 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
+//! The `mock` adapter and the forge beside it: a session is whatever the
+//! fixture scripted for it, and nothing else.
+//!
+//! Every behavior a real adapter is asked for is exercised here against
+//! a script — the terminal event a session always pays, the effects the
+//! fence lets through, resume under one session id, the capabilities the
+//! fixture declares, and a gate published to a pull request — so the
+//! engine's own suites can trust the adapter they run on.
+
+use std::path::{Path, PathBuf};
 use std::time::Duration;
+use yunta_core::fence::{Advice, Fence};
 
 use futures::StreamExt;
-use yunta_adapters::{
-    Adapter, AgentEvent, Budget, Forge, ForgeError, MockAdapter, MockForge, MockForgeState,
-    PermissionProfile, ProbeReport, PublishRequest, PublishedGate, ReviewOutcome, SessionRequest,
+use yunta_adapters::{MockAdapter, MockFixture, MockForge, MockForgeState, RunPaths};
+use yunta_core::port::{
+    Adapter, AgentEvent, Forge, ForgeError, ProbeReport, PublishRequest, PublishedGate,
+    ReviewOutcome, SessionRequest,
 };
 use yunta_core::{Capabilities, SessionId};
-
-fn request(cwd: PathBuf) -> SessionRequest {
-    SessionRequest {
-        prompt: "do the thing".to_string(),
-        cwd,
-        model: None,
-        agent: None,
-        permissions: PermissionProfile::Edit,
-        env: HashMap::new(),
-        edit_constraints: None,
-        budget: Budget::default(),
-        adapter_settings: serde_json::Map::new(),
-        skills: Vec::new(),
-        run_tools_endpoint: None,
-        artifact_dir: None,
-        scratch_dir: None,
-    }
-}
-
-async fn drain(mut session: Box<dyn yunta_adapters::AgentSession>) -> Vec<AgentEvent> {
-    let mut events = Vec::new();
-    let mut stream = session.events();
-    while let Some(event) = stream.next().await {
-        events.push(event);
-    }
-    events
-}
+use yunta_testkit_core::adapter::{drain, request};
 
 #[tokio::test]
 async fn a_successful_session_opens_then_completes() {
@@ -58,8 +42,8 @@ steps:
     assert!(matches!(
         events[1],
         AgentEvent::Usage {
-            input_tokens: 10,
-            output_tokens: 5,
+            input_tokens: Some(10),
+            output_tokens: Some(5),
             ..
         }
     ));
@@ -138,12 +122,14 @@ async fn killing_a_hung_session_before_draining_ends_the_stream_with_no_terminal
     ));
 }
 
+/// The mock judges by the same function every real adapter asks, so a
+/// fixture exercises the rule rather than a second implementation of it.
 #[tokio::test]
-async fn blocked_is_derived_from_edit_constraints() {
+async fn a_fixture_effect_outside_the_fence_is_refused_and_recorded() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = MockAdapter::from_yaml(
         r#"
-capabilities: { edit_hooks: true }
+capabilities: { fence: tool_calls }
 effects:
   - { path: src/lib.rs, content: "pub fn hello() {}\n" }
   - { path: outside/scope.rs, content: "should never land" }
@@ -153,29 +139,35 @@ outcome: { type: completed, summary: "done" }
     .unwrap();
 
     let mut req = request(dir.path().to_path_buf());
-    req.edit_constraints = Some(vec!["src/**".to_string()]);
+    req.fence = Fence {
+        allowed: Some(vec!["src/**".into()]),
+        roots: Vec::new(),
+        advice: Advice::ReportFinding,
+    };
     let session = fixture.spawn(req).await.unwrap();
     let events = drain(session).await;
 
     assert!(dir.path().join("src/lib.rs").exists());
     assert!(!dir.path().join("outside/scope.rs").exists());
 
-    let blocked_marker = events.iter().any(|e| {
-        matches!(e, AgentEvent::ToolUse { name, target_digest }
-            if name == "edit" && target_digest.contains("outside/scope.rs"))
+    // The refused path reaches the log as the path it is: a path names
+    // the repository, which is what a reader needs to see.
+    let refused = events.iter().any(|e| {
+        matches!(e, AgentEvent::WriteRefused { target }
+            if target.display.as_deref() == Some("outside/scope.rs"))
     });
     assert!(
-        blocked_marker,
-        "expected a ToolUse marking the blocked edit"
+        refused,
+        "the refused write is recorded, naming the path: {events:?}"
     );
 }
 
 #[tokio::test]
-async fn without_edit_hooks_the_engine_never_asked_for_the_constraint_is_not_enforced() {
+async fn without_a_fence_the_adapter_builds_none_and_the_effect_lands() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = MockAdapter::from_yaml(
         r#"
-capabilities: { edit_hooks: false }
+capabilities: { fence: none }
 effects:
   - { path: outside/scope.rs, content: "lands anyway" }
 outcome: { type: completed, summary: "done" }
@@ -184,13 +176,16 @@ outcome: { type: completed, summary: "done" }
     .unwrap();
 
     let mut req = request(dir.path().to_path_buf());
-    req.edit_constraints = Some(vec!["src/**".to_string()]);
+    req.fence = Fence {
+        allowed: Some(vec!["src/**".into()]),
+        roots: Vec::new(),
+        advice: Advice::ReportFinding,
+    };
     let session = fixture.spawn(req).await.unwrap();
     let _ = drain(session).await;
 
-    // Without the capability, the adapter ignores the constraint
-    // instead of failing — the engine's own post-check scope diff
-    // is what would catch this later.
+    // With no fence to build, the adapter writes what it scripted —
+    // the engine's own post-check scope diff is what catches it later.
     assert!(dir.path().join("outside/scope.rs").exists());
 }
 
@@ -241,7 +236,7 @@ outcome: { type: completed, summary: ok }
     let caps: Capabilities = fixture.capabilities();
     assert!(caps.resume_session);
     assert!(caps.run_tools);
-    assert!(!caps.edit_hooks);
+    assert_eq!(caps.fence, yunta_core::FenceLevel::None);
 }
 
 #[tokio::test]
@@ -687,5 +682,141 @@ sessions:
         adapter.unconsumed(),
         vec![1, 2],
         "a run that opened one session leaves the other two scripts unclaimed"
+    );
+}
+
+#[tokio::test]
+async fn a_dropped_session_stops_its_player() {
+    // One step scheduled far enough ahead that the player is still
+    // waiting for it when the session goes away.
+    let adapter = MockAdapter::from_yaml(
+        "sessions:\n  - steps:\n      - { type: note, text: later, after_ms: 3600000 }\n    \
+         outcome: { type: completed, summary: done }\n",
+    )
+    .unwrap();
+    let alive = || {
+        tokio::runtime::Handle::current()
+            .metrics()
+            .num_alive_tasks()
+    };
+
+    let before = alive();
+    let mut session = adapter.spawn(request(std::env::temp_dir())).await.unwrap();
+    {
+        // Reading the opening event proves the player is past it and
+        // into the step it has to wait for.
+        let mut events = session.events();
+        assert!(matches!(
+            events.next().await,
+            Some(AgentEvent::SessionOpened { .. })
+        ));
+    }
+    assert!(
+        alive() > before,
+        "the session's script is played by a task of its own",
+    );
+
+    drop(session);
+    // Cancellation lands when the runtime next drives the task, so the
+    // test hands it the turns rather than waiting a wall-clock interval.
+    for _ in 0..1_000 {
+        if alive() <= before {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    panic!("a dropped session leaves its player waiting on a step nobody will read");
+}
+
+/// A fixture names the run's own directories — where a session writes
+/// the file its node declares, above all — and it has to mean the same
+/// thing whichever caller parses it. The `yunta test` harness rendered
+/// those names and the run bench did not, so the same YAML scripted a
+/// real path from one caller and a literal `{{run.staging}}` from the other.
+#[test]
+fn a_fixture_renders_its_run_paths_wherever_it_is_parsed() {
+    let yaml = "\
+sessions:
+  - effects:
+      - path: \"{{run.staging}}/grill/brief.md\"
+        content: hi
+    outcome: { type: completed, summary: done }
+";
+    let fixture = MockFixture::parse(
+        yaml,
+        &RunPaths {
+            run_dir: Path::new("/runs/r1"),
+            worktree: Path::new("/runs/r1/tree"),
+            staging: Path::new("/runs/r1/scratch/staging"),
+        },
+    )
+    .expect("the fixture parses");
+    assert_eq!(
+        fixture.sessions[0].effects[0].path,
+        PathBuf::from("/runs/r1/scratch/staging/grill/brief.md"),
+        "`{{{{run.staging}}}}` names the directory the run granted the node"
+    );
+}
+
+/// A caller with no run in hand still gets one answer, not a wrong one:
+/// the fixture that names a directory the caller cannot resolve is
+/// refused, rather than scripting a session to write to a path spelled
+/// `{{run.staging}}`.
+#[test]
+fn a_fixture_naming_a_run_directory_is_refused_where_there_is_no_run() {
+    let yaml = "\
+sessions:
+  - effects:
+      - path: \"{{run.staging}}/grill/brief.md\"
+        content: hi
+    outcome: { type: completed, summary: done }
+";
+    let refused = MockFixture::parse_without_a_run(yaml).expect_err("no run defines `staging`");
+    assert!(
+        refused.to_string().contains("run paths"),
+        "the refusal names what could not be resolved: {refused}"
+    );
+}
+
+/// The fixture's capability twin names the same eight fields the port
+/// does, and each one a fixture declares reaches the adapter. A twin
+/// that drifted would let a test claim a capability the engine never
+/// saw — or hide one it did.
+#[test]
+fn every_capability_round_trips_through_a_fixture() {
+    for capability in yunta_core::Capability::ALL {
+        // The fence is a level, not a flag: a fixture names which of
+        // the three it builds, and the other seven stay booleans.
+        let declares = match capability {
+            yunta_core::Capability::Fence => "tool_calls",
+            _ => "true",
+        };
+        let fixture = MockFixture::parse_without_a_run(&format!(
+            "capabilities: {{ {}: {declares} }}\nsessions:\n  - outcome: {{ type: completed, summary: ok }}\n",
+            capability.as_str()
+        ))
+        .unwrap_or_else(|e| panic!("a fixture declaring `{capability}` parses: {e}"));
+        let declared = MockAdapter::new(fixture).capabilities();
+        for other in yunta_core::Capability::ALL {
+            assert_eq!(
+                declared.declares(other),
+                other == capability,
+                "a fixture declaring `{capability}` declares it and nothing else"
+            );
+        }
+    }
+}
+
+/// And a flag the twin does not know is refused, naming it: a fixture is
+/// authored, so a typo is a mistake and never a silent `false`.
+#[test]
+fn a_fixture_that_declares_an_unknown_capability_is_refused() {
+    let error = MockFixture::parse_without_a_run(
+        "capabilities: { teleportation: true }\nsessions:\n  - outcome: { type: completed, summary: ok }\n",
+    )
+    .expect_err("an unknown capability flag is refused");
+    assert!(
+        error.to_string().contains("teleportation"),
+        "the refusal names the flag: {error}"
     );
 }

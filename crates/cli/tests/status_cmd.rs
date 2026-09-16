@@ -20,7 +20,7 @@ nodes:
     kind: bash
     run: |
       printf 'tasks:\n  - id: T001\n    title: ""\n    scope: []\n    criteria: []\n' > {{node.artifacts}}/tasks.yaml
-      printf 'findings:\n  - id: F1\n    severity: minor\n    title: ""\n    location: ""\n    detail: ""\n' > {{node.artifacts}}/findings.yaml
+      printf 'findings:\n  - id: F1\n    severity: minor\n    title: ""\n    location: src/lib.rs\n    detail: ""\n' > {{node.artifacts}}/findings.yaml
     artifacts:
       produces: [tasks, findings]
 "#;
@@ -130,8 +130,8 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
         "a task with an empty `title` says so: {tasks_problems:?}"
     );
     assert!(
-        findings_problems.iter().any(|p| p.contains("location")),
-        "a finding with an empty `location` says so: {findings_problems:?}"
+        findings_problems.iter().any(|p| p.contains("detail")),
+        "a finding with an empty `detail` says so: {findings_problems:?}"
     );
 
     // The node list above stays one line per node, and that one line
@@ -143,6 +143,38 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
     assert!(
         node_line.contains(&staged("tasks.yaml")) && node_line.contains(&staged("findings.yaml")),
         "the collapsed line still names every document: {node_line}"
+    );
+}
+
+#[test]
+fn every_level_of_a_failure_block_hangs_one_step_under_the_line_above_it() {
+    // Three levels deep: the heading, the node that failed, and each
+    // document that node named. The steps come from one value, so a
+    // reader follows the nesting by eye instead of measuring it — and a
+    // level that started spelling its own margin would show up here as a
+    // ladder with an uneven rung.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let home = root.path().join("state");
+    let run_id = run_two_documents(&repo, &home);
+
+    let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    let mut lines = text.lines().skip_while(|line| *line != "failures:");
+    let heading = lines.next().expect("a failed run says what failed");
+    let node = lines.next().expect("the node that failed heads its detail");
+    let named = staged("tasks.yaml");
+    let document = lines
+        .find(|line| line.trim_start().starts_with(&named))
+        .expect("a document the node did not close");
+
+    assert_eq!(indent_of(heading), 0, "{text}");
+    let step = indent_of(node);
+    assert!(step > 0, "the node hangs under the heading: {text}");
+    assert_eq!(
+        indent_of(document),
+        step * 2,
+        "one step per level, the same step every time: {text}"
     );
 }
 
@@ -207,8 +239,8 @@ fn status_json_carries_the_document_each_problem_belongs_to() {
     assert!(
         findings_problems
             .iter()
-            .any(|d| d["problem"] == "rule" && d["code"] == "empty-location"),
-        "the finding has an empty `location`: {state:#}"
+            .any(|d| d["problem"] == "rule" && d["code"] == "empty-detail"),
+        "the finding has an empty `detail`: {state:#}"
     );
 }
 
@@ -298,4 +330,135 @@ fn status_json_publishes_an_unheld_artifact_under_its_stable_code() {
     assert!(entry["path"].is_null(), "{state:#}");
     assert!(entry["kind"].is_null(), "{state:#}");
     assert!(entry["file"].is_null(), "{state:#}");
+}
+
+/// The workflow the one-document test drives: two nodes, the second
+/// depending on the first, so a run of it reaches a stop with nodes and
+/// tasks to report.
+const TWO_NODES: &str = r#"
+name: two-nodes
+nodes:
+  - id: touch
+    kind: bash
+    run: "echo made > made.txt"
+  - id: verify
+    kind: bash
+    depends_on: [touch]
+    run: "test -f made.txt"
+"#;
+
+#[test]
+fn run_json_and_status_json_are_one_document() {
+    // `yunta run --json` and `yunta status --json` answer the same
+    // question about the same run, and answer it with the same document:
+    // one derivation off the run's own log, so a program that learned to
+    // read one reads the other.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(&repo.join("wf.yaml"), TWO_NODES);
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--json"]);
+    assert!(run.status.success(), "{}", stdout(&run));
+    let from_run: serde_json::Value = serde_json::from_str(&stdout(&run))
+        .unwrap_or_else(|e| panic!("run --json emits JSON: {e}\n{}", stdout(&run)));
+    let run_id = from_run["run_id"].as_str().expect("the run's id");
+
+    let status = yunta_in!(&repo, &home, &["status", run_id, "--json"]);
+    let from_status: serde_json::Value = serde_json::from_str(&stdout(&status))
+        .unwrap_or_else(|e| panic!("status --json emits JSON: {e}"));
+
+    assert_eq!(
+        from_run, from_status,
+        "one document, two commands:\n{from_run:#}\n{from_status:#}"
+    );
+    assert_eq!(from_run["outcome"], "finished", "{from_run:#}");
+}
+
+// --- a session that never opened -----------------------------------------
+
+/// A project whose one runner is a `codex` that refuses whatever it is
+/// given: it writes the refusal on stderr and exits before its first
+/// line, which is what a CLI rejecting the configuration this engine
+/// writes it actually does.
+fn run_a_dying_session(root: &Path, repo: &Path, home: &Path) -> String {
+    let said = root.join("stderr.txt");
+    write(&said, "url is not supported for stdio\n");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        &format!(
+            "runners:\n  executor:\n    - {{ adapter: codex, model: codex-model }}\nadapters:\n  \
+             codex:\n    binary: {stub}\nsecrets: [CODEX_STUB_STDERR_FILE, CODEX_STUB_EXIT]\n",
+            stub = yunta_testkit_core::stubs::codex().display()
+        ),
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: dying\nnodes:\n  - id: work\n    kind: prompt\n    runner: executor\n    prompt: \
+         \"Do the thing.\"\n",
+    );
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-q", "-m", "project"]);
+
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, repo, home);
+    let run = command
+        .args(["run", "wf.yaml"])
+        .env("CODEX_STUB_STDERR_FILE", &said)
+        .env("CODEX_STUB_EXIT", "2")
+        .output()
+        .expect("the yunta binary runs");
+    run_id_from(&run)
+}
+
+#[test]
+fn status_prints_the_stderr_a_dead_session_left() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    let run_id = run_a_dying_session(root.path(), &repo, &home);
+
+    let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    assert!(
+        text.contains("session `codex` exited with code 2 before any terminal event"),
+        "the node's own line says how the process went: {text}"
+    );
+    assert!(
+        text.contains("url is not supported for stdio"),
+        "and the page shows what the CLI said on its way out: {text}"
+    );
+}
+
+#[test]
+fn status_json_publishes_a_session_death_on_its_node() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    let run_id = run_a_dying_session(root.path(), &repo, &home);
+
+    let document: serde_json::Value = serde_json::from_str(&stdout(&yunta_in!(
+        &repo,
+        &home,
+        &["status", &run_id, "--json"]
+    )))
+    .expect("a JSON document");
+    let node = document["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.first())
+        .expect("the one node");
+    assert_eq!(node["session_death"]["adapter"], "codex", "{document:#}");
+    assert_eq!(node["session_death"]["exit"]["end"], "code", "{document:#}");
+    assert_eq!(node["session_death"]["exit"]["code"], 2, "{document:#}");
+    assert_eq!(
+        node["session_death"]["exit"]["stderr_tail"][0], "url is not supported for stdio",
+        "{document:#}"
+    );
+    // A dead session names no document, so it is not a diagnostic.
+    assert!(document.get("diagnostics").is_none(), "{document:#}");
 }

@@ -13,18 +13,92 @@
 //! never a silent replay of the last session. A person writes fixtures,
 //! so every shape here refuses a key it does not know.
 
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use yunta_core::fence::{Coverage, Fenced};
+use yunta_core::template::TemplateVar;
 use yunta_core::yaml::{self, Value};
-use yunta_core::{Capabilities, ModelName};
+use yunta_core::{Capabilities, FenceLevel, ModelName};
 
 /// A parsed fixture: adapter-level capabilities plus one script per
 /// expected `spawn()`, in order.
 #[derive(Debug, Clone)]
 pub struct MockFixture {
     pub capabilities: Capabilities,
+    /// How much of a session this fixture's adapter reports it fenced.
+    /// A fixture that says nothing gets what its level implies: a
+    /// judgement per tool call is exact, a filesystem sandbox is widened
+    /// to the directories it confines.
+    pub fence_coverage: Option<FixtureCoverage>,
     pub sessions: Vec<SessionScript>,
+}
+
+/// The run directories a fixture names. They are the caller's to
+/// compute — a fixture is parsed before any run exists in some callers
+/// and beside a live one in others — and this is what they are called
+/// inside the YAML.
+#[derive(Debug, Clone, Copy)]
+pub struct RunPaths<'a> {
+    /// `{{run.dir}}` — the run's own directory.
+    pub run_dir: &'a Path,
+    /// `{{run.worktree}}` — the checkout the session works in.
+    pub worktree: &'a Path,
+    /// `{{run.staging}}` — the root under which each node writes the files
+    /// it declares, one directory per node id: a session scripted to
+    /// produce an artifact of node `grill` writes
+    /// `{{run.staging}}/grill/<name>`, which is exactly the directory that
+    /// session is granted.
+    pub staging: &'a Path,
+}
+
+/// Why a fixture did not become a script.
+#[derive(Debug, thiserror::Error)]
+pub enum FixtureError {
+    /// The YAML names a variable these paths do not define, or leaves a
+    /// `{{` unclosed.
+    #[error("the fixture's run paths could not be resolved")]
+    Paths(#[from] yunta_core::template::TemplateError),
+    /// The rendered YAML is not a fixture. The document's own
+    /// diagnostic is the message: it already names the key, the path
+    /// and what it expected, which is what the person who wrote the
+    /// fixture needs.
+    #[error(transparent)]
+    Shape(#[from] yunta_core::yaml::YamlError),
+}
+
+impl MockFixture {
+    /// Reads one fixture, resolving the run directories it names against
+    /// `paths` before the YAML is parsed.
+    ///
+    /// The one way a scripted session comes to exist. Rendering here
+    /// rather than in each caller is what makes a fixture mean the same
+    /// thing from the `yunta test` harness, from `yunta run --adapter
+    /// mock --fixture` and from the run bench — the paths differ, the
+    /// document does not.
+    pub fn parse(yaml: &str, paths: &RunPaths<'_>) -> Result<Self, FixtureError> {
+        Self::render(
+            yaml,
+            BTreeMap::from([
+                (TemplateVar::RunDir, paths.run_dir.display().to_string()),
+                (TemplateVar::Worktree, paths.worktree.display().to_string()),
+                (TemplateVar::Staging, paths.staging.display().to_string()),
+            ]),
+        )
+    }
+
+    /// One fixture for a caller that has no run: the same door with no
+    /// directory defined, so a fixture that names one is refused here
+    /// instead of scripting the literal `{{run.staging}}` as a path.
+    pub fn parse_without_a_run(yaml: &str) -> Result<Self, FixtureError> {
+        Self::render(yaml, BTreeMap::new())
+    }
+
+    fn render(yaml: &str, vars: BTreeMap<TemplateVar, String>) -> Result<Self, FixtureError> {
+        let rendered = yunta_core::template::render_template(yaml, &vars)?;
+        Ok(yunta_core::yaml::parse(&rendered)?)
+    }
 }
 
 impl<'de> Deserialize<'de> for MockFixture {
@@ -47,11 +121,17 @@ impl<'de> Deserialize<'de> for MockFixture {
             struct Multi {
                 #[serde(default)]
                 capabilities: FixtureCapabilities,
+                #[serde(default)]
+                fence_coverage: Option<FixtureCoverage>,
                 sessions: Vec<SessionScript>,
             }
             let multi: Multi = yaml::from_value(value).map_err(D::Error::custom)?;
+            let capabilities: Capabilities = multi.capabilities.into();
             Ok(MockFixture {
-                capabilities: multi.capabilities.into(),
+                fence_coverage: multi
+                    .fence_coverage
+                    .or_else(|| FixtureCoverage::of(capabilities.fence)),
+                capabilities,
                 sessions: multi.sessions,
             })
         } else {
@@ -68,12 +148,52 @@ impl<'de> Deserialize<'de> for MockFixture {
                 Some(value) => yaml::from_value(value).map_err(D::Error::custom)?,
                 None => FixtureCapabilities::default(),
             };
+            let declared: Option<FixtureCoverage> = match mapping.remove("fence_coverage") {
+                Some(value) => Some(yaml::from_value(value).map_err(D::Error::custom)?),
+                None => None,
+            };
             let script: SessionScript =
                 yaml::from_value(Value::Mapping(mapping)).map_err(D::Error::custom)?;
+            let capabilities: Capabilities = capabilities.into();
             Ok(MockFixture {
-                capabilities: capabilities.into(),
+                fence_coverage: declared.or_else(|| FixtureCoverage::of(capabilities.fence)),
+                capabilities,
                 sessions: vec![script],
             })
+        }
+    }
+}
+
+/// What a fixture says its adapter's fence covered. The shapes of
+/// [`Coverage`] as a fixture spells them; the roots of a widened one are
+/// the session's own, so a fixture names the shape and never the paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FixtureCoverage {
+    Exact,
+    Widened,
+    ToolsOnly,
+}
+
+impl FixtureCoverage {
+    /// What a fixture's level reports when it names no coverage.
+    pub fn of(level: FenceLevel) -> Option<Self> {
+        match level {
+            FenceLevel::None => None,
+            FenceLevel::ToolCalls => Some(FixtureCoverage::Exact),
+            FenceLevel::Filesystem => Some(FixtureCoverage::Widened),
+        }
+    }
+
+    /// This coverage for a session confined to `directories`.
+    pub fn resolve(self, directories: Vec<std::path::PathBuf>) -> Coverage {
+        match self {
+            FixtureCoverage::Exact => Coverage::of(Fenced::Exact, Some(Fenced::Exact)),
+            FixtureCoverage::Widened => Coverage::of(
+                Fenced::Roots(directories.clone()),
+                Some(Fenced::Roots(directories)),
+            ),
+            FixtureCoverage::ToolsOnly => Coverage::of(Fenced::Exact, None),
         }
     }
 }
@@ -86,7 +206,7 @@ impl<'de> Deserialize<'de> for MockFixture {
 #[serde(default, deny_unknown_fields)]
 pub struct FixtureCapabilities {
     pub resume_session: bool,
-    pub edit_hooks: bool,
+    pub fence: FenceLevel,
     pub permission_profiles: bool,
     pub custom_agents: bool,
     pub usage_reporting: bool,
@@ -99,7 +219,7 @@ impl From<FixtureCapabilities> for Capabilities {
     fn from(fixture: FixtureCapabilities) -> Self {
         Capabilities {
             resume_session: fixture.resume_session,
-            edit_hooks: fixture.edit_hooks,
+            fence: fixture.fence,
             permission_profiles: fixture.permission_profiles,
             custom_agents: fixture.custom_agents,
             usage_reporting: fixture.usage_reporting,
@@ -146,7 +266,10 @@ fn default_model() -> ModelName {
 pub enum MockStep {
     ToolUse {
         name: String,
-        target_digest: String,
+        /// What the scripted call acts on. A fixture writes what a real
+        /// session would hand over, so the mock produces the same
+        /// opaque target every other adapter does.
+        target: String,
         #[serde(default)]
         after_ms: u64,
     },
@@ -219,7 +342,7 @@ impl MockStep {
 /// A file the session writes under the request's `cwd`, simulating the
 /// agent's own edits. Whether it lands is the request's business: with
 /// `edit_hooks` declared, a path outside the request's
-/// `edit_constraints` is blocked before it is written, exactly as a
+/// the fence refuses is never written, exactly as a
 /// hook-capable CLI would; without the capability every effect lands
 /// and the engine's post-check scope diff is what catches it.
 #[derive(Debug, Clone, Deserialize)]

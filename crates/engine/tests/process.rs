@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use yunta_core::Pid;
 use yunta_engine::process::{spawn_governed, GovernedCommand, Outcome, Supervision};
+use yunta_testkit::Owner;
+use yunta_testkit_core::FixedClock;
 
 /// True while any member of `pgid` still runs. A zombie is not
 /// running: it has exited and only waits for its parent to collect its
@@ -29,8 +31,43 @@ fn group_running(pgid: Pid) -> bool {
         .any(|(member_group, state)| member_group == group && !state.starts_with('Z'))
 }
 
+/// Outside a run there is no registry, but there is always somebody who
+/// can stop the work: a supervision that cannot be built without a token
+/// is what makes "no subprocess without an owner" a property of the type
+/// rather than of every call site remembering.
+#[tokio::test]
+async fn a_supervision_outside_any_run_still_answers_to_its_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let owner = Owner::new();
+    let marker = dir.path().join("running.marker");
+    let trigger = owner.cancellation().clone();
+    let watcher = tokio::spawn(async move {
+        while !marker.exists() {
+            tokio::task::yield_now().await;
+        }
+        trigger.cancel();
+    });
+
+    let outcome = spawn_governed(
+        GovernedCommand::shell(dir.path(), "touch running.marker; tail -f /dev/null"),
+        owner.supervision(),
+    )
+    .await
+    .unwrap();
+    watcher.await.unwrap();
+
+    let Outcome::Cancelled { pgid, .. } = outcome else {
+        panic!("expected a cancellation, got {outcome:?}");
+    };
+    assert!(
+        !group_running(pgid),
+        "a command outside any run dies with its tree like any other"
+    );
+}
+
 #[tokio::test]
 async fn context_command_timeout_leaves_no_process_alive() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     let command = GovernedCommand::shell(
         dir.path(),
@@ -38,7 +75,7 @@ async fn context_command_timeout_leaves_no_process_alive() {
     )
     .timeout(Duration::from_millis(200));
 
-    let outcome = spawn_governed(command, Supervision::none()).await.unwrap();
+    let outcome = spawn_governed(command, owner.supervision()).await.unwrap();
 
     let Outcome::TimedOut { pgid, stdout, .. } = outcome else {
         panic!("expected a timeout, got {outcome:?}");
@@ -74,16 +111,9 @@ async fn cancellation_kills_the_tree_and_drains_the_pipes() {
         "echo begun; touch running.marker; tail -f /dev/null & tail -f /dev/null",
     );
 
-    let outcome = spawn_governed(
-        command,
-        Supervision {
-            registry: None,
-            cancel: Some(&cancel),
-            env: &[],
-        },
-    )
-    .await
-    .unwrap();
+    let outcome = spawn_governed(command, Supervision::outside_any_run(&cancel, &FixedClock))
+        .await
+        .unwrap();
 
     let Outcome::Cancelled { pgid, stdout, .. } = outcome else {
         panic!("expected a cancellation, got {outcome:?}");
@@ -97,10 +127,11 @@ async fn cancellation_kills_the_tree_and_drains_the_pipes() {
 
 #[tokio::test]
 async fn a_finished_command_reports_its_status_and_both_streams() {
+    let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();
     let command = GovernedCommand::shell(dir.path(), "echo out; echo err 1>&2; exit 3");
 
-    let outcome = spawn_governed(command, Supervision::none()).await.unwrap();
+    let outcome = spawn_governed(command, owner.supervision()).await.unwrap();
 
     let Outcome::Exited {
         status,
@@ -113,4 +144,103 @@ async fn a_finished_command_reports_its_status_and_both_streams() {
     assert_eq!(status.code(), Some(3));
     assert_eq!(String::from_utf8_lossy(&stdout), "out\n");
     assert_eq!(String::from_utf8_lossy(&stderr), "err\n");
+}
+
+/// A `git` a run spawns is a subprocess the run owns: born in its own
+/// process group, registered, and killed with its whole tree when the run
+/// is cancelled. Proven with a `git` of the test's own on an injected
+/// `PATH`, so the assertion is about who governs the child rather than
+/// about what real git does.
+#[tokio::test]
+async fn a_cancelled_run_kills_the_git_it_spawned() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let started = dir.path().join("started");
+    // The stub publishes its pid by renaming a file it has already
+    // written, never by writing the file the test watches: a rename is
+    // atomic, so the moment the path exists it holds the whole pid, and
+    // the watcher below needs no interval to be sure of that.
+    std::fs::write(
+        bin.join("git"),
+        format!(
+            "#!/bin/sh\necho $$ > {0}.partial\nmv {0}.partial {0}\ntail -f /dev/null\n",
+            started.display()
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(bin.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let env = [("PATH".to_string(), path.clone())];
+    let supervision = Supervision::outside_any_run(&cancel, &FixedClock).with_env(&env);
+
+    let waiting = started.clone();
+    let trigger = cancel.clone();
+    let killer = tokio::spawn(async move {
+        // The stub is running once it has written its pid.
+        while !waiting.exists() {
+            tokio::task::yield_now().await;
+        }
+        trigger.cancel();
+    });
+
+    let error = yunta_engine::git::output(dir.path(), &["status"], supervision)
+        .await
+        .expect_err("a cancelled git never answers");
+    killer.await.unwrap();
+
+    let pid: i32 = std::fs::read_to_string(&started)
+        .expect("the stub ran")
+        .trim()
+        .parse()
+        .expect("the stub wrote its pid");
+    assert!(
+        !group_running(Pid::try_from(pid).expect("a real pid")),
+        "the git this run spawned outlived the run's cancellation: {error}"
+    );
+}
+
+#[test]
+fn a_corrupt_registry_is_reported_as_corrupt_not_absent() {
+    // An `engine.json` that is there and will not read is a fact about
+    // this run: a reader told it was absent would conclude the engine
+    // never wrote one, which is a different thing to do about it.
+    let run_dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(run_dir.path().join("scratch")).unwrap();
+    std::fs::write(
+        yunta_engine::registry_path(run_dir.path()),
+        "{ this is not a registry",
+    )
+    .unwrap();
+
+    match yunta_engine::read_registry(run_dir.path()) {
+        yunta_engine::Registry::Corrupt(error) => {
+            let said = yunta_core::describe(&error);
+            assert!(
+                said.contains("process registry"),
+                "the refusal names what the file was meant to be: {said}"
+            );
+        }
+        yunta_engine::Registry::Absent => {
+            panic!("a file that is there is not absent")
+        }
+        yunta_engine::Registry::Read(_) => panic!("that is not a registry"),
+    }
+
+    // And a run with no registry at all still reads as absent.
+    let empty = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        yunta_engine::read_registry(empty.path()),
+        yunta_engine::Registry::Absent
+    ));
 }

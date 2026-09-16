@@ -3,9 +3,10 @@
 //! the edge.
 
 use thiserror::Error;
+use yunta_core::McpServerName;
 use yunta_core::NodeId;
 
-use crate::template::TemplateError;
+use yunta_core::template::TemplateError;
 
 use super::mcp::McpQueryError;
 use super::EXTERNAL_CALL_TIMEOUT;
@@ -113,7 +114,7 @@ pub(super) enum ContextResolveError {
     UnknownMcpServer {
         node: NodeId,
         source_id: String,
-        server: String,
+        server: McpServerName,
     },
     #[error(
         "context `{source_id}` on node `{node}`: mcp server `{server}` declares `auth_env: \
@@ -122,14 +123,14 @@ pub(super) enum ContextResolveError {
     MissingAuthEnv {
         node: NodeId,
         source_id: String,
-        server: String,
+        server: McpServerName,
         var: String,
     },
     #[error("context `{source_id}` on node `{node}`: mcp server `{server}`: {source}")]
     McpFailed {
         node: NodeId,
         source_id: String,
-        server: String,
+        server: McpServerName,
         #[source]
         source: McpQueryError,
     },
@@ -141,6 +142,6 @@ pub(super) enum ContextResolveError {
     McpTimedOut {
         node: NodeId,
         source_id: String,
-        server: String,
+        server: McpServerName,
     },
 }

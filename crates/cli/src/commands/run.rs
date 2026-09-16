@@ -1,6 +1,11 @@
 //! `yunta run <workflow>`: resolve config, check, freeze the manifest,
-//! prepare the run's isolated working tree, create the run and execute
-//! it there.
+//! prepare the run's isolated working tree and create the run.
+//!
+//! A run takes one of two shapes from there, one module each —
+//! [`attached`] drives it here, [`detach`] hands it to a child that
+//! outlives this process — and every step both of them share lives in
+//! this module, so the two reach a run through the very same resolution,
+//! refusals and creation.
 //!
 //! The run id is a ULID from the shell's id source; the engine mints
 //! only the ids of the runs this one gives birth to, through the same
@@ -8,22 +13,22 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use yunta_adapters::MOCK_ID;
-use yunta_core::{AdapterId, Clock, IdSource, Isolation, Manifest, ModeName, RunId, Workflow};
-use yunta_engine::{FrozenRun, RunEnv, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_core::{AdapterId, Clock, IdSource, InputName, Isolation, Manifest, ModeName, Workflow};
+use yunta_engine::{FrozenRun, PriorEstimation};
 use yunta_storage::AsyncStorage;
 
-use super::status::progress_summary;
+mod attached;
+mod detach;
+
+pub(crate) use detach::start_detached;
+
+use super::drive::Prepared;
+use super::Adapters;
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
-use crate::json::SCHEMA_VERSION;
-use crate::load_yaml;
-
-/// How often `--follow` re-reads the run's event log to print progress —
-/// the poll interval named once, matching the `run --follow` help text.
-const FOLLOW_POLL_INTERVAL: Duration = Duration::from_millis(500);
+use yunta_core::events::RunEvent;
 
 /// Parses `--input name=value` entries into the raw map
 /// `yunta_engine::resolve_inputs` validates against the workflow's own
@@ -32,16 +37,16 @@ const FOLLOW_POLL_INTERVAL: Duration = Duration::from_millis(500);
 /// a name is declared, required, or well-typed is `resolve_inputs`'s
 /// job, not this one's, so the two error paths never disagree about who
 /// owns which rule.
-fn parse_inputs(raw: &[String]) -> Result<HashMap<String, String>, String> {
+fn parse_inputs(raw: &[String]) -> Result<HashMap<InputName, String>, String> {
     let mut inputs = HashMap::new();
     for entry in raw {
         let (name, value) = entry
             .split_once('=')
             .ok_or_else(|| format!("--input `{entry}` must have the form `name=value`"))?;
-        if name.is_empty() {
-            return Err(format!("--input `{entry}` has an empty name"));
-        }
-        if inputs.insert(name.to_string(), value.to_string()).is_some() {
+        let name: InputName = name
+            .parse()
+            .map_err(|error| format!("--input `{entry}`: {error}"))?;
+        if inputs.insert(name.clone(), value.to_string()).is_some() {
             return Err(format!("--input `{name}` was given more than once"));
         }
     }
@@ -51,10 +56,7 @@ fn parse_inputs(raw: &[String]) -> Result<HashMap<String, String>, String> {
 /// `--adapter <name>` names a real adapter every session runs on; it
 /// must be one `real_adapters` constructed from the config. `mock` is
 /// handled before this: it needs a fixture, never a real binary.
-fn validate_adapter_flag(
-    name: &AdapterId,
-    adapters: &HashMap<AdapterId, std::sync::Arc<dyn yunta_adapters::Adapter>>,
-) -> Result<(), String> {
+fn validate_adapter_flag(name: &AdapterId, adapters: &Adapters) -> Result<(), String> {
     if !adapters.contains_key(name) {
         return Err(format!(
             "unknown adapter `{name}` — this binary can run: {}",
@@ -70,50 +72,6 @@ fn validate_adapter_flag(
     Ok(())
 }
 
-/// `run --follow`: a background task that re-reads the run's own event
-/// log every 500ms and prints `progress_summary` whenever it changes.
-/// This polls rather than subscribing to a real push stream, since
-/// `yunta-storage` exposes no such subscription mechanism — a
-/// deliberately narrow, ~5-method interface; the *content* printed is
-/// identical either way, only the delivery latency (bounded by the
-/// poll interval) differs from a true stream. Reads through its own
-/// clone of the run's log handle: every poll is its own read-only
-/// connection on a blocking thread, which WAL mode (set by
-/// `Storage::open`) keeps safe beside the writer `execute_run` itself
-/// is using.
-fn spawn_follower(
-    storage: AsyncStorage,
-    run_id: RunId,
-    manifest: Manifest,
-) -> (
-    tokio::task::JoinHandle<()>,
-    std::sync::Arc<tokio::sync::Notify>,
-) {
-    let stop = std::sync::Arc::new(tokio::sync::Notify::new());
-    let stop_follower = stop.clone();
-    let handle = tokio::spawn(async move {
-        let mut last = String::new();
-        loop {
-            tokio::select! {
-                _ = stop_follower.notified() => return,
-                _ = tokio::time::sleep(FOLLOW_POLL_INTERVAL) => {}
-            }
-            let Ok(events) = storage.events_for_run(run_id.clone()).await else {
-                continue;
-            };
-            if events.is_empty() {
-                continue;
-            }
-            let summary = progress_summary(&events, &manifest);
-            if summary != last {
-                println!("run {run_id}: {summary}");
-                last = summary;
-            }
-        }
-    });
-    (handle, stop)
-}
-
 /// Every run in storage with events but no `run_finished` — paused runs
 /// hold a slot (they expect a `resume`), finished ones never do.
 async fn count_non_terminal_runs(
@@ -125,7 +83,7 @@ async fn count_non_terminal_runs(
         let finished = events.iter().any(|e| {
             matches!(
                 e.payload(),
-                Some(yunta_core::events::EventPayload::RunFinished(_))
+                Some(yunta_core::events::EventPayload::Run(RunEvent::Finished(_)))
             )
         });
         if !events.is_empty() && !finished {
@@ -135,6 +93,9 @@ async fn count_non_terminal_runs(
     Ok(active)
 }
 
+/// Creates a run from a workflow and takes one of the two shapes a run
+/// reaches a person in: driven here, with this invocation watching it to
+/// its end, or handed to a detached child that outlives this process.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     workflow_path: &Path,
@@ -142,200 +103,169 @@ pub async fn run(
     adapter: Option<&AdapterId>,
     fixture: Option<&Path>,
     mode: Option<&ModeName>,
-    follow: bool,
+    quiet: bool,
     detach: bool,
     json: bool,
 ) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let storage = ctx.async_storage().await?;
+    let mock_fixture = mock_fixture(adapter, fixture, detach)?;
 
-    // `--adapter mock --fixture <path>` runs against a scripted fixture:
-    // no real adapter is constructed or probed. Any other `--adapter`
-    // is an override every role resolves through. Detected before the
-    // workflow is even loaded, so a misuse fails fast.
-    let mock_fixture = match (adapter, fixture) {
-        (Some(id), Some(path)) if *id == MOCK_ID => Some(path),
-        (Some(id), None) if *id == MOCK_ID => {
-            return Err(CliError::msg(
-                "`--adapter mock` runs the workflow against a scripted fixture — pass \
-                 `--fixture <path>` (the format a `.yunta/tests/` fixture uses), or write a \
-                 case and run `yunta test`",
-            ));
-        }
-        (_, Some(_)) => {
-            return Err(CliError::msg(
-                "`--fixture` only applies together with `--adapter mock`",
-            ));
-        }
-        _ => None,
-    };
-
-    // Detach is the control plane's own shape: create the run, hand it to
-    // a fully independent `yunta resume`, and return its id without
-    // waiting — never with a mock fixture, which is an inline test tool.
-    // The exact `start_detached` the MCP `run_workflow` tool calls.
-    if detach && mock_fixture.is_none() {
-        let run_id =
-            start_detached(&ctx, &storage, workflow_path, raw_inputs, adapter, mode).await?;
-        if json {
-            return crate::json::print_json(&RunJson::detached(&run_id));
-        }
-        println!("run {run_id}: detached, driving forward independently");
-        return Ok(Outcome::Success);
+    if detach {
+        return detach::detached(detach::Detaching {
+            ctx: &ctx,
+            storage: &storage,
+            workflow_path,
+            raw_inputs,
+            adapter,
+            mode,
+            quiet,
+            json,
+        })
+        .await;
     }
 
-    let (workflow_path, workflow) = resolve_and_check(&ctx, workflow_path)?;
-    let adapter_override = adapter.filter(|id| **id != MOCK_ID).cloned();
-    let real_adapters = if mock_fixture.is_some() {
-        HashMap::new()
-    } else {
-        super::real_adapters(&ctx.project.config)
-    };
-    if mock_fixture.is_none() {
-        super::refuse_unrunnable(&workflow, &real_adapters)?;
-        if let Some(name) = adapter {
-            validate_adapter_flag(name, &real_adapters).map_err(CliError::msg)?;
-        }
-        super::probe_or_refuse(&real_adapters).await?;
+    attached::attached(attached::Attaching {
+        ctx: &ctx,
+        storage: &storage,
+        workflow_path,
+        raw_inputs,
+        adapter,
+        mock_fixture,
+        mode,
+        quiet,
+        json,
+    })
+    .await
+}
+
+/// `--adapter mock --fixture <path>`: the scripted fixture every session
+/// runs against, with no real adapter constructed or probed.
+///
+/// The one place the flags around a mock run mean something: each
+/// combination is either that fixture or a refusal naming what to do
+/// instead, read before the workflow is even loaded so a misuse costs
+/// nothing.
+fn mock_fixture<'a>(
+    adapter: Option<&AdapterId>,
+    fixture: Option<&'a Path>,
+    detach: bool,
+) -> Result<Option<&'a Path>, CliError> {
+    match (adapter, fixture) {
+        // A fixture is read by whoever runs the sessions, and `--detach`
+        // makes that a separate `yunta resume` — which resolves the
+        // adapters `runners:` names and takes no fixture of its own.
+        (Some(id), _) if *id == MOCK_ID && detach => Err(CliError::msg(
+            "`--adapter mock` scripts every session from a fixture, and `--detach` hands \
+             the run to a separate `yunta resume` that resolves the adapters `runners:` \
+             names and reads no fixture — drop `--detach` to run against a fixture here, \
+             or write a case and run `yunta test`",
+        )),
+        (Some(id), Some(path)) if *id == MOCK_ID => Ok(Some(path)),
+        (Some(id), None) if *id == MOCK_ID => Err(CliError::msg(
+            "`--adapter mock` runs the workflow against a scripted fixture — pass \
+             `--fixture <path>` (the format a `.yunta/tests/` fixture uses), or write a \
+             case and run `yunta test`",
+        )),
+        (_, Some(_)) => Err(CliError::msg(
+            "`--fixture` only applies together with `--adapter mock`",
+        )),
+        _ => Ok(None),
     }
+}
 
-    let frozen = build_frozen_manifest(&ctx, &workflow, &workflow_path, raw_inputs)?;
+/// Everything a run settles before it exists: the workflow resolved and
+/// checked, every adapter it names present and healthy, and the manifest
+/// frozen — so what this refuses costs nothing, and what it returns is
+/// the very run the caller is about to create.
+///
+/// Both shapes of a run come through here, which is what makes them
+/// refuse the same workflow in the same words. A mock fixture skips the
+/// adapter step whole: a scripted session needs no binary, so none is
+/// built or probed for it, and the caller gets an empty registry to
+/// fill from the fixture once the run has a directory to read it into.
+pub(super) async fn runnable(
+    ctx: &Context,
+    workflow_path: &Path,
+    raw_inputs: &[String],
+    adapter: Option<&AdapterId>,
+    mock_fixture: Option<&Path>,
+) -> Result<(FrozenRun, Adapters), CliError> {
+    let (workflow_path, workflow) = resolve_and_check(ctx, workflow_path)?;
+    let adapters = match mock_fixture {
+        Some(_) => HashMap::new(),
+        None => runnable_adapters(ctx, &workflow, adapter).await?,
+    };
+    let frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs).await?;
+    Ok((frozen, adapters))
+}
 
-    // Informative, never blocking — suppressed under `--json` so the
-    // document is the only thing on stdout. The history a run's own log
-    // joins once it finishes; a log that cannot be read is an empty
-    // history here, exactly as it is for `stats`.
-    if !json {
-        let history = {
-            let runs_root = ctx.project.runs_root.clone();
-            let workflow_name = workflow.name.clone();
-            storage
-                .blocking("collect the workflow's history", move |storage| {
-                    Ok(super::stats::collect_history(
-                        &runs_root,
-                        storage,
-                        &workflow_name,
-                    ))
-                })
-                .await
-                .unwrap_or_default()
-        };
-        let estimation = yunta_engine::prior_estimation(&history);
-        if let Some(estimation) = &estimation {
+/// The real adapters this workflow can run on, refused before a worktree
+/// or a token is spent if one is missing, unnamed or unhealthy.
+///
+/// Every path that is about to execute a workflow on real binaries goes
+/// through here — the one that drives the run itself and the one that
+/// hands it to a detached child — so a workflow no adapter can run is
+/// refused in the same words whichever of them the caller asked for.
+async fn runnable_adapters(
+    ctx: &Context,
+    workflow: &Workflow,
+    adapter: Option<&AdapterId>,
+) -> Result<Adapters, CliError> {
+    let adapters = super::real_adapters(&ctx.project.config);
+    super::refuse_unrunnable(workflow, &adapters)?;
+    if let Some(name) = adapter {
+        validate_adapter_flag(name, &adapters).map_err(CliError::msg)?;
+    }
+    super::probe_or_refuse(&adapters).await?;
+    Ok(adapters)
+}
+
+/// What reading a workflow's history said before its run started.
+///
+/// The warning is kept rather than only printed: stderr reaches the
+/// person watching, and §8.6 of the run contract makes this the one
+/// piece of the estimation that is actionable — so it also reaches the
+/// reader who has only a document, which is the reader most likely to
+/// be automating the spend.
+pub(super) struct Estimated {
+    pub(super) prior: Option<PriorEstimation>,
+    pub(super) budget_warning: Option<String>,
+}
+
+/// What this workflow's past runs cost, shown before anything is spent
+/// and returned for the closing block's own comparison when the
+/// invocation stays to draw one.
+///
+/// The distribution is informative, and this is where the two flags that
+/// suppress it are read: whoever asked for the run id alone (`--quiet`)
+/// or for a JSON document (`--json`) did not ask for context. The budget
+/// warning survives both — it asks for a decision before tokens are
+/// spent, and a run that stops halfway on a badly chosen cap is the most
+/// expensive waste there is.
+async fn estimate(ctx: &Context, manifest: &Manifest, quiet: bool, json: bool) -> Estimated {
+    let history =
+        super::stats::summaries(&super::stats::history(ctx, &manifest.workflow.name).await);
+    let estimation = yunta_engine::prior_estimation(&history);
+    if let Some(estimation) = &estimation {
+        if !(quiet || json) {
             println!("{}", super::stats::format_estimation_line(estimation));
         }
-        if let Some(warning) = yunta_engine::budget_p90_warning(
-            frozen
-                .manifest
-                .config
-                .limits
-                .as_ref()
-                .and_then(|limits| limits.max_tokens_per_run),
-            estimation.as_ref(),
-        ) {
-            println!("{warning}");
-        }
     }
-
-    let Prepared {
-        run_id,
-        run_dir,
-        worktree,
-    } = create_run_from(&ctx, &storage, &frozen, mode).await?;
-    // The documents the run was born with are on its log now; what the
-    // rest of the run needs is the manifest.
-    let manifest = frozen.manifest;
-    if !json {
-        println!("run {run_id}: created at {}", run_dir.display());
+    let budget_warning = yunta_engine::budget_p90_warning(
+        manifest
+            .config
+            .limits
+            .as_ref()
+            .and_then(|limits| limits.max_tokens_per_run),
+        estimation.as_ref(),
+    );
+    if let Some(warning) = &budget_warning {
+        warn(warning);
     }
-
-    let adapters = match mock_fixture {
-        Some(path) => {
-            let mock =
-                super::test::load_mock_fixture(path, &run_dir, &worktree).map_err(CliError::msg)?;
-            super::test::mock_adapters(&ctx.project.config, mock)
-        }
-        None => real_adapters,
-    };
-
-    // `--follow`'s progress stream would interleave with the JSON
-    // document; under `--json` the final DTO is the whole story.
-    let follower = (follow && !json)
-        .then(|| spawn_follower(storage.clone(), run_id.clone(), manifest.clone()));
-
-    let forge = super::real_forge(&manifest.config);
-    let root_cancel = super::cancel_on_ctrl_c();
-    let ambient = crate::project::process_env();
-    let outcome = yunta_engine::execute_run(RunEnv {
-        run_id: &run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &worktree,
-        adapters: &adapters,
-        storage: &storage,
-        clock: std::sync::Arc::new(ctx.clock),
-        ids: &ctx.ids,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &crate::human_interaction::ConsoleInteraction,
-        forge: forge.as_deref(),
-        cancel: Some(&root_cancel),
-        adapter_override: adapter_override.as_ref(),
-        ambient: Some(&ambient),
-    })
-    .await;
-
-    if let Some((handle, stop)) = follower {
-        stop.notify_one();
-        let _ = handle.await;
-    }
-
-    match outcome {
-        Ok(report) => {
-            // Chases every `Promoted` terminal to its actual end before
-            // anything downstream (release, report) looks at it — see
-            // `promote.rs`'s own doc comment for why this can't happen
-            // inside `execute_run` itself.
-            let (run_id, manifest, _worktree, report) = super::promote::drive_promotions(
-                &super::promote::PromotionEnv {
-                    cwd: &ctx.cwd,
-                    project: &ctx.project,
-                    storage: &storage,
-                    ids: &ctx.ids,
-                    adapters: &adapters,
-                    forge: forge.as_deref(),
-                    cancel: Some(&root_cancel),
-                },
-                run_id,
-                manifest,
-                worktree,
-                report,
-            )
-            .await
-            .map_err(CliError::msg)?;
-            // Only a *finished* run releases isolation `none`'s lock — a
-            // paused run expects a future `resume` on the same checkout,
-            // which is the same logical run, not a second concurrent one.
-            // A user cancellation also releases `none`'s lock — the
-            // engine process is exiting, and a Ctrl-C is designed to
-            // leave nothing held.
-            if matches!(
-                report.terminal,
-                RunTerminal::Finished | RunTerminal::Failed { .. }
-            ) || root_cancel.is_cancelled()
-            {
-                yunta_engine::release_worktree(&ctx.cwd, manifest.isolation).await?;
-            }
-            if json {
-                crate::json::print_json(&RunJson::from_report(&run_id, &report))?;
-                Ok(match report.terminal {
-                    RunTerminal::Finished => Outcome::Success,
-                    _ => Outcome::Reported,
-                })
-            } else {
-                Ok(super::report_outcome(run_id.as_str(), &report))
-            }
-        }
-        Err(e) => Err(e.into()),
+    Estimated {
+        prior: estimation,
+        budget_warning,
     }
 }
 
@@ -347,8 +277,8 @@ pub async fn run(
 /// extension is taken as a literal path.
 fn resolve_and_check(ctx: &Context, workflow_path: &Path) -> Result<(PathBuf, Workflow), CliError> {
     let resolved = super::resolve_workflow_ref(&ctx.cwd, workflow_path)?;
-    let workflow: Workflow = load_yaml(&resolved, "workflow")?;
-    super::check_or_refuse(&workflow, &ctx.project.config, &resolved)?;
+    let workflow = crate::load_workflow(&resolved)?;
+    super::check_or_refuse(&ctx.cwd, &workflow, &ctx.project.config, &resolved)?;
     Ok((resolved, workflow))
 }
 
@@ -358,7 +288,7 @@ fn resolve_and_check(ctx: &Context, workflow_path: &Path) -> Result<(PathBuf, Wo
 /// absolute — `resume`/`status`/`gc` read these back from any directory,
 /// so a relative root (a relative `paths.*` or `YUNTA_HOME`) is refused
 /// here, naming it, rather than silently rooted at the invocation's cwd.
-fn build_frozen_manifest(
+async fn build_frozen_manifest(
     ctx: &Context,
     workflow: &Workflow,
     workflow_path: &Path,
@@ -372,7 +302,9 @@ fn build_frozen_manifest(
         workflow_dir,
         &ctx.cwd,
         &provided_inputs,
-    )?;
+        ctx.supervision(),
+    )
+    .await?;
     frozen.manifest.paths = Some(yunta_core::FrozenPaths::new(
         ctx.project.runs_root.clone(),
         ctx.project.worktrees_root.clone(),
@@ -380,19 +312,11 @@ fn build_frozen_manifest(
     Ok(frozen)
 }
 
-/// A created run's identity and the paths it lives at — what both the
-/// executing and the detaching path need after `create_run`.
-struct Prepared {
-    run_id: RunId,
-    run_dir: PathBuf,
-    worktree: PathBuf,
-}
-
 /// Enforces the soft concurrency cap, mints the run id from the injected
 /// clock, prepares the isolation worktree and creates the run — the
 /// shared create step of an executed run and a detached one. Prints
 /// nothing of its own: the caller reports what it made.
-async fn create_run_from(
+pub(super) async fn create_run_from(
     ctx: &Context,
     storage: &AsyncStorage,
     frozen: &FrozenRun,
@@ -411,9 +335,9 @@ async fn create_run_from(
         let active = count_non_terminal_runs(storage).await?;
         if active >= cap as usize {
             return Err(CliError::msg(format!(
-                "{active} run(s) are still active and `limits.max_concurrent_runs` \
-                 is {cap} — resume or cancel one (`yunta list` names them) before starting \
-                 another"
+                "{} still active and `limits.max_concurrent_runs` is {cap} — resume or \
+                 cancel one (`yunta list` names them) before starting another",
+                yunta_core::text::counted(active, "run")
             )));
         }
     }
@@ -429,6 +353,7 @@ async fn create_run_from(
         &manifest.base_commit,
         &yunta_engine::run_branch(&run_id),
         manifest.isolation,
+        ctx.supervision(),
     )
     .await?
     {
@@ -468,9 +393,12 @@ async fn create_run_from(
             // The run is born holding every document its `inputs:`
             // named, accepted right after `run_created`.
             artifacts: &frozen.documents,
+            // A run a caller starts is the root of its lineage: it
+            // measures on its first wake, if its config names a suite.
+            baseline: None,
         },
         storage,
-        &ctx.clock,
+        ctx.supervision(),
     )
     .await?;
 
@@ -479,82 +407,4 @@ async fn create_run_from(
         run_dir,
         worktree,
     })
-}
-
-/// Creates a run for a real (non-mock) workflow and hands it to a detached
-/// `yunta resume`, returning its id without waiting — the shared core of
-/// `yunta run --detach` and the MCP `run_workflow` tool, so both resolve,
-/// check, probe, freeze and create a run identically. Prints nothing: the
-/// caller decides how to report the id (a line, or a DTO).
-pub(crate) async fn start_detached(
-    ctx: &Context,
-    storage: &AsyncStorage,
-    workflow_path: &Path,
-    raw_inputs: &[String],
-    adapter: Option<&AdapterId>,
-    mode: Option<&ModeName>,
-) -> Result<RunId, CliError> {
-    let (workflow_path, workflow) = resolve_and_check(ctx, workflow_path)?;
-    let adapters = super::real_adapters(&ctx.project.config);
-    super::refuse_unrunnable(&workflow, &adapters)?;
-    if let Some(name) = adapter {
-        validate_adapter_flag(name, &adapters).map_err(CliError::msg)?;
-    }
-    super::probe_or_refuse(&adapters).await?;
-
-    let frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs)?;
-    let prepared = create_run_from(ctx, storage, &frozen, mode).await?;
-    super::spawn_detached_resume(&prepared.run_dir, prepared.run_id.as_str(), &ctx.cwd)
-        .await
-        .map_err(|source| {
-            CliError::io(
-                "spawn a detached",
-                format!("`yunta resume {}`", prepared.run_id),
-                source,
-            )
-        })?;
-    Ok(prepared.run_id)
-}
-
-/// The outcome of a `yunta run` as the versioned JSON `--json` prints and
-/// the control plane can hand back — the run's id and how it ended, or
-/// that it detached to run on independently.
-#[derive(serde::Serialize)]
-struct RunJson {
-    schema_version: u32,
-    run_id: String,
-    /// `detached`, or the run's terminal: `finished`, `paused`,
-    /// `failed`, `promoted`.
-    outcome: &'static str,
-    /// Why, when the run did not finish. Absent on a clean finish and on
-    /// `detached`, where there is nothing to say yet. A caller reading
-    /// JSON learns what went wrong here, not only that something did.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<String>,
-}
-
-impl RunJson {
-    fn detached(run_id: &RunId) -> Self {
-        Self {
-            schema_version: SCHEMA_VERSION,
-            run_id: run_id.to_string(),
-            outcome: "detached",
-            reason: None,
-        }
-    }
-
-    fn from_report(run_id: &RunId, report: &RunReport) -> Self {
-        let (outcome, reason) = match &report.terminal {
-            RunTerminal::Finished => ("finished", None),
-            RunTerminal::Paused { reason } => ("paused", Some(reason.clone())),
-            RunTerminal::Failed { reason } => ("failed", Some(reason.clone())),
-            RunTerminal::Promoted { .. } => ("promoted", None),
-        };
-        Self {
-            schema_version: SCHEMA_VERSION,
-            run_id: run_id.to_string(),
-            outcome,
-            reason,
-        }
-    }
 }

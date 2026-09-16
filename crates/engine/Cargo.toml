@@ -13,16 +13,22 @@ workspace = true
 [dependencies]
 yunta-core.workspace = true
 yunta-storage.workspace = true
-yunta-adapters.workspace = true
 thiserror.workspace = true
 futures.workspace = true
 globset.workspace = true
 # `kind: executor`'s stdin/stdout contract is JSON by definition —
-# already a dependency of yunta-core/yunta-adapters/yunta-storage at the
-# same version, not a new one to the workspace.
+# already a dependency of yunta-core and yunta-storage at the same
+# version, not a new one to the workspace.
 serde_json.workspace = true
 serde = { workspace = true, features = ["derive"] }
 tracing.workspace = true
+# Constant-time byte comparison for the per-run MCP listener's bearer.
+# A `==` on two strings stops at the first differing byte, so how long
+# it takes says how much of the credential a caller got right; a whole
+# credential is then guessable one byte at a time. The crate is the
+# audited, no-std implementation of the one primitive that fixes it —
+# not something to hand-roll (Apache-2.0, no dependencies of its own).
+subtle.workspace = true
 tokio = { workspace = true, features = ["process", "rt", "macros", "time"] }
 # CancellationToken (`join: any`'s interrupt→kill of the losing
 # siblings) — the propagated-cancellation primitive CLAUDE.md's own
@@ -62,12 +68,12 @@ reqwest = { workspace = true, features = ["rustls"] }
 # validates a user-supplied regex against a string; nothing already in
 # the dependency tree exposes that.
 regex.workspace = true
-# `HumanInteraction` needs a dyn-safe async trait method, same reason
-# `yunta-adapters`'s own `Adapter`/`AgentSession` already use this — not
+# `HumanInteraction` needs a dyn-safe async trait method, the same
+# reason `yunta_core::port`'s own `Adapter`/`AgentSession` use it — not
 # a new idiom to the workspace, just the same one crossing into engine
-# because a gate's resolution surface (console today, MCP later) is
-# exactly this kind of boundary (CLAUDE.md's own "traits solo en
-# fronteras reales").
+# because a gate's resolution surface (the console, the control-plane
+# tool) is exactly this kind of boundary (CLAUDE.md's own "traits solo
+# en fronteras reales").
 async-trait.workspace = true
 # `kind: gate`'s `on:` mapping is the same ordered map the schema itself
 # uses (`yunta-core` already depends on it — no new node in the
@@ -89,8 +95,13 @@ serde_path_to_error.workspace = true
 
 [dev-dependencies]
 yunta-core = { workspace = true, features = ["testkit"] }
+# A port is exercised against an implementation of it: the engine's
+# tests run whole workflows on the `mock` adapter and the mock forge,
+# which is why this crate the library never links is here.
+yunta-adapters.workspace = true
 # The shared test harness: git-repo fixture, fixed clock, run bench.
 yunta-testkit.workspace = true
+yunta-testkit-core.workspace = true
 # Property tests for the replay guarantees (derive, JSONL wire form, resume).
 proptest.workspace = true
 # Tests write their workflows and fixtures as YAML literals.

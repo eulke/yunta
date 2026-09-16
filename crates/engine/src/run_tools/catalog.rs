@@ -15,23 +15,104 @@ use yunta_core::ArtifactKind;
 
 use super::session::SessionTools;
 
+/// Every tool a session can be served.
+///
+/// The one place a run tool's name is written: the catalog builds from
+/// it, the dispatch reads a call back through it, and a sentence that
+/// tells a session to call one asks it for the name. A name spelled
+/// twice is a tool a session is offered and the engine cannot answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunTool {
+    CheckArtifact,
+    TaskStatus,
+    GetBlackboard,
+    RequestScopeExpansion,
+    PostFinding,
+    UpdateFinding,
+    WithdrawFinding,
+    /// One per kind a session submits a whole document of.
+    Submit(ArtifactKind),
+}
+
+impl RunTool {
+    /// Every tool, in the order a session reads them. The submission
+    /// tools follow the kinds that have one.
+    pub fn all() -> Vec<RunTool> {
+        let mut all = vec![
+            RunTool::CheckArtifact,
+            RunTool::PostFinding,
+            RunTool::UpdateFinding,
+            RunTool::WithdrawFinding,
+        ];
+        all.extend(
+            ArtifactKind::ALL
+                .into_iter()
+                .filter(|kind| kind.submit_tool().is_some())
+                .map(RunTool::Submit),
+        );
+        all.extend([
+            RunTool::TaskStatus,
+            RunTool::RequestScopeExpansion,
+            RunTool::GetBlackboard,
+        ]);
+        all
+    }
+
+    /// The name a session calls it by.
+    pub fn name(self) -> &'static str {
+        match self {
+            RunTool::CheckArtifact => "yunta_check_artifact",
+            RunTool::TaskStatus => "yunta_task_status",
+            RunTool::GetBlackboard => "yunta_get_blackboard",
+            RunTool::RequestScopeExpansion => "yunta_request_scope_expansion",
+            RunTool::PostFinding => ArtifactKind::POST_FINDING_TOOL,
+            RunTool::UpdateFinding => ArtifactKind::UPDATE_FINDING_TOOL,
+            RunTool::WithdrawFinding => ArtifactKind::WITHDRAW_FINDING_TOOL,
+            // A kind with no tool to submit through is never a
+            // `Submit`: `all` builds them from the kinds that have one,
+            // and `parse` reads a name back through the same door.
+            RunTool::Submit(kind) => kind.submit_tool().unwrap_or_default(),
+        }
+    }
+
+    /// The tool `name` is, or `None` for a name no tool answers to.
+    pub fn parse(name: &str) -> Option<RunTool> {
+        RunTool::all().into_iter().find(|tool| tool.name() == name)
+    }
+
+    /// Whether `session` is served this tool.
+    fn offered_to(self, session: &SessionTools) -> bool {
+        match self {
+            RunTool::RequestScopeExpansion => session.task.is_some(),
+            RunTool::GetBlackboard => session.in_blackboard_group(),
+            RunTool::Submit(kind) => session.submits(kind),
+            _ => true,
+        }
+    }
+
+    /// The tool as the session is offered it: its name, what it does,
+    /// and the shape of what it takes.
+    fn declared(self) -> Tool {
+        match self {
+            RunTool::CheckArtifact => check_artifact_tool(),
+            RunTool::TaskStatus => task_status_tool(),
+            RunTool::GetBlackboard => blackboard_tool(),
+            RunTool::RequestScopeExpansion => scope_expansion_tool(),
+            RunTool::PostFinding => post_finding_tool(),
+            RunTool::UpdateFinding => update_finding_tool(),
+            RunTool::WithdrawFinding => withdraw_finding_tool(),
+            RunTool::Submit(kind) => submit_tool(self.name(), kind),
+        }
+    }
+}
+
 /// The tools this session is served, in the order it reads them.
 pub(super) fn mounted(session: &SessionTools) -> Vec<Tool> {
-    let mut tools = vec![
-        check_artifact_tool(),
-        post_finding_tool(),
-        update_finding_tool(),
-        withdraw_finding_tool(),
-    ];
-    tools.extend(submission_tools(session));
-    tools.push(task_status_tool());
-    if session.task.is_some() {
-        tools.push(scope_expansion_tool());
-    }
-    if session.in_blackboard_group() {
-        tools.push(blackboard_tool());
-    }
-    tools
+    RunTool::all()
+        .into_iter()
+        .filter(|tool| tool.offered_to(session))
+        .map(RunTool::declared)
+        .collect()
 }
 
 fn check_artifact_tool() -> Tool {
@@ -131,24 +212,6 @@ fn blackboard_tool() -> Tool {
          group's consolidated output, so results never depend on arrival order).",
         no_arguments(),
     )
-}
-
-/// One tool per submittable kind this node declares.
-///
-/// A node produces at most one document of each kind, so declaring the
-/// kind is the whole decision: the tool exists exactly when the close
-/// will look for that document, and there is nothing left for the
-/// session to name.
-fn submission_tools(session: &SessionTools) -> Vec<Tool> {
-    let mut tools = Vec::new();
-    for kind in ArtifactKind::ALL {
-        if let Some(tool) = kind.submit_tool() {
-            if session.submits(kind) {
-                tools.push(submit_tool(tool, kind));
-            }
-        }
-    }
-    tools
 }
 
 /// The tool a session submits a whole `kind` document through.

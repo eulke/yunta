@@ -5,10 +5,11 @@ use yunta_core::events::{EventPayload, HookExecutedPayload, HookPhase};
 use yunta_core::{HookStep, Hooks, Node};
 
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
-use crate::template::render_template;
+use yunta_core::template::render_template;
 
 use super::node_exec::template_vars;
 use super::{RunCtx, RunError};
+use yunta_core::events::NodeEvent;
 
 /// How one hook step went: it ran (with its own success bool, before the
 /// caller applies `on_failure`), or the permissions model refused it
@@ -36,11 +37,11 @@ pub(super) async fn run_hook(
             // account of it; no warning duplicates that event.
             ctx.emit(
                 Some(&node.id),
-                EventPayload::HookExecuted(HookExecutedPayload {
+                EventPayload::Node(NodeEvent::HookExecuted(HookExecutedPayload {
                     phase,
                     command: step.run.clone(),
                     exit_code: -1,
-                }),
+                })),
             )
             .await?;
             return Ok(HookRun::Ran(false));
@@ -74,11 +75,11 @@ pub(super) async fn run_hook(
 
     ctx.emit(
         Some(&node.id),
-        EventPayload::HookExecuted(HookExecutedPayload {
+        EventPayload::Node(NodeEvent::HookExecuted(HookExecutedPayload {
             phase,
             command: rendered,
             exit_code,
-        }),
+        })),
     )
     .await?;
     Ok(HookRun::Ran(exit_code == 0))

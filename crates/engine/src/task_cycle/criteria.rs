@@ -1,39 +1,34 @@
 //! Running a task's criteria: each command once per tree it ran
-//! against, memoized, before an attempt and after it.
+//! against, memoized, before an attempt and after it — the pre-check in
+//! the order the log priced those commands, cheapest first.
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
-use yunta_core::events::CriterionType;
+use yunta_core::events::{CriterionType, TaskLedger};
 use yunta_core::Criterion;
 use yunta_core::{ContentHash, Task, TaskId};
 
-use super::{CriterionRun, PreCheckOutcome, TaskCycleError};
+use super::{CriterionRun, TaskCycleError};
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
 
-/// Per-run memoization cache: a criterion's result is reused when
-/// its command, the working tree's content, and the resolved config are
-/// all unchanged since the last time it ran *in this run*. Never
-/// cross-run — a fresh `Memo` per `execute_run` call is correct, not a
-/// gap: a resumed run simply starts with a cold cache and re-verifies
-/// once more than strictly necessary, which is safe (over-verifying),
-/// unlike a stale cross-run cache (which would risk under-verifying).
+/// Per-invocation memoization cache: a criterion's result is reused
+/// when its command, the working tree's content and the resolved config
+/// are all unchanged since the last time it ran *in this invocation*.
+/// One `Memo` per `execute_run` call is what the cache is for: a
+/// resumed run starts cold and verifies once more than strictly
+/// necessary, which is safe (over-verifying), unlike a result carried
+/// across invocations onto a tree no event in between speaks for (which
+/// would risk under-verifying).
 ///
-/// The full key is `cmd + tree_hash + declared env +
-/// resolved config` — `declared env` drops out here because criteria
-/// have no `env:` field in the schema yet (nothing to declare yet).
+/// The key is `sha256(cmd \0 tree_hash \0 config_hash)`: the command as
+/// written, a fingerprint of the tree it would run against, and the hash
+/// of the resolved config it runs under — the three things its exit code
+/// can turn on, since a criterion declares no `env:` of its own.
 pub struct Memo {
     config_hash: ContentHash,
     cache: Mutex<HashMap<ContentHash, i32>>,
-    /// Observed wall-clock durations per criterion command, this
-    /// invocation only — the same lifetime discipline as the result
-    /// cache above (a resume starts cold and re-learns, which only
-    /// costs one declared-order pass). Keyed by the bare command, not
-    /// the memo key: a criterion's cost profile survives tree changes,
-    /// which is exactly when the ordering matters (a memo hit never
-    /// re-runs anything, so there is nothing to reorder).
-    durations: Mutex<HashMap<String, Vec<u64>>>,
 }
 
 impl Memo {
@@ -41,27 +36,7 @@ impl Memo {
         Self {
             config_hash,
             cache: Mutex::new(HashMap::new()),
-            durations: Mutex::new(HashMap::new()),
         }
-    }
-
-    fn record_duration(&self, cmd: &str, duration_ms: u64) {
-        let mut durations = self.durations.lock().unwrap_or_else(|e| e.into_inner());
-        durations
-            .entry(cmd.to_string())
-            .or_default()
-            .push(duration_ms);
-    }
-
-    /// The median of this command's observed durations as a cheapest-first
-    /// sort key, `None` with no history yet — the workspace's one
-    /// [`crate::stats::median`], truncated back to whole milliseconds.
-    fn median_duration(&self, cmd: &str) -> Option<u64> {
-        let durations = self.durations.lock().unwrap_or_else(|e| e.into_inner());
-        let samples = durations.get(cmd)?;
-        let mut sorted: Vec<f64> = samples.iter().map(|&ms| ms as f64).collect();
-        sorted.sort_by(|a, b| a.total_cmp(b));
-        crate::stats::median(&sorted).map(|ms| ms as u64)
     }
 
     fn key(&self, cmd: &str, tree_hash: &ContentHash) -> ContentHash {
@@ -78,6 +53,50 @@ impl Memo {
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.insert(key, exit_code);
     }
+
+    /// The exit code of `cmd` on `cwd` as this invocation already knows
+    /// it, or by running it now: what a criterion and a
+    /// `baseline_compare` share, so a suite two comparisons ask about
+    /// runs once while the tree stands still.
+    pub(crate) async fn exit_code(
+        &self,
+        cmd: &str,
+        cwd: &Path,
+        supervision: Supervision<'_>,
+    ) -> Result<Memoized, TaskCycleError> {
+        let tree_hash = tree_hash(cwd, supervision).await?;
+        if let Some(exit_code) = self.get(cmd, &tree_hash) {
+            return Ok(Memoized {
+                exit_code,
+                reused: true,
+            });
+        }
+        let command = GovernedCommand::shell(cwd, cmd)
+            .stdout(Capture::Inherit)
+            .stderr(Capture::Inherit);
+        let exit_code = match spawn_governed(command, supervision)
+            .await
+            .map_err(|source| TaskCycleError::MemoizedCommand {
+                cmd: cmd.to_string(),
+                source,
+            })? {
+            Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
+            Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
+        };
+        self.put(cmd, &tree_hash, exit_code);
+        Ok(Memoized {
+            exit_code,
+            reused: false,
+        })
+    }
+}
+
+/// What a memoized command answered, and whether this invocation had to
+/// run it to find out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Memoized {
+    pub exit_code: i32,
+    pub reused: bool,
 }
 
 /// A fingerprint of `cwd`'s current content: the commit it's on,
@@ -87,16 +106,21 @@ impl Memo {
 /// genuinely different trees hash the same and wrongly reuse a stale
 /// result; a bare filename list (from `git status`) isn't enough since a
 /// file can change content without its name changing.
-async fn tree_hash(cwd: &Path) -> Result<ContentHash, TaskCycleError> {
+async fn tree_hash(
+    cwd: &Path,
+    supervision: Supervision<'_>,
+) -> Result<ContentHash, TaskCycleError> {
     let run_git = |args: &'static [&'static str]| async move {
-        crate::git::output(cwd, args).await.map_err(|e| {
-            let detail = e.detail();
-            TaskCycleError::TreeHash {
-                args: e.args,
-                cwd: e.cwd,
-                detail,
-            }
-        })
+        crate::git::output(cwd, args, supervision)
+            .await
+            .map_err(|e| {
+                let detail = e.detail();
+                TaskCycleError::TreeHash {
+                    args: e.args,
+                    cwd: e.cwd,
+                    detail,
+                }
+            })
     };
 
     let head = run_git(&["rev-parse", "HEAD"]).await?;
@@ -105,7 +129,7 @@ async fn tree_hash(cwd: &Path) -> Result<ContentHash, TaskCycleError> {
 
     let mut untracked_fingerprint = String::new();
     for path in untracked.lines() {
-        let bytes = std::fs::read(cwd.join(path)).unwrap_or_default();
+        let bytes = tokio::fs::read(cwd.join(path)).await.unwrap_or_default();
         untracked_fingerprint.push_str(path);
         untracked_fingerprint.push(':');
         untracked_fingerprint.push_str(yunta_core::sha256_hex(&bytes).as_str());
@@ -119,8 +143,10 @@ async fn tree_hash(cwd: &Path) -> Result<ContentHash, TaskCycleError> {
 
 /// Runs one criterion command, measuring its wall-clock cost —
 /// an observed fact about an external process, same standing as its
-/// exit code; the injected `Clock` governs event timestamps and derived
-/// state, neither of which this feeds.
+/// exit code, and recorded like one: the order a later check runs its
+/// commands in is derived from the value the log carries, never
+/// measured again. The injected `Clock` governs when an event happened,
+/// which is not what this measures.
 async fn run_criterion(
     task_id: &TaskId,
     cwd: &Path,
@@ -161,7 +187,7 @@ async fn run_all_criteria(
     memo: &Memo,
     supervision: Supervision<'_>,
 ) -> Result<Vec<CriterionRun>, TaskCycleError> {
-    let tree_hash = tree_hash(cwd).await?;
+    let tree_hash = tree_hash(cwd, supervision).await?;
     let mut runs = Vec::with_capacity(criteria.len());
     for criterion in criteria {
         let (exit_code, reused, duration_ms) = match memo.get(&criterion.cmd, &tree_hash) {
@@ -170,7 +196,6 @@ async fn run_all_criteria(
                 let (exit_code, duration_ms) =
                     run_criterion(task_id, cwd, &criterion.cmd, supervision).await?;
                 memo.put(&criterion.cmd, &tree_hash, exit_code);
-                memo.record_duration(&criterion.cmd, duration_ms);
                 (exit_code, false, Some(duration_ms))
             }
         };
@@ -185,43 +210,42 @@ async fn run_all_criteria(
     Ok(runs)
 }
 
+/// The median of what the log says `cmd` cost, as a cheapest-first sort
+/// key; `None` for a command the log never priced. The workspace's one
+/// [`crate::stats::median`], over samples the log holds in the order
+/// they were measured, truncated back to whole milliseconds.
+fn median_duration(history: &TaskLedger, cmd: &str) -> Option<u64> {
+    let mut sorted: Vec<f64> = history
+        .criterion_durations(cmd)
+        .iter()
+        .map(|&ms| ms as f64)
+        .collect();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    crate::stats::median(&sorted).map(|ms| ms as u64)
+}
+
 /// Pre-check in rojo: every non-`guard` criterion must
 /// fail, every `guard` must pass. Runs every criterion regardless — the
 /// report should show all of them, not stop at the first surprise.
-/// Execution order is the learned one: ascending historical
-/// median duration, criteria without history last in declared order —
-/// the fast, likely-to-fail evidence lands first while the verdict
+/// Execution order is the learned one, and `history` is where it is
+/// learned from: ascending median of what the log records each command
+/// costing, criteria the log never priced last in declared order — the
+/// fast, likely-to-fail evidence lands first while the verdict
 /// (computed over the complete set) stays order-independent by
 /// construction.
 pub async fn pre_check(
     task: &Task,
     cwd: &Path,
     memo: &Memo,
+    history: &TaskLedger,
     supervision: Supervision<'_>,
-) -> Result<(Vec<CriterionRun>, PreCheckOutcome), TaskCycleError> {
+) -> Result<Vec<CriterionRun>, TaskCycleError> {
     let mut ordered: Vec<&Criterion> = task.criteria.iter().collect();
-    // Stable sort: no-history criteria (u64::MAX key) keep declared
-    // order among themselves.
-    ordered.sort_by_key(|criterion| memo.median_duration(&criterion.cmd).unwrap_or(u64::MAX));
+    // Stable sort: criteria the log never priced (u64::MAX key) keep
+    // declared order among themselves.
+    ordered.sort_by_key(|criterion| median_duration(history, &criterion.cmd).unwrap_or(u64::MAX));
     let ordered: Vec<Criterion> = ordered.into_iter().cloned().collect();
-    let runs = run_all_criteria(&task.id, &ordered, cwd, memo, supervision).await?;
-
-    let mut outcome = PreCheckOutcome::Red;
-    for run in &runs {
-        if matches!(outcome, PreCheckOutcome::Red) {
-            if run.is_guard && run.exit_code != 0 {
-                outcome = PreCheckOutcome::BrokenGuard {
-                    cmd: run.cmd.clone(),
-                };
-            } else if !run.is_guard && run.exit_code == 0 {
-                outcome = PreCheckOutcome::TrivialCriterion {
-                    cmd: run.cmd.clone(),
-                };
-            }
-        }
-    }
-
-    Ok((runs, outcome))
+    run_all_criteria(&task.id, &ordered, cwd, memo, supervision).await
 }
 
 /// Post-check: every criterion, guard or not, must now

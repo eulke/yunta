@@ -27,25 +27,37 @@
 
 mod branches;
 mod integrity;
+mod unit;
 
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
-use yunta_adapters::signal::Liveness;
-use yunta_core::{CommitSha, InvalidId, Isolation, Pid, SystemClock};
+use tokio_util::sync::CancellationToken;
+use yunta_core::process::signal::Liveness;
+use yunta_core::{CommitSha, InvalidId, Isolation, Pid, TreeId};
 
 use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
 
-pub use branches::{run_branch, task_branch};
+use crate::process::Supervision;
+pub use branches::{run_branch, unit_branch};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
+pub use unit::{
+    commit_work, land, open_unit, rebase_onto, snapshot_commit, Rebase, Unit, UnitHome, UnitId,
+};
 
 #[derive(Debug, Error)]
 pub enum WorktreeError {
-    #[error("git {args} in `{cwd}` failed: {detail}")]
-    Git {
+    #[error(transparent)]
+    Git(#[from] crate::git::GitError),
+    /// git answered, and its answer is not what it names. `rev-parse`
+    /// promised a commit sha and returned something else — a broken git,
+    /// not a failed command.
+    #[error("git answered `{args}` in `{}` with something that is not a commit sha", .cwd.display())]
+    NotACommit {
         args: String,
         cwd: PathBuf,
-        detail: String,
+        #[source]
+        source: InvalidId,
     },
     #[error(
         "`{path}` has uncommitted changes — isolation `none` requires a clean tree: \
@@ -70,9 +82,9 @@ pub enum WorktreeError {
         lock_path: PathBuf,
         pid: Pid,
     },
-    /// A lock whose owner can't be verified — pre-owner-format
-    /// (empty) or corrupted. Conservative on purpose: guessing that an
-    /// unreadable lock is stale would break the old contract silently.
+    /// A lock whose owner can't be verified — empty or corrupted.
+    /// Conservative on purpose: a lock whose holder cannot be checked is
+    /// never taken, so no live run loses its checkout to a guess.
     #[error(
         "`{path}` has an isolation lock with no readable owner (`{lock_path}`) — written by \
          an older build or corrupted; if no other run is active on this checkout, delete \
@@ -121,10 +133,38 @@ pub enum WorktreeError {
          works directly on the checkout it was created in; resume it from there"
     )]
     NotACheckout { path: PathBuf, detail: String },
+    /// git answered, and its answer is not what it names: `rev-parse`
+    /// promised a tree and returned something else.
+    #[error("git answered `{args}` in `{}` with something that is not a tree id", .cwd.display())]
+    NotATree {
+        args: String,
+        cwd: PathBuf,
+        #[source]
+        source: InvalidId,
+    },
+    /// The shared tree moved between a unit replaying its work onto it
+    /// and that unit landing. This engine is the only writer of that
+    /// tree in between, so the invariant broke rather than the unit
+    /// misbehaving.
+    #[error(
+        "landing `{unit}` in `{}`: git refused a fast-forward onto a head this engine is \
+         the only writer of",
+        .path.display()
+    )]
+    NotFastForward { unit: String, path: PathBuf },
     /// The common git dir has no parent directory, so there is no
     /// checkout to run `git worktree` from.
     #[error("the git common dir `{common_dir}` has no parent directory to run `git worktree` in")]
     NoMainRepo { common_dir: PathBuf },
+}
+
+impl WorktreeError {
+    /// Whether the token this ran under fired: nobody is waiting for
+    /// the tree any more, so there is no failure to report — only a
+    /// stop to honour.
+    pub fn cancelled(&self) -> bool {
+        matches!(self, WorktreeError::Git(git) if git.cancelled())
+    }
 }
 
 /// Puts `repo` in the state a run needs before it starts: for
@@ -152,19 +192,22 @@ pub async fn prepare_worktree(
     base_commit: &CommitSha,
     branch_name: &str,
     isolation: Isolation,
+    supervision: Supervision<'_>,
 ) -> Result<WorktreePrepared, WorktreeError> {
     match isolation {
         Isolation::Worktree => {
             if let Some(parent) = worktree_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|source| WorktreeError::Io {
-                    action: "create the worktrees directory".to_string(),
-                    path: parent.to_path_buf(),
-                    source,
-                })?;
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|source| WorktreeError::Io {
+                        action: "create the worktrees directory".to_string(),
+                        path: parent.to_path_buf(),
+                        source,
+                    })?;
             }
-            let common_dir = common_git_dir(repo).await?;
-            let _mutation_lock = lock_worktree_mutations(&common_dir).await?;
-            run_git(
+            let common_dir = common_git_dir(repo, supervision).await?;
+            let _mutation_lock = lock_worktree_mutations(&common_dir, supervision.clock).await?;
+            match run_git(
                 repo,
                 &[
                     "worktree",
@@ -174,17 +217,58 @@ pub async fn prepare_worktree(
                     branch_name,
                     base_commit.as_str(),
                 ],
+                supervision,
             )
-            .await?;
-            Ok(WorktreePrepared::Ready)
+            .await
+            {
+                Ok(_) => Ok(WorktreePrepared::Ready),
+                Err(stopped) if stopped.cancelled() => {
+                    undo_half_added(repo, worktree_path, branch_name, supervision).await;
+                    Err(stopped)
+                }
+                Err(other) => Err(other),
+            }
         }
         Isolation::None => {
-            if !is_clean(repo).await? {
+            if !is_clean(repo, supervision).await? {
                 return Err(WorktreeError::DirtyTree {
                     path: repo.to_path_buf(),
                 });
             }
-            lock(repo).await
+            lock(repo, supervision).await
+        }
+    }
+}
+
+/// Hands what `prepare_worktree` took to `pid`, which drives the run
+/// from here on: for `None`, the checkout's lock changes holder. For
+/// `Worktree`, a no-op — a run under that isolation works in a tree of
+/// its own and shares no lock with anyone.
+///
+/// What `run --detach` and the control plane's `run_workflow` owe the
+/// checkout they just claimed. Both check it is free, create the run,
+/// and then leave, and the process they leave behind is the one
+/// actually in the tree.
+pub async fn hand_over_worktree(
+    repo: &Path,
+    isolation: Isolation,
+    pid: Pid,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
+    match isolation {
+        Isolation::Worktree => Ok(()),
+        Isolation::None => {
+            let lock_path = lock_path(repo, supervision).await?;
+            lock::hand_over(&lock_path, pid, &SystemProbe, supervision.clock).map_err(|source| {
+                WorktreeError::Io {
+                    action: "hand over the isolation lock".to_string(),
+                    path: lock_path,
+                    source: match source {
+                        LockError::Io { source, .. } => source,
+                        other => std::io::Error::other(other.to_string()),
+                    },
+                }
+            })
         }
     }
 }
@@ -192,12 +276,16 @@ pub async fn prepare_worktree(
 /// Releases what `prepare_worktree` took: for `None`, removes the lock
 /// so a later run may proceed. For `Worktree`, a no-op — the worktree
 /// stays on disk (see module docs).
-pub async fn release_worktree(repo: &Path, isolation: Isolation) -> Result<(), WorktreeError> {
+pub async fn release_worktree(
+    repo: &Path,
+    isolation: Isolation,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
     match isolation {
         Isolation::Worktree => Ok(()),
         Isolation::None => {
-            let lock_path = lock_path(repo).await?;
-            match std::fs::remove_file(&lock_path) {
+            let lock_path = lock_path(repo, supervision).await?;
+            match tokio::fs::remove_file(&lock_path).await {
                 Ok(()) => Ok(()),
                 Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(source) => Err(WorktreeError::Io {
@@ -230,15 +318,18 @@ pub enum WorktreeCleanup {
 pub async fn cleanup_worktree(
     worktree: &Path,
     branch: &str,
+    supervision: Supervision<'_>,
 ) -> Result<WorktreeCleanup, WorktreeError> {
     let git_dir = run_git(
         worktree,
         &["rev-parse", "--path-format=absolute", "--git-dir"],
+        supervision,
     )
     .await?;
     let common_dir = run_git(
         worktree,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        supervision,
     )
     .await?;
     if git_dir.trim() == common_dir.trim() {
@@ -248,7 +339,8 @@ pub async fn cleanup_worktree(
 
     // Removal rewrites the same `.git/worktrees/` metadata an
     // `add` scans — same lock, same reasoning.
-    let _mutation_lock = lock_worktree_mutations(Path::new(common_dir.trim())).await?;
+    let _mutation_lock =
+        lock_worktree_mutations(Path::new(common_dir.trim()), supervision.clock).await?;
     run_git(
         &main_repo,
         &[
@@ -257,31 +349,160 @@ pub async fn cleanup_worktree(
             "--force",
             &worktree.display().to_string(),
         ],
+        supervision,
     )
     .await?;
     // Best-effort by design: `-d` refusing is the branch's protection.
-    let _ = run_git(&main_repo, &["branch", "-d", branch]).await;
+    let _ = run_git(&main_repo, &["branch", "-d", branch], supervision).await;
     Ok(WorktreeCleanup::Removed)
 }
+
+/// Undoes a `worktree add` a cancellation killed in the middle: the
+/// directory it was writing into and the branch it may already have
+/// created. Best effort throughout — what it is undoing was killed with
+/// no chance to say how far it got, so every step is allowed to find
+/// nothing to do.
+///
+/// It runs under a token of its own: the token that killed the `add`
+/// would kill the undo before it started, and the caller asked to stop
+/// making a worktree, not to be left with half of one. A bound of its
+/// own keeps it from becoming the thing that hangs a Ctrl-C.
+async fn undo_half_added(
+    repo: &Path,
+    worktree_path: &Path,
+    branch_name: &str,
+    supervision: Supervision<'_>,
+) {
+    let undo = CancellationToken::new();
+    let undo = Supervision::outside_any_run(&undo, supervision.clock).with_env(supervision.env);
+    let path = worktree_path.display().to_string();
+    for args in [
+        ["worktree", "remove", "--force", &path].as_slice(),
+        // A directory git never registered is not a worktree it can
+        // remove, and the metadata of one it half-registered is what
+        // `prune` is for.
+        ["worktree", "prune"].as_slice(),
+        // `-D`, not `-d`: this branch was born a moment ago pointing at
+        // the base commit, and nothing has been committed on it.
+        ["branch", "-D", branch_name].as_slice(),
+    ] {
+        match tokio::time::timeout(UNDO_BOUND, run_git(repo, args, undo)).await {
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) => {
+                tracing::debug!(%error, ?args, "a step of the undo found nothing to undo");
+            }
+            Err(_) => tracing::debug!(?args, "a step of the undo outlasted its bound"),
+        }
+    }
+    if let Err(error) = tokio::fs::remove_dir_all(worktree_path).await {
+        tracing::debug!(%error, path = %worktree_path.display(), "nothing left of the tree to remove");
+    }
+}
+
+/// How long the undo of a killed `worktree add` may take before it is
+/// abandoned, fixed by D170: long enough for a local git on a cold
+/// cache, short enough that a person who pressed Ctrl-C twice is not
+/// waiting on it.
+const UNDO_BOUND: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The commit `repo`'s HEAD is on — the one place the engine asks a
 /// checkout where it is, so "HEAD" means the same thing to the batch that
 /// branches from it, the promotion that builds on it, and the resume that
 /// checks the run's base commit is still behind it.
-pub async fn head_commit(repo: &Path) -> Result<CommitSha, WorktreeError> {
-    let output = run_git(repo, &["rev-parse", "HEAD"]).await?;
+pub async fn head_commit(
+    repo: &Path,
+    supervision: Supervision<'_>,
+) -> Result<CommitSha, WorktreeError> {
+    let output = run_git(repo, &["rev-parse", "HEAD"], supervision).await?;
     output
         .trim()
         .parse()
-        .map_err(|e: InvalidId| WorktreeError::Git {
+        .map_err(|source: InvalidId| WorktreeError::NotACommit {
             args: "rev-parse HEAD".to_string(),
             cwd: repo.to_path_buf(),
-            detail: e.to_string(),
+            source,
         })
 }
 
-async fn is_clean(repo: &Path) -> Result<bool, WorktreeError> {
-    let output = run_git(repo, &["status", "--porcelain"]).await?;
+/// The tree `cwd` stands at right now, as the starting point a later
+/// audit measures against.
+///
+/// Captured through an index of its own (`GIT_INDEX_FILE` under
+/// `scratch`), never the repository's: a sibling unit working in the
+/// same checkout at the same moment must not find this call holding
+/// `.git/index`, and this call must not see half of what that sibling
+/// was mid-way through staging.
+///
+/// `index` must sit outside `cwd`, and no two units working in one tree
+/// at once may name the same one. Staging is `add -A` over the whole
+/// checkout, so an index kept inside the tree it measures ends up in the
+/// tree it measures; and a shared index is a lock two captures fight
+/// over. `run_dir::index_for` answers both: outside the worktree,
+/// named by the unit.
+pub async fn capture_tree(
+    cwd: &Path,
+    index: &Path,
+    supervision: Supervision<'_>,
+) -> Result<TreeId, WorktreeError> {
+    // Made absolute before anything touches it: this call creates the
+    // index's directory and the git child opens the file, and the two
+    // resolve a relative path against different directories — here the
+    // process's, there `cwd`. Absolute, they name the one file, and no
+    // index can land inside the tree it is measuring by accident.
+    let index = std::path::absolute(index).map_err(|source| WorktreeError::Io {
+        action: "resolve the private index path".to_string(),
+        path: index.to_path_buf(),
+        source,
+    })?;
+    if let Some(parent) = index.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|source| WorktreeError::Io {
+                action: "create the private index's directory".to_string(),
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    }
+    // The index travels the way every other value this engine hands a
+    // child does: through the supervision it is already governed by.
+    let mut env: Vec<(String, String)> = supervision.env.to_vec();
+    env.push(("GIT_INDEX_FILE".to_string(), index.display().to_string()));
+    let private = supervision.with_env(&env);
+    // `add -A` stages what is there, untracked included, so the tree is
+    // the whole visible state and not only what git already followed.
+    crate::git::output(cwd, &["add", "-A"], private).await?;
+    let printed = crate::git::output(cwd, &["write-tree"], private).await?;
+    printed
+        .trim()
+        .parse()
+        .map_err(|source: InvalidId| WorktreeError::NotATree {
+            args: "write-tree".to_string(),
+            cwd: cwd.to_path_buf(),
+            source,
+        })
+}
+
+/// The tree `repo`'s `HEAD` points at — the same question
+/// [`head_commit`] asks, answered as the object a diff takes as an end.
+///
+/// What a unit that was handed a clean checkout of its own started
+/// from: the commit it was branched from is exactly what it began with,
+/// so its starting tree needs no capture. A node sharing a tree it did
+/// not receive clean uses [`capture_tree`](fn@capture_tree) instead.
+pub async fn head_tree(repo: &Path, supervision: Supervision<'_>) -> Result<TreeId, WorktreeError> {
+    let output = run_git(repo, &["rev-parse", "HEAD^{tree}"], supervision).await?;
+    output
+        .trim()
+        .parse()
+        .map_err(|source: InvalidId| WorktreeError::NotATree {
+            args: "rev-parse HEAD^{tree}".to_string(),
+            cwd: repo.to_path_buf(),
+            source,
+        })
+}
+
+async fn is_clean(repo: &Path, supervision: Supervision<'_>) -> Result<bool, WorktreeError> {
+    let output = run_git(repo, &["status", "--porcelain"], supervision).await?;
     Ok(output.trim().is_empty())
 }
 
@@ -290,8 +511,11 @@ async fn is_clean(repo: &Path) -> Result<bool, WorktreeError> {
 /// files live, next to git's own metadata rather than inside the
 /// working tree: they must never show up as uncommitted files for the
 /// very checks they exist to support (dirty-tree, scope-by-diff).
-async fn common_git_dir(repo: &Path) -> Result<PathBuf, WorktreeError> {
-    let common_dir = run_git(repo, &["rev-parse", "--git-common-dir"]).await?;
+async fn common_git_dir(
+    repo: &Path,
+    supervision: Supervision<'_>,
+) -> Result<PathBuf, WorktreeError> {
+    let common_dir = run_git(repo, &["rev-parse", "--git-common-dir"], supervision).await?;
     let common_dir = PathBuf::from(common_dir.trim());
     Ok(if common_dir.is_absolute() {
         common_dir
@@ -300,8 +524,10 @@ async fn common_git_dir(repo: &Path) -> Result<PathBuf, WorktreeError> {
     })
 }
 
-async fn lock_path(repo: &Path) -> Result<PathBuf, WorktreeError> {
-    Ok(common_git_dir(repo).await?.join("yunta-none.lock"))
+async fn lock_path(repo: &Path, supervision: Supervision<'_>) -> Result<PathBuf, WorktreeError> {
+    Ok(common_git_dir(repo, supervision)
+        .await?
+        .join("yunta-none.lock"))
 }
 
 /// How long an acquirer waits on a live holder before giving up
@@ -319,6 +545,9 @@ struct WorktreeMutationGuard {
 
 impl Drop for WorktreeMutationGuard {
     fn drop(&mut self) {
+        // blocking: a `Drop` has no `await` to give, and removing one
+        // lock file is a single syscall. Doing it here is what makes an
+        // early `?` unable to leak the lock.
         let _ = std::fs::remove_file(&self.lock_path);
     }
 }
@@ -340,13 +569,14 @@ impl Drop for WorktreeMutationGuard {
 /// leaves one behind.
 async fn lock_worktree_mutations(
     common_dir: &Path,
+    clock: &dyn yunta_core::Clock,
 ) -> Result<WorktreeMutationGuard, WorktreeError> {
     let lock_path = common_dir.join("yunta-worktree.lock");
     let contention = Contention::Wait {
         patience: MUTATION_LOCK_TIMEOUT,
         poll: MUTATION_LOCK_POLL,
     };
-    match lock::acquire(&lock_path, contention, &SystemProbe, &SystemClock).await {
+    match lock::acquire(&lock_path, contention, &SystemProbe, clock).await {
         Ok(Acquired::Fresh) => Ok(WorktreeMutationGuard { lock_path }),
         Ok(Acquired::Stolen { dead }) => {
             // Taking over a dead holder's lock is the protocol working as
@@ -389,9 +619,19 @@ async fn lock_worktree_mutations(
 /// Refuses at once on a present holder — a second run on the same
 /// checkout is the thing this lock exists to prevent — and reports a
 /// takeover from a gone holder, never silently.
-async fn lock(repo: &Path) -> Result<WorktreePrepared, WorktreeError> {
-    let lock_path = lock_path(repo).await?;
-    match lock::acquire(&lock_path, Contention::Refuse, &SystemProbe, &SystemClock).await {
+async fn lock(
+    repo: &Path,
+    supervision: Supervision<'_>,
+) -> Result<WorktreePrepared, WorktreeError> {
+    let lock_path = lock_path(repo, supervision).await?;
+    match lock::acquire(
+        &lock_path,
+        Contention::Refuse,
+        &SystemProbe,
+        supervision.clock,
+    )
+    .await
+    {
         Ok(Acquired::Fresh) => Ok(WorktreePrepared::Ready),
         Ok(Acquired::Stolen { dead }) => {
             Ok(WorktreePrepared::StoleStaleLock { dead_pid: dead.pid })
@@ -446,15 +686,14 @@ fn main_repo_of(common_dir: &Path) -> Result<PathBuf, WorktreeError> {
         })
 }
 
-async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, WorktreeError> {
-    crate::git::output(cwd, args).await.map_err(|e| {
-        let detail = e.detail();
-        WorktreeError::Git {
-            args: e.args,
-            cwd: e.cwd,
-            detail,
-        }
-    })
+async fn run_git(
+    cwd: &Path,
+    args: &[&str],
+    supervision: Supervision<'_>,
+) -> Result<String, WorktreeError> {
+    crate::git::output(cwd, args, supervision)
+        .await
+        .map_err(WorktreeError::Git)
 }
 
 #[cfg(test)]

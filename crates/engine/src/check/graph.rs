@@ -12,8 +12,9 @@ pub(crate) fn find_depends_on_cycle(nodes: &[Node]) -> Option<Vec<NodeId>> {
 
 /// Per-file workflow-node rules: no runner bindings (a workflow
 /// node opens no session — the child's nodes bind their own), and an
-/// `inherit` child of a `parallel` group must declare scope so the
-/// disjointness demand is verifiable at all.
+/// a child of a `parallel` group that shares the group's tree
+/// (`isolation: none`) must declare scope so the disjointness demand is
+/// verifiable at all.
 pub(crate) fn check_workflow_nodes(
     nodes: &[Node],
     group: Option<&Node>,
@@ -33,7 +34,7 @@ pub(crate) fn check_workflow_nodes(
                     });
                 }
             }
-            if *isolation == yunta_core::WorkflowIsolation::Inherit && node.scope.is_empty() {
+            if *isolation == yunta_core::Isolation::None && node.scope.is_empty() {
                 if let Some(group) = group {
                     errors.push(CheckError::InheritChildWithoutScope {
                         group: group.id.clone(),
@@ -58,20 +59,16 @@ pub(crate) fn check_workflow_nodes(
 /// finished" cannot hold). `MountOnFanOut` lives in
 /// [`check_runner_fanout`], next to the other fan-out target rules.
 pub(crate) fn check_mounts(workflow: &Workflow, errors: &mut Vec<CheckError>) {
-    let known: HashSet<&NodeId> = workflow.iter_nodes().map(|node| &node.id).collect();
     for node in &workflow.nodes {
         if let NodeKind::Workflow { mounts, .. } = &node.kind {
             for mount in mounts {
                 let target = &mount.artifact.node;
+                // That the target exists at all is `read`'s to say;
+                // what is left here is a mount that names its own node,
+                // which reads fine and cannot work.
                 if target == &node.id {
                     errors.push(CheckError::MountOnSelf {
                         node: node.id.clone(),
-                    });
-                } else if !known.contains(target) {
-                    errors.push(CheckError::BrokenReference {
-                        node: node.id.clone(),
-                        field: "mounts".to_string(),
-                        target: target.clone(),
                     });
                 }
             }

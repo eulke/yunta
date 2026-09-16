@@ -4,15 +4,18 @@
 
 mod crossing;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use yunta_core::events::{
-    self, EventPayload, StoredEvent, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload,
+    self, EventPayload, StoredEvent, TaskLedger, TaskRegisteredPayload, TaskStatus,
+    TaskStatusChangedPayload,
 };
+use yunta_core::ScopeGlob;
 use yunta_core::{CommitSha, NodeId, Task, TaskId, TasksFile};
 
 use crate::run::RunError;
 use crate::run_log::RunLog;
+use yunta_core::events::TaskEvent;
 
 pub(crate) use crossing::{carried_into, standing_of, Standing};
 
@@ -35,7 +38,7 @@ pub(crate) enum Provenance<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Identity {
     criteria: Vec<events::Criterion>,
-    scope: Vec<String>,
+    scope: Vec<ScopeGlob>,
 }
 
 impl Identity {
@@ -53,7 +56,7 @@ pub(crate) fn prior_registrations(events: &[StoredEvent]) -> BTreeMap<TaskId, Id
     events
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::TaskRegistered(p)) => Some((
+            Some(EventPayload::Tasks(TaskEvent::Registered(p))) => Some((
                 p.task_id.clone(),
                 Identity {
                     criteria: p.criteria.clone(),
@@ -95,7 +98,7 @@ pub(crate) struct Planned<'a> {
 pub(crate) fn plan_registration<'a>(
     document: &'a TasksFile,
     prior: &BTreeMap<TaskId, Identity>,
-    current: &HashMap<TaskId, TaskStatus>,
+    current: &TaskLedger,
     carried: &BTreeMap<TaskId, CommitSha>,
 ) -> Vec<Planned<'a>> {
     document
@@ -110,7 +113,7 @@ pub(crate) fn plan_registration<'a>(
             } else {
                 carried
                     .get(&task.id)
-                    .filter(|_| current.get(&task.id) != Some(&TaskStatus::Done))
+                    .filter(|_| current.status(&task.id) != Some(TaskStatus::Done))
                     .map(|commit| Follow::Done(commit.clone()))
             };
             Planned { task, follow }
@@ -146,33 +149,24 @@ pub(crate) async fn register(
         let registered = log
             .record(
                 node,
-                EventPayload::TaskRegistered(TaskRegisteredPayload {
+                EventPayload::Tasks(TaskEvent::Registered(TaskRegisteredPayload {
                     task_id: planned.task.id.clone(),
                     criteria: planned.task.criteria.iter().map(Into::into).collect(),
                     scope: planned.task.scope.clone(),
                     depends_on: planned.task.depends_on.clone(),
-                }),
+                })),
             )
             .await?;
         let Some(follow) = planned.follow else {
             continue;
         };
-        // Only a `done` states where work landed; a reset states that
-        // nothing about this task is settled, which no commit can name.
-        let (new_status, commit) = match follow {
-            Follow::Reset => (TaskStatus::Pending, None),
-            Follow::Done(commit) => (TaskStatus::Done, Some(commit)),
+        let task_id = planned.task.id.clone();
+        let changed = match follow {
+            Follow::Reset => TaskStatusChangedPayload::to(task_id, TaskStatus::Pending, registered),
+            Follow::Done(commit) => TaskStatusChangedPayload::done(task_id, registered, commit),
         };
-        log.record(
-            node,
-            EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
-                task_id: planned.task.id.clone(),
-                new_status,
-                caused_by: registered,
-                commit,
-            }),
-        )
-        .await?;
+        log.record(node, EventPayload::Tasks(TaskEvent::StatusChanged(changed)))
+            .await?;
     }
     Ok(())
 }
@@ -180,18 +174,19 @@ pub(crate) async fn register(
 #[cfg(test)]
 mod tests {
     use proptest::prelude::*;
-    use yunta_core::RunId;
     use yunta_testkit::tasks_document;
+    use yunta_testkit_core::Log;
 
     use super::*;
 
-    /// The registration this log holds for `task`, at `seq`.
-    fn registration(seq: u64, task: &Task) -> StoredEvent {
-        yunta_testkit::stored(
-            &RunId::from("run-1"),
-            seq,
-            yunta_testkit::task_registered(task),
-        )
+    /// The log a run that registered `tasks`, in order, left behind.
+    fn registrations(tasks: &[Task]) -> Vec<StoredEvent> {
+        tasks
+            .iter()
+            .fold(Log::for_run("run-1"), |log, task| {
+                log.event(yunta_testkit::task_registered(task))
+            })
+            .build()
     }
 
     /// The commit a `done` that crossed names. Any commit: what
@@ -206,13 +201,53 @@ mod tests {
         ids.iter().map(|id| ((*id).into(), landed())).collect()
     }
 
+    /// A ledger holding exactly these statuses, built the way a run
+    /// builds one: the registration first, then the move. A fixture can
+    /// only state what a log could have written.
+    fn ledger_of<S: AsRef<str>>(entries: &[(S, TaskStatus)]) -> TaskLedger {
+        let mut ledger = TaskLedger::default();
+        for (seq, (id, status)) in entries.iter().enumerate() {
+            let task: TaskId = id.as_ref().into();
+            let meta = yunta_core::events::EventMeta {
+                seq: (seq as u64 + 1).into(),
+                at: chrono::DateTime::UNIX_EPOCH,
+                node: None,
+            };
+            ledger
+                .apply(
+                    &TaskEvent::Registered(TaskRegisteredPayload {
+                        task_id: task.clone(),
+                        criteria: Vec::new(),
+                        scope: Vec::new(),
+                        depends_on: Vec::new(),
+                    }),
+                    &meta,
+                )
+                .expect("a registration introduces its own task");
+            ledger
+                .apply(
+                    &TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+                        task, *status, meta.seq,
+                    )),
+                    &meta,
+                )
+                .expect("the registration above introduced it");
+        }
+        ledger
+    }
+
     #[test]
     fn a_fresh_document_registers_every_task_with_no_status_to_follow() {
         let doc = tasks_document(&[
             ("T001", "a.txt", "test -f a.txt"),
             ("T002", "b.txt", "true"),
         ]);
-        let planned = plan_registration(&doc, &BTreeMap::new(), &HashMap::new(), &carried(&[]));
+        let planned = plan_registration(
+            &doc,
+            &BTreeMap::new(),
+            &TaskLedger::default(),
+            &carried(&[]),
+        );
 
         assert_eq!(
             planned
@@ -228,8 +263,12 @@ mod tests {
     #[test]
     fn a_task_that_crossed_with_the_same_identity_is_done_here_at_the_commit_it_names() {
         let doc = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
-        let planned =
-            plan_registration(&doc, &BTreeMap::new(), &HashMap::new(), &carried(&["T001"]));
+        let planned = plan_registration(
+            &doc,
+            &BTreeMap::new(),
+            &TaskLedger::default(),
+            &carried(&["T001"]),
+        );
 
         assert_eq!(
             planned[0].follow,
@@ -243,9 +282,9 @@ mod tests {
     fn a_task_that_crossed_whose_identity_changed_here_starts_over() {
         let doc = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
         let cut_differently = tasks_document(&[("T001", "a.txt", "test -f something-else")]);
-        let prior = prior_registrations(&[registration(1, &cut_differently.tasks[0])]);
+        let prior = prior_registrations(&registrations(&cut_differently.tasks));
 
-        let planned = plan_registration(&doc, &prior, &HashMap::new(), &carried(&["T001"]));
+        let planned = plan_registration(&doc, &prior, &TaskLedger::default(), &carried(&["T001"]));
 
         assert_eq!(
             planned[0].follow,
@@ -257,7 +296,7 @@ mod tests {
     #[test]
     fn a_task_this_log_already_has_done_gets_no_second_done() {
         let doc = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
-        let current = HashMap::from([(TaskId::from("T001"), TaskStatus::Done)]);
+        let current = ledger_of(&[("T001", TaskStatus::Done)]);
 
         let planned = plan_registration(&doc, &BTreeMap::new(), &current, &carried(&["T001"]));
 
@@ -327,16 +366,8 @@ mod tests {
             };
             let doc = as_document(&declared);
             let before = as_document(&registered);
-            let prior = prior_registrations(
-                &before
-                    .tasks
-                    .iter()
-                    .enumerate()
-                    .map(|(i, task)| registration(i as u64 + 1, task))
-                    .collect::<Vec<_>>(),
-            );
-            let current: HashMap<TaskId, TaskStatus> =
-                current.into_iter().map(|(id, status)| (id.into(), status)).collect();
+            let prior = prior_registrations(&registrations(&before.tasks));
+            let current = ledger_of(&current);
             let crossed = carried(&crossed);
 
             let planned = plan_registration(&doc, &prior, &current, &crossed);

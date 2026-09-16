@@ -92,8 +92,10 @@ fn init_interactive_without_a_tty_degrades_instead_of_hanging() {
 
     let result = yunta_in!(&repo, &home, &["init", "--interactive"]);
     assert!(result.status.success(), "stderr: {}", stderr(&result));
+    // What the degradation says is what was missing: a prompt needs a
+    // terminal at both ends, and this process was handed neither.
     assert!(
-        stderr(&result).contains("non-interactive") || stderr(&result).contains("TTY"),
+        stderr(&result).contains("no terminal to ask on"),
         "expected a degrade warning, got: {}",
         stderr(&result)
     );

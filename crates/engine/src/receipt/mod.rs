@@ -11,16 +11,19 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use yunta_core::diagnostic::ArtifactFailure;
-use yunta_core::events::{EventPayload, Failure, Phase, StoredEvent, TerminalState, TokenUsage};
+use yunta_core::diagnostic::{ArtifactFailure, DiagnosticCode, DocumentKind};
+use yunta_core::events::{
+    BaselineOrigin, EventPayload, Failure, Phase, StoredEvent, TerminalState, TokenUsage,
+};
 use yunta_core::ContentHash;
 use yunta_core::{
-    AdapterId, ArtifactKind, CheckBuiltin, Manifest, ModeName, ModelName, NodeId, NodeKind, RunId,
-    RunnerName, Seq,
+    AdapterId, CheckBuiltin, Manifest, ModeName, ModelName, NodeId, NodeKind, RunId, RunnerName,
+    Seq, WorkflowName,
 };
 
 use crate::replay::{derive, NodeState};
 use crate::replay::{unknown_kind_counts, UnknownKindCount};
+use yunta_core::events::{NodeEvent, RunEvent};
 
 mod render;
 
@@ -31,9 +34,13 @@ pub enum ReceiptError {
     /// A receipt certifies *closed* work — a run still
     /// `running`/`waiting`/`paused` has no
     /// `run_finished` metrics (CPTV, final token total) to report yet.
+    ///
+    /// The sentence names the state the run is in and stops there:
+    /// which command shows a reader where that run stands is the
+    /// caller's own vocabulary, not the engine's.
     #[error(
-        "run `{0}` hasn't reached a terminal state yet — `yunta status {0}` shows where it is; \
-         a receipt is only generated once a run finishes"
+        "run `{0}` hasn't reached a terminal state yet — a receipt is only generated \
+         once a run finishes"
     )]
     NotFinished(RunId),
 }
@@ -61,11 +68,13 @@ pub struct CriteriaSummary {
 pub struct BaselineSummary {
     pub suite: String,
     pub hash: ContentHash,
-    /// `baseline_compare` nodes that actually compared against the
-    /// capture (the run's first `baseline_compare` only captures — it
-    /// has nothing yet to regress against).
+    /// `baseline_compare` nodes that ran against the measurement this
+    /// run holds.
     pub compared: usize,
     pub regressions: usize,
+    /// Who took the measurement: this run, or the root of the lineage it
+    /// was born into.
+    pub origin: BaselineOrigin,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -104,8 +113,10 @@ pub enum EventChainStatus {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Receipt {
+    /// Version of this document's own schema.
+    pub schema_version: u32,
     pub run_id: RunId,
-    pub workflow: String,
+    pub workflow: WorkflowName,
     pub mode: ModeName,
     pub terminal_state: TerminalState,
     pub criteria: CriteriaSummary,
@@ -137,9 +148,22 @@ pub struct DiagnosticCount {
     /// The document whose rules were asked. `None` for a problem with
     /// the artifact itself — a file that was never written, and an
     /// artifact another run owes, have no content to have a kind.
-    pub kind: Option<ArtifactKind>,
-    pub code: String,
+    pub kind: Option<DocumentKind>,
+    pub code: DiagnosticCode,
     pub occurrences: usize,
+}
+
+impl Receipt {
+    /// Version of the receipt's own schema, stamped on every one this
+    /// binary writes.
+    ///
+    /// Not a [`Persisted`](yunta_core::persisted::Persisted) document:
+    /// nothing reads a receipt back — `yunta receipt` derives it from
+    /// the log every time — so it has no tolerant reader to be. The
+    /// version is for whoever consumes `receipt.json` outside yunta,
+    /// who has no log to derive it from and needs to know what shape
+    /// they were handed.
+    pub const SCHEMA_VERSION: u32 = 1;
 }
 
 impl std::fmt::Display for DiagnosticCount {
@@ -168,7 +192,7 @@ impl std::fmt::Display for DiagnosticCount {
 /// was going to hand over, and `artifact-unheld` the same whatever run
 /// was asked. A document whose content failed is not one problem but
 /// every problem it has, each under the kind it was read against.
-fn counted(failure: &ArtifactFailure) -> Vec<(Option<ArtifactKind>, &'static str)> {
+fn counted(failure: &ArtifactFailure) -> Vec<(Option<DocumentKind>, DiagnosticCode)> {
     match failure {
         // Exhaustive rather than keyed off `report()`, so a fifth way an
         // artifact can fail reaches this decision as a compile error
@@ -192,12 +216,16 @@ fn counted(failure: &ArtifactFailure) -> Vec<(Option<ArtifactKind>, &'static str
 /// most frequent first and ties broken by name so the same log always
 /// renders the same receipt.
 fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
-    let mut counts: HashMap<(Option<ArtifactKind>, &'static str), usize> = HashMap::new();
+    let mut counts: HashMap<(Option<DocumentKind>, DiagnosticCode), usize> = HashMap::new();
     let failed = events.iter().filter_map(|event| match event.payload() {
-        Some(EventPayload::NodeFailed(p)) => Some(&p.failure),
+        Some(EventPayload::Node(NodeEvent::Failed(p))) => Some(&p.failure),
         _ => None,
     });
     for failure in failed {
+        // Only a failure about documents has documents to count. A
+        // sentence and a dead session name no artifact, and counting
+        // them as zero of something would be a different claim from
+        // having nothing to say.
         let Failure::Artifacts { artifacts } = failure else {
             continue;
         };
@@ -209,18 +237,18 @@ fn diagnostic_counts(events: &[StoredEvent]) -> Vec<DiagnosticCount> {
         .into_iter()
         .map(|((kind, code), occurrences)| DiagnosticCount {
             kind,
-            code: code.to_string(),
+            code,
             occurrences,
         })
         .collect();
     counts.sort_by(|a, b| {
         b.occurrences
             .cmp(&a.occurrences)
-            .then_with(|| a.code.cmp(&b.code))
+            .then_with(|| a.code.as_str().cmp(b.code.as_str()))
             .then_with(|| {
                 a.kind
-                    .map(ArtifactKind::as_str)
-                    .cmp(&b.kind.map(ArtifactKind::as_str))
+                    .map(DocumentKind::label)
+                    .cmp(&b.kind.map(DocumentKind::label))
             })
     });
     counts
@@ -236,7 +264,9 @@ pub fn build_receipt(
     event_chain: EventChainStatus,
 ) -> Result<Receipt, ReceiptError> {
     let Some((terminal_state, metrics)) = events.iter().find_map(|e| match e.payload() {
-        Some(EventPayload::RunFinished(p)) => Some((p.terminal_state, p.metrics.clone())),
+        Some(EventPayload::Run(RunEvent::Finished(p))) => {
+            Some((p.terminal_state, p.metrics.clone()))
+        }
         _ => None,
     }) else {
         return Err(ReceiptError::NotFinished(run_id.clone()));
@@ -249,10 +279,16 @@ pub fn build_receipt(
     let unknown_kinds = unknown_kind_counts(&crate::replay::derive(events));
     let reroutes = events
         .iter()
-        .filter(|e| matches!(e.payload(), Some(EventPayload::NodeRerouted(_))))
+        .filter(|e| {
+            matches!(
+                e.payload(),
+                Some(EventPayload::Node(NodeEvent::Rerouted(_)))
+            )
+        })
         .count();
 
     Ok(Receipt {
+        schema_version: Receipt::SCHEMA_VERSION,
         run_id: run_id.clone(),
         workflow: manifest.workflow.name.clone(),
         mode: yunta_core::events::run_mode(events),
@@ -279,7 +315,7 @@ fn criteria_summary(events: &[StoredEvent]) -> CriteriaSummary {
     let mut latest_post: HashMap<String, &yunta_core::events::CriteriaCheckedPayload> =
         HashMap::new();
     for event in events {
-        if let Some(EventPayload::CriteriaChecked(p)) = event.payload() {
+        if let Some(EventPayload::Node(NodeEvent::CriteriaChecked(p))) = event.payload() {
             if p.phase == Phase::Post {
                 latest_post.insert(p.task_id.to_string(), p);
             }
@@ -305,31 +341,27 @@ fn criteria_summary(events: &[StoredEvent]) -> CriteriaSummary {
 }
 
 fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<BaselineSummary> {
-    // The one node that emitted `baseline_captured` did the capturing;
-    // every other `baseline_compare` node compared. Read from the event
-    // kind and the envelope's node id, never the node's outcome text.
-    let capturing_node = events.iter().find_map(|e| match e.payload() {
-        Some(EventPayload::BaselineCaptured(_)) => e.node_id.clone(),
-        _ => None,
-    });
-    let captured = events.iter().find_map(|e| match e.payload() {
-        Some(EventPayload::BaselineCaptured(p)) => Some(p),
-        _ => None,
-    })?;
-
+    // A run holds a measurement whenever its lineage declared a suite,
+    // so what decides whether the run *looked* is the workflow: with no
+    // `baseline_compare` in it there is no comparison to report, and a
+    // "0 regressions" line would be about nothing.
+    let compares: Vec<&NodeId> = manifest
+        .workflow
+        .iter_nodes()
+        .filter(|node| matches!(&node.kind, NodeKind::Check(CheckBuiltin::BaselineCompare)))
+        .map(|node| &node.id)
+        .collect();
+    if compares.is_empty() {
+        return None;
+    }
+    // Read from the run's own fold and each node's derived state, never
+    // from a node's outcome text.
     let state = derive(events);
+    let captured = state.run.baseline()?;
     let mut compared = 0usize;
     let mut regressions = 0usize;
-    for node in manifest.workflow.iter_nodes() {
-        if !matches!(&node.kind, NodeKind::Check(CheckBuiltin::BaselineCompare)) {
-            continue;
-        }
-        // The run's very first `baseline_compare` only captures — it has
-        // nothing yet to compare against, so it isn't counted.
-        if capturing_node.as_ref() == Some(&node.id) {
-            continue;
-        }
-        match state.nodes.get(&node.id) {
+    for node in compares {
+        match state.nodes.state(node) {
             Some(NodeState::Finished { .. }) => compared += 1,
             Some(NodeState::Failed { .. }) => {
                 compared += 1;
@@ -344,6 +376,7 @@ fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<Basel
         hash: captured.hash.clone(),
         compared,
         regressions,
+        origin: captured.origin.clone(),
     })
 }
 
@@ -351,7 +384,7 @@ fn scope_summary(events: &[StoredEvent]) -> ScopeSummary {
     let mut files: BTreeSet<PathBuf> = BTreeSet::new();
     let mut violations: BTreeSet<PathBuf> = BTreeSet::new();
     for event in events {
-        if let Some(EventPayload::ScopeChecked(p)) = event.payload() {
+        if let Some(EventPayload::Node(NodeEvent::ScopeChecked(p))) = event.payload() {
             files.extend(p.diff.iter().cloned());
             violations.extend(p.violations.iter().cloned());
         }
@@ -375,7 +408,7 @@ fn runner_usage(events: &[StoredEvent]) -> Vec<RunnerUsage> {
     events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(EventPayload::RunnerResolved(p)) => {
+            Some(EventPayload::Node(NodeEvent::RunnerResolved(p))) => {
                 let node_id = e.node_id.clone()?;
                 seen.insert(node_id.clone()).then(|| RunnerUsage {
                     node_id,

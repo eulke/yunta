@@ -1,8 +1,8 @@
 //! Per-run process registry: `run.dir/scratch/engine.json`,
-//! the one thing that lets a *separate* process — `yunta cancel`, a
-//! future `--detach` supervisor — find and signal a live run's process
-//! tree so cancellation can always tear the whole tree down, not just
-//! the top process. Scratch, deliberately: it is ephemeral process
+//! the one thing that lets a *separate* process — `yunta cancel`, which
+//! shares no memory with the run it stops — find and signal a live run's
+//! process tree so cancellation can always tear the whole tree down, not
+//! just the top process. Scratch, deliberately: it is ephemeral process
 //! state, not an artifact and not event-log truth; it is written when
 //! `execute_run` starts, updated as sessions/hooks/executors spawn and
 //! close, and deleted at every terminal.
@@ -12,21 +12,38 @@
 //! here degrades to a `tracing` warning, never to a failed run — but it
 //! degrades *loudly*, never silently.
 
+use chrono::{DateTime, Utc};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use yunta_core::Pid;
+use yunta_core::persisted::Persisted;
+use yunta_core::{Pid, RelativePath};
+
+impl Persisted for EngineProcessFile {
+    const SCHEMA_VERSION: u32 = 1;
+    const NAME: &'static str = "process registry";
+    // `engine.json` — the name is what a person opening it reads, and a
+    // separate process parsing it at a crash should not need a YAML
+    // reader to.
+    const ENCODING: yunta_core::persisted::Encoding = yunta_core::persisted::Encoding::Json;
+}
 
 /// The file's whole content — small enough that every mutation rewrites
 /// it atomically (tempfile + rename) rather than patching in place.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EngineProcessFile {
+    /// Version of this file's own schema.
+    #[serde(default)]
+    pub schema_version: u32,
     /// The `yunta` process driving the run — signal it first (`yunta
     /// cancel` sends SIGINT here while it's alive, so the engine's own
     /// interrupt→kill path does the exterminating).
     pub engine_pid: Pid,
-    pub started_at: String,
+    /// When this engine started, as its own injected clock read it —
+    /// what tells a live pid apart from a number the host handed to
+    /// something else after a crash.
+    pub started_at: DateTime<Utc>,
     /// Process-group ids of live sessions/hooks/executors — what a
     /// post-crash `cancel` kills directly when `engine_pid` is gone.
     pub process_groups: Vec<Pid>,
@@ -45,9 +62,10 @@ impl ProcessRegistry {
     pub fn create(
         run_dir: &Path,
         engine_pid: Pid,
-        started_at: String,
+        started_at: DateTime<Utc>,
     ) -> std::io::Result<ProcessRegistry> {
         let state = EngineProcessFile {
+            schema_version: <EngineProcessFile as Persisted>::SCHEMA_VERSION,
             engine_pid,
             started_at,
             process_groups: Vec::new(),
@@ -83,23 +101,62 @@ impl ProcessRegistry {
         }
     }
 
-    /// Deletes the file — the run reached a terminal, there is nothing
-    /// left for an outside process to signal.
+    /// Deletes what the run's scratch directory holds about live
+    /// processes — the registry itself, and the MCP config a session's
+    /// adapter was pointed at, which carries that session's bearer.
+    ///
+    /// The run reached a terminal: there is nothing left for an outside
+    /// process to signal, and a credential nobody can use is a
+    /// credential nobody should still be able to read.
     pub fn clear(&self) {
+        // blocking: the terminal's last act, on the thread that reached
+        // it, after the log is closed and nothing is left to schedule.
         if let Err(e) = std::fs::remove_file(&self.path) {
             if e.kind() != std::io::ErrorKind::NotFound {
                 tracing::warn!(error = %e, "failed to delete engine.json at run terminal");
             }
         }
+        if let Some(scratch) = self.path.parent() {
+            delete_credentials_under(scratch);
+        }
     }
 
     fn persist(&self) -> std::io::Result<()> {
         let state = lock(&self.state);
-        let json = serde_json::to_string_pretty(&*state).map_err(std::io::Error::other)?;
+        let json = yunta_core::persisted::PersistedDoc::of(state.clone())
+            .write()
+            .map_err(std::io::Error::other)?;
         drop(state);
         let tmp = self.path.with_extension("json.tmp");
         std::fs::write(&tmp, json)?;
         std::fs::rename(&tmp, &self.path)
+    }
+}
+
+/// Deletes every `mcp.json` under `scratch/`: one per session that held
+/// the run's tools, each carrying that session's bearer. A directory
+/// that cannot be listed is left alone — the run already closed, and a
+/// warning about a file nobody can reach helps no one.
+fn delete_credentials_under(scratch: &Path) {
+    // blocking: see `clear`.
+    let Ok(entries) = std::fs::read_dir(scratch) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        match entry.file_type() {
+            Ok(kind) if kind.is_dir() => delete_credentials_under(&path),
+            Ok(_) if path.file_name().is_some_and(|name| name == "mcp.json") => {
+                if let Err(e) = std::fs::remove_file(&path) {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %e,
+                        "failed to delete a session's tool credentials at run terminal"
+                    );
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -146,17 +203,43 @@ impl Drop for ProcessRegistry {
 
 /// Where a run's registry lives: `run.dir/scratch/engine.json`.
 pub fn registry_path(run_dir: &Path) -> PathBuf {
-    run_dir
-        .join(crate::run_dir::SCRATCH_DIR)
-        .join("engine.json")
+    run_dir.join(registry_file().as_path())
 }
 
-/// Reads a run's registry, if one exists and parses — `None` covers
-/// both "no live engine ever wrote one" and "unreadable", because the
-/// caller's fallback is the same: work from the event log alone.
-pub fn read_registry(run_dir: &Path) -> Option<EngineProcessFile> {
-    let bytes = std::fs::read(registry_path(run_dir)).ok()?;
-    serde_json::from_slice(&bytes).ok()
+/// The registry's place under the run directory — what a finding about
+/// it names, since a location is relative to the run and never to this
+/// host.
+pub fn registry_file() -> RelativePath {
+    RelativePath::of([crate::run_dir::SCRATCH_DIR, REGISTRY_NAME])
+}
+
+/// The registry's file name under the run's scratch.
+const REGISTRY_NAME: &str = "engine.json";
+
+/// A run's registry, as this binary reads it.
+///
+/// Three answers, not two: no registry at all is a run no live engine
+/// ever wrote one for, a registry that reads is what it says, and a
+/// registry that does not read is a fact about this run worth saying —
+/// a caller that reported it as absent would be telling a person the
+/// engine was never there.
+pub enum Registry {
+    /// No registry: nothing wrote one, or a terminal deleted it.
+    Absent,
+    /// The registry, and whatever a newer binary wrote beside it.
+    Read(Box<yunta_core::persisted::PersistedDoc<EngineProcessFile>>),
+    /// A registry this binary cannot make sense of.
+    Corrupt(yunta_core::persisted::PersistedError),
+}
+
+pub fn read_registry(run_dir: &Path) -> Registry {
+    let Ok(bytes) = std::fs::read(registry_path(run_dir)) else {
+        return Registry::Absent;
+    };
+    match yunta_core::persisted::PersistedDoc::read(&bytes) {
+        Ok(registry) => Registry::Read(Box::new(registry)),
+        Err(error) => Registry::Corrupt(error),
+    }
 }
 
 /// The pid of a spawned child, or `None` once it has been reaped.
