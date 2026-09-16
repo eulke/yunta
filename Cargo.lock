@@ -2804,7 +2804,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "serde_json",
  "yunta-core",
@@ -2835,7 +2835,7 @@ dependencies = [
 
 [[package]]
 name = "yunta"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2864,7 +2864,7 @@ dependencies = [
 
 [[package]]
 name = "yunta-adapters"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "async-trait",
  "axum",
@@ -2886,7 +2886,7 @@ dependencies = [
 
 [[package]]
 name = "yunta-core"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2911,7 +2911,7 @@ dependencies = [
 
 [[package]]
 name = "yunta-engine"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "async-trait",
  "axum",
@@ -2944,7 +2944,7 @@ dependencies = [
 
 [[package]]
 name = "yunta-storage"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "chrono",
  "proptest",
@@ -2960,7 +2960,7 @@ dependencies = [
 
 [[package]]
 name = "yunta-testkit"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2979,7 +2979,7 @@ dependencies = [
 
 [[package]]
 name = "yunta-testkit-core"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "chrono",
  "futures",

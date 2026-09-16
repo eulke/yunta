@@ -19,7 +19,7 @@ fn every_persisted_file_carries_its_version() {
 fn manifest() -> yunta_core::Manifest {
     yunta_core::Manifest {
         schema_version: <yunta_core::Manifest as Persisted>::SCHEMA_VERSION,
-        yunta_version: "0.0.4".to_string(),
+        yunta_version: "0.0.5".to_string(),
         workflow: yunta_core::yaml::parse(
             "name: ship\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n",
         )
@@ -98,7 +98,7 @@ fn a_file_that_is_not_the_document_is_refused_as_that_document() {
 fn a_frozen_manifest_that_says_inherit_reads_as_none() {
     let frozen = format!(
         "schema_version: {}\n\
-         yunta_version: \"0.0.4\"\n\
+         yunta_version: \"0.0.5\"\n\
          isolation: inherit\n\
          base_branch: main\n\
          base_commit: deadbeef\n\
