@@ -684,8 +684,23 @@ nodes:
       - { id: sweep-b, kind: bash, scope: ["b/**"], run: "sleep 30" }
 "#;
 
-/// The last painting that carried every one of `headlines`, and `None`
-/// while no painting has carried them all.
+/// How a node's row is recognised: by the node it is about, and not by
+/// the mark in front of it — that mark says how the node is doing and
+/// changes while it works, while the indentation these cases are about
+/// sits before it either way. The separator is part of the needle
+/// because `sweep` is a prefix of `sweep-a`.
+fn headline(id: &str) -> String {
+    format!("run {id} ·")
+}
+
+/// The rows of the last painting carrying a row for every one of `ids`,
+/// and `None` while no single painting has carried them all.
+///
+/// One painting and not several, because what these cases assert is
+/// where the rows sit relative to each other: the region draws a node
+/// once it is working, the children of a group start in whichever order
+/// the scheduler reaches them, and whichever starts first is drawn in a
+/// painting the other is missing from.
 ///
 /// A painting goes out as one run of text between escape sequences, each
 /// row padded to the terminal's full width, so cutting that run into
@@ -712,19 +727,6 @@ fn the_live_view_indents_a_groups_children_under_it() {
     let (repo, home) = project(root.path(), GROUPED);
     let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
 
-    // One painting carrying all three, not three paintings carrying one
-    // each: the region draws a node once it is working, the two children
-    // start in whichever order the scheduler reaches them, and whichever
-    // starts first is drawn in a painting the other is missing from.
-    // What this asserts on is where the rows sit relative to each other,
-    // which only a painting that holds them all can answer.
-    //
-    // A row is found by the node it is about and not by the mark in
-    // front of it: that mark says how the node is doing and changes
-    // while it works, and what this is about is the indentation, which
-    // sits before the mark either way. The trailing separator is part of
-    // the needle because `sweep` is a prefix of `sweep-a`.
-    let headline = |id: &str| format!("run {id} ·");
     let wanted = ["sweep", "sweep-a", "sweep-b"].map(headline);
     let rows = yunta_testkit::wait_for(
         || painting_with(&terminal.drawn(), &wanted),

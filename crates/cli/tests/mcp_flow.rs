@@ -14,7 +14,7 @@ use yunta_core::events::GateEvent;
 use yunta_core::process::signal::{signal_process, Signal};
 use yunta_core::Pid;
 use yunta_testkit::{
-    git, init_repo, run_id_from, stderr, stdout, wait_until_async, write, yunta_in,
+    git, init_repo, run_id_from, stderr, stdout, wait_for_async, wait_until_async, write, yunta_in,
 };
 
 fn tool_text(result: &rmcp::model::CallToolResult) -> String {
@@ -1198,16 +1198,29 @@ async fn answer_questions_pre_seeds_the_answer_and_resume_finishes_the_node() {
     )
     .await;
 
-    let text = std::fs::read_to_string(
-        yunta_testkit::runs_root(&home)
-            .join(&run_id)
-            .join("events.jsonl"),
+    // The export is written after the `run_finished` the status above
+    // reads, so a run that reports finished has not necessarily written
+    // its forensic copy yet: this waits for the copy itself.
+    let exported = yunta_testkit::runs_root(&home)
+        .join(&run_id)
+        .join("events.jsonl");
+    let text = wait_for_async(
+        || {
+            let exported = exported.clone();
+            async move {
+                std::fs::read_to_string(&exported)
+                    .ok()
+                    .filter(|text| text.contains("questions_answered"))
+            }
+        },
+        || {
+            format!(
+                "the answer is on the exported log: {}",
+                std::fs::read_to_string(&exported).unwrap_or_default()
+            )
+        },
     )
-    .expect("the run exports its own log");
-    assert!(
-        text.contains("questions_answered"),
-        "the answer is on the log: {text}"
-    );
+    .await;
     assert!(
         text.contains("\"channel\":\"mcp\""),
         "recorded as arriving through the control plane, which is what \
