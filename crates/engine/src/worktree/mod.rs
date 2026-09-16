@@ -41,7 +41,9 @@ use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
 use crate::process::Supervision;
 pub use branches::{run_branch, unit_branch};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
-pub use unit::{commit_work, land, open_unit, rebase_onto, Rebase, Unit, UnitHome, UnitId};
+pub use unit::{
+    commit_work, land, open_unit, rebase_onto, snapshot_commit, Rebase, Unit, UnitHome, UnitId,
+};
 
 #[derive(Debug, Error)]
 pub enum WorktreeError {
@@ -422,14 +424,71 @@ pub async fn head_commit(
         })
 }
 
+/// The tree `cwd` stands at right now, as the starting point a later
+/// audit measures against.
+///
+/// Captured through an index of its own (`GIT_INDEX_FILE` under
+/// `scratch`), never the repository's: a sibling unit working in the
+/// same checkout at the same moment must not find this call holding
+/// `.git/index`, and this call must not see half of what that sibling
+/// was mid-way through staging.
+///
+/// `index` must sit outside `cwd`, and no two units working in one tree
+/// at once may name the same one. Staging is `add -A` over the whole
+/// checkout, so an index kept inside the tree it measures ends up in the
+/// tree it measures; and a shared index is a lock two captures fight
+/// over. `run_dir::index_for` answers both: outside the worktree,
+/// named by the unit.
+pub async fn capture_tree(
+    cwd: &Path,
+    index: &Path,
+    supervision: Supervision<'_>,
+) -> Result<TreeId, WorktreeError> {
+    // Made absolute before anything touches it: this call creates the
+    // index's directory and the git child opens the file, and the two
+    // resolve a relative path against different directories — here the
+    // process's, there `cwd`. Absolute, they name the one file, and no
+    // index can land inside the tree it is measuring by accident.
+    let index = std::path::absolute(index).map_err(|source| WorktreeError::Io {
+        action: "resolve the private index path".to_string(),
+        path: index.to_path_buf(),
+        source,
+    })?;
+    if let Some(parent) = index.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|source| WorktreeError::Io {
+                action: "create the private index's directory".to_string(),
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    }
+    // The index travels the way every other value this engine hands a
+    // child does: through the supervision it is already governed by.
+    let mut env: Vec<(String, String)> = supervision.env.to_vec();
+    env.push(("GIT_INDEX_FILE".to_string(), index.display().to_string()));
+    let private = supervision.with_env(&env);
+    // `add -A` stages what is there, untracked included, so the tree is
+    // the whole visible state and not only what git already followed.
+    crate::git::output(cwd, &["add", "-A"], private).await?;
+    let printed = crate::git::output(cwd, &["write-tree"], private).await?;
+    printed
+        .trim()
+        .parse()
+        .map_err(|source: InvalidId| WorktreeError::NotATree {
+            args: "write-tree".to_string(),
+            cwd: cwd.to_path_buf(),
+            source,
+        })
+}
+
 /// The tree `repo`'s `HEAD` points at — the same question
 /// [`head_commit`] asks, answered as the object a diff takes as an end.
 ///
 /// What a unit that was handed a clean checkout of its own started
 /// from: the commit it was branched from is exactly what it began with,
-/// so its starting tree needs no capture. A unit sharing a tree it did
-/// not receive clean uses [`scope::capture_tree`](crate::scope::capture_tree)
-/// instead.
+/// so its starting tree needs no capture. A node sharing a tree it did
+/// not receive clean uses [`capture_tree`](fn@capture_tree) instead.
 pub async fn head_tree(repo: &Path, supervision: Supervision<'_>) -> Result<TreeId, WorktreeError> {
     let output = run_git(repo, &["rev-parse", "HEAD^{tree}"], supervision).await?;
     output

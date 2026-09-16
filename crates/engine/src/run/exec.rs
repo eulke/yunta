@@ -390,7 +390,7 @@ fn build_ctx(
         Pid::current(),
         clock.now(),
     ) {
-        Ok(registry) => (Some(registry), None),
+        Ok(registry) => (Some(std::sync::Arc::new(registry)), None),
         Err(e) => (None, Some(e)),
     };
     // The per-run MCP host outlives every borrow of this invocation, so
@@ -410,10 +410,10 @@ fn build_ctx(
         clock,
         ids,
         max_task_retries,
-        memo: Memo::new(manifest.config_hash.clone()),
+        memo: std::sync::Arc::new(Memo::new(manifest.config_hash.clone())),
         human_interaction,
         adapter_override,
-        budget_lifted: std::sync::atomic::AtomicBool::new(false),
+        budget_lifted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         process_registry: registry,
         root_cancel: root_cancel_for_ctx,
         forge,
@@ -422,6 +422,8 @@ fn build_ctx(
         secrets,
         redactor: redactor.clone(),
         observer,
+        unit: None,
+        landing: std::sync::Arc::new(tokio::sync::Mutex::new(())),
         // One host per execute_run invocation, shared by every session
         // listener; each of them reads and writes through the host's own
         // clone of the log handle.

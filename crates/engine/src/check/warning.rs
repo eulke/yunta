@@ -13,8 +13,9 @@ use thiserror::Error;
 pub enum CheckWarning {
     #[error(
         "parallel group `{group}`: two or more children can write and don't declare scope as \
-         disjoint — the engine can't verify they won't collide; declare `scope` on each \
-         to make the check real"
+         disjoint — they share the run's tree, so the last write wins and nothing says so; \
+         declare `scope` on each, which gives every child a checkout of its own and its \
+         writes a boundary this engine enforces"
     )]
     UndeclaredParallelScope { group: NodeId },
 
@@ -24,8 +25,9 @@ pub enum CheckWarning {
     /// the signal in noise).
     #[error(
         "nodes {nodes} have no dependency paths between them and can all write without \
-         declared scope — with `max_parallel_nodes` > 1 the engine can't verify they won't \
-         collide; declare `scope` on each or chain them with `depends_on`"
+         declared scope — with `max_parallel_nodes` > 1 they share the run's tree at the \
+         same moment and the last write wins; declare `scope` on each, which gives every \
+         one a checkout of its own, or chain them with `depends_on`"
     )]
     UndeclaredFanOutScope { nodes: String },
 

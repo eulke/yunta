@@ -137,8 +137,8 @@ pub use run_tools::{
 };
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{
-    audit, audited_scope, capture_tree, changed_since, fence_breach, violations, Breach,
-    ScopeCheckError, ScopeCheckResult,
+    audit, audited_scope, changed_since, fence_breach, violations, Breach, ScopeCheckError,
+    ScopeCheckResult,
 };
 pub use stats::{
     compute_run_stats, compute_run_stats_at, median, FindingActivity, NodeStat, RunStats,
@@ -159,7 +159,8 @@ pub use view::{
     NodeStanding, Reroute, RunFrame, RunPhase, WaitingOn,
 };
 pub use worktree::{
-    cleanup_worktree, commit_work, hand_over_worktree, head_commit, head_tree, land, open_unit,
-    prepare_worktree, rebase_onto, release_worktree, run_branch, unit_branch, Rebase, RunWorktree,
-    Unit, UnitHome, UnitId, WorktreeCleanup, WorktreeError, WorktreeIntegrity, WorktreePrepared,
+    capture_tree, cleanup_worktree, commit_work, hand_over_worktree, head_commit, head_tree, land,
+    open_unit, prepare_worktree, rebase_onto, release_worktree, run_branch, snapshot_commit,
+    unit_branch, Rebase, RunWorktree, Unit, UnitHome, UnitId, WorktreeCleanup, WorktreeError,
+    WorktreeIntegrity, WorktreePrepared,
 };

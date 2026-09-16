@@ -36,14 +36,11 @@ pub enum ScopeCheckError {
         #[source]
         source: globset::Error,
     },
-    /// `git write-tree` answered something that is not an object id —
-    /// a git this build does not understand, which is not a scope
-    /// verdict to report but a tool to fix.
-    #[error("`git write-tree` did not name a tree")]
-    NotATree {
-        #[source]
-        source: yunta_core::InvalidId,
-    },
+    /// The checkout would not say what it holds. Asking a tree where it
+    /// stands belongs to the worktree module; an audit only reports what
+    /// came back.
+    #[error(transparent)]
+    Worktree(#[from] crate::worktree::WorktreeError),
 }
 
 /// What a unit of work changed between the tree it started from and the
@@ -55,58 +52,6 @@ pub struct ScopeCheckResult {
     pub violations: Vec<PathBuf>,
 }
 
-/// The tree `cwd` stands at right now, as the starting point a later
-/// audit measures against.
-///
-/// Captured through an index of its own (`GIT_INDEX_FILE` under
-/// `scratch`), never the repository's: a sibling unit working in the
-/// same checkout at the same moment must not find this call holding
-/// `.git/index`, and this call must not see half of what that sibling
-/// was mid-way through staging.
-///
-/// `index` must sit outside `cwd`, and no two units working in one tree
-/// at once may name the same one. Staging is `add -A` over the whole
-/// checkout, so an index kept inside the tree it measures ends up in the
-/// tree it measures; and a shared index is a lock two captures fight
-/// over. `run_dir::node_index` and `run_dir::task_index` answer both:
-/// outside the worktree, named by the unit.
-pub async fn capture_tree(
-    cwd: &Path,
-    index: &Path,
-    supervision: Supervision<'_>,
-) -> Result<TreeId, ScopeCheckError> {
-    // Made absolute before anything touches it: this call creates the
-    // index's directory and the git child opens the file, and the two
-    // resolve a relative path against different directories — here the
-    // process's, there `cwd`. Absolute, they name the one file, and no
-    // index can land inside the tree it is measuring by accident.
-    let index = std::path::absolute(index).map_err(|source| ScopeCheckError::Io {
-        action: format!("resolve `{}`", index.display()),
-        source,
-    })?;
-    if let Some(parent) = index.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|source| ScopeCheckError::Io {
-                action: format!("create `{}`", parent.display()),
-                source,
-            })?;
-    }
-    // The index travels the way every other value this engine hands a
-    // child does: through the supervision it is already governed by.
-    let mut env: Vec<(String, String)> = supervision.env.to_vec();
-    env.push(("GIT_INDEX_FILE".to_string(), index.display().to_string()));
-    let private = supervision.with_env(&env);
-    // `add -A` stages what is there, untracked included, so the tree is
-    // the whole visible state and not only what git already followed.
-    git_bytes(cwd, &["add", "-A"], private).await?;
-    let printed = git_bytes(cwd, &["write-tree"], private).await?;
-    String::from_utf8_lossy(&printed)
-        .trim()
-        .parse()
-        .map_err(|source| ScopeCheckError::NotATree { source })
-}
-
 /// What changed in `cwd` since `from`: the paths a unit of work is
 /// answerable for, and nothing that was already there when it began.
 ///
@@ -116,16 +61,15 @@ pub async fn capture_tree(
 /// for untracked paths separately would answer about the checkout rather
 /// than about the unit, which is the whole distinction this makes.
 ///
-/// The counterpart of [`worktree::head_tree`](crate::worktree::head_tree),
-/// which a unit that was handed a clean tree of its own uses instead: it
-/// asks its checkout where it stands and needs no capture at all.
+/// Both ends come from [`capture_tree`](crate::capture_tree), which is
+/// the one place a checkout is asked what it holds.
 pub async fn changed_since(
     cwd: &Path,
     from: &TreeId,
     index: &Path,
     supervision: Supervision<'_>,
 ) -> Result<Vec<PathBuf>, ScopeCheckError> {
-    let now = capture_tree(cwd, index, supervision).await?;
+    let now = crate::worktree::capture_tree(cwd, index, supervision).await?;
     let bytes = git_bytes(
         cwd,
         &["diff", "--name-only", "-z", from.as_str(), now.as_str()],

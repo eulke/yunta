@@ -51,9 +51,13 @@ async fn a_unit(owner: &Owner) -> (tempfile::TempDir, tempfile::TempDir, Unit) {
     let from = yunta_engine::head_tree(dir.path(), owner.supervision())
         .await
         .expect("the checkout says where it stands");
+    let base = yunta_engine::head_commit(dir.path(), owner.supervision())
+        .await
+        .expect("and which commit that is");
     let unit = Unit {
         who: UnitId::Task("test-unit".into()),
         worktree: dir.path().to_path_buf(),
+        base,
         from,
     };
     (dir, run, unit)

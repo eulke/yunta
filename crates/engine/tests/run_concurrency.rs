@@ -1,7 +1,7 @@
 //! Concurrent execution: parallel nodes, join:all / join:any groups, per-loop concurrency, and orphan resume across a crash.
 
 use yunta_engine::{NodeState, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
-use yunta_testkit::{git, Bench};
+use yunta_testkit::{git, git_output, Bench};
 
 mod common;
 use common::*;
@@ -1053,4 +1053,222 @@ nodes:
         other => panic!("the uncertain child is recorded failed, got {other:?}"),
     }
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
+}
+
+// --- quién recibe un árbol propio (M32 · D184) ----------------------------
+
+/// Two nodes that run at once meet here before either writes, so both
+/// capture their starting tree before the other has touched anything —
+/// which is the only way the blame is mutual. The rendezvous is under
+/// the run directory because that is the one place every node of a run
+/// reaches whether or not it works in a tree of its own.
+fn meet_then_write(mine: &str, marker: &str) -> String {
+    format!(
+        "mkdir -p {mine} \"{{{{run.dir}}}}/meet\"; touch \"{{{{run.dir}}}}/meet/{marker}\"; \
+         while :; do set -- \"{{{{run.dir}}}}/meet\"/*; [ \"$#\" -ge 2 ] && break; done; \
+         echo x > {mine}/out.txt"
+    )
+}
+
+/// Each child writes only inside the globs it declared, and `check`
+/// already proved those globs disjoint. Neither is answerable for what
+/// the other wrote.
+#[tokio::test]
+async fn two_parallel_children_with_disjoint_scope_both_finish_clean() {
+    let bench = Bench::new();
+    let workflow = format!(
+        r#"
+name: sweep
+nodes:
+  - id: sweep
+    kind: parallel
+    join: all
+    nodes:
+      - id: sweep-a
+        kind: bash
+        scope: ["a/**"]
+        run: '{}'
+      - id: sweep-b
+        kind: bash
+        scope: ["b/**"]
+        run: '{}'
+"#,
+        meet_then_write("a", "a"),
+        meet_then_write("b", "b"),
+    );
+
+    let RunReport { terminal, state } = bench.run(&workflow, "sessions: []").await;
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "{:?}",
+        state.nodes.state("sweep-a")
+    );
+    for id in ["sweep-a", "sweep-b"] {
+        assert!(
+            matches!(state.nodes.state(id), Some(NodeState::Finished { .. })),
+            "expected `{id}` finished, got {:?}",
+            state.nodes.state(id)
+        );
+    }
+    assert!(bench.worktree.join("a/out.txt").exists(), "a's work landed");
+    assert!(bench.worktree.join("b/out.txt").exists(), "b's work landed");
+}
+
+/// The same, for nodes the scheduler batched rather than a group the
+/// author declared: `max_parallel_nodes` is what puts them together, and
+/// neither answers for the other either.
+#[tokio::test]
+async fn fan_out_nodes_under_max_parallel_two_do_not_blame_each_other() {
+    let bench = Bench::new();
+    let workflow = format!(
+        r#"
+name: fan-out-scoped
+nodes:
+  - id: sweep-a
+    kind: bash
+    scope: ["a/**"]
+    run: '{}'
+  - id: sweep-b
+    kind: bash
+    scope: ["b/**"]
+    run: '{}'
+"#,
+        meet_then_write("a", "a"),
+        meet_then_write("b", "b"),
+    );
+
+    let RunReport { terminal, state } = bench
+        .run_with_config(
+            &workflow,
+            "sessions: []",
+            "defaults:\n  max_parallel_nodes: 2\n",
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    for id in ["sweep-a", "sweep-b"] {
+        assert!(
+            matches!(state.nodes.state(id), Some(NodeState::Finished { .. })),
+            "expected `{id}` finished, got {:?}",
+            state.nodes.state(id)
+        );
+    }
+}
+
+/// A child that writes outside every glob it declared fails for its own
+/// write, and takes nobody with it: the sibling that stayed inside its
+/// scope finishes and lands.
+#[tokio::test]
+async fn a_parallel_child_that_writes_outside_every_scope_fails_alone() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: sweep
+nodes:
+  - id: sweep
+    kind: parallel
+    join: all
+    nodes:
+      - id: tidy
+        kind: bash
+        scope: ["a/**"]
+        run: "mkdir -p a && echo x > a/out.txt && echo escaped > loose.txt"
+      - id: neat
+        kind: bash
+        scope: ["b/**"]
+        run: "mkdir -p b && echo x > b/out.txt"
+"#;
+
+    let RunReport { state, .. } = bench.run(workflow, "sessions: []").await;
+    assert!(
+        matches!(state.nodes.state("tidy"), Some(NodeState::Failed { .. })),
+        "the node that wrote outside its scope fails, got {:?}",
+        state.nodes.state("tidy")
+    );
+    assert!(
+        matches!(state.nodes.state("neat"), Some(NodeState::Finished { .. })),
+        "and the sibling that stayed inside its own finishes, got {:?}",
+        state.nodes.state("neat")
+    );
+    assert!(
+        !bench.worktree.join("loose.txt").exists(),
+        "a unit that failed never lands, so its write never reaches the run's tree"
+    );
+}
+
+/// Two units that landed on one branch left one history, not two heads:
+/// the run's tree carries both, each as its own commit.
+#[tokio::test]
+async fn two_units_landing_on_one_branch_serialize() {
+    let bench = Bench::new();
+    let workflow = format!(
+        r#"
+name: sweep
+nodes:
+  - id: sweep
+    kind: parallel
+    join: all
+    nodes:
+      - id: sweep-a
+        kind: bash
+        scope: ["a/**"]
+        run: '{}'
+      - id: sweep-b
+        kind: bash
+        scope: ["b/**"]
+        run: '{}'
+"#,
+        meet_then_write("a", "a"),
+        meet_then_write("b", "b"),
+    );
+
+    let RunReport { terminal, .. } = bench.run(&workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let log = git_output(&bench.worktree, &["log", "--oneline", "--first-parent"]);
+    let landed = log
+        .lines()
+        .filter(|line| line.contains("sweep-a") || line.contains("sweep-b"))
+        .count();
+    assert_eq!(landed, 2, "both units landed, one commit each:\n{log}");
+    assert!(
+        git_output(&bench.worktree, &["status", "--porcelain"])
+            .trim()
+            .is_empty(),
+        "and the run's tree is clean once they have"
+    );
+}
+
+/// A node that declares no scope keeps the run's own tree: what it
+/// writes is there for the next node exactly as before, including what
+/// git ignores — which a checkout of its own would never have carried.
+#[tokio::test]
+async fn a_node_without_scope_keeps_the_runs_own_tree() {
+    let bench = Bench::new();
+    tokio::fs::write(bench.worktree.join(".gitignore"), "build/\n")
+        .await
+        .unwrap();
+    git(&bench.worktree, &["add", "-A"]);
+    git(&bench.worktree, &["commit", "-qm", "ignore build"]);
+
+    let workflow = r#"
+name: ignored-output
+nodes:
+  - id: compile
+    kind: bash
+    run: "mkdir -p build && echo artifact > build/out.bin"
+  - id: consume
+    kind: bash
+    depends_on: [compile]
+    run: "test -f build/out.bin"
+"#;
+
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(
+        matches!(
+            state.nodes.state("consume"),
+            Some(NodeState::Finished { .. })
+        ),
+        "what a node with no declared scope leaves is still there for the next one"
+    );
 }

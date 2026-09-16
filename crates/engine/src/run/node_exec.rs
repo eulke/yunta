@@ -71,21 +71,31 @@ pub(super) async fn cancelled_end(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeE
 /// Writes the one `node_started` this engine ever writes, with the tree
 /// the attempt begins from.
 ///
-/// The starting point is captured here and nowhere else, because a fact
+/// The starting point is recorded here and nowhere else, because a fact
 /// derived from the log has to be written at exactly one moment: the
 /// audit that reads it back at close is only as true as the single
-/// instant this call names.
+/// instant this call names. A node given a checkout of its own already
+/// has that instant — the one its unit was opened at; a node working in
+/// the run's tree captures what it finds there.
 pub(super) async fn emit_started(
     ctx: &RunCtx<'_>,
     node: &Node,
     attempt: u32,
 ) -> Result<(), RunError> {
-    let from = crate::scope::capture_tree(
-        ctx.worktree,
-        &crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone())),
-        ctx.root_supervision(),
-    )
-    .await?;
+    let from = match ctx.unit {
+        Some(mine) => mine.unit.from.clone(),
+        None => {
+            crate::worktree::capture_tree(
+                ctx.worktree,
+                &crate::run_dir::index_for(
+                    ctx.run_dir,
+                    &crate::worktree::UnitId::Node(node.id.clone()),
+                ),
+                ctx.root_supervision(),
+            )
+            .await?
+        }
+    };
     ctx.emit(
         Some(&node.id),
         EventPayload::Node(NodeEvent::Started(
@@ -103,7 +113,59 @@ pub(super) async fn emit_started(
     skip_all,
     fields(run_id = %ctx.run_id, node_id = %node.id, attempt)
 )]
+/// Runs one attempt of `node`, in the tree that node works in.
+///
+/// A node that declares `scope:` is given a checkout of its own, opened
+/// at what the run's tree holds this moment and landed back onto it when
+/// its work passes its audit (D184). Asking to be audited is asking for
+/// a tree: it is the only way what a node answers for is its own, and
+/// the only way two nodes running at once are not answerable for each
+/// other. A node that declares nothing works where the run works, sees
+/// what the node before it left — including what git ignores, which no
+/// checkout of its own would carry — and lands nothing, because what it
+/// wrote is already there.
 pub(super) async fn execute_node(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    attempt: u32,
+    cancel: &CancellationToken,
+) -> Result<NodeEnd, RunError> {
+    // Boxed on both paths: this function opens a unit and then holds a
+    // whole `RunCtx` across the await below, and node execution nests —
+    // a group inside a workflow inside a group — so an inlined future
+    // would carry every level's frame at once.
+    if crate::audited_scope(node).is_none() {
+        return Box::pin(execute_in_its_tree(ctx, node, attempt, cancel)).await;
+    }
+    let who = crate::worktree::UnitId::Node(node.id.clone());
+    let base = crate::worktree::snapshot_commit(
+        ctx.worktree,
+        &crate::run_dir::index_for(ctx.run_dir, &who),
+        ctx.root_supervision(),
+    )
+    .await?;
+    let unit = crate::worktree::open_unit(
+        crate::worktree::UnitHome {
+            repo: ctx.worktree,
+            run_dir: ctx.run_dir,
+            run_id: ctx.run_id,
+            base: &base,
+        },
+        who,
+        attempt,
+        ctx.root_supervision(),
+    )
+    .await?;
+    Box::pin(execute_in_its_tree(
+        &ctx.in_unit(&unit),
+        node,
+        attempt,
+        cancel,
+    ))
+    .await
+}
+
+async fn execute_in_its_tree(
     ctx: &RunCtx<'_>,
     node: &Node,
     attempt: u32,

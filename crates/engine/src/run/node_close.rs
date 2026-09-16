@@ -114,6 +114,9 @@ pub(super) async fn close_node(
     if let Some(end) = scope_violation(ctx, node, close.staged, tokens).await? {
         return Ok(end);
     }
+    if let Some(end) = land_unit(ctx, node, tokens).await? {
+        return Ok(end);
+    }
 
     // An opaque artifact's name can carry a template
     // (`report-{{runner.name}}.md`) — rendered per node so every fan-out
@@ -249,6 +252,66 @@ pub(super) async fn finish_node(
     .await?;
     write_progress(ctx).await?;
     Ok(NodeEnd::Finished)
+}
+
+/// Lands what a node did in its own checkout onto the run's tree, and
+/// says nothing for a node that never had one.
+///
+/// A unit lands the moment its work passes its audit: from there what it
+/// wrote is the run's, and a later failure about what the node
+/// *declared* — a missing artifact — is about the node, not about its
+/// edits, exactly as it is for a node that worked in the run's own tree
+/// all along. A node that failed its audit never reaches here, so a
+/// write outside every glob never becomes the run's.
+///
+/// A replay git cannot finish fails the node naming the paths: two nodes
+/// that can be open at once had their scopes proved disjoint by `check`,
+/// so a conflict here is a workflow that got past it.
+async fn land_unit(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    tokens: TokenUsage,
+) -> Result<Option<NodeEnd>, RunError> {
+    let Some(mine) = ctx.unit else {
+        return Ok(None);
+    };
+    let supervision = ctx.root_supervision();
+    crate::worktree::commit_work(
+        mine.unit,
+        &yunta_core::text::detailed(format!("node {}", node.id), &close_title(node)),
+        supervision,
+    )
+    .await?;
+    let _landing = ctx.landing.lock().await;
+    match crate::worktree::rebase_onto(mine.unit, mine.into, supervision).await? {
+        crate::worktree::Rebase::Onto(_) => {}
+        crate::worktree::Rebase::Conflicts(paths) => {
+            return fail_with_tokens(
+                ctx,
+                node,
+                format!(
+                    "landing `{}` on the run's tree: git could not replay it over {}",
+                    node.id,
+                    yunta_core::text::counted(paths.len(), "path"),
+                ),
+                false,
+                tokens,
+            )
+            .await
+            .map(Some);
+        }
+    }
+    crate::worktree::land(mine.unit, mine.into, supervision).await?;
+    Ok(None)
+}
+
+/// What a node's landing commit is about, for a person reading the
+/// branch: what the node declares it does, or its id when it says
+/// nothing about itself.
+fn close_title(node: &Node) -> String {
+    node.description
+        .clone()
+        .unwrap_or_else(|| node.id.to_string())
 }
 
 /// What the node changed and what of it falls outside its declared

@@ -41,7 +41,7 @@ pub(crate) struct RunCtx<'a> {
     /// Criteria memoization — one cache per `execute_run`
     /// call, never persisted: a resume simply starts cold, which is safe
     /// (over-verifying) rather than risking a stale cross-run hit.
-    pub memo: Memo,
+    pub memo: Arc<Memo>,
     /// The one surface every escalation goes through:
     /// exhausted re-routes and scope-expansion `ask` alike — on the ctx
     /// so the deep execution paths (loop_exec) reach it without threading
@@ -51,13 +51,13 @@ pub(crate) struct RunCtx<'a> {
     /// this invocation only — in memory, never derived from the log, so
     /// every resume asks again before spending new money. Atomic because
     /// concurrent batch members read it while the scheduler loop writes.
-    pub budget_lifted: std::sync::atomic::AtomicBool,
+    pub budget_lifted: Arc<std::sync::atomic::AtomicBool>,
     /// `run.dir/scratch/engine.json`, so a separate process can
     /// find this run's live process tree. `None` when the file could not
     /// be written — the run proceeds, degraded loudly (an external
     /// cancellation loses its map to this run's processes; internal
     /// paths never needed it).
-    pub process_registry: Option<crate::process_registry::ProcessRegistry>,
+    pub process_registry: Option<Arc<crate::process_registry::ProcessRegistry>>,
     /// The invocation's root cancellation (Ctrl-C, `yunta
     /// cancel`). Execution paths consult it to tell a user cancellation
     /// (leave the node orphaned — resume re-treats it per
@@ -97,17 +97,84 @@ pub(crate) struct RunCtx<'a> {
     /// borrowed: the run-tools host keeps a clone of it and outlives
     /// every borrow of ours.
     pub observer: Option<Arc<dyn RunObserver>>,
+    /// The checkout this node was given of its own, and the tree its
+    /// work lands in once that work passes its audit. `None` for a node
+    /// working in the run's own tree, which lands nothing because what
+    /// it wrote is already there.
+    pub(crate) unit: Option<NodeUnit<'a>>,
+    /// Held while one unit replays its work onto the run's tree and
+    /// moves that tree onto it.
+    ///
+    /// The replay reads where the tree stands and the move asserts it
+    /// has not moved since, so the two are one step. Two units landing
+    /// at once would each replay onto what the other is about to
+    /// replace, and the second move would be a merge — the one thing it
+    /// refuses. Landing is therefore serial, in whatever order the units
+    /// finish, exactly as a loop's own integration already is.
+    pub(crate) landing: Arc<tokio::sync::Mutex<()>>,
 }
 
-impl RunCtx<'_> {
+/// A node's own checkout, and the tree its work lands in.
+#[derive(Clone, Copy)]
+pub(crate) struct NodeUnit<'a> {
+    pub(crate) unit: &'a crate::worktree::Unit,
+    pub(crate) into: &'a Path,
+}
+
+impl<'a> RunCtx<'a> {
+    /// This same run, as a node working in `unit` sees it.
+    ///
+    /// Everything a run holds once — its log, its budget, its process
+    /// registry, its criteria cache — is shared with the context it came
+    /// from, not copied: a unit is a tree of its own and nothing else.
+    /// What changes is the checkout every command, session, hook and
+    /// audit of that node reaches, which is the whole of what working in
+    /// a unit means; the tree this context points at now becomes the one
+    /// the unit lands in.
+    pub(crate) fn in_unit<'b>(&'b self, unit: &'b crate::worktree::Unit) -> RunCtx<'b>
+    where
+        'a: 'b,
+    {
+        RunCtx {
+            run_id: self.run_id,
+            manifest: self.manifest,
+            run_dir: self.run_dir,
+            worktree: &unit.worktree,
+            adapters: self.adapters,
+            storage: self.storage,
+            clock: self.clock.clone(),
+            ids: self.ids,
+            max_task_retries: self.max_task_retries,
+            memo: self.memo.clone(),
+            human_interaction: self.human_interaction,
+            budget_lifted: self.budget_lifted.clone(),
+            process_registry: self.process_registry.clone(),
+            root_cancel: self.root_cancel.clone(),
+            fence_hook: self.fence_hook.clone(),
+            adapter_override: self.adapter_override,
+            forge: self.forge,
+            depth: self.depth,
+            run_tools_host: self.run_tools_host.clone(),
+            ambient: self.ambient,
+            secrets: self.secrets.clone(),
+            redactor: self.redactor.clone(),
+            observer: self.observer.clone(),
+            landing: self.landing.clone(),
+            unit: Some(NodeUnit {
+                unit,
+                into: self.worktree,
+            }),
+        }
+    }
+
     /// The supervision every subprocess of this run gets: its registry,
     /// and `cancel` — a node's own token, or the run's root token.
-    pub(crate) fn supervision<'a>(
-        &'a self,
-        cancel: &'a CancellationToken,
-    ) -> crate::process::Supervision<'a> {
+    pub(crate) fn supervision<'s>(
+        &'s self,
+        cancel: &'s CancellationToken,
+    ) -> crate::process::Supervision<'s> {
         crate::process::Supervision {
-            registry: self.process_registry.as_ref(),
+            registry: self.process_registry.as_deref(),
             cancel,
             env: self
                 .ambient
@@ -403,6 +470,6 @@ impl crate::task_cycle::SessionObserver for RunCtx<'_> {
     }
 
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry> {
-        self.process_registry.as_ref()
+        self.process_registry.as_deref()
     }
 }

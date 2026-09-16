@@ -52,8 +52,13 @@ pub struct Unit {
     pub who: UnitId,
     /// The checkout it works in, which is nobody else's.
     pub worktree: PathBuf,
-    /// The tree it started from — what its own diff is judged against,
-    /// captured once, when it opened.
+    /// The commit its branch was cut from — where its own history
+    /// starts, and therefore what a replay must not carry along.
+    pub base: CommitSha,
+    /// The tree it started from — what its own diff is judged against.
+    /// The tree of [`base`](Unit::base), read once when the unit opened,
+    /// held as its own value because an audit compares trees and never
+    /// asks git again.
     pub from: TreeId,
 }
 
@@ -69,6 +74,44 @@ pub struct UnitHome<'a> {
     pub run_dir: &'a Path,
     pub run_id: &'a RunId,
     pub base: &'a CommitSha,
+}
+
+/// A commit naming exactly what `repo` holds this moment: its `HEAD`
+/// plus whatever is lying in its working tree uncommitted.
+///
+/// A unit branches from what it would have found, not from the last
+/// thing anybody committed — and between two nodes of a run nobody
+/// commits, so those are different trees. Nothing points at this commit
+/// but the unit's own branch: `repo`'s branch does not move, and what is
+/// uncommitted there stays uncommitted, to be landed over later.
+pub async fn snapshot_commit(
+    repo: &Path,
+    index: &Path,
+    supervision: Supervision<'_>,
+) -> Result<CommitSha, WorktreeError> {
+    let tree = super::capture_tree(repo, index, supervision).await?;
+    let head = head_commit(repo, supervision).await?;
+    let printed = crate::git::output(
+        repo,
+        &[
+            "commit-tree",
+            tree.as_str(),
+            "-p",
+            head.as_str(),
+            "-m",
+            "the tree a unit of work started from",
+        ],
+        supervision,
+    )
+    .await?;
+    printed
+        .trim()
+        .parse()
+        .map_err(|source: yunta_core::InvalidId| WorktreeError::NotACommit {
+            args: "commit-tree".to_string(),
+            cwd: repo.to_path_buf(),
+            source,
+        })
 }
 
 /// Opens `who`'s own checkout at the run's base commit, on a branch of
@@ -100,6 +143,7 @@ pub async fn open_unit(
     Ok(Unit {
         who,
         worktree,
+        base: home.base.clone(),
         from,
     })
 }
@@ -155,13 +199,25 @@ pub enum Rebase {
 }
 
 /// Replays the unit's work onto `into` as it stands right now.
+///
+/// Only the unit's own commits move: the replay runs `--onto` from the
+/// commit the unit was cut at, so whatever that commit carried — for a
+/// unit opened over a tree somebody left uncommitted, that is the
+/// leftovers themselves — stays where it was instead of arriving as the
+/// unit's doing.
 pub async fn rebase_onto(
     unit: &Unit,
     into: &Path,
     supervision: Supervision<'_>,
 ) -> Result<Rebase, WorktreeError> {
     let onto = head_commit(into, supervision).await?;
-    if crate::git::success(&unit.worktree, &["rebase", onto.as_str()], supervision).await? {
+    if crate::git::success(
+        &unit.worktree,
+        &["rebase", "--onto", onto.as_str(), unit.base.as_str()],
+        supervision,
+    )
+    .await?
+    {
         // Asked of `into` and not of the rebased checkout: what the unit
         // now sits on is that tree, while its own `HEAD` already carries
         // the work a later diff has to find.
