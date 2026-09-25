@@ -48,7 +48,10 @@ yunta run acme/review
 yunta check acme/review
 ```
 
-and the same form works inside a workflow (`use: acme/qa-review`) and a
+The reference pack's workflow is `fragua.yaml`, so run it with
+`yunta run yunta/fragua` after installing the pack.
+
+The same form works inside a workflow (`use: acme/qa-review`) and a
 node's `skills:` list (`skills: [acme/review-rubric]`). Resolution always
 tries the repo's own `.yunta/workflows/` first — a repo file at the same
 `publisher/name` path always wins over the pack: a local workflow with the

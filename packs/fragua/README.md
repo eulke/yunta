@@ -9,7 +9,7 @@ the engine grants it no special status.
 
 ```bash
 yunta pack add <source-of-this-pack>
-yunta run yunta/build-feature --input idea="add dark mode to the settings page"
+yunta run yunta/fragua --input idea="add dark mode to the settings page"
 ```
 
 `--mode quick` skips the two human gates and the multi-runner review for a
@@ -25,7 +25,7 @@ why the `pr` node above doesn't try to attach one itself. The recommended
 pattern is a follow-up step, run by whatever drives this pack in CI:
 
 ```bash
-yunta run yunta/build-feature --input idea="..." --detach
+yunta run yunta/fragua --input idea="..." --detach
 # ... wait for the run to reach a terminal state ...
 yunta receipt <run_id>
 gh pr comment <pr-number> --body-file <run_dir>/receipt.md

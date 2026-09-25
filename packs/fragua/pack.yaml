@@ -22,6 +22,6 @@ requires:
     - name: reviewer-alt
 contents:
   workflows:
-    - .yunta/workflows/build-feature.yaml
+    - .yunta/workflows/fragua.yaml
   docs:
     - README.md

@@ -5,7 +5,7 @@
 # server, which a pack's own mock self-test has no reason to stand up)
 # and `node_defaults.hooks` is dropped (an ecosystem-specific
 # convenience, not something a reference pack needs to demonstrate).
-name: build-feature
+name: fragua
 description: Full feature cycle — grill, verified tasks document, lint/fix, baseline, multi-runner review, PR
 yunta_schema: ">=1 <2"
 inputs:

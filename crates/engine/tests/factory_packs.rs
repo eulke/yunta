@@ -67,7 +67,7 @@ sessions:
 "##;
 
 #[tokio::test]
-async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
+async fn yunta_fragua_runs_end_to_end_in_quick_mode_with_mock() {
     // `gh` isn't installed in this environment (or anywhere CI runs) —
     // stub it so the `pr` node's real bash command has something to
     // call, and inject the stub's directory onto the run's subprocess
@@ -126,8 +126,7 @@ async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
         &["checkout", "-q", "-b", &run_branch(&bench.run_id)],
     );
 
-    let workflow =
-        std::fs::read_to_string(Path::new(WORKFLOWS).join("build-feature.yaml")).unwrap();
+    let workflow = std::fs::read_to_string(Path::new(WORKFLOWS).join("fragua.yaml")).unwrap();
     let RunReport { terminal, state } = bench
         .run_full(&workflow, FIXTURE, &config, &ApproveEverything::new("test"))
         .await;

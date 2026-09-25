@@ -118,7 +118,7 @@ fn yunta_fragua_installs_and_checks_every_declared_mode_through_the_real_pack_pi
     // `check` validates mode-coherence for every declared mode in one
     // pass — this is real schema/reference validation against
     // the actual installed file, not a hand-copied stand-in.
-    let check = yunta_at!(project, &["check", "yunta/build-feature"]);
+    let check = yunta_at!(project, &["check", "yunta/fragua"]);
     assert!(check.status.success(), "{}", stderr(&check));
     assert!(stdout(&check).contains("OK"));
 }
