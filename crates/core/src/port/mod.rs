@@ -2,9 +2,8 @@
 //!
 //! Two ports: [`session`], the agent CLI an adapter drives, and
 //! [`forge`], the pull request an external gate is decided on. Both live
-//! in this crate so the engine can depend on the interface without
-//! depending on any implementation of it — the frontier CLAUDE.md asks
-//! the compiler to hold, held by the compiler.
+//! in this crate so the engine depends on their contracts rather than
+//! on a concrete implementation.
 
 pub mod forge;
 pub mod policy;

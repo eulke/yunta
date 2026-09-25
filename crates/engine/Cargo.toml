@@ -30,9 +30,7 @@ tracing.workspace = true
 # not something to hand-roll (Apache-2.0, no dependencies of its own).
 subtle.workspace = true
 tokio = { workspace = true, features = ["process", "rt", "macros", "time"] }
-# CancellationToken (`join: any`'s interrupt→kill of the losing
-# siblings) — the propagated-cancellation primitive CLAUDE.md's own
-# "Concurrencia estructurada" section names, not a new idiom.
+# Propagates cancellation to losing siblings in `join: any`.
 tokio-util.workspace = true
 # `mcp:` context source — an outbound streamable-HTTP MCP client, the
 # transport the reference config's own `mcp_servers:` shape uses (a
@@ -68,12 +66,7 @@ reqwest = { workspace = true, features = ["rustls"] }
 # validates a user-supplied regex against a string; nothing already in
 # the dependency tree exposes that.
 regex.workspace = true
-# `HumanInteraction` needs a dyn-safe async trait method, the same
-# reason `yunta_core::port`'s own `Adapter`/`AgentSession` use it — not
-# a new idiom to the workspace, just the same one crossing into engine
-# because a gate's resolution surface (the console, the control-plane
-# tool) is exactly this kind of boundary (CLAUDE.md's own "traits solo
-# en fronteras reales").
+# `HumanInteraction` needs a dyn-safe async method, as the core adapter ports do.
 async-trait.workspace = true
 # `kind: gate`'s `on:` mapping is the same ordered map the schema itself
 # uses (`yunta-core` already depends on it — no new node in the

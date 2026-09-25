@@ -1,23 +1,16 @@
-# Corpus de diseño
+# Design references
 
-Documentos normativos del engine, en español. Cada uno manda sobre lo suyo; ante una contradicción entre código y documento, el documento gana y el código se corrige, salvo que una decisión registrada diga lo contrario.
+Use these references when a change depends on a documented contract or
+earlier decision. If a reference and the implementation disagree, establish
+the current behavior and intended contract before changing either.
 
-Orden de autoridad:
+| Area | Reference |
+|---|---|
+| Run behavior and replay | [Run contract](contrato-del-run.md), [event specification](spec-events.md) |
+| Adapters and tasks | [Adapter specification](spec-adapter.md), [task specification](spec-tasks.md) |
+| Configuration examples | [Schema reference](referencia-schema.md) |
+| Terms | [Glossary](glosario.md) |
+| Earlier decisions | [Decision index](adrs.md), [architecture RFC](rfc-0001.md) |
+| Open design work | [Status](status.md) |
 
-1. [`contrato-del-run.md`](contrato-del-run.md) — comportamiento del engine e invariantes del run.
-2. [`spec-adapter.md`](spec-adapter.md) — traits `Adapter`/`AgentSession`, capacidades y obligaciones de un adapter.
-3. [`spec-tasks.md`](spec-tasks.md) — schema del documento de tareas, validación y errores.
-4. [`spec-events.md`](spec-events.md) — payloads del event log, versionado y cadena de hashes.
-5. [`adr/`](adr/) — una decisión por archivo, con racional y alternativas descartadas; fuente de desempate. [`adrs.md`](adrs.md) es su índice, generado por `cargo xtask adr`.
-6. [`rfc-0001.md`](rfc-0001.md) visión y arquitectura · [`rfc-0002.md`](rfc-0002.md) packs · [`rfc-0003.md`](rfc-0003.md) diferenciales de producto · [`rfc-0004.md`](rfc-0004.md) distribución, licencia y sostenibilidad.
-7. [`referencia-schema.md`](referencia-schema.md) — config y workflows canónicos; los fixtures de parseo del workspace salen de acá.
-8. [`deuda-consciente.md`](deuda-consciente.md) — lo deliberadamente no resuelto; cada ítem se resuelve con una decisión registrada, nunca de facto.
-
-Complementos:
-
-- [`glosario.md`](glosario.md) — los términos del dominio, con la palabra que se usa y las que se evitan.
-- [`status.md`](status.md) — lo que sigue abierto y las posturas cerradas que no son deuda.
-- [`smoke-checklist.md`](smoke-checklist.md) — verificación en vivo de adapters, forja y MCP contra sistemas reales.
-- [`plan-de-raiz/`](plan-de-raiz/README.md) — el plan vigente de corrección arquitectónica: régimen de ejecución, mecanismos, decisiones pendientes, tablero e índice de defectos. Mientras esté abierto, manda sobre el orden del trabajo.
-
-La documentación de uso, en inglés, vive un nivel arriba en [`docs/`](../README.md).
+The [user documentation](../README.md) describes current usage.

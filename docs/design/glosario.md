@@ -5,10 +5,6 @@ palabra que se usa y las que se evitan. Un término entra acá cuando el corpus
 ya lo apoya en más de un lugar: definirlo tarde es lo que deja que dos partes
 del sistema entiendan cosas distintas por la misma palabra.
 
-Las reglas de escritura y la tabla de sustituciones de vocabulario
-(`adapter` en lugar de `driver`, `runner:` en lugar de `role:`) viven en
-[`CLAUDE.md`](../../CLAUDE.md) y no se repiten acá.
-
 ## La frontera de autoría
 
 **YAML de autor**:

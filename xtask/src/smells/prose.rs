@@ -59,10 +59,9 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>, keep: &dyn Fn(&Path) -> bool) {
 }
 
 /// The documents that state the rule, or record the words it retired:
-/// the table itself, the glossary that defines each term, the decisions,
-/// which quote the spelling they retired, and their index, where a title
-/// carries that spelling too.
-const VOCABULARY_EXEMPT: &[&str] = &["CLAUDE.md", "glosario.md", "docs/design/adr/", "adrs.md"];
+/// the glossary that defines each term, the decisions that quote retired
+/// spellings, and their index, where a title can carry that spelling too.
+const VOCABULARY_EXEMPT: &[&str] = &["glosario.md", "docs/design/adr/", "adrs.md"];
 
 /// The documents whose subject is what the repository will do: the plan
 /// and its mechanisms, the debt it carries knowingly, the checklist of a
