@@ -266,18 +266,50 @@ fn redacted(line: String, secrets: &[Secret<String>]) -> String {
 }
 
 impl SubprocessSession {
-    fn kill_group(&self) -> Result<()> {
+    fn kill_group_now(&self) -> Result<()> {
         if self.reaped {
             return Ok(());
         }
         signal_group(self.pgid, Signal::SIGKILL).map_err(|e| e.into_adapter_error(self.adapter))
     }
 
+    async fn force_kill_group(&self) -> Result<()> {
+        if self.reaped {
+            return Ok(());
+        }
+        super::group::force_kill_group(self.pgid)
+            .await
+            .map_err(|error| AdapterError::AdapterIo {
+                adapter: self.adapter.clone(),
+                action: "close the session's process group".to_string(),
+                source: std::io::Error::other(error),
+            })
+    }
+
     /// The readers hold the pipes; dropping them before the wait means
     /// no process can sit on a full pipe nobody reads from.
-    fn close_pipes(&self) {
+    async fn finish_readers(&mut self, abort_stderr: bool) -> Result<()> {
         self.reader.abort();
-        self.stderr_drain.abort();
+        if abort_stderr {
+            self.stderr_drain.abort();
+        }
+        let stdout = (&mut self.reader).await;
+        let stderr = (&mut self.stderr_drain).await;
+        for (action, result) in [
+            ("read the session's stdout", stdout),
+            ("read the session's stderr", stderr),
+        ] {
+            if let Err(error) = result {
+                if !error.is_cancelled() {
+                    return Err(AdapterError::AdapterIo {
+                        adapter: self.adapter.clone(),
+                        action: action.to_string(),
+                        source: std::io::Error::other(error),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -295,29 +327,49 @@ impl AgentSession for SubprocessSession {
     }
 
     async fn interrupt(&mut self) -> Result<()> {
+        if self.reaped {
+            return Ok(());
+        }
         signal_group(self.pgid, Signal::SIGINT).map_err(|e| e.into_adapter_error(self.adapter))
     }
 
     async fn kill(&mut self) -> Result<()> {
-        self.kill_group()?;
-        self.close_pipes();
-        match self.child.wait().await {
+        let cleanup = self.force_kill_group().await;
+        if cleanup.is_err() {
+            if let Err(error) = self.kill_group_now() {
+                tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %error, "fallback signal after group cleanup failed");
+            }
+        }
+        if let Err(error) = self.child.start_kill() {
+            tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %error, "fallback signal to the session leader failed");
+        }
+        let pipes = self.finish_readers(true).await;
+        let wait = self.child.wait().await;
+        match wait {
             Ok(status) => {
                 self.reaped = true;
                 tracing::debug!(adapter = %self.adapter, pgid = %self.pgid, %status, "session killed");
             }
             Err(e) => {
                 tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %e, "failed to collect the killed session's exit");
+                cleanup?;
+                pipes?;
+                return Err(AdapterError::AdapterIo {
+                    adapter: self.adapter.clone(),
+                    action: "collect the killed session's exit".to_string(),
+                    source: e,
+                });
             }
         }
-        Ok(())
+        cleanup?;
+        pipes
     }
 
     fn pgid(&self) -> Option<Pid> {
-        Some(self.pgid)
+        (!self.reaped).then_some(self.pgid)
     }
 
-    async fn exit(&mut self) -> Option<SessionExit> {
+    async fn exit(&mut self) -> Result<Option<SessionExit>> {
         // The group dies first, as in `kill`, so nothing can still be
         // writing and no reader can be left holding a pipe open. The
         // stdout reader is then dropped — its stream is exhausted, which
@@ -326,13 +378,16 @@ impl AgentSession for SubprocessSession {
         // on its way out is the whole point of the question, and a pipe
         // whose only writer is a dead process ends by itself. The status
         // is collected last, a wait bounded by a process already dead.
-        if let Err(e) = self.kill_group() {
-            tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %e, "failed to kill a dead session's process group");
+        let cleanup = self.force_kill_group().await;
+        if cleanup.is_err() {
+            if let Err(error) = self.kill_group_now() {
+                tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %error, "fallback signal after group cleanup failed");
+            }
+            if let Err(error) = self.child.start_kill() {
+                tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %error, "fallback signal to the session leader failed");
+            }
         }
-        self.reader.abort();
-        if let Err(e) = (&mut self.stderr_drain).await {
-            tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %e, "failed to read a dead session's last stderr lines");
-        }
+        let pipes = self.finish_readers(cleanup.is_err()).await;
         let status = match self.child.wait().await {
             Ok(status) => {
                 self.reaped = true;
@@ -340,10 +395,18 @@ impl AgentSession for SubprocessSession {
             }
             Err(e) => {
                 tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %e, "failed to collect a dead session's exit");
-                return None;
+                cleanup?;
+                pipes?;
+                return Err(AdapterError::AdapterIo {
+                    adapter: self.adapter.clone(),
+                    action: "collect a dead session's exit".to_string(),
+                    source: e,
+                });
             }
         };
-        Some(SessionExit {
+        cleanup?;
+        pipes?;
+        Ok(Some(SessionExit {
             end: end_of(status),
             stderr_tail: self
                 .stderr_tail
@@ -352,7 +415,7 @@ impl AgentSession for SubprocessSession {
                 .iter()
                 .cloned()
                 .collect(),
-        })
+        }))
     }
 }
 
@@ -376,10 +439,11 @@ fn end_of(status: std::process::ExitStatus) -> SessionEnd {
 /// group is what must die, whether the session ended or was abandoned.
 impl Drop for SubprocessSession {
     fn drop(&mut self) {
-        if let Err(e) = self.kill_group() {
+        if let Err(e) = self.kill_group_now() {
             tracing::warn!(adapter = %self.adapter, pgid = %self.pgid, error = %e, "failed to kill a dropped session's process group");
         }
-        self.close_pipes();
+        self.reader.abort();
+        self.stderr_drain.abort();
     }
 }
 

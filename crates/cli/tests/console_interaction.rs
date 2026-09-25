@@ -225,6 +225,10 @@ fn a_keystroke_in_the_list_goes_back_over_the_rows_the_list_drew_and_no_further(
     let root = tempfile::tempdir().unwrap();
     let mut terminal = gated(root.path());
     terminal.wait_for("2  abort", "the gate never put its options on the console");
+    wait_until(
+        || !terminal.line_discipline_is_back(),
+        || "the gate did not put the terminal in raw mode before reading keys".into(),
+    );
     // Any key redraws the list, and the redraw begins by clearing the
     // rows it last wrote. Clearing more than it wrote takes the rows
     // above it — the evidence the decision is being made on.

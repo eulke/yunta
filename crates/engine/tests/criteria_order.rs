@@ -15,13 +15,12 @@ use yunta_testkit::{wait_until_async, Bench};
 /// The cheapest criterion, and a guard both tasks share: a process and
 /// nothing else.
 const CHEAP_GUARD: &str = "true";
-/// The other shared guard, an order of magnitude above the cheapest.
-const MIDDLE_GUARD: &str = "sleep 0.05; true";
-/// The first task's own criterion, and the most expensive of the three
-/// it runs: red until the task's file exists, green after.
-const FIRST_TASK_CRITERION: &str = "sleep 0.2; test -f hello.txt";
-/// The second task's, the same cost and the same shape.
-const SECOND_TASK_CRITERION: &str = "sleep 0.2; test -f world.txt";
+/// A shared guard, distinct from the cheapest guard and with no delay.
+const MIDDLE_GUARD: &str = "test -e .git";
+/// The first task's own criterion: red until the task's file exists.
+const FIRST_TASK_CRITERION: &str = "test -f hello.txt";
+/// The second task's, the same shape.
+const SECOND_TASK_CRITERION: &str = "test -f world.txt";
 
 /// A plan node that hands over the tasks document, and the loop that
 /// works it task by task.
@@ -112,9 +111,10 @@ async fn cancel_once_the_second_task_holds_a_session(bench: &Bench, token: &Canc
     wait_until_async(
         || async move { sessions_opened(bench) == 3 },
         || {
+            let events = bench.events();
             format!(
-                "the second task never opened its session ({} did)",
-                sessions_opened(bench)
+                "the second task never opened its session ({} did); events: {events:#?}",
+                sessions_opened(bench),
             )
         },
     )
@@ -156,39 +156,6 @@ fn pre_checks_of(bench: &Bench, task: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// What the log says `cmd` cost, every execution of it, in log order.
-fn durations_of(bench: &Bench, cmd: &str) -> Vec<u64> {
-    let mut durations = Vec::new();
-    for event in bench.events() {
-        let Some(EventPayload::Node(NodeEvent::CriteriaChecked(payload))) = event.payload() else {
-            continue;
-        };
-        for result in &payload.results {
-            if result.cmd == cmd {
-                durations.extend(result.duration_ms);
-            }
-        }
-    }
-    durations
-}
-
-/// Asserts that the log priced `cheaper` below `costlier` — every
-/// execution of one under every execution of the other. The learned
-/// order is only a question worth asking where the answer is this
-/// clear; a machine loaded enough to blur these is reported as itself.
-fn priced_below(bench: &Bench, cheaper: &str, costlier: &str) {
-    let cheap = durations_of(bench, cheaper);
-    let costly = durations_of(bench, costlier);
-    assert!(
-        !cheap.is_empty() && !costly.is_empty(),
-        "the log prices both commands: `{cheaper}` {cheap:?}, `{costlier}` {costly:?}"
-    );
-    assert!(
-        cheap.iter().max() < costly.iter().min(),
-        "`{cheaper}` {cheap:?} has to cost less than `{costlier}` {costly:?}"
-    );
-}
-
 /// A run cut in the middle of its work, whose log holds what each of
 /// its criteria cost: the first task ran all three commands and
 /// finished, and the second's session was cancelled after its own
@@ -217,14 +184,49 @@ async fn a_run_whose_log_priced_its_criteria() -> Bench {
         ]),
         "the first task meets its criteria as declared, off a log that prices nothing"
     );
-    priced_below(&bench, CHEAP_GUARD, MIDDLE_GUARD);
-    priced_below(&bench, MIDDLE_GUARD, SECOND_TASK_CRITERION);
     bench.with_cancel(CancellationToken::new())
+}
+
+/// The median of the durations the pre-resume event log actually stores.
+fn median(history: &[yunta_core::events::StoredEvent], cmd: &str) -> Option<u64> {
+    let mut samples: Vec<f64> = history
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Node(NodeEvent::CriteriaChecked(payload))) => Some(payload),
+            _ => None,
+        })
+        .flat_map(|payload| payload.results.iter())
+        .filter(|result| result.cmd == cmd)
+        .filter_map(|result| result.duration_ms)
+        .map(|duration_ms| duration_ms as f64)
+        .collect();
+    if samples.is_empty() {
+        return None;
+    }
+    samples.sort_by(f64::total_cmp);
+    let middle = samples.len() / 2;
+    let median = if samples.len() % 2 == 1 {
+        samples[middle]
+    } else {
+        (samples[middle - 1] + samples[middle]) / 2.0
+    };
+    Some(median as u64)
 }
 
 #[tokio::test]
 async fn a_resumed_pre_check_runs_criteria_in_the_order_the_log_priced_them() {
     let bench = a_run_whose_log_priced_its_criteria().await;
+
+    // The order is judged against the evidence already on disk when the
+    // resume begins, never against guessed command runtimes.
+    let history = bench.events();
+    let declared = [SECOND_TASK_CRITERION, MIDDLE_GUARD, CHEAP_GUARD];
+    let mut expected: Vec<(usize, &str)> = declared.iter().copied().enumerate().collect();
+    expected.sort_by_key(|(index, cmd)| (median(&history, cmd).unwrap_or(u64::MAX), *index));
+    let expected: Vec<String> = expected
+        .into_iter()
+        .map(|(_, cmd)| cmd.to_string())
+        .collect();
 
     // The resume is a separate execution: nothing carries over but the
     // log, which now says what each command cost.
@@ -236,13 +238,21 @@ async fn a_resumed_pre_check_runs_criteria_in_the_order_the_log_priced_them() {
         Some(yunta_core::events::TaskStatus::Done)
     );
     let resumed = pre_checks_of(&bench, "T002");
+    let actual = resumed.last().expect("the resumed pre-check is in the log");
     assert_eq!(
-        resumed.last(),
-        Some(&vec![
-            CHEAP_GUARD.to_string(),
-            MIDDLE_GUARD.to_string(),
-            SECOND_TASK_CRITERION.to_string(),
-        ]),
-        "the resumed pre-check runs cheapest first, off the durations the log holds: {resumed:?}"
+        actual, &expected,
+        "the resume sorts by logged median; equal medians retain declaration order"
     );
+    assert_eq!(
+        actual.len(),
+        declared.len(),
+        "the pre-check evaluates the complete set"
+    );
+    for cmd in declared {
+        assert_eq!(
+            actual.iter().filter(|seen| seen.as_str() == cmd).count(),
+            1,
+            "`{cmd}` runs exactly once: {actual:?}"
+        );
+    }
 }

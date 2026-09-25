@@ -1,17 +1,16 @@
 name: CI
 
 on:
-  push:
   pull_request:
   # The release gate runs these same checks by calling this workflow,
   # so the two can never drift into testing different things.
   workflow_call:
 
-# One run per ref: a push that supersedes another cancels it rather than
-# queueing behind it.
+# A newer commit supersedes an earlier PR check. A reusable release check
+# uses its caller's ref and never cancels the release that called it.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -61,7 +60,7 @@ jobs:
       # is a difference the product ships. One crate is enough to keep
       # the profile compiling and passing.
       - name: test (release profile)
-        run: cargo test --workspace --release --locked -p yunta-core
+        run: cargo test --release --locked -p yunta-core
 
       - name: the repository's own workflows and every pack pass check and their cases
         run: |

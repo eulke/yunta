@@ -4,6 +4,8 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
+use crate::CliChild;
+
 /// What a terminal a test asks for calls itself.
 pub(crate) const TERM: &str = "xterm-256color";
 
@@ -91,10 +93,11 @@ impl Spawning for tokio::process::Command {
 pub fn run_yunta(bin: &Path, dir: &Path, home: &Path, args: &[&str]) -> Output {
     let mut cmd = Command::new(bin);
     hermetic(&mut cmd, dir, home);
-    cmd.args(args)
-        .stdin(Stdio::null())
-        .output()
-        .expect("failed to run the yunta binary")
+    cmd.args(args).stdin(Stdio::null());
+    CliChild::spawn(cmd, None)
+        .expect("failed to spawn the yunta binary")
+        .wait_with_output()
+        .expect("the yunta binary did not finish within the test deadline")
 }
 
 /// The command's stdout as an owned `String` (lossy on non-UTF-8).
@@ -111,17 +114,27 @@ pub fn stderr(output: &Output) -> String {
 /// handle every follow-up command (`status`, `receipt`, `graph --run`)
 /// needs. Panics if no such line is present, naming what it saw.
 pub fn run_id_from(output: &Output) -> String {
-    run_id_in(&stdout(output))
+    find_run_id(&stdout(output))
+        .or_else(|| find_run_id(&stderr(output)))
+        .unwrap_or_else(|| {
+            panic!(
+                "no `run <id>:` line in output:\nstdout:\n{}\nstderr:\n{}",
+                stdout(output),
+                stderr(output)
+            )
+        })
 }
 
 /// The same, from output a test collected some other way — a log file
 /// the command was spawned onto.
 pub fn run_id_in(text: &str) -> String {
-    text.lines()
-        .find_map(|line| {
-            line.strip_prefix("run ")
-                .and_then(|rest| rest.split(':').next())
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| panic!("no `run <id>:` line in output:\n{text}"))
+    find_run_id(text).unwrap_or_else(|| panic!("no `run <id>:` line in output:\n{text}"))
+}
+
+fn find_run_id(text: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        line.strip_prefix("run ")
+            .and_then(|rest| rest.split(':').next())
+            .map(str::to_string)
+    })
 }

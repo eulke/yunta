@@ -343,8 +343,8 @@ pub trait AgentSession: Send {
     /// first and the status is collected after: the wait is bounded by
     /// construction and nothing outlives the run. A session with no
     /// process of its own answers `None`.
-    async fn exit(&mut self) -> Option<SessionExit> {
-        None
+    async fn exit(&mut self) -> Result<Option<SessionExit>> {
+        Ok(None)
     }
 }
 

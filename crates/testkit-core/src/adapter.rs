@@ -51,10 +51,10 @@ pub async fn drain(mut session: Box<dyn AgentSession>) -> Vec<AgentEvent> {
 /// reads both without draining twice.
 pub async fn drain_for_exit(
     mut session: Box<dyn AgentSession>,
-) -> (Vec<AgentEvent>, Option<SessionExit>) {
+) -> yunta_core::Result<(Vec<AgentEvent>, Option<SessionExit>)> {
     let events = to_the_end(&mut session).await;
-    let exit = session.exit().await;
-    (events, exit)
+    let exit = session.exit().await?;
+    Ok((events, exit))
 }
 
 async fn to_the_end(session: &mut Box<dyn AgentSession>) -> Vec<AgentEvent> {

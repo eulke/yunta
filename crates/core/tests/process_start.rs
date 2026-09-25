@@ -1,8 +1,6 @@
 //! `yunta_core::process::process_start`: a process's start time from the
 //! host's process table, or `None` where the host cannot tell.
 
-use std::time::SystemTime;
-
 use yunta_core::process::process_start::process_start;
 use yunta_core::Pid;
 

@@ -820,6 +820,48 @@ async fn pre_check_orders_criteria_by_the_median_duration_the_log_recorded() {
 }
 
 #[tokio::test]
+async fn pre_check_uses_medians_with_outliers_and_stable_declaration_ties() {
+    let owner = Owner::new();
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    let slow = "test -f slow.txt";
+    let tied_first = "test -f tied-first.txt";
+    let tied_second = "test -f tied-second.txt";
+    let unpriced_command = "test -f unpriced.txt";
+    let t = task(
+        "T1",
+        &["**"],
+        vec![
+            cmd(slow),
+            cmd(tied_first),
+            cmd(unpriced_command),
+            cmd(tied_second),
+        ],
+    );
+    let history = priced(&[
+        (slow, &[1, 50, 99]),
+        (tied_first, &[12, 12, 1000]),
+        (tied_second, &[1000, 12, 12]),
+    ]);
+
+    let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &history, owner.supervision())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        runs.iter().map(|run| run.cmd.as_str()).collect::<Vec<_>>(),
+        [tied_first, tied_second, slow, unpriced_command],
+        "outliers do not change medians, equal medians retain declaration order, and unknown history sorts last"
+    );
+    assert_eq!(runs.len(), t.criteria.len(), "every criterion still runs");
+    assert!(
+        surprises(&t, &runs).is_empty(),
+        "ordering does not alter the verdict"
+    );
+}
+
+#[tokio::test]
 async fn reused_criteria_carry_no_duration() {
     let owner = Owner::new();
     let dir = tempfile::tempdir().unwrap();

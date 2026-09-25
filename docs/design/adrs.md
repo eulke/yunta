@@ -191,3 +191,4 @@ lista.
 **D182 — Una unidad de trabajo se audita contra el árbol del que partió, y ese árbol es un hecho del log.** `accepted` → [`adr/D182-una-unidad-de-trabajo-se-audita-contra-el-arbol-del-que-partio.md`](adr/D182-una-unidad-de-trabajo-se-audita-contra-el-arbol-del-que-partio.md)
 **D183 — Una sola palabra para el árbol que una unidad no aísla: `none` queda, `inherit` se retira.** `accepted` → [`adr/D183-una-sola-palabra-para-el-arbol-que-una-unidad-no-aisla.md`](adr/D183-una-sola-palabra-para-el-arbol-que-una-unidad-no-aisla.md)
 **D184 — Declarar `scope:` es pedir un árbol propio.** `accepted` → [`adr/D184-declarar-scope-es-pedir-un-arbol-propio.md`](adr/D184-declarar-scope-es-pedir-un-arbol-propio.md)
+**D185 — Cerrar un process group exige una observación estable de sus miembros.** `accepted` → [`adr/D185-cierre-estable-de-process-groups.md`](adr/D185-cierre-estable-de-process-groups.md)

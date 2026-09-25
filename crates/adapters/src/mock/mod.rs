@@ -470,8 +470,8 @@ impl AgentSession for MockSession {
     /// Nothing, because there is no process — and a record that the
     /// question was put, which is what a test of the engine's rule
     /// reads.
-    async fn exit(&mut self) -> Option<SessionExit> {
+    async fn exit(&mut self) -> yunta_core::Result<Option<SessionExit>> {
         self.interrogated.store(true, Ordering::SeqCst);
-        None
+        Ok(None)
     }
 }

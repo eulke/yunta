@@ -12,6 +12,7 @@
 //! running a CLI, the engine running `git`, and the harness running the
 //! binary all own their children the same way.
 
+pub mod group;
 pub mod lines;
 pub mod process_start;
 pub mod signal;

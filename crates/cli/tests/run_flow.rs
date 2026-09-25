@@ -11,7 +11,7 @@ use yunta_core::process::signal::{liveness, signal_group, signal_process, Livene
 use yunta_core::Pid;
 use yunta_testkit::{
     git, hermetic, init_repo, run_id_from, stderr, stdout, wait_for, wait_until, write, yunta_at,
-    yunta_in, Checkout,
+    yunta_in, Checkout, CliChild,
 };
 
 fn claude_code_stub() -> PathBuf {
@@ -1074,11 +1074,11 @@ nodes:
 
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
     hermetic(&mut command, &repo, &home);
-    let output = command
-        .args(["run", "wf.yaml"])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .expect("failed to run the yunta binary");
+    command.args(["run", "wf.yaml"]);
+    let output = CliChild::spawn(command, None)
+        .expect("failed to spawn the yunta binary")
+        .wait_with_output()
+        .expect("the yunta binary did not finish within the test deadline");
 
     assert!(!output.status.success());
     let text = stdout(&output);
@@ -1129,12 +1129,8 @@ nodes:
     let progress_log = root.path().join("progress.log");
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
     hermetic(&mut command, &repo, &home);
-    let mut run = command
-        .args(["run", "wf.yaml"])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::fs::File::create(&progress_log).unwrap())
-        .spawn()
-        .unwrap();
+    command.args(["run", "wf.yaml"]);
+    let mut run = CliChild::spawn_with_stderr_log(command, Some(&progress_log)).unwrap();
 
     wait_until(
         || marker_written(&repo.join("first.started")),
@@ -1373,12 +1369,8 @@ nodes:
 
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
     hermetic(&mut command, &repo, &home);
-    let yunta = command
-        .args(["run", "wf.yaml"])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
+    command.args(["run", "wf.yaml"]);
+    let yunta = CliChild::spawn(command, None).unwrap();
 
     // Wait for the bash node to actually start and write its pid — poll for
     // the pid content, not just the file, so a tight loop never reads it
@@ -1432,15 +1424,11 @@ fn marker_written(marker: &Path) -> bool {
 
 /// Spawns `yunta run` detached and waits until the given file is written —
 /// the bash node's own signal that it is really running.
-fn spawn_run_until(repo: &Path, home: &Path, marker: &Path) -> std::process::Child {
+fn spawn_run_until(repo: &Path, home: &Path, marker: &Path) -> CliChild {
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
     hermetic(&mut command, repo, home);
-    let child = command
-        .args(["run", "wf.yaml"])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
+    command.args(["run", "wf.yaml"]);
+    let child = CliChild::spawn(command, None).unwrap();
     wait_until(
         || marker_written(marker),
         || "the bash node never started".into(),
@@ -1558,11 +1546,13 @@ nodes:
 
     let mut yunta = spawn_run_until(&repo, &home, &repo.join("child.pid"));
     let run_id = only_run_id(&home);
+    let child_pid = parse_pid(&std::fs::read_to_string(repo.join("child.pid")).unwrap());
+    let mut child_group = ProcessGroupCleanup::new(child_pid);
 
     // Simulated crash: SIGKILL gives the engine no chance to clean up —
     // engine.json survives with the orphaned process group in it.
     signal_process(pid_of(&yunta), Signal::SIGKILL).expect("yunta is alive to be killed");
-    let _ = yunta.wait();
+    yunta.wait_until_exit().expect("the killed engine exits");
     let engine_json = home.join("runs").join(&run_id).join("scratch/engine.json");
     assert!(
         engine_json.exists(),
@@ -1580,6 +1570,9 @@ nodes:
         "got: {}",
         stdout(&cancel)
     );
+    yunta
+        .wait_with_output()
+        .expect("the cancelled group is closed and the engine is reaped");
 
     // The orphaned child is dead, the registry is gone, the log records
     // the crash-cancellation. `kill -0` succeeds on a zombie (the
@@ -1587,20 +1580,17 @@ nodes:
     // gone or Z both mean the kill landed. `cancel` returns once the kill
     // is sent; the child leaves the process table on the kernel's
     // schedule, not ours.
-    let child_pid = std::fs::read_to_string(repo.join("child.pid"))
-        .unwrap()
-        .trim()
-        .to_string();
     let dead = |state: &str| state.is_empty() || state.starts_with('Z');
     wait_until(
-        || dead(&process_state(&child_pid)),
+        || dead(&process_state(&child_pid.as_i32().to_string())),
         || {
             format!(
                 "the orphaned child must be dead, ps state: {}",
-                process_state(&child_pid)
+                process_state(&child_pid.as_i32().to_string())
             )
         },
     );
+    child_group.disarm();
     assert!(!engine_json.exists());
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     assert!(
@@ -1628,19 +1618,15 @@ name: frozen-paths
 nodes:
   - id: gated
     kind: bash
-    run: "echo x > started.txt; test -f go.txt || tail -f /dev/null"
+    run: "echo $$ > child.pid; echo x > started.txt; test -f go.txt || tail -f /dev/null"
 "#,
     );
 
     // Crash the engine mid-node (the node blocks until go.txt exists).
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
     hermetic(&mut command, &repo, &home);
-    let mut yunta = command
-        .args(["run", "wf.yaml"])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
+    command.args(["run", "wf.yaml"]);
+    let mut yunta = CliChild::spawn(command, None).unwrap();
     let worktree = wait_for(
         || {
             let entry = std::fs::read_dir(home.join("worktrees"))
@@ -1657,11 +1643,19 @@ nodes:
     );
     let run_id = only_run_id(&home);
     signal_process(pid_of(&yunta), Signal::SIGKILL).expect("yunta is alive to be killed");
-    let _ = yunta.wait();
+    yunta.wait_until_exit().expect("the crashed engine exits");
 
     // The condition the restarted node needs, in the ORIGINAL worktree —
     // then move the config's worktrees root somewhere else entirely.
+    let orphaned_group = parse_pid(&std::fs::read_to_string(worktree.join("child.pid")).unwrap());
+    let mut child_group = ProcessGroupCleanup::new(orphaned_group);
+    child_group
+        .close()
+        .expect("the previous node's group is killed before resume");
     write(&worktree.join("go.txt"), "go");
+    yunta
+        .wait_with_output()
+        .expect("the crashed engine is reaped after its child group is closed");
     write(
         &repo.join(".yunta/config.yaml"),
         "paths:\n  worktrees: elsewhere-worktrees\n",
@@ -2375,8 +2369,24 @@ nodes:
 }
 
 /// The pid of a child this test spawned.
-fn pid_of(child: &std::process::Child) -> Pid {
-    Pid::try_from(child.id()).expect("a spawned child has a positive pid")
+trait ChildPid {
+    fn child_pid(&self) -> Pid;
+}
+
+impl ChildPid for std::process::Child {
+    fn child_pid(&self) -> Pid {
+        Pid::try_from(self.id()).expect("a spawned child has a positive pid")
+    }
+}
+
+impl ChildPid for CliChild {
+    fn child_pid(&self) -> Pid {
+        self.pid()
+    }
+}
+
+fn pid_of(child: &impl ChildPid) -> Pid {
+    child.child_pid()
 }
 
 /// A pid a run wrote for the test to read back.
@@ -2386,6 +2396,40 @@ fn parse_pid(text: &str) -> Pid {
         .ok()
         .and_then(|raw| Pid::try_from(raw).ok())
         .unwrap_or_else(|| panic!("`{text}` is not a pid"))
+}
+
+struct ProcessGroupCleanup {
+    pgid: Pid,
+    armed: bool,
+}
+
+impl ProcessGroupCleanup {
+    fn new(pgid: Pid) -> Self {
+        Self { pgid, armed: true }
+    }
+
+    fn close(&mut self) -> std::io::Result<()> {
+        yunta_testkit::force_kill_process_group(self.pgid)?;
+        self.armed = false;
+        Ok(())
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ProcessGroupCleanup {
+    fn drop(&mut self) {
+        if self.armed {
+            if let Err(error) = yunta_testkit::force_kill_process_group(self.pgid) {
+                eprintln!(
+                    "could not clean test-owned process group {}: {error}",
+                    self.pgid
+                );
+            }
+        }
+    }
 }
 
 /// §8.6 of the run contract hands the prior distribution — and the budget
@@ -2796,12 +2840,14 @@ secrets: [CLAUDE_STUB_ARGS_FILE, CODEX_STUB_ARGS_FILE]
 
     let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
     hermetic(&mut command, &repo, &home);
-    let run = command
+    command
         .args(["run", "wf.yaml", "--adapter", "claude-code"])
         .env("CLAUDE_STUB_ARGS_FILE", &claude_args)
-        .env("CODEX_STUB_ARGS_FILE", &codex_args)
-        .output()
-        .unwrap();
+        .env("CODEX_STUB_ARGS_FILE", &codex_args);
+    let run = CliChild::spawn(command, None)
+        .expect("the yunta binary spawns")
+        .wait_with_output()
+        .expect("the adapter run finishes within the test deadline");
     assert!(
         run.status.success(),
         "stdout: {}\nstderr: {}",
@@ -3278,9 +3324,7 @@ fn an_interrupt_during_a_resume_pauses_the_run_as_cancelled_by_user() {
     );
     signal_process(pid_of(&first), Signal::SIGINT).expect("the run is alive");
     first.wait_with_output().expect("the run returns");
-    let run_id = yunta_testkit::run_id_in(
-        &std::fs::read_to_string(&log).expect("the run said what it made"),
-    );
+    let run_id = only_run_id(&project.home);
     std::fs::remove_file(&started).expect("the marker is the resume's own signal");
 
     // Then: the resume re-runs the interrupted node, and is stopped in
@@ -3308,15 +3352,10 @@ fn an_interrupt_during_a_resume_pauses_the_run_as_cancelled_by_user() {
 
 /// Spawns the binary in `project` with its stderr on `log`, for a test
 /// that signals it while it runs.
-fn spawn_yunta(project: &Checkout, args: &[&str], log: PathBuf) -> std::process::Child {
-    let both = std::fs::File::create(&log).expect("a log to write to");
-    project
-        .command(Path::new(env!("CARGO_BIN_EXE_yunta")))
-        .args(args)
-        .stdout(both.try_clone().expect("one file, two streams"))
-        .stderr(both)
-        .spawn()
-        .expect("the binary runs")
+fn spawn_yunta(project: &Checkout, args: &[&str], log: PathBuf) -> CliChild {
+    let mut command = project.command(Path::new(env!("CARGO_BIN_EXE_yunta")));
+    command.args(args);
+    CliChild::spawn(command, Some(&log)).expect("the binary runs")
 }
 
 /// Two Ctrl-C, two stages (D181): the first stops the work, and what

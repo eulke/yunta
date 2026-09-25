@@ -17,6 +17,7 @@
 mod bench;
 mod bin;
 mod checkout;
+mod child;
 mod corpus;
 mod events;
 mod frames;
@@ -34,6 +35,7 @@ mod wait;
 pub use bench::{Bench, MOCK_CONFIG};
 pub use bin::{hermetic, run_id_from, run_id_in, run_yunta, stderr, stdout, Spawning};
 pub use checkout::Checkout;
+pub use child::{force_kill_process_group, CliChild};
 pub use corpus::{
     backticked, bullets, fenced_blocks, field_tables, fixed_consts, has_top_level_key, json_schema,
     markdown_files, names_after, number_before, numbered_items, rule_codes_named, section,

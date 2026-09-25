@@ -300,7 +300,7 @@ pub(crate) async fn dispatch_session(
         // its turn said everything it had to say, and asking it would
         // cost a kill and a wait for nothing.
         None => DispatchOutcome::Crashed {
-            exit: session.exit().await,
+            exit: session.exit().await?,
         },
     };
     Ok(Dispatched {

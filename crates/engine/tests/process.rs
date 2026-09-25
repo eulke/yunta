@@ -5,10 +5,19 @@
 
 use std::time::Duration;
 
+use tokio_util::sync::CancellationToken;
 use yunta_core::Pid;
 use yunta_engine::process::{spawn_governed, GovernedCommand, Outcome, Supervision};
 use yunta_testkit::Owner;
 use yunta_testkit_core::FixedClock;
+
+struct CancelOnDrop(CancellationToken);
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
 
 /// True while any member of `pgid` still runs. A zombie is not
 /// running: it has exited and only waits for its parent to collect its
@@ -144,6 +153,136 @@ async fn a_finished_command_reports_its_status_and_both_streams() {
     assert_eq!(status.code(), Some(3));
     assert_eq!(String::from_utf8_lossy(&stdout), "out\n");
     assert_eq!(String::from_utf8_lossy(&stderr), "err\n");
+}
+
+#[tokio::test]
+async fn a_finished_shell_does_not_leave_a_descendant_holding_its_pipes_open() {
+    let owner = Owner::new();
+    let dir = tempfile::tempdir().unwrap();
+    let command = GovernedCommand::shell(
+        dir.path(),
+        "sleep 30 & printf 'leader stdout\\n'; printf 'leader stderr\\n' >&2; exit 0",
+    );
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(3),
+        spawn_governed(command, owner.supervision()),
+    )
+    .await
+    .expect("closing the descendant also closes the inherited pipes")
+    .unwrap();
+
+    let Outcome::Exited {
+        status,
+        stdout,
+        stderr,
+    } = outcome
+    else {
+        panic!("expected the shell's successful exit, got {outcome:?}");
+    };
+    assert!(status.success());
+    assert_eq!(stdout, b"leader stdout\n");
+    assert_eq!(stderr, b"leader stderr\n");
+}
+
+#[tokio::test]
+async fn large_input_and_both_output_streams_are_drained_concurrently() {
+    let owner = Owner::new();
+    let dir = tempfile::tempdir().unwrap();
+    let input = vec![b'i'; 1024 * 1024];
+    let command = GovernedCommand::shell(
+        dir.path(),
+        "cat >/dev/null & dd if=/dev/zero bs=65536 count=16 2>/dev/null; dd if=/dev/zero bs=65536 count=16 1>&2 2>/dev/null; wait",
+    )
+    .stdin(input);
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(5),
+        spawn_governed(command, owner.supervision()),
+    )
+    .await
+    .expect("stdin and both output pipes make progress together")
+    .unwrap();
+
+    let Outcome::Exited {
+        status,
+        stdout,
+        stderr,
+    } = outcome
+    else {
+        panic!("expected a successful exit, got {outcome:?}");
+    };
+    assert!(status.success());
+    assert_eq!(stdout.len(), 1024 * 1024);
+    assert!(stdout.iter().all(|byte| *byte == 0));
+    assert_eq!(stderr.len(), 1024 * 1024);
+    assert!(stderr.iter().all(|byte| *byte == 0));
+}
+
+#[tokio::test]
+async fn early_stdin_close_is_not_reported_as_a_pipe_failure() {
+    let owner = Owner::new();
+    let dir = tempfile::tempdir().unwrap();
+    let command = GovernedCommand::shell(dir.path(), "exit 0").stdin(vec![b'x'; 8 * 1024 * 1024]);
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(3),
+        spawn_governed(command, owner.supervision()),
+    )
+    .await
+    .expect("a closed stdin does not strand the writer task")
+    .unwrap();
+
+    let Outcome::Exited { status, .. } = outcome else {
+        panic!("expected the child's successful exit, got {outcome:?}");
+    };
+    assert!(status.success());
+}
+
+#[tokio::test]
+async fn repeated_forks_during_cancellation_leave_no_running_group_members() {
+    for iteration in 0..12 {
+        let dir = tempfile::tempdir().unwrap();
+        let children = dir.path().join("children");
+        let cancel = CancellationToken::new();
+        let trigger = cancel.clone();
+        let observed = children.clone();
+        let watcher = tokio::spawn(async move {
+            let _cancel_on_drop = CancelOnDrop(trigger);
+            yunta_testkit::wait_until_async(
+                || async {
+                    tokio::fs::read_to_string(&observed)
+                        .await
+                        .map(|lines| lines.lines().count() >= 3)
+                        .unwrap_or_default()
+                },
+                || format!("iteration {iteration}: the shell did not create three children"),
+            )
+            .await;
+        });
+        let command = GovernedCommand::shell(
+            dir.path(),
+            "while :; do sleep 30 & echo $! >> \"$1\"; sleep 0.01; done",
+        )
+        .arg("sh")
+        .arg(children.display().to_string());
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            spawn_governed(command, Supervision::outside_any_run(&cancel, &FixedClock)),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("iteration {iteration}: cancellation did not close the group"))
+        .unwrap();
+        watcher.await.unwrap();
+
+        let Outcome::Cancelled { pgid, .. } = outcome else {
+            panic!("iteration {iteration}: expected cancellation, got {outcome:?}");
+        };
+        assert!(
+            !group_running(pgid),
+            "iteration {iteration}: group {pgid} still has an executable member"
+        );
+    }
 }
 
 /// A `git` a run spawns is a subprocess the run owns: born in its own

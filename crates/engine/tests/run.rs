@@ -506,6 +506,7 @@ nodes:
 #[tokio::test]
 async fn a_bash_node_can_reference_the_run_s_worktree_by_template() {
     let bench = Bench::new();
+    let worktree = bench.worktree.canonicalize().unwrap();
 
     let workflow = format!(
         r#"
@@ -515,11 +516,11 @@ nodes:
     kind: bash
     run: "test -d {{{{run.worktree}}}} && test $(pwd) = '{worktree}'"
 "#,
-        worktree = bench.worktree.display()
+        worktree = worktree.display()
     );
 
-    let RunReport { terminal, .. } = bench.run(&workflow, "sessions: []").await;
-    assert_eq!(terminal, RunTerminal::Finished);
+    let RunReport { terminal, state } = bench.run(&workflow, "sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 }
 
 #[tokio::test]

@@ -308,7 +308,9 @@ async fn a_session_that_dies_before_its_first_event_reports_its_exit_and_its_las
     );
     req.env
         .insert("CODEX_STUB_EXIT".to_string(), "2".to_string().into());
-    let (events, exit) = drain_for_exit(adapter().spawn(req).await.unwrap()).await;
+    let (events, exit) = drain_for_exit(adapter().spawn(req).await.unwrap())
+        .await
+        .unwrap();
 
     assert!(events.is_empty(), "the CLI said nothing: {events:?}");
     let exit = exit.expect("a session with a process of its own says how it ended");
@@ -338,7 +340,9 @@ async fn a_dead_sessions_stderr_tail_never_carries_a_value_from_its_env() {
     );
     req.env
         .insert("CODEX_STUB_EXIT".to_string(), "1".to_string().into());
-    let (_, exit) = drain_for_exit(adapter().spawn(req).await.unwrap()).await;
+    let (_, exit) = drain_for_exit(adapter().spawn(req).await.unwrap())
+        .await
+        .unwrap();
 
     let tail = exit
         .expect("the session ended with a process of its own")
@@ -368,7 +372,10 @@ async fn a_dead_sessions_process_group_is_gone_once_its_exit_is_collected() {
     let mut session = adapter().spawn(req).await.unwrap();
     let grandchild: i32 = grandchild_pid(&child_pid_file).await.parse().unwrap();
 
-    assert!(session.exit().await.is_some(), "the session had a process");
+    assert!(
+        session.exit().await.unwrap().is_some(),
+        "the session had a process"
+    );
     wait_until_gone(Pid::try_from(grandchild).unwrap()).await;
 }
 

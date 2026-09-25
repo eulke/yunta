@@ -25,6 +25,7 @@ tokio = { workspace = true, features = ["rt", "sync", "time", "process", "io-uti
 # kernel's own `errno` instead of a `kill` binary's exit status, with no
 # unsafe code of ours (D118).
 nix.workspace = true
+rustix.workspace = true
 # A subprocess's stderr is drained to the trace log rather than dropped.
 tracing.workspace = true
 serde = { workspace = true, features = ["derive"] }
@@ -57,6 +58,14 @@ ulid.workspace = true
 # `chrono` support. `indexmap2` describes `modes:`, an ordered map.
 schemars = { workspace = true, features = ["chrono04", "indexmap2"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+errno.workspace = true
+libproc.workspace = true
+
 [features]
 # Unchecked `From<&str>`/`From<String>` for identifiers, so a test can
 # write a literal; production code parses.
@@ -65,4 +74,5 @@ testkit = []
 [dev-dependencies]
 yunta-testkit-core.workspace = true
 yunta-core = { path = ".", features = ["testkit"] }
+tokio = { workspace = true, features = ["macros"] }
 proptest.workspace = true

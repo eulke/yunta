@@ -35,7 +35,7 @@ serde_json.workspace = true
 async-trait.workspace = true
 # The async form of the bounded wait yields to the runtime between polls,
 # for tests that poll through an async client (`yunta mcp` over stdio).
-tokio = { workspace = true, features = ["rt", "process"] }
+tokio = { workspace = true, features = ["rt", "process", "time"] }
 tokio-util.workspace = true
 # The terminal harness stands a pty up (`term`) and signals the run
 # watched on it (`signal`) — the only way a test reaches the behaviors

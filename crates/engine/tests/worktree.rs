@@ -51,8 +51,17 @@ async fn worktree_isolation_creates_a_real_git_worktree_at_base_commit() {
     assert!(worktree_path.join(".gitkeep").exists());
     assert_eq!(head(&worktree_path), base_commit);
     // It's a real worktree of the same repo, not a detached clone.
-    let common_dir = git_output(&worktree_path, &["rev-parse", "--git-common-dir"]);
-    assert!(common_dir.starts_with(repo.join(".git").to_str().unwrap()));
+    let common_dir_output = git_output(&worktree_path, &["rev-parse", "--git-common-dir"]);
+    let common_dir = Path::new(common_dir_output.trim());
+    let common_dir = if common_dir.is_absolute() {
+        common_dir.to_path_buf()
+    } else {
+        worktree_path.join(common_dir)
+    }
+    .canonicalize()
+    .unwrap();
+    let repo_git = repo.join(".git").canonicalize().unwrap();
+    assert!(common_dir.starts_with(repo_git));
 }
 
 #[tokio::test]
@@ -550,7 +559,10 @@ async fn both_locks_share_one_protocol() {
     );
     let holder = read_owner(&lock_file(&repo));
     assert_eq!(holder.pid, Pid::current());
-    assert!(holder.started_at > Utc::now() - chrono::Duration::minutes(1));
+    let expected_start = yunta_core::process::process_start::process_start(Pid::current())
+        .map(DateTime::<Utc>::from)
+        .unwrap_or_else(|| owner.supervision().clock.now());
+    assert_eq!(holder.started_at, expected_start);
     assert_eq!(
         std::fs::read_to_string(&witness).unwrap(),
         stale,

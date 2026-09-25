@@ -40,9 +40,14 @@ clap = "4"
 futures = "0.3"
 globset = "0.4"
 dialoguer = { version = "0.12", default-features = false }
+errno = "0.3"
 indexmap = "2"
 indicatif = "0.18"
 nix = { version = "0.31", features = ["signal", "process"] }
+libc = "0.2"
+rustix = { version = "1.1", features = ["process"] }
+procfs = "0.18"
+libproc = "0.14.11"
 proptest = "1"
 regex = "1"
 reqwest = { version = "0.13", default-features = false }

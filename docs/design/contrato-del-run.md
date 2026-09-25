@@ -458,6 +458,32 @@ Nombres de atributo con prefijo `yunta.` — sin adoptar todavía las convencion
 
 Config (`telemetry:`): `enabled`, `endpoint` (OTLP, default un collector local), `protocol` (`grpc | http`).
 
+## 8.9 Cierre de subprocesos
+
+Todo subproceso del engine y toda sesión de adapter nace en su propio
+process group. Al cancelar, vencer su plazo, terminar la sesión o liberar a su
+dueño, Yunta cierra el grupo entero; terminar el proceso líder no alcanza
+porque un descendiente puede seguir trabajando o mantener abiertos stdout y
+stderr.
+
+El cierre conserva al líder como hijo no recolectado hasta completar el grupo:
+`waitid` observa su salida sin recogerla, así su PID no puede reutilizarse
+mientras todavía identifica al process group. El cierre detiene el grupo,
+inspecciona sus miembros y repite la detención hasta observar dos veces seguidas
+el mismo conjunto sin miembros ejecutables. Entonces envía `SIGKILL` y confirma
+que ningún miembro puede seguir ejecutándose. Los zombies ya terminaron y no
+cuentan como trabajo vivo. Los lectores de stdout y stderr corren en paralelo y
+se esperan después del cierre para conservar lo escrito; cancelar o vencer el
+plazo durante ese drenaje vuelve a cerrar el grupo. La recolección del líder y
+la liberación de sus handles ocurren al final.
+
+La inspección, las señales, la lectura de pipes y la espera conservan sus causas
+de error. Una inspección fallida no equivale a un grupo vacío: el cierre hace
+un intento de emergencia y devuelve el diagnóstico. La misma implementación en
+`yunta_core::process` gobierna tanto `spawn_governed` como las sesiones de
+adapters. El ciclo de Ctrl-C conserva las dos etapas de D181; este cierre es la
+última garantía de que detener o abandonar el trabajo no deja un árbol detrás.
+
 # 9. Inyección de contexto
 Trait del engine:
 ```rust
