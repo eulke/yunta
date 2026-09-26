@@ -10,6 +10,7 @@
 mod dispatch;
 mod escalate;
 mod integrate;
+mod reopen;
 
 use yunta_core::events::{
     EventPayload, Failure, LoopIterationPayload, SessionDeath, StoredEvent, TaskStatus, TokenUsage,
@@ -43,6 +44,7 @@ pub(super) async fn execute_loop(
         LoopReady::Go(prep) => *prep,
         LoopReady::Ended(end) => return Ok(end),
     };
+    reopen::after_retry(ctx, node, &prep.tasks).await?;
 
     let mut state = LoopState {
         tokens: TokenUsage::default(),

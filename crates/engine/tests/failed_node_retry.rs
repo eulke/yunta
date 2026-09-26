@@ -188,3 +188,119 @@ async fn aborting_a_failed_node_pauses_on_the_failure_and_asks_again_on_resume()
     );
     assert_eq!(attempts(&bench, "broken"), 1);
 }
+
+/// A loop whose one task needs `made.txt`: the plan writes the task, and
+/// only a session that creates the file meets its criterion.
+const ONE_TASK_LOOP_WORKFLOW: &str = r#"
+name: stuck-task
+nodes:
+  - id: plan
+    kind: bash
+    run: "printf 'tasks:\n  - id: T001\n    title: Make it\n    scope: [made.txt]\n    criteria:\n      - cmd: test -f made.txt\n' > {{node.artifacts}}/tasks.yaml"
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Implement your task."
+"#;
+
+/// Three attempts that never write the file: the task runs out of them.
+const THREE_MISSES: &str = "\
+capabilities: { run_tools: true }
+sessions:
+  - outcome: { type: completed, summary: missed }
+  - outcome: { type: completed, summary: missed }
+  - outcome: { type: completed, summary: missed }
+";
+
+/// One attempt that writes it.
+const MAKES_IT: &str = "\
+capabilities: { run_tools: true }
+sessions:
+  - effects:
+      - { path: made.txt, content: made }
+    outcome: { type: completed, summary: made }
+";
+
+fn status_of(bench: &Bench, task: &str) -> Option<yunta_core::events::TaskStatus> {
+    yunta_engine::derive(&bench.events()).tasks.status(task)
+}
+
+#[tokio::test]
+async fn a_task_out_of_attempts_says_what_its_last_attempt_left_red() {
+    let bench = parked(ONE_TASK_LOOP_WORKFLOW, THREE_MISSES).await;
+
+    assert_eq!(
+        status_of(&bench, "T001"),
+        Some(yunta_core::events::TaskStatus::Blocked)
+    );
+    let (_, escalation) =
+        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events()))
+            .expect("a loop that failed on a blocked task is a decision");
+    let facts = format!("{:?}", escalation.evidence());
+    assert!(
+        facts.contains("task `T001` blocked")
+            && facts.contains("not done after 3 attempt(s): `test -f made.txt` still exits 1"),
+        "the decision names the criterion still red: {facts}"
+    );
+}
+
+#[tokio::test]
+async fn retrying_a_loop_gives_the_task_it_left_blocked_a_fresh_cycle() {
+    let bench = parked(ONE_TASK_LOOP_WORKFLOW, THREE_MISSES).await;
+
+    answer_parked(&bench, "retry").await.unwrap();
+    let RunReport { terminal, state } = bench.wake_on_fixture(MAKES_IT).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Done)
+    );
+    // The reopening cites the decision that asked for it.
+    let events = bench.events();
+    let decision = events
+        .iter()
+        .rev()
+        .find(|e| {
+            matches!(
+                e.payload(),
+                Some(yunta_core::events::EventPayload::Gates(
+                    GateEvent::Resolved(_)
+                ))
+            )
+        })
+        .map(|e| e.seq)
+        .expect("the retry is on the log");
+    assert!(events.iter().any(|e| matches!(
+        e.payload(),
+        Some(yunta_core::events::EventPayload::Tasks(
+            yunta_core::events::TaskEvent::StatusChanged(p)
+        )) if p.task_id.as_str() == "T001"
+            && p.new_status == yunta_core::events::TaskStatus::Pending
+            && p.caused_by == decision
+    )));
+}
+
+#[tokio::test]
+async fn a_plain_resume_leaves_a_blocked_task_blocked() {
+    let bench = parked(ONE_TASK_LOOP_WORKFLOW, THREE_MISSES).await;
+
+    let RunReport { terminal, .. } = bench.wake_on_fixture(MAKES_IT).await;
+
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+    assert_eq!(
+        status_of(&bench, "T001"),
+        Some(yunta_core::events::TaskStatus::Blocked)
+    );
+    assert!(
+        bench.mock().requests_seen().is_empty(),
+        "nobody chose to spend again, so no session opened"
+    );
+}

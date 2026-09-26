@@ -80,8 +80,14 @@ pub enum BlockedCause {
     /// The criteria were wrong before any work started.
     PreCheck(yunta_core::NonEmpty<Surprise>),
     /// Every attempt ran and the criteria are still red, or the work
-    /// left the scope the task declared.
-    Unmet { attempts: u32 },
+    /// left the scope the task declared. `red` and `outside` are what the
+    /// last attempt left: the criteria still failing, and the paths it
+    /// changed outside the scope.
+    Unmet {
+        attempts: u32,
+        red: Vec<CriterionRun>,
+        outside: Vec<PathBuf>,
+    },
     /// A scope-expansion request is owed a human decision, and no
     /// further session spends budget while one is owed.
     ScopeDecisionOwed,
@@ -107,10 +113,36 @@ impl std::fmt::Display for BlockedCause {
                 let said: Vec<String> = found.as_slice().iter().map(ToString::to_string).collect();
                 write!(f, "{}", said.join("\n"))
             }
-            BlockedCause::Unmet { attempts } => write!(
-                f,
-                "criteria still red or scope violated after {attempts} attempt(s)"
-            ),
+            BlockedCause::Unmet {
+                attempts,
+                red,
+                outside,
+            } => {
+                write!(f, "not done after {attempts} attempt(s)")?;
+                let red: Vec<String> = red
+                    .iter()
+                    .map(|run| format!("`{}` still exits {}", run.cmd, run.exit_code))
+                    .collect();
+                let outside: Vec<String> = outside
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect();
+                match (red.is_empty(), outside.is_empty()) {
+                    (false, false) => write!(
+                        f,
+                        ": {}, and the work changed {} outside its scope",
+                        red.join(", "),
+                        outside.join(", ")
+                    ),
+                    (false, true) => write!(f, ": {}", red.join(", ")),
+                    (true, false) => write!(
+                        f,
+                        ": the criteria pass, but the work changed {} outside its scope",
+                        outside.join(", ")
+                    ),
+                    (true, true) => Ok(()),
+                }
+            }
             BlockedCause::ScopeDecisionOwed => {
                 write!(f, "a scope expansion request needs a human decision")
             }

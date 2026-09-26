@@ -325,17 +325,32 @@ pub async fn run_task(
         }
     }
 
+    // What the last attempt left is what a person deciding about the task
+    // needs to read: which criteria still fail, and what strayed.
+    let last = attempts.last();
+    let cause = BlockedCause::Unmet {
+        attempts: max_retries + 1,
+        red: last
+            .map(|attempt| {
+                attempt
+                    .post_check
+                    .iter()
+                    .filter(|run| run.exit_code != 0)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default(),
+        outside: last
+            .map(|attempt| attempt.scope.violations.clone())
+            .unwrap_or_default(),
+    };
     Ok(TaskCycleReport {
         task_id: task.id.clone(),
         staged: last_staged.clone(),
         pre_check: pre_runs,
         attempts,
         needs_human_decision: false,
-        outcome: TaskOutcome::Blocked {
-            cause: BlockedCause::Unmet {
-                attempts: max_retries + 1,
-            },
-        },
+        outcome: TaskOutcome::Blocked { cause },
         last_check,
     })
 }
