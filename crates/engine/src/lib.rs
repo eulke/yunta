@@ -89,7 +89,10 @@ pub use catalog::{
     installed_publishers, origin_of, packs_for_publisher, resolve_workflow, CatalogError,
     PublisherPacks, ResolvedWorkflow, WorkflowOrigin,
 };
-pub use check::{check, check_warnings, check_workflow_refs, CheckError, CheckWarning, RefsCheck};
+pub use check::{
+    check, check_context_files, check_warnings, check_workflow_refs, CheckError, CheckWarning,
+    MissingContextFile, RefsCheck, RunTreeOrigin,
+};
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;
 pub use git::GitError;
@@ -104,7 +107,7 @@ pub use live::{
     OpenSession, ToolCall,
 };
 pub use manifest::{build_manifest, FrozenRun, ManifestError};
-pub use modes::dependencies_in_mode;
+pub use modes::{dependencies_in_mode, mode_included_nodes};
 pub use observer::{Observed, RunObserver};
 pub use pack_audit::{
     audit_pack, NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit,

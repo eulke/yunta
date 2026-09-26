@@ -9,7 +9,7 @@ use yunta_core::{AdapterId, ModeName, RunId};
 use yunta_engine::FrozenRun;
 use yunta_storage::AsyncStorage;
 
-use super::{create_run_from, estimate, runnable};
+use super::{create_run_from, preflight, runnable};
 use crate::commands::drive::report_run_json;
 use crate::commands::{spawn_detached_resume, DetachedResumeError};
 use crate::context::Context;
@@ -56,7 +56,7 @@ pub(super) async fn detached(detaching: Detaching<'_>) -> Result<Outcome, CliErr
     // No fixture ever reaches here: a detached child resolves the
     // adapters `runners:` names and reads none.
     let (frozen, _) = runnable(ctx, workflow_path, raw_inputs, adapter, None).await?;
-    let estimated = estimate(ctx, &frozen.manifest, quiet, json).await;
+    let preflight = preflight(ctx, &frozen.manifest, mode, quiet, json).await;
     let run_id = create_and_detach(ctx, storage, &frozen, mode).await?;
     if json {
         // The run's own log, read the instant it was handed off: the
@@ -69,7 +69,7 @@ pub(super) async fn detached(detaching: Detaching<'_>) -> Result<Outcome, CliErr
             storage,
             &run_id,
             &frozen.manifest,
-            estimated.budget_warning.clone(),
+            preflight.warnings.clone(),
         )
         .await?;
         return Ok(Outcome::Success);
@@ -101,11 +101,11 @@ pub(crate) async fn start_detached(
     // stream: the distribution line the estimation prints for a person
     // would land in the middle of a response. What it has to say
     // travels in the answer instead.
-    let estimated = estimate(ctx, &frozen.manifest, true, false).await;
+    let preflight = preflight(ctx, &frozen.manifest, mode, true, false).await;
     let run_id = create_and_detach(ctx, storage, &frozen, mode).await?;
     Ok(Started {
         run_id,
-        budget_warning: estimated.budget_warning,
+        warnings: preflight.warnings,
     })
 }
 
@@ -113,10 +113,12 @@ pub(crate) async fn start_detached(
 /// reader about it.
 pub(crate) struct Started {
     pub(crate) run_id: RunId,
-    /// §8.6's warning, when this workflow's history has one to give. A
-    /// client that starts runs is the one deciding whether a cap is
-    /// worth starting under, and it never sees stderr.
-    pub(crate) budget_warning: Option<String>,
+    /// What was said before the first token: §8.6's warning, when this
+    /// workflow's history has one to give, and the `files:` a node reads
+    /// that the run would not find. A client that starts runs is the one
+    /// deciding whether the run is worth starting, and it never sees
+    /// stderr.
+    pub(crate) warnings: crate::json::PreRunWarnings,
 }
 
 /// Creates the run and hands it to a detached `yunta resume`, returning

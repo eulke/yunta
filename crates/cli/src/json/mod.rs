@@ -28,6 +28,29 @@ use crate::commands::status::{decision, progress, task_status_label};
 use crate::error::{CliError, Outcome};
 use crate::render::state::RunWord;
 
+/// What the invocation that creates a run says before the first token —
+/// on stderr for the person watching, and carried here so the document
+/// that invocation prints says it too: a `--json` reader, or a client of
+/// the control plane, is watching nothing else.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PreRunWarnings {
+    /// §8.6: the declared cap sits under what this workflow has
+    /// historically spent.
+    pub(crate) budget: Option<String>,
+    /// A `files:` path a node reads that the run would not find.
+    pub(crate) context_files: Vec<String>,
+}
+
+impl PreRunWarnings {
+    /// Every warning, one per line, in the order they were raised.
+    pub(crate) fn lines(&self) -> impl Iterator<Item = &str> {
+        self.budget
+            .iter()
+            .chain(&self.context_files)
+            .map(String::as_str)
+    }
+}
+
 /// The version stamped on every machine-readable document this CLI emits.
 /// Bumped when a field's meaning changes, never for an additive one, so a
 /// reader can refuse a document from a schema it predates.
@@ -83,6 +106,13 @@ pub(crate) struct RunDocument {
     /// of the log alone never does.
     #[serde(skip_serializing_if = "Option::is_none")]
     budget_warning: Option<String>,
+    /// The `files:` paths a node reads that the tree this run started
+    /// from did not hold when it was created, one sentence each — each
+    /// one a node that stops there unless something before it writes
+    /// the file. Carried, like `budget_warning`, only by the invocation
+    /// that created the run.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    context_warnings: Vec<String>,
     /// How many findings stand blocking now. A run that finished
     /// carrying any of them is work nobody has accepted, and the count
     /// is what says so to a reader with only this document.
@@ -137,6 +167,7 @@ impl RunDocument {
             summary: progress::summary(&frame),
             reason: reason(&frame.phase),
             budget_warning: None,
+            context_warnings: Vec::new(),
             blocking_findings: frame.blocking_findings,
             nodes: frame
                 .nodes
@@ -158,9 +189,11 @@ impl RunDocument {
         }
     }
 
-    /// The same document carrying the pre-run estimation's warning.
-    pub(crate) fn warning(mut self, budget_warning: Option<String>) -> Self {
-        self.budget_warning = budget_warning;
+    /// The same document carrying what was said before the run's first
+    /// token.
+    pub(crate) fn warnings(mut self, pre_run: PreRunWarnings) -> Self {
+        self.budget_warning = pre_run.budget;
+        self.context_warnings = pre_run.context_files;
         self
     }
 

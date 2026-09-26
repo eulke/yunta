@@ -18,6 +18,7 @@ use yunta_storage::AsyncStorage;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::json::PreRunWarnings;
 use crate::render::Glyphs;
 use crate::surface::{Closing, ClosingEnv, Delivery, Outline, TerminalEnv};
 
@@ -49,10 +50,10 @@ pub(crate) struct Driving<'a> {
     /// adapter, and the log records each candidate passed over.
     pub(crate) adapter_override: Option<AdapterId>,
     pub(crate) prior: Option<PriorEstimation>,
-    /// The warning the pre-run estimation raised, carried so the
-    /// document this invocation prints says it too — stderr reaches the
-    /// person watching, and a `--json` reader is watching nothing.
-    pub(crate) budget_warning: Option<String>,
+    /// What was said before the first token, carried so the document
+    /// this invocation prints says it too — stderr reaches the person
+    /// watching, and a `--json` reader is watching nothing.
+    pub(crate) warnings: PreRunWarnings,
     /// `--quiet`: the run id and nothing else, with the verdict in the
     /// exit code.
     pub(crate) quiet: bool,
@@ -218,7 +219,7 @@ async fn finish(
         report,
         cancelled: cancel.is_cancelled(),
         prior: env.prior.as_ref(),
-        budget_warning: env.budget_warning.clone(),
+        warnings: env.warnings.clone(),
         glyphs: shown.glyphs,
         quiet: env.quiet,
         json: env.json,
@@ -240,10 +241,10 @@ pub(crate) struct Settling<'a> {
     /// Whether a person interrupted this invocation.
     pub(crate) cancelled: bool,
     pub(crate) prior: Option<&'a PriorEstimation>,
-    /// The pre-run warning, for the document this invocation prints.
-    /// `None` on a `resume`: §8.6 gives the estimation to whoever
-    /// *creates* a run, and a resume picks one up.
-    pub(crate) budget_warning: Option<String>,
+    /// The pre-run warnings, for the document this invocation prints.
+    /// Empty on a `resume`: they are said to whoever *creates* a run
+    /// (§8.6), and a resume picks one up.
+    pub(crate) warnings: PreRunWarnings,
     pub(crate) glyphs: Glyphs,
     pub(crate) quiet: bool,
     pub(crate) json: bool,
@@ -260,7 +261,7 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
             settling.storage,
             &settling.run_id,
             &settling.manifest,
-            settling.budget_warning,
+            settling.warnings,
         )
         .await?
         .verdict());
@@ -274,7 +275,7 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
             settling.storage,
             &settling.run_id,
             &settling.manifest,
-            settling.budget_warning,
+            settling.warnings,
         )
         .await?
         .verdict());
@@ -384,13 +385,10 @@ async fn documented(
     storage: &AsyncStorage,
     run_id: &RunId,
     manifest: &Manifest,
-    budget_warning: Option<String>,
+    warnings: PreRunWarnings,
 ) -> Result<crate::json::RunDocument, CliError> {
     let events = storage.events_for_run(run_id.clone()).await?;
-    Ok(
-        crate::json::RunDocument::of(run_id, &events, manifest, ctx.clock.now())
-            .warning(budget_warning),
-    )
+    Ok(crate::json::RunDocument::of(run_id, &events, manifest, ctx.clock.now()).warnings(warnings))
 }
 
 /// Prints the run as the one versioned document `run --json`,
@@ -407,9 +405,9 @@ pub(crate) async fn report_run_json(
     storage: &AsyncStorage,
     run_id: &RunId,
     manifest: &Manifest,
-    budget_warning: Option<String>,
+    warnings: PreRunWarnings,
 ) -> Result<crate::json::RunDocument, CliError> {
-    let document = documented(ctx, storage, run_id, manifest, budget_warning).await?;
+    let document = documented(ctx, storage, run_id, manifest, warnings).await?;
     crate::json::print_json(&document)?;
     Ok(document)
 }

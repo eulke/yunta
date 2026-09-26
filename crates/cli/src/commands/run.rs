@@ -28,6 +28,7 @@ use super::drive::Prepared;
 use super::Adapters;
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
+use crate::json::PreRunWarnings;
 use yunta_core::events::RunEvent;
 
 /// Parses `--input name=value` entries into the raw map
@@ -221,16 +222,60 @@ async fn runnable_adapters(
     Ok(adapters)
 }
 
-/// What reading a workflow's history said before its run started.
+/// What an invocation says about a run before it creates it: what this
+/// workflow's history cost, and every warning a person can still act on
+/// for free.
 ///
-/// The warning is kept rather than only printed: stderr reaches the
-/// person watching, and §8.6 of the run contract makes this the one
-/// piece of the estimation that is actionable — so it also reaches the
-/// reader who has only a document, which is the reader most likely to
-/// be automating the spend.
-pub(super) struct Estimated {
+/// The warnings are kept rather than only printed: stderr reaches the
+/// person watching, and they also have to reach the reader who has only
+/// a document, which is the reader most likely to be automating the
+/// spend.
+pub(super) struct Preflight {
     pub(super) prior: Option<PriorEstimation>,
-    pub(super) budget_warning: Option<String>,
+    pub(super) warnings: PreRunWarnings,
+}
+
+/// Everything said before the first token: the estimation, and the
+/// `files:` paths the run would not find in the tree it starts from.
+pub(super) async fn preflight(
+    ctx: &Context,
+    manifest: &Manifest,
+    mode: Option<&ModeName>,
+    quiet: bool,
+    json: bool,
+) -> Preflight {
+    let (prior, budget) = estimate(ctx, manifest, quiet, json).await;
+    Preflight {
+        prior,
+        warnings: PreRunWarnings {
+            budget,
+            context_files: context_files(ctx, manifest, mode).await,
+        },
+    }
+}
+
+/// The literal `files:` paths the nodes of this run's mode read that the
+/// commit it starts from does not hold, each warned about now — before
+/// the nodes ahead of them spend, which is when the run itself would
+/// find out.
+async fn context_files(ctx: &Context, manifest: &Manifest, mode: Option<&ModeName>) -> Vec<String> {
+    let mode = resolve_mode(manifest, mode);
+    let included = yunta_engine::mode_included_nodes(&manifest.workflow, &mode);
+    let warnings = super::context_file_warnings(
+        ctx,
+        &manifest.workflow,
+        included.as_ref(),
+        manifest.isolation,
+        &manifest.base_commit,
+    )
+    .await;
+    warnings
+        .iter()
+        .map(|warning| {
+            warn(warning);
+            warning.to_string()
+        })
+        .collect()
 }
 
 /// What this workflow's past runs cost, shown before anything is spent
@@ -243,7 +288,12 @@ pub(super) struct Estimated {
 /// warning survives both — it asks for a decision before tokens are
 /// spent, and a run that stops halfway on a badly chosen cap is the most
 /// expensive waste there is.
-async fn estimate(ctx: &Context, manifest: &Manifest, quiet: bool, json: bool) -> Estimated {
+async fn estimate(
+    ctx: &Context,
+    manifest: &Manifest,
+    quiet: bool,
+    json: bool,
+) -> (Option<PriorEstimation>, Option<String>) {
     let history =
         super::stats::summaries(&super::stats::history(ctx, &manifest.workflow.name).await);
     let estimation = yunta_engine::prior_estimation(&history);
@@ -263,10 +313,7 @@ async fn estimate(ctx: &Context, manifest: &Manifest, quiet: bool, json: bool) -
     if let Some(warning) = &budget_warning {
         warn(warning);
     }
-    Estimated {
-        prior: estimation,
-        budget_warning,
-    }
+    (estimation, budget_warning)
 }
 
 /// A workflow reference resolved to its file and loaded, refused if it
@@ -310,6 +357,24 @@ async fn build_frozen_manifest(
         ctx.project.worktrees_root.clone(),
     )?);
     Ok(frozen)
+}
+
+/// The mode a run of `manifest` runs in. An explicit `--mode` is used as
+/// given (`create_run` itself refuses an unknown name); omitted with
+/// `modes:` declared defaults to the *first* declared mode — promotion
+/// only ever escalates forward, so starting at the floor is the one
+/// default that can never need walking back. A workflow with no `modes:`
+/// at all keeps running everything, unaffected.
+fn resolve_mode(manifest: &Manifest, mode: Option<&ModeName>) -> ModeName {
+    mode.cloned().unwrap_or_else(|| {
+        manifest
+            .workflow
+            .modes
+            .as_ref()
+            .and_then(|modes| modes.keys().next())
+            .cloned()
+            .unwrap_or_default()
+    })
 }
 
 /// Enforces the soft concurrency cap, mints the run id from the injected
@@ -366,21 +431,7 @@ pub(super) async fn create_run_from(
         }
     }
 
-    // An explicit `--mode` is used as given (`create_run` itself refuses
-    // an unknown name); omitted with `modes:` declared defaults to the
-    // *first* declared mode — promotion only ever escalates forward, so
-    // starting at the floor is the one default that can never need walking
-    // back. A workflow with no `modes:` at all keeps running everything,
-    // unaffected.
-    let resolved_mode = mode.cloned().unwrap_or_else(|| {
-        manifest
-            .workflow
-            .modes
-            .as_ref()
-            .and_then(|modes| modes.keys().next())
-            .cloned()
-            .unwrap_or_default()
-    });
+    let resolved_mode = resolve_mode(manifest, mode);
 
     let run_dir = yunta_engine::create_run(
         yunta_engine::CreateRunParams {

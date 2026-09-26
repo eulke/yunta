@@ -25,10 +25,11 @@ mod lines;
 mod painter;
 mod region;
 mod scrollback;
+mod terminal;
 mod turns;
 mod view;
 
-use std::io::{IsTerminal, Write};
+use std::io::Write;
 use std::sync::Arc;
 
 use dialoguer::console::Term;
@@ -48,6 +49,7 @@ use region::Region;
 
 pub(crate) use closing::{Closing, ClosingEnv, Outline};
 pub(crate) use feed::Diagnostics;
+pub(crate) use terminal::TerminalEnv;
 pub(crate) use turns::Curtain;
 
 /// Why the live region stood down, in the words the reader is given.
@@ -91,29 +93,6 @@ pub(crate) enum Delivery {
     /// A pinned region of plain text at the bottom of the terminal, with
     /// finished work graduating above it into the terminal's own history.
     Live,
-}
-
-/// The three values the delivery policy reads, lifted out of the process
-/// so the policy is a function of its arguments and nothing else.
-pub(crate) struct TerminalEnv {
-    /// Whether the stream the region would draw on is a terminal.
-    pub(crate) stderr_is_terminal: bool,
-    /// `TERM`.
-    pub(crate) term: Option<String>,
-    /// `NO_COLOR`, which the convention reads as set when it is present
-    /// and not empty.
-    pub(crate) no_color: Option<String>,
-}
-
-impl TerminalEnv {
-    /// What this process was started with.
-    pub(crate) fn from_process() -> Self {
-        Self {
-            stderr_is_terminal: std::io::stderr().is_terminal(),
-            term: std::env::var("TERM").ok(),
-            no_color: std::env::var("NO_COLOR").ok(),
-        }
-    }
 }
 
 impl Delivery {

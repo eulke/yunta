@@ -36,6 +36,9 @@ pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
     if !check_installed_pack_requires(&ctx.cwd, &ctx.project.config) {
         all_well = false;
     }
+    if !check_installed_pack_context_files(&ctx).await {
+        all_well = false;
+    }
 
     if session {
         all_well &= probe_sessions(&ctx, &healthy).await;
@@ -144,6 +147,32 @@ fn check_installed_pack_requires(cwd: &std::path::Path, config: &yunta_core::Con
         }
     }
     all_satisfied
+}
+
+/// Checks that every `files:` path an installed pack's workflows read
+/// is in the commit this repository is on — the part of a pack's needs
+/// no manifest declares, because only the workflow says it. Returns
+/// `false` (and prints a line per path) when any is missing; a broken
+/// pack is `check_installed_pack_requires`'s to name.
+async fn check_installed_pack_context_files(ctx: &Context) -> bool {
+    let isolation = ctx.project.config.resolved_isolation();
+    let mut all_present = true;
+    for publisher in yunta_engine::installed_publishers(&ctx.cwd) {
+        for (pack_dir, manifest) in
+            yunta_engine::packs_for_publisher(&ctx.cwd, &publisher).installed
+        {
+            for declared in &manifest.contents.workflows {
+                let Ok(workflow) = crate::load_workflow(&pack_dir.join(declared)) else {
+                    continue;
+                };
+                for warning in super::context_files_at_head(ctx, &workflow, isolation).await {
+                    all_present = false;
+                    println!("pack {}: {warning}", manifest.reference());
+                }
+            }
+        }
+    }
+    all_present
 }
 
 /// Opens one session per binding whose adapter probed healthy, and

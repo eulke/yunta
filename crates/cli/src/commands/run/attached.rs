@@ -9,7 +9,7 @@ use yunta_adapters::MOCK_ID;
 use yunta_core::{AdapterId, ModeName};
 use yunta_storage::AsyncStorage;
 
-use super::{create_run_from, estimate, runnable};
+use super::{create_run_from, preflight, runnable};
 use crate::commands::drive::{drive, Driving};
 use crate::commands::test::{load_mock_fixture, mock_adapters};
 use crate::context::Context;
@@ -51,7 +51,7 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
 
     let (frozen, real_adapters) =
         runnable(ctx, workflow_path, raw_inputs, adapter, mock_fixture).await?;
-    let estimated = estimate(ctx, &frozen.manifest, quiet, json).await;
+    let preflight = preflight(ctx, &frozen.manifest, mode, quiet, json).await;
 
     let prepared = create_run_from(ctx, storage, &frozen, mode).await?;
     // The documents the run was born with are on its log now; what the
@@ -79,8 +79,8 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
         prepared: &prepared,
         adapters,
         adapter_override: adapter.filter(|id| **id != MOCK_ID).cloned(),
-        prior: estimated.prior,
-        budget_warning: estimated.budget_warning,
+        prior: preflight.prior,
+        warnings: preflight.warnings,
         quiet,
         json,
     })

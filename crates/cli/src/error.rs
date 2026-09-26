@@ -7,6 +7,8 @@
 //! belongs on top of it.
 
 use std::fmt::Display;
+
+use crate::surface::TerminalEnv;
 use yunta_core::RunId;
 
 /// How a subcommand came back when nothing stopped it from running.
@@ -212,8 +214,20 @@ impl CliError {
 
 /// A warning to stderr — the one place the CLI prints `warning:` lines,
 /// so a run that succeeds with caveats still says so without an error.
+/// The word is bold yellow on a terminal that draws color, so a warning
+/// said before a run starts is not lost among the lines around it.
 pub fn warn(message: impl Display) {
-    eprintln!("warning: {message}");
+    eprintln!("{}: {message}", warning_word(&TerminalEnv::from_process()));
+}
+
+/// `warning`, painted when `env` draws color and plain everywhere else —
+/// a captured stream reads the same whoever captured it.
+fn warning_word(env: &TerminalEnv) -> &'static str {
+    if env.draws_color() {
+        "\x1b[1;33mwarning\x1b[0m"
+    } else {
+        "warning"
+    }
 }
 
 /// An informational block to stderr — verification findings and the
@@ -221,4 +235,36 @@ pub fn warn(message: impl Display) {
 /// error.
 pub fn note(message: impl Display) {
     eprintln!("{message}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env(stderr_is_terminal: bool, term: Option<&str>, no_color: Option<&str>) -> TerminalEnv {
+        TerminalEnv {
+            stderr_is_terminal,
+            term: term.map(str::to_string),
+            no_color: no_color.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_warning_is_painted_only_where_color_is_drawn() {
+        assert_eq!(
+            warning_word(&env(true, Some("xterm-256color"), None)),
+            "\x1b[1;33mwarning\x1b[0m"
+        );
+        assert_eq!(warning_word(&env(false, Some("xterm"), None)), "warning");
+        assert_eq!(warning_word(&env(true, Some("dumb"), None)), "warning");
+        assert_eq!(
+            warning_word(&env(true, Some("xterm"), Some("1"))),
+            "warning"
+        );
+        assert_eq!(
+            warning_word(&env(true, Some("xterm"), Some(""))),
+            "\x1b[1;33mwarning\x1b[0m",
+            "an empty NO_COLOR is unset, by the convention's own reading"
+        );
+    }
 }

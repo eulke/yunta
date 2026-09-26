@@ -105,14 +105,13 @@ pub(super) async fn tool_run_workflow(
     )
     .await?;
     // The run id first, so a client that reads one line still reads the
-    // thing it asked for, and §8.6's warning under it when this
-    // workflow's history has one: a client that starts runs is the one
-    // deciding whether a cap is worth starting under, and stderr never
-    // reaches it.
-    Ok(match started.budget_warning {
-        Some(warning) => format!("run_id: {}\n{warning}", started.run_id),
-        None => format!("run_id: {}", started.run_id),
-    })
+    // thing it asked for, and each pre-run warning under it: a client
+    // that starts runs is the one deciding whether the run is worth
+    // starting, and stderr never reaches it.
+    Ok(std::iter::once(format!("run_id: {}", started.run_id))
+        .chain(started.warnings.lines().map(str::to_string))
+        .collect::<Vec<_>>()
+        .join("\n"))
 }
 
 pub(super) async fn tool_resume_run(

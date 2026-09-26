@@ -52,4 +52,46 @@ pub enum CheckWarning {
          drop the suite"
     )]
     BaselineNeverCompared { suite: String },
+
+    /// A literal `files:` path a node reads that the tree a run would
+    /// start from does not hold — said before the first token, since the
+    /// run only meets it once every node ahead of the reader has spent.
+    #[error("{}", context_file_missing(node, path, base.as_deref(), missing))]
+    ContextFileMissing {
+        node: NodeId,
+        path: String,
+        /// The commit an isolated run starts from, abbreviated; `None`
+        /// when the run reads the checkout itself or the path is absolute.
+        base: Option<String>,
+        missing: super::context_files::MissingContextFile,
+    },
+}
+
+/// The sentence for a missing `files:` path: what is missing, why the run
+/// would not see it, and what to do — each shape its own remedy.
+fn context_file_missing(
+    node: &NodeId,
+    path: &str,
+    base: Option<&str>,
+    missing: &super::context_files::MissingContextFile,
+) -> String {
+    use super::context_files::MissingContextFile as M;
+    let reads = format!("node `{node}` reads `{path}` (a `files:` context source)");
+    let stops = format!("unless a node before it writes the file, `{node}` stops there");
+    match (missing, base) {
+        (M::Nowhere, Some(base)) => format!(
+            "{reads}, which commit `{base}` — the one a run starts from — does not hold: \
+             {stops}; commit the file first"
+        ),
+        (M::Nowhere, None) => format!("{reads}, which does not exist: {stops}"),
+        (M::Uncommitted, _) => format!(
+            "{reads}, which is in your checkout but not committed: a run starts from commit \
+             `{}` and never sees it, so {stops}; commit it first",
+            base.unwrap_or("HEAD")
+        ),
+        (M::Ignored, _) => format!(
+            "{reads}, which git ignores: a run's tree never carries an ignored file, so \
+             {stops}; add it with `git add -f`, or read a file git tracks"
+        ),
+    }
 }

@@ -8,12 +8,13 @@
 //! `parallel` and DAG fan-out, permission ceilings over
 //! literal commands, input specs and references,
 //! `yunta_schema`, and workflow-node and fan-out
-//! declaration rules. [`check_workflow_refs`] is the deliberate
-//! exception that does read files: the composition reference graph
-//! (`use:` resolves, acyclic, within `limits.max_workflow_depth`)
-//! against the repo's `.yunta/workflows/` catalog — a separate entry
-//! point so `check`'s no-IO property stays intact, called alongside it
-//! by the CLI.
+//! declaration rules. Two separate entry points are the deliberate
+//! exceptions that do read files, so `check`'s no-IO property stays
+//! intact and the CLI calls them alongside it: [`check_workflow_refs`],
+//! the composition reference graph (`use:` resolves, acyclic, within
+//! `limits.max_workflow_depth`) against the repo's `.yunta/workflows/`
+//! catalog; and [`check_context_files`], whether the `files:` a node
+//! reads are in the tree a run would start from.
 //!
 //! Capability-aware checks (agent existence, required
 //! capabilities) wait for the `Adapter` trait to exist — there is
@@ -24,6 +25,7 @@
 //! reads through `use super::*`.
 
 mod capabilities;
+mod context_files;
 mod declarations;
 mod error;
 mod gates;
@@ -35,6 +37,7 @@ mod runners;
 mod scopes;
 mod warning;
 
+pub use context_files::{check_context_files, MissingContextFile, RunTreeOrigin};
 pub use error::CheckError;
 pub use refs::{check_workflow_refs, RefsCheck};
 pub use warning::CheckWarning;

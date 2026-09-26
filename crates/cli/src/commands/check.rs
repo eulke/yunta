@@ -57,6 +57,10 @@ pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<O
     for warning in &refs.warnings {
         warn(warning);
     }
+    for warning in &super::context_files_at_head(&ctx, &workflow, config.resolved_isolation()).await
+    {
+        warn(warning);
+    }
 
     // Verification-effectiveness findings, surfaced here too — right when
     // someone is already looking at this workflow — not only via `stats

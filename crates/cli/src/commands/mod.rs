@@ -311,6 +311,44 @@ pub(crate) fn resolve_workflow_ref(cwd: &Path, reference: &Path) -> Result<PathB
     }
 }
 
+/// The literal `files:` paths the nodes of `workflow` that `mode_nodes`
+/// includes (every node when `None`) read and a run started at
+/// `ctx.cwd` from `base` would not find.
+pub(crate) async fn context_file_warnings(
+    ctx: &crate::context::Context,
+    workflow: &Workflow,
+    mode_nodes: Option<&std::collections::HashSet<yunta_core::NodeId>>,
+    isolation: yunta_core::Isolation,
+    base: &yunta_core::CommitSha,
+) -> Vec<yunta_engine::CheckWarning> {
+    yunta_engine::check_context_files(
+        workflow,
+        mode_nodes,
+        yunta_engine::RunTreeOrigin {
+            checkout: &ctx.cwd,
+            isolation,
+            base,
+        },
+        ctx.supervision(),
+    )
+    .await
+}
+
+/// [`context_file_warnings`] for a run started here now, from the commit
+/// `ctx.cwd` is on. Every node counts, since nothing has chosen a mode.
+/// Nothing to say outside a repository with a commit, where no run starts
+/// either.
+pub(crate) async fn context_files_at_head(
+    ctx: &crate::context::Context,
+    workflow: &Workflow,
+    isolation: yunta_core::Isolation,
+) -> Vec<yunta_engine::CheckWarning> {
+    let Ok(base) = yunta_engine::head_commit(&ctx.cwd, ctx.supervision()).await else {
+        return Vec::new();
+    };
+    context_file_warnings(ctx, workflow, None, isolation, &base).await
+}
+
 /// `yunta check` before running anything — a workflow that fails static
 /// validation never creates a run. `workflow_path` is where `workflow`
 /// itself was loaded from — needed to tell `check_workflow_refs`
