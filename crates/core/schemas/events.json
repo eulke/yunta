@@ -1126,7 +1126,7 @@
       ]
     },
     "EventPayload": {
-      "description": "All 38 event kinds, internally tagged by `kind`.",
+      "description": "All event kinds, internally tagged by `kind`.",
       "oneOf": [
         {
           "type": "object",
@@ -1579,6 +1579,19 @@
             }
           },
           "$ref": "#/$defs/WriteRefusedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "run_tool_failed"
+            }
+          },
+          "$ref": "#/$defs/RunToolFailedPayload",
           "required": [
             "kind"
           ]
@@ -2631,6 +2644,48 @@
           ]
         }
       }
+    },
+    "RunTool": {
+      "type": "string",
+      "enum": [
+        "yunta_check_artifact",
+        "yunta_post_finding",
+        "yunta_update_finding",
+        "yunta_withdraw_finding",
+        "yunta_submit_tasks",
+        "yunta_submit_questions",
+        "yunta_task_status",
+        "yunta_request_scope_expansion",
+        "yunta_get_blackboard"
+      ]
+    },
+    "RunToolFailedPayload": {
+      "description": "One failed call to a tool this binary serves on `yunta-run`.",
+      "type": "object",
+      "properties": {
+        "cause": {
+          "$ref": "#/$defs/RunToolFailureCause"
+        },
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "tool": {
+          "$ref": "#/$defs/RunTool"
+        }
+      },
+      "required": [
+        "session_id",
+        "tool",
+        "cause"
+      ]
+    },
+    "RunToolFailureCause": {
+      "description": "The closed reason a run tool call failed, without adapter error text.",
+      "type": "string",
+      "enum": [
+        "approval_blocked",
+        "call_failed"
+      ]
     },
     "RunnerCandidate": {
       "description": "One binding candidate for a role in `runners:`.",

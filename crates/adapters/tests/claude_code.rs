@@ -857,6 +857,38 @@ async fn the_init_line_reports_how_many_run_tools_the_session_holds() {
 }
 
 #[tokio::test]
+async fn interleaved_tool_results_are_matched_by_id_and_ignore_other_servers() {
+    let events = events_of(&[
+        INIT_LINE,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"mcp__yunta-run__yunta_submit_questions","input":{"secret":"top-secret"}},{"type":"tool_use","id":"b","name":"mcp__yunta-run__yunta_check_artifact","input":{}},{"type":"tool_use","id":"c","name":"mcp__other__yunta_submit_questions","input":{}}]}}"#,
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"b","is_error":true,"content":"top-secret"},{"type":"tool_result","tool_use_id":"c","is_error":true,"content":"top-secret"}]}}"#,
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a","is_error":true,"content":"top-secret"}]}}"#,
+        RESULT_LINE,
+    ]).await;
+    let failed: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::RunToolFailed { tool, cause } => Some((*tool, *cause)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        failed,
+        vec![
+            (
+                yunta_core::RunTool::CheckArtifact,
+                yunta_core::events::RunToolFailureCause::CallFailed
+            ),
+            (
+                yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
+                yunta_core::events::RunToolFailureCause::CallFailed
+            ),
+        ]
+    );
+    assert!(!format!("{failed:?}").contains("top-secret"));
+}
+
+#[tokio::test]
 async fn a_session_the_run_tools_never_reached_reports_none_of_them() {
     // What a `tools/list` the CLI rejected looks like from here: the
     // server is connected, and not one of its tools is in the set.

@@ -141,9 +141,9 @@ tokens.
 yunta doctor --session
 ```
 
-opens the smallest run there is — one `kind: prompt` node, run tools
-mounted, driven through the same machinery a workflow is — once per
-*binding*: an adapter, a model and an agent that some runner names. The
+opens the smallest run there is — one `kind: prompt` node that declares a
+`questions` document, with run tools mounted, driven through the same
+machinery a workflow is — once per *binding*: an adapter, a model and an agent that some runner names. The
 binding and not the runner name, because a session exercises a binding:
 two runners naming the same one are not two things to check, and one a
 runner falls back to is checked too, since a run reaches it exactly when
@@ -154,10 +154,17 @@ claude-code/claude-sonnet-5 (executor, reviewer): ok — 812 tokens
 codex/gpt-5-codex (planner fallback): session died — session `codex` exited with code 2 before any terminal event — url is not supported for stdio
 ```
 
+The prompt asks the session to call `yunta_submit_questions` with
+`{"document":{"questions":[]}}`. `ok` means the run recorded acceptance of
+that document, finished the node and finished the run. A session that opens
+but does not submit it reports `session opened, no questions document`;
+a CLI that exits before completing the session reports `session died`.
+The empty document requires no human answer.
+
 It spends one prompt per binding, which is why it is opt-in. It runs in a
 sandbox of its own — nothing of your tree is touched, and your
 `baseline:` suite is never measured, because the question is whether a
-session opens, not what the tree measures.
+session can deliver a document, not what the tree measures.
 
 ## The two MCP servers
 
@@ -172,6 +179,13 @@ same thing:
   itself and always calls `yunta-run`. It talks over streamable HTTP,
   lives as long as the run does, and carries the tools a node uses to
   post findings and submit documents.
+
+When Codex receives that per-run endpoint, Yunta sets
+`mcp_servers.yunta-run.default_tools_approval_mode="approve"` for the spawned
+CLI so its run tools can be called. The bearer token is passed through the
+process environment; the CLI arguments contain only the environment variable's
+name. Claude Code allows the run tools through its `--allowedTools` list, and
+the mock adapter calls the server directly.
 
 A CLI merges both entries into one table by key, so the per-run server
 carries a name of its own: registering the control plane as `yunta` — the

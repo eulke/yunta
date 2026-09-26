@@ -266,6 +266,11 @@ where that run left it rather than repeating what is already in the tree. A node
 must appear in every declared mode regardless of name or count — a mode narrows how
 much deliberation happens, never how much verification does.
 
+The run freezes that declaration order in its manifest. For a new run with
+`quick`, `standard`, then `full`, a promotion from `standard` can select `full`.
+Older manifests remain readable; if an older writer saved their modes in a
+different order, the original order cannot be recovered from that file alone.
+
 `include:` only ever names top-level node ids. A `parallel` group is atomic from a
 mode's point of view — it's included or excluded whole, never by naming one of its
 children; naming a child directly is a `check` error, not a way to reach inside the

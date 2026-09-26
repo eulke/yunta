@@ -72,6 +72,25 @@ pub fn read(bytes: &str, path: &Path) -> Result<Workflow, Report> {
             )],
         )
     })?;
+    // This is the authored frontier. A persisted manifest reads the
+    // same Node type after fan-out and legitimately contains `@`.
+    let authored_ids: Vec<_> = workflow
+        .iter_nodes()
+        .enumerate()
+        .filter(|(_, node)| node.id.is_fan_out())
+        .map(|(index, node)| {
+            Diagnostic::new(
+                Subject::Node(Named::new(node.id.clone(), index)),
+                Problem::parse(
+                    "id".to_string(),
+                    "`@` is reserved for fan-out siblings generated from `runners:`".to_string(),
+                ),
+            )
+        })
+        .collect();
+    if !authored_ids.is_empty() {
+        return Err(Report::new(document, authored_ids));
+    }
     // Fan-out declarations are about the shape as written, so they are
     // read before the expansion multiplies them; every rule after sees
     // the graph that will actually run.

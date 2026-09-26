@@ -45,8 +45,10 @@ healthy `doctor` means the binary is there, answers and authenticates.
 It does not mean a session opens. The probe asks for a version, which never
 touches the configuration a run writes the CLI; a CLI that refuses that
 configuration is healthy to a probe and dead to a run. `yunta doctor
---session` opens one real session per binding and reports how each ended,
-at the cost of a prompt each. See [adapters](adapters.md#yunta-doctor).
+--session` opens one real session per binding, asks it to submit an empty
+`questions` document, and reports success only after the run accepts that
+document and finishes. It costs a prompt per binding. See
+[adapters](adapters.md#yunta-doctor).
 
 If `doctor` reports a pack's `requires:` unmet (a role, an `mcp_servers:`
 name, or a command not on `PATH`), it names the pack — add what's missing to
@@ -65,6 +67,28 @@ environment — the run tools' token among them — read as `[redacted]`.
 
 `yunta doctor --session` reproduces it outside any run, once per binding, so
 you can fix the configuration and check it without spending a workflow.
+
+## `doctor --session` opened a session but received no questions document
+
+`session opened, no questions document` means the CLI opened, but the probe
+run never accepted its required `yunta_submit_questions` call. The probe
+asks for `{"document":{"questions":[]}}`; this empty document needs no
+human answer. Check the binding's tool access. For a workflow run that
+shows the same symptom, `yunta status <run_id>` can show a failed
+`yunta-run` call. Codex sessions need the per-run server's tool approval;
+Yunta supplies that approval when it mounts the endpoint.
+
+## A run reports a failed `yunta-run` call
+
+The live chronicle shows each failed call, while `yunta status <run_id>` shows
+the **last failed call of the attempt**, with the tool name and either
+`approval_blocked` or `call_failed`. The event log records every failed call
+as `run_tool_failed`. `status --json` exposes the last one on the node as
+`last_tool_failure`, with `session_id`, `tool`, and `cause`. A retry starts a
+new attempt and clears
+that summary. The failed call is diagnostic context: the session may recover
+and finish, and a node failure can have another cause. Arguments, responses,
+tokens and CLI error text are not stored in this event or summary.
 
 ## A node failed with "scope violated: N file(s) outside the declared globs"
 

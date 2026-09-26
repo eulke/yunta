@@ -191,6 +191,43 @@ fn doctor_session_reports_a_binding_whose_cli_dies_at_startup_with_its_stderr() 
 }
 
 #[test]
+fn doctor_session_refuses_a_reply_without_the_questions_submission() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    std::fs::create_dir_all(repo.join(".yunta")).unwrap();
+    std::fs::write(
+        repo.join(".yunta/config.yaml"),
+        format!("defaults:\n  runner: executor\nrunners:\n  executor:\n    - {{ adapter: codex, model: codex-model }}\nadapters:\n  codex:\n    binary: {}\nsecrets: [CODEX_STUB_LINES_FILE]\n", yunta_testkit_core::stubs::codex().display()),
+    ).unwrap();
+    std::fs::write(
+        repo.join(".codex-stub-lines.jsonl"),
+        "{\"type\":\"thread.started\",\"thread_id\":\"doctor-no-delivery\"}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\n",
+    ).unwrap();
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-q", "-m", "project"]);
+
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    let output = command
+        .args(["doctor", "--session"])
+        .env(
+            "CODEX_STUB_LINES_FILE",
+            repo.join(".codex-stub-lines.jsonl"),
+        )
+        .output()
+        .expect("doctor runs");
+    let text = stdout(&output);
+    assert!(!output.status.success(), "{text}");
+    assert!(
+        text.contains("session opened, no questions document"),
+        "{text}"
+    );
+}
+
+#[test]
 fn doctor_session_names_every_runner_that_reaches_a_binding() {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");

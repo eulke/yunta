@@ -62,7 +62,8 @@ pub(super) fn kept(happening: &Happening) -> bool {
         }
         Happening::Node(node::happening::Happening::Rerouted(_)) => true,
         Happening::Node(_) => false,
-        Happening::Session(session::happening::Happening::Degraded { .. }) => true,
+        Happening::Session(session::happening::Happening::Degraded { .. })
+        | Happening::Session(session::happening::Happening::RunToolFailed { .. }) => true,
         Happening::Session(_) => false,
         Happening::Gates(gates::happening::Happening::Escalated(_))
         | Happening::Gates(gates::happening::Happening::Resolved(_))
@@ -267,6 +268,22 @@ mod tests {
         assert!(
             kept(&derive_chronicle(&events)[0].happening),
             "a node that failed closed something"
+        );
+
+        let failed_call = EventPayload::Session(yunta_core::events::SessionEvent::RunToolFailed(
+            yunta_core::events::RunToolFailedPayload {
+                session_id: "s1".into(),
+                tool: yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
+                cause: yunta_core::events::RunToolFailureCause::CallFailed,
+            },
+        ));
+        let events = vec![StoredEvent {
+            body: EventBody::Known(failed_call),
+            ..events[0].clone()
+        }];
+        assert!(
+            kept(&derive_chronicle(&events)[0].happening),
+            "a watched terminal keeps a failed call visible"
         );
     }
 }

@@ -7,7 +7,7 @@ use yunta_core::events::{EventPayload, RunnerResolvedPayload};
 use yunta_core::{
     AdapterId, AgentName, ExecutorName, FindingId, InvalidId, ModeName, ModelName, NodeId,
     PackManifest, PackName, PackRef, Pid, Publisher, QuestionId, RunId, RunnerName, Seq, SessionId,
-    TaskId, TasksFile, Workflow,
+    TaskId, TasksFile,
 };
 
 fn rule_of<T>(result: Result<T, InvalidId>) -> String {
@@ -85,12 +85,24 @@ nodes:
     kind: prompt
     prompt: audit
 ";
-    let error = yunta_core::yaml::parse::<Workflow>(yaml)
+    let error = yunta_core::workflow::read::read(yaml, std::path::Path::new("fan.yaml"))
         .unwrap_err()
         .to_string();
-    assert_eq!(
-        error,
-        "`nodes[0]`: nodes: node `review@alt`: `@` is reserved for the fan-out siblings the manifest expands `runners:` into; an authored id is a letter followed by letters, digits, `_` or `-` at line 3 column 3"
+    assert!(
+        error.contains("review@alt") && error.contains("`@` is reserved"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_parallel_child_cannot_author_a_generated_id() {
+    let yaml = "name: fan\nnodes:\n  - id: group\n    kind: parallel\n    nodes:\n      - id: child@alt\n        kind: prompt\n        prompt: audit\n";
+    let error = yunta_core::workflow::read::read(yaml, std::path::Path::new("fan.yaml"))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("child@alt") && error.contains("`@` is reserved"),
+        "{error}"
     );
 }
 

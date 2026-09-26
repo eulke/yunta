@@ -12,74 +12,16 @@
 use rmcp::model::Tool;
 use serde_json::{json, Value};
 use yunta_core::ArtifactKind;
+pub use yunta_core::RunTool;
 
 use super::session::SessionTools;
 
-/// Every tool a session can be served.
-///
-/// The one place a run tool's name is written: the catalog builds from
-/// it, the dispatch reads a call back through it, and a sentence that
-/// tells a session to call one asks it for the name. A name spelled
-/// twice is a tool a session is offered and the engine cannot answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunTool {
-    CheckArtifact,
-    TaskStatus,
-    GetBlackboard,
-    RequestScopeExpansion,
-    PostFinding,
-    UpdateFinding,
-    WithdrawFinding,
-    /// One per kind a session submits a whole document of.
-    Submit(ArtifactKind),
+trait RunToolCatalog {
+    fn offered_to(self, session: &SessionTools) -> bool;
+    fn declared(self) -> Tool;
 }
 
-impl RunTool {
-    /// Every tool, in the order a session reads them. The submission
-    /// tools follow the kinds that have one.
-    pub fn all() -> Vec<RunTool> {
-        let mut all = vec![
-            RunTool::CheckArtifact,
-            RunTool::PostFinding,
-            RunTool::UpdateFinding,
-            RunTool::WithdrawFinding,
-        ];
-        all.extend(
-            ArtifactKind::ALL
-                .into_iter()
-                .filter(|kind| kind.submit_tool().is_some())
-                .map(RunTool::Submit),
-        );
-        all.extend([
-            RunTool::TaskStatus,
-            RunTool::RequestScopeExpansion,
-            RunTool::GetBlackboard,
-        ]);
-        all
-    }
-
-    /// The name a session calls it by.
-    pub fn name(self) -> &'static str {
-        match self {
-            RunTool::CheckArtifact => "yunta_check_artifact",
-            RunTool::TaskStatus => "yunta_task_status",
-            RunTool::GetBlackboard => "yunta_get_blackboard",
-            RunTool::RequestScopeExpansion => "yunta_request_scope_expansion",
-            RunTool::PostFinding => ArtifactKind::POST_FINDING_TOOL,
-            RunTool::UpdateFinding => ArtifactKind::UPDATE_FINDING_TOOL,
-            RunTool::WithdrawFinding => ArtifactKind::WITHDRAW_FINDING_TOOL,
-            // A kind with no tool to submit through is never a
-            // `Submit`: `all` builds them from the kinds that have one,
-            // and `parse` reads a name back through the same door.
-            RunTool::Submit(kind) => kind.submit_tool().unwrap_or_default(),
-        }
-    }
-
-    /// The tool `name` is, or `None` for a name no tool answers to.
-    pub fn parse(name: &str) -> Option<RunTool> {
-        RunTool::all().into_iter().find(|tool| tool.name() == name)
-    }
-
+impl RunToolCatalog for RunTool {
     /// Whether `session` is served this tool.
     fn offered_to(self, session: &SessionTools) -> bool {
         match self {

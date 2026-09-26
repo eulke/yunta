@@ -62,7 +62,10 @@ impl DegradationLedger {
             // A session opening and what it says while it runs belong to
             // the node that opened it: `NodeLedger::apply_session` holds
             // them, because an attempt is what bounds a session's life.
-            SessionEvent::Opened(_) | SessionEvent::Message(_) | SessionEvent::WriteRefused(_) => {}
+            SessionEvent::Opened(_)
+            | SessionEvent::Message(_)
+            | SessionEvent::WriteRefused(_)
+            | SessionEvent::RunToolFailed(_) => {}
         }
     }
 }

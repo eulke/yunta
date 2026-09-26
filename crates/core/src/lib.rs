@@ -42,6 +42,7 @@ pub mod policy;
 pub mod port;
 pub mod process;
 mod questions;
+mod run_tool;
 pub mod schema;
 mod schema_range;
 mod secret;
@@ -90,6 +91,7 @@ pub use pack::{
 };
 pub use policy::ScopeExpansionMode;
 pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionsFile};
+pub use run_tool::RunTool;
 pub use schema_range::{SchemaRange, SchemaRangeError};
 pub use secret::Secret;
 pub use tasks::{Criterion, Task, TasksFile};

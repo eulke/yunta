@@ -306,7 +306,7 @@ fn the_contract_event_table_names_exactly_the_kinds_the_binary_writes() {
     let counts = section(&design_doc("spec-events.md"), "## 0.");
     assert_eq!(
         Some(rows.len()),
-        number_before(&counts, "filas"),
+        number_before(&counts, "rows"),
         "the payload spec counts the contract's rows"
     );
     assert_eq!(

@@ -241,6 +241,12 @@ pub enum AgentEvent {
     RunToolsMounted {
         count: usize,
     },
+    /// A known tool of this session's `yunta-run` server failed. No
+    /// arguments or CLI error text cross this boundary.
+    RunToolFailed {
+        tool: crate::RunTool,
+        cause: crate::events::RunToolFailureCause,
+    },
     ToolUse {
         name: String,
         /// What the call acted on. An adapter that can name a path says

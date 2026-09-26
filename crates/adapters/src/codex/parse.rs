@@ -37,7 +37,7 @@
 //! could be, not wider than what's confirmed.
 
 use serde_json::Value;
-use yunta_core::SessionId;
+use yunta_core::{RunTool, SessionId};
 
 use crate::failure;
 use yunta_core::events::ToolTarget;
@@ -78,7 +78,7 @@ pub(super) fn parse_line(line: &str, last_message: &str, fence: &Coverage) -> Ve
     };
     match parsed {
         ThreadEvent::ThreadStarted(value) => thread_started(&value, fence).into_iter().collect(),
-        ThreadEvent::ItemCompleted(value) => item_completed(&value).into_iter().collect(),
+        ThreadEvent::ItemCompleted(value) => item_completed(&value),
         ThreadEvent::TurnCompleted(value) => turn_completed(&value, last_message),
         ThreadEvent::TurnFailed { error } => vec![failed(error.as_ref(), "turn failed")],
         ThreadEvent::Error(value) => vec![failed(Some(&value), "the CLI reported an error")],
@@ -113,37 +113,66 @@ fn sandbox_denied(item: &Value) -> bool {
     item.get("status").and_then(Value::as_str) == Some("sandbox_denied")
 }
 
-fn item_completed(value: &Value) -> Option<AgentEvent> {
-    let item = value.get("item")?;
-    match item.get("type").and_then(Value::as_str)? {
-        "agent_message" => Some(AgentEvent::Note {
-            text: item.get("text")?.as_str()?.to_string(),
-        }),
+fn item_completed(value: &Value) -> Vec<AgentEvent> {
+    let Some(item) = value.get("item") else {
+        return Vec::new();
+    };
+    let event = match item.get("type").and_then(Value::as_str) {
+        Some("agent_message") => {
+            item.get("text")
+                .and_then(Value::as_str)
+                .map(|text| AgentEvent::Note {
+                    text: text.to_string(),
+                })
+        }
         // A command the sandbox refused is a write that did not
         // happen, not activity to chronicle as a tool call.
-        "command_execution" if sandbox_denied(item) => Some(AgentEvent::WriteRefused {
+        Some("command_execution") if sandbox_denied(item) => Some(AgentEvent::WriteRefused {
             target: opaque_field(item, "command"),
         }),
-        "command_execution" => Some(AgentEvent::ToolUse {
+        Some("command_execution") => Some(AgentEvent::ToolUse {
             name: "command_execution".to_string(),
             target: opaque_field(item, "command"),
         }),
-        "file_change" => Some(AgentEvent::ToolUse {
+        Some("file_change") => Some(AgentEvent::ToolUse {
             name: "file_change".to_string(),
             target: file_change_target(item),
         }),
-        "mcp_tool_call" => Some(AgentEvent::ToolUse {
+        Some("mcp_tool_call") => Some(AgentEvent::ToolUse {
             name: "mcp_tool_call".to_string(),
             target: mcp_tool_call_target(item),
         }),
-        "web_search" => Some(AgentEvent::ToolUse {
+        Some("web_search") => Some(AgentEvent::ToolUse {
             name: "web_search".to_string(),
             target: opaque_field(item, "query"),
         }),
         // "reasoning", "todo_list", "error" (mid-turn, non-fatal): not
         // operator-facing tool activity — see this module's own doc.
         _ => None,
+    };
+    let mut events: Vec<_> = event.into_iter().collect();
+    if let Some(failed) = run_tool_failure(item) {
+        events.push(failed);
     }
+    events
+}
+
+fn run_tool_failure(item: &Value) -> Option<AgentEvent> {
+    use yunta_core::events::RunToolFailureCause;
+    if item.get("type").and_then(Value::as_str) != Some("mcp_tool_call")
+        || item.get("server").and_then(Value::as_str)
+            != Some(yunta_core::port::RunToolsEndpoint::SERVER_NAME)
+    {
+        return None;
+    }
+    let tool = RunTool::parse(item.get("tool")?.as_str()?)?;
+    let status = item.get("status")?.as_str()?;
+    let cause = match status {
+        "failed" => RunToolFailureCause::CallFailed,
+        "approval_denied" | "approval_blocked" | "declined" => RunToolFailureCause::ApprovalBlocked,
+        _ => return None,
+    };
+    Some(AgentEvent::RunToolFailed { tool, cause })
 }
 
 /// The field this kind of item acts on, identified and never shown: it

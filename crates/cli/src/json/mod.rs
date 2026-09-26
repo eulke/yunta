@@ -138,7 +138,11 @@ impl RunDocument {
             reason: reason(&frame.phase),
             budget_warning: None,
             blocking_findings: frame.blocking_findings,
-            nodes: frame.nodes.iter().map(NodeJson::of).collect(),
+            nodes: frame
+                .nodes
+                .iter()
+                .map(|node| NodeJson::of(node, state.nodes.get(&node.id)))
+                .collect(),
             tasks: state
                 .tasks
                 .iter()

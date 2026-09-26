@@ -13,8 +13,8 @@ use proptest::prelude::*;
 use yunta_core::events::{
     AgentMessagePayload, AgentMessageType, AgentSessionOpenedPayload, Capabilities, EventPayload,
     Failure, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, RunFinishedPayload,
-    RunMetrics, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload, TerminalState,
-    TokenUsage,
+    RunMetrics, StoredEvent, TaskRegisteredPayload, TaskStatus, TaskStatusChangedPayload,
+    TerminalState, TokenUsage,
 };
 use yunta_core::events::{NodeEvent, RunEvent, SessionEvent, TaskEvent};
 use yunta_core::{Node, NodeKind, Workflow};
@@ -125,6 +125,70 @@ fn session_opened(session: &str) -> EventPayload {
         capabilities: Capabilities::default(),
         fence: None,
     }))
+}
+
+fn run_tool_failure_log() -> Vec<StoredEvent> {
+    use yunta_core::events::{RunToolFailedPayload, RunToolFailureCause};
+    let tool_failed = |tool, cause| {
+        EventPayload::Session(SessionEvent::RunToolFailed(RunToolFailedPayload {
+            session_id: "session-1".into(),
+            tool,
+            cause,
+        }))
+    };
+    Log::for_run("run-tool-failures")
+        .node("build", started(1))
+        .node("build", session_opened("session-1"))
+        .node(
+            "build",
+            tool_failed(
+                yunta_core::RunTool::CheckArtifact,
+                RunToolFailureCause::CallFailed,
+            ),
+        )
+        .node(
+            "build",
+            tool_failed(
+                yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
+                RunToolFailureCause::ApprovalBlocked,
+            ),
+        )
+        .node("build", failed(TokenUsage::default()))
+        .build()
+}
+
+#[test]
+fn only_the_latest_run_tool_failure_of_each_attempt_is_derived() {
+    use yunta_core::events::RunToolFailureCause;
+    let first = run_tool_failure_log();
+    let state = derive(&first);
+    let last = state
+        .nodes
+        .get("build")
+        .and_then(|record| record.last_tool_failure.as_ref())
+        .expect("last failure survives the terminal");
+    assert_eq!(
+        last.tool,
+        yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions)
+    );
+    assert_eq!(last.cause, RunToolFailureCause::ApprovalBlocked);
+    let json = serde_json::to_string(&first[3]).expect("failure event serializes");
+    assert!(!json.contains("arguments") && !json.contains("response"));
+
+    let mut retry = first;
+    let next = Log::for_run("run-tool-failures")
+        .node("build", started(2))
+        .build()
+        .remove(0);
+    retry.push(yunta_core::events::StoredEvent {
+        seq: 6_u64.into(),
+        ..next
+    });
+    assert!(derive(&retry)
+        .nodes
+        .get("build")
+        .and_then(|record| record.last_tool_failure.as_ref())
+        .is_none());
 }
 
 /// One node, one attempt, still open: a session, two tool calls and one

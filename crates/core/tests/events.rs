@@ -55,6 +55,7 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
         | EventPayload::Children(ChildEvent::Finished(_))
         | EventPayload::Session(SessionEvent::CapabilityDegraded(_))
         | EventPayload::Session(SessionEvent::WriteRefused(_))
+        | EventPayload::Session(SessionEvent::RunToolFailed(_))
         | EventPayload::Run(RunEvent::Paused(_))
         | EventPayload::Run(RunEvent::Resumed(_))
         | EventPayload::Run(RunEvent::Finished(_)) => {}
@@ -190,12 +191,12 @@ fn every_domain_declares_the_kinds_the_wire_carries() {
 }
 
 #[test]
-fn there_are_exactly_38_kinds_with_distinct_names() {
+fn there_are_exactly_39_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 38);
+    assert_eq!(kinds.len(), 39);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 38, "expected 38 distinct kind names");
+    assert_eq!(names.len(), 39, "expected 39 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -264,6 +265,7 @@ fn kind_names_match_the_spec_exactly() {
         "child_run_finished",
         "capability_degraded",
         "write_refused",
+        "run_tool_failed",
         "run_paused",
         "run_resumed",
         "run_finished",

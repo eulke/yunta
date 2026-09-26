@@ -142,6 +142,9 @@ fn session_words(happening: &session::happening::Happening) -> String {
             &one_line(policy),
         ),
         H::Refused(target) => format!("write refused: {}", target.sentence()),
+        H::RunToolFailed { tool, cause } => {
+            format!("run tool call failed: {} ({})", tool.name(), cause.as_str())
+        }
     }
 }
 

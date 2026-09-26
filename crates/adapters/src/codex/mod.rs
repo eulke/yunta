@@ -1,22 +1,8 @@
 //! The real `codex` adapter: spawns `codex exec --json` headless,
 //! streams its JSONL into `AgentEvent`s (`parse.rs`), and maps yunta's
 //! portable request fields onto the CLI's own flags (`permissions.rs`).
-//! Never exercised by the automated suite — no real LLM in CI — covered
-//! instead by `crates/adapters/tests/codex.rs` against a scripted fake
-//! binary, matching `claude_code`'s own testing shape exactly.
-//!
-//! **No live smoke test against the real binary — a documented gap, not
-//! a silent skip.** The `claude_code` adapter's own manual smoke test
-//! ran against `claude`, which is installed and authenticated in that
-//! sandbox. No `codex` binary exists here (`which codex` finds nothing)
-//! and no OpenAI credentials are configured — there is no way to run one
-//! from this environment. What the wire protocol looks like isn't a
-//! guess, though: `parse.rs`'s own doc comment cites the CLI's own
-//! source (`codex-rs/exec/src/exec_events.rs`, openai/codex) for every
-//! event and field shape this adapter reads, the same rigor applied to
-//! `claude_code`'s own CLI-specific mapping — the piece that's missing
-//! is only live confirmation that the installed binary actually behaves
-//! the way its own source says it should.
+//! Automated tests use a scripted CLI. A live Codex probe is run
+//! separately when the binary and credentials are available.
 //!
 //! **`resume_session` is a fixed `true`, not literally "calculated in
 //! the constructor from `probe()`"** the way the adapter spec's own
@@ -192,6 +178,10 @@ fn config_overrides(req: &SessionRequest) -> Vec<String> {
             ConfigOverride::string(
                 format!("mcp_servers.{server}.bearer_token_env_var"),
                 TOKEN_VAR,
+            ),
+            ConfigOverride::string(
+                format!("mcp_servers.{server}.default_tools_approval_mode"),
+                "approve",
             ),
         ] {
             args.extend(setting.into_args());

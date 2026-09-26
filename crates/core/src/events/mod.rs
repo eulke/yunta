@@ -300,10 +300,10 @@ impl schemars::JsonSchema for StoredEvent {
 ///
 /// Nine arms, one per domain; each domain declares its own kinds, their
 /// payloads and their names. Nothing outside a domain has to know all
-/// thirty-eight, and a kind that gains a domain gains it in one file.
+/// thirty-nine, and a kind that gains a domain gains it in one file.
 ///
 /// On the wire this is still one flat object tagged by `kind`: `serde`
-/// goes through a private flat enum holding the thirty-eight in the
+/// goes through a private flat enum holding the thirty-nine in the
 /// order the log has always written them, so the shape a log carries is
 /// independent of the shape the engine reads.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -321,7 +321,7 @@ pub enum EventPayload {
 }
 
 /// The schema published for an event payload is the wire shape's: a
-/// `oneOf` of thirty-eight branches, each pinning its own `kind`, in the
+/// `oneOf` of thirty-nine branches, each pinning its own `kind`, in the
 /// order the log writes them. The nine domains are an internal shape and
 /// no reader of `events.json` ever learns about them.
 impl schemars::JsonSchema for EventPayload {
@@ -402,6 +402,7 @@ wire_kinds! {
     ChildRunFinished => "child_run_finished",
     CapabilityDegraded => "capability_degraded",
     WriteRefused => "write_refused",
+    RunToolFailed => "run_tool_failed",
     RunPaused => "run_paused",
     RunResumed => "run_resumed",
     RunFinished => "run_finished",

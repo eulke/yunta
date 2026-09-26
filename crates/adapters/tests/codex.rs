@@ -217,6 +217,54 @@ async fn an_mcp_tool_call_item_maps_to_tool_use_digesting_its_server_and_tool() 
 }
 
 #[tokio::test]
+async fn failed_run_tool_calls_report_only_a_known_tool_and_closed_cause() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            THREAD_STARTED_LINE,
+            r#"{"type":"item.completed","item":{"type":"mcp_tool_call","server":"yunta-run","tool":"yunta_submit_questions","status":"failed","error":{"message":"approval policy is Never; secret=top-secret"},"arguments":{"secret":"top-secret"}}}"#,
+            r#"{"type":"item.completed","item":{"type":"mcp_tool_call","server":"yunta-run","tool":"yunta_submit_questions","status":"failed","arguments":{"secret":"top-secret"}}}"#,
+            r#"{"type":"item.completed","item":{"type":"mcp_tool_call","server":"yunta-run","tool":"yunta_submit_questions","status":"approval_denied","arguments":{"secret":"top-secret"}}}"#,
+            r#"{"type":"item.completed","item":{"type":"mcp_tool_call","server":"other","tool":"yunta_submit_questions","status":"failed","error":"approval blocked"}}"#,
+            r#"{"type":"item.completed","item":{"type":"mcp_tool_call","server":"yunta-run","tool":"unknown_tool","status":"failed","error":"approval blocked"}}"#,
+        ],
+    );
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let events = drain(adapter().spawn(req).await.unwrap()).await;
+    let failed: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::RunToolFailed { tool, cause } => Some((*tool, *cause)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        failed,
+        vec![
+            (
+                yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
+                yunta_core::events::RunToolFailureCause::CallFailed
+            ),
+            (
+                yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
+                yunta_core::events::RunToolFailureCause::CallFailed
+            ),
+            (
+                yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
+                yunta_core::events::RunToolFailureCause::ApprovalBlocked
+            ),
+        ]
+    );
+    assert!(!format!("{failed:?}").contains("top-secret"));
+}
+
+#[tokio::test]
 async fn a_web_search_item_maps_to_tool_use_digesting_its_query() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(
@@ -891,6 +939,10 @@ async fn the_per_run_tools_reach_the_session_with_the_token_only_in_the_environm
         "the credential is named, not inlined: {args}"
     );
     assert!(
+        args.contains("mcp_servers.yunta-run.default_tools_approval_mode=\"approve\""),
+        "calls on the ephemeral server are approved without prompting: {args}"
+    );
+    assert!(
         env.contains("YUNTA_RUN_TOOLS_TOKEN=s3cr3t-token-value"),
         "the token reaches the child by environment"
     );
@@ -989,8 +1041,8 @@ async fn no_dead_config_override_reaches_the_cli() {
         .collect();
     assert_eq!(
         server.len(),
-        2,
-        "the per-run server takes its url and its credential's variable, nothing more: {args:?}"
+        3,
+        "the per-run server takes its url, credential variable and approval mode: {args:?}"
     );
     assert!(
         server

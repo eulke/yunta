@@ -13,10 +13,11 @@
 //! and correct cost attribution matters more than a cutoff this CLI's
 //! atomic-turn execution model can't reliably support anyway.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde_json::Value;
-use yunta_core::{InvalidId, ModelName, SessionId};
+use yunta_core::{InvalidId, ModelName, RunTool, SessionId};
 
 use crate::failure;
 use yunta_core::events::ToolTarget;
@@ -56,7 +57,12 @@ struct SystemLine {
     rest: Value,
 }
 
-pub(super) fn parse_line(line: &str, cwd: &Path, fence: Option<&Coverage>) -> Vec<AgentEvent> {
+pub(super) fn parse_line(
+    line: &str,
+    cwd: &Path,
+    fence: Option<&Coverage>,
+    run_tool_calls: &mut HashMap<String, RunTool>,
+) -> Vec<AgentEvent> {
     // A line that is not JSON at all is not this protocol: the stream
     // carries whatever the CLI wrote to stdout, warnings included.
     let Ok(parsed) = serde_json::from_str::<ClaudeLine>(line) else {
@@ -66,8 +72,12 @@ pub(super) fn parse_line(line: &str, cwd: &Path, fence: Option<&Coverage>) -> Ve
         ClaudeLine::System(system) if system.subtype.as_deref() == Some("init") => {
             opened(&system.rest, fence)
         }
-        ClaudeLine::Assistant(value) => assistant_message(&value),
-        ClaudeLine::User(value) => refused_writes(&value, cwd),
+        ClaudeLine::Assistant(value) => assistant_message(&value, run_tool_calls),
+        ClaudeLine::User(value) => {
+            let mut events = refused_writes(&value, cwd);
+            events.extend(failed_run_tools(&value, run_tool_calls));
+            events
+        }
         ClaudeLine::Result(value) => result_events(&value),
         ClaudeLine::System(_) | ClaudeLine::Unknown => Vec::new(),
     }
@@ -192,7 +202,10 @@ fn failed(error: AgentError) -> AgentEvent {
     }
 }
 
-fn assistant_message(value: &Value) -> Vec<AgentEvent> {
+fn assistant_message(
+    value: &Value,
+    run_tool_calls: &mut HashMap<String, RunTool>,
+) -> Vec<AgentEvent> {
     let Some(content) = value
         .get("message")
         .and_then(|m| m.get("content"))
@@ -200,7 +213,50 @@ fn assistant_message(value: &Value) -> Vec<AgentEvent> {
     else {
         return Vec::new();
     };
+    for item in content {
+        if item.get("type").and_then(Value::as_str) == Some("tool_use") {
+            if let (Some(id), Some(name)) = (
+                item.get("id").and_then(Value::as_str),
+                item.get("name").and_then(Value::as_str),
+            ) {
+                if let Some(tool) = RunTool::from_claude_name(name) {
+                    run_tool_calls.insert(id.to_string(), tool);
+                }
+            }
+        }
+    }
     content.iter().filter_map(content_event).collect()
+}
+
+fn failed_run_tools(
+    value: &Value,
+    run_tool_calls: &mut HashMap<String, RunTool>,
+) -> Vec<AgentEvent> {
+    let Some(content) = value
+        .get("message")
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    content
+        .iter()
+        .filter_map(|part| {
+            if part.get("type").and_then(Value::as_str) != Some("tool_result") {
+                return None;
+            }
+            let id = part.get("tool_use_id")?.as_str()?;
+            let tool = run_tool_calls.remove(id)?;
+            if part.get("is_error").and_then(Value::as_bool) == Some(true) {
+                Some(AgentEvent::RunToolFailed {
+                    tool,
+                    cause: yunta_core::events::RunToolFailureCause::CallFailed,
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn content_event(item: &Value) -> Option<AgentEvent> {

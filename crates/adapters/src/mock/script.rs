@@ -113,8 +113,8 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
         if !stops.waited(step.after_ms()).await {
             return;
         }
-        let event = match played(step, script.run_tools_endpoint.as_ref()).await {
-            Ok(event) => event,
+        let generated = match played(step, script.run_tools_endpoint.as_ref()).await {
+            Ok(events) => events,
             Err(message) => {
                 let _ = events.send(AgentEvent::Failed {
                     error: AgentError::message(message),
@@ -123,8 +123,14 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
                 return;
             }
         };
-        if events.send(event).is_err() {
-            return;
+        for event in generated {
+            let terminal = matches!(event, AgentEvent::Failed { .. });
+            if events.send(event).is_err() {
+                return;
+            }
+            if terminal {
+                return;
+            }
         }
     }
 
@@ -136,8 +142,8 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
 async fn played(
     step: MockStep,
     endpoint: Option<&RunToolsEndpoint>,
-) -> std::result::Result<AgentEvent, String> {
-    Ok(match step {
+) -> std::result::Result<Vec<AgentEvent>, String> {
+    Ok(vec![match step {
         MockStep::ToolUse { name, target, .. } => AgentEvent::ToolUse {
             name,
             target: yunta_core::events::ToolTarget::opaque(target.as_bytes()),
@@ -160,7 +166,7 @@ async fn played(
             expect,
             ..
         } => return called(tool, arguments, expect, endpoint).await,
-    })
+    }])
 }
 
 /// One `run_tool` step: a real MCP call over the wire, judged against
@@ -176,20 +182,50 @@ async fn called(
     arguments: serde_json::Map<String, serde_json::Value>,
     expect: ToolExpectation,
     endpoint: Option<&RunToolsEndpoint>,
-) -> std::result::Result<AgentEvent, String> {
+) -> std::result::Result<Vec<AgentEvent>, String> {
     match (call_run_tool(endpoint, &tool, arguments).await, expect) {
-        (Ok(answer), ToolExpectation::Accepted) => Ok(AgentEvent::ToolUse {
+        (Ok(answer), ToolExpectation::Accepted) => Ok(vec![AgentEvent::ToolUse {
             name: tool,
             target: yunta_core::events::ToolTarget::opaque(answer.as_bytes()),
-        }),
-        (Err(error), ToolExpectation::Refused) => Ok(AgentEvent::ToolUse {
-            target: yunta_core::events::ToolTarget::opaque(yunta_core::describe(&error).as_bytes()),
-            name: tool,
-        }),
-        (Err(error), ToolExpectation::Accepted) => Err(yunta_core::describe(&error)),
-        (Ok(_), ToolExpectation::Refused) => Err(format!(
-            "fixture expected `{tool}` to be refused and it was accepted"
-        )),
+        }]),
+        (Err(error), ToolExpectation::Refused) if error.reached_call() => {
+            let mut events = Vec::new();
+            if let Some(known) = yunta_core::RunTool::parse(&tool) {
+                events.push(AgentEvent::RunToolFailed {
+                    tool: known,
+                    cause: yunta_core::events::RunToolFailureCause::CallFailed,
+                });
+            }
+            events.push(AgentEvent::ToolUse {
+                target: yunta_core::events::ToolTarget::opaque(tool.as_bytes()),
+                name: tool,
+            });
+            Ok(events)
+        }
+        (Err(error), _) => {
+            let mut events = Vec::new();
+            let known = yunta_core::RunTool::parse(&tool);
+            if error.reached_call() {
+                if let Some(known) = known {
+                    events.push(AgentEvent::RunToolFailed {
+                        tool: known,
+                        cause: yunta_core::events::RunToolFailureCause::CallFailed,
+                    });
+                }
+            }
+            let message = known.map_or_else(
+                || "run tool call failed".to_string(),
+                |known| format!("run tool `{}` failed", known.name()),
+            );
+            events.push(AgentEvent::Failed {
+                error: AgentError::message(message),
+                retryable: false,
+            });
+            Ok(events)
+        }
+        (Ok(_), ToolExpectation::Refused) => {
+            Err("fixture expected a refused run tool call and it was accepted".to_string())
+        }
     }
 }
 

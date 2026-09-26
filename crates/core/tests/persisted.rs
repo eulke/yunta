@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use yunta_core::persisted::{Persisted, PersistedDoc, PersistedError};
+use yunta_core::persisted::{Encoding, Persisted, PersistedDoc, PersistedError};
 use yunta_core::PackLock;
 use yunta_testkit_core::persisted::holds_its_version;
 
@@ -36,6 +36,31 @@ fn manifest() -> yunta_core::Manifest {
         paths: None,
         pack: None,
     }
+}
+
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct JsonDocument {
+    name: String,
+}
+
+impl Persisted for JsonDocument {
+    const SCHEMA_VERSION: u32 = 1;
+    const NAME: &'static str = "JSON document";
+    const ENCODING: Encoding = Encoding::Json;
+}
+
+#[test]
+fn a_json_persisted_document_keeps_its_encoding_and_unknown_fields() {
+    let read =
+        PersistedDoc::<JsonDocument>::read(br#"{"schema_version":1,"name":"kept","future":42}"#)
+            .expect("JSON document reads");
+    assert_eq!(read.doc.name, "kept");
+    assert_eq!(read.unknown_keys(), ["future"]);
+    let bytes = read.write().expect("JSON document writes");
+    let back: serde_json::Value = serde_json::from_slice(&bytes).expect("still JSON");
+    assert_eq!(back["name"], "kept");
+    assert_eq!(back["future"], 42);
+    assert_eq!(back["schema_version"], 1);
 }
 
 #[test]
@@ -128,4 +153,44 @@ fn a_frozen_manifest_that_says_inherit_reads_as_none() {
         panic!("expected a workflow node");
     };
     assert_eq!(*isolation, yunta_core::Isolation::None);
+}
+
+#[test]
+fn a_frozen_fanout_manifest_round_trips_without_reordering_modes() {
+    let mut manifest = manifest();
+    manifest.workflow = yunta_core::workflow::read::read(
+        "name: ship\nmodes:\n  quick: { include: [review] }\n  standard: { include: [review] }\n  full: { include: all }\nnodes:\n  - id: review\n    kind: prompt\n    runners: [first, second]\n    prompt: audit\n",
+        std::path::Path::new("ship.yaml"),
+    ).expect("an authored fan-out expands");
+    let bytes = PersistedDoc::of(manifest.clone())
+        .write()
+        .expect("manifest writes");
+    let text = String::from_utf8(bytes.clone()).expect("YAML is UTF-8");
+    let quick = text.find("quick:").expect("quick is present");
+    let standard = text.find("standard:").expect("standard is present");
+    let full = text.find("full:").expect("full is present");
+    assert!(
+        quick < standard && standard < full,
+        "declaration order survives writing: {text}"
+    );
+    let read = PersistedDoc::<yunta_core::Manifest>::read(&bytes).expect("generated ids read");
+    let modes: Vec<_> = read
+        .doc
+        .workflow
+        .modes
+        .as_ref()
+        .expect("modes")
+        .keys()
+        .map(|name| name.as_str())
+        .collect();
+    assert_eq!(modes, ["quick", "standard", "full"]);
+    let ids: Vec<_> = read
+        .doc
+        .workflow
+        .nodes
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect();
+    assert_eq!(ids, ["review@first", "review@second"]);
+    assert_eq!(read.doc.workflow, manifest.workflow);
 }

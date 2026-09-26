@@ -10,12 +10,11 @@ su parser.
 > detalle se fija acá, con cita de la fuente cuando existe y marcado
 > **[inferido]** cuando no hay texto normativo literal que lo respalde.
 
-## 0. Conteo de eventos
+## 0. Event count
 
-La tabla de eventos del Contrato del Run tiene 31 filas y **38 `kind` distintos**
-(25 filas de 1 kind, 4 filas de 2 kinds, 1 fila de 3 kinds y 1 fila de 2 kinds para
-el par de preguntas). La tabla es el contenido normativo; este documento especifica
-esos 38 kinds tal como la tabla los enumera.
+The current Run Contract event table has 32 rows and **39 `kind` names**.
+It had 31 rows and 38 kinds before `run_tool_failed` was added. The table
+defines the normative set; this document specifies each payload.
 
 ## 1. Envelope común
 
@@ -27,7 +26,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | uno de los 38 nombres de este documento, con su sufijo `_vN` si no es la v1 |
+| `kind` | string | One of the 39 names in this document, with a `_vN` suffix beyond v1. |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
 
@@ -532,6 +531,21 @@ tuvo el artifact y el log no dice cómo.
 |---|---|---|---|
 | `session_id` | `SessionId` | sí | la sesión abierta cuando el cerco rechazó la escritura |
 | `target` | `ToolTarget` | sí | el path, relativo al worktree cuando está bajo él — el mismo tipo que `agent_message.target` |
+
+### 5.25a `run_tool_failed` — adapter (recorded by the engine)
+
+A failed call to a known tool on the ephemeral `yunta-run` server. This is a
+nonterminal session event; it does not claim the node failed because of the
+call. The node ledger retains only the last failure of each attempt for status,
+while the append-only log retains every occurrence.
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `session_id` | `SessionId` | yes | The session that made the call. |
+| `tool` | known run-tool name | yes | Resolved through the shared run-tool catalog. |
+| `cause` | `approval_blocked \| call_failed` | yes | A closed classification, never a CLI error message. |
+
+The payload contains no arguments, tool response, or free-form error text.
 
 ### 5.26 `run_paused` / `run_resumed` / `run_finished` — engine
 **Fuente:** razón / estado terminal, métricas

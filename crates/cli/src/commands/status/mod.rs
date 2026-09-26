@@ -79,6 +79,17 @@ fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState) {
                 node.id,
                 NodeDisplay::standing(&node.state).label()
             );
+            if let Some(failed) = state
+                .nodes
+                .get(&node.id)
+                .and_then(|record| record.last_tool_failure.as_ref())
+            {
+                println!(
+                    "{under}  last failed call of attempt: {} ({})",
+                    failed.tool.name(),
+                    failed.cause.as_str()
+                );
+            }
         }
     }
 

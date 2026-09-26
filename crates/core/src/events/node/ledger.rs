@@ -151,6 +151,9 @@ pub struct NodeRecord {
     pub refused: Vec<RefusedWrite>,
     /// The tool calls the open attempt made, oldest first.
     pub calls: Vec<ToolCall>,
+    /// Last failed run-tool call of the current or most recently closed
+    /// attempt. A new start clears it; a terminal preserves it.
+    pub last_tool_failure: Option<crate::events::RunToolFailedPayload>,
     pub last_event_at: Option<DateTime<Utc>>,
     /// The session of a previous attempt that no terminal ever closed —
     /// what a resume finds when a crash cut the attempt between its
@@ -341,6 +344,7 @@ impl NodeLedger {
                 record.tokens_this_attempt = TokenUsage::default();
                 record.sessions.clear();
                 record.calls.clear();
+                record.last_tool_failure = None;
             }
             NodeEvent::Finished(p) => {
                 let attempt = record.tokens_this_attempt + p.tokens_used;
@@ -423,6 +427,7 @@ impl NodeLedger {
                 session_id: p.session_id.clone(),
                 target: p.target.clone(),
             }),
+            SessionEvent::RunToolFailed(p) => record.last_tool_failure = Some(p.clone()),
             SessionEvent::Message(p) => match p.message_type {
                 AgentMessageType::ToolUse => record.calls.push(ToolCall {
                     tool_name: p.tool_name.clone(),

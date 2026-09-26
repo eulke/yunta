@@ -61,10 +61,20 @@ pub(crate) struct NodeJson {
     /// acts on without parsing one.
     #[serde(skip_serializing_if = "Option::is_none")]
     session_death: Option<SessionDeathJson>,
+    /// Most recent failed `yunta-run` call in this node's attempt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_tool_failure: Option<RunToolFailureJson>,
+}
+
+#[derive(serde::Serialize)]
+pub(crate) struct RunToolFailureJson {
+    tool: String,
+    cause: yunta_core::events::RunToolFailureCause,
+    session_id: String,
 }
 
 impl NodeJson {
-    pub(super) fn of(node: &NodeFrame) -> Self {
+    pub(super) fn of(node: &NodeFrame, record: Option<&yunta_core::events::NodeRecord>) -> Self {
         let display = NodeDisplay::standing(&node.state);
         NodeJson {
             id: node.id.to_string(),
@@ -82,6 +92,13 @@ impl NodeJson {
                 }) => Some(SessionDeathJson::of(died)),
                 _ => None,
             },
+            last_tool_failure: record
+                .and_then(|record| record.last_tool_failure.as_ref())
+                .map(|failed| RunToolFailureJson {
+                    tool: failed.tool.name().to_string(),
+                    cause: failed.cause,
+                    session_id: failed.session_id.to_string(),
+                }),
         }
     }
 }

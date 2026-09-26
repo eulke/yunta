@@ -111,6 +111,94 @@ fn status_json_lists_every_declared_node_in_order_under_schema_version_five() {
     );
 }
 
+const CORRECTED_WORKFLOW: &str = r#"
+name: corrected-submission
+nodes:
+  - id: ask
+    kind: prompt
+    runner: executor
+    prompt: "Submit an empty questions document."
+    artifacts:
+      produces: [questions]
+"#;
+
+const CORRECTED_FIXTURE: &str = r#"
+capabilities: { run_tools: true }
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_questions
+        expect: refused
+        arguments:
+          document:
+            questions: "secret-in-arguments"
+      - type: run_tool
+        tool: yunta_submit_questions
+        arguments:
+          document:
+            questions: []
+    outcome: { type: completed, summary: corrected }
+"#;
+
+fn corrected_submission_run() -> (Checkout, String) {
+    let project = Checkout::new()
+        .config("defaults:\n  isolation: none\nrunners:\n  executor:\n    - { adapter: mock, model: mock-model }\n")
+        .workflow("wf", CORRECTED_WORKFLOW)
+        .file("fixture.yaml", CORRECTED_FIXTURE)
+        .committed();
+    let run = project.run(
+        std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
+        &[
+            "run",
+            "wf.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml",
+        ],
+    );
+    assert!(run.status.success(), "{}", stderr(&run));
+    let run_id = run_id_from(&run);
+    (project, run_id)
+}
+
+#[test]
+fn status_reports_the_last_failed_run_tool_call_without_making_it_the_run_outcome() {
+    let (project, run_id) = corrected_submission_run();
+    let text = status(&project, &run_id, &[]);
+    assert!(
+        text.contains("last failed call of attempt: yunta_submit_questions (call_failed)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("1/1 nodes") && !text.contains("secret-in-arguments"),
+        "{text}"
+    );
+
+    let json: serde_json::Value =
+        serde_json::from_str(&status(&project, &run_id, &["--json"])).expect("status JSON");
+    assert_eq!(json["outcome"], "finished");
+    assert_eq!(
+        json["nodes"][0]["last_tool_failure"]["tool"],
+        "yunta_submit_questions"
+    );
+    assert_eq!(
+        json["nodes"][0]["last_tool_failure"]["cause"],
+        "call_failed"
+    );
+    assert!(!json.to_string().contains("secret-in-arguments"));
+
+    let log = std::fs::read_to_string(project.home.join("runs").join(&run_id).join("events.jsonl"))
+        .expect("append-only event log");
+    let failures: Vec<serde_json::Value> = log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("stored event"))
+        .filter(|event| event["kind"] == "run_tool_failed")
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert!(!failures[0].to_string().contains("secret-in-arguments"));
+}
+
 /// The workflow and the scripted session behind the questions tests: a
 /// node that asks, and a session that submits one question and closes.
 const ASKING: &str = r#"

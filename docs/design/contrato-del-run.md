@@ -67,7 +67,9 @@ Tipos: `string`, `number`, `boolean`, `enum`, `path`, `document`. `required` y `
 `description` no es decorativa: es lo que `list_workflows` le muestra a un agente cliente y lo que `--help` muestra a una persona. Un catálogo sin descripciones es una lista de nombres sin sentido.
 Reglas: todo se valida **al crear el run, antes del primer token**; los defaults se resuelven en ese momento y quedan congelados en el manifest (resolverlos por nodo introduciría estado no determinista); y `yunta check` verifica que todo `{{inputs.x}}` de los templates refiera a un input declarado.
 # 3. Modelo de eventos
-El event log es append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`. El estado actual no se guarda: se **deriva** por replay del log (snapshots solo como optimización, jamás como fuente de verdad). Los 38 tipos de evento (31 filas; varias agrupan variantes emparentadas):
+The event log is append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`.
+Current state is derived by replaying that log; snapshots are only an optimization.
+The current table contains 39 event kinds in 32 rows; some rows group related variants:
 | Evento | Emisor | Payload relevante |
 |---|---|---|
 | `run_created` | engine | manifest hash, inputs, modo, `promoted_from?` |
@@ -100,6 +102,7 @@ El event log es append-only: `(run_id, seq, timestamp, node_id?, kind, payload_j
 | `child_run_created` / `child_run_finished` | engine | node_id, child run_id, `workflow_hash` del hijo, estado terminal |
 | `capability_degraded` | engine | capacidad, adapter, política aplicada |
 | `write_refused` | adapter | sesión que la rechazó, y el path que la escritura nombraba (§6) |
+| `run_tool_failed` | adapter (recorded by engine) | session ID, known `yunta-run` tool, closed failure cause; no arguments, response, or raw error text |
 | `run_paused` / `run_resumed` / `run_finished` | engine | razón / estado terminal, métricas |
 
 Dos decisiones incorporadas al modelo. Primera: `agent_session_opened` es obligatorio para los adapters y transporta el session_id — es lo que hace posible reanudar conversaciones (§8.1). Segunda: el uso de tokens viaja en eventos, así que los presupuestos (`limits.*`) se evalúan en el engine contra el log, nunca contra el autorreporte del agente.

@@ -222,17 +222,22 @@ impl ClaudeCodeAdapter {
 struct ClaudeParser {
     cwd: PathBuf,
     fence: Coverage,
+    run_tool_calls: std::collections::HashMap<String, yunta_core::RunTool>,
 }
 
 impl ClaudeParser {
     fn new(cwd: PathBuf, fence: Coverage) -> Self {
-        ClaudeParser { cwd, fence }
+        ClaudeParser {
+            cwd,
+            fence,
+            run_tool_calls: std::collections::HashMap::new(),
+        }
     }
 }
 
 impl LineParser for ClaudeParser {
     fn parse(&mut self, line: &str) -> Vec<AgentEvent> {
-        parse::parse_line(line, &self.cwd, Some(&self.fence))
+        parse::parse_line(line, &self.cwd, Some(&self.fence), &mut self.run_tool_calls)
     }
 }
 

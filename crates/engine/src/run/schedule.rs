@@ -711,3 +711,38 @@ fn nothing_runnable(board: &Board<'_>) -> Decision {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::next_mode_after;
+    use yunta_core::persisted::{Persisted, PersistedDoc};
+
+    #[test]
+    fn a_persisted_mode_ladder_promotes_standard_to_full() {
+        let workflow = yunta_core::yaml::parse(
+            "name: ship\nmodes:\n  quick: { include: all }\n  standard: { include: all }\n  full: { include: all }\nnodes:\n  - { id: review, kind: bash, run: 'true' }\n",
+        ).expect("a mode ladder");
+        let manifest = yunta_core::Manifest {
+            schema_version: <yunta_core::Manifest as Persisted>::SCHEMA_VERSION,
+            yunta_version: "0.0.5".to_string(),
+            workflow,
+            config: yunta_core::ConfigLayer::default(),
+            inputs: std::collections::BTreeMap::new(),
+            prompts: std::collections::BTreeMap::new(),
+            base_branch: "main".to_string(),
+            base_commit: "deadbeef".into(),
+            isolation: yunta_core::Isolation::None,
+            max_parallel_nodes: 1,
+            workflow_hash: yunta_core::sha256_hex(b"workflow"),
+            config_hash: yunta_core::sha256_hex(b"config"),
+            paths: None,
+            pack: None,
+        };
+        let bytes = PersistedDoc::of(manifest).write().expect("manifest writes");
+        let read = PersistedDoc::<yunta_core::Manifest>::read(&bytes).expect("manifest reads");
+        assert_eq!(
+            next_mode_after(&read.doc.workflow, &"standard".into()),
+            Some("full".into()),
+        );
+    }
+}

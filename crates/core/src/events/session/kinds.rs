@@ -9,6 +9,7 @@ pub enum SessionEvent {
     Message(AgentMessagePayload),
     CapabilityDegraded(CapabilityDegradedPayload),
     WriteRefused(WriteRefusedPayload),
+    RunToolFailed(RunToolFailedPayload),
 }
 
 impl SessionEvent {
@@ -18,6 +19,7 @@ impl SessionEvent {
         "agent_message",
         "capability_degraded",
         "write_refused",
+        "run_tool_failed",
     ];
 
     /// The persisted `kind` string of this fact.
@@ -27,6 +29,7 @@ impl SessionEvent {
             Self::Message(_) => "agent_message",
             Self::CapabilityDegraded(_) => "capability_degraded",
             Self::WriteRefused(_) => "write_refused",
+            Self::RunToolFailed(_) => "run_tool_failed",
         }
     }
 
@@ -43,6 +46,7 @@ impl SessionEvent {
             Self::Message(_) => false,
             Self::CapabilityDegraded(_) => false,
             Self::WriteRefused(_) => false,
+            Self::RunToolFailed(_) => false,
         }
     }
 

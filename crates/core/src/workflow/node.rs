@@ -275,13 +275,6 @@ impl<'de> Deserialize<'de> for Node {
 
         let fields: NodeFields = yaml::from_value(Value::Mapping(own))
             .map_err(|error| D::Error::custom(format!("{subject}: {error}")))?;
-        if fields.id.is_fan_out() {
-            return Err(D::Error::custom(format!(
-                "{subject}: `@` is reserved for the fan-out siblings the manifest expands \
-                 `runners:` into; an authored id is a letter followed by letters, digits, `_` \
-                 or `-`"
-            )));
-        }
         let kind: NodeKind = yaml::from_value(Value::Mapping(kind_part))
             .map_err(|error| D::Error::custom(format!("{subject}: {error}")))?;
         Ok(Node {

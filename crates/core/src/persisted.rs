@@ -47,7 +47,10 @@ pub trait Persisted: Serialize + DeserializeOwned {
     /// the other direction: this binary wrote that word itself, so the
     /// file is read under its replacement rather than refused. Documents
     /// that have retired nothing leave this alone.
-    fn reconcile(_value: &mut serde_json::Value) {}
+    fn reconcile(_value: &mut crate::yaml::Value) {}
+
+    /// JSON documents keep their existing JSON value path.
+    fn reconcile_json(_value: &mut serde_json::Value) {}
 }
 
 /// What a persisted document is written as.
@@ -111,15 +114,13 @@ impl<T: Persisted> PersistedDoc<T> {
     /// writer is refused naming both numbers, rather than parsed into a
     /// shape that happens to fit and acted on as if it were whole.
     pub fn read(bytes: &[u8]) -> Result<Self, PersistedError> {
-        let unreadable = |cause| PersistedError::Unreadable {
-            name: T::NAME,
-            cause,
-        };
-        let value: serde_json::Value = crate::yaml::parse_bytes(bytes).map_err(unreadable)?;
-        let schema_version = value
-            .get(T::VERSION_KEY)
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0) as u32;
+        match T::ENCODING {
+            Encoding::Yaml => Self::read_yaml(bytes),
+            Encoding::Json => Self::read_json(bytes),
+        }
+    }
+
+    fn check_version(schema_version: u32) -> Result<u32, PersistedError> {
         if schema_version > T::SCHEMA_VERSION {
             return Err(PersistedError::NewerWriter {
                 name: T::NAME,
@@ -127,10 +128,45 @@ impl<T: Persisted> PersistedDoc<T> {
                 supported: T::SCHEMA_VERSION,
             });
         }
+        Ok(schema_version)
+    }
+
+    fn read_yaml(bytes: &[u8]) -> Result<Self, PersistedError> {
+        let value: crate::yaml::Value =
+            crate::yaml::parse_bytes(bytes).map_err(Self::unreadable)?;
+        let schema_version = Self::check_version(
+            value
+                .get(T::VERSION_KEY)
+                .and_then(crate::yaml::Value::as_u64)
+                .unwrap_or(0) as u32,
+        )?;
         let mut reconciled = value.clone();
         T::reconcile(&mut reconciled);
-        let doc: T = serde_json::from_value(reconciled).map_err(|error| {
-            unreadable(crate::yaml::YamlError::Parse {
+        let doc = crate::yaml::from_value(reconciled).map_err(Self::unreadable)?;
+        let json = serde_json::to_value(value).map_err(|error| {
+            Self::unreadable(crate::yaml::YamlError::Serialize {
+                message: error.to_string(),
+            })
+        })?;
+        Ok(PersistedDoc {
+            schema_version,
+            unknown: unknown_beside(&json, &doc),
+            doc,
+        })
+    }
+
+    fn read_json(bytes: &[u8]) -> Result<Self, PersistedError> {
+        let mut value: serde_json::Value =
+            crate::yaml::parse_bytes(bytes).map_err(Self::unreadable)?;
+        let schema_version = Self::check_version(
+            value
+                .get(T::VERSION_KEY)
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as u32,
+        )?;
+        T::reconcile_json(&mut value);
+        let doc = serde_json::from_value(value.clone()).map_err(|error| {
+            Self::unreadable(crate::yaml::YamlError::Parse {
                 path: String::new(),
                 message: error.to_string(),
             })
@@ -149,12 +185,44 @@ impl<T: Persisted> PersistedDoc<T> {
     /// file a newer one wrote does not quietly delete what the newer one
     /// recorded.
     pub fn write(&self) -> Result<Vec<u8>, PersistedError> {
-        let unreadable = |cause| PersistedError::Unreadable {
-            name: T::NAME,
-            cause,
+        let text = match T::ENCODING {
+            Encoding::Yaml => self.write_yaml()?,
+            Encoding::Json => self.write_json()?,
         };
+        Ok(text.into_bytes())
+    }
+
+    fn write_yaml(&self) -> Result<String, PersistedError> {
+        // YAML mappings preserve insertion order. Passing the document
+        // through JSON would alphabetize `modes:` and change promotion.
+        let mut ordered = serde_norway::to_value(&self.doc).map_err(|error| {
+            Self::unreadable(crate::yaml::YamlError::Serialize {
+                message: error.to_string(),
+            })
+        })?;
+        if let Some(fields) = ordered.as_mapping_mut() {
+            fields.insert(
+                crate::yaml::Value::String(T::VERSION_KEY.to_string()),
+                crate::yaml::Value::from(T::SCHEMA_VERSION),
+            );
+            for (key, kept) in &self.unknown {
+                let key = crate::yaml::Value::String(key.clone());
+                if !fields.contains_key(&key) {
+                    let kept = serde_norway::to_value(kept).map_err(|error| {
+                        Self::unreadable(crate::yaml::YamlError::Serialize {
+                            message: error.to_string(),
+                        })
+                    })?;
+                    fields.insert(key, kept);
+                }
+            }
+        }
+        crate::yaml::to_string(&ordered).map_err(Self::unreadable)
+    }
+
+    fn write_json(&self) -> Result<String, PersistedError> {
         let mut value = serde_json::to_value(&self.doc).map_err(|error| {
-            unreadable(crate::yaml::YamlError::Serialize {
+            Self::unreadable(crate::yaml::YamlError::Serialize {
                 message: error.to_string(),
             })
         })?;
@@ -167,15 +235,18 @@ impl<T: Persisted> PersistedDoc<T> {
                 object.entry(key.clone()).or_insert_with(|| kept.clone());
             }
         }
-        let text = match T::ENCODING {
-            Encoding::Yaml => crate::yaml::to_string(&value).map_err(unreadable)?,
-            Encoding::Json => serde_json::to_string_pretty(&value).map_err(|error| {
-                unreadable(crate::yaml::YamlError::Serialize {
-                    message: error.to_string(),
-                })
-            })?,
-        };
-        Ok(text.into_bytes())
+        serde_json::to_string_pretty(&value).map_err(|error| {
+            Self::unreadable(crate::yaml::YamlError::Serialize {
+                message: error.to_string(),
+            })
+        })
+    }
+
+    fn unreadable(cause: crate::yaml::YamlError) -> PersistedError {
+        PersistedError::Unreadable {
+            name: T::NAME,
+            cause,
+        }
     }
 
     /// What this binary did not understand, as a reader names it — empty

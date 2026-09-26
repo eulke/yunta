@@ -35,6 +35,13 @@ pub(super) enum RunToolCallError {
     Refused { tool: String, text: String },
 }
 
+impl RunToolCallError {
+    /// A `tools/call` request was sent to the per-run server.
+    pub(super) fn reached_call(&self) -> bool {
+        matches!(self, Self::Call { .. } | Self::Refused { .. })
+    }
+}
+
 /// The mock's own MCP client leg: one `tools/call` against the
 /// session's per-run endpoint, exactly as a real CLI would place it.
 /// Returns a short digest of the response for the audit stream

@@ -119,6 +119,22 @@ pub(super) async fn apply_agent_event(
                     .map_err(DispatchError::Audit)?;
             }
         }
+        AgentEvent::RunToolFailed { tool, cause } => {
+            if let Some(session_id) = opened.clone() {
+                emit_audit(
+                    audit,
+                    EventPayload::Session(SessionEvent::RunToolFailed(
+                        yunta_core::events::RunToolFailedPayload {
+                            session_id,
+                            tool,
+                            cause,
+                        },
+                    )),
+                )
+                .await
+                .map_err(DispatchError::Audit)?;
+            }
+        }
         AgentEvent::ToolUse { name, target } => {
             emit_audit(
                 audit,

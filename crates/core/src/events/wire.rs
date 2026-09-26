@@ -9,7 +9,7 @@
 //!
 //! [`EventPayload`](super::EventPayload) is nine domain arms, because a
 //! kind belongs to a domain and nothing else should have to know all
-//! thirty-eight. This enum is the same thirty-eight, flat, in the order
+//! event kinds. This enum is the same set, flat, in the order
 //! the log has always written them, and `serde` moves between the two.
 //! The published JSON Schema is this enum's, which is why reorganising
 //! the Rust side leaves `events.json` untouched.
@@ -35,7 +35,7 @@ use super::{
 // have. Its doc comment is published in `events.json`, so it describes
 // the log to whoever reads that file, not this indirection to whoever
 // reads this one.
-/// All 38 event kinds, internally tagged by `kind`.
+/// All event kinds, internally tagged by `kind`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum EventPayloadWire {
@@ -74,6 +74,7 @@ pub(crate) enum EventPayloadWire {
     ChildRunFinished(ChildRunFinishedPayload),
     CapabilityDegraded(CapabilityDegradedPayload),
     WriteRefused(WriteRefusedPayload),
+    RunToolFailed(RunToolFailedPayload),
     RunPaused(RunPausedPayload),
     RunResumed(RunResumedPayload),
     RunFinished(RunFinishedPayload),
@@ -118,6 +119,7 @@ impl From<EventPayloadWire> for EventPayload {
             W::ChildRunFinished(p) => Self::Children(ChildEvent::Finished(p)),
             W::CapabilityDegraded(p) => Self::Session(SessionEvent::CapabilityDegraded(p)),
             W::WriteRefused(p) => Self::Session(SessionEvent::WriteRefused(p)),
+            W::RunToolFailed(p) => Self::Session(SessionEvent::RunToolFailed(p)),
             W::RunPaused(p) => Self::Run(RunEvent::Paused(p)),
             W::RunResumed(p) => Self::Run(RunEvent::Resumed(p)),
             W::RunFinished(p) => Self::Run(RunEvent::Finished(p)),
@@ -164,6 +166,7 @@ impl From<EventPayload> for EventPayloadWire {
             EventPayload::Children(ChildEvent::Finished(p)) => W::ChildRunFinished(p),
             EventPayload::Session(SessionEvent::CapabilityDegraded(p)) => W::CapabilityDegraded(p),
             EventPayload::Session(SessionEvent::WriteRefused(p)) => W::WriteRefused(p),
+            EventPayload::Session(SessionEvent::RunToolFailed(p)) => W::RunToolFailed(p),
             EventPayload::Run(RunEvent::Paused(p)) => W::RunPaused(p),
             EventPayload::Run(RunEvent::Resumed(p)) => W::RunResumed(p),
             EventPayload::Run(RunEvent::Finished(p)) => W::RunFinished(p),

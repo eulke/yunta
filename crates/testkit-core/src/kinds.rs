@@ -4,7 +4,7 @@
 //! Two crates need this list and neither can hold it: `yunta-core`'s own
 //! tests cannot reach the engine's derivation, and the engine's cannot
 //! reach a fixture that lives in another crate's test target. It lives
-//! here, once, so the two ask about the same thirty-eight.
+//! here, once, so the two ask about the same set.
 
 use std::collections::BTreeMap;
 use yunta_core::events::RecordedOrigin;
@@ -283,6 +283,11 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 yunta_core::events::ToolTarget::of_path(std::path::Path::new("docs/readme.md")),
             ),
         )),
+        EventPayload::Session(SessionEvent::RunToolFailed(RunToolFailedPayload {
+            session_id: "sess-1".into(),
+            tool: yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
+            cause: RunToolFailureCause::ApprovalBlocked,
+        })),
         EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
             "gate waiting".to_string(),
         ))),

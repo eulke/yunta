@@ -50,6 +50,11 @@ existing run is how `status`/`stats`/`graph` and the live view a `run` draws
 *render* information already in the log — never the log's content or the run's
 outcome.
 
+The manifest also preserves the declaration order of `modes:` for newly
+created runs, so promotion follows the authored sequence. Manifests written
+before that preservation remain readable, though an order already changed
+on disk cannot be reconstructed from the file.
+
 Waking a run does verify what it holds: `resume` reads back every artifact
 the run's log accepted, from the object the log names it by, and refuses to
 go on when one is gone or its bytes no longer hash to their own name. That
@@ -104,8 +109,10 @@ rule is refused with the value, what it was meant to be and the rule:
 
 - A node id, a runner name, a mode name, a task id, a question id, an
   adapter id and an executor name are a letter followed by letters, digits,
-  `_` or `-`. A fan-out sibling the manifest expands `runners:` into adds
-  `@` and its runner's name; authored YAML never spells that form.
+  `_` or `-`. `@` is reserved for the fan-out siblings Yunta generates from
+  `runners:`. `yunta check` rejects an authored node id containing `@`,
+  including the id of a child in a `parallel` group, before fan-out expands.
+  Frozen manifests read those generated `<base>@<runner>` ids back.
 - A model name and an agent name are one printable word without whitespace,
   as the adapter's CLI accepts them.
 - A run id, a publisher and a pack name are one path segment: printable,
@@ -369,11 +376,19 @@ draws. Every declared node is in it, the ones this run's mode leaves out
 included and marked `skipped`; a node the log never mentioned is in it too,
 because a document that left it out could not say whether the run is still on
 its way there or never going. Each entry is `{id, state, detail?, group?,
-waiting_on?}`: `state` is the word every text surface prints for a node, `detail`
+waiting_on?, session_death?, last_tool_failure?}`: `state` is the word every text
+surface prints for a node, `detail`
 is what qualifies it, `group` names the enclosing `parallel` group, and
 `waiting_on` carries the wait in the same shape the run-level one uses.
 `tasks` and `diagnostics` stay maps: a reader indexes those by id, and they
 carry no order of their own.
+
+`last_tool_failure`, when present, is `{session_id, tool, cause}` for the
+last failed `yunta-run` call of that node's current or most recently closed
+attempt. `cause` is `approval_blocked` or `call_failed`. A new attempt clears
+it. The field gives context and does not claim that the call caused the
+node's terminal outcome. The event log keeps every `run_tool_failed`; this
+status field keeps only the latest for the attempt.
 
 A node that failed because its session ended without ever reporting a terminal
 event carries `session_death`: the `adapter` whose session it was and, when that

@@ -10,6 +10,31 @@ use crate::hash::ContentHash;
 use crate::ids::{AdapterId, AgentName, ModelName, SessionId};
 use crate::{Capabilities, Capability};
 
+/// The closed reason a run tool call failed, without adapter error text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RunToolFailureCause {
+    ApprovalBlocked,
+    CallFailed,
+}
+
+impl RunToolFailureCause {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ApprovalBlocked => "approval_blocked",
+            Self::CallFailed => "call_failed",
+        }
+    }
+}
+
+/// One failed call to a tool this binary serves on `yunta-run`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RunToolFailedPayload {
+    pub session_id: SessionId,
+    pub tool: crate::RunTool,
+    pub cause: RunToolFailureCause,
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
 )]

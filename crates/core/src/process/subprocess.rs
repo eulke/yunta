@@ -458,5 +458,6 @@ fn describe(event: &AgentEvent) -> &'static str {
         AgentEvent::Note { .. } => "a note",
         AgentEvent::Completed { .. } => "a completion",
         AgentEvent::Failed { .. } => "a failure",
+        AgentEvent::RunToolFailed { .. } => "a run tool failure",
     }
 }
