@@ -201,6 +201,17 @@ waiting on and the exact option ids; `yunta resolve-gate <run_id> <option>`
 answers it from any process. See [gates from the
 outside](guide.md#gates-from-the-outside).
 
+## A node failed and `resume` pauses on the same failure
+
+A node with no `on_failure` re-route that fails leaves the decision to you:
+`yunta status <run_id>` lists `retry` and `abort`. Fix the cause in the run's
+own worktree (`~/.yunta/worktrees/<run_id>` by default), not in your checkout:
+the run starts from the commit it was created on and never sees files you add
+or change there afterwards. Then run
+`yunta resolve-gate <run_id> retry`. The node starts a fresh attempt; nothing
+before it runs again. A plain `yunta resume` asks the same question again
+rather than spending on a retry nobody chose.
+
 ## `yunta pack add`/`update` refuses
 
 - **`publisher "x" is not in permissions.packs.publishers.allow`** — your

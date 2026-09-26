@@ -187,10 +187,10 @@ pub(crate) fn without_menu(run_id: &RunId, reason: &str) -> String {
     let mut out = "waiting on:\n".to_string();
     out.push_str(&paragraph(reason, 1));
     out.push_str(&paragraph(
-        "no options to choose here: a menu is reconstructed for an exhausted \
-         re-route and for an unresolved gate node, and this pause is neither. \
-         Resolve it where it was raised — a budget, a scope, an answers file, \
-         a review on the forge — then hand the run back with:",
+        "no options to choose here: a menu is reconstructed for a failed node, \
+         an exhausted re-route and an unresolved gate node, and this pause is \
+         none of them. Resolve it where it was raised — a budget, a scope, an \
+         answers file, a review on the forge — then hand the run back with:",
         1,
     ));
     out.push_str(&verbatim(2, &advice::resume(run_id)));

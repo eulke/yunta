@@ -5,51 +5,12 @@
 //! process that paused the run) know what it's answering.
 
 use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
-use yunta_engine::{
-    current_escalation, resolve_gate, ResolveGateError, RunReport, RunState, RunTerminal,
-};
+use yunta_engine::{current_escalation, ResolveGateError, RunReport, RunState, RunTerminal};
 use yunta_testkit::Bench;
 use yunta_testkit_core::FixedClock;
 
-/// A bench whose run is parked: it drove `(workflow_yaml, fixture_yaml)`
-/// with no human present and stopped on a pause, which is where every
-/// test here starts.
-async fn paused(workflow_yaml: &str, fixture_yaml: &str) -> Bench {
-    let bench = Bench::new();
-    let RunReport { terminal, .. } = bench.run(workflow_yaml, fixture_yaml).await;
-    assert!(
-        matches!(terminal, RunTerminal::Paused { .. }),
-        "expected the run to pause, got {terminal:?}"
-    );
-    bench
-}
-
-/// Records `option` as the answer to whatever escalation the bench's run
-/// is parked on — the write a separate `yunta mcp` process makes, with
-/// nothing of the run's own process behind it.
-async fn resolve(bench: &Bench, option: &str) -> Result<(), ResolveGateError> {
-    resolve_gate(
-        &bench.manifest(),
-        &bench.storage.async_handle(),
-        &bench.run_id,
-        &FixedClock,
-        yunta_core::events::HumanChoice {
-            option: option.into(),
-            by: "mcp".into(),
-            free_text: None,
-        },
-    )
-    .await
-}
-
-/// How many of the run's events carry a payload `pred` accepts.
-fn count(bench: &Bench, pred: impl Fn(&yunta_core::events::EventPayload) -> bool) -> usize {
-    bench
-        .events()
-        .iter()
-        .filter(|e| e.payload().is_some_and(&pred))
-        .count()
-}
+mod common;
+use common::*;
 
 /// The frozen manifest of a run parked with `NoInteraction` alongside its
 /// log — exactly the two inputs a separate `resolve_gate` invocation
@@ -58,7 +19,7 @@ async fn paused_manifest_and_events(
     workflow_yaml: &str,
     fixture_yaml: &str,
 ) -> (yunta_core::Manifest, Vec<yunta_core::events::StoredEvent>) {
-    let bench = paused(workflow_yaml, fixture_yaml).await;
+    let bench = parked(workflow_yaml, fixture_yaml).await;
     (bench.manifest(), bench.events())
 }
 
@@ -143,22 +104,6 @@ async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
     assert!(escalation.options().iter().all(|o| !o.tradeoff.is_empty()));
 }
 
-#[tokio::test]
-async fn a_plain_failure_with_no_on_failure_has_no_escalation_to_reconstruct() {
-    // A pause with no menu of options (no on_failure, no gate) — nothing
-    // for `resolve_gate` to answer; the caller keeps its plain pause
-    // reason instead of inventing a decision that doesn't exist.
-    let workflow = r#"
-name: plain-failure
-nodes:
-  - id: broken
-    kind: bash
-    run: "false"
-"#;
-    let (manifest, events) = paused_manifest_and_events(workflow, "sessions: []\n").await;
-    assert!(current_escalation(&manifest, &yunta_engine::derive(&events)).is_none());
-}
-
 // --- resolve_gate writes ONLY the decision; the engine
 // consumes it on wake through its one existing consequence path.
 
@@ -171,17 +116,17 @@ sessions:
 
 #[tokio::test]
 async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
-    let bench = paused(
+    let bench = parked(
         HOPELESS_UNTIL_RETRIED_WORKFLOW,
         HOPELESS_UNTIL_RETRIED_FIXTURE,
     )
     .await;
 
-    resolve(&bench, "retry").await.unwrap();
+    answer_parked(&bench, "retry").await.unwrap();
     // resolve_gate writes ONLY the decision pair — the reroute
     // consequence is the engine's to apply, not this function's.
     assert_eq!(
-        count(&bench, |p| matches!(
+        events_matching(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Node(NodeEvent::Rerouted(_))
         )),
@@ -197,14 +142,14 @@ async fn a_pre_seeded_retry_is_consumed_by_a_plain_resume_and_finishes() {
     ));
     // The consuming engine never re-emits the recorded pair.
     assert_eq!(
-        count(&bench, |p| matches!(
+        events_matching(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Gates(GateEvent::Waiting(_))
         )),
         1
     );
     assert_eq!(
-        count(&bench, |p| matches!(
+        events_matching(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Gates(GateEvent::Resolved(_))
         )),
@@ -240,7 +185,7 @@ async fn a_pre_seeded_promote_closes_the_run_as_promoted_on_resume() {
     let report = bench.run(PROMOTABLE_WORKFLOW, "sessions: []\n").await;
     assert!(matches!(report.terminal, RunTerminal::Paused { .. }));
 
-    resolve(&bench, "promote").await.unwrap();
+    answer_parked(&bench, "promote").await.unwrap();
 
     let report = bench.wake_on_fixture("sessions: []\n").await;
     assert_eq!(
@@ -289,9 +234,9 @@ fn plan_runs(worktree: &std::path::Path) -> usize {
 
 #[tokio::test]
 async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume() {
-    let bench = paused(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
+    let bench = parked(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
 
-    resolve(&bench, "aprobar").await.unwrap();
+    answer_parked(&bench, "aprobar").await.unwrap();
     let RunReport { terminal, state } = bench.wake_on_fixture("sessions: []\n").await;
 
     assert_eq!(terminal, RunTerminal::Finished);
@@ -302,14 +247,14 @@ async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume(
     assert!(bench.worktree.join("shipped.txt").exists());
     // One recorded pair — the consuming engine never re-emits it.
     assert_eq!(
-        count(&bench, |p| matches!(
+        events_matching(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Gates(GateEvent::Waiting(_))
         )),
         1
     );
     assert_eq!(
-        count(&bench, |p| matches!(
+        events_matching(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Gates(GateEvent::Resolved(_))
         )),
@@ -319,10 +264,10 @@ async fn a_pre_seeded_internal_gate_unmapped_option_finishes_the_gate_on_resume(
 
 #[tokio::test]
 async fn a_pre_seeded_internal_gate_mapped_option_reroutes_and_asks_again() {
-    let bench = paused(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
+    let bench = parked(INTERNAL_GATE_DAG_WORKFLOW, "sessions: []\n").await;
     assert_eq!(plan_runs(&bench.worktree), 1);
 
-    resolve(&bench, "ajustar").await.unwrap();
+    answer_parked(&bench, "ajustar").await.unwrap();
     let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
 
     // A reroute through a pre-seeded choice: plan re-ran, the gate came
@@ -333,13 +278,13 @@ async fn a_pre_seeded_internal_gate_mapped_option_reroutes_and_asks_again() {
 
 #[tokio::test]
 async fn a_pre_seeded_abort_is_consumed_exactly_once() {
-    let bench = paused(
+    let bench = parked(
         HOPELESS_UNTIL_RETRIED_WORKFLOW,
         HOPELESS_UNTIL_RETRIED_FIXTURE,
     )
     .await;
 
-    resolve(&bench, "abort").await.unwrap();
+    answer_parked(&bench, "abort").await.unwrap();
     let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
     let RunTerminal::Paused { reason } = terminal else {
         panic!("expected the consumed abort to pause, got {terminal:?}");
@@ -358,7 +303,7 @@ async fn a_pre_seeded_abort_is_consumed_exactly_once() {
         "a stale abort must not be re-applied: {reason}"
     );
     assert_eq!(
-        count(&bench, |p| matches!(
+        events_matching(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Gates(GateEvent::Resolved(_))
         )),
@@ -406,12 +351,12 @@ sessions:
         )
         .await;
 
-    let seeded = paused(
+    let seeded = parked(
         HOPELESS_UNTIL_RETRIED_WORKFLOW,
         HOPELESS_UNTIL_RETRIED_FIXTURE,
     )
     .await;
-    resolve(&seeded, "retry").await.unwrap();
+    answer_parked(&seeded, "retry").await.unwrap();
     let RunReport {
         terminal: seeded_terminal,
         state: seeded_state,
@@ -450,18 +395,20 @@ nodes:
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let err = resolve(&bench, "retry").await.unwrap_err();
+    let err = answer_parked(&bench, "retry").await.unwrap_err();
     assert!(matches!(err, ResolveGateError::NotPaused));
 }
 
 #[tokio::test]
 async fn resolve_gate_rejects_an_option_not_on_the_menu() {
-    let bench = paused(
+    let bench = parked(
         HOPELESS_UNTIL_RETRIED_WORKFLOW,
         HOPELESS_UNTIL_RETRIED_FIXTURE,
     )
     .await;
-    let err = resolve(&bench, "nonexistent-option").await.unwrap_err();
+    let err = answer_parked(&bench, "nonexistent-option")
+        .await
+        .unwrap_err();
     match err {
         ResolveGateError::UnknownOption { chosen, declared } => {
             assert_eq!(chosen, "nonexistent-option");
@@ -471,7 +418,7 @@ async fn resolve_gate_rejects_an_option_not_on_the_menu() {
     }
     // A refusal is a no-op on the log.
     assert_eq!(
-        count(&bench, |p| matches!(
+        events_matching(&bench, |p| matches!(
             p,
             yunta_core::events::EventPayload::Gates(GateEvent::Resolved(_))
         )),
@@ -481,17 +428,43 @@ async fn resolve_gate_rejects_an_option_not_on_the_menu() {
 
 #[tokio::test]
 async fn resolve_gate_on_a_run_paused_without_a_menu_errors() {
-    let bench = paused(
-        r#"
-name: plain-failure
+    // A node interrupted mid-attempt under `fail_if_uncertain`: the run
+    // parks for a person to look at the tree, and there is no option to
+    // choose — only the tree to inspect.
+    let bench = Bench::new();
+    bench
+        .create(
+            r#"
+name: uncertain
 nodes:
-  - id: broken
+  - id: only
     kind: bash
-    run: "false"
+    on_interrupt: fail_if_uncertain
+    run: "true"
 "#,
-        "sessions: []\n",
-    )
-    .await;
-    let err = resolve(&bench, "anything").await.unwrap_err();
+            "sessions: []\n",
+            yunta_testkit::MOCK_CONFIG,
+        )
+        .await;
+    bench
+        .storage
+        .append(
+            &yunta_core::events::EventDraft {
+                run_id: bench.run_id.clone(),
+                node_id: Some("only".into()),
+                payload: yunta_core::events::EventPayload::Node(NodeEvent::Started(
+                    yunta_core::events::NodeStartedPayload::attempt(1),
+                )),
+            },
+            &FixedClock,
+        )
+        .unwrap();
+    let RunReport { terminal, .. } = bench.wake().await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+
+    let err = answer_parked(&bench, "anything").await.unwrap_err();
     assert!(matches!(err, ResolveGateError::NothingToResolve));
 }

@@ -156,6 +156,17 @@ pub(crate) async fn execute_run_at_depth(
                     return Ok(report);
                 }
             }
+            Decision::EscalateFailure {
+                node,
+                failure,
+                next_attempt,
+            } => {
+                if let Some(report) =
+                    steps::failure_escalation(&ctx, &state, node, failure, next_attempt).await?
+                {
+                    return Ok(report);
+                }
+            }
             Decision::Execute(batch) => {
                 if let Some(report) = steps::execute_batch(&ctx, &state, batch).await? {
                     return Ok(report);

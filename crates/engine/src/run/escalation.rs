@@ -1,19 +1,20 @@
-//! The escalation object, built once and shared. Two
-//! constructors — one per gate shape — used by both
-//! the live pause path (`run/mod.rs`'s `GateExhaustedReroutes` arm and
-//! `gate_exec::resolve_internal_gate`, which await a `HumanInteraction`
-//! with the built object synchronously) and [`current_escalation`]
+//! The escalation object, built once and shared. Three
+//! constructors — one per shape with a menu — used by both
+//! the live pause path (`run/exec.rs`'s `GateExhaustedReroutes` and
+//! `EscalateFailure` arms and `gate_exec::resolve_internal_gate`, which
+//! await a `HumanInteraction` with the built object synchronously) and [`current_escalation`]
 //! (which rebuilds the identical object for a run already paused, no
 //! live process involved) — one construction site each, not two copies
 //! that could drift apart.
 
 use yunta_core::events::{
-    Escalation, EscalationError, EventDraft, EventPayload, Fact, GateOption, GateResolvedPayload,
-    GateWaitingPayload, HumanChoice, StoredEvent,
+    Escalation, EscalationError, EventDraft, EventPayload, Fact, Failure, GateOption,
+    GateResolvedPayload, GateWaitingPayload, HumanChoice, StoredEvent,
 };
 use yunta_core::{Manifest, ModeName, NodeId, NodeKind, NonEmpty, OptionId, RunId, Workflow};
 
 use super::schedule::{self, Decision};
+use super::{RunCtx, RunError};
 use crate::replay::RunState;
 use crate::reserved::{offers, ReservedOption};
 use yunta_core::events::{GateEvent, RerouteCause, RunEvent};
@@ -53,6 +54,29 @@ pub(crate) fn build_reroute_escalation(
         ),
         vec![Fact::bare(cause.to_string())].into(),
         NonEmpty::from((retry, rest)),
+    )
+}
+
+/// The escalation object for a node that failed with no re-route of its
+/// own while the run's `defaults.on_failure` is `pause`: run it again
+/// from a fresh attempt, or stop here.
+///
+/// Nothing re-routes such a failure, so a person who fixes its cause —
+/// a file the node reads, a variable a source needs — has no other way
+/// to hand the node back: a resume alone finds it failed and pauses
+/// again.
+pub(crate) fn build_failure_escalation(
+    node: &NodeId,
+    failure: &Failure,
+    next_attempt: u32,
+) -> Result<Escalation, EscalationError> {
+    Escalation::new(
+        format!("node `{node}` failed"),
+        vec![Fact::bare(failure.to_string())].into(),
+        NonEmpty::from((
+            offers::retry_node(node, next_attempt),
+            vec![offers::abort()],
+        )),
     )
 }
 
@@ -104,14 +128,14 @@ pub(crate) fn build_internal_gate_escalation(
 /// mcp` tool call, running in a process that never paused this run)
 /// know what it's answering: `schedule::decide` is pure, so asking it
 /// again about the same state deterministically reaches the same
-/// `GateExhaustedReroutes`/`ResolveInternalGate` step the paused
-/// invocation saw — same inputs, same escalation, even though nothing
+/// `GateExhaustedReroutes`/`EscalateFailure`/`ResolveInternalGate` step
+/// the paused invocation saw — same inputs, same escalation, even though nothing
 /// was ever logged for the "no live surface" case (the one who escalates
 /// does the work of building the decision — that's a computation, not
 /// a persisted fact, until a human actually answers).
 ///
-/// `None` covers every pause this function's two cases don't: a plain
-/// failure with no `on_failure`, a budget cap, a cancellation, an
+/// `None` covers every pause this function's three cases don't: a failed
+/// gate node, a budget cap, a cancellation, an
 /// external gate degraded to console for lack of a forge (deliberately
 /// out of scope here — whether a forge is reachable depends on the
 /// calling machine's own environment, not on the log, so it isn't a
@@ -142,6 +166,14 @@ pub fn current_escalation(manifest: &Manifest, state: &RunState) -> Option<(Node
             .ok()?;
             Some((node, escalation))
         }
+        Decision::EscalateFailure {
+            node,
+            failure,
+            next_attempt,
+        } => {
+            let escalation = build_failure_escalation(&node, &failure, next_attempt).ok()?;
+            Some((node, escalation))
+        }
         Decision::ResolveInternalGate { node } => {
             let node = super::find_node(&manifest.workflow, &node).ok()?;
             let NodeKind::Gate {
@@ -164,7 +196,7 @@ pub fn current_escalation(manifest: &Manifest, state: &RunState) -> Option<(Node
 }
 
 /// The raw scheduler decision behind [`current_escalation`] — `None`
-/// for every decision that isn't one of the two gate shapes.
+/// for every decision that isn't one of the three shapes with a menu.
 fn current_decision(
     manifest: &Manifest,
     state: &RunState,
@@ -176,9 +208,9 @@ fn current_decision(
         &schedule::Policy::of(manifest, mode_name),
     );
     match decision {
-        Decision::GateExhaustedReroutes { .. } | Decision::ResolveInternalGate { .. } => {
-            Some(decision)
-        }
+        Decision::GateExhaustedReroutes { .. }
+        | Decision::EscalateFailure { .. }
+        | Decision::ResolveInternalGate { .. } => Some(decision),
         _ => None,
     }
 }
@@ -278,6 +310,42 @@ pub(crate) fn pre_seeded_resolution(
     }
 }
 
+/// The decision `escalation` about `node` came to, recorded on the log —
+/// or `None` when there is nobody to ask.
+///
+/// A decision `resolve_gate` pre-seeded onto the log while this run was
+/// parked is consumed here, never re-asked, and its escalation pair is
+/// already recorded so it is never re-emitted. The option is re-validated
+/// against the re-derived menu: a mismatch means ask normally. A decision
+/// made here is recorded as the same pair, after the answer, so a crash
+/// never leaves a question standing that nobody is asking.
+pub(super) async fn decided(
+    ctx: &RunCtx<'_>,
+    state: &RunState,
+    node: &NodeId,
+    escalation: &Escalation,
+) -> Result<Option<HumanChoice>, RunError> {
+    if let Some(choice) = pre_seeded_resolution(state, node, escalation) {
+        return Ok(Some(choice));
+    }
+    let Some(choice) = ctx.ask_human(escalation).await? else {
+        return Ok(None);
+    };
+    ctx.emit(
+        Some(node),
+        EventPayload::Gates(GateEvent::Waiting(escalation.clone().into_payload())),
+    )
+    .await?;
+    ctx.emit(
+        Some(node),
+        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
+            choice.clone(),
+        ))),
+    )
+    .await?;
+    Ok(Some(choice))
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveGateError {
     /// The sentence names the state the run is in and stops there:
@@ -290,8 +358,8 @@ pub enum ResolveGateError {
     NotPaused,
     #[error(
         "this run isn't currently waiting on a decision `resolve_gate` can answer — it's \
-         paused for a reason with no menu of options (a plain failure, a budget cap, an \
-         external gate with no forge)"
+         paused for a reason with no menu of options (a failed gate node, a budget cap, \
+         an external gate with no forge)"
     )]
     NothingToResolve,
     #[error("option `{chosen}` isn't valid here — declared options: {declared}")]

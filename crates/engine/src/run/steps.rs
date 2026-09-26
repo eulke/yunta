@@ -3,9 +3,9 @@
 //! serves so the loop reads as the schedule it runs.
 
 use yunta_core::events::{
-    EventPayload, Evidence, Fact, FindingSeverity, GateResolvedPayload, NodeReroutedPayload,
-    PauseReason, PromotionSignaledPayload, RerouteCause, RerouteOrigin, RunFinishedPayload,
-    TerminalState, TokenUsage,
+    EventPayload, Evidence, Fact, Failure, FindingSeverity, NodeReroutedPayload, PauseReason,
+    PromotionSignaledPayload, RerouteCause, RerouteOrigin, RunFinishedPayload, TerminalState,
+    TokenUsage,
 };
 use yunta_core::{ModeName, NodeId};
 
@@ -17,7 +17,7 @@ use super::{
     budget, escalation, find_node, gate_exec, node_close, node_exec, pause, questions_exec,
     schedule, RunCtx, RunError, RunReport, RunTerminal,
 };
-use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
+use yunta_core::events::{NodeEvent, RunEvent};
 use yunta_core::{Location, RelativePath};
 
 /// A corrupt log is exactly the one you most want exported — each event
@@ -160,6 +160,34 @@ pub(super) async fn reroute(
     Ok(())
 }
 
+/// A failed node with no re-route of its own, put to a person: `retry`
+/// is recorded and the loop continues, where the scheduler starts the
+/// node's next attempt; `abort`, or nobody to ask, pauses on the failure
+/// itself, so every surface still names it and a resume asks again.
+pub(super) async fn failure_escalation(
+    ctx: &RunCtx<'_>,
+    state: &RunState,
+    node: NodeId,
+    failure: Failure,
+    next_attempt: u32,
+) -> Result<Option<RunReport>, RunError> {
+    let escalation =
+        escalation::build_failure_escalation(&node, &failure, next_attempt).map_err(|source| {
+            RunError::Broken {
+                diagnostic: format!("node `{node}`'s escalation: {source}"),
+            }
+        })?;
+    let choice = escalation::decided(ctx, state, &node, &escalation).await?;
+    if choice
+        .is_some_and(|choice| ReservedOption::of(&choice.option) == Some(ReservedOption::Retry))
+    {
+        return Ok(None);
+    }
+    Ok(Some(
+        pause(ctx, PauseReason::NodeFailed { node, failure }).await?,
+    ))
+}
+
 /// A node used up its re-routes to `goto`: the engine assembles the
 /// escalation from the log (never the failed node, which has no further say)
 /// and asks a human — or consumes a decision a `resolve_gate` MCP call
@@ -187,18 +215,7 @@ pub(super) async fn gate_exhausted(
     .map_err(|source| RunError::Broken {
         diagnostic: format!("node `{node}`'s escalation: {source}"),
     })?;
-    // A decision `resolve_gate` pre-seeded onto the log while this run was
-    // parked is consumed here, by this same consequence code — never
-    // re-asked, and its escalation pair is already recorded so it is never
-    // re-emitted. The option is re-validated against the re-derived menu: a
-    // mismatch means ask normally.
-    let pre_seeded = escalation::pre_seeded_resolution(state, &node, &escalation);
-    let already_recorded = pre_seeded.is_some();
-    let choice = match pre_seeded {
-        Some(choice) => Some(choice),
-        None => ctx.ask_human(&escalation).await?,
-    };
-    let Some(choice) = choice else {
+    let Some(choice) = escalation::decided(ctx, state, &node, &escalation).await? else {
         // No live surface to ask (headless, no TTY, `yunta test`): pause and
         // let a later `yunta resume` (or a future MCP client) carry the
         // decision instead.
@@ -206,20 +223,6 @@ pub(super) async fn gate_exhausted(
             pause(ctx, PauseReason::Escalation(Box::new(escalation.clone()))).await?,
         ));
     };
-    if !already_recorded {
-        ctx.emit(
-            Some(&node),
-            EventPayload::Gates(GateEvent::Waiting(escalation.clone().into_payload())),
-        )
-        .await?;
-        ctx.emit(
-            Some(&node),
-            EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
-                choice.clone(),
-            ))),
-        )
-        .await?;
-    }
     let chosen = ReservedOption::of(&choice.option);
     if chosen == Some(ReservedOption::Retry) {
         ctx.emit(

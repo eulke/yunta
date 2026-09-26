@@ -857,3 +857,51 @@ nodes:
     on_interrupt: resume_session
     prompt: "Do the thing."
 "#;
+
+// --- a run parked on a decision --------------------------
+
+/// A bench whose run is parked: it drove `(workflow_yaml, fixture_yaml)`
+/// with no human present and stopped on a pause, which is where every
+/// test here starts.
+pub async fn parked(workflow_yaml: &str, fixture_yaml: &str) -> Bench {
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench.run(workflow_yaml, fixture_yaml).await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "expected the run to pause, got {terminal:?}"
+    );
+    bench
+}
+
+/// Records `option` as the answer to whatever escalation the bench's run
+/// is parked on — the write a separate `yunta mcp` process makes, with
+/// nothing of the run's own process behind it.
+pub async fn answer_parked(
+    bench: &Bench,
+    option: &str,
+) -> Result<(), yunta_engine::ResolveGateError> {
+    yunta_engine::resolve_gate(
+        &bench.manifest(),
+        &bench.storage.async_handle(),
+        &bench.run_id,
+        &yunta_testkit_core::FixedClock,
+        yunta_core::events::HumanChoice {
+            option: option.into(),
+            by: "mcp".into(),
+            free_text: None,
+        },
+    )
+    .await
+}
+
+/// How many of the run's events carry a payload `pred` accepts.
+pub fn events_matching(
+    bench: &Bench,
+    pred: impl Fn(&yunta_core::events::EventPayload) -> bool,
+) -> usize {
+    bench
+        .events()
+        .iter()
+        .filter(|e| e.payload().is_some_and(&pred))
+        .count()
+}

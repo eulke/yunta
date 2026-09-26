@@ -44,8 +44,8 @@ nodes:
     on: { adjust: plan }
 "#;
 
-/// A node that fails with no `on_failure` at all: the run parks with
-/// nothing to choose from — one of the pauses no menu reconstructs.
+/// A node that fails with no `on_failure` at all: the run parks on
+/// whether to run it again, a menu rebuilt from the log alone.
 const PLAIN_FAILURE: &str = r#"
 name: plain-failure
 nodes:
@@ -422,11 +422,10 @@ fn the_menu_a_person_reads_is_the_menu_a_program_reads() {
 }
 
 #[test]
-fn a_pause_with_no_menu_still_says_what_the_run_is_waiting_on() {
-    // Two shapes reconstruct a menu — an exhausted re-route and an
-    // unresolved internal gate. A plain failure is neither, and the page
-    // says so rather than leaving the reader to wonder where the options
-    // went.
+fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
+    // A failure nothing re-routes is still a decision: the page offers
+    // running the node again, because a resume alone would find it
+    // failed and stop on it once more.
     let root = tempfile::tempdir().unwrap();
     let repo = repo_with(root.path(), &[("plain", PLAIN_FAILURE)]);
     let home = root.path().join("state");
@@ -436,11 +435,100 @@ fn a_pause_with_no_menu_still_says_what_the_run_is_waiting_on() {
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let text = stdout(&status);
 
-    assert!(text.contains("waiting on:"), "{text}");
     assert!(
-        text.contains("node `boom` failed"),
-        "the reason it stopped is on the page: {text}"
+        text.contains("decision needed on node `boom`"),
+        "the page says which node the decision belongs to: {text}"
     );
+    assert!(
+        text.contains("retry — Run `boom` again (attempt 2)"),
+        "{text}"
+    );
+    assert!(text.contains("abort — Abort the run"), "{text}");
+    assert!(
+        text.contains(&format!("yunta resolve-gate {run_id} <option>")),
+        "{text}"
+    );
+
+    let status_json = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
+    let state: serde_json::Value = serde_json::from_slice(&status_json.stdout)
+        .unwrap_or_else(|e| panic!("status --json emits JSON: {e}"));
+    let options: Vec<&str> = state["decision"]["options"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a failed node carries its menu: {state:#}"))
+        .iter()
+        .map(|option| option["id"].as_str().unwrap_or_default())
+        .collect();
+    assert_eq!(options, ["retry", "abort"], "{state:#}");
+}
+
+/// Two nodes whose first session spends past the run's cap: the run
+/// parks before the second one on a budget, which has no menu to rebuild.
+const OVER_BUDGET: &str = r#"
+name: over-budget
+nodes:
+  - id: spend
+    kind: prompt
+    runner: executor
+    prompt: "Spend."
+  - id: more
+    kind: prompt
+    runner: executor
+    depends_on: [spend]
+    prompt: "Spend more."
+"#;
+
+const OVER_BUDGET_FIXTURE: &str = r#"
+sessions:
+  - steps:
+      - { type: usage, input_tokens: 500, output_tokens: 10 }
+    outcome: { type: completed, summary: spent }
+"#;
+
+/// A run of [`OVER_BUDGET`] parked on its cap, and the repository and
+/// home it ran under.
+fn parked_over_budget(root: &Path) -> (PathBuf, PathBuf, String) {
+    let repo = repo_with(
+        root,
+        &[
+            ("over-budget", OVER_BUDGET),
+            ("fixture", OVER_BUDGET_FIXTURE),
+        ],
+    );
+    let home = root.join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        &format!("{MOCK_CONFIG}limits:\n  max_tokens_per_run: 100\n"),
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "runners"]);
+    let run = yunta_in!(
+        &repo,
+        &home,
+        &[
+            "run",
+            "over-budget.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml"
+        ]
+    );
+    let run_id = run_id_from(&run);
+    (repo, home, run_id)
+}
+
+#[test]
+fn a_pause_with_no_menu_still_says_what_the_run_is_waiting_on() {
+    // Three shapes reconstruct a menu — a failed node, an exhausted
+    // re-route and an unresolved internal gate. A budget cap is none of
+    // them, and the page says so rather than leaving the reader to wonder
+    // where the options went.
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home, run_id) = parked_over_budget(root.path());
+    let status = yunta_in!(&repo, &home, &["status", &run_id]);
+    let text = stdout(&status);
+
+    assert!(text.contains("waiting on:"), "{text}");
     assert!(
         text.contains("no options to choose"),
         "the absent menu is named, not silently missing: {text}"

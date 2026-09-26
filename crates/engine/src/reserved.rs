@@ -16,7 +16,8 @@ use yunta_core::OptionId;
 pub(crate) enum ReservedOption {
     /// Pause the run with the decision recorded (every escalation offers it).
     Abort,
-    /// Re-route to the corrective node once more, past the reroute cap.
+    /// Run a failed node again: through its corrective node once more,
+    /// past the reroute cap, or — for a node with no re-route — itself.
     Retry,
     /// Accept promotion to the next declared mode.
     Promote,
@@ -100,6 +101,16 @@ pub(crate) mod offers {
                 "Uses one extra correction attempt beyond the declared max_reroutes \
                  ({max_reroutes}); escalates again if `{goto}` doesn't fix it"
             ),
+        )
+    }
+
+    /// Run a failed node that has no re-route of its own once more,
+    /// from a fresh attempt.
+    pub(crate) fn retry_node(node: &NodeId, attempt: u32) -> GateOption {
+        ReservedOption::Retry.offer(
+            format!("Run `{node}` again (attempt {attempt})"),
+            "Starts a fresh attempt and reuses nothing the failed one did; fix what it \
+             failed on first, or it fails the same way and asks again",
         )
     }
 
@@ -231,6 +242,7 @@ mod tests {
         vec![
             offers::abort(),
             offers::retry(&node, 0),
+            offers::retry_node(&node, 2),
             offers::promote(&next, &mode),
             offers::continue_past_tokens(),
             offers::abort_on_tokens(),

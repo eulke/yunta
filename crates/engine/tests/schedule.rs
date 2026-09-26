@@ -10,11 +10,14 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
     AgentMessagePayload, AgentMessageType, BaselineCapturedPayload, BaselineOrigin,
-    BaselineResults, EventBody, EventPayload, HookExecutedPayload, HookPhase, NodeEvent,
+    BaselineResults, Escalation, EventBody, EventPayload, Fact, Failure, GateEvent, GateOption,
+    GateResolvedPayload, HookExecutedPayload, HookPhase, HumanChoice, NodeEvent, NodeFailedPayload,
     NodeFinishedPayload, NodeStartedPayload, RunCreatedPayload, RunEvent, SessionEvent,
     StoredEvent, TokenUsage,
 };
-use yunta_core::{CommitSha, ContentHash, DefaultOnFailure, NodeId, OnInterrupt, Workflow};
+use yunta_core::{
+    CommitSha, ContentHash, DefaultOnFailure, NodeId, NonEmpty, OnInterrupt, Workflow,
+};
 use yunta_engine::{decide, derive, Decision, SchedulingPolicy};
 
 const RUN: &str = "run-1";
@@ -177,6 +180,88 @@ nodes:
         decide(&workflow, &state, &narrow),
         Decision::Execute(vec![(NodeId::from("a"), 1)]),
         "and one at a time under a cap of one"
+    );
+}
+
+/// The pair a person's answer to `plan`'s failure leaves on the log: the
+/// question they were shown, and `option`.
+fn chose(failure: &Failure, option: &str) -> Vec<(Option<&'static str>, EventPayload)> {
+    let escalation = Escalation::new(
+        "node `plan` failed",
+        vec![Fact::bare(failure.to_string())].into(),
+        NonEmpty::from((
+            GateOption {
+                id: "retry".into(),
+                label: "Run `plan` again (attempt 2)".to_string(),
+                tradeoff: "a fresh attempt".to_string(),
+            },
+            Vec::new(),
+        )),
+    )
+    .expect("the escalation is well-formed");
+    vec![
+        (
+            Some("plan"),
+            EventPayload::Gates(GateEvent::Waiting(escalation.into_payload())),
+        ),
+        (
+            Some("plan"),
+            EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
+                HumanChoice {
+                    option: option.into(),
+                    by: "lead".into(),
+                    free_text: None,
+                },
+            ))),
+        ),
+    ]
+}
+
+/// A failed node with no re-route, under `pause`, is a person's decision
+/// — and once they chose `retry` after the failure, the decision is the
+/// node's next attempt.
+#[test]
+fn a_failed_node_escalates_until_a_person_chooses_to_retry_it() {
+    let failure = Failure::message("exit 1");
+    let failed = vec![
+        (None, created()),
+        (
+            Some("plan"),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        ),
+        (
+            Some("plan"),
+            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+                failure.clone(),
+                false,
+                TokenUsage::default(),
+            ))),
+        ),
+    ];
+    assert_eq!(
+        decide(&workflow(), &derive(&log(failed.clone())), &policy()),
+        Decision::EscalateFailure {
+            node: NodeId::from("plan"),
+            failure: failure.clone(),
+            next_attempt: 2,
+        }
+    );
+
+    let mut aborted = failed.clone();
+    aborted.extend(chose(&failure, "abort"));
+    assert!(
+        matches!(
+            decide(&workflow(), &derive(&log(aborted)), &policy()),
+            Decision::EscalateFailure { .. }
+        ),
+        "only a `retry` runs the node again"
+    );
+
+    let mut retried = failed;
+    retried.extend(chose(&failure, "retry"));
+    assert_eq!(
+        decide(&workflow(), &derive(&log(retried)), &policy()),
+        Decision::Execute(vec![(NodeId::from("plan"), 2)])
     );
 }
 

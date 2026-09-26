@@ -30,11 +30,14 @@
 
 use std::collections::HashSet;
 
-use yunta_core::events::{NodeWait, PauseReason, RerouteCause, ResumePolicy};
+use yunta_core::events::{
+    Failure, GateResolvedPayload, NodeWait, PauseReason, RerouteCause, ResumePolicy,
+};
 use yunta_core::{DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, Workflow};
 
 use crate::modes::dependencies_in_mode;
 use crate::replay::{NodeState, RunState};
+use crate::reserved::ReservedOption;
 
 /// The mode immediately after `mode_name` in `modes:`'s own declaration
 /// order — the *only* direction promotion ever moves (going back to an
@@ -98,6 +101,17 @@ pub enum Decision {
         goto: NodeId,
         max_reroutes: u32,
         cause: RerouteCause,
+    },
+    /// A node failed with no re-route of its own, and the run's
+    /// `defaults.on_failure` is `pause`: a person decides whether it runs
+    /// again. The imperative shell asks — or consumes a decision
+    /// `resolve_gate` seeded while the run was parked — and pauses when
+    /// nobody is there to ask. A `retry` it records comes back through
+    /// [`unrerouted`] as an `Execute` of `next_attempt`.
+    EscalateFailure {
+        node: NodeId,
+        failure: Failure,
+        next_attempt: u32,
     },
     /// A `kind: gate` node is ready and has never been published —
     /// the imperative shell commits its declared artifacts,
@@ -329,6 +343,19 @@ impl<'a> Board<'a> {
         self.state.nodes.get(id).map_or(0, |r| r.attempts) + 1
     }
 
+    /// Whether a person chose `retry` for this node after its latest
+    /// failure. The decision's window is [`RunState::pre_seeded`]'s: one
+    /// recorded after the failure and after the run's last pause, which
+    /// nothing has consumed — the attempt it starts closes it, so it runs
+    /// the node once.
+    fn retry_chosen(&self, id: &NodeId) -> bool {
+        matches!(
+            self.state.pre_seeded(id),
+            Some(GateResolvedPayload::Chosen(choice))
+                if ReservedOption::of(&choice.option) == Some(ReservedOption::Retry)
+        )
+    }
+
     /// How a ready or re-opened gate is driven: poll the handle it was
     /// published under, publish it for the first time, or ask here.
     fn drive_gate(&self, node: &Node) -> Decision {
@@ -540,7 +567,9 @@ fn failure_step(board: &Board<'_>) -> Option<Decision> {
 /// or escalates, and a node without one leaves the decision to the
 /// policy. `continue` is the one answer that is not a decision — the
 /// node stays failed, its dependents stay unscheduled, and the rest of
-/// the graph keeps running.
+/// the graph keeps running. Under `pause` a person decides, and a
+/// `retry` they chose after this failure runs the node again; a gate
+/// node keeps the plain pause, since its own flow is what re-asks it.
 fn unrerouted(
     board: &Board<'_>,
     node: &Node,
@@ -569,7 +598,16 @@ fn unrerouted(
         failure: failure.clone(),
     };
     match board.policy.on_failure {
-        DefaultOnFailure::Pause => Some(Decision::Pause { reason }),
+        DefaultOnFailure::Pause if is_gate(node) => Some(Decision::Pause { reason }),
+        DefaultOnFailure::Pause if board.retry_chosen(&node.id) => Some(Decision::Execute(vec![(
+            node.id.clone(),
+            board.next_attempt(&node.id),
+        )])),
+        DefaultOnFailure::Pause => Some(Decision::EscalateFailure {
+            node: node.id.clone(),
+            failure: failure.clone(),
+            next_attempt: board.next_attempt(&node.id),
+        }),
         DefaultOnFailure::Abort => Some(Decision::Fail {
             reason: reason.to_string(),
         }),

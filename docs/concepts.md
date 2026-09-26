@@ -101,6 +101,11 @@ a person's answer is what the node is missing: a `gate` asking for a decision,
 or a node that handed its questions over and is waiting on them. Nothing is
 running underneath either, and both survive the engine restarting exactly like
 any other state.
+A node that fails with no `on_failure` re-route pauses the run on a decision
+too (under the default `defaults.on_failure: pause`): run it again or stop. At
+a terminal the run asks right away, so you can fix the cause and choose
+`retry` without leaving it; otherwise `yunta resolve-gate <run_id> retry`
+answers later. A plain `yunta resume` never retries a failed node on its own.
 `yunta resolve-gate` (or the MCP `resolve_gate` tool) answers a decision from
 a completely separate process, and the MCP `answer_questions` tool answers a
 node's questions the same way; either lands on the log and a detached resume

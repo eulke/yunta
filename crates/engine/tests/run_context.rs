@@ -1,7 +1,7 @@
 //! Context assembly: sources, templates, stable-first hashing, knowledge layering across repo/user/org, and loop-level context.
 
 use yunta_engine::{RunReport, RunTerminal};
-use yunta_testkit::{Bench, MOCK_CONFIG};
+use yunta_testkit::{write, Bench, MOCK_CONFIG};
 
 mod common;
 use common::*;
@@ -132,6 +132,43 @@ nodes:
         RunTerminal::Paused { .. } => {}
         other => panic!("expected the run to pause, got {other:?}"),
     }
+}
+
+/// A node reading one required file, and the one session that answers
+/// only once the file's content is in its prompt.
+fn reads_architecture() -> (String, &'static str) {
+    (
+        context_workflow("      - files: [\"docs/architecture.md\"]\n"),
+        "sessions:\n  - match_prompt_contains: \"MARKER-ARCHITECTURE\"\n    outcome: { type: completed, summary: ok }\n",
+    )
+}
+
+#[tokio::test]
+async fn a_missing_file_retried_after_it_is_put_in_place_finishes() {
+    // Once a person puts the file where the failure said, `retry` runs the
+    // node again instead of leaving the run parked on it.
+    let bench = Bench::new();
+    let (workflow, fixture) = reads_architecture();
+    let RunReport { terminal, .. } = bench.run(&workflow, fixture).await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+
+    write(
+        &bench.worktree.join("docs/architecture.md"),
+        "MARKER-ARCHITECTURE\n",
+    );
+    answer_parked(&bench, "retry").await.unwrap();
+    let RunReport { terminal, state } = bench.wake_on_fixture(fixture).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(matches!(
+        state.nodes.state("ask"),
+        Some(yunta_engine::NodeState::Finished { .. })
+    ));
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    assert_eq!(context_sources(&events, "ask")[0].kind, "files");
 }
 
 #[tokio::test]
