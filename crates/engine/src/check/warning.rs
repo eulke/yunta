@@ -78,12 +78,13 @@ fn context_file_missing(
     use super::context_files::MissingContextFile as M;
     let reads = format!("node `{node}` reads `{path}` (a `files:` context source)");
     let stops = format!("unless a node before it writes the file, `{node}` stops there");
+    let optional = "or declare the entry `optional: true` if the node can do without it";
     match (missing, base) {
         (M::Nowhere, Some(base)) => format!(
             "{reads}, which commit `{base}` — the one a run starts from — does not hold: \
-             {stops}; commit the file first"
+             {stops}; commit the file first, {optional}"
         ),
-        (M::Nowhere, None) => format!("{reads}, which does not exist: {stops}"),
+        (M::Nowhere, None) => format!("{reads}, which does not exist: {stops}; {optional}"),
         (M::Uncommitted, _) => format!(
             "{reads}, which is in your checkout but not committed: a run starts from commit \
              `{}` and never sees it, so {stops}; commit it first",

@@ -56,6 +56,7 @@ pub(super) async fn mount_artifact_shapes(
             source_id,
             kind: SHAPE_KIND.to_string(),
             content_hash,
+            absent: Vec::new(),
         });
     }
     Ok(())

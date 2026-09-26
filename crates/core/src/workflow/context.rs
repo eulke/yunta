@@ -1,13 +1,13 @@
 //! `context:` entries — the sources a node reads before it runs, each
 //! discriminated by the key it is written under.
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::parse::{keyed_entry, nested, take};
+use super::parse::{describe, keyed_entry, nested, take};
 use super::ArtifactRefId;
 use crate::glob::ScopeGlob;
 use crate::ids::{McpServerName, NodeId};
-use crate::yaml::Mapping;
+use crate::yaml::{Mapping, Value};
 
 /// One `context:` entry: a builtin `ContextSource` plus its own
 /// parameters, discriminated by its own field name, exactly matching
@@ -18,7 +18,7 @@ use crate::yaml::Mapping;
 #[serde(untagged)]
 pub enum ContextSpec {
     Files {
-        files: Vec<String>,
+        files: Vec<ContextFile>,
     },
     Command {
         command: String,
@@ -93,6 +93,102 @@ impl<'de> Deserialize<'de> for ContextSpec {
             },
         };
         Ok(spec)
+    }
+}
+
+/// One path a `files:` source reads (D186): the bare path when the node
+/// cannot do without the file, or `{ path, optional: true }` when it can.
+/// A missing required file fails the node; a missing optional one is
+/// marked in the session's context and recorded on `context_assembled`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextFile {
+    pub path: String,
+    pub optional: bool,
+}
+
+impl ContextFile {
+    /// A path the node requires — what a bare string declares.
+    pub fn required(path: impl Into<String>) -> Self {
+        ContextFile {
+            path: path.into(),
+            optional: false,
+        }
+    }
+}
+
+impl Serialize for ContextFile {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        // A required path is the bare string it always was, so a
+        // manifest that declares nothing optional hashes as it always
+        // did, and every run frozen before this shape existed reads back.
+        if !self.optional {
+            return serializer.serialize_str(&self.path);
+        }
+        let mut entry = serializer.serialize_map(Some(2))?;
+        entry.serialize_entry("path", &self.path)?;
+        entry.serialize_entry("optional", &true)?;
+        entry.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ContextFile {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::Error;
+
+        const KEYS: &[&str] = &["path", "optional"];
+        let mut mapping = match Value::deserialize(deserializer)? {
+            Value::String(path) => return Ok(ContextFile::required(path)),
+            Value::Mapping(mapping) => mapping,
+            other => {
+                return Err(D::Error::custom(format!(
+                    "a `files:` entry is a path or `{{ path, optional }}`, not {}",
+                    describe(&other)
+                )))
+            }
+        };
+        let path: Option<String> = take::<D, _>(&mut mapping, "path")?;
+        let optional: Option<bool> = take::<D, _>(&mut mapping, "optional")?;
+        if let Some((key, _)) = mapping.into_iter().next() {
+            return Err(D::Error::custom(format!(
+                "unknown key `{}` for a `files:` entry; one of {}",
+                key.as_str().unwrap_or("?"),
+                super::parse::list(KEYS)
+            )));
+        }
+        let path = path.ok_or_else(|| {
+            D::Error::custom("a `files:` entry written as a mapping names its `path`")
+        })?;
+        Ok(ContextFile {
+            path,
+            optional: optional.unwrap_or(false),
+        })
+    }
+}
+
+impl schemars::JsonSchema for ContextFile {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ContextFile".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "A path a `files:` source reads: the bare path when the node requires \
+                            the file, or `{ path, optional: true }` when it can do without it.",
+            "anyOf": [
+                { "type": "string", "minLength": 1 },
+                {
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "minLength": 1 },
+                        "optional": { "type": "boolean" }
+                    },
+                    "required": ["path"],
+                    "additionalProperties": false
+                }
+            ]
+        })
     }
 }
 

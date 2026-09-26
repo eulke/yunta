@@ -162,6 +162,31 @@
         "worktree"
       ]
     },
+    "ContextFile": {
+      "description": "A path a `files:` source reads: the bare path when the node requires the file, or `{ path, optional: true }` when it can do without it.",
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "properties": {
+            "optional": {
+              "type": "boolean"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ]
+        }
+      ]
+    },
     "ContextSpec": {
       "description": "One `context:` entry: a builtin `ContextSource` plus its own\nparameters, discriminated by its own field name, exactly matching\nthe schema's YAML — `- files: [...]`, `- command: \"...\"`,\n`- artifact: { node: ..., name: ... }`, and so on; there is no\nseparate `kind:` key to introduce.",
       "anyOf": [
@@ -171,7 +196,7 @@
             "files": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/$defs/ContextFile"
               }
             }
           },

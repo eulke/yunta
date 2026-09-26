@@ -25,7 +25,7 @@ lista.
 **D16 — `progress.md` generado por el engine desde el log.** `accepted` → [`adr/D16-progress-md-generado-por-el-engine.md`](adr/D16-progress-md-generado-por-el-engine.md)
 **D17 — Presupuestos evaluados por el engine contra `Usage` del log.** `accepted` → [`adr/D17-presupuestos-evaluados-por-el-engine-contra.md`](adr/D17-presupuestos-evaluados-por-el-engine-contra.md)
 **D18 — Baseline de regresiones y coverage como builtins.** `revised` *(Revisada por D167, D176.)* → [`adr/D18-baseline-de-regresiones-y-coverage.md`](adr/D18-baseline-de-regresiones-y-coverage.md)
-**D19 — ContextSource como trait.** `revised` *(Revisada por D157, D167.)* → [`adr/D19-contextsource-como-trait.md`](adr/D19-contextsource-como-trait.md)
+**D19 — ContextSource como trait.** `revised` *(Revisada por D157, D167, D186.)* → [`adr/D19-contextsource-como-trait.md`](adr/D19-contextsource-como-trait.md)
 **D20 — Lo fetcheado/generado va a la respuesta del nodo, lo durable a knowledge.** `accepted` → [`adr/D20-lo-fetcheado-generado-va-a-la-respuesta.md`](adr/D20-lo-fetcheado-generado-va-a-la-respuesta.md)
 **D21 — Modos quick/standard/full como variantes del workflow.** `accepted` → [`adr/D21-modos-quick-standard-full-como-variantes.md`](adr/D21-modos-quick-standard-full-como-variantes.md)
 **D22 — Promoción = run sucesor.** `accepted` → [`adr/D22-promocion-run-sucesor.md`](adr/D22-promocion-run-sucesor.md)
@@ -192,3 +192,4 @@ lista.
 **D183 — Una sola palabra para el árbol que una unidad no aísla: `none` queda, `inherit` se retira.** `accepted` → [`adr/D183-una-sola-palabra-para-el-arbol-que-una-unidad-no-aisla.md`](adr/D183-una-sola-palabra-para-el-arbol-que-una-unidad-no-aisla.md)
 **D184 — Declarar `scope:` es pedir un árbol propio.** `accepted` → [`adr/D184-declarar-scope-es-pedir-un-arbol-propio.md`](adr/D184-declarar-scope-es-pedir-un-arbol-propio.md)
 **D185 — Cerrar un process group exige una observación estable de sus miembros.** `accepted` → [`adr/D185-cierre-estable-de-process-groups.md`](adr/D185-cierre-estable-de-process-groups.md)
+**D186 — A `files:` entry may be declared optional; its absence is recorded, never silent.** `accepted` → [`adr/D186-a-files-entry-may-be-declared-optional.md`](adr/D186-a-files-entry-may-be-declared-optional.md)

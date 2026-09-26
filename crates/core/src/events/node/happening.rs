@@ -28,7 +28,11 @@ pub enum Happening {
         phase: HookPhase,
         exit_code: i32,
     },
-    ContextAssembled,
+    /// The context a session was given, and the optional files it went
+    /// without — the one part of an assembly a person watching acts on.
+    ContextAssembled {
+        absent: Vec<String>,
+    },
     CriteriaChecked {
         task: TaskId,
         phase: Phase,
@@ -82,7 +86,13 @@ impl Happening {
                 phase: p.phase,
                 exit_code: p.exit_code,
             },
-            NodeEvent::ContextAssembled(_) => Happening::ContextAssembled,
+            NodeEvent::ContextAssembled(p) => Happening::ContextAssembled {
+                absent: p
+                    .sources
+                    .iter()
+                    .flat_map(|source| source.absent.iter().cloned())
+                    .collect(),
+            },
             NodeEvent::CriteriaChecked(p) => Happening::CriteriaChecked {
                 task: p.task_id.clone(),
                 phase: p.phase,

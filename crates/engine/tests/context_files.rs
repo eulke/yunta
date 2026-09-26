@@ -153,6 +153,43 @@ async fn only_the_nodes_the_mode_includes_are_checked() {
         .is_empty());
 }
 
+#[tokio::test]
+async fn an_optional_entry_is_never_warned_about() {
+    // Its author already said the node goes on without it.
+    let root = repo();
+    let workflow: Workflow = yunta_core::yaml::parse(
+        r#"
+name: optional
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Plan."
+    context:
+      - files: [{ path: docs/missing.md, optional: true }]
+"#,
+    )
+    .unwrap();
+    let base: CommitSha = git_output(root.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .parse()
+        .unwrap();
+    let cancel = CancellationToken::new();
+    let clock = FixedClock;
+    let warnings = check_context_files(
+        &workflow,
+        None,
+        RunTreeOrigin {
+            checkout: root.path(),
+            isolation: Isolation::Worktree,
+            base: &base,
+        },
+        Supervision::outside_any_run(&cancel, &clock),
+    )
+    .await;
+    assert!(warnings.is_empty(), "{warnings:?}");
+}
+
 #[test]
 fn the_warning_names_the_commit_the_run_starts_from_and_the_way_out() {
     let warning = CheckWarning::ContextFileMissing {
@@ -165,6 +202,7 @@ fn the_warning_names_the_commit_the_run_starts_from_and_the_way_out() {
         warning.to_string(),
         "node `plan` reads `docs/architecture.md` (a `files:` context source), which commit \
          `36096d2c0a1b` — the one a run starts from — does not hold: unless a node before it \
-         writes the file, `plan` stops there; commit the file first"
+         writes the file, `plan` stops there; commit the file first, or declare the entry \
+         `optional: true` if the node can do without it"
     );
 }

@@ -204,6 +204,13 @@ Field by field:
 - **No composition outside the pack's own contents.** A workflow inside your
   pack can `use:` another workflow from the same pack; reaching into another
   pack or back out to the installing repo is rejected by `check`.
+- **No silent assumption about the installing repo's files.** A path a node
+  reads through `files:` is a guess about repositories you have never seen.
+  Declare the entry `{ path: <path>, optional: true }` when the node can do
+  without the file — a missing optional file is marked in the session's
+  context instead of failing the node — and name the files your pack reads in
+  its README. `yunta check` and `yunta doctor` tell the person installing it
+  which required ones their last commit lacks.
 
 ## Testing a pack before sharing it
 

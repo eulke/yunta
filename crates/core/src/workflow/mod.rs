@@ -32,7 +32,7 @@ pub use artifacts::{
     UnknownArtifactKind, ARTIFACTS_DIR,
 };
 pub use context::{
-    ArtifactContextRef, ContextSpec, KnowledgeLayer, KnowledgeParams, McpQueryParams,
+    ArtifactContextRef, ContextFile, ContextSpec, KnowledgeLayer, KnowledgeParams, McpQueryParams,
     NodeOutputParams, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams,
 };
 pub use hooks::{HookFailurePolicy, HookStep, Hooks, OnFailure};

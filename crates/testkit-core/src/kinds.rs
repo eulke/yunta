@@ -70,6 +70,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 source_id: "files:docs".to_string(),
                 kind: "files".to_string(),
                 content_hash: yunta_core::sha256_hex(b"sha256:333"),
+                absent: vec!["docs/architecture.md".to_string()],
             }],
             segment_hashes: BTreeMap::from([(
                 "stable".to_string(),

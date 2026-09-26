@@ -101,6 +101,12 @@ pub struct ContextSourceRef {
     pub source_id: String,
     pub kind: String,
     pub content_hash: ContentHash,
+    /// The optional `files:` paths this source did not find (D186): the
+    /// session got a marker in each one's place, and the hash above
+    /// covers that marker. Empty — and absent from the wire — for every
+    /// source that found all it read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub absent: Vec<String>,
 }
 
 /// `runner` names the `runners:` entry the node resolved through. The

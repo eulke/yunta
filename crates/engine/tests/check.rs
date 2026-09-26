@@ -842,7 +842,7 @@ fn a_template_referencing_a_declared_input_passes_check() {
 fn an_undeclared_input_reference_inside_a_files_context_pattern_is_caught() {
     let mut node = prompt("plan", "planner", &[]);
     node.context = vec![yunta_core::ContextSpec::Files {
-        files: vec!["{{inputs.changelog}}".to_string()],
+        files: vec![yunta_core::ContextFile::required("{{inputs.changelog}}")],
     }];
     let wf = workflow_with_inputs(vec![node], std::collections::BTreeMap::new());
     let errors = check(&wf, &ConfigLayer::default());

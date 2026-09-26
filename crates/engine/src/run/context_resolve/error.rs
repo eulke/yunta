@@ -186,7 +186,8 @@ impl std::fmt::Display for Absence {
                 f,
                 "`{path}` is not in the run's tree, which starts from commit `{}` — a file \
                  that is not committed there, or that git ignores, never reaches it; put it \
-                 at `{}` and choose `retry`",
+                 at `{}` and choose `retry`, or declare the entry `optional: true` if the node \
+                 can do without it",
                 base.abbreviated(),
                 run_tree.join(path).display()
             ),
@@ -196,7 +197,8 @@ impl std::fmt::Display for Absence {
                 branched_from: None,
             } => write!(
                 f,
-                "`{path}` does not exist in `{}`; put it there and choose `retry`",
+                "`{path}` does not exist in `{}`; put it there and choose `retry`, or declare \
+                 the entry `optional: true` if the node can do without it",
                 run_tree.display()
             ),
         }

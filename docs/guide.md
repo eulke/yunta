@@ -123,7 +123,10 @@ Two environment variables move all of this:
 ## Context
 
 `context:` on a `prompt` or `loop` node assembles what that session sees, beyond the
-prompt text itself: `files: [globs]`, `command: "<cmd>"` (stdout), `artifact: {node,
+prompt text itself: `files: [paths]` (literal paths from the top of the run's tree;
+an entry written `{ path: <path>, optional: true }` is one the node can do without —
+when it's missing the session reads a marker in its place instead of the node
+failing), `command: "<cmd>"` (stdout), `artifact: {node,
 kind}` or `artifact: {node, name}` (another node's declared output, named the way
 that node declares it — this also creates the implicit dependency edge, no
 separate `depends_on` needed), `mcp: {server, query}`, `run-events: {filter}`

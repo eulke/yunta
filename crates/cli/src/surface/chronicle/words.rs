@@ -85,7 +85,16 @@ fn node_words(happening: &node::happening::Happening) -> (Option<StateWord>, Str
         H::HookRan { phase, exit_code } => {
             (None, format!("hook {} exit {exit_code}", phase.as_str()))
         }
-        H::ContextAssembled => (None, "context assembled".to_string()),
+        H::ContextAssembled { absent } if absent.is_empty() => {
+            (None, "context assembled".to_string())
+        }
+        H::ContextAssembled { absent } => (
+            None,
+            format!(
+                "context assembled · {} absent (optional)",
+                yunta_core::text::listed(absent.iter().map(String::as_str))
+            ),
+        ),
         H::CriteriaChecked {
             task,
             phase,

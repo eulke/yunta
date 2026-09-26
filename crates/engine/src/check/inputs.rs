@@ -92,8 +92,8 @@ pub(crate) fn check_input_references_in_nodes(
         for source in &node.context {
             match source {
                 yunta_core::ContextSpec::Files { files } => {
-                    for pattern in files {
-                        check_template_text(&node.id, pattern, workflow, errors);
+                    for file in files {
+                        check_template_text(&node.id, &file.path, workflow, errors);
                     }
                 }
                 yunta_core::ContextSpec::Command { command } => {

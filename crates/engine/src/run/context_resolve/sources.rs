@@ -13,22 +13,28 @@ use crate::process::{spawn_governed, GovernedCommand, Outcome};
 use yunta_core::template::render_template;
 
 use super::error::{Absence, ContextResolveError};
+use super::Resolved;
 use super::EXTERNAL_CALL_TIMEOUT;
 use crate::run::node_exec::template_vars;
 use crate::run::{RunCtx, RunError};
 use yunta_core::events::{FindingEvent, NodeEvent};
 
+/// What the session reads in place of an optional file that is not
+/// there: said, never left for the agent to guess at (D186).
+const ABSENT_MARKER: &str = "[absent — declared optional; not in the run's tree]";
+
 pub(super) async fn resolve_files(
     ctx: &RunCtx<'_>,
     node: &Node,
     source_id: &str,
-    files: &[String],
-) -> Result<Vec<u8>, ContextResolveError> {
+    files: &[yunta_core::ContextFile],
+) -> Result<Resolved, ContextResolveError> {
     let vars = template_vars(ctx, node);
     let mut out = Vec::new();
-    for pattern in files {
+    let mut absent = Vec::new();
+    for file in files {
         let rendered =
-            render_template(pattern, &vars).map_err(|e| ContextResolveError::Template {
+            render_template(&file.path, &vars).map_err(|e| ContextResolveError::Template {
                 node: node.id.clone(),
                 source_id: source_id.to_string(),
                 source: e,
@@ -40,6 +46,11 @@ pub(super) async fn resolve_files(
         };
         let bytes = match tokio::fs::read(&path).await {
             Ok(bytes) => bytes,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound && file.optional => {
+                out.extend_from_slice(format!("# {rendered}\n{ABSENT_MARKER}\n").as_bytes());
+                absent.push(rendered);
+                continue;
+            }
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
                 return Err(ContextResolveError::MissingFile {
                     node: node.id.clone(),
@@ -60,7 +71,7 @@ pub(super) async fn resolve_files(
         out.extend_from_slice(&bytes);
         out.push(b'\n');
     }
-    Ok(out)
+    Ok(Resolved { bytes: out, absent })
 }
 
 /// Where `rendered` was looked for, in the terms a person acts on: the

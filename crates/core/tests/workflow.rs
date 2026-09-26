@@ -641,6 +641,60 @@ prompt: "plan it"
     assert!(node.context.is_empty());
 }
 
+/// A required entry is written back as the bare path it always was, so
+/// the JSON a manifest's hash is taken over is the one a `Vec<String>`
+/// produced before optional entries existed: no frozen run's hash moves.
+#[test]
+fn a_required_files_entry_serializes_as_the_bare_path_it_always_was() {
+    use yunta_core::{ContextFile, ContextSpec};
+
+    let required = ContextSpec::Files {
+        files: vec![ContextFile::required("docs/architecture.md")],
+    };
+    assert_eq!(
+        serde_json::to_string(&required).unwrap(),
+        r#"{"files":["docs/architecture.md"]}"#
+    );
+
+    let optional = ContextSpec::Files {
+        files: vec![ContextFile {
+            path: "docs/architecture.md".to_string(),
+            optional: true,
+        }],
+    };
+    let written = serde_json::to_string(&optional).unwrap();
+    assert_eq!(
+        written,
+        r#"{"files":[{"path":"docs/architecture.md","optional":true}]}"#
+    );
+    let read: ContextSpec = serde_norway::from_str(&written).unwrap();
+    assert_eq!(read, optional, "what is written reads back as itself");
+}
+
+#[test]
+fn a_files_entry_that_is_neither_shape_is_refused_by_name() {
+    let refused = |entry: &str| {
+        serde_norway::from_str::<yunta_core::ContextSpec>(&format!("files: [{entry}]"))
+            .unwrap_err()
+            .to_string()
+    };
+    assert!(
+        refused("{ path: a.md, required: true }").contains("unknown key `required`"),
+        "{}",
+        refused("{ path: a.md, required: true }")
+    );
+    assert!(
+        refused("{ optional: true }").contains("names its `path`"),
+        "{}",
+        refused("{ optional: true }")
+    );
+    assert!(
+        refused("[a.md]").contains("a path or `{ path, optional }`, not a list"),
+        "{}",
+        refused("[a.md]")
+    );
+}
+
 #[test]
 fn every_context_builtin_parses_from_its_own_contrato_example() {
     let yaml = r#"
@@ -648,7 +702,7 @@ id: plan
 kind: prompt
 prompt: "plan it"
 context:
-  - files: ["docs/architecture.md"]
+  - files: ["docs/architecture.md", { path: docs/overview.md, optional: true }]
   - command: "git log --oneline -20"
   - artifact: { node: grill, name: brief.md }
   - tasks: {}
@@ -660,11 +714,18 @@ context:
     let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
     assert_eq!(node.context.len(), 8);
 
-    use yunta_core::ContextSpec;
+    use yunta_core::{ContextFile, ContextSpec};
     match &node.context[0] {
-        ContextSpec::Files { files } => {
-            assert_eq!(files, &vec!["docs/architecture.md".to_string()])
-        }
+        ContextSpec::Files { files } => assert_eq!(
+            files,
+            &vec![
+                ContextFile::required("docs/architecture.md"),
+                ContextFile {
+                    path: "docs/overview.md".to_string(),
+                    optional: true,
+                },
+            ]
+        ),
         other => panic!("expected Files, got {other:?}"),
     }
     match &node.context[1] {

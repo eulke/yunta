@@ -218,7 +218,7 @@ registra.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `task_id` | string | no | presente cuando el ensamblado construyó el brief de UNA tarea dentro de un `loop` — la misma convención tarea-vs-nodo de `scope_checked.task_id`; ausente en el ensamblado de un nodo `prompt` |
-| `sources` | lista de `{source_id, kind}` | sí | qué `ContextSource` se resolvieron |
+| `sources` | lista de `{source_id, kind, content_hash, absent?}` | sí | qué `ContextSource` se resolvieron; `absent` lists the optional `files:` paths the source did not find (D186), omitted when empty |
 | `segment_hashes` | mapa `stable \| run-stable \| volatile` → hash | sí | orden fijo estable→run-estable→volátil→prompt; insumo directo de replay/diff |
 
 ### 5.9 `task_registered` — engine

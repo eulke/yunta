@@ -134,6 +134,34 @@ nodes:
     }
 }
 
+#[tokio::test]
+async fn a_missing_optional_file_is_marked_in_the_context_and_recorded() {
+    // An optional file the tree does not hold is not a failed source: the
+    // session is told it is absent — the fixture only answers a prompt
+    // that says so — and the event names it, so replay knows what the
+    // session went without.
+    let bench = Bench::new();
+    write(&bench.worktree.join("a.txt"), "MARKER-FILES-CONTENT\n");
+    let workflow = context_workflow(
+        "      - files: [{ path: docs/architecture.md, optional: true }, \"a.txt\"]\n",
+    );
+    let fixture = "sessions:\n  - match_prompt_contains: \"# docs/architecture.md\\n[absent — declared optional; not in the run's tree]\"\n    outcome: { type: completed, summary: ok }\n";
+
+    let RunReport { terminal, .. } = bench.run(&workflow, fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.storage.events_for_run(&bench.run_id).unwrap();
+    let sources = context_sources(&events, "ask");
+    assert_eq!(sources[0].source_id, "files:docs/architecture.md,a.txt");
+    assert_eq!(sources[0].absent, vec!["docs/architecture.md".to_string()]);
+    assert_materialized(&bench.run_dir(), &sources[0]);
+    let object = String::from_utf8(bench.object(&sources[0].content_hash).unwrap()).unwrap();
+    assert!(
+        object.contains("MARKER-FILES-CONTENT"),
+        "the files that are there are read as always: {object}"
+    );
+}
+
 /// A node reading one required file, and the one session that answers
 /// only once the file's content is in its prompt.
 fn reads_architecture() -> (String, &'static str) {
@@ -164,7 +192,8 @@ async fn a_missing_file_fails_the_node_saying_where_the_next_attempt_looks() {
         format!(
             "context `files:docs/architecture.md` on node `ask`: `docs/architecture.md` is not \
              in the run's tree, which starts from commit `{}` — a file that is not committed \
-             there, or that git ignores, never reaches it; put it at `{}` and choose `retry`",
+             there, or that git ignores, never reaches it; put it at `{}` and choose `retry`, \
+             or declare the entry `optional: true` if the node can do without it",
             bench.manifest().base_commit.abbreviated(),
             bench.worktree.join("docs/architecture.md").display()
         )

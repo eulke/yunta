@@ -152,7 +152,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     context:
       - artifact: { node: brief, name: brief.md }
       - knowledge: {}
-      - files: ["docs/architecture.md"]
+      - files: ["docs/architecture.md"]   # or { path: ..., optional: true } when the node can do without it (D186)
       - command: "git log --oneline -20"
       - mcp: { server: internal-docs, query: "{{inputs.idea}}" }
     prompt: { file: prompts/plan.md }   # §9.3 — también admite string inline

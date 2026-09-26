@@ -78,16 +78,18 @@ pub async fn check_context_files(
     warnings
 }
 
-/// `(node, path)` for every literal `files:` entry of `node` and of the
-/// children a `parallel` group runs, each pair once.
+/// `(node, path)` for every literal, required `files:` entry of `node`
+/// and of the children a `parallel` group runs, each pair once. An
+/// optional entry is left out: its author already said the node goes on
+/// without it (D186).
 fn literal_files(node: &Node, read: &mut Vec<(NodeId, String)>) {
     for source in &node.context {
         let ContextSpec::Files { files } = source else {
             continue;
         };
-        for path in files {
-            let literal = template_variables(path).is_ok_and(|vars| vars.is_empty());
-            let entry = (node.id.clone(), path.clone());
+        for file in files.iter().filter(|file| !file.optional) {
+            let literal = template_variables(&file.path).is_ok_and(|vars| vars.is_empty());
+            let entry = (node.id.clone(), file.path.clone());
             if literal && !read.contains(&entry) {
                 read.push(entry);
             }
