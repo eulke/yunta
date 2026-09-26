@@ -144,6 +144,34 @@ fn reads_architecture() -> (String, &'static str) {
 }
 
 #[tokio::test]
+async fn a_missing_file_fails_the_node_saying_where_the_next_attempt_looks() {
+    // Where the file has to be for the next attempt — the run's own tree,
+    // and the commit it starts from — not the checkout this attempt read.
+    let bench = Bench::new();
+    let (workflow, fixture) = reads_architecture();
+
+    let RunReport { terminal, state } = bench.run(&workflow, fixture).await;
+
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+    let Some(yunta_engine::NodeState::Failed { failure, .. }) = state.nodes.state("ask") else {
+        panic!("expected `ask` to fail on the missing file");
+    };
+    assert_eq!(
+        failure.to_string(),
+        format!(
+            "context `files:docs/architecture.md` on node `ask`: `docs/architecture.md` is not \
+             in the run's tree, which starts from commit `{}` — a file that is not committed \
+             there, or that git ignores, never reaches it; put it at `{}` and choose `retry`",
+            bench.manifest().base_commit.abbreviated(),
+            bench.worktree.join("docs/architecture.md").display()
+        )
+    );
+}
+
+#[tokio::test]
 async fn a_missing_file_retried_after_it_is_put_in_place_finishes() {
     // Once a person puts the file where the failure said, `retry` runs the
     // node again instead of leaving the run parked on it.

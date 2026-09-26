@@ -12,7 +12,7 @@ use crate::artifacts::store::ObjectStore;
 use crate::process::{spawn_governed, GovernedCommand, Outcome};
 use yunta_core::template::render_template;
 
-use super::error::ContextResolveError;
+use super::error::{Absence, ContextResolveError};
 use super::EXTERNAL_CALL_TIMEOUT;
 use crate::run::node_exec::template_vars;
 use crate::run::{RunCtx, RunError};
@@ -38,19 +38,46 @@ pub(super) async fn resolve_files(
         } else {
             ctx.worktree.join(&rendered)
         };
-        let bytes = tokio::fs::read(&path)
-            .await
-            .map_err(|source| ContextResolveError::Io {
-                node: node.id.clone(),
-                source_id: source_id.to_string(),
-                action: format!("read `{}`", path.display()),
-                source,
-            })?;
+        let bytes = match tokio::fs::read(&path).await {
+            Ok(bytes) => bytes,
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+                return Err(ContextResolveError::MissingFile {
+                    node: node.id.clone(),
+                    source_id: source_id.to_string(),
+                    absence: absence(ctx, rendered),
+                });
+            }
+            Err(source) => {
+                return Err(ContextResolveError::Io {
+                    node: node.id.clone(),
+                    source_id: source_id.to_string(),
+                    action: format!("read `{}`", path.display()),
+                    source,
+                });
+            }
+        };
         out.extend_from_slice(format!("# {rendered}\n").as_bytes());
         out.extend_from_slice(&bytes);
         out.push(b'\n');
     }
     Ok(out)
+}
+
+/// Where `rendered` was looked for, in the terms a person acts on: the
+/// run's own tree — never the checkout a node given one of its own reads,
+/// which is rebuilt from the run's tree on its next attempt — and, for an
+/// isolated run, the commit that tree starts from.
+fn absence(ctx: &RunCtx<'_>, rendered: String) -> Absence {
+    if Path::new(&rendered).is_absolute() {
+        return Absence::Absolute { path: rendered };
+    }
+    let run_tree = ctx.unit.map_or(ctx.worktree, |mine| mine.into);
+    Absence::InRunTree {
+        path: rendered,
+        run_tree: run_tree.to_path_buf(),
+        branched_from: (ctx.manifest.isolation == yunta_core::Isolation::Worktree)
+            .then(|| ctx.manifest.base_commit.clone()),
+    }
 }
 
 pub(super) async fn resolve_command(
