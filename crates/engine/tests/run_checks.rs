@@ -474,6 +474,33 @@ nodes:
 }
 
 #[tokio::test]
+async fn progress_md_names_a_node_that_failed_as_soon_as_it_fails() {
+    // What a retry or a corrective node reads next has to know about the
+    // failure it follows, even when nothing finished after it.
+    let bench = Bench::new();
+    let workflow = r#"
+name: one-failure
+nodes:
+  - id: broken
+    kind: bash
+    run: "exit 3"
+"#;
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+
+    let progress = tokio::fs::read_to_string(bench.run_dir().join("progress.md"))
+        .await
+        .unwrap();
+    assert_eq!(
+        progress,
+        "# Progress\n\n## Finished\n\n_none yet_\n\n## Failed\n\n- **broken** — `exit 3`\n\n## Next\n\n_nothing pending_\n"
+    );
+}
+
+#[tokio::test]
 async fn progress_md_lists_a_node_s_artifacts_after_it_finishes() {
     let bench = Bench::new();
 

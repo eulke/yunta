@@ -418,8 +418,9 @@ pub(super) async fn fail(
 }
 
 /// Regenerates `progress.md` at `run.dir`'s root — the engine's own
-/// call, right after the `node_finished` that triggers it (`node_failed`
-/// is not itself a regeneration point).
+/// call, right after the `node_finished` or `node_failed` that ends a
+/// node, so the next session to read it (a retry, a corrective node)
+/// sees the failure it follows.
 pub(super) async fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
     let events = ctx.load_events().await?;
     let markdown = crate::progress::render_progress(&ctx.manifest.workflow, &events);
@@ -463,5 +464,6 @@ pub(super) async fn fail_with(
         ))),
     )
     .await?;
+    write_progress(ctx).await?;
     Ok(NodeEnd::Failed)
 }

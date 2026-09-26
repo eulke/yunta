@@ -2,7 +2,7 @@
 //! from at start (a node never assumes prior history): its rendered prompt, its
 //! resolved context sources, this file, and its skills. The engine
 //! writes it, never an agent — regenerated in full from the log after
-//! each `node_finished`, the same "state is a pure function of the log"
+//! each `node_finished` and `node_failed`, the same "state is a pure function of the log"
 //! principle [`crate::replay::derive`] follows, so it never accumulates
 //! narrative drift.
 
