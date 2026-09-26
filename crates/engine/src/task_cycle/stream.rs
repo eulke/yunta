@@ -233,7 +233,7 @@ async fn emit_audit(
     payload: EventPayload,
 ) -> Result<(), StorageError> {
     match audit {
-        Some((observer, node_id)) => observer.emit_session_event(node_id, payload).await,
+        Some((observer, node_id)) => observer.record(node_id, payload).await.map(|_| ()),
         None => Ok(()),
     }
 }

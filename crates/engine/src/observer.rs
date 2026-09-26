@@ -68,7 +68,7 @@ pub trait RunObserver: Send + Sync {
     /// repaint and costs the run nothing. A `Result` would hand every
     /// call site a display error whose only correct handling is to
     /// ignore it. Contrast
-    /// [`SessionObserver::emit_session_event`](crate::SessionObserver::emit_session_event),
+    /// [`SessionObserver::record`](crate::SessionObserver::record),
     /// which does return one: a lost audit event thins the trail replay
     /// and `status` read, so its storage cause travels back and fails
     /// the node.

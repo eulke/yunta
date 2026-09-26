@@ -933,11 +933,11 @@ struct FailingObserver;
 
 #[async_trait::async_trait]
 impl yunta_engine::SessionObserver for FailingObserver {
-    async fn emit_session_event(
+    async fn record(
         &self,
         _node_id: &yunta_core::NodeId,
         _payload: yunta_core::events::EventPayload,
-    ) -> Result<(), yunta_storage::StorageError> {
+    ) -> Result<yunta_core::Seq, yunta_storage::StorageError> {
         Err(yunta_storage::StorageError::Append {
             run_id: yunta_core::RunId::from("run-test"),
             source: "audit storage is down".into(),

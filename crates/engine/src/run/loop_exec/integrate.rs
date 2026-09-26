@@ -5,13 +5,13 @@
 use std::path::PathBuf;
 
 use yunta_core::events::{
-    CriteriaCheckedPayload, CriterionResult, CriterionType, EventPayload, Phase,
-    ScopeCheckedPayload, TaskStatus, TaskStatusChangedPayload,
+    CriteriaCheckedPayload, CriterionResult, EventPayload, Phase, ScopeCheckedPayload, TaskStatus,
+    TaskStatusChangedPayload,
 };
 use yunta_core::{CommitSha, Node, ScopeGlob, Seq, Task};
 
 use crate::scope::audit;
-use crate::task_cycle::{post_check, CriterionRun, Memo, TaskCycleReport, TaskOutcome};
+use crate::task_cycle::{post_check, to_results, Memo, TaskCycleReport, TaskOutcome};
 use crate::worktree::{commit_work, land, rebase_onto, Rebase, Unit};
 
 use super::escalate::{emit_scope_expansion_events, PendingEscalation};
@@ -20,8 +20,10 @@ use crate::run::{RunCtx, RunError};
 use yunta_core::events::{NodeEvent, TaskEvent};
 
 /// Integrates one dispatched batch, serially and in declaration order
-/// (never the order dispatch finished in): drains each task's attempts onto
-/// the log, rebases and fast-forwards a `Done` task onto the run's current
+/// (never the order dispatch finished in): records what each task's cycle
+/// could not record itself — its attempts' fence breaches and scope
+/// expansion requests; every check is already on the log, written the
+/// moment it ran — rebases and fast-forwards a `Done` task onto the run's current
 /// tree, and marks each task's new status. A cancelled dispatch ends the
 /// whole node. Any `Escalate`d scope-expansion request is collected for the
 /// caller to resolve once the whole batch is on the log.
@@ -43,40 +45,17 @@ pub(super) async fn integrate_batch(
         // escalation object is built from.
         let mut escalated: Option<(u32, crate::scope_expansion::ScopeExpansionOutcome)> = None;
 
-        let mut last_check_seq = ctx
-            .emit(
-                Some(&node.id),
-                EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
-                    task_id: task.id.clone(),
-                    phase: Phase::Pre,
-                    results: to_results(&report.pre_check),
-                })),
-            )
-            .await?;
+        // The cycle recorded each of its checks the moment it ran; what
+        // it hands over is where the last one landed, which the status
+        // change closing the cycle cites.
+        let mut last_check_seq = report.last_check.ok_or_else(|| RunError::Broken {
+            diagnostic: format!("task `{}`'s cycle recorded no check", task.id),
+        })?;
 
         for attempt in report.attempts.drain(..) {
             state.tokens += attempt.tokens;
-            last_check_seq = ctx
-                .emit(
-                    Some(&node.id),
-                    EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
-                        task_id: task.id.clone(),
-                        phase: Phase::Post,
-                        results: to_results(&attempt.post_check),
-                    })),
-                )
-                .await?;
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {
-                    task_id: Some(task.id.clone()),
-                    diff: attempt.scope.diff,
-                    violations: attempt.scope.violations,
-                })),
-            )
-            .await?;
             // `run_task` has no ctx to record on, so it hands the
-            // breach here, beside the check that found it.
+            // breach here, after the check that found it.
             if let Some(breach) = &attempt.fence_breach {
                 record_breach(ctx, node, breach).await?;
             }
@@ -349,18 +328,6 @@ fn conflict_list(paths: &[PathBuf]) -> String {
         .map(|path| path.display().to_string())
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-fn to_results(runs: &[CriterionRun]) -> Vec<CriterionResult> {
-    runs.iter()
-        .map(|run| CriterionResult {
-            cmd: run.cmd.clone(),
-            exit_code: run.exit_code,
-            r#type: run.is_guard.then_some(CriterionType::Guard),
-            reused: run.reused,
-            duration_ms: run.duration_ms,
-        })
-        .collect()
 }
 
 /// A write the adapter said its fence would have stopped, filed against

@@ -9,7 +9,7 @@
 use std::path::PathBuf;
 
 use yunta_core::events::{SessionDeath, SessionExit, TokenUsage};
-use yunta_core::TaskId;
+use yunta_core::{Seq, TaskId};
 
 use crate::scope::ScopeCheckResult;
 
@@ -175,6 +175,9 @@ pub struct AttemptRecord {
     /// so it hands the breach to the caller that already records this
     /// attempt's `scope_checked`.
     pub fence_breach: Option<crate::scope::Breach>,
+    /// The sequence number the log gave this attempt's post-check, which
+    /// the cycle records the moment it runs. `None` without an observer.
+    pub recorded: Option<Seq>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -208,4 +211,8 @@ pub struct TaskCycleReport {
     /// check at integration leaves out, exactly as the cycle's own
     /// check did.
     pub staged: Vec<PathBuf>,
+    /// The sequence number of the last check this cycle recorded — what
+    /// the status change closing the cycle cites. `None` only for a
+    /// cycle run without an observer, which records nothing.
+    pub last_check: Option<Seq>,
 }

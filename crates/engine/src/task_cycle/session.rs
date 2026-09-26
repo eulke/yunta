@@ -117,22 +117,24 @@ impl SessionSetup {
     }
 }
 
-/// What a session dispatch needs from its surrounding run,
+/// What a task cycle needs from its surrounding run,
 /// abstracted so `run_task` stays callable without a full run context
-/// (its own integration tests): append the session's audit events, and
+/// (its own integration tests): append what the cycle observes — each
+/// session's audit events, and each check the moment it runs — and
 /// expose the process registry for pgid bookkeeping. `RunCtx` is the one
 /// real implementor.
 #[async_trait::async_trait]
 pub trait SessionObserver: Sync {
-    /// Appends one session audit event to the run's log. The storage
-    /// cause travels back on failure so the dispatch fails the node
-    /// rather than dropping the event — a lost audit event thins the
-    /// trail `status` and replay read.
-    async fn emit_session_event(
+    /// Appends one event to the run's log and returns the sequence
+    /// number the log gave it. The storage cause travels back on failure
+    /// so the cycle fails the node rather than dropping the event — a
+    /// lost event thins the trail `status`, replay and a task session's
+    /// own tools read.
+    async fn record(
         &self,
         node_id: &yunta_core::NodeId,
         payload: EventPayload,
-    ) -> Result<(), StorageError>;
+    ) -> Result<yunta_core::Seq, StorageError>;
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry>;
 }
 

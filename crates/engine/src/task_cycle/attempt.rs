@@ -5,11 +5,12 @@ use std::path::PathBuf;
 use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{SessionDeath, TokenUsage};
+use yunta_core::events::{Phase, SessionDeath, TokenUsage};
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::Task;
 
 use super::criteria::{post_check, Memo};
+use super::record::Recorder;
 use super::session::{dispatch_session, DispatchError, SessionObserver, SessionSetup};
 use super::{AttemptRecord, DispatchOutcome, TaskCycleError, TaskOutcome};
 use crate::process::Supervision;
@@ -56,6 +57,7 @@ pub(super) enum AttemptStep {
 /// attempt alongside the step [`run_task`] acts on.
 pub(super) async fn run_one_attempt(
     params: &AttemptParams<'_>,
+    recorder: Recorder<'_>,
     attempt: u32,
 ) -> Result<(Vec<PathBuf>, AttemptStep), TaskCycleError> {
     let (last_staged, dispatch_outcome, tokens, covered) = open_and_dispatch(params).await?;
@@ -83,15 +85,21 @@ pub(super) async fn run_one_attempt(
     let cancelled =
         matches!(dispatch_outcome, DispatchOutcome::Cancelled) || supervision.cancel.is_cancelled();
     if cancelled {
+        // Nothing was checked, and the log says so in the attempt's own
+        // place: an empty post-check and an empty scope audit.
+        let scope = crate::scope::ScopeCheckResult::default();
+        let recorded = recorder.criteria(Phase::Post, &[]).await?;
+        recorder.scope(&scope).await?;
         let record = AttemptRecord {
             attempt,
             dispatch: DispatchOutcome::Cancelled,
             tokens,
             fence_breach: None,
             post_check: Vec::new(),
-            scope: crate::scope::ScopeCheckResult::default(),
+            scope,
             succeeded: false,
             scope_expansion: None,
+            recorded,
         };
         return Ok((
             last_staged,
@@ -133,6 +141,10 @@ pub(super) async fn run_one_attempt(
         supervision,
     )
     .await?;
+    // On the log before anything else happens to this task, so the next
+    // attempt's session can read why this one did not close.
+    let recorded = recorder.criteria(Phase::Post, &post_runs).await?;
+    recorder.scope(&scope).await?;
 
     let criteria_green = post_runs.iter().all(|r| r.exit_code == 0);
     let succeeded = criteria_green && scope.violations.is_empty();
@@ -170,6 +182,7 @@ pub(super) async fn run_one_attempt(
         scope,
         succeeded,
         scope_expansion: expansion_outcome,
+        recorded,
     };
 
     if succeeded {

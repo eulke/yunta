@@ -11,6 +11,7 @@
 mod attempt;
 mod criteria;
 mod outcome;
+mod record;
 mod session;
 mod stream;
 
@@ -19,7 +20,7 @@ use yunta_core::ScopeGlob;
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::TaskLedger;
+use yunta_core::events::{Phase, TaskLedger};
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::{AdapterError, Task, TaskId};
 use yunta_storage::StorageError;
@@ -31,6 +32,8 @@ pub use outcome::{
 use crate::process::Supervision;
 use crate::scope::ScopeCheckError;
 use attempt::{run_one_attempt, AttemptParams, AttemptStep};
+pub(crate) use record::to_results;
+use record::Recorder;
 
 pub use criteria::{post_check, pre_check, Memo, Memoized};
 pub(crate) use session::dispatch_session;
@@ -210,6 +213,13 @@ pub async fn run_task(
         grants,
         already_granted_paths,
     } = governance;
+    // Every check reaches the log the moment it runs. A cycle records a
+    // pre-check even when it ran no criterion — denied, or cut before it
+    // began — because the status change that closes the cycle cites it.
+    let recorder = Recorder {
+        audit,
+        task: &task.id,
+    };
     for criterion in &task.criteria {
         if let Some(rule) = crate::permissions::command_violation(&criterion.cmd, permissions) {
             return Ok(TaskCycleReport {
@@ -221,6 +231,7 @@ pub async fn run_task(
                     cause: BlockedCause::CommandDenied { rule },
                 },
                 needs_human_decision: false,
+                last_check: recorder.criteria(Phase::Pre, &[]).await?,
             });
         }
     }
@@ -239,10 +250,12 @@ pub async fn run_task(
             attempts: Vec::new(),
             outcome: TaskOutcome::Interrupted,
             needs_human_decision: false,
+            last_check: recorder.criteria(Phase::Pre, &[]).await?,
         });
     }
 
     let pre_runs = pre_check(task, &unit.worktree, memo, history, supervision).await?;
+    let mut last_check = recorder.criteria(Phase::Pre, &pre_runs).await?;
 
     // The pre-check validates the criteria before any work: a non-guard
     // that already passes, or a guard already red, means the criteria
@@ -259,6 +272,7 @@ pub async fn run_task(
                 cause: BlockedCause::PreCheck(found),
             },
             needs_human_decision: false,
+            last_check,
         });
     }
 
@@ -282,7 +296,7 @@ pub async fn run_task(
     };
     let mut attempts = Vec::new();
     for attempt in 1..=(max_retries + 1) {
-        let (staged, step) = run_one_attempt(&params, attempt).await?;
+        let (staged, step) = run_one_attempt(&params, recorder, attempt).await?;
         last_staged = staged;
         match step {
             AttemptStep::Stop {
@@ -290,6 +304,7 @@ pub async fn run_task(
                 outcome,
                 needs_human_decision,
             } => {
+                last_check = record.recorded.or(last_check);
                 attempts.push(record);
                 return Ok(TaskCycleReport {
                     task_id: task.id.clone(),
@@ -298,9 +313,13 @@ pub async fn run_task(
                     attempts,
                     outcome,
                     needs_human_decision,
+                    last_check,
                 });
             }
-            AttemptStep::Again(record) => attempts.push(record),
+            AttemptStep::Again(record) => {
+                last_check = record.recorded.or(last_check);
+                attempts.push(record);
+            }
         }
     }
 
@@ -315,5 +334,6 @@ pub async fn run_task(
                 attempts: max_retries + 1,
             },
         },
+        last_check,
     })
 }

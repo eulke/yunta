@@ -455,18 +455,18 @@ impl<'a> RunCtx<'a> {
 /// which fails the node with it.
 #[async_trait::async_trait]
 impl crate::task_cycle::SessionObserver for RunCtx<'_> {
-    async fn emit_session_event(
+    async fn record(
         &self,
         node_id: &NodeId,
         payload: EventPayload,
-    ) -> Result<(), StorageError> {
-        // A session audit event that cannot be appended is not
+    ) -> Result<yunta_core::Seq, StorageError> {
+        // An event of the cycle that cannot be appended is not
         // dropped: it would silently thin the trail `status` and replay
         // read (a lost `agent_session_opened` even changes what a resume
-        // finds), so the storage cause travels back to the dispatch and
+        // finds), so the storage cause travels back to the cycle and
         // fails the node — the same storage the run's next mandatory
         // event would hit anyway, surfaced now instead of masked.
-        self.log().record(Some(node_id), payload).await.map(|_| ())
+        self.log().record(Some(node_id), payload).await
     }
 
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry> {

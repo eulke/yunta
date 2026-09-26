@@ -1212,6 +1212,75 @@ nodes:
     );
 }
 
+/// Every check a task cycle runs reaches the log the moment it runs: the
+/// pre-check before the task's first session opens, and each attempt's
+/// post-check before the next attempt's session does — so what a retry
+/// reads about the attempt before it is already there to read.
+#[tokio::test]
+async fn each_check_of_a_task_reaches_the_log_before_the_next_session_opens() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: checked-as-it-goes
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Implement your task."
+"#;
+    let tasks = format!(
+        "tasks:\n{}",
+        task_yaml("task-1", "t1", "a1.txt", "test -f a1.txt")
+    );
+    let mut fixture = plan_session(&tasks);
+    // The first attempt leaves the criterion red; the second meets it.
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-1\"\n    outcome: { type: completed, summary: missed }\n\
+         \x20 - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
+    );
+
+    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    assert_eq!(
+        sessions_and_checks(&bench.events(), "implement"),
+        ["pre", "session", "post", "session", "post", "post"],
+        "each check lands before the session after it; the last `post` is the \
+         re-verification on the integrated tree"
+    );
+}
+
+/// `node`'s session openings and criteria checks, in the order the log
+/// holds them.
+fn sessions_and_checks(
+    events: &[yunta_core::events::StoredEvent],
+    node: &str,
+) -> Vec<&'static str> {
+    events
+        .iter()
+        .filter(|event| event.node_id.as_ref().map(|id| id.as_str()) == Some(node))
+        .filter_map(|event| match event.payload() {
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::Opened(_))) => {
+                Some("session")
+            }
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::CriteriaChecked(p))) => {
+                Some(match p.phase {
+                    yunta_core::events::Phase::Pre => "pre",
+                    yunta_core::events::Phase::Post => "post",
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// Every session carries what it may write, always: a node that
 /// declared a scope carries it, and a `read_only` node carries a
 /// ceiling that admits nothing under the worktree.

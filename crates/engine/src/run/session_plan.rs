@@ -367,7 +367,7 @@ async fn mount_tools(
     }
     if let Some((observer, node)) = observer {
         observer
-            .emit_session_event(
+            .record(
                 node,
                 yunta_core::events::EventPayload::Session(
                     yunta_core::events::SessionEvent::CapabilityDegraded(
