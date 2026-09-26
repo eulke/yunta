@@ -12,12 +12,31 @@
 //! here carries a hash.
 
 pub mod artifacts;
+pub mod children;
+mod evidence;
 mod failure;
 pub mod findings;
-mod payloads;
+pub mod gates;
+pub mod meta;
+pub mod node;
+pub mod run;
+pub mod scope;
+pub mod session;
+pub mod tasks;
+mod wire;
 
-pub use failure::Failure;
-pub use payloads::*;
+pub use artifacts::{payloads::*, ArtifactEvent};
+pub use children::{ledger::*, payloads::*, ChildEvent};
+pub use evidence::{Evidence, Fact};
+pub use failure::{Failure, SessionDeath, SessionEnd, SessionExit, STDERR_TAIL_LINES};
+pub use findings::{payloads::*, FindingEvent};
+pub use gates::{ledger::*, payloads::*, GateEvent};
+pub use meta::EventMeta;
+pub use node::{ledger::*, payloads::*, NodeEvent};
+pub use run::{ledger::*, payloads::*, RunEvent};
+pub use scope::{ledger::*, payloads::*, ScopeEvent};
+pub use session::{ledger::*, payloads::*, SessionEvent};
+pub use tasks::{ledger::*, payloads::*, TaskEvent};
 
 // Re-exported for convenience: `agent_session_opened`'s payload uses this
 // type, but it is defined at the crate root (`capabilities.rs`) since the
@@ -277,46 +296,46 @@ impl schemars::JsonSchema for StoredEvent {
     }
 }
 
-/// All 36 event kinds, internally tagged by `kind`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+/// What happened, in the terms of the domain it happened to.
+///
+/// Nine arms, one per domain; each domain declares its own kinds, their
+/// payloads and their names. Nothing outside a domain has to know all
+/// thirty-nine, and a kind that gains a domain gains it in one file.
+///
+/// On the wire this is still one flat object tagged by `kind`: `serde`
+/// goes through a private flat enum holding the thirty-nine in the
+/// order the log has always written them, so the shape a log carries is
+/// independent of the shape the engine reads.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(from = "wire::EventPayloadWire", into = "wire::EventPayloadWire")]
 pub enum EventPayload {
-    RunCreated(RunCreatedPayload),
-    RunnerResolved(RunnerResolvedPayload),
-    BaselineCaptured(BaselineCapturedPayload),
-    NodeStarted(NodeStartedPayload),
-    AgentSessionOpened(AgentSessionOpenedPayload),
-    AgentMessage(AgentMessagePayload),
-    ArtifactWritten(ArtifactWrittenPayload),
-    ContextAssembled(ContextAssembledPayload),
-    TaskRegistered(TaskRegisteredPayload),
-    CriteriaChecked(CriteriaCheckedPayload),
-    TaskStatusChanged(TaskStatusChangedPayload),
-    ScopeChecked(ScopeCheckedPayload),
-    ScopeExpansionRequested(ScopeExpansionRequestedPayload),
-    ScopeExpansionGranted(ScopeExpansionGrantedPayload),
-    ScopeExpansionDenied(ScopeExpansionDeniedPayload),
-    NodeFinished(NodeFinishedPayload),
-    NodeFailed(NodeFailedPayload),
-    HookExecuted(HookExecutedPayload),
-    NodeRerouted(NodeReroutedPayload),
-    GateWaiting(GateWaitingPayload),
-    GateResolved(GateResolvedPayload),
-    QuestionsAnswered(QuestionsAnsweredPayload),
-    LoopIteration(LoopIterationPayload),
-    FindingPosted(FindingPostedPayload),
-    FindingUpdated(FindingUpdatedPayload),
-    FindingWithdrawn(FindingWithdrawnPayload),
-    FindingRefused(FindingRefusedPayload),
-    ArtifactSubmitted(ArtifactSubmittedPayload),
-    ArtifactAccepted(ArtifactAcceptedPayload),
-    PromotionSignaled(PromotionSignaledPayload),
-    ChildRunCreated(ChildRunCreatedPayload),
-    ChildRunFinished(ChildRunFinishedPayload),
-    CapabilityDegraded(CapabilityDegradedPayload),
-    RunPaused(RunPausedPayload),
-    RunResumed(RunResumedPayload),
-    RunFinished(RunFinishedPayload),
+    Run(RunEvent),
+    Node(NodeEvent),
+    Session(SessionEvent),
+    Tasks(TaskEvent),
+    Scope(ScopeEvent),
+    Findings(FindingEvent),
+    Artifacts(ArtifactEvent),
+    Gates(GateEvent),
+    Children(ChildEvent),
+}
+
+/// The schema published for an event payload is the wire shape's: a
+/// `oneOf` of thirty-nine branches, each pinning its own `kind`, in the
+/// order the log writes them. The nine domains are an internal shape and
+/// no reader of `events.json` ever learns about them.
+impl schemars::JsonSchema for EventPayload {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("EventPayload")
+    }
+
+    fn schema_id() -> std::borrow::Cow<'static, str> {
+        wire::EventPayloadWire::schema_id()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        wire::EventPayloadWire::json_schema(generator)
+    }
 }
 
 /// The mode `run_created` froze for this log — always the log's own
@@ -326,100 +345,120 @@ pub enum EventPayload {
 /// disagree about a run's mode.
 pub fn run_mode(events: &[StoredEvent]) -> ModeName {
     match events.first().and_then(StoredEvent::payload) {
-        Some(EventPayload::RunCreated(p)) => p.mode.clone(),
+        Some(EventPayload::Run(RunEvent::Created(p))) => p.mode.clone(),
         _ => ModeName::default(),
     }
+}
+
+/// Every kind this binary knows, in the order the wire writes them.
+///
+/// Derived from [`wire::EventPayloadWire`]'s own variants, so the list a
+/// reader checks a stored `kind` against and the shapes `serde` can
+/// actually read are the same declaration. `every_domain_declares_the_kinds_the_wire_carries`
+/// proves the domains account for exactly this set.
+macro_rules! wire_kinds {
+    ($($variant:ident => $name:literal),* $(,)?) => {
+        const WIRE_KINDS: &[&str] = &[$($name),*];
+        #[allow(dead_code)]
+        fn wire_kinds_are_the_wire_variants(wire: &wire::EventPayloadWire) -> &'static str {
+            match wire { $(wire::EventPayloadWire::$variant(_) => $name),* }
+        }
+    };
+}
+
+wire_kinds! {
+    RunCreated => "run_created",
+    RunnerResolved => "runner_resolved",
+    BaselineCaptured => "baseline_captured",
+    NodeStarted => "node_started",
+    AgentSessionOpened => "agent_session_opened",
+    AgentMessage => "agent_message",
+    ArtifactWritten => "artifact_written",
+    ContextAssembled => "context_assembled",
+    TaskRegistered => "task_registered",
+    CriteriaChecked => "criteria_checked",
+    TaskStatusChanged => "task_status_changed",
+    ScopeChecked => "scope_checked",
+    ScopeExpansionRequested => "scope_expansion_requested",
+    ScopeExpansionGranted => "scope_expansion_granted",
+    ScopeExpansionDenied => "scope_expansion_denied",
+    NodeFinished => "node_finished",
+    NodeFailed => "node_failed",
+    HookExecuted => "hook_executed",
+    NodeRerouted => "node_rerouted",
+    GateWaiting => "gate_waiting",
+    GateResolved => "gate_resolved",
+    QuestionsAsked => "questions_asked",
+    QuestionsAnswered => "questions_answered",
+    LoopIteration => "loop_iteration",
+    FindingPosted => "finding_posted",
+    FindingUpdated => "finding_updated",
+    FindingWithdrawn => "finding_withdrawn",
+    FindingRefused => "finding_refused",
+    ArtifactSubmitted => "artifact_submitted",
+    ArtifactAccepted => "artifact_accepted",
+    PromotionSignaled => "promotion_signaled",
+    ChildRunCreated => "child_run_created",
+    ChildRunFinished => "child_run_finished",
+    CapabilityDegraded => "capability_degraded",
+    WriteRefused => "write_refused",
+    RunToolFailed => "run_tool_failed",
+    RunPaused => "run_paused",
+    RunResumed => "run_resumed",
+    RunFinished => "run_finished",
 }
 
 impl EventPayload {
     /// Every kind this binary knows, as persisted — what the reader checks
     /// a stored `kind` against before deciding it is unknown.
-    pub const KINDS: &'static [&'static str] = &[
-        "run_created",
-        "runner_resolved",
-        "baseline_captured",
-        "node_started",
-        "agent_session_opened",
-        "agent_message",
-        "artifact_written",
-        "context_assembled",
-        "task_registered",
-        "criteria_checked",
-        "task_status_changed",
-        "scope_checked",
-        "scope_expansion_requested",
-        "scope_expansion_granted",
-        "scope_expansion_denied",
-        "node_finished",
-        "node_failed",
-        "hook_executed",
-        "node_rerouted",
-        "gate_waiting",
-        "gate_resolved",
-        "questions_answered",
-        "loop_iteration",
-        "finding_posted",
-        "finding_updated",
-        "finding_withdrawn",
-        "finding_refused",
-        "artifact_submitted",
-        "artifact_accepted",
-        "promotion_signaled",
-        "child_run_created",
-        "child_run_finished",
-        "capability_degraded",
-        "run_paused",
-        "run_resumed",
-        "run_finished",
-    ];
+    pub const KINDS: &'static [&'static str] = WIRE_KINDS;
 
-    /// The persisted `kind` string — what storage writes to its
-    /// `kind` column, independent of re-serializing the whole payload.
+    /// The persisted `kind` string — what storage writes to its `kind`
+    /// column, independent of re-serializing the whole payload. The
+    /// domain answers for its own kinds.
     pub fn kind_name(&self) -> &'static str {
         match self {
-            Self::RunCreated(_) => "run_created",
-            Self::RunnerResolved(_) => "runner_resolved",
-            Self::BaselineCaptured(_) => "baseline_captured",
-            Self::NodeStarted(_) => "node_started",
-            Self::AgentSessionOpened(_) => "agent_session_opened",
-            Self::AgentMessage(_) => "agent_message",
-            Self::ArtifactWritten(_) => "artifact_written",
-            Self::ContextAssembled(_) => "context_assembled",
-            Self::TaskRegistered(_) => "task_registered",
-            Self::CriteriaChecked(_) => "criteria_checked",
-            Self::TaskStatusChanged(_) => "task_status_changed",
-            Self::ScopeChecked(_) => "scope_checked",
-            Self::ScopeExpansionRequested(_) => "scope_expansion_requested",
-            Self::ScopeExpansionGranted(_) => "scope_expansion_granted",
-            Self::ScopeExpansionDenied(_) => "scope_expansion_denied",
-            Self::NodeFinished(_) => "node_finished",
-            Self::NodeFailed(_) => "node_failed",
-            Self::HookExecuted(_) => "hook_executed",
-            Self::NodeRerouted(_) => "node_rerouted",
-            Self::GateWaiting(_) => "gate_waiting",
-            Self::GateResolved(_) => "gate_resolved",
-            Self::QuestionsAnswered(_) => "questions_answered",
-            Self::LoopIteration(_) => "loop_iteration",
-            Self::FindingPosted(_) => "finding_posted",
-            Self::FindingUpdated(_) => "finding_updated",
-            Self::FindingWithdrawn(_) => "finding_withdrawn",
-            Self::FindingRefused(_) => "finding_refused",
-            Self::ArtifactSubmitted(_) => "artifact_submitted",
-            Self::ArtifactAccepted(_) => "artifact_accepted",
-            Self::PromotionSignaled(_) => "promotion_signaled",
-            Self::ChildRunCreated(_) => "child_run_created",
-            Self::ChildRunFinished(_) => "child_run_finished",
-            Self::CapabilityDegraded(_) => "capability_degraded",
-            Self::RunPaused(_) => "run_paused",
-            Self::RunResumed(_) => "run_resumed",
-            Self::RunFinished(_) => "run_finished",
+            Self::Run(e) => e.kind_name(),
+            Self::Node(e) => e.kind_name(),
+            Self::Session(e) => e.kind_name(),
+            Self::Tasks(e) => e.kind_name(),
+            Self::Scope(e) => e.kind_name(),
+            Self::Findings(e) => e.kind_name(),
+            Self::Artifacts(e) => e.kind_name(),
+            Self::Gates(e) => e.kind_name(),
+            Self::Children(e) => e.kind_name(),
         }
     }
 
-    /// Every kind is currently at v1 — this is a
-    /// stub now, and becomes real per-variant lookup the day any kind
-    /// gets an incompatible `_v2` sibling.
+    /// Whether this kind is audit: the log carries it so a reader can
+    /// see what the engine did, and no ledger moves when it arrives.
+    pub fn is_audit(&self) -> bool {
+        match self {
+            Self::Run(e) => e.is_audit(),
+            Self::Node(e) => e.is_audit(),
+            Self::Session(e) => e.is_audit(),
+            Self::Tasks(e) => e.is_audit(),
+            Self::Scope(e) => e.is_audit(),
+            Self::Findings(e) => e.is_audit(),
+            Self::Artifacts(e) => e.is_audit(),
+            Self::Gates(e) => e.is_audit(),
+            Self::Children(e) => e.is_audit(),
+        }
+    }
+
+    /// The shape version of this event's kind. Per kind, never global:
+    /// the domain that declares the kind declares its version.
     pub fn schema_version(&self) -> u32 {
-        1
+        match self {
+            Self::Run(e) => e.schema_version(),
+            Self::Node(e) => e.schema_version(),
+            Self::Session(e) => e.schema_version(),
+            Self::Tasks(e) => e.schema_version(),
+            Self::Scope(e) => e.schema_version(),
+            Self::Findings(e) => e.schema_version(),
+            Self::Artifacts(e) => e.schema_version(),
+            Self::Gates(e) => e.schema_version(),
+            Self::Children(e) => e.schema_version(),
+        }
     }
 }

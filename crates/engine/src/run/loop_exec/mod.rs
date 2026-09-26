@@ -10,9 +10,14 @@
 mod dispatch;
 mod escalate;
 mod integrate;
+mod reopen;
 
-use yunta_core::events::{EventPayload, LoopIterationPayload, StoredEvent, TaskStatus, TokenUsage};
-use yunta_core::{Node, NodeKind, PromptSource, Task, TasksFile};
+use yunta_core::events::{
+    EventPayload, Failure, LoopIterationPayload, SessionDeath, StoredEvent, TaskStatus, TokenUsage,
+};
+use yunta_core::{Node, NodeKind, PromptSource, Task, TaskId, TasksFile};
+
+use crate::task_cycle::BlockedCause;
 
 use crate::replay::RunState;
 
@@ -27,6 +32,7 @@ use escalate::{resolve_escalations, PendingEscalation};
 use integrate::integrate_batch;
 
 use crate::worktree::head_commit;
+use yunta_core::events::{ChildEvent, ScopeEvent};
 
 pub(super) async fn execute_loop(
     ctx: &RunCtx<'_>,
@@ -38,12 +44,13 @@ pub(super) async fn execute_loop(
         LoopReady::Go(prep) => *prep,
         LoopReady::Ended(end) => return Ok(end),
     };
+    reopen::after_retry(ctx, node, &prep.tasks).await?;
 
     let mut state = LoopState {
         tokens: TokenUsage::default(),
         iteration: 0,
         iterations_lifted: false,
-        blocked_reasons: Vec::new(),
+        blocked: Vec::new(),
     };
     loop {
         state.iteration += 1;
@@ -55,13 +62,13 @@ pub(super) async fn execute_loop(
                 .tasks
                 .tasks
                 .iter()
-                .all(|task| view.state.tasks.get(&task.id) == Some(&TaskStatus::Done));
+                .all(|task| view.state.tasks.status(&task.id) == Some(TaskStatus::Done));
             ctx.emit(
                 Some(&node.id),
-                EventPayload::LoopIteration(LoopIterationPayload {
+                EventPayload::Children(ChildEvent::LoopIteration(LoopIterationPayload {
                     iteration: state.iteration,
                     until_result: all_done,
-                }),
+                })),
             )
             .await?;
             if all_done {
@@ -75,12 +82,29 @@ pub(super) async fn execute_loop(
                 )
                 .await;
             }
+            // A session that died is the actionable fact among them, and
+            // it reaches the log as the fact rather than inside a
+            // sentence: the node failed because a CLI would not start,
+            // and that is retryable in a way an unmet criterion is not.
+            if let Some(died) = state.first_death() {
+                return crate::run::node_close::fail_with(
+                    ctx,
+                    node,
+                    Failure::SessionDied { died },
+                    true,
+                    state.tokens,
+                )
+                .await;
+            }
             let mut diagnostic = "no task is ready and not all are done — blocked or failed \
                                   tasks need a decision"
                 .to_string();
-            for reason in &state.blocked_reasons {
+            for (task, cause) in &state.blocked {
                 diagnostic.push_str("; ");
-                diagnostic.push_str(reason);
+                diagnostic.push_str(&yunta_core::text::detailed(
+                    format!("task `{task}` blocked"),
+                    &cause.to_string(),
+                ));
             }
             return fail_with_tokens(ctx, node, diagnostic, false, state.tokens).await;
         }
@@ -90,11 +114,15 @@ pub(super) async fn execute_loop(
                 &node.id,
                 state.iteration,
                 prep.max_iterations,
-            );
+            )
+            .map_err(|source| RunError::Broken {
+                diagnostic: format!("loop `{}`'s escalation: {source}", node.id),
+            })?;
             match super::budget::escalate(ctx, Some(&node.id), escalation, reason).await? {
                 super::budget::BudgetDecision::Continue => state.iterations_lifted = true,
                 super::budget::BudgetDecision::Pause { reason } => {
-                    return fail_with_tokens(ctx, node, reason, false, state.tokens).await;
+                    return fail_with_tokens(ctx, node, reason.to_string(), false, state.tokens)
+                        .await;
                 }
             }
         }
@@ -103,7 +131,7 @@ pub(super) async fn execute_loop(
         // point — one worktree per task, derived from the current base
         // commit — captured once so all N tasks work from an identical
         // snapshot.
-        let base_commit = head_commit(ctx.worktree).await?;
+        let base_commit = head_commit(ctx.worktree, ctx.root_supervision()).await?;
 
         // Each batch member's brief carries the loop's declared `context:` —
         // resolved per task (volatile sources fresh, stable ones from the
@@ -188,7 +216,7 @@ pub(super) async fn execute_loop(
 /// Everything one loop invocation resolves once, before its first iteration.
 struct LoopPrep<'a> {
     instruction: String,
-    adapter: std::sync::Arc<dyn yunta_adapters::Adapter>,
+    adapter: std::sync::Arc<dyn yunta_core::port::Adapter>,
     setup: crate::task_cycle::SessionSetup,
     tasks: TasksFile,
     concurrency: u32,
@@ -209,10 +237,23 @@ struct LoopState {
     tokens: TokenUsage,
     iteration: u32,
     iterations_lifted: bool,
-    /// Blocked reasons gathered this invocation, so the loop's own failure
-    /// can cite them. A resume starts empty — the log carries each task's
-    /// status, and the empty-batch tail still names which tasks are blocked.
-    blocked_reasons: Vec<String>,
+    /// What blocked each task this invocation, so the loop's own failure
+    /// can cite them. Typed rather than a sentence: the node closes with
+    /// the first death among them as the fact it is, and writes prose
+    /// only at the edge. A resume starts empty — the log carries each
+    /// task's status, and the empty-batch tail still names which tasks
+    /// are blocked.
+    blocked: Vec<(TaskId, BlockedCause)>,
+}
+
+impl LoopState {
+    /// The first session death among this invocation's blocked tasks.
+    fn first_death(&self) -> Option<SessionDeath> {
+        self.blocked.iter().find_map(|(_, cause)| match cause {
+            BlockedCause::SessionDied(died) => Some(died.clone()),
+            _ => None,
+        })
+    }
 }
 
 /// What integrating one batch produced: a cancellation that ends the node,
@@ -242,89 +283,18 @@ async fn prepare_loop<'a>(
         Step::Ended(end) => return Ok(LoopReady::Ended(end)),
     };
     let adapter = ctx.adapters[&chosen.adapter].clone();
-    // Once for the whole loop, like skills below: the network policy is the
-    // node's, not the task's, so its declarative-only degradation is recorded
-    // here rather than per task session.
-    report_declarative_network(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
+    // Once for the whole loop: the network policy is the node's, not the
+    // task's, so its declarative-only degradation is recorded here rather
+    // than per task session.
+    report_declarative_network(ctx, node, adapter.as_ref()).await?;
 
-    // One resolution for the whole loop — every task session mounts the same
-    // skills, and a missing name fails the node before any token is spent.
-    let skills = match crate::skills::resolve_skills(
-        &ctx.manifest.config,
-        &ctx.manifest.workflow,
-        node,
-        ctx.worktree,
-    ) {
-        Ok(skills) => skills,
-        Err(error) => {
-            return Ok(LoopReady::Ended(
-                fail(ctx, node, error.to_string(), false).await?,
-            ))
-        }
-    };
-    let skills = if !skills.is_empty()
-        && !adapter
-            .capabilities()
-            .declares(yunta_core::Capability::Skills)
-    {
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
-                capability: yunta_core::Capability::Skills,
-                adapter: chosen.adapter.clone(),
-                policy_applied: "skills not mounted — the adapter declares no native \
-                                 mechanism; task sessions run without them"
-                    .to_string(),
-            }),
-        )
-        .await?;
-        Vec::new()
-    } else {
-        skills
-    };
-    // Same gating as a prompt session — the capability decides, and a
-    // blackboard-group loop on a capability-less adapter fails rather than
-    // silently dropping its declared coordination.
-    let run_tools = if adapter
-        .capabilities()
-        .declares(yunta_core::Capability::RunTools)
-    {
-        Some(crate::run_tools::RunToolsAccess {
-            host: ctx.run_tools_host.clone(),
-            node: node.id.clone(),
-            // A task session writes into the loop node's own declared
-            // artifacts, so it gets to check them: the file it writes is
-            // the file that node closes on.
-            declared: super::node_exec::declared_artifacts(ctx, node),
-        })
-    } else {
-        if ctx.run_tools_host.is_blackboard_member(&node.id) {
-            let end = fail(
-                ctx,
-                node,
-                format!(
-                    "node `{}` is in a `coordination: blackboard` group but adapter `{}` \
-                     declares no `run_tools` capability — the blackboard cannot be mounted",
-                    node.id, chosen.adapter
-                ),
-                false,
-            )
-            .await?;
-            return Ok(LoopReady::Ended(end));
-        }
-        None
-    };
-    let setup = crate::task_cycle::SessionSetup {
-        skills,
-        adapter_settings: ctx.adapter_settings(&chosen.adapter),
-        env: crate::task_cycle::SessionSetup::secrets_env(&ctx.manifest.config),
-        run_tools,
-        run_dir: ctx.run_dir.to_path_buf(),
-        node: node.id.clone(),
+    let setup = match super::session_plan::resolve_setup(ctx, node, &chosen).await? {
+        Ok(setup) => setup,
+        Err(end) => return Ok(LoopReady::Ended(end)),
     };
 
     let view = ctx.run_view().await?;
-    let Some(held) = load_registered_tasks(ctx, &view.events)? else {
+    let Some(held) = load_registered_tasks(ctx, &view.events).await? else {
         let end = fail(
             ctx,
             node,
@@ -385,11 +355,11 @@ fn select_batch<'a>(tasks: &'a TasksFile, state: &RunState, concurrency: u32) ->
     tasks
         .tasks
         .iter()
-        .filter(|task| match state.tasks.get(&task.id) {
+        .filter(|task| match state.tasks.status(&task.id) {
             Some(TaskStatus::Pending) => task
                 .depends_on
                 .iter()
-                .all(|dep| state.tasks.get(dep) == Some(&TaskStatus::Done)),
+                .all(|dep| state.tasks.status(dep) == Some(TaskStatus::Done)),
             Some(TaskStatus::Running) => true,
             _ => false,
         })
@@ -410,7 +380,7 @@ fn granted_count(events: &[StoredEvent]) -> u32 {
         .filter(|event| {
             matches!(
                 event.payload(),
-                Some(EventPayload::ScopeExpansionGranted(_))
+                Some(EventPayload::Scope(ScopeEvent::Granted(_)))
             )
         })
         .count() as u32
@@ -431,7 +401,7 @@ struct HeldTasks {
 /// finds its tasks whatever became of the `artifacts/` view. `None` when
 /// the run holds no tasks document at all — no node produced one, no
 /// input named one, and nothing was handed over.
-fn load_registered_tasks(
+async fn load_registered_tasks(
     ctx: &RunCtx<'_>,
     events: &[StoredEvent],
 ) -> Result<Option<HeldTasks>, RunError> {
@@ -444,7 +414,7 @@ fn load_registered_tasks(
     else {
         return Ok(None);
     };
-    let bytes = held.bytes(&registered)?;
+    let bytes = held.bytes(&registered).await?;
     let describe = crate::artifacts::describe(&registered);
     // The same door `close_artifacts` reads a tasks document through, so
     // a document that stops being readable between the node that wrote
@@ -468,7 +438,7 @@ fn registered_here(held: &HeldTasks, state: &RunState) -> Result<(), RunError> {
         .document
         .tasks
         .iter()
-        .filter(|task| !state.tasks.contains_key(&task.id))
+        .filter(|task| !state.tasks.contains(&task.id))
         .map(|task| task.id.to_string())
         .collect();
     if missing.is_empty() {

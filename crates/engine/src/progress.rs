@@ -2,7 +2,7 @@
 //! from at start (a node never assumes prior history): its rendered prompt, its
 //! resolved context sources, this file, and its skills. The engine
 //! writes it, never an agent — regenerated in full from the log after
-//! each `node_finished`, the same "state is a pure function of the log"
+//! each `node_finished` and `node_failed`, the same "state is a pure function of the log"
 //! principle [`crate::replay::derive`] follows, so it never accumulates
 //! narrative drift.
 
@@ -24,7 +24,7 @@ pub fn render_progress(workflow: &Workflow, events: &[yunta_core::events::Stored
 
     out.push_str("\n## Finished\n\n");
     render_section(&mut out, &nodes, &state, "_none yet_", |node| {
-        match state.nodes.get(&node.id) {
+        match state.nodes.state(&node.id) {
             Some(NodeState::Finished { outcome, .. }) => {
                 Some(finished_entry(&state, node, outcome))
             }
@@ -34,7 +34,7 @@ pub fn render_progress(workflow: &Workflow, events: &[yunta_core::events::Stored
 
     out.push_str("\n## Failed\n\n");
     render_section(&mut out, &nodes, &state, "_none_", |node| {
-        match state.nodes.get(&node.id) {
+        match state.nodes.state(&node.id) {
             Some(NodeState::Failed { failure, .. }) => {
                 Some(format!("- **{}** — {}\n", node.id, fenced(failure)))
             }
@@ -48,7 +48,7 @@ pub fn render_progress(workflow: &Workflow, events: &[yunta_core::events::Stored
         &nodes,
         &state,
         "_nothing pending_",
-        |node| match state.nodes.get(&node.id) {
+        |node| match state.nodes.state(&node.id) {
             None => Some(format!("- **{}** — {}\n", node.id, description_of(node))),
             Some(NodeState::Running { .. }) => Some(format!(
                 "- **{}** — {} (running)\n",

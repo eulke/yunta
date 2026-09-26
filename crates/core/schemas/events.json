@@ -46,10 +46,15 @@
           "format": "uint64",
           "minimum": 0
         },
-        "target_digest": {
-          "type": [
-            "string",
-            "null"
+        "target": {
+          "description": "What the tool acted on. Absent for a message that is not a tool\ncall, and for a log written before the engine recorded it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolTarget"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "text": {
@@ -97,6 +102,17 @@
         },
         "capabilities": {
           "$ref": "#/$defs/Capabilities"
+        },
+        "fence": {
+          "description": "How much of this session the adapter's fence covered — derived\nfrom what it built, never declared. Absent when it built none.\nThe level travels once, in `capabilities.fence`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Coverage"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "model": {
           "description": "The model the CLI reported for the session; absent when it\nreported none.",
@@ -278,14 +294,14 @@
       "enum": [
         "tasks",
         "findings",
-        "questions"
+        "questions",
+        "answers"
       ]
     },
     "ArtifactOrigin": {
-      "description": "How the run came by an artifact.\n\nThe origin is what tells apart an artifact a node produced from one\nthe run was handed, which no hash and no name can: two runs holding\nthe same tasks document differ in whether they planned it or\ninherited it, and every rule about who may replace an artifact reads\nthat difference.",
+      "description": "Where an artifact came from, as the log spells it: the recorded\norigins and `legacy` are one tagged set on the wire, while in Rust a\nfresh acceptance can only name a [`RecordedOrigin`]. `serde` moves\nbetween the two here, so the type the engine holds is not shaped by\nthe file it is written to.",
       "oneOf": [
         {
-          "description": "A session handed the whole document over through its submission\ntool.",
           "type": "object",
           "properties": {
             "kind": {
@@ -298,7 +314,6 @@
           ]
         },
         {
-          "description": "A command node wrote the file and the engine took it as declared.",
           "type": "object",
           "properties": {
             "kind": {
@@ -311,7 +326,6 @@
           ]
         },
         {
-          "description": "The engine derived the document from the log itself, as it does\nfor a findings artifact.",
           "type": "object",
           "properties": {
             "kind": {
@@ -324,7 +338,6 @@
           ]
         },
         {
-          "description": "The answers to a questions artifact.",
           "type": "object",
           "properties": {
             "kind": {
@@ -337,11 +350,10 @@
           ]
         },
         {
-          "description": "A `type: document` input, named by the input it came in as.",
           "type": "object",
           "properties": {
             "input": {
-              "type": "string"
+              "$ref": "#/$defs/InputName"
             },
             "kind": {
               "type": "string",
@@ -354,7 +366,6 @@
           ]
         },
         {
-          "description": "Another run's artifact: a mount, a child's output, a promotion.\n`producer` is the node that produced it there, absent when that\nrun acquired it without a node either.",
           "type": "object",
           "properties": {
             "kind": {
@@ -381,7 +392,6 @@
           ]
         },
         {
-          "description": "A log that recorded the artifact without saying where it came\nfrom — every `artifact_written` there is. The honest origin of a\nfact stated before origins were: the run held it, and the log\ndoes not say how.",
           "type": "object",
           "properties": {
             "kind": {
@@ -443,6 +453,7 @@
       ]
     },
     "BaselineCapturedPayload": {
+      "description": "What the suite a run's lineage declared did on the tree the run\nopens on, and whose measurement it is.",
       "type": "object",
       "properties": {
         "command": {
@@ -450,6 +461,13 @@
         },
         "hash": {
           "$ref": "#/$defs/ContentHash"
+        },
+        "origin": {
+          "description": "Whose measurement this is. A log written before the field reads\n[`BaselineOrigin::Measured`], which is what such a log meant.",
+          "$ref": "#/$defs/BaselineOrigin",
+          "default": {
+            "type": "measured"
+          }
         },
         "results": {
           "$ref": "#/$defs/BaselineResults"
@@ -461,7 +479,43 @@
         "hash"
       ]
     },
+    "BaselineOrigin": {
+      "description": "Who took the measurement a run holds: this run, or the root of the\nlineage it was born into.\n\nA lineage measures once. A run born of another — a `kind: workflow`\nchild, a promotion successor — is born holding the root's\nmeasurement, so every comparison anywhere in the lineage answers the\nsame question: what worked before the invocation started.",
+      "oneOf": [
+        {
+          "description": "This run ran the suite itself, on its first wake.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "measured"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "The run was born holding it; `run` is the root that measured,\nnever the parent it was handed down through.",
+          "type": "object",
+          "properties": {
+            "run": {
+              "$ref": "#/$defs/RunId"
+            },
+            "type": {
+              "type": "string",
+              "const": "inherited"
+            }
+          },
+          "required": [
+            "type",
+            "run"
+          ]
+        }
+      ]
+    },
     "BaselineResults": {
+      "description": "What the suite reported: the code it exited with, and the tail a\nreader sees without opening what the measuring run kept.",
       "type": "object",
       "properties": {
         "exit_code": {
@@ -486,10 +540,10 @@
           "type": "boolean",
           "default": false
         },
-        "edit_hooks": {
-          "description": "Can block edits outside a set of globs as they happen (hot\nenforcement of scope).",
-          "type": "boolean",
-          "default": false
+        "fence": {
+          "description": "What this adapter can build to keep a session's writes inside\nits fence. `None` means nothing: the post-check diff is the only\nthing that catches a write outside the scope. A log written\nbefore the fence existed carries `edit_hooks` instead, which this\nfield's `default` reads as `None`.",
+          "$ref": "#/$defs/FenceLevel",
+          "default": "none"
         },
         "network_isolation": {
           "description": "Can confine a session's process to no network access, enforcing a\nnode's `network: false`. Declarative policy is never an OS sandbox\nYunta core promises (D105): where this is absent, a node's\n`network: false` degrades with `capability_degraded` — recorded for\npolicy and audit, never enforced.",
@@ -528,7 +582,7 @@
       "type": "string",
       "enum": [
         "resume_session",
-        "edit_hooks",
+        "fence",
         "permission_profiles",
         "custom_agents",
         "usage_reporting",
@@ -654,6 +708,13 @@
       "description": "One resolved `ContextSource` reference in `context_assembled.sources`.\n`kind` stays a plain string — the engine fixes the *set* of\nbuiltin source kinds (`files | command | artifact | run-events |\ntasks | knowledge | node-output`, `mcp` among them) but never closes\nit into an enum, since a pack can add its own sources without\nthis type needing to change. `content_hash` is what makes every\nresolution's event carry a verifiable hash — the hash of exactly\nthe bytes the run stored under `objects/<content_hash>` for this\nsource, so replay can name precisely what a session saw without\nre-running anything.",
       "type": "object",
       "properties": {
+        "absent": {
+          "description": "The optional `files:` paths this source did not find (D186): the\nsession got a marker in each one's place, and the hash above\ncovers that marker. Empty — and absent from the wire — for every\nsource that found all it read.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "content_hash": {
           "$ref": "#/$defs/ContentHash"
         },
@@ -668,6 +729,54 @@
         "source_id",
         "kind",
         "content_hash"
+      ]
+    },
+    "Coverage": {
+      "description": "How much of a session the fence actually covered, derived from what\nthe adapter could build — never declared.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "coverage": {
+              "type": "string",
+              "const": "exact"
+            }
+          },
+          "required": [
+            "coverage"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "coverage": {
+              "type": "string",
+              "const": "widened_to_roots"
+            },
+            "roots": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "coverage",
+            "roots"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "coverage": {
+              "type": "string",
+              "const": "tools_only"
+            }
+          },
+          "required": [
+            "coverage"
+          ]
+        }
       ]
     },
     "CriteriaCheckedPayload": {
@@ -873,13 +982,27 @@
               "required": [
                 "of"
               ]
+            },
+            {
+              "description": "A node of a workflow, for a rule about the graph the file\ndeclares.",
+              "type": "object",
+              "properties": {
+                "of": {
+                  "type": "string",
+                  "const": "node"
+                }
+              },
+              "$ref": "#/$defs/Named4",
+              "required": [
+                "of"
+              ]
             }
           ]
         },
         {
           "oneOf": [
             {
-              "description": "The document does not parse into its kind: an unknown key, a\nvalue of the wrong type, an id that is not one. `path` locates\nthe offending value from the document's root\n(`tasks[1].manual_review`), and is empty when the root itself is\nthe problem; `message` is what the deserializer said about that\nvalue, which names the key and what it expected.",
+              "description": "The document does not parse into its kind: an unknown key, a\nvalue of the wrong type, an id that is not one. `path` locates\nthe offending value from the document's root (`tasks[1].scope`),\nand is empty when the root itself is the problem; `message` is\nwhat the deserializer said about that value, which names the key\nand what it expected.",
               "type": "object",
               "properties": {
                 "message": {
@@ -938,12 +1061,26 @@
         "reason"
       ]
     },
+    "DocumentKind": {
+      "description": "What kind of document a report is about.\n\nEvery document this system reads is held to a shape and to rules,\nand reports what it found the same way — so a workflow that breaks\nits own rules reaches a reader in the shape a tasks document already\ndoes. The two are separate arms because they are read at different\nmoments by different doors: a workflow before any run, an artifact\nat a node's close.",
+      "anyOf": [
+        {
+          "description": "The workflow file a run is created from.",
+          "type": "string",
+          "const": "workflow"
+        },
+        {
+          "description": "A document a node produces and the engine reads.",
+          "$ref": "#/$defs/ArtifactKind"
+        }
+      ]
+    },
     "DocumentRef": {
       "description": "Which document a report is about: the kind that fixes its shape, and\nwhere a reader opens it.\n\nA document always has a kind. An artifact the engine never\ninterprets has no shape to demand and therefore no content to report\non; what can go wrong with one is a [`FileProblem`] instead. An\nartifact another run owes has no document at all, and names none.",
       "type": "object",
       "properties": {
         "kind": {
-          "$ref": "#/$defs/ArtifactKind"
+          "$ref": "#/$defs/DocumentKind"
         },
         "path": {
           "description": "As a reader would type it to open the file.",
@@ -996,7 +1133,7 @@
       ]
     },
     "EventPayload": {
-      "description": "All 36 event kinds, internally tagged by `kind`.",
+      "description": "All event kinds, internally tagged by `kind`.",
       "oneOf": [
         {
           "type": "object",
@@ -1276,6 +1413,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "questions_asked"
+            }
+          },
+          "$ref": "#/$defs/QuestionsAskedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "questions_answered"
             }
           },
@@ -1432,6 +1582,32 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "write_refused"
+            }
+          },
+          "$ref": "#/$defs/WriteRefusedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "run_tool_failed"
+            }
+          },
+          "$ref": "#/$defs/RunToolFailedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "run_paused"
             }
           },
@@ -1466,6 +1642,49 @@
             "kind"
           ]
         }
+      ]
+    },
+    "Evidence": {
+      "description": "The facts behind an escalation's summary, attached by the engine\nstraight from the log.\n\nThe pair is the point: the summary is a *claim* about what happened\nand this is the *record* it is audited against, so neither one\nrepeats the other. A producer that writes the cause into both leaves\nevery surface printing it twice, under a heading that promised\nsomething new.\n\nUntagged, with `Prose` last: a payload carrying a list reads as\n[`Evidence::Facts`], and a log written before evidence was data\ncarries one string and reads back as [`Evidence::Prose`], which\nrenders as the single unlabelled fact it always was. That tolerance\nis the rule for what is persisted and versioned, and it is why no\nreader needs to know which version wrote the line it is looking at.",
+      "anyOf": [
+        {
+          "description": "What this binary writes: the labelled facts, in the order a\nreader meets them.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Fact"
+          }
+        },
+        {
+          "description": "One string, as an older log recorded it. Only reading produces\nthis; nothing in this workspace writes one.",
+          "type": "string"
+        }
+      ]
+    },
+    "Fact": {
+      "description": "One fact the engine read off the log: the label a reader scans for,\nand the value under it.\n\nThe label is optional because not every fact needs one. A cause like\n`exit 1` or a sentence like `no forge reachable from this machine`\nalready names itself, and putting a word in front of it would add\nreading without adding meaning; a bare number like `400` says\nnothing until `limits.max_tokens_per_run` is in front of it. A fact\nthat carries a label states it here rather than writing it into the\nvalue, so every surface sets the two apart the same way.",
+      "type": "object",
+      "properties": {
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ]
+    },
+    "FenceLevel": {
+      "description": "What an adapter can build to keep a session's writes inside its\nfence. Three levels, because three is what the market has: nothing;\na judgement before each file-tool call; or a filesystem sandbox the\nprocess itself runs under.",
+      "type": "string",
+      "enum": [
+        "none",
+        "tool_calls",
+        "filesystem"
       ]
     },
     "FileProblem": {
@@ -1555,7 +1774,7 @@
           "$ref": "#/$defs/FindingId"
         },
         "location": {
-          "type": "string"
+          "$ref": "#/$defs/Location"
         },
         "proposed_criterion": {
           "anyOf": [
@@ -1743,7 +1962,8 @@
       "type": "object",
       "properties": {
         "evidence": {
-          "type": "string"
+          "description": "The record `summary` is audited against, attached by the engine\nstraight from the log.",
+          "$ref": "#/$defs/Evidence"
         },
         "external_ref": {
           "description": "The forge's own handle for this gate — a PR URL,\ntoday — `None` for the internal escalation case (exhausted\nre-routes) this payload already covered before external\ngates existed. Round-trips the forge's `PublishedGate` through\nthe log so a later `poll` (from a completely different process\nwaking up to check on the gate) knows what to poll without\nre-publishing.",
@@ -1759,6 +1979,7 @@
           }
         },
         "summary": {
+          "description": "The claim: what happened, in the words of whoever escalated.\nIt ends where the record begins — a summary that quotes what\n`evidence` holds leaves every surface printing it twice.",
           "type": "string"
         }
       },
@@ -1794,6 +2015,16 @@
         "before",
         "after"
       ]
+    },
+    "InputName": {
+      "description": "An input name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "Location": {
+      "description": "where a finding is: a path relative to the work, with its lines when they are known (`src/lib.rs`, `src/lib.rs:10`, `src/lib.rs:10-14`), or one relative to the run's own directory under the `run:` prefix (`run:objects`). Never absolute",
+      "type": "string",
+      "minLength": 1
     },
     "LoopIterationPayload": {
       "type": "object",
@@ -1894,8 +2125,32 @@
         "index"
       ]
     },
+    "Named4": {
+      "description": "One entry of a document: by name when its id parsed, by position\nwhen the id is the thing that could not be read.\n\nThe pair is one concept, so it is one type. Spelled as two loose\nfields, the half that is easiest to forget is the position, and a\nposition that goes missing does not read as absent — it reads as\nzero, and names the first entry with confidence.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "index": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "index"
+      ]
+    },
     "NodeFailedPayload": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "type": "object",
       "properties": {
         "retryable": {
@@ -1920,6 +2175,18 @@
           },
           "required": [
             "artifacts"
+          ]
+        },
+        {
+          "description": "The session the node was working in ended without a terminal\nevent, and how its process went.",
+          "type": "object",
+          "properties": {
+            "died": {
+              "$ref": "#/$defs/SessionDeath"
+            }
+          },
+          "required": [
+            "died"
           ]
         },
         {
@@ -2005,6 +2272,17 @@
           "type": "integer",
           "format": "uint32",
           "minimum": 0
+        },
+        "from_tree": {
+          "description": "The tree this attempt starts from — what its own diff is judged\nagainst when it closes, so a node answers for what it changed and\nnot for what the run's worktree already held.\n\nAbsent in a log written before the audit had a recorded starting\npoint, and read then as the run's own base: the tolerance every\npersisted field here gives a reader older than its writer.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TreeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -2044,9 +2322,11 @@
       "type": "object",
       "properties": {
         "evidence": {
-          "type": "string"
+          "description": "The record `reason` is built from, kept apart so a surface can\nshow it under its own heading.",
+          "$ref": "#/$defs/Evidence"
         },
         "reason": {
+          "description": "Why the run promoted, on one line — the claim and the facts\nbehind it, since this is the only field a reader of the event\nitself gets.",
           "type": "string"
         },
         "suggested_mode": {
@@ -2112,6 +2392,32 @@
         "channel"
       ]
     },
+    "QuestionsAskedPayload": {
+      "description": "A node handed its questions over and closed on them: what it asked\nfrom, which ids await an answer, and what the session that asked\nspent.\n\nThe pair of [`QuestionsAnsweredPayload`]. Between the two the node\nwaits, and the `node_finished` its close deferred lands after the\nanswer — so a node that asked is never mistaken for one that failed,\nand a log that holds a questions document is never mistaken for a\nnode that is waiting on it.",
+      "type": "object",
+      "properties": {
+        "questions": {
+          "description": "The ids awaiting an answer. Never empty: a node with nothing to\nask finishes in the same close instead of waiting.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QuestionId"
+          }
+        },
+        "questions_hash": {
+          "description": "The questions document the node handed over: what the answers\nanswer, and what the round re-reads before putting them to\nanyone.",
+          "$ref": "#/$defs/ContentHash"
+        },
+        "tokens_used": {
+          "description": "What the session that asked spent. The attempt's accounting\ncloses here, so the `node_finished` after the answer carries\nnone and no surface counts the session twice while it waits.",
+          "$ref": "#/$defs/TokenUsage"
+        }
+      },
+      "required": [
+        "questions_hash",
+        "questions",
+        "tokens_used"
+      ]
+    },
     "Report": {
       "description": "Every problem one document has, reported together.\n\nCollecting them is not a convenience: a reader who corrects one\nproblem per round pays a round per problem, and a writer who hears\none rule at a time rewrites the document once per rule.",
       "type": "object",
@@ -2169,9 +2475,7 @@
             "empty-scope",
             "no-criteria",
             "dependency-cycle",
-            "manual-review-without-justification",
             "empty-text",
-            "empty-location",
             "empty-detail"
           ]
         },
@@ -2214,6 +2518,21 @@
           "description": "`answer_type` is `choice` and `values` is empty.",
           "type": "string",
           "const": "missing-values"
+        },
+        {
+          "description": "A `required` question has no answer.",
+          "type": "string",
+          "const": "missing-answer"
+        },
+        {
+          "description": "An answer's value is not what its question's `answer_type` allows.",
+          "type": "string",
+          "const": "mismatched-answer"
+        },
+        {
+          "description": "A `mode` leaves out a node the workflow cannot run without, or a\nnode a node it includes reroutes to.",
+          "type": "string",
+          "const": "incoherent-mode"
         }
       ]
     },
@@ -2247,9 +2566,13 @@
           ]
         },
         "yunta_schema": {
-          "type": [
-            "string",
-            "null"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SchemaRange"
+            },
+            {
+              "type": "null"
+            }
           ]
         }
       },
@@ -2329,6 +2652,50 @@
         }
       }
     },
+    "RunTool": {
+      "type": "string",
+      "enum": [
+        "yunta_check_artifact",
+        "yunta_post_finding",
+        "yunta_update_finding",
+        "yunta_withdraw_finding",
+        "yunta_submit_tasks",
+        "yunta_submit_questions",
+        "yunta_task_status",
+        "yunta_task",
+        "yunta_check_task",
+        "yunta_request_scope_expansion",
+        "yunta_get_blackboard"
+      ]
+    },
+    "RunToolFailedPayload": {
+      "description": "One failed call to a tool this binary serves on `yunta-run`.",
+      "type": "object",
+      "properties": {
+        "cause": {
+          "$ref": "#/$defs/RunToolFailureCause"
+        },
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "tool": {
+          "$ref": "#/$defs/RunTool"
+        }
+      },
+      "required": [
+        "session_id",
+        "tool",
+        "cause"
+      ]
+    },
+    "RunToolFailureCause": {
+      "description": "The closed reason a run tool call failed, without adapter error text.",
+      "type": "string",
+      "enum": [
+        "approval_blocked",
+        "call_failed"
+      ]
+    },
     "RunnerCandidate": {
       "description": "One binding candidate for a role in `runners:`.",
       "type": "object",
@@ -2383,6 +2750,11 @@
         "chosen",
         "discarded"
       ]
+    },
+    "SchemaRange": {
+      "description": "a schema range: whitespace-separated comparators (`>=`, `<=`, `>`, `<`, `=`) over whole schema majors, e.g. `>=1 <2`",
+      "type": "string",
+      "minLength": 1
     },
     "ScopeCheckedPayload": {
       "description": "`task_id` is present for a task's scope check within a loop node;\nabsent for a node-level scope check — either way the envelope's own\n`node_id` already names the node, so it is not repeated here.",
@@ -2466,7 +2838,7 @@
           "type": "array",
           "default": [],
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ScopeGlob"
           }
         },
         "task_id": {
@@ -2495,7 +2867,7 @@
         "paths": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ScopeGlob"
           }
         },
         "proposed_criterion": {
@@ -2531,10 +2903,106 @@
         "reason"
       ]
     },
+    "ScopeGlob": {
+      "description": "a scope glob: a path pattern where `*` stays within one directory and `**` recurses",
+      "type": "string",
+      "minLength": 1
+    },
     "Seq": {
       "description": "A position in a run's log: a positive number",
       "type": "integer",
       "minimum": 1
+    },
+    "SessionDeath": {
+      "description": "A session that ended without ever reporting a terminal event: whose\nit was, and how its process went, when it had one of its own.",
+      "type": "object",
+      "properties": {
+        "adapter": {
+          "$ref": "#/$defs/AdapterId"
+        },
+        "exit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionExit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "adapter"
+      ]
+    },
+    "SessionEnd": {
+      "description": "How the process ended: the status it exited with, or the signal that\nended it.\n\nA closed union rather than two optionals, so a process that says\nneither is not representable. A stored `type` this build does not\nknow reads back as [`SessionEnd::Unknown`] — the tolerance everything\npersisted here gives a reader older than its writer.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "type": {
+              "type": "string",
+              "const": "code"
+            }
+          },
+          "required": [
+            "type",
+            "code"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "signal": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "type": {
+              "type": "string",
+              "const": "signal"
+            }
+          },
+          "required": [
+            "type",
+            "signal"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "unknown"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    "SessionExit": {
+      "description": "What a process left behind: how it ended, and the last lines it wrote\nto stderr, redacted of every value its environment carried.",
+      "type": "object",
+      "properties": {
+        "end": {
+          "$ref": "#/$defs/SessionEnd"
+        },
+        "stderr_tail": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "end"
+      ]
     },
     "SessionId": {
       "description": "A session id: not empty and without control characters",
@@ -2609,7 +3077,7 @@
         "scope": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ScopeGlob"
           }
         },
         "task_id": {
@@ -2708,6 +3176,47 @@
       "required": [
         "input",
         "output"
+      ]
+    },
+    "ToolTarget": {
+      "description": "What a tool call acted on, as the log may carry it.\n\nA tool's argument is the session's own text: a path, a shell command,\na URL. Some of it names the repository, which a reader needs; some of\nit is whatever the session typed, which may be anything at all,\nincluding a secret. So the log carries two things and they are not\nthe same thing: `display` is what a reader may be shown and is only\never present for a value the engine itself can vouch for, and\n`digest` is what identifies the target — the whole hash, so two\ntargets never share one. `abbreviated()` is how a hash is shown,\nnever how it is stored.",
+      "type": "object",
+      "properties": {
+        "digest": {
+          "description": "What identifies the target, whether or not it can be shown.",
+          "$ref": "#/$defs/ContentHash"
+        },
+        "display": {
+          "description": "The target as a reader may see it. Absent whenever the value is\nthe session's own text.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "digest"
+      ]
+    },
+    "TreeId": {
+      "description": "A tree id: 7 to 64 lowercase hex digits: a git object id, abbreviated or full",
+      "type": "string",
+      "minLength": 1
+    },
+    "WriteRefusedPayload": {
+      "description": "A write the fence refused before it happened.",
+      "type": "object",
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        },
+        "target": {
+          "$ref": "#/$defs/ToolTarget"
+        }
+      },
+      "required": [
+        "session_id",
+        "target"
       ]
     }
   }

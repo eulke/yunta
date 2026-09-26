@@ -11,9 +11,10 @@
 //! whole session. The tools move it inside: a refusal comes back as an
 //! answer, and the session fixes it in the same breath.
 
-use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, SubmissionOutcome};
+use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RecordedOrigin, SessionEvent};
+use yunta_core::events::{ArtifactId, EventPayload, SubmissionOutcome};
 use yunta_core::ArtifactKind;
-use yunta_engine::{NodeState, RunTerminal};
+use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
 const PLAN_NODE: &str = r#"
@@ -58,7 +59,7 @@ fn submitted(bench: &Bench) -> Vec<(String, bool)> {
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::ArtifactSubmitted(p)) => Some((
+            Some(EventPayload::Artifacts(ArtifactEvent::Submitted(p))) => Some((
                 p.name.clone(),
                 matches!(p.outcome, SubmissionOutcome::Accepted { .. }),
             )),
@@ -72,7 +73,7 @@ fn refusals(bench: &Bench) -> Vec<yunta_core::diagnostic::Report> {
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::ArtifactSubmitted(p)) => match &p.outcome {
+            Some(EventPayload::Artifacts(ArtifactEvent::Submitted(p))) => match &p.outcome {
                 SubmissionOutcome::Refused { report } => Some(report.clone()),
                 SubmissionOutcome::Accepted { .. } => None,
             },
@@ -107,7 +108,7 @@ sessions:
         tasks_document(&[("alpha", "First"), ("beta", "Second")])
     );
 
-    let (terminal, state) = bench.run(PLAN_NODE, &fixture).await;
+    let RunReport { terminal, state } = bench.run(PLAN_NODE, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     assert_eq!(submitted(&bench), vec![("tasks.yaml".to_string(), true)]);
@@ -130,7 +131,7 @@ sessions:
             kind: ArtifactKind::Tasks
         }
     );
-    assert_eq!(held.origin, ArtifactOrigin::Submitted);
+    assert_eq!(held.origin, RecordedOrigin::Submitted);
 
     // The bytes are in the store under the hash the event names, and
     // the view under the node that produced it says the same.
@@ -227,7 +228,7 @@ sessions:
     outcome: { type: completed, summary: "planned after a correction" }
 "#;
 
-    let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(PLAN_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
 
     // One attempt: a refusal is an answer, not the end of the session.
@@ -244,7 +245,7 @@ sessions:
     let codes: Vec<&str> = report
         .diagnostics
         .iter()
-        .map(|d| d.problem.code())
+        .map(|d| d.problem.code().as_str())
         .collect();
     assert!(
         codes.contains(&"unknown-dependency") && codes.contains(&"dependency-cycle"),
@@ -267,8 +268,7 @@ sessions:
             tasks:
               - id: alpha
                 title: "First"
-                scope: ["src/alpha/**"]
-                manual_review: "yes"
+                scope: "src/alpha/**"
                 criteria:
                   - cmd: "cargo test alpha"
     outcome: { type: completed, summary: "gave up" }
@@ -278,7 +278,7 @@ sessions:
     let report = refusals(&bench).pop().expect("the refusal is on the log");
     let rendered = report.diagnostics[0].to_string();
     assert!(
-        rendered.contains("tasks[0].manual_review"),
+        rendered.contains("tasks[0].scope"),
         "the path locates the value: {rendered}"
     );
 }
@@ -321,7 +321,7 @@ sessions:
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::ArtifactSubmitted(p)) => match &p.outcome {
+            Some(EventPayload::Artifacts(ArtifactEvent::Submitted(p))) => match &p.outcome {
                 SubmissionOutcome::Accepted { content_hash } => Some(content_hash.to_string()),
                 SubmissionOutcome::Refused { .. } => None,
             },
@@ -340,7 +340,7 @@ capabilities: { run_tools: true }
 sessions:
   - outcome: { type: completed, summary: "said it was done" }
 "#;
-    let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(PLAN_NODE, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
 
     // One attempt, and no session opened to correct anything: a document
@@ -353,7 +353,7 @@ sessions:
         .iter()
         .rev()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::NodeFailed(p)) => Some(p.retryable),
+            Some(EventPayload::Node(NodeEvent::Failed(p))) => Some(p.retryable),
             _ => None,
         })
         .expect("the node failed");
@@ -370,10 +370,10 @@ async fn a_typed_artifact_on_an_adapter_without_run_tools_fails_before_dispatch(
 sessions:
   - outcome: { type: completed, summary: "never reached" }
 "#;
-    let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(PLAN_NODE, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
 
-    match state.nodes.get("plan") {
+    match state.nodes.state("plan") {
         Some(NodeState::Failed { failure, .. }) => {
             let text = failure.to_string();
             assert!(
@@ -412,7 +412,7 @@ sessions:
           detail: "The flag it names was renamed two releases ago."
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, state) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let bytes = bench.artifact("findings").expect("the run holds it");
@@ -438,7 +438,7 @@ sessions:
             .iter()
             .map(|held| held.origin.clone())
             .collect::<Vec<_>>(),
-        vec![ArtifactOrigin::Derived],
+        vec![RecordedOrigin::Derived],
         "the engine derived the file from what the node posted"
     );
 }
@@ -451,7 +451,7 @@ capabilities: { run_tools: true }
 sessions:
   - outcome: { type: completed, summary: "found nothing" }
 "#;
-    let (terminal, state) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
 
     let bytes = bench.artifact("findings").expect("the run holds it");
@@ -465,7 +465,7 @@ sessions:
             .iter()
             .map(|held| held.origin.clone())
             .collect::<Vec<_>>(),
-        vec![ArtifactOrigin::Derived],
+        vec![RecordedOrigin::Derived],
         "a review that found nothing still holds its findings artifact"
     );
 }
@@ -497,7 +497,7 @@ sessions:
         .events()
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::FindingRefused(p)) => Some(p.report.clone()),
+            Some(EventPayload::Findings(FindingEvent::Refused(p))) => Some(p.report.clone()),
             _ => None,
         })
         .expect("the refusal is on the log");
@@ -534,7 +534,7 @@ sessions:
           detail: "d"
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(kinds(&bench, "finding_posted"), 1);
@@ -578,7 +578,7 @@ sessions:
           detail: "d"
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let bytes = bench.artifact("findings").expect("the engine wrote it");
@@ -633,7 +633,7 @@ sessions:
           reason: "the call it named is gone"
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let bytes = bench.artifact("findings").expect("the engine wrote it");
@@ -648,7 +648,7 @@ sessions:
         .events()
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::FindingWithdrawn(p)) => Some(p.reason.clone()),
+            Some(EventPayload::Findings(FindingEvent::Withdrawn(p))) => Some(p.reason.clone()),
             _ => None,
         })
         .expect("the withdrawal is on the log");
@@ -701,7 +701,7 @@ sessions:
           reason: "again"
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     assert_eq!(kinds(&bench, "finding_refused"), 3);
@@ -709,7 +709,9 @@ sessions:
         .events()
         .iter()
         .filter_map(|event| match event.payload() {
-            Some(EventPayload::FindingRefused(p)) => Some(format!("{:?}", p.operation)),
+            Some(EventPayload::Findings(FindingEvent::Refused(p))) => {
+                Some(format!("{:?}", p.operation))
+            }
             _ => None,
         })
         .collect();
@@ -744,18 +746,21 @@ sessions:
           reason: "   "
     outcome: { type: completed, summary: "reviewed" }
 "#;
-    let (terminal, _) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(REVIEW_NODE, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let report = bench
         .events()
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::FindingRefused(p)) => Some(p.report.clone()),
+            Some(EventPayload::Findings(FindingEvent::Refused(p))) => Some(p.report.clone()),
             _ => None,
         })
         .expect("the refusal is on the log");
-    assert_eq!(report.diagnostics[0].problem.code(), "empty-reason");
+    assert_eq!(
+        report.diagnostics[0].problem.code().as_str(),
+        "empty-reason"
+    );
 
     // The finding it named still stands.
     let bytes = bench.artifact("findings").expect("the engine wrote it");
@@ -781,7 +786,7 @@ sessions:
           detail: "d"
     outcome: { type: crash }
 "#;
-    let (terminal, state) = bench.run(REVIEW_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(REVIEW_NODE, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
 
     // The session never reached an answer, and the finding is still the
@@ -805,10 +810,10 @@ sessions:
     outcome: { type: completed, summary: "nothing to submit with" }
 "#;
 
-    let (terminal, state) = bench.run(PLAN_NODE, fixture).await;
+    let RunReport { terminal, state } = bench.run(PLAN_NODE, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
     assert!(
-        matches!(state.nodes.get("plan"), Some(NodeState::Failed { .. })),
+        matches!(state.nodes.state("plan"), Some(NodeState::Failed { .. })),
         "the node owes the document it declares: {state:?}"
     );
 
@@ -816,7 +821,7 @@ sessions:
     let degraded = events
         .iter()
         .find_map(|event| match event.payload() {
-            Some(EventPayload::CapabilityDegraded(p))
+            Some(EventPayload::Session(SessionEvent::CapabilityDegraded(p)))
                 if p.capability == yunta_core::Capability::RunTools =>
             {
                 Some(p.clone())
@@ -824,10 +829,10 @@ sessions:
             _ => None,
         })
         .expect("a session with no run tool of its own is degraded, not silently failed");
-    assert!(
-        degraded.policy_applied.contains("none of its tools"),
-        "the record names what was missing: {}",
-        degraded.policy_applied
+    assert_eq!(
+        degraded.policy_applied(),
+        yunta_core::events::Policy::NoRunTools.to_string(),
+        "the record names what was missing and what ran instead"
     );
 
     let degraded_at = events
@@ -841,5 +846,49 @@ sessions:
     assert!(
         degraded_at < failed_at,
         "the cause is recorded while the session runs, not after it ends"
+    );
+}
+
+/// A loop node's declared document has no way in on an adapter that
+/// cannot be a client of the run's tools, and the refusal lands before
+/// the first task session — not after four of them produced nothing.
+///
+/// The gate used to guard prompt nodes only, so the same workflow shape
+/// with `kind: loop` spent a session per task and failed at the close.
+#[tokio::test]
+async fn a_loop_task_on_a_run_tools_less_adapter_is_refused_before_any_session() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: loop-owes-a-document
+nodes:
+  - id: implement
+    kind: loop
+    runner: executor
+    until: all_tasks_complete
+    prompt: "Implement your task."
+    artifacts:
+      produces: [findings]
+"#;
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "never reached" }
+"#;
+    let RunReport { terminal, state } = bench.run(workflow, fixture).await;
+    assert!(matches!(terminal, RunTerminal::Paused { .. }), "{state:?}");
+
+    match state.nodes.state("implement") {
+        Some(NodeState::Failed { failure, .. }) => {
+            let text = failure.to_string();
+            assert!(
+                text.contains("run_tools") && text.contains("findings"),
+                "the refusal names the capability and the artifact: {text}"
+            );
+        }
+        other => panic!("expected implement failed, got {other:?}"),
+    }
+    assert_eq!(
+        kinds(&bench, "agent_session_opened"),
+        0,
+        "not one token is spent on a node that cannot hand over what it owes"
     );
 }

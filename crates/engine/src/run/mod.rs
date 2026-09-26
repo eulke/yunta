@@ -1,8 +1,9 @@
 //! Run creation and execution.
 //!
 //! `create_run` freezes the anatomy on disk (run.dir, `manifest.yaml`,
-//! `run_created`); `execute_run` drives the run forward and is also
-//! `yunta resume` — it replays the log, asks [`schedule::next_action`]
+//! `run_created`, and the baseline the run is measured against);
+//! `execute_run` drives the run forward and is also
+//! `yunta resume` — it replays the log, asks [`schedule::decide`]
 //! what's next, and executes until the answer is terminal. Crash,
 //! restart and Ctrl-C are the same case: whatever the log says happened,
 //! happened; everything else re-runs (`restart_node`).
@@ -17,8 +18,10 @@
 //! `distill.rs`; the close sequence is distill → `run_finished` →
 //! export → cleanup.
 
+pub mod baseline;
 mod bash_exec;
 mod budget;
+pub(crate) mod capability;
 mod check_exec;
 mod context_resolve;
 mod create;
@@ -32,13 +35,14 @@ mod hooks_exec;
 mod loop_exec;
 mod node_artifacts;
 mod node_close;
-mod node_exec;
+pub(crate) mod node_exec;
 mod parallel_exec;
 mod promote;
 mod prompt_exec;
 mod questions_exec;
-mod runner_resolve;
-mod schedule;
+pub(crate) mod runner_resolve;
+pub mod schedule;
+pub(crate) mod session_plan;
 mod step;
 mod steps;
 mod workflow_exec;
@@ -49,22 +53,28 @@ use std::sync::Arc;
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, Forge, ForgeError};
-use yunta_core::{AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, RunId};
+use yunta_core::port::{Adapter, Forge, ForgeError};
+use yunta_core::{
+    AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, RunId, WorkflowName,
+};
 use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
+use crate::observer::RunObserver;
 use crate::replay::RunState;
 use crate::scope::ScopeCheckError;
 use crate::task_cycle::TaskCycleError;
+pub use baseline::BirthBaseline;
 pub use budget::session_token_budget;
 pub use create::{create_run, BirthArtifact, BirthOrigin, CreateRunParams};
 pub(crate) use ctx::RunCtx;
 pub use escalation::{current_escalation, resolve_gate, ResolveGateError};
 pub(crate) use exec::execute_run_at_depth;
 pub use exec::record_pause_after_crash;
-pub(in crate::run) use exec::{find_node, pause, record_pause};
-pub use promote::{create_promotion_successor, Predecessor, PromotionSuccessor, RunRoots};
+pub(in crate::run) use exec::{find_node, pause};
+pub use promote::{
+    create_promotion_successor, CallerInfra, Predecessor, PromotionSuccessor, RunRoots,
+};
 
 /// A frozen `manifest.yaml` that cannot be read back.
 #[derive(Debug, Error)]
@@ -75,21 +85,32 @@ pub enum ManifestReadError {
         #[source]
         source: std::io::Error,
     },
-    #[error("`{path}` is not a manifest")]
+    #[error("cannot read the manifest at `{path}`")]
     Parse {
         path: PathBuf,
         #[source]
-        source: yunta_core::yaml::YamlError,
+        source: yunta_core::persisted::PersistedError,
     },
 }
 
-/// Reads a run's frozen manifest back from its `manifest.yaml`.
-pub fn read_manifest(path: &Path) -> Result<Manifest, ManifestReadError> {
-    let text = std::fs::read_to_string(path).map_err(|source| ManifestReadError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    yunta_core::yaml::parse(&text).map_err(|source| ManifestReadError::Parse {
+/// Reads a run's frozen manifest back from its `manifest.yaml`, keeping
+/// whatever a newer binary wrote beside what this one knows.
+///
+/// A manifest stamped with a schema this binary does not read is
+/// refused naming both versions — a run interpreted under a shape its
+/// own creator did not write is a run whose history means something
+/// else. Everything below that reads, and what this binary did not
+/// understand comes back on the document for a caller to report.
+pub async fn read_manifest(
+    path: &Path,
+) -> Result<yunta_core::persisted::PersistedDoc<Manifest>, ManifestReadError> {
+    let bytes = tokio::fs::read(path)
+        .await
+        .map_err(|source| ManifestReadError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    yunta_core::persisted::PersistedDoc::read(&bytes).map_err(|source| ManifestReadError::Parse {
         path: path.to_path_buf(),
         source,
     })
@@ -105,6 +126,14 @@ pub enum RunError {
 
     #[error("run is broken: {diagnostic}")]
     Broken { diagnostic: String },
+
+    /// The invocation's token fired while the run was being born, or
+    /// while it was preparing the tree a run works on. A birth has no
+    /// log of its own to record a pause on, so it says so to its
+    /// caller — a `kind: workflow` node turns it into the parent's
+    /// `run_paused { cancelled by user }`, and a CLI into its own exit.
+    #[error("cancelled by user")]
+    Cancelled,
 
     /// A `HumanInteraction` surface returned an option the escalation it
     /// was shown never offered: a decision nobody was given, refused
@@ -125,7 +154,7 @@ pub enum RunError {
     /// caught, before anything is written.
     #[error("workflow `{workflow}` declares no mode `{mode}` — declared modes: {declared}")]
     UnknownMode {
-        workflow: String,
+        workflow: WorkflowName,
         mode: ModeName,
         declared: String,
     },
@@ -161,8 +190,8 @@ pub enum RunError {
         source: ForgeError,
     },
 
-    #[error("git failed to {context}: {detail}")]
-    Git { context: String, detail: String },
+    #[error(transparent)]
+    Git(crate::git::GitError),
 
     #[error("failed to serialize the manifest for `{path}`: {detail}")]
     ManifestWrite { path: PathBuf, detail: String },
@@ -194,7 +223,7 @@ pub enum RunError {
     EventsExport(#[from] crate::events_export::EventsExportError),
 
     #[error(transparent)]
-    Worktree(#[from] crate::worktree::WorktreeError),
+    Worktree(crate::worktree::WorktreeError),
 
     /// An artifact the run acquired that could not become a fact of the
     /// run: its bytes, its acceptance or its view did not land.
@@ -206,6 +235,27 @@ pub enum RunError {
     /// accepted.
     #[error(transparent)]
     Object(#[from] crate::artifacts::ObjectError),
+}
+
+/// A git the caller's token stopped is not a failure of anything: it is
+/// the invocation being cancelled, and it says so wherever it surfaces.
+/// One conversion, so no call site has to remember to ask.
+impl From<crate::git::GitError> for RunError {
+    fn from(git: crate::git::GitError) -> Self {
+        match git.cancelled() {
+            true => RunError::Cancelled,
+            false => RunError::Git(git),
+        }
+    }
+}
+
+impl From<crate::worktree::WorktreeError> for RunError {
+    fn from(worktree: crate::worktree::WorktreeError) -> Self {
+        match worktree.cancelled() {
+            true => RunError::Cancelled,
+            false => RunError::Worktree(worktree),
+        }
+    }
 }
 
 /// How `execute_run` came back: everything done, waiting on a human, or
@@ -262,7 +312,10 @@ pub struct RunEnv<'a> {
     pub max_task_retries: u32,
     pub human_interaction: &'a dyn HumanInteraction,
     pub forge: Option<&'a dyn Forge>,
-    pub cancel: Option<&'a CancellationToken>,
+    /// What stops this run: the invocation's own token, which the shell
+    /// that started it owns. Every subprocess the run spawns is born
+    /// under it, so a Ctrl-C reaches the whole tree.
+    pub cancel: &'a CancellationToken,
     /// `yunta run --adapter <id>`: every role resolves to its candidate
     /// on this adapter, or fails naming what it tried. Invocation-scoped,
     /// never frozen: the log's `runner_resolved` records the discards.
@@ -273,6 +326,50 @@ pub struct RunEnv<'a> {
     /// variables layered onto every subprocess. `None` means no user layer
     /// and no injected variables — the shape most tests want.
     pub ambient: Option<&'a yunta_core::Env>,
+    /// The hook a CLI runs to ask the judge about one write: this
+    /// binary's own path, resolved once by the shell that started the
+    /// run. `None` in a harness with no binary to run — an adapter
+    /// whose fence needs it then fails the session rather than opening
+    /// one that writes freely.
+    pub fence_hook: Option<yunta_core::fence::FenceHook>,
+    /// Where the values of the variables `secrets:` names come from. The
+    /// config names them; only the shell that started the run may read
+    /// their values, so the engine asks here and never the process.
+    /// `None` is a run that can reach no secret at all — what a test
+    /// starts from, and what a run declaring none needs.
+    pub secrets: Option<Arc<dyn yunta_core::SecretSource>>,
+    /// Where every event this invocation appends is mirrored as it is
+    /// written — this run's, its `kind: workflow` children's and its
+    /// promotion successors' alike. Display only: it derives nothing and
+    /// decides nothing.
+    ///
+    /// An owned [`Arc`] rather than a borrow, unlike `human_interaction`
+    /// and `forge` beside it, because [`RunToolsHost`] outlives every
+    /// borrow of the invocation and needs its own handle; `clock` in this
+    /// same struct is an `Arc<dyn Clock>` for exactly that reason. The
+    /// `Option` is load-bearing too, not nullability sugar: it is what
+    /// lets the append helper skip the payload clone entirely when
+    /// nobody is watching.
+    ///
+    /// [`RunToolsHost`]: crate::RunToolsHost
+    pub observer: Option<Arc<dyn RunObserver>>,
+}
+
+/// The tail of what a child process wrote to stderr, as the diagnostic
+/// of a node that failed quotes it.
+///
+/// Bounded, because a diagnostic is read by a person and a run that
+/// fails on a thousand-line stack trace would otherwise carry all of it
+/// onto the log, into every surface that quotes the log, and into the
+/// receipt. The last lines are the ones that say why, so those are the
+/// ones kept, in the order the process wrote them.
+fn stderr_tail(bytes: &[u8]) -> String {
+    /// How many lines of stderr a failure quotes.
+    const LINES: usize = 20;
+    let text = String::from_utf8_lossy(bytes);
+    let mut tail: Vec<&str> = text.lines().rev().take(LINES).collect();
+    tail.reverse();
+    tail.join("\n")
 }
 
 /// Drives a run until it finishes or pauses. Serving `yunta run` and

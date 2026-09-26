@@ -51,6 +51,7 @@ rmcp = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+yunta-testkit-core.workspace = true
 # The tests read back what `config.rs` renders, which needs the parser
 # the adapter itself has no use for.
 toml = { workspace = true, features = ["parse"] }

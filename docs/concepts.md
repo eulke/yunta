@@ -97,12 +97,20 @@ must provide — it never assumes a concrete adapter, model or secret. See
 ## Where a run's state can pause, and how it resumes
 
 A node can end in one of `finished | failed | skipped | waiting`. `waiting` means
-a `gate` is asking a person for a decision — nothing is running underneath
-it, and it survives the engine restarting exactly like any other state.
-`yunta resolve-gate` (or the MCP `resolve_gate` tool) answers it from a
-completely separate process; the run picks the decision up on its own next
-resume. Nothing about a run depends on the process that started it, or hit
-the gate, staying alive.
+a person's answer is what the node is missing: a `gate` asking for a decision,
+or a node that handed its questions over and is waiting on them. Nothing is
+running underneath either, and both survive the engine restarting exactly like
+any other state.
+A node that fails with no `on_failure` re-route pauses the run on a decision
+too (under the default `defaults.on_failure: pause`): run it again or stop. At
+a terminal the run asks right away, so you can fix the cause and choose
+`retry` without leaving it; otherwise `yunta resolve-gate <run_id> retry`
+answers later. A plain `yunta resume` never retries a failed node on its own.
+`yunta resolve-gate` (or the MCP `resolve_gate` tool) answers a decision from
+a completely separate process, and the MCP `answer_questions` tool answers a
+node's questions the same way; either lands on the log and a detached resume
+carries the run on from there. Nothing about a run depends on the process that
+started it, or hit the wait, staying alive.
 
 ## Where to go next
 

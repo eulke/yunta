@@ -8,18 +8,21 @@
 use std::path::Path;
 
 use yunta_core::text::problems;
-use yunta_core::{ConfigLayer, Workflow};
+use yunta_core::ConfigLayer;
 
 use crate::context::Context;
 use crate::error::{note, warn, CliError, Outcome};
 use crate::{load_yaml, project};
 
-pub fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome, CliError> {
-    // The one directory this command resolves everything against: the
-    // catalog reference, the config layers, and the composition graph.
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome, CliError> {
+    // The one prologue: the directory this command resolves everything
+    // against — the catalog reference, the config layers, the
+    // composition graph — comes from the same `Context` its history
+    // reading does, so a project resolved twice cannot be two projects.
+    let ctx = Context::load()?;
+    let cwd = ctx.cwd.clone();
     let workflow_path = super::resolve_workflow_ref(&cwd, workflow_path)?;
-    let workflow: Workflow = load_yaml(&workflow_path, "workflow")?;
+    let workflow = crate::load_workflow(&workflow_path)?;
 
     // Without `--config`, check sees the project's real layers — the same
     // ones a run would — including the `permissions` layer conflict check
@@ -41,15 +44,21 @@ pub fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome
         }
     };
 
-    let mut errors = yunta_engine::check(&workflow, &config);
+    let mut errors = yunta_engine::check(&workflow, &config, &super::declared_capabilities);
     // Composition references (`use:`) resolve against the repo catalog
     // under `cwd` (`.yunta/workflows/`), then packs — the same catalog a
     // run's children resolve against at birth.
     let origin = yunta_engine::origin_of(&cwd, &workflow_path);
-    errors.extend(yunta_engine::check_workflow_refs(
-        &workflow, &config, &cwd, &origin,
-    ));
+    let refs = yunta_engine::check_workflow_refs(&workflow, &config, &cwd, &origin);
+    errors.extend(refs.errors);
     for warning in &yunta_engine::check_warnings(&workflow, &config) {
+        warn(warning);
+    }
+    for warning in &refs.warnings {
+        warn(warning);
+    }
+    for warning in &super::context_files_at_head(&ctx, &workflow, config.resolved_isolation()).await
+    {
         warn(warning);
     }
 
@@ -58,16 +67,12 @@ pub fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome
     // --workflow`. Best effort: a project with no state root yet (nothing
     // ever ran) or an unnamed workflow simply shows nothing, the same
     // stance `list_workflows` takes on missing history.
-    if let Ok(ctx) = Context::load() {
-        if let Ok(storage) = ctx.storage() {
-            let (history, _) =
-                super::stats::collect_raw_history(&ctx.project.runs_root, &storage, &workflow.name);
-            let findings = yunta_engine::analyze_verification_effectiveness(&workflow, &history);
-            let text = super::stats::render_verification_findings(&findings);
-            if !text.is_empty() {
-                note(format!("\n{text}"));
-            }
-        }
+    let opened = super::stats::history(&ctx, &workflow.name).await;
+    let (history, _) = super::stats::raw_history(&opened);
+    let findings = yunta_engine::analyze_verification_effectiveness(&workflow, &history);
+    let text = super::stats::render_verification_findings(&findings);
+    if !text.is_empty() {
+        note(format!("\n{text}"));
     }
 
     if errors.is_empty() {

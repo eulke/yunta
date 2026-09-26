@@ -9,11 +9,12 @@
 use std::path::Path;
 
 use yunta_core::diagnostic::{ArtifactFailure, FileProblem};
+use yunta_core::events::ArtifactEvent;
 use yunta_core::events::{
-    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, EventBody, EventPayload, StoredEvent,
+    ArtifactAcceptedPayload, ArtifactId, EventBody, EventPayload, RecordedOrigin, StoredEvent,
 };
 use yunta_core::{sha256_hex, ArtifactKind, Node};
-use yunta_engine::{close_artifacts, ArtifactContent, ObjectStore};
+use yunta_engine::{close_artifacts, ArtifactContent, ObjectStore, RunReport};
 
 /// A run that has accepted nothing: what a node with no history closes
 /// against.
@@ -31,6 +32,7 @@ fn codes(failures: &[ArtifactFailure]) -> Vec<&str> {
             None => failure.code().into_iter().collect::<Vec<_>>(),
             Some(report) => report.diagnostics.iter().map(|d| d.code()).collect(),
         })
+        .map(|code| code.as_str())
         .collect()
 }
 
@@ -64,19 +66,24 @@ fn staged(node: &str, name: &str) -> String {
 /// Takes `content` into the run the way a submission or a derivation
 /// does: the bytes in the object store, an `artifact_accepted` under
 /// `node` naming their hash.
-fn accepted(run_dir: &Path, node: &str, kind: ArtifactKind, content: &str) -> StoredEvent {
+async fn accepted(run_dir: &Path, node: &str, kind: ArtifactKind, content: &str) -> StoredEvent {
     std::fs::create_dir_all(run_dir.join("scratch")).unwrap();
-    let content_hash = ObjectStore::at(run_dir).put(content.as_bytes()).unwrap();
+    let content_hash = ObjectStore::at(run_dir)
+        .put(content.as_bytes())
+        .await
+        .unwrap();
     StoredEvent {
         run_id: "run-1".into(),
         seq: 1.into(),
         timestamp: chrono::Utc::now(),
         node_id: Some(node.into()),
-        body: EventBody::Known(EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
-            artifact: ArtifactId::Interpreted { kind },
-            content_hash,
-            origin: ArtifactOrigin::Submitted,
-        })),
+        body: EventBody::Known(EventPayload::Artifacts(ArtifactEvent::Accepted(
+            ArtifactAcceptedPayload::new(
+                ArtifactId::Interpreted { kind },
+                content_hash,
+                RecordedOrigin::Submitted,
+            ),
+        ))),
     }
 }
 
@@ -125,12 +132,13 @@ tasks:
     depends_on: [T001]
 "#;
 
-#[test]
-fn a_missing_declared_artifact_fails_the_node_no_matter_what_the_agent_said() {
+#[tokio::test]
+async fn a_missing_declared_artifact_fails_the_node_no_matter_what_the_agent_said() {
     let run_dir = tempfile::tempdir().unwrap();
 
-    let failures =
-        close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    let failures = close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
     // The node that declared it is on the failure as data, not only in
     // the sentence a reader gets.
     match &failures[..] {
@@ -146,18 +154,19 @@ fn a_missing_declared_artifact_fails_the_node_no_matter_what_the_agent_said() {
     assert!(rendered(&failures).contains(&staged("report", "report.md")));
 }
 
-#[test]
-fn an_empty_artifact_is_as_bad_as_a_missing_one() {
+#[tokio::test]
+async fn an_empty_artifact_is_as_bad_as_a_missing_one() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "report", "report.md", "");
 
-    let failures =
-        close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    let failures = close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
     assert_eq!(codes(&failures), ["artifact-empty"]);
 }
 
-#[test]
-fn every_missing_artifact_is_reported_not_just_the_first() {
+#[tokio::test]
+async fn every_missing_artifact_is_reported_not_just_the_first() {
     let run_dir = tempfile::tempdir().unwrap();
     let n = node(
         r#"
@@ -169,12 +178,14 @@ artifacts:
 "#,
     );
 
-    let failures = close_artifacts(&n, run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    let failures = close_artifacts(&n, run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
     assert_eq!(failures.len(), 2);
 }
 
-#[test]
-fn an_opaque_artifact_is_verified_by_existence_and_hash_never_by_format() {
+#[tokio::test]
+async fn an_opaque_artifact_is_verified_by_existence_and_hash_never_by_format() {
     let run_dir = tempfile::tempdir().unwrap();
     // Content that is not valid YAML/JSON/anything — the engine
     // assumes no format for opaque artifacts.
@@ -185,7 +196,9 @@ fn an_opaque_artifact_is_verified_by_existence_and_hash_never_by_format() {
         "{{{ not : parseable ][",
     );
 
-    let verified = close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None).unwrap();
+    let verified = close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap();
     assert_eq!(verified.len(), 1);
     assert_eq!(
         verified[0].artifact,
@@ -194,19 +207,26 @@ fn an_opaque_artifact_is_verified_by_existence_and_hash_never_by_format() {
         }
     );
     assert_eq!(
-        verified[0].content_hash,
-        sha256_hex("{{{ not : parseable ][".as_bytes())
+        verified[0]
+            .staged
+            .as_ref()
+            .map(|staged| staged.to_string())
+            .as_deref(),
+        Some(sha256_hex("{{{ not : parseable ][".as_bytes()).as_str()),
+        "the file this node staged, which is what a close read"
     );
     assert_eq!(verified[0].content, ArtifactContent::Opaque);
     assert_eq!(verified[0].content.kind(), None);
 }
 
-#[test]
-fn a_valid_tasks_document_is_parsed_and_returned_for_registration() {
+#[tokio::test]
+async fn a_valid_tasks_document_is_parsed_and_returned_for_registration() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "plan", "tasks.yaml", VALID_TASKS);
 
-    let verified = close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None).unwrap();
+    let verified = close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap();
     let ArtifactContent::Tasks(tasks) = &verified[0].content else {
         panic!("a parsed tasks document: {:?}", verified[0].content);
     };
@@ -218,8 +238,8 @@ fn a_valid_tasks_document_is_parsed_and_returned_for_registration() {
     );
 }
 
-#[test]
-fn an_invalid_tasks_document_reports_every_violation_together() {
+#[tokio::test]
+async fn an_invalid_tasks_document_reports_every_violation_together() {
     let run_dir = tempfile::tempdir().unwrap();
     // Two independent violations: T001 has no criteria, T002 has an
     // empty scope. Both must surface in one pass.
@@ -241,8 +261,9 @@ tasks:
 "#,
     );
 
-    let failures =
-        close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    let failures = close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
     // Every violation reaches the reader, not a count of them, and in
     // document order: someone correcting a file works top to bottom.
     assert_eq!(codes(&failures), ["no-criteria", "empty-scope"]);
@@ -255,8 +276,8 @@ tasks:
     assert!(text.contains("task `T002`: `scope` is empty"), "{text}");
 }
 
-#[test]
-fn a_content_failure_keeps_the_document_every_diagnostic_belongs_to() {
+#[tokio::test]
+async fn a_content_failure_keeps_the_document_every_diagnostic_belongs_to() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(
         run_dir.path(),
@@ -265,23 +286,25 @@ fn a_content_failure_keeps_the_document_every_diagnostic_belongs_to() {
         "tasks: [not, a, document",
     );
 
-    let failures =
-        close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    let failures = close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
     // Not a flat list of diagnostics: each one is reachable through the
     // document it is about, so a later reader knows which file to open
     // and which kind's rules were asked.
     let report = failures[0].report().expect("a problem with the content");
-    assert_eq!(report.document.kind, yunta_core::ArtifactKind::Tasks);
+    assert_eq!(report.document.kind, yunta_core::ArtifactKind::Tasks.into());
     assert_eq!(report.document.path, staged("plan", "tasks.yaml"));
     assert_eq!(codes(&failures), ["parse"]);
 }
 
-#[test]
-fn a_problem_with_the_file_itself_has_no_document_to_report_on() {
+#[tokio::test]
+async fn a_problem_with_the_file_itself_has_no_document_to_report_on() {
     let run_dir = tempfile::tempdir().unwrap();
 
-    let failures =
-        close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    let failures = close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
     // A tasks document that was never written has no content whose kind could
     // be wrong — which is exactly why a rewrite cannot fix it.
     assert!(failures[0].report().is_none(), "{:?}", failures[0]);
@@ -293,19 +316,16 @@ fn a_problem_with_the_file_itself_has_no_document_to_report_on() {
 
 // --- an interpreted artifact the run already holds ----------------------------
 
-#[test]
-fn a_document_the_run_holds_closes_its_node_with_no_file_anywhere() {
+#[tokio::test]
+async fn a_document_the_run_holds_closes_its_node_with_no_file_anywhere() {
     let run_dir = tempfile::tempdir().unwrap();
     // Nothing was ever written where a node writes: the run's own
     // acceptance is the whole answer, and the bytes come from the store.
-    let held = [accepted(
-        run_dir.path(),
-        "plan",
-        ArtifactKind::Tasks,
-        VALID_TASKS,
-    )];
+    let held = [accepted(run_dir.path(), "plan", ArtifactKind::Tasks, VALID_TASKS).await];
 
-    let verified = close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), &held, None).unwrap();
+    let verified = close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), &held, None)
+        .await
+        .unwrap();
     let ArtifactContent::Tasks(tasks) = &verified[0].content else {
         panic!("a parsed tasks document: {:?}", verified[0].content);
     };
@@ -317,15 +337,10 @@ fn a_document_the_run_holds_closes_its_node_with_no_file_anywhere() {
     );
 }
 
-#[test]
-fn a_session_node_s_document_is_the_one_it_handed_over_never_a_file_beside_it() {
+#[tokio::test]
+async fn a_session_node_s_document_is_the_one_it_handed_over_never_a_file_beside_it() {
     let run_dir = tempfile::tempdir().unwrap();
-    let held = [accepted(
-        run_dir.path(),
-        "plan",
-        ArtifactKind::Tasks,
-        VALID_TASKS,
-    )];
+    let held = [accepted(run_dir.path(), "plan", ArtifactKind::Tasks, VALID_TASKS).await];
     // A file of the declared name, with a different document in it. The
     // run accepted the other one, and a file nobody accepted is not an
     // artifact of the run.
@@ -343,7 +358,9 @@ tasks:
 "#,
     );
 
-    let verified = close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), &held, None).unwrap();
+    let verified = close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), &held, None)
+        .await
+        .unwrap();
     let ArtifactContent::Tasks(tasks) = &verified[0].content else {
         panic!("a parsed tasks document: {:?}", verified[0].content);
     };
@@ -351,16 +368,17 @@ tasks:
     assert_eq!(ids, ["T001", "T002"]);
 }
 
-#[test]
-fn a_session_node_that_handed_nothing_over_owes_the_document_it_declared() {
+#[tokio::test]
+async fn a_session_node_that_handed_nothing_over_owes_the_document_it_declared() {
     let run_dir = tempfile::tempdir().unwrap();
     // A valid document sits exactly where a command node would write
     // one. This node is not a command node: nobody handed the document
     // over, and nothing on disk changes that.
     write_artifact(run_dir.path(), "plan", "tasks.yaml", VALID_TASKS);
 
-    let failures =
-        close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    let failures = close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
     match &failures[..] {
         [ArtifactFailure::Undelivered { node, artifact }] => {
             assert_eq!(node.as_str(), "plan");
@@ -389,15 +407,16 @@ fn a_session_node_that_handed_nothing_over_owes_the_document_it_declared() {
     );
 }
 
-#[test]
-fn a_command_node_that_wrote_no_file_still_names_the_file_it_did_not_write() {
+#[tokio::test]
+async fn a_command_node_that_wrote_no_file_still_names_the_file_it_did_not_write() {
     let run_dir = tempfile::tempdir().unwrap();
 
     // The same tasks document, declared by a node whose close does open
     // a file: the path is real, the close went looking for it, and that
     // is what the failure says.
-    let failures =
-        close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    let failures = close_artifacts(&node(PLAN_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
     match &failures[..] {
         [ArtifactFailure::File {
             path,
@@ -411,20 +430,16 @@ fn a_command_node_that_wrote_no_file_still_names_the_file_it_did_not_write() {
     assert_eq!(codes(&failures), ["artifact-missing"]);
 }
 
-#[test]
-fn a_held_document_whose_bytes_the_store_lost_says_so_instead_of_reading_a_file() {
+#[tokio::test]
+async fn a_held_document_whose_bytes_the_store_lost_says_so_instead_of_reading_a_file() {
     let run_dir = tempfile::tempdir().unwrap();
-    let held = [accepted(
-        run_dir.path(),
-        "plan",
-        ArtifactKind::Tasks,
-        VALID_TASKS,
-    )];
+    let held = [accepted(run_dir.path(), "plan", ArtifactKind::Tasks, VALID_TASKS).await];
     std::fs::remove_dir_all(run_dir.path().join("objects")).unwrap();
     write_artifact(run_dir.path(), "plan", "tasks.yaml", VALID_TASKS);
 
-    let failures =
-        close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), &held, None).unwrap_err();
+    let failures = close_artifacts(&node(PLAN_SESSION_NODE), run_dir.path(), &held, None)
+        .await
+        .unwrap_err();
     assert_eq!(codes(&failures), ["artifact-unreadable"]);
     assert!(
         rendered(&failures).contains("artifacts/plan/tasks.yaml"),
@@ -455,12 +470,14 @@ findings:
     detail: "Prefer the idiomatic form here."
 "#;
 
-#[test]
-fn a_valid_findings_artifact_is_parsed_and_returned() {
+#[tokio::test]
+async fn a_valid_findings_artifact_is_parsed_and_returned() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "review", "findings.yaml", VALID_FINDINGS);
 
-    let verified = close_artifacts(&node(REVIEW_NODE), run_dir.path(), NOTHING_HELD, None).unwrap();
+    let verified = close_artifacts(&node(REVIEW_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap();
     let ArtifactContent::Findings(findings) = &verified[0].content else {
         panic!("parsed findings: {:?}", verified[0].content);
     };
@@ -468,8 +485,8 @@ fn a_valid_findings_artifact_is_parsed_and_returned() {
     assert_eq!(ids, ["f1", "f2"]);
 }
 
-#[test]
-fn duplicate_finding_ids_report_every_violation_together() {
+#[tokio::test]
+async fn duplicate_finding_ids_report_every_violation_together() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(
         run_dir.path(),
@@ -490,8 +507,9 @@ findings:
 "#,
     );
 
-    let failures =
-        close_artifacts(&node(REVIEW_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    let failures = close_artifacts(&node(REVIEW_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
     assert_eq!(codes(&failures), ["duplicate-id", "empty-title"]);
     let text = rendered(&failures);
     assert!(
@@ -500,8 +518,8 @@ findings:
     );
 }
 
-#[test]
-fn a_malformed_findings_yaml_is_a_typed_error_not_a_panic() {
+#[tokio::test]
+async fn a_malformed_findings_yaml_is_a_typed_error_not_a_panic() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(
         run_dir.path(),
@@ -510,8 +528,9 @@ fn a_malformed_findings_yaml_is_a_typed_error_not_a_panic() {
         "findings: [not, valid",
     );
 
-    let failures =
-        close_artifacts(&node(REVIEW_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    let failures = close_artifacts(&node(REVIEW_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
     assert_eq!(codes(&failures), ["parse"]);
 }
 
@@ -536,12 +555,14 @@ questions:
     required: false
 "#;
 
-#[test]
-fn a_valid_questions_artifact_is_parsed_and_returned() {
+#[tokio::test]
+async fn a_valid_questions_artifact_is_parsed_and_returned() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "ask", "questions.yaml", VALID_QUESTIONS);
 
-    let verified = close_artifacts(&node(ASK_NODE), run_dir.path(), NOTHING_HELD, None).unwrap();
+    let verified = close_artifacts(&node(ASK_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap();
     let ArtifactContent::Questions(questions) = &verified[0].content else {
         panic!("parsed questions: {:?}", verified[0].content);
     };
@@ -549,8 +570,8 @@ fn a_valid_questions_artifact_is_parsed_and_returned() {
     assert_eq!(ids, ["q1", "q2"]);
 }
 
-#[test]
-fn a_choice_question_with_no_values_is_a_reported_violation() {
+#[tokio::test]
+async fn a_choice_question_with_no_values_is_a_reported_violation() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(
         run_dir.path(),
@@ -565,15 +586,16 @@ questions:
 "#,
     );
 
-    let failures =
-        close_artifacts(&node(ASK_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    let failures = close_artifacts(&node(ASK_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
     assert_eq!(codes(&failures).len(), 1);
     let text = rendered(&failures);
     assert!(text.contains(&staged("ask", "questions.yaml")), "{text}");
 }
 
-#[test]
-fn duplicate_question_ids_report_every_violation_together() {
+#[tokio::test]
+async fn duplicate_question_ids_report_every_violation_together() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(
         run_dir.path(),
@@ -592,8 +614,9 @@ questions:
 "#,
     );
 
-    let failures =
-        close_artifacts(&node(ASK_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    let failures = close_artifacts(&node(ASK_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
     assert_eq!(codes(&failures), ["duplicate-id", "empty-text"]);
     let text = rendered(&failures);
     assert!(
@@ -602,8 +625,8 @@ questions:
     );
 }
 
-#[test]
-fn a_malformed_questions_yaml_is_a_typed_error_not_a_panic() {
+#[tokio::test]
+async fn a_malformed_questions_yaml_is_a_typed_error_not_a_panic() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(
         run_dir.path(),
@@ -612,13 +635,14 @@ fn a_malformed_questions_yaml_is_a_typed_error_not_a_panic() {
         "questions: [not, valid",
     );
 
-    let failures =
-        close_artifacts(&node(ASK_NODE), run_dir.path(), NOTHING_HELD, None).unwrap_err();
+    let failures = close_artifacts(&node(ASK_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
     assert_eq!(codes(&failures), ["parse"]);
 }
 
-#[test]
-fn a_node_that_declares_no_artifacts_verifies_nothing() {
+#[tokio::test]
+async fn a_node_that_declares_no_artifacts_verifies_nothing() {
     let run_dir = tempfile::tempdir().unwrap();
     let n = node(
         r#"
@@ -628,19 +652,22 @@ run: "true"
 "#,
     );
 
-    let verified = close_artifacts(&n, run_dir.path(), NOTHING_HELD, None).unwrap();
+    let verified = close_artifacts(&n, run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap();
     assert!(verified.is_empty());
 }
 
 // --- limits.max_artifact_bytes ------------------------------------------------
 
-#[test]
-fn an_artifact_over_max_artifact_bytes_fails_the_node_with_the_sizes_named() {
+#[tokio::test]
+async fn an_artifact_over_max_artifact_bytes_fails_the_node_with_the_sizes_named() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "report", "report.md", "0123456789");
 
-    let failures =
-        close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, Some(5)).unwrap_err();
+    let failures = close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, Some(5))
+        .await
+        .unwrap_err();
     // Both numbers on the table as data, never a truncation, so whoever
     // reads the log does not have to parse them back out of a sentence.
     match &failures[..] {
@@ -658,11 +685,52 @@ fn an_artifact_over_max_artifact_bytes_fails_the_node_with_the_sizes_named() {
     assert!(text.contains("10") && text.contains('5'), "{text}");
 }
 
-#[test]
-fn an_artifact_at_the_cap_or_with_no_cap_passes() {
+#[tokio::test]
+async fn an_artifact_at_the_cap_or_with_no_cap_passes() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(run_dir.path(), "report", "report.md", "0123456789");
 
-    assert!(close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, Some(10)).is_ok());
-    assert!(close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None).is_ok());
+    assert!(
+        close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, Some(10))
+            .await
+            .is_ok()
+    );
+    assert!(
+        close_artifacts(&node(REPORT_NODE), run_dir.path(), NOTHING_HELD, None)
+            .await
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn a_rendered_artifact_name_that_leaves_the_run_dir_fails_the_node() {
+    let bench = yunta_testkit::Bench::new();
+
+    // The name is a template, so what `check` reads is `{{...}}` and
+    // what the view would be given is whatever it stands for — here an
+    // absolute path, which would write the file outside the run
+    // entirely.
+    let workflow = r#"
+name: escaping-name
+nodes:
+  - id: write
+    kind: bash
+    run: "true"
+    artifacts:
+      produces: ["{{node.artifacts}}/report.md"]
+"#;
+
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []\n").await;
+
+    assert!(matches!(terminal, yunta_engine::RunTerminal::Paused { .. }));
+    match state.nodes.state("write") {
+        Some(yunta_engine::NodeState::Failed { failure, .. }) => {
+            let said = failure.to_string();
+            assert!(
+                said.contains("reaches outside the run directory"),
+                "the failure names the rendered name and the rule, got {said}",
+            );
+        }
+        other => panic!("a name that leaves the run directory fails its node, got {other:?}"),
+    }
 }

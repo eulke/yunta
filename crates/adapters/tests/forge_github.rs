@@ -15,9 +15,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
-use yunta_adapters::{
-    Forge, ForgeError, GitHubForge, PublishRequest, PublishedGate, ReviewOutcome,
-};
+use yunta_adapters::GitHubForge;
+use yunta_core::port::{Forge, ForgeError, PublishRequest, PublishedGate, ReviewOutcome};
 use yunta_core::{GitHubRepo, Secret};
 
 #[derive(Clone)]

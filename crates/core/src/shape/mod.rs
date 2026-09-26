@@ -60,6 +60,9 @@ mod sealed {
     impl Sealed for crate::TasksFile {}
     impl Sealed for crate::FindingsFile {}
     impl Sealed for crate::QuestionsFile {}
+    impl Sealed for crate::AnswersFile {}
+    impl Sealed for crate::FindingEntry {}
+    impl Sealed for crate::Withdrawal {}
 }
 
 /// Reads `bytes` into `T`, or reports every problem the document has.
@@ -153,6 +156,7 @@ pub fn contract(kind: ArtifactKind) -> String {
         ArtifactKind::Tasks => rendered::<TasksFile>(),
         ArtifactKind::Findings => rendered::<FindingsFile>(),
         ArtifactKind::Questions => rendered::<QuestionsFile>(),
+        ArtifactKind::Answers => rendered::<crate::AnswersFile>(),
     }
 }
 
@@ -162,6 +166,7 @@ pub fn rules(kind: ArtifactKind) -> &'static [Rule] {
         ArtifactKind::Tasks => TasksFile::RULES,
         ArtifactKind::Findings => FindingsFile::RULES,
         ArtifactKind::Questions => QuestionsFile::RULES,
+        ArtifactKind::Answers => crate::AnswersFile::RULES,
     }
 }
 
@@ -249,13 +254,14 @@ mod tests {
         }
     }
 
-    /// Every rule code belongs to some kind's published rules: a rule
-    /// the engine can report is a rule a writer was told about.
+    /// Every rule code belongs to some document's published rules: a
+    /// rule the engine can report is a rule a writer was told about.
     #[test]
     fn every_rule_code_belongs_to_a_published_contract() {
         let published: BTreeSet<crate::diagnostic::RuleCode> = ArtifactKind::ALL
             .into_iter()
             .flat_map(|kind| rules(kind).iter().map(|rule| rule.code))
+            .chain(crate::workflow::read::RULES.iter().map(|rule| rule.code))
             .collect();
         for code in crate::diagnostic::RuleCode::ALL {
             assert!(

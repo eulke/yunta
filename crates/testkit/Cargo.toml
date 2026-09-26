@@ -15,6 +15,9 @@ workspace = true
 
 [dependencies]
 yunta-core = { workspace = true, features = ["testkit"] }
+# The clocks, the id source and the capturing writer live one layer
+# down, with the crates that have no run to build.
+yunta-testkit-core.workspace = true
 yunta-storage.workspace = true
 yunta-adapters.workspace = true
 # The run bench drives the real engine against the mock adapter, so a run
@@ -24,9 +27,17 @@ chrono.workspace = true
 tempfile.workspace = true
 # Benches parse workflow/config/fixture YAML literals the tests write.
 serde_norway.workspace = true
+# An event a constructor refuses still reaches a reader off disk: the
+# wire form is how a test writes one.
+serde_json.workspace = true
 # `ScriptedInteraction` implements the engine's dyn-safe async
 # `HumanInteraction`, same reason the CLI's console surface does.
 async-trait.workspace = true
 # The async form of the bounded wait yields to the runtime between polls,
 # for tests that poll through an async client (`yunta mcp` over stdio).
-tokio = { workspace = true, features = ["rt"] }
+tokio = { workspace = true, features = ["rt", "process", "time"] }
+tokio-util.workspace = true
+# The terminal harness stands a pty up (`term`) and signals the run
+# watched on it (`signal`) — the only way a test reaches the behaviors
+# that exist only at a terminal.
+nix = { workspace = true, features = ["term", "signal"] }

@@ -2,11 +2,12 @@
 //! on construction and on deserialization, so an invalid identifier is
 //! unrepresentable past the frontier that read it.
 
+use yunta_core::events::NodeEvent;
 use yunta_core::events::{EventPayload, RunnerResolvedPayload};
 use yunta_core::{
     AdapterId, AgentName, ExecutorName, FindingId, InvalidId, ModeName, ModelName, NodeId,
     PackManifest, PackName, PackRef, Pid, Publisher, QuestionId, RunId, RunnerName, Seq, SessionId,
-    TaskId, TasksFile, Workflow,
+    TaskId, TasksFile,
 };
 
 fn rule_of<T>(result: Result<T, InvalidId>) -> String {
@@ -84,12 +85,24 @@ nodes:
     kind: prompt
     prompt: audit
 ";
-    let error = yunta_core::yaml::parse::<Workflow>(yaml)
+    let error = yunta_core::workflow::read::read(yaml, std::path::Path::new("fan.yaml"))
         .unwrap_err()
         .to_string();
-    assert_eq!(
-        error,
-        "`nodes[0]`: nodes: node `review@alt`: `@` is reserved for the fan-out siblings the manifest expands `runners:` into; an authored id is a letter followed by letters, digits, `_` or `-` at line 3 column 3"
+    assert!(
+        error.contains("review@alt") && error.contains("`@` is reserved"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_parallel_child_cannot_author_a_generated_id() {
+    let yaml = "name: fan\nnodes:\n  - id: group\n    kind: parallel\n    nodes:\n      - id: child@alt\n        kind: prompt\n        prompt: audit\n";
+    let error = yunta_core::workflow::read::read(yaml, std::path::Path::new("fan.yaml"))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("child@alt") && error.contains("`@` is reserved"),
+        "{error}"
     );
 }
 
@@ -296,16 +309,18 @@ fn runner_resolved_names_its_runner_and_still_reads_logs_written_with_role() {
         "discarded": []
     });
     let payload: EventPayload = serde_json::from_value(former).unwrap();
-    let EventPayload::RunnerResolved(resolved) = payload else {
+    let EventPayload::Node(NodeEvent::RunnerResolved(resolved)) = payload else {
         panic!("expected runner_resolved");
     };
     assert_eq!(resolved.runner.as_str(), "planner");
 
-    let written = serde_json::to_value(EventPayload::RunnerResolved(RunnerResolvedPayload {
-        runner: "planner".parse().unwrap(),
-        chosen: serde_json::from_value(candidate).unwrap(),
-        discarded: Vec::new(),
-    }))
+    let written = serde_json::to_value(EventPayload::Node(NodeEvent::RunnerResolved(
+        RunnerResolvedPayload {
+            runner: "planner".parse().unwrap(),
+            chosen: serde_json::from_value(candidate).unwrap(),
+            discarded: Vec::new(),
+        },
+    )))
     .unwrap();
     assert_eq!(written["runner"], "planner");
     assert!(written.get("role").is_none());

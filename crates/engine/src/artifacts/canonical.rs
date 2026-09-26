@@ -19,9 +19,7 @@ use yunta_core::diagnostic::{
     ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Problem, Report, Subject,
 };
 use yunta_core::events::{ArtifactId, Finding};
-use yunta_core::{
-    sha256_hex, ArtifactKind, ArtifactSpec, FindingsFile, NodeId, QuestionsFile, TasksFile,
-};
+use yunta_core::{ArtifactKind, ArtifactSpec, FindingsFile, NodeId, QuestionsFile, TasksFile};
 
 use super::ingest::{interpret, ArtifactContent, VerifiedArtifact};
 
@@ -93,7 +91,7 @@ pub(crate) fn submit(
         });
     };
     let artifact = ArtifactId::Interpreted { kind: *kind };
-    let path = document_path(node, &artifact);
+    let path = document_path(Some(node), &artifact);
 
     let (content, yaml) = match kind {
         ArtifactKind::Tasks => {
@@ -109,6 +107,14 @@ pub(crate) fn submit(
             (ArtifactContent::Questions(file.questions), yaml)
         }
         ArtifactKind::Findings => return Err(SubmitError::Accumulated),
+        // The engine writes the answers when a person replies, so no
+        // session hands one over — `submit_tool` gives this kind no tool
+        // to arrive through, and `declarable` keeps a node from owing one.
+        ArtifactKind::Answers => {
+            return Err(SubmitError::NotInterpreted {
+                name: kind.to_string(),
+            })
+        }
     };
 
     rendered_document(artifact, path, yaml, content, max_bytes)
@@ -123,7 +129,7 @@ pub(crate) fn submit(
 /// session that dies after reporting it. A node that reported nothing
 /// gets an empty list: a review that found nothing is a review.
 pub(crate) fn derive_findings(
-    node: &NodeId,
+    node: Option<&NodeId>,
     posted: Vec<Finding>,
     max_bytes: Option<u64>,
 ) -> Result<VerifiedArtifact, SubmitError> {
@@ -142,14 +148,17 @@ pub(crate) fn derive_findings(
     )
 }
 
-/// How a document the engine renders for `node` names itself: the
-/// `artifacts/` view it is projected to once accepted.
+/// How a document the engine renders names itself: the `artifacts/`
+/// view it is projected to once accepted. `node` is the producer, or
+/// `None` for a document that is the run's own.
 ///
 /// Such a document is never a file on its way in, so there is no staging
 /// path to name it by — and the view is where a reader of the run opens
 /// it, which is what a refusal and a diagnostic both have to point at.
-fn document_path(node: &NodeId, artifact: &ArtifactId) -> String {
-    super::ingest::view_path(node, artifact)
+fn document_path(node: Option<&NodeId>, artifact: &ArtifactId) -> String {
+    super::store::view_path(node, &artifact.view_name())
+        .display()
+        .to_string()
 }
 
 fn render<T: yunta_core::shape::Document>(document: &T, path: &str) -> Result<String, SubmitError> {
@@ -188,7 +197,7 @@ fn rendered_document(
     Ok(VerifiedArtifact {
         artifact,
         path: PathBuf::from(path),
-        content_hash: sha256_hex(&bytes),
+        staged: None,
         bytes,
         content,
     })
@@ -212,7 +221,7 @@ pub(crate) fn canonical_document(
     let document = VerifiedArtifact {
         artifact: ArtifactId::Interpreted { kind },
         path: PathBuf::from(path),
-        content_hash: sha256_hex(bytes),
+        staged: None,
         bytes: bytes.to_vec(),
         content,
     };
@@ -249,6 +258,13 @@ pub(crate) fn canonical(artifact: &VerifiedArtifact) -> Result<Vec<u8>, SubmitEr
         ArtifactContent::Questions(questions) => render(
             &QuestionsFile {
                 questions: questions.clone(),
+            },
+            &path,
+        )?
+        .into_bytes(),
+        ArtifactContent::Answers(answers) => render(
+            &yunta_core::AnswersFile {
+                answers: answers.clone(),
             },
             &path,
         )?

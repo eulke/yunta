@@ -22,7 +22,7 @@ fn manifest(
         yunta_schema: None,
         requires: PackRequires {
             runners,
-            mcp_servers: mcp_servers.into_iter().map(str::to_string).collect(),
+            mcp_servers: mcp_servers.into_iter().map(Into::into).collect(),
             commands: commands.into_iter().map(str::to_string).collect(),
         },
         declares: PackDeclares {
@@ -104,7 +104,10 @@ fn an_undefined_mcp_server_is_flagged() {
     let config = ConfigLayer::default();
 
     let gap = check_pack_requires(&manifest, &config);
-    assert_eq!(gap.missing_mcp_servers, vec!["internal-docs".to_string()]);
+    assert_eq!(
+        gap.missing_mcp_servers,
+        vec![yunta_core::McpServerName::from("internal-docs")]
+    );
     assert!(!gap.is_satisfied());
 }
 
@@ -113,7 +116,7 @@ fn a_defined_mcp_server_resolves() {
     let manifest = manifest(vec![], vec!["internal-docs"], vec![]);
     let config = ConfigLayer {
         mcp_servers: Some(BTreeMap::from([(
-            "internal-docs".to_string(),
+            "internal-docs".into(),
             yunta_core::McpServerConfig {
                 url: "https://example.invalid".to_string(),
                 auth_env: None,

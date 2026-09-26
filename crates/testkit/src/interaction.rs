@@ -48,7 +48,7 @@ impl HumanInteraction for ScriptedInteraction {
         self.seen_options
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(escalation.options.iter().map(|o| o.id.clone()).collect());
+            .push(escalation.options().iter().map(|o| o.id.clone()).collect());
         Some(self.choice.clone())
     }
 }
@@ -69,7 +69,7 @@ impl ApproveEverything {
 #[async_trait]
 impl HumanInteraction for ApproveEverything {
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
-        escalation.options.first().map(|first| HumanChoice {
+        escalation.options().first().map(|first| HumanChoice {
             option: first.id.clone(),
             by: self.by.clone(),
             free_text: None,

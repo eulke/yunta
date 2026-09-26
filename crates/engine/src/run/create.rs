@@ -5,8 +5,8 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, RunCreatedPayload};
-use yunta_core::{Clock, CommitSha, Manifest, ModeName, NodeId, RunId, TaskId, ARTIFACTS_DIR};
+use yunta_core::events::{ArtifactId, EventPayload, RecordedOrigin, RunCreatedPayload};
+use yunta_core::{CommitSha, InputName, Manifest, ModeName, NodeId, RunId, TaskId};
 use yunta_storage::AsyncStorage;
 
 use crate::artifacts::accept;
@@ -14,20 +14,21 @@ use crate::run_log::RunLog;
 use crate::tasks::Provenance;
 
 use super::RunError;
+use yunta_core::events::RunEvent;
 
 /// How a run comes by an artifact before any of its nodes runs: a
 /// document one of its `inputs:` named, or what another run — a
 /// predecessor, a parent, a sibling — hands over. Nothing else exists at
 /// birth, so nothing else is representable here.
 ///
-/// Narrower than [`ArtifactOrigin`], which every acceptance of a run's
+/// Narrower than [`yunta_core::events::RecordedOrigin`], which every acceptance of a run's
 /// whole life shares: what a run is born holding it did not produce,
 /// derive or receive an answer to, and a birth that names one of those
 /// is a state nobody can reach.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BirthOrigin {
     /// A `type: document` input, named by the input it came in as.
-    Input { input: String },
+    Input { input: InputName },
     /// Another run's artifact. `producer` is the node that produced it
     /// there, absent when that run acquired it without a node either.
     Inherited {
@@ -36,13 +37,13 @@ pub enum BirthOrigin {
     },
 }
 
-impl From<&BirthOrigin> for ArtifactOrigin {
+impl From<&BirthOrigin> for RecordedOrigin {
     fn from(origin: &BirthOrigin) -> Self {
         match origin {
-            BirthOrigin::Input { input } => ArtifactOrigin::Input {
+            BirthOrigin::Input { input } => RecordedOrigin::Input {
                 input: input.clone(),
             },
-            BirthOrigin::Inherited { run, producer } => ArtifactOrigin::Inherited {
+            BirthOrigin::Inherited { run, producer } => RecordedOrigin::Inherited {
                 run: run.clone(),
                 producer: producer.clone(),
             },
@@ -88,14 +89,20 @@ pub struct CreateRunParams<'a> {
     /// `run_created` — a run that exists in the log names every one of
     /// them.
     pub artifacts: &'a [BirthArtifact],
+    /// The measurement of the lineage this run is born into: the root's,
+    /// named by the run that took it. `None` for a run that starts a
+    /// lineage — it measures on its first wake, if its config names a
+    /// suite.
+    pub baseline: Option<&'a super::BirthBaseline>,
 }
 
 /// Creates the run's anatomy: run.dir with `artifacts/` and
-/// `scratch/`, the frozen `manifest.yaml`, the `run_created` event, and
+/// `scratch/`, the frozen `manifest.yaml`, the `run_created` event,
 /// then one acceptance per birth artifact — with the tasks of every
 /// tasks document among them registered beside it, `done` the ones
-/// another run finished at a commit `worktree` already carries. Returns
-/// the run directory.
+/// another run finished at a commit `worktree` already carries — and
+/// last the run's baseline, captured on `worktree`. Returns the run
+/// directory.
 ///
 /// `run_created` comes first because it is the run: replay reads it
 /// before anything else, so an artifact a run is born holding is a fact
@@ -109,14 +116,17 @@ pub struct CreateRunParams<'a> {
 /// log. `"default"` — the caller's choice when nothing else applies,
 /// same sentinel `events::run_mode` falls back to for a log with no
 /// mode recorded — always passes: a workflow declaring no `modes:` at
-/// all has nothing to validate a name against, and every node stays
-/// schedulable, exactly the behavior before modes existed. A workflow
-/// that *does* declare `modes:` rejects any other unrecognized name.
+/// all has nothing to validate a name against, so every node stays
+/// schedulable. A workflow that *does* declare `modes:` rejects any
+/// other unrecognized name.
 pub async fn create_run(
     params: CreateRunParams<'_>,
     storage: &AsyncStorage,
-    clock: &dyn Clock,
+    supervision: crate::process::Supervision<'_>,
 ) -> Result<PathBuf, RunError> {
+    // One clock per birth: whatever the caller tells the time by is what
+    // stamps the log and what judges a lock's holder.
+    let clock = supervision.clock;
     let CreateRunParams {
         run_id,
         manifest,
@@ -125,6 +135,7 @@ pub async fn create_run(
         worktree,
         promoted_from,
         artifacts,
+        baseline,
     } = params;
     if *mode != ModeName::default() {
         match &manifest.workflow.modes {
@@ -153,7 +164,7 @@ pub async fn create_run(
     // Everything the run must be able to answer for is resolved before
     // it exists: a source whose log cannot be read leaves no run
     // directory and no `run_created` behind.
-    let documents = birth_registrations(artifacts, worktree, storage).await?;
+    let documents = birth_registrations(artifacts, worktree, storage, supervision).await?;
 
     let run_dir = runs_root.join(run_id.as_str());
     tokio::fs::create_dir_all(runs_root)
@@ -175,7 +186,7 @@ pub async fn create_run(
         }
     }
     for dir in [
-        run_dir.join(ARTIFACTS_DIR),
+        crate::run_dir::artifacts_view(&run_dir),
         run_dir.join(crate::run_dir::SCRATCH_DIR),
     ] {
         tokio::fs::create_dir(&dir)
@@ -186,29 +197,35 @@ pub async fn create_run(
             })?;
     }
 
-    let manifest_path = run_dir.join("manifest.yaml");
-    let yaml = yunta_core::yaml::to_string(manifest).map_err(|e| RunError::ManifestWrite {
-        path: manifest_path.clone(),
-        detail: e.to_string(),
-    })?;
-    tokio::fs::write(&manifest_path, yaml)
+    let manifest_path = crate::run_dir::manifest_path(&run_dir);
+    let bytes = yunta_core::persisted::PersistedDoc::of(manifest.clone())
+        .write()
+        .map_err(|e| RunError::ManifestWrite {
+            path: manifest_path.clone(),
+            detail: e.to_string(),
+        })?;
+    tokio::fs::write(&manifest_path, bytes)
         .await
         .map_err(|source| RunError::Io {
             context: format!("write `{}`", manifest_path.display()),
             source,
         })?;
 
-    let log = RunLog::new(storage, run_id, clock);
+    // A birth is written before a run exists to declare secrets
+    // against: `run_created` carries the manifest's hash and the
+    // inputs the caller resolved, never a session's words.
+    let nothing_to_redact = yunta_core::Redactor::default();
+    let log = RunLog::new(storage, run_id, clock, &nothing_to_redact);
     log.record(
         None,
-        EventPayload::RunCreated(RunCreatedPayload {
+        EventPayload::Run(RunEvent::Created(RunCreatedPayload {
             manifest_hash: manifest.manifest_hash(),
             // Every declared input as the manifest froze it — provided
             // or defaulted, already validated: what the run used.
             inputs: manifest
                 .inputs
                 .iter()
-                .map(|(name, value)| (name.clone(), serde_json::Value::String(value.clone())))
+                .map(|(name, value)| (name.to_string(), serde_json::Value::String(value.clone())))
                 .collect(),
             mode: mode.clone(),
             promoted_from: promoted_from.cloned(),
@@ -220,15 +237,27 @@ pub async fn create_run(
                     .workflow
                     .yunta_schema
                     .clone()
-                    .unwrap_or_else(|| format!("={}", yunta_core::YUNTA_SCHEMA)),
+                    .unwrap_or_else(|| yunta_core::SchemaRange::exactly(yunta_core::YUNTA_SCHEMA)),
             ),
             base_branch: manifest.base_branch.clone(),
             base_commit: manifest.base_commit.clone(),
-        }),
+        })),
     )
     .await?;
 
     register_birth_documents(&log, &run_dir, artifacts, &documents).await?;
+
+    // Last: the measurement of the lineage this run is born into, if
+    // it was born into one. What its own tree did is not a birth fact —
+    // measuring is something an invocation does, and no invocation has
+    // woken this run.
+    if let Some(baseline) = baseline {
+        log.record(
+            None,
+            EventPayload::Run(RunEvent::BaselineCaptured(baseline.captured())),
+        )
+        .await?;
+    }
 
     Ok(run_dir)
 }
@@ -264,6 +293,7 @@ async fn birth_registrations(
     artifacts: &[BirthArtifact],
     worktree: &Path,
     storage: &AsyncStorage,
+    supervision: crate::process::Supervision<'_>,
 ) -> Result<Vec<Option<BirthDocument>>, RunError> {
     let tasks = ArtifactId::Interpreted {
         kind: yunta_core::ArtifactKind::Tasks,
@@ -293,7 +323,7 @@ async fn birth_registrations(
                         slot.insert(crate::tasks::standing_of(run, &events)?)
                     }
                 };
-                Some(crate::tasks::carried_into(standing, &document, worktree).await?)
+                Some(crate::tasks::carried_into(standing, &document, worktree, supervision).await?)
             }
         };
         documents.push(Some(BirthDocument { document, carried }));

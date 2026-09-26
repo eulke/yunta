@@ -61,11 +61,6 @@ pub(super) const RULES: &[Rule] = &[
         demand: "two tasks with no dependency between them declare no overlapping scope, so \
                  either give them disjoint scopes or declare the dependency",
     },
-    Rule {
-        code: RuleCode::ManualReviewWithoutJustification,
-        demand: "`manual_review: true` carries a non-empty `justification` — and the task's \
-                 criteria still apply",
-    },
 ];
 
 fn broke(index: usize, id: &TaskId, code: RuleCode, detail: impl Into<String>) -> Diagnostic {
@@ -139,22 +134,6 @@ fn task_rules(index: usize, task: &Task, known_ids: &HashSet<TaskId>) -> Vec<Dia
         ));
     }
     broken.extend(criteria_rules(index, task));
-    if task.manual_review
-        && task
-            .justification
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .is_empty()
-    {
-        broken.push(broke(
-            index,
-            &task.id,
-            RuleCode::ManualReviewWithoutJustification,
-            "`manual_review: true` without `justification`; say why no command can verify \
-             this task",
-        ));
-    }
     broken
 }
 

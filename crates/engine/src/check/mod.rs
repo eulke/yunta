@@ -8,12 +8,13 @@
 //! `parallel` and DAG fan-out, permission ceilings over
 //! literal commands, input specs and references,
 //! `yunta_schema`, and workflow-node and fan-out
-//! declaration rules. [`check_workflow_refs`] is the deliberate
-//! exception that does read files: the composition reference graph
-//! (`use:` resolves, acyclic, within `limits.max_workflow_depth`)
-//! against the repo's `.yunta/workflows/` catalog — a separate entry
-//! point so `check`'s no-IO property stays intact, called alongside it
-//! by the CLI.
+//! declaration rules. Two separate entry points are the deliberate
+//! exceptions that do read files, so `check`'s no-IO property stays
+//! intact and the CLI calls them alongside it: [`check_workflow_refs`],
+//! the composition reference graph (`use:` resolves, acyclic, within
+//! `limits.max_workflow_depth`) against the repo's `.yunta/workflows/`
+//! catalog; and [`check_context_files`], whether the `files:` a node
+//! reads are in the tree a run would start from.
 //!
 //! Capability-aware checks (agent existence, required
 //! capabilities) wait for the `Adapter` trait to exist — there is
@@ -23,37 +24,41 @@
 //! the two entries that run them all and the shared re-exports each family
 //! reads through `use super::*`.
 
+mod capabilities;
+mod context_files;
 mod declarations;
 mod error;
 mod gates;
 mod graph;
 mod inputs;
-mod modes;
 mod packs;
 mod refs;
 mod runners;
 mod scopes;
+mod warning;
 
-pub use error::{CheckError, CheckWarning, SchemaRangeError};
-pub use refs::check_workflow_refs;
+pub use context_files::{check_context_files, MissingContextFile, RunTreeOrigin};
+pub use error::CheckError;
+pub use refs::{check_workflow_refs, RefsCheck};
+pub use warning::CheckWarning;
 
 // One home for what every family reads: the workspace types, the
 // shared helpers (the glob heuristic the tasks document's own scope rule uses,
 // and the template scanner), and each family's own rule functions, so a
 // family file's `use super::*` sees them all and the two entries below
 // call any rule unqualified.
-pub(crate) use crate::template::template_variables;
 pub(crate) use declarations::*;
 pub(crate) use gates::*;
 pub(crate) use graph::*;
 pub(crate) use inputs::*;
-pub(crate) use modes::*;
 pub(crate) use packs::*;
 pub(crate) use runners::*;
 pub(crate) use scopes::*;
 pub(crate) use std::collections::{HashMap, HashSet};
+pub(crate) use yunta_core::template::template_variables;
 pub(crate) use yunta_core::{
-    might_overlap, ConfigLayer, InputSpec, ModeName, Node, NodeId, NodeKind, RunnerName, Workflow,
+    might_overlap, ArtifactSpec, ConfigLayer, InputSpec, Node, NodeId, NodeKind, RunnerName,
+    Workflow,
 };
 
 /// The pseudo-node a finding about `node_defaults:` is attributed to.
@@ -66,50 +71,38 @@ pub(crate) static DEFAULTS: NodeId = NodeId::from_static("defaults");
 /// checked and every violation reported — not just the first one (same
 /// spirit as the tasks document: whoever writes this by hand corrects
 /// once, not once per `yunta check` run).
-pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
-    // `context: [{ artifact }]` creates an implicit `depends_on` edge
-    // — expanded here, on this function's own clone, so cycle detection
-    // below sees exactly the graph a real run would build (`build_manifest`
-    // expands the same way), never a narrower one that misses a cycle
-    // formed only through context references.
+pub fn check(
+    workflow: &Workflow,
+    config: &ConfigLayer,
+    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<yunta_core::Capabilities>,
+) -> Vec<CheckError> {
+    // `read` hands back the expanded graph, and this is asked of a
+    // workflow that read — so the shape here is the one a run builds.
+    // The clone is for the rules that are about the shape as *written*:
+    // a fan-out declaration, a `kind: workflow` node's own, a mount's.
     let mut workflow = workflow.clone();
     let mut errors = Vec::new();
-    // Fan-out declarations validate on the *original* shape (the
-    // rules are about the declaration itself), then the graph expands so
-    // every later rule sees what will actually run.
     check_runner_fanout(&workflow, &mut errors);
-    // Workflow-node rules also validate the original shape
-    // (`runners:` on one is refused before expansion would multiply it).
     check_workflow_nodes(&workflow.nodes, None, &mut errors);
-    // Mount declarations too — expansion below turns each mount
-    // into an ordinary `depends_on` edge, so cycle detection sees them.
     check_mounts(&workflow, &mut errors);
-    crate::manifest::expand_runner_fanout(&mut workflow);
-    crate::manifest::expand_implicit_dependencies(&mut workflow);
+    yunta_core::workflow::read::expand_runner_fanout(&mut workflow);
+    yunta_core::workflow::read::expand_implicit_dependencies(&mut workflow);
     let workflow = &workflow;
+    // What a node asks of its adapter, checked against what this binary
+    // built. `permissions:` and `agent:` have no fallback — refusing
+    // here is the whole of that policy.
+    capabilities::check_adapter_capabilities(workflow, config, declared, &mut errors);
 
-    // Global, not per-group: replay derives node state from one flat
-    // NodeId -> NodeState map, so a `parallel` child's id colliding
-    // with anything else — a sibling, a top-level node, another group's
-    // child — would corrupt derivation, not just read oddly.
-    let mut known_ids: HashSet<NodeId> = HashSet::new();
-    for node in workflow.iter_nodes() {
-        if !known_ids.insert(node.id.clone()) {
-            errors.push(CheckError::DuplicateNodeId {
-                id: node.id.clone(),
-            });
-        }
-    }
-
-    check_parallel_scopes(&workflow.nodes, &mut errors);
     check_fanout_scopes(workflow, config, &mut errors);
     check_resume_session(workflow, &mut errors);
     check_yunta_schema(workflow, &mut errors);
     check_config_defaults(config, &mut errors);
     check_distill_paths(workflow, &mut errors);
     check_artifact_declarations(workflow, &mut errors);
+    check_asking_nodes(workflow, &mut errors);
     check_input_documents(workflow, &mut errors);
     check_reserved_artifact_names(workflow, &mut errors);
+    check_answer_sources(workflow, &mut errors);
 
     if let Some(permissions) = &config.permissions {
         check_commands(&workflow.nodes, permissions, &mut errors);
@@ -134,26 +127,6 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     }
 
     for node in &workflow.nodes {
-        for dep in &node.depends_on {
-            if !known_ids.contains(dep) {
-                errors.push(CheckError::BrokenReference {
-                    node: node.id.clone(),
-                    field: "depends_on".to_string(),
-                    target: dep.clone(),
-                });
-            }
-        }
-
-        if let Some(on_failure) = &node.on_failure {
-            if !known_ids.contains(&on_failure.goto) {
-                errors.push(CheckError::BrokenReference {
-                    node: node.id.clone(),
-                    field: "on_failure.goto".to_string(),
-                    target: on_failure.goto.clone(),
-                });
-            }
-        }
-
         if let Some(runner) = &node.runner {
             match config.runners.as_ref().and_then(|r| r.get(runner)) {
                 None => errors.push(CheckError::UnknownRunner {
@@ -178,7 +151,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
             });
         }
 
-        check_gate(node, &known_ids, config, &mut errors);
+        check_gate(node, config, &mut errors);
 
         // The loop's declared expansion mode against the
         // merged ceiling. An absent block is `deny` — the strictest —
@@ -205,6 +178,7 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
     }
 
     check_no_gate_in_parallel(&workflow.nodes, None, &mut errors);
+    check_no_questions_in_parallel(&workflow.nodes, None, &mut errors);
 
     if let Some(cycle) = find_depends_on_cycle(&workflow.nodes) {
         let path = cycle
@@ -217,7 +191,6 @@ pub fn check(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckError> {
 
     check_input_specs(&workflow.inputs, &mut errors);
     check_input_references(workflow, &mut errors);
-    check_modes(workflow, &mut errors);
 
     errors
 }

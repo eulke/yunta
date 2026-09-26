@@ -45,8 +45,13 @@
         "guard"
       ]
     },
+    "ScopeGlob": {
+      "description": "a scope glob: a path pattern where `*` stays within one directory and `**` recurses",
+      "type": "string",
+      "minLength": 1
+    },
     "Task": {
-      "description": "One task. `id`'s pattern isn't enforced by this type — the\nspec treats that as a registration-time rule, not a parse-time\none, so an ill-formed id still parses and gets a proper diagnostic\nnaming the task, field and expectation instead of a raw serde error.",
+      "description": "One task. `id` is a `TaskId`, so an ill-formed one is a problem of\nreading the document: the report names the path that carries it\n(`tasks[0].id`) and what an id is, never a raw serde error. The rules\nthat only hold across the whole document, uniqueness among them, run\nonce it parses.",
       "type": "object",
       "properties": {
         "criteria": {
@@ -64,15 +69,6 @@
         "id": {
           "$ref": "#/$defs/TaskId"
         },
-        "justification": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "manual_review": {
-          "type": "boolean"
-        },
         "notes": {
           "type": [
             "string",
@@ -82,7 +78,7 @@
         "scope": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ScopeGlob"
           }
         },
         "title": {

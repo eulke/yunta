@@ -2,18 +2,20 @@
 //! per-run tools it may mount, and the orphaned session it may resume.
 
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::SessionRequest;
 use yunta_core::events::EventPayload;
+use yunta_core::events::Failure;
+use yunta_core::events::OrphanedSession;
 use yunta_core::{Node, PromptSource};
 
 use crate::run_dir::Opening;
 use crate::task_cycle::{dispatch_session, DispatchOutcome};
 
-use super::node_close::{close_node, fail, fail_with_tokens, Close};
+use super::node_close::{close_node, fail_with_tokens, Close};
 use super::node_exec::{cancelled_end, open_staging, render_or_fail, session_profile, NodeEnd};
-use super::runner_resolve::{open_run_tools, report_declarative_network, resolve_node_runner};
+use super::runner_resolve::{report_declarative_network, resolve_node_runner};
 use super::step::Step;
 use super::{RunCtx, RunError};
+use yunta_core::events::SessionEvent;
 
 /// The node's prompt text: frozen file content from the manifest when the
 /// workflow declared `{file: ...}`, the inline string otherwise — never a
@@ -69,8 +71,7 @@ async fn assemble_prompt(
 async fn resume_target(
     ctx: &RunCtx<'_>,
     node: &Node,
-    adapter: &dyn yunta_adapters::Adapter,
-    adapter_id: &yunta_core::AdapterId,
+    adapter: &dyn yunta_core::port::Adapter,
 ) -> Result<Option<yunta_core::SessionId>, RunError> {
     let policy = node
         .on_interrupt
@@ -78,41 +79,42 @@ async fn resume_target(
     if policy != yunta_core::OnInterrupt::ResumeSession {
         return Ok(None);
     }
-    let degraded = |policy_applied: &str| {
-        EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
-            capability: yunta_core::Capability::ResumeSession,
-            adapter: adapter_id.clone(),
-            policy_applied: policy_applied.to_string(),
-        })
-    };
-    match orphaned_session(&ctx.load_events().await?, &node.id) {
-        OrphanedSession::Open(session_id) => {
-            if adapter
-                .capabilities()
-                .declares(yunta_core::Capability::ResumeSession)
+    match crate::replay::derive(&ctx.load_events().await?)
+        .nodes
+        .get(&node.id)
+        .and_then(|record| record.orphaned_session.clone())
+    {
+        Some(OrphanedSession::Open(session_id)) => {
+            match crate::run::capability::require(
+                ctx,
+                adapter,
+                yunta_core::Capability::ResumeSession,
+                node,
+            )
+            .await?
             {
-                return Ok(Some(session_id));
+                crate::run::capability::Decision::Granted => return Ok(Some(session_id)),
+                crate::run::capability::Decision::Degraded => {}
+                crate::run::capability::Decision::Refused(error) => return Err(error),
             }
+        }
+        // The capability is not what is missing here — there is nothing
+        // to resume. The run still says so, with the same fallback it
+        // took, so a reader knows the interrupted node started over.
+        Some(OrphanedSession::NoneRecorded) => {
             ctx.emit(
                 Some(&node.id),
-                degraded(
-                    "restart_node — the adapter declares no session resume; a fresh session \
-                     replaces the interrupted one",
-                ),
+                EventPayload::Session(SessionEvent::CapabilityDegraded(
+                    yunta_core::events::CapabilityDegradedPayload::new(
+                        yunta_core::Capability::ResumeSession,
+                        adapter.id().clone(),
+                        yunta_core::events::Policy::FreshSession,
+                    ),
+                )),
             )
             .await?;
         }
-        OrphanedSession::NoneRecorded => {
-            ctx.emit(
-                Some(&node.id),
-                degraded(
-                    "restart_node — no session was recorded before the interruption; started \
-                     fresh",
-                ),
-            )
-            .await?;
-        }
-        OrphanedSession::NotAnOrphan => {}
+        None => {}
     }
     Ok(None)
 }
@@ -135,90 +137,41 @@ pub(super) async fn execute_prompt(
     };
 
     let adapter = &ctx.adapters[&chosen.adapter];
-    report_declarative_network(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
-    // Names resolved by the engine; mounting is the adapter's —
-    // and an adapter without the capability degrades with an event,
-    // never a fatal error (a skill is instruction, not correctness).
-    let skills = match crate::skills::resolve_skills(
-        &ctx.manifest.config,
-        &ctx.manifest.workflow,
-        node,
-        ctx.worktree,
-    ) {
-        Ok(skills) => skills,
-        Err(error) => return fail(ctx, node, error.to_string(), false).await,
+    report_declarative_network(ctx, node, adapter.as_ref()).await?;
+    let setup = match super::session_plan::resolve_setup(ctx, node, &chosen).await? {
+        Ok(setup) => setup,
+        Err(end) => return Ok(end),
     };
-    let skills = if !skills.is_empty()
-        && !adapter
-            .capabilities()
-            .declares(yunta_core::Capability::Skills)
+    let super::session_plan::OpenedSession {
+        request,
+        run_tools: _run_tools,
+    } = match super::session_plan::open_session(
+        &setup,
+        super::session_plan::SessionPlan {
+            node,
+            task: None,
+            prompt: rendered,
+            cwd: ctx.worktree.to_path_buf(),
+            profile: session_profile(node),
+            budget: ctx.session_budget().await?,
+        },
+        adapter.as_ref(),
+        Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
+    )
+    .await
     {
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
-                capability: yunta_core::Capability::Skills,
-                adapter: chosen.adapter.clone(),
-                policy_applied: "skills not mounted — the adapter declares no native \
-                                 mechanism; the session runs without them"
-                    .to_string(),
-            }),
-        )
-        .await?;
-        Vec::new()
-    } else {
-        skills
-    };
-    // A fresh listener + credential for THIS session attempt
-    // when the adapter can be a client of it; `None` without the
-    // capability is the resting state, not degradation — unless the
-    // node sits in a `coordination: blackboard` group, whose declared
-    // semantics the engine never emulates: that's a node failure.
-    let run_tools = match open_run_tools(ctx, node, adapter.as_ref(), &chosen.adapter, None).await {
-        Ok(resolution) => {
-            if let Some(policy_applied) = resolution.degraded {
-                ctx.emit(
-                    Some(&node.id),
-                    EventPayload::CapabilityDegraded(
-                        yunta_core::events::CapabilityDegradedPayload {
-                            capability: yunta_core::Capability::RunTools,
-                            adapter: chosen.adapter.clone(),
-                            policy_applied,
-                        },
-                    ),
-                )
-                .await?;
-            }
-            resolution.session
+        Ok(opened) => opened,
+        // A node that cannot proceed without the run tools it declared:
+        // refused before a token is spent, naming what has no way in.
+        Err(super::session_plan::OpenSessionError::RunTools(error)) => {
+            return super::node_close::fail(ctx, node, error.to_string(), false).await
         }
-        Err(error) => return fail(ctx, node, error.to_string(), false).await,
-    };
-    // The tool sentence is produced by the mount, so a session is never
-    // told to call something this adapter did not give it.
-    let mut rendered = rendered;
-    if let Some(notice) = crate::run_tools::submission_notice(
-        run_tools.as_ref(),
-        &super::node_exec::declared_artifacts(ctx, node),
-        super::node_exec::artifact_dir(ctx, node).as_deref(),
-    ) {
-        rendered.push_str(&notice);
-    }
-    let request = SessionRequest {
-        prompt: rendered,
-        cwd: ctx.worktree.to_path_buf(),
-        model: Some(chosen.model),
-        agent: chosen.agent,
-        permissions: session_profile(node),
-        env: crate::task_cycle::SessionSetup::secrets_env(&ctx.manifest.config),
-        edit_constraints: (!node.scope.is_empty()).then(|| node.scope.clone()),
-        budget: ctx.session_budget().await?,
-        adapter_settings: ctx.adapter_settings(&chosen.adapter),
-        skills,
-        run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
-        artifact_dir: super::node_exec::artifact_dir(ctx, node),
-        scratch_dir: Some(crate::session_dir::SessionSlot::Node(&node.id).scratch_dir(ctx.run_dir)),
+        Err(super::session_plan::OpenSessionError::Audit(source)) => {
+            return Err(RunError::Storage(source))
+        }
     };
 
-    let resume_session = resume_target(ctx, node, adapter.as_ref(), &chosen.adapter).await?;
+    let resume_session = resume_target(ctx, node, adapter.as_ref()).await?;
     // The staging is the session's. A session continuing here already
     // wrote in it and what it left is work it did; a fresh session —
     // including one replacing an interrupted session the adapter cannot
@@ -236,7 +189,11 @@ pub(super) async fn execute_prompt(
     .await?;
 
     let staged = adapter.staged_paths(&request);
-    let (outcome, tokens) = dispatch_session(
+    let crate::task_cycle::Dispatched {
+        outcome,
+        tokens,
+        fence: _fence,
+    } = dispatch_session(
         adapter.as_ref(),
         request,
         cancel,
@@ -259,13 +216,15 @@ pub(super) async fn execute_prompt(
         DispatchOutcome::Failed { message, retryable } => {
             fail_with_tokens(ctx, node, message, retryable, tokens).await
         }
-        // No terminal event means the engine synthesizes a retryable
-        // failure — the adapter never invents one.
-        DispatchOutcome::Crashed => {
-            fail_with_tokens(
+        // No terminal event means the engine records the death — the
+        // adapter never invents a terminal of its own — with how the
+        // process went, which is what a reader needs to tell a CLI that
+        // refused its configuration from one that merely stopped.
+        DispatchOutcome::Crashed { exit } => {
+            super::node_close::fail_with(
                 ctx,
                 node,
-                "session ended without a terminal event".to_string(),
+                Failure::session_died(adapter.id().clone(), exit),
                 true,
                 tokens,
             )
@@ -275,65 +234,5 @@ pub(super) async fn execute_prompt(
             fail_with_tokens(ctx, node, reason, false, tokens).await
         }
         DispatchOutcome::Cancelled => cancelled_end(ctx, node).await,
-    }
-}
-
-/// What resume finds in the log for `node`: the id of a session
-/// cut mid-flight (this dispatch is an orphan restart — a prior
-/// `node_started` with no terminal event before the current one, and an
-/// `agent_session_opened` inside that window), an orphan restart with no
-/// session on record (crash before it opened), or nothing to resume at
-/// all (a first attempt, or a retry after a *verdict* — a failed
-/// session ended with an answer, only an interrupted one is continued).
-enum OrphanedSession {
-    Open(yunta_core::SessionId),
-    NoneRecorded,
-    NotAnOrphan,
-}
-
-fn orphaned_session(
-    events: &[yunta_core::events::StoredEvent],
-    node_id: &yunta_core::NodeId,
-) -> OrphanedSession {
-    let mine = |event: &&yunta_core::events::StoredEvent| event.node_id.as_ref() == Some(node_id);
-    let starts: Vec<usize> = events
-        .iter()
-        .enumerate()
-        .filter(|(_, e)| {
-            e.node_id.as_ref() == Some(node_id)
-                && matches!(e.payload(), Some(EventPayload::NodeStarted(_)))
-        })
-        .map(|(i, _)| i)
-        .collect();
-    // The caller's own `node_started` for this attempt is already on the
-    // log — the *previous* start is the one that may have been cut.
-    let (Some(&current), Some(&previous)) = (
-        starts.last(),
-        starts.len().checked_sub(2).and_then(|i| starts.get(i)),
-    ) else {
-        return OrphanedSession::NotAnOrphan;
-    };
-    let Some(window) = events.get(previous..current) else {
-        return OrphanedSession::NotAnOrphan;
-    };
-    let had_verdict = window.iter().filter(mine).any(|e| {
-        matches!(
-            e.payload(),
-            Some(EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_))
-        )
-    });
-    if had_verdict {
-        return OrphanedSession::NotAnOrphan;
-    }
-    match window
-        .iter()
-        .filter(mine)
-        .rev()
-        .find_map(|e| match e.payload() {
-            Some(EventPayload::AgentSessionOpened(p)) => Some(p.session_id.clone()),
-            _ => None,
-        }) {
-        Some(session_id) => OrphanedSession::Open(session_id),
-        None => OrphanedSession::NoneRecorded,
     }
 }

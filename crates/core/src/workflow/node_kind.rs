@@ -7,7 +7,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::parse::{describe, nested, take};
 use super::{ArtifactRefId, ArtifactSpec, LoopUntil, Node, ScopeExpansion};
-use crate::ids::{ExecutorName, NodeId, OptionId};
+use crate::config::Isolation;
+use crate::ids::{ExecutorName, InputName, NodeId, OptionId};
 use crate::yaml::Value;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -145,13 +146,13 @@ pub enum NodeKind {
         /// before the child validates them against its declared
         /// `inputs:`. Absent means the child must get by on defaults.
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        inputs: BTreeMap<String, String>,
+        inputs: BTreeMap<InputName, String>,
         /// `worktree` (default) gives the child its own tree branched
-        /// off the parent's HEAD; `inherit` shares the parent's tree
-        /// for phases of one piece of work — parallel `inherit`
-        /// siblings must declare disjoint `scope` (checked).
-        #[serde(default, skip_serializing_if = "is_default_workflow_isolation")]
-        isolation: WorkflowIsolation,
+        /// off the tree this node works in; `none` shares that tree, for
+        /// phases of one piece of work — parallel children sharing a
+        /// tree must declare disjoint `scope` (checked).
+        #[serde(default, skip_serializing_if = "crate::config::is_default_isolation")]
+        isolation: Isolation,
         /// `mounts:` — artifacts of the parent's own graph
         /// copied into the child's `run.dir/artifacts/` at birth: the
         /// promotion inheritance mechanism generalized (promotion is
@@ -185,6 +186,23 @@ impl NodeKind {
     /// the answer is stated once here.
     pub fn opens_resumable_session(&self) -> bool {
         matches!(self, NodeKind::Prompt { .. })
+    }
+
+    /// The `kind:` this node declares, spelled as YAML spells it — the
+    /// name in [`KINDS`](Self::KINDS) that the serialized `kind` tag
+    /// carries. Exhaustive: a new variant does not compile until it
+    /// names itself here.
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            NodeKind::Prompt { .. } => "prompt",
+            NodeKind::Bash { .. } => "bash",
+            NodeKind::Loop { .. } => "loop",
+            NodeKind::Parallel { .. } => "parallel",
+            NodeKind::Check(_) => "check",
+            NodeKind::Executor { .. } => "executor",
+            NodeKind::Gate { .. } => "gate",
+            NodeKind::Workflow { .. } => "workflow",
+        }
     }
 
     /// The keys a node of `kind` accepts besides the node-level ones,
@@ -249,23 +267,6 @@ impl<'de> Deserialize<'de> for MountArtifact {
         }
         Ok(MountArtifact { node, id, rename })
     }
-}
-
-fn is_default_workflow_isolation(isolation: &WorkflowIsolation) -> bool {
-    *isolation == WorkflowIsolation::default()
-}
-
-/// A `kind: workflow` node's `isolation:` — deliberately its own
-/// enum, not [`crate::Isolation`]: `inherit` only exists for workflow
-/// nodes, and a run-level `none` is not a per-node choice.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowIsolation {
-    #[default]
-    Worktree,
-    Inherit,
 }
 
 /// `kind: gate`'s `external:` block.

@@ -8,11 +8,11 @@
 //! holds once it has.
 
 use yunta_core::diagnostic::ArtifactFailure;
-use yunta_core::events::{ArtifactId, ArtifactOrigin, EventPayload, Failure, TokenUsage};
-use yunta_core::{ArtifactSpec, Node, NodeKind, RunId};
+use yunta_core::events::{ArtifactId, EventPayload, Failure, RecordedOrigin, TokenUsage};
+use yunta_core::{ArtifactSpec, Node, NodeKind, QuestionId, RunId};
 
 use crate::artifacts::{
-    accept, answered_by_the_log, canonical, interpreted, ArtifactContent, RunArtifacts,
+    accept, answerer, canonical, interpreted, Answerer, ArtifactContent, RunArtifacts,
     VerifiedArtifact,
 };
 use crate::tasks::{Provenance, Standing};
@@ -20,6 +20,7 @@ use crate::tasks::{Provenance, Standing};
 use super::node_close::{fail_with_tokens, ChildRun};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
+use yunta_core::events::FindingEvent;
 
 /// Whether `node` declares the `findings` artifact the run derives from
 /// what that node posted rather than from anything it wrote.
@@ -58,7 +59,7 @@ pub(super) async fn derive_findings(
     }
     let posted = yunta_core::events::findings::FindingLedger::of(&ctx.load_events().await?)
         .effective_of(&node.id);
-    let derived = match crate::artifacts::derive_findings(&node.id, posted, ceiling) {
+    let derived = match crate::artifacts::derive_findings(Some(&node.id), posted, ceiling) {
         Ok(derived) => derived,
         Err(error) => {
             return Ok(Some(
@@ -72,7 +73,7 @@ pub(super) async fn derive_findings(
         Some(&node.id),
         derived.artifact.clone(),
         &derived.bytes,
-        ArtifactOrigin::Derived,
+        RecordedOrigin::Derived,
     )
     .await?;
     Ok(None)
@@ -133,7 +134,7 @@ struct Resolved<'a> {
 /// child's ledger is asked for. The child may hold more — those are that
 /// run's business and stay there — and it must hold these, because a
 /// node cannot finish owing what it declared.
-fn resolve_from_child<'a>(
+async fn resolve_from_child<'a>(
     node: &Node,
     produces: &'a [ArtifactSpec],
     held: &RunArtifacts<'_>,
@@ -154,7 +155,7 @@ fn resolve_from_child<'a>(
             });
             continue;
         };
-        let bytes = match held.bytes(found) {
+        let bytes = match held.bytes(found).await {
             Ok(bytes) => bytes,
             Err(source) => return Err(NotAcquired::Unreachable { artifact, source }),
         };
@@ -212,7 +213,7 @@ pub(super) async fn acquire_from_child(
         }));
     };
     let held = RunArtifacts::of(child.run_dir, &events);
-    let resolved = match resolve_from_child(node, &artifacts.produces, &held, child.id) {
+    let resolved = match resolve_from_child(node, &artifacts.produces, &held, child.id).await {
         Ok(resolved) => resolved,
         Err(problem) => return Ok(Err(problem)),
     };
@@ -225,7 +226,7 @@ pub(super) async fn acquire_from_child(
             Some(&node.id),
             ArtifactId::from(item.spec),
             &item.bytes,
-            ArtifactOrigin::Inherited {
+            RecordedOrigin::Inherited {
                 run: child.id.clone(),
                 producer: item.producer,
             },
@@ -260,7 +261,7 @@ pub(super) async fn record_artifacts(
         // under the origin that produced it: there is nothing left for
         // the close to accept. Everything else is a file the node wrote,
         // and this is where it enters the run.
-        if !answered_by_the_log(&node.kind, artifact.content.kind()) {
+        if answerer(&node.kind, artifact.content.kind()) == Answerer::Staging {
             let bytes = canonical(artifact).map_err(|error| RunError::Broken {
                 diagnostic: error.to_string(),
             })?;
@@ -270,7 +271,7 @@ pub(super) async fn record_artifacts(
                 Some(&node.id),
                 artifact.artifact.clone(),
                 &bytes,
-                ArtifactOrigin::Ingested,
+                RecordedOrigin::Ingested,
             )
             .await?;
         }
@@ -294,9 +295,15 @@ async fn record_content(
             // already has — asked of that tree, here, because the
             // document is what names the tasks to ask about.
             let carried = match standing {
-                Some(standing) => {
-                    Some(crate::tasks::carried_into(standing, tasks, ctx.worktree).await?)
-                }
+                Some(standing) => Some(
+                    crate::tasks::carried_into(
+                        standing,
+                        tasks,
+                        ctx.worktree,
+                        ctx.root_supervision(),
+                    )
+                    .await?,
+                ),
                 None => None,
             };
             let provenance = match &carried {
@@ -314,37 +321,46 @@ async fn record_content(
             for finding in findings {
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::FindingPosted(yunta_core::events::FindingPostedPayload {
-                        finding: finding.clone(),
-                    }),
+                    EventPayload::Findings(FindingEvent::Posted(
+                        yunta_core::events::FindingPostedPayload {
+                            finding: finding.clone(),
+                        },
+                    )),
                 )
                 .await?;
             }
         }
-        ArtifactContent::Findings(_) | ArtifactContent::Questions(_) | ArtifactContent::Opaque => {}
+        // The answers are recorded where they arrive — `answers::record`
+        // writes the acceptance and the `questions_answered` together —
+        // so a close that meets them again has nothing to add.
+        ArtifactContent::Findings(_)
+        | ArtifactContent::Questions(_)
+        | ArtifactContent::Answers(_)
+        | ArtifactContent::Opaque => {}
     }
     Ok(())
 }
 
 /// Every question this node's artifacts ask, by id.
 ///
-/// A `kind: questions` artifact's own session has already closed by the
-/// time it is read (the same "artifact read only at node close" ordering
-/// `tasks` and `findings` rely on), so nothing renders
-/// mid-session. Questions left here close the node waiting-shaped — a
-/// `node_failed` that replay derives as `Waiting` from the typed
-/// `kind: questions` on the artifact event — and the asking happens in
-/// ONE place, the scheduler's own `AskQuestions` step
-/// (`questions_exec`), which serves the first invocation and every
+/// The questions a node handed over, with the document they came from —
+/// `None` when the node declared none at all.
+///
+/// A `kind: questions` artifact is read at the node's close (the same
+/// "artifact read only at node close" ordering `tasks` and `findings`
+/// rely on), so this is what the close knows: a node that asked
+/// something records that it asked and waits; a node that handed over an
+/// empty document asked nothing and finishes in the same close. The
+/// asking happens in ONE place afterwards, the scheduler's own
+/// `AskQuestions` step, which serves the first invocation and every
 /// resume through the identical path.
-pub(super) fn pending_questions(verified: &[VerifiedArtifact]) -> Vec<String> {
+pub(super) fn asked(verified: &[VerifiedArtifact]) -> Option<Vec<QuestionId>> {
     verified
         .iter()
-        .filter_map(|artifact| match &artifact.content {
-            ArtifactContent::Questions(questions) => Some(questions),
+        .find_map(|artifact| match &artifact.content {
+            ArtifactContent::Questions(questions) => {
+                Some(questions.iter().map(|q| q.id.clone()).collect())
+            }
             _ => None,
         })
-        .flatten()
-        .map(|question| question.id.to_string())
-        .collect()
 }

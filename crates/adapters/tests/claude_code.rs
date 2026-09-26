@@ -1,5 +1,5 @@
 //! Integration tests for the real `claude-code` adapter against a fake
-//! `claude` binary (`fixtures/claude_code_stub.sh`) — no network, no
+//! `claude` binary (`yunta_testkit_core::stubs::claude_code`) — no network, no
 //! API cost, no real LLM in CI. The one thing this suite cannot cover
 //! is whether the real CLI's actual output matches what the stub
 //! scripts: that is what the manual smoke test covers instead.
@@ -9,18 +9,17 @@
 //! in a test — cargo runs tests concurrently in one process, and a
 //! process-global env var would race across them.
 
-use std::collections::HashMap;
+use std::error::Error as _;
 use std::path::PathBuf;
-use std::time::Duration;
+use yunta_core::fence::{Advice, Coverage, Fence};
 
-use futures::StreamExt;
-use yunta_adapters::{
-    Adapter, AgentEvent, Budget, ClaudeCodeAdapter, PermissionProfile, ProbeReport, SessionRequest,
-};
+use yunta_adapters::ClaudeCodeAdapter;
+use yunta_core::port::{Adapter, AgentEvent, PermissionProfile, ProbeReport, SessionRequest};
 use yunta_core::{AdapterSettings, SessionId};
+use yunta_testkit_core::adapter::{child_pid_fifo, drain, grandchild_pid, request, write_lines};
 
 fn stub_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/claude_code_stub.sh")
+    yunta_testkit_core::stubs::claude_code()
 }
 
 fn adapter() -> ClaudeCodeAdapter {
@@ -30,46 +29,10 @@ fn adapter() -> ClaudeCodeAdapter {
     })
 }
 
-fn request(cwd: PathBuf) -> SessionRequest {
-    SessionRequest {
-        prompt: "do the thing".to_string(),
-        cwd,
-        model: None,
-        agent: None,
-        permissions: PermissionProfile::Edit,
-        env: HashMap::new(),
-        edit_constraints: None,
-        budget: Budget::default(),
-        adapter_settings: serde_json::Map::new(),
-        skills: Vec::new(),
-        run_tools_endpoint: None,
-        artifact_dir: None,
-        scratch_dir: None,
-    }
-}
-
-async fn drain(mut session: Box<dyn yunta_adapters::AgentSession>) -> Vec<AgentEvent> {
-    let mut events = Vec::new();
-    let mut stream = session.events();
-    while let Some(event) = stream.next().await {
-        events.push(event);
-    }
-    events
-}
-
-fn write_lines(dir: &std::path::Path, name: &str, lines: &[&str]) -> PathBuf {
-    let path = dir.join(name);
-    let contents = if lines.is_empty() {
-        String::new()
-    } else {
-        lines.join("\n") + "\n"
-    };
-    std::fs::write(&path, contents).unwrap();
-    path
-}
-
 const INIT_LINE: &str =
     r#"{"type":"system","subtype":"init","session_id":"sess-abc","model":"claude-sonnet-5"}"#;
+
+const RESULT_LINE: &str = r#"{"type":"result","is_error":false,"result":"all done"}"#;
 
 #[tokio::test]
 async fn probe_reports_the_stub_as_healthy_with_its_version() {
@@ -87,10 +50,9 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
     assert!(caps.permission_profiles);
     assert!(caps.custom_agents);
     assert!(caps.usage_reporting);
-    // Never claim a capability that isn't wired end-to-end yet — there
-    // is no live edit-hook blocking for the real CLI, only the engine's
-    // post-hoc scope check.
-    assert!(!caps.edit_hooks);
+    // Every writing tool goes through the hook that runs the judge
+    // before the write happens.
+    assert_eq!(caps.fence, yunta_core::FenceLevel::ToolCalls);
     assert!(caps.run_tools);
 }
 
@@ -125,8 +87,8 @@ async fn capability_usage_reporting_surfaces_the_streams_usage() {
     assert!(events.iter().any(|e| matches!(
         e,
         AgentEvent::Usage {
-            input_tokens: 10,
-            output_tokens: 4,
+            input_tokens: Some(10),
+            output_tokens: Some(4),
             cached_input_tokens: Some(2)
         }
     )));
@@ -166,7 +128,7 @@ async fn a_failed_result_ends_the_stream_with_failed_and_retryable() {
 }
 
 #[tokio::test]
-async fn a_tool_use_block_maps_to_tool_use_with_a_readable_digest() {
+async fn a_tool_use_block_maps_to_tool_use_digesting_its_target() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(
         dir.path(),
@@ -188,8 +150,8 @@ async fn a_tool_use_block_maps_to_tool_use_with_a_readable_digest() {
 
     assert!(events.iter().any(|e| matches!(
         e,
-        AgentEvent::ToolUse { name, target_digest }
-            if name == "Edit" && target_digest == "src/lib.rs"
+        AgentEvent::ToolUse { name, target }
+            if name == "Edit" && target.display.as_deref() == Some("src/lib.rs")
     )));
 }
 
@@ -238,10 +200,7 @@ async fn capability_permission_profiles_give_read_only_the_non_mutating_tools() 
         .iter()
         .position(|a| a == "--tools")
         .expect("ReadOnly restricts the tools");
-    assert_eq!(
-        args[tools_pos + 1],
-        "Read,Grep,Glob,WebFetch,WebSearch,Write"
-    );
+    assert_eq!(args[tools_pos + 1], "Read,Grep,Glob,WebFetch,WebSearch");
     let mode_pos = args
         .iter()
         .position(|a| a == "--permission-mode")
@@ -374,37 +333,6 @@ async fn kill_terminates_the_whole_process_tree_including_grandchildren() {
     );
 }
 
-/// The fifo the stub records its child pid into. A fifo, not a plain file,
-/// so [`grandchild_pid`] blocks on it and wakes the instant the stub writes,
-/// a rendezvous with the child rather than a poll of the filesystem.
-fn child_pid_fifo(dir: &std::path::Path) -> PathBuf {
-    let path = dir.join("child.pid");
-    let status = std::process::Command::new("mkfifo")
-        .arg(&path)
-        .status()
-        .expect("mkfifo runs");
-    assert!(status.success(), "mkfifo creates the child-pid fifo");
-    path
-}
-
-/// The pid of the blocking child the stub spawned. The path is a fifo, so the
-/// read blocks until the stub opens it and writes the pid: an explicit
-/// rendezvous with the child, not a timed poll. The deadline turns a stub that
-/// never records the pid into a failed test rather than a hung one.
-async fn grandchild_pid(child_pid_fifo: &std::path::Path) -> String {
-    let fifo = child_pid_fifo.to_path_buf();
-    tokio::time::timeout(
-        Duration::from_secs(30),
-        tokio::task::spawn_blocking(move || std::fs::read_to_string(fifo)),
-    )
-    .await
-    .expect("the stub records the child pid before the deadline")
-    .expect("the pid reader joins")
-    .expect("the child-pid fifo reads")
-    .trim()
-    .to_string()
-}
-
 /// True while `pid` runs. `kill -0` alone is not enough: a killed
 /// process whose parent is gone lingers as a zombie — still visible to
 /// `kill -0` — until something reaps it, so running means `ps` reports
@@ -517,35 +445,6 @@ async fn prompt_travels_by_stdin_never_argv() {
     );
     let stdin = std::fs::read_to_string(&stdin_file).unwrap();
     assert_eq!(stdin, "the whole brief, with a --flag-looking line");
-}
-
-#[test]
-fn debug_of_a_session_request_never_prints_secrets() {
-    let mut req = request(std::path::PathBuf::from("/tmp"));
-    req.env
-        .insert("API_TOKEN".to_string(), "hunter2".to_string().into());
-    req.run_tools_endpoint = Some(yunta_adapters::RunToolsEndpoint {
-        url: "http://127.0.0.1:1/mcp".to_string(),
-        token: "bearer-secret".to_string().into(),
-    });
-    let debug = format!("{req:?}");
-    assert!(
-        debug.contains("API_TOKEN"),
-        "the name stays visible: {debug}"
-    );
-    assert!(
-        !debug.contains("hunter2"),
-        "the value never prints: {debug}"
-    );
-    assert!(
-        !debug.contains("bearer-secret"),
-        "the token never prints: {debug}"
-    );
-    assert_eq!(
-        debug.matches("[redacted]").count(),
-        2,
-        "both the env value and the endpoint token are redacted: {debug}"
-    );
 }
 
 /// `Edit` is its own tool set — file editing, no shell, no network —
@@ -665,8 +564,17 @@ async fn an_unknown_adapter_setting_is_reported_by_probe() {
 /// event it produced.
 async fn events_of(lines: &[&str]) -> Vec<AgentEvent> {
     let dir = tempfile::tempdir().unwrap();
+    let req = request(dir.path().to_path_buf());
+    spawn_with(&dir, req, lines).await
+}
+
+/// The same, for a request a test shaped itself.
+async fn spawn_with(
+    dir: &tempfile::TempDir,
+    mut req: SessionRequest,
+    lines: &[&str],
+) -> Vec<AgentEvent> {
     let lines = write_lines(dir.path(), "lines.jsonl", lines);
-    let mut req = request(dir.path().to_path_buf());
     req.env.insert(
         "CLAUDE_STUB_LINES_FILE".to_string(),
         lines.display().to_string().into(),
@@ -777,49 +685,85 @@ async fn argv_for(dir: &std::path::Path, mut req: SessionRequest) -> Vec<String>
         .collect()
 }
 
+/// Everything the fence installs, and nothing of it under the worktree:
+/// the judge as a `PreToolUse` hook, the roots the CLI would otherwise
+/// refuse, and the fence itself in the child's environment.
 #[tokio::test]
-async fn a_declared_artifact_directory_is_writable_by_the_session() {
+async fn a_claude_session_installs_the_fence_by_settings_and_add_dir_and_nothing_under_cwd() {
     let dir = tempfile::tempdir().unwrap();
     let artifacts = dir.path().join("run/artifacts");
     std::fs::create_dir_all(&artifacts).unwrap();
 
     let mut req = request(dir.path().to_path_buf());
-    req.artifact_dir = Some(artifacts.clone());
+    req.fence = Fence {
+        allowed: Some(vec!["src/**".into()]),
+        roots: vec![artifacts.clone()],
+        advice: Advice::ReportFinding,
+    };
     let args = argv_for(dir.path(), req).await;
 
-    // The CLI confines writes to its working directory, and the run's
-    // artifact directory is never inside it: without this the agent is
-    // told to write a file it is then refused permission to create.
+    // The CLI confines writes to its working directory, and a root the
+    // fence keeps writable is never inside it: without this the agent
+    // is told to write a file it is then refused permission to create.
     let pos = args
         .iter()
         .position(|a| a == "--add-dir")
-        .expect("a declared artifact directory is added to the writable set");
+        .expect("every fence root is added to the writable set");
     assert_eq!(args[pos + 1], artifacts.display().to_string());
-}
 
-#[tokio::test]
-async fn no_declared_artifact_widens_nothing() {
-    let dir = tempfile::tempdir().unwrap();
-    let args = argv_for(dir.path(), request(dir.path().to_path_buf())).await;
+    let settings = args
+        .iter()
+        .position(|a| a == "--settings")
+        .map(|pos| args[pos + 1].clone())
+        .expect("the judge is installed as the CLI's own pre-write hook");
     assert!(
-        !args.iter().any(|a| a == "--add-dir"),
-        "a node that declares no artifact needs no widening: {args:?}"
+        settings.contains("PreToolUse") && settings.contains("fence"),
+        "the hook runs `yunta fence` before every writing tool: {settings}"
+    );
+    assert!(
+        !dir.path().join(".claude").exists(),
+        "nothing of the session's configuration lands under the worktree"
     );
 }
 
 #[tokio::test]
-async fn read_only_still_writes_its_own_declared_artifact() {
+async fn a_fence_with_no_roots_widens_nothing() {
     let dir = tempfile::tempdir().unwrap();
+    let args = argv_for(dir.path(), request(dir.path().to_path_buf())).await;
+    assert!(
+        !args.iter().any(|a| a == "--add-dir"),
+        "a session with nothing to write outside its worktree needs no widening: {args:?}"
+    );
+}
+
+/// `read_only` means the node does not touch the project. Its own
+/// declared file is the node's output, written to a root the fence keeps
+/// writable — so the writing tools stay exactly when there is such a
+/// root, and go when there is not.
+#[tokio::test]
+async fn a_read_only_claude_session_keeps_write_only_for_its_declared_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let artifacts = dir.path().join("run/artifacts");
+
     let mut req = request(dir.path().to_path_buf());
     req.permissions = PermissionProfile::ReadOnly;
+    req.fence = Fence::read_only(vec![artifacts], Advice::ReportFinding);
     let args = argv_for(dir.path(), req).await;
-
-    // `read-only` means the node does not touch the project. Its own
-    // declared artifact is the node's output, not the project.
     let pos = args.iter().position(|a| a == "--tools").unwrap();
     assert!(
-        args[pos + 1].split(',').any(|t| t == "Write"),
-        "read-only must still be able to produce what it declares: {}",
+        args[pos + 1].split(',').any(|tool| tool == "Write"),
+        "read-only must still produce what it declares: {}",
+        args[pos + 1]
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.permissions = PermissionProfile::ReadOnly;
+    req.fence = Fence::read_only(Vec::new(), Advice::ReportFinding);
+    let args = argv_for(dir.path(), req).await;
+    let pos = args.iter().position(|a| a == "--tools").unwrap();
+    assert!(
+        !args[pos + 1].split(',').any(|tool| tool == "Write"),
+        "with nothing declared there is nothing at all to write: {}",
         args[pos + 1]
     );
 }
@@ -831,8 +775,8 @@ async fn the_per_run_tools_reach_the_session_without_the_token_on_the_command_li
     std::fs::create_dir_all(&scratch).unwrap();
 
     let mut req = request(dir.path().to_path_buf());
-    req.scratch_dir = Some(scratch.clone());
-    req.run_tools_endpoint = Some(yunta_adapters::RunToolsEndpoint {
+    req.scratch_dir = scratch.clone();
+    req.run_tools_endpoint = Some(yunta_core::port::RunToolsEndpoint {
         url: "http://127.0.0.1:54321/mcp".to_string(),
         token: "s3cr3t-token-value".to_string().into(),
     });
@@ -844,7 +788,11 @@ async fn the_per_run_tools_reach_the_session_without_the_token_on_the_command_li
         .expect("the per-run MCP server is mounted");
     let config: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&args[pos + 1]).unwrap()).unwrap();
-    let server = &config["mcpServers"]["yunta"];
+    assert!(
+        config["mcpServers"]["yunta"].is_null(),
+        "the per-run server never takes the name a person's own entry takes: {config:#}"
+    );
+    let server = &config["mcpServers"]["yunta-run"];
     assert_eq!(server["url"], "http://127.0.0.1:54321/mcp");
     assert_eq!(
         server["headers"]["Authorization"], "Bearer s3cr3t-token-value",
@@ -859,7 +807,7 @@ async fn the_per_run_tools_reach_the_session_without_the_token_on_the_command_li
     // Mounting a server the profile then forbids would be a tool the
     // agent is told to call and cannot.
     assert!(
-        args.iter().any(|a| a == "mcp__yunta__*"),
+        args.iter().any(|a| a == "mcp__yunta-run__*"),
         "every tool of the mounted server is allowed, so this adapter \
          never has to know which tools the engine mounts: {args:?}"
     );
@@ -881,7 +829,7 @@ async fn no_per_run_endpoint_mounts_no_server() {
 async fn init_with_tools(tools: &str) -> Vec<AgentEvent> {
     events_of(&[
         &format!(
-            r#"{{"type":"system","subtype":"init","session_id":"sess-tools","model":"claude-sonnet-5","mcp_servers":[{{"name":"yunta","status":"connected"}}],"tools":{tools}}}"#
+            r#"{{"type":"system","subtype":"init","session_id":"sess-tools","model":"claude-sonnet-5","mcp_servers":[{{"name":"yunta-run","status":"connected"}}],"tools":{tools}}}"#
         ),
         r#"{"type":"result","is_error":false,"result":"done"}"#,
     ])
@@ -898,7 +846,7 @@ fn run_tools_mounted(events: &[AgentEvent]) -> Option<usize> {
 #[tokio::test]
 async fn the_init_line_reports_how_many_run_tools_the_session_holds() {
     let events = init_with_tools(
-        r#"["Bash","mcp__yunta__yunta_check_artifact","mcp__yunta__yunta_post_finding"]"#,
+        r#"["Bash","mcp__yunta-run__yunta_check_artifact","mcp__yunta-run__yunta_post_finding"]"#,
     )
     .await;
     assert_eq!(
@@ -906,6 +854,38 @@ async fn the_init_line_reports_how_many_run_tools_the_session_holds() {
         Some(2),
         "the CLI named the session's tools: {events:?}"
     );
+}
+
+#[tokio::test]
+async fn interleaved_tool_results_are_matched_by_id_and_ignore_other_servers() {
+    let events = events_of(&[
+        INIT_LINE,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a","name":"mcp__yunta-run__yunta_submit_questions","input":{"secret":"top-secret"}},{"type":"tool_use","id":"b","name":"mcp__yunta-run__yunta_check_artifact","input":{}},{"type":"tool_use","id":"c","name":"mcp__other__yunta_submit_questions","input":{}}]}}"#,
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"b","is_error":true,"content":"top-secret"},{"type":"tool_result","tool_use_id":"c","is_error":true,"content":"top-secret"}]}}"#,
+        r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a","is_error":true,"content":"top-secret"}]}}"#,
+        RESULT_LINE,
+    ]).await;
+    let failed: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::RunToolFailed { tool, cause } => Some((*tool, *cause)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        failed,
+        vec![
+            (
+                yunta_core::RunTool::CheckArtifact,
+                yunta_core::events::RunToolFailureCause::CallFailed
+            ),
+            (
+                yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
+                yunta_core::events::RunToolFailureCause::CallFailed
+            ),
+        ]
+    );
+    assert!(!format!("{failed:?}").contains("top-secret"));
 }
 
 #[tokio::test]
@@ -931,5 +911,268 @@ async fn an_init_line_that_names_no_tool_set_reports_nothing_about_run_tools() {
         run_tools_mounted(&events),
         None,
         "a CLI that says nothing is unknown, never zero: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_tool_use_never_persists_the_command_it_ran() {
+    let dir = tempfile::tempdir().unwrap();
+    let command = "psql postgres://admin:hunter2@db.internal/prod -c 'select 1'";
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            INIT_LINE,
+            &format!(
+                r#"{{"type":"assistant","message":{{"id":"msg-1","content":[{{"type":"tool_use","name":"Bash","input":{{"command":"{command}"}}}}]}}}}"#
+            ),
+            r#"{"type":"result","is_error":false,"result":"ran","usage":{"input_tokens":1,"output_tokens":1}}"#,
+        ],
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CLAUDE_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    let targets: Vec<&yunta_core::events::ToolTarget> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ToolUse { target, .. } => Some(target),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(targets.len(), 1, "the stream carries the one call it made");
+    assert_eq!(
+        targets[0].display, None,
+        "a command is the session's own text: identified, never shown"
+    );
+    let carried = format!("{:?}", targets[0]);
+    for fragment in ["psql", "hunter2", "db.internal", "select"] {
+        assert!(
+            !carried.contains(fragment),
+            "`{fragment}` of the command reached the log as `{carried}`"
+        );
+    }
+    assert_eq!(
+        targets[0].digest,
+        yunta_core::sha256_hex(command.as_bytes())
+    );
+}
+
+/// A count the CLI did not report is absent, never zero. A run that
+/// recorded zero would say the session cost nothing, which is a
+/// different claim from "the CLI said nothing about it".
+#[tokio::test]
+async fn a_missing_token_count_is_absent_not_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            INIT_LINE,
+            // A `usage` naming only what it counted.
+            r#"{"type":"result","is_error":false,"result":"done","usage":{"input_tokens":40}}"#,
+        ],
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CLAUDE_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    let usage = events
+        .iter()
+        .find_map(|event| match event {
+            AgentEvent::Usage {
+                input_tokens,
+                output_tokens,
+                cached_input_tokens,
+            } => Some((*input_tokens, *output_tokens, *cached_input_tokens)),
+            _ => None,
+        })
+        .expect("the result reported its usage");
+    assert_eq!(usage, (Some(40), None, None));
+}
+
+/// A line kind this adapter does not read is tolerated: the stream goes
+/// on, and the line contributes nothing rather than failing the session
+/// or being mistaken for something it is not.
+#[tokio::test]
+async fn an_unknown_stream_line_is_tolerated_and_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &[
+            INIT_LINE,
+            // A kind the CLI could add tomorrow, one it already has that
+            // this adapter does not read, and a `system` that is not the
+            // init subtype.
+            r#"{"type":"compact_boundary","reason":"context"}"#,
+            r#"{"type":"user","message":{"content":[]}}"#,
+            r#"{"type":"system","subtype":"status","note":"still here"}"#,
+            r#"{"type":"result","is_error":false,"result":"done"}"#,
+        ],
+    );
+
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CLAUDE_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter().spawn(req).await.unwrap();
+    let events = drain(session).await;
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Completed { .. })),
+        "the session reached its terminal past the lines it does not read: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Failed { .. })),
+        "an unread line is not a failure: {events:?}"
+    );
+}
+
+/// Settings that do not read fail the session rather than fall back: a
+/// session opened under settings nobody could parse runs under
+/// something nobody asked for, and silently.
+#[tokio::test]
+async fn a_session_never_opens_under_settings_that_do_not_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let adapter = ClaudeCodeAdapter::new(&AdapterSettings {
+        adapter_settings: Some(
+            serde_json::from_str(r#"{"sandbox": "read-only"}"#).expect("the settings parse"),
+        ),
+        binary: Some(stub_path()),
+    });
+
+    let Err(error) = adapter.spawn(request(dir.path().to_path_buf())).await else {
+        panic!("a session must not open under settings nobody could read");
+    };
+    let text = yunta_core::describe(&error);
+    assert!(
+        text.contains("cannot read its `adapter_settings`") && text.contains("sandbox"),
+        "the refusal names what it could not read: {text}"
+    );
+}
+
+/// A field the CLI filled with something that cannot be a session id
+/// fails the session, and the failure keeps what rejected the value so a
+/// reader following the chain reaches the rule it broke.
+#[tokio::test]
+async fn a_session_id_that_cannot_be_one_fails_keeping_what_rejected_it() {
+    let events = events_of(&[
+        r#"{"type":"system","subtype":"init","session_id":"","model":"claude-sonnet-5"}"#,
+    ])
+    .await;
+
+    let AgentEvent::Failed { error, retryable } = &events[0] else {
+        panic!("expected Failed, got {:?}", events[0]);
+    };
+    assert!(!retryable, "not a failure to retry: {error}");
+    let described = yunta_core::describe(error);
+    assert!(
+        described.starts_with("the CLI's init line's `session_id`"),
+        "the failure names the field: {described}"
+    );
+    assert!(
+        error.source().is_some(),
+        "the failure keeps what rejected the value: {described}"
+    );
+    assert!(
+        described.len() > error.message.len(),
+        "the cause is read, not dropped: {described}"
+    );
+}
+
+/// The judge reaches this CLI only by a hook it can run. Without one
+/// there is no fence to build, and a session that opened anyway would
+/// write wherever it liked.
+#[tokio::test]
+async fn a_claude_session_without_a_hook_fails_before_spawning() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    req.fence_hook = None;
+
+    let refused = adapter()
+        .spawn(req)
+        .await
+        .err()
+        .expect("a session never opens without a fence to build");
+    let said = yunta_core::describe(&refused);
+    assert!(
+        said.contains("fence hook"),
+        "the refusal names what it could not build: {said}"
+    );
+}
+
+/// An `edit` session exposes no shell, so both channels are exact; a
+/// `full` one does, and nothing fences a shell by path.
+#[tokio::test]
+async fn an_edit_profile_reports_exact_coverage_and_full_reports_tools_only() {
+    for (profile, expected) in [
+        (PermissionProfile::Edit, Coverage::Exact),
+        (PermissionProfile::Full, Coverage::ToolsOnly),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut req = request(dir.path().to_path_buf());
+        req.permissions = profile;
+        let events = spawn_with(&dir, req, &[INIT_LINE, RESULT_LINE]).await;
+
+        let AgentEvent::SessionOpened { fence, .. } = &events[0] else {
+            panic!("a session opens first: {events:?}");
+        };
+        assert_eq!(fence.as_ref(), Some(&expected), "under {profile:?}");
+    }
+}
+
+/// The hook's refusal comes back through the conversation, as an errored
+/// tool result. The one parser of the marker reads the path out of it.
+#[tokio::test]
+async fn a_refused_write_in_the_stream_becomes_write_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let refusal = yunta_core::fence::Refusal {
+        target: dir.path().join("docs/readme.md"),
+        worktree: dir.path().to_path_buf(),
+        allowed: Some(vec!["src/**".into()]),
+        roots: Vec::new(),
+        advice: yunta_core::fence::Advice::ReportFinding,
+    };
+    let user_line = serde_json::json!({
+        "type": "user",
+        "message": { "content": [{
+            "type": "tool_result",
+            "is_error": true,
+            "content": refusal.to_string(),
+        }] },
+    })
+    .to_string();
+
+    let events = spawn_with(
+        &dir,
+        request(dir.path().to_path_buf()),
+        &[INIT_LINE, &user_line, RESULT_LINE],
+    )
+    .await;
+
+    let refused = events.iter().find_map(|event| match event {
+        AgentEvent::WriteRefused { target } => Some(target),
+        _ => None,
+    });
+    assert_eq!(
+        refused.and_then(|target| target.display.as_deref()),
+        Some("docs/readme.md"),
+        "the refused path reaches the log relative to the work: {events:?}"
     );
 }

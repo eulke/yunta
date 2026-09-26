@@ -9,7 +9,7 @@ the engine grants it no special status.
 
 ```bash
 yunta pack add <source-of-this-pack>
-yunta run yunta/build-feature --input idea="add dark mode to the settings page"
+yunta run yunta/fragua --input idea="add dark mode to the settings page"
 ```
 
 `--mode quick` skips the two human gates and the multi-runner review for a
@@ -25,7 +25,7 @@ why the `pr` node above doesn't try to attach one itself. The recommended
 pattern is a follow-up step, run by whatever drives this pack in CI:
 
 ```bash
-yunta run yunta/build-feature --input idea="..." --detach
+yunta run yunta/fragua --input idea="..." --detach
 # ... wait for the run to reach a terminal state ...
 yunta receipt <run_id>
 gh pr comment <pr-number> --body-file <run_dir>/receipt.md
@@ -40,3 +40,21 @@ Your own `runners:` needs `planner`, `executor`, `mechanical`, `reviewer`
 and `reviewer-alt` resolvable, and `baseline.suite` configured for the
 `tests` node's `baseline_compare` check — `yunta doctor` says so if
 something's missing.
+
+## What this pack assumes about your repository
+
+- **`docs/architecture.md`** (optional, recommended): `plan` reads it as
+  context when it is there. Without it the session is told the file is
+  absent and the planner explores the code on its own, which costs more
+  tokens and plans with less of your intent. The run starts from your last
+  commit, so commit the file before `yunta run`.
+- **A Rust toolchain**: `lint` runs `cargo clippy -- -D warnings`. In another
+  ecosystem it fails after `implement`, the most expensive node, and uses
+  two `fix-lint` attempts before asking you. Copy the workflow into
+  `.yunta/workflows/` and change `lint` to your own linter first.
+- **Rust sources**: `fix-lint` may edit any `*.rs` file, so a workspace
+  with its code under `crates/*/src` works as well as a single crate. A
+  task that needs files outside its scope asks a person
+  (`scope_expansion.mode: ask`); the loop's `within: ["src/**"]` only
+  bounds what `mode: rules` would grant without asking.
+- **`baseline.suite`** in your config, for the `tests` node.

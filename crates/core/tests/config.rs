@@ -1,3 +1,11 @@
+//! One config layer parsed, and three of them merged.
+//!
+//! Each group of the reference config reads into its type with the
+//! defaults the schema declares, and repo over user over org resolves
+//! group by group: a list is replaced whole, a struct merges field by
+//! field, and a permission a lower layer re-allows is named as a
+//! conflict rather than silently widened.
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -512,14 +520,14 @@ fn repo_replaces_an_mcp_server_entry_wholesale_others_survive_from_org() {
     let org = ConfigLayer {
         mcp_servers: Some(BTreeMap::from([
             (
-                "internal-docs".to_string(),
+                "internal-docs".into(),
                 McpServerConfig {
                     url: "https://org.example.com/mcp".to_string(),
                     auth_env: Some("ORG_TOKEN".to_string()),
                 },
             ),
             (
-                "other".to_string(),
+                "other".into(),
                 McpServerConfig {
                     url: "https://other.example.com/mcp".to_string(),
                     auth_env: None,
@@ -530,7 +538,7 @@ fn repo_replaces_an_mcp_server_entry_wholesale_others_survive_from_org() {
     };
     let repo = ConfigLayer {
         mcp_servers: Some(BTreeMap::from([(
-            "internal-docs".to_string(),
+            "internal-docs".into(),
             McpServerConfig {
                 url: "http://localhost:8000/mcp".to_string(),
                 auth_env: None,

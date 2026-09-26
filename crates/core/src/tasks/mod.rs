@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::events::{self, CriterionType};
+use crate::glob::ScopeGlob;
 use crate::TaskId;
 
 /// A tasks document — the sole top-level key is `tasks:`, with no
@@ -48,29 +49,22 @@ impl From<&Criterion> for events::Criterion {
     }
 }
 
-/// One task. `id`'s pattern isn't enforced by this type — the
-/// spec treats that as a registration-time rule, not a parse-time
-/// one, so an ill-formed id still parses and gets a proper diagnostic
-/// naming the task, field and expectation instead of a raw serde error.
+/// One task. `id` is a `TaskId`, so an ill-formed one is a problem of
+/// reading the document: the report names the path that carries it
+/// (`tasks[0].id`) and what an id is, never a raw serde error. The rules
+/// that only hold across the whole document, uniqueness among them, run
+/// once it parses.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Task {
     pub id: TaskId,
     pub title: String,
-    pub scope: Vec<String>,
+    pub scope: Vec<ScopeGlob>,
     pub criteria: Vec<Criterion>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<TaskId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub manual_review: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub justification: Option<String>,
-}
-
-fn is_false(b: &bool) -> bool {
-    !b
 }
 
 mod rules;

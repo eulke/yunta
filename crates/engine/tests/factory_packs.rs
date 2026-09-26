@@ -6,147 +6,31 @@
 //! and stubbing `gh` so the `pr` node's real command has something to
 //! call.
 
-use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 
-use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::SeqIdSource;
-use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, RunEnv, RunTerminal,
-    DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::{git, write, ApproveEverything, FixedClock};
+use yunta_engine::{run_branch, NodeState, RunReport, RunTerminal};
+use yunta_testkit::{git, write, ApproveEverything, Bench, INITIAL_BRANCH, MOCK_CONFIG};
 
-/// Run ids for everything a test run gives birth to — unique across
-/// the binary, so parallel tests never share a run directory.
-static IDS: SeqIdSource = SeqIdSource::new("minted");
+/// The pack directory the workflow, its `prompt: { file: … }` and its
+/// provenance are read from.
+const WORKFLOWS: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../packs/fragua/.yunta/workflows"
+);
 
-const CONFIG: &str = r#"
-project:
-  base_branch: master
-runners:
-  planner:
-    - { adapter: mock, model: mock-model }
-  executor:
-    - { adapter: mock, model: mock-model }
-baseline:
-  suite: "true"
-"#;
-
-#[tokio::test]
-async fn yunta_fragua_build_feature_runs_end_to_end_in_quick_mode_with_mock() {
-    // `gh` isn't installed in this environment (or anywhere CI runs) —
-    // stub it so the `pr` node's real bash command has something to
-    // call, and inject the stub's directory onto the run's subprocess
-    // `PATH` (through `ambient` below) so every governed child finds it
-    // without this test mutating its own process environment.
-    let stub_dir = tempfile::tempdir().unwrap();
-    let gh_stub = stub_dir.path().join("gh");
-    write(&gh_stub, "#!/bin/sh\necho \"pr created (stub): $*\"\n");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&gh_stub, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    let inherited_path = std::env::var("PATH").unwrap_or_default();
-    let ambient = yunta_core::Env {
-        subprocess_vars: vec![(
-            "PATH".to_string(),
-            format!("{}:{}", stub_dir.path().display(), inherited_path),
-        )],
-        ..Default::default()
-    };
-
-    let root = tempfile::tempdir().unwrap();
-    let worktree = root.path().join("worktree");
-    std::fs::create_dir_all(&worktree).unwrap();
-    write(
-        &worktree.join("Cargo.toml"),
-        "[package]\nname = \"sandbox\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-    );
-    write(
-        &worktree.join("src/lib.rs"),
-        "pub fn hello() -> &'static str {\n    \"hello\"\n}\n",
-    );
-    write(
-        &worktree.join("docs/architecture.md"),
-        "# Architecture\n\nA sandbox crate for the fragua reference pipeline's own test.\n",
-    );
-    git(&worktree, &["init", "-q", "-b", "master"]);
-    git(&worktree, &["config", "user.email", "test@example.com"]);
-    git(&worktree, &["config", "user.name", "Test"]);
-    git(&worktree, &["add", "."]);
-    git(&worktree, &["commit", "-q", "-m", "initial"]);
-
-    // `pr`'s own `git push -u origin {{run.branch}}` needs a real
-    // remote and a local branch of exactly that name — both of which a
-    // real `isolation: worktree` run gets from `prepare_worktree`
-    // before any node executes. This test calls `execute_run` directly,
-    // so it recreates that same setup by hand instead of going through
-    // `prepare_worktree`.
-    let bare = root.path().join("origin.git");
-    std::fs::create_dir_all(&bare).unwrap();
-    git(&bare, &["init", "-q", "--bare"]);
-    git(
-        &worktree,
-        &["remote", "add", "origin", bare.to_str().unwrap()],
-    );
-    let run_id = RunId::from("run-fragua");
-    git(
-        &worktree,
-        &["checkout", "-q", "-b", &format!("yunta/{run_id}")],
-    );
-
-    let workflow_path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../packs/fragua/.yunta/workflows/build-feature.yaml"
-    );
-    let workflow_yaml = std::fs::read_to_string(workflow_path).unwrap();
-    let workflow: Workflow = serde_norway::from_str(&workflow_yaml).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-    let workflow_dir = Path::new(workflow_path).parent().unwrap();
-    let inputs = HashMap::from([("idea".to_string(), "add dark mode".to_string())]);
-    let manifest = build_manifest(&workflow, &config, workflow_dir, &worktree, &inputs)
-        .unwrap()
-        .manifest;
-
-    let runs_root = root.path().join("runs");
-    let run_dir = runs_root.join(run_id.as_str());
-    let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-    create_run(
-        CreateRunParams {
-            run_id: &run_id,
-            manifest: &manifest,
-            runs_root: &runs_root,
-            mode: &"quick".into(),
-            worktree: &worktree,
-            promoted_from: None,
-            artifacts: &[],
-        },
-        &storage.async_handle(),
-        &FixedClock,
-    )
-    .await
-    .unwrap();
-
-    // One scripted session per node the "quick" mode actually spawns,
-    // in the order the DAG reaches them: grill, plan, one implement
-    // task, then lint/tests/ship/pr run for real against the sandbox
-    // crate above (no mock involved — cargo and git are the real
-    // things being exercised, exactly as they would be in production).
-    // The two interpreted documents go over the run tools, so the
-    // sessions name them by the name the node declares; `brief.md` is
-    // the session's own file, and lands in `grill`'s own directory —
-    // the absolute path that session is granted, the same way a real
-    // agent reads it from its rendered prompt, since a session's cwd is
-    // the worktree.
-    let grill_staging = yunta_engine::run_dir::staging(&run_dir, &"grill".into());
-    let fixture = format!(
-        r##"
-capabilities: {{ run_tools: true }}
+/// One scripted session per node the "quick" mode actually spawns, in
+/// the order the DAG reaches them: grill, brief, plan, one implement
+/// task, then lint/tests/ship/pr run for real against the sandbox crate
+/// this test lays down (no mock involved — cargo and git are the real
+/// things being exercised, exactly as they would be in production). The
+/// two interpreted documents go over the run tools; `brief.md` is a
+/// session's own file, and lands in `brief`'s own directory — the
+/// absolute path that session is granted, the same way a real agent
+/// reads it from its rendered prompt, since a session's cwd is the
+/// worktree. `grill` asks nothing, so the case runs to its end with
+/// nobody to answer.
+const FIXTURE: &str = r##"
+capabilities: { run_tools: true }
 sessions:
   - steps:
       - type: run_tool
@@ -154,9 +38,11 @@ sessions:
         arguments:
           document:
             questions: []
-    effects:
-      - {{ path: {brief:?}, content: "# Brief\n\nAdd dark mode.\n" }}
-    outcome: {{ type: completed, summary: "grilled" }}
+    outcome: { type: completed, summary: "grilled" }
+  - effects:
+      - path: "{{run.staging}}/brief/brief.md"
+        content: "# Brief\n\nAdd dark mode.\n"
+    outcome: { type: completed, summary: "brief written" }
   - steps:
       - type: run_tool
         tool: yunta_submit_tasks
@@ -168,63 +54,96 @@ sessions:
                 scope: ["src/lib.rs"]
                 criteria:
                   - cmd: "grep -q '//! sandbox' src/lib.rs"
-    outcome: {{ type: completed, summary: "planned" }}
+    outcome: { type: completed, summary: "planned" }
   - effects:
       - path: "src/lib.rs"
         content: |
           //! sandbox
 
-          pub fn hello() -> &'static str {{
+          pub fn hello() -> &'static str {
               "hello"
-          }}
-    outcome: {{ type: completed, summary: "did T001" }}
-"##,
-        brief = grill_staging.join("brief.md"),
-    );
-    let adapter = MockAdapter::from_yaml(&fixture).unwrap();
-    let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-    adapters.insert("mock".into(), Arc::new(adapter));
+          }
+    outcome: { type: completed, summary: "did T001" }
+"##;
 
-    let report = execute_run(RunEnv {
-        run_id: &run_id,
-        manifest: &manifest,
-        run_dir: &run_dir,
-        worktree: &worktree,
-        adapters: &adapters,
-        storage: &storage.async_handle(),
-        clock: std::sync::Arc::new(FixedClock),
-        ids: &IDS,
-        max_task_retries: DEFAULT_MAX_RETRIES,
-        human_interaction: &ApproveEverything::new("test"),
-        forge: None,
-        cancel: None,
-        adapter_override: None,
-        ambient: Some(&ambient),
-    })
-    .await
-    .unwrap();
+#[tokio::test]
+async fn yunta_fragua_runs_end_to_end_in_quick_mode_with_mock() {
+    // `gh` isn't installed in this environment (or anywhere CI runs) —
+    // stub it so the `pr` node's real bash command has something to
+    // call, and inject the stub's directory onto the run's subprocess
+    // `PATH` so every governed child finds it without this test mutating
+    // its own process environment.
+    let stub_dir = tempfile::tempdir().unwrap();
+    let gh_stub = stub_dir.path().join("gh");
+    write(&gh_stub, "#!/bin/sh\necho \"pr created (stub): $*\"\n");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&gh_stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let inherited_path = std::env::var("PATH").unwrap_or_default();
 
-    assert_eq!(
-        report.terminal,
-        RunTerminal::Finished,
-        "state: {:?}",
-        report.state
+    let config = format!(
+        "{MOCK_CONFIG}project:\n  base_branch: {INITIAL_BRANCH}\nbaseline:\n  suite: \"true\"\n"
     );
+    let bench = Bench::with_run_id("run-fragua")
+        .in_mode("quick")
+        .with_inputs(&[("idea", "add dark mode")])
+        .with_workflow_dir(WORKFLOWS)
+        .with_subprocess_vars(vec![(
+            "PATH".to_string(),
+            format!("{}:{}", stub_dir.path().display(), inherited_path),
+        )]);
+
+    write(
+        &bench.worktree.join("Cargo.toml"),
+        "[package]\nname = \"sandbox\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    );
+    write(
+        &bench.worktree.join("src/lib.rs"),
+        "pub fn hello() -> &'static str {\n    \"hello\"\n}\n",
+    );
+    write(
+        &bench.worktree.join("docs/architecture.md"),
+        "# Architecture\n\nA sandbox crate for the fragua reference pipeline's own test.\n",
+    );
+    git(&bench.worktree, &["add", "."]);
+    git(&bench.worktree, &["commit", "-q", "-m", "sandbox crate"]);
+
+    // `pr`'s own `git push -u origin {{run.branch}}` needs a real remote
+    // and a local branch of exactly that name — both of which an
+    // `isolation: worktree` run gets from `prepare_worktree` before any
+    // node executes. A bench executes against the checkout it is handed,
+    // so the remote and the branch are laid down here.
+    let origin = tempfile::tempdir().unwrap();
+    git(origin.path(), &["init", "-q", "--bare"]);
+    git(
+        &bench.worktree,
+        &["remote", "add", "origin", origin.path().to_str().unwrap()],
+    );
+    git(
+        &bench.worktree,
+        &["checkout", "-q", "-b", &run_branch(&bench.run_id)],
+    );
+
+    let workflow = std::fs::read_to_string(Path::new(WORKFLOWS).join("fragua.yaml")).unwrap();
+    let RunReport { terminal, state } = bench
+        .run_full(&workflow, FIXTURE, &config, &ApproveEverything::new("test"))
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
     for node in ["grill", "plan", "implement", "lint", "tests", "ship", "pr"] {
         assert!(
-            matches!(
-                report.state.nodes.get(node),
-                Some(yunta_engine::NodeState::Finished { .. })
-            ),
+            matches!(state.nodes.state(node), Some(NodeState::Finished { .. })),
             "node `{node}` did not finish: {:?}",
-            report.state.nodes.get(node)
+            state.nodes.state(node)
         );
     }
     // `fix-lint` is only in quick mode's node set as a re-route target —
     // lint passed on the first try, so it must never have run.
     assert!(
-        !report.state.nodes.contains_key("fix-lint"),
+        !state.nodes.has_state("fix-lint"),
         "fix-lint ran despite lint passing on the first try: {:?}",
-        report.state.nodes.get("fix-lint")
+        state.nodes.state("fix-lint")
     );
 }

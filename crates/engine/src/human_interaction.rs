@@ -47,19 +47,18 @@ pub trait HumanInteraction: Send + Sync {
 
     /// Puts a `kind: questions` artifact to the human,
     /// question by question. `None` = this surface can't ask (same
-    /// convention as `resolve`), and the run degrades to waiting exactly
-    /// as it did before any surface existed. Deliberately a separate
-    /// method from `resolve`: questions and gate escalations
-    /// are two distinct shapes, and flattening them
-    /// into one payload would breed the ambiguous-object vice. A default
-    /// implementation returns `None` so surfaces that only handle gates
-    /// (and every existing implementor) stay valid unchanged.
-    /// `interactive` is the node's own `interactive:` flag — a
-    /// presentation datum: a surface that can hold a live
-    /// conversation should when it's `true`; one that can't ignores it,
-    /// and nothing else changes.
-    async fn ask(&self, questions: &QuestionsFile, interactive: bool) -> Option<QuestionsReply> {
-        let _ = (questions, interactive);
+    /// convention as `resolve`), and the run parks with its questions
+    /// registered, to be answered on a later invocation or through
+    /// another surface. Deliberately a separate method from `resolve`:
+    /// questions and gate escalations are two distinct shapes, and
+    /// flattening them into one payload would breed the
+    /// ambiguous-object vice. A default implementation returns `None`
+    /// so surfaces that only handle gates stay valid unchanged.
+    ///
+    /// How the questions are presented is the surface's own call: a
+    /// node that declares them has said everything it has to say.
+    async fn ask(&self, questions: &QuestionsFile) -> Option<QuestionsReply> {
+        let _ = questions;
         None
     }
 }

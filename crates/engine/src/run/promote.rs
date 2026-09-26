@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::events::artifacts::ArtifactRef;
 use yunta_core::events::{ArtifactId, StoredEvent};
-use yunta_core::{Clock, IdSource, Isolation, Manifest, ModeName, RunId};
+use yunta_core::{IdSource, Isolation, Manifest, ModeName, RunId};
 use yunta_storage::AsyncStorage;
 
 use crate::artifacts::ObjectError;
@@ -55,33 +55,52 @@ pub struct Predecessor<'a> {
 /// Creates (never runs) the successor of `predecessor`, which just
 /// closed `Promoted` toward `suggested_mode`.
 ///
+/// What the caller brings to a run it creates: where the log goes, the
+/// instant and the ids the log is stamped with, and the supervision every
+/// subprocess that creation spawns is born under.
+///
+/// Grouped because they travel together and none of them is a decision
+/// this function makes: it is handed the caller's infrastructure and
+/// trail, exactly as [`create_run`](crate::create_run) is.
+pub struct CallerInfra<'a> {
+    pub storage: &'a AsyncStorage,
+    pub ids: &'a dyn IdSource,
+    /// The token, the clock and the environment every subprocess this
+    /// creation spawns is born under — the successor's birth reads the
+    /// time by the same clock its git answers to.
+    pub supervision: crate::process::Supervision<'a>,
+}
+
 /// `repo` is the checkout a fresh worktree branches from (the original
 /// `cwd` for a top-level chain; the parent run's own tree for a child's).
 /// Under `Isolation::None` the successor reuses the predecessor's
 /// checkout — the lock (if any) is the caller's and only releases when
-/// the whole chain ends. `storage`, `clock` and `ids` are the caller's
-/// infrastructure and trail, as in [`create_run`].
+/// the whole chain ends. `storage`, `ids` and `supervision` are the
+/// caller's infrastructure and trail, as in [`create_run`].
 pub async fn create_promotion_successor(
     predecessor: Predecessor<'_>,
     repo: &Path,
     suggested_mode: &ModeName,
     roots: RunRoots<'_>,
-    storage: &AsyncStorage,
-    clock: &dyn Clock,
-    ids: &dyn IdSource,
+    caller: CallerInfra<'_>,
 ) -> Result<PromotionSuccessor, RunError> {
+    let CallerInfra {
+        storage,
+        ids,
+        supervision,
+    } = caller;
     let Predecessor {
         id: predecessor_id,
         manifest: predecessor_manifest,
         worktree: predecessor_worktree,
         run_dir: predecessor_run_dir,
     } = predecessor;
-    let successor_id = ids.mint_run_id(clock.now());
+    let successor_id = ids.mint_run_id(supervision.clock.now());
 
     let mut manifest = predecessor_manifest.clone();
     // The successor builds on wherever the predecessor's own
     // work left the tree, not on the original base.
-    manifest.base_commit = crate::worktree::head_commit(predecessor_worktree).await?;
+    manifest.base_commit = crate::worktree::head_commit(predecessor_worktree, supervision).await?;
 
     let worktree = match manifest.isolation {
         Isolation::Worktree => {
@@ -92,6 +111,7 @@ pub async fn create_promotion_successor(
                 &manifest.base_commit,
                 &crate::worktree::run_branch(&successor_id),
                 Isolation::Worktree,
+                supervision,
             )
             .await?;
             worktree
@@ -103,7 +123,7 @@ pub async fn create_promotion_successor(
     // artifact keeps the identity and the producer it had there.
     let predecessor_events = storage.events_for_run(predecessor_id.clone()).await?;
     let inherited =
-        read_inherited_artifacts(predecessor_run_dir, predecessor_id, &predecessor_events)?;
+        read_inherited_artifacts(predecessor_run_dir, predecessor_id, &predecessor_events).await?;
     let run_dir = create_run(
         CreateRunParams {
             run_id: &successor_id,
@@ -113,9 +133,18 @@ pub async fn create_promotion_successor(
             worktree: &worktree,
             promoted_from: Some(predecessor_id),
             artifacts: &inherited,
+            // A promotion is the invocation carrying on, so the
+            // successor compares against what the lineage measured
+            // before any of it ran — never against the tree its
+            // predecessor already worked.
+            baseline: crate::run::baseline::inherited(
+                predecessor_id,
+                &crate::replay::derive(&predecessor_events),
+            )
+            .as_ref(),
         },
         storage,
-        clock,
+        supervision,
     )
     .await?;
 
@@ -137,7 +166,7 @@ pub async fn create_promotion_successor(
 /// for is not an artifact and reaches no successor. Each inherited
 /// artifact keeps the identity and the producer the predecessor held it
 /// under, because the identity is all a run needs to answer for it.
-fn read_inherited_artifacts(
+async fn read_inherited_artifacts(
     from_run_dir: &Path,
     from_run: &RunId,
     from_events: &[StoredEvent],
@@ -147,7 +176,7 @@ fn read_inherited_artifacts(
     for artifact in held.ledger().every() {
         inherited.push(birth_artifact(
             artifact.artifact.clone(),
-            held.bytes(artifact)?,
+            held.bytes(artifact).await?,
             from_run,
             artifact,
         ));

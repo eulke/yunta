@@ -3,20 +3,22 @@
 //! serves so the loop reads as the schedule it runs.
 
 use yunta_core::events::{
-    EventPayload, FindingSeverity, GateResolvedPayload, NodeReroutedPayload,
-    PromotionSignaledPayload, RerouteOrigin, RunFinishedPayload, RunMetrics, StoredEvent,
-    TerminalState,
+    EventPayload, Evidence, Fact, Failure, FindingSeverity, NodeReroutedPayload, PauseReason,
+    PromotionSignaledPayload, RerouteCause, RerouteOrigin, RunFinishedPayload, TerminalState,
+    TokenUsage,
 };
 use yunta_core::{ModeName, NodeId};
 
-use crate::replay::derive;
+use crate::replay::RunState;
 use crate::reserved::ReservedOption;
-use crate::stats::cptv;
+use crate::stats::tasks_done;
 
 use super::{
-    budget, escalation, find_node, gate_exec, node_exec, pause, questions_exec, schedule, RunCtx,
-    RunError, RunReport, RunTerminal,
+    budget, escalation, find_node, gate_exec, node_close, node_exec, pause, questions_exec,
+    schedule, RunCtx, RunError, RunReport, RunTerminal,
 };
+use yunta_core::events::{NodeEvent, RunEvent};
+use yunta_core::{Location, RelativePath};
 
 /// A corrupt log is exactly the one you most want exported — each event
 /// serializes on its own, so a broken *sequence* doesn't stop the forensic
@@ -32,23 +34,25 @@ pub(super) async fn broken(ctx: &RunCtx<'_>, diagnostic: String) -> RunError {
     RunError::Broken { diagnostic }
 }
 
-/// Every node is done: distill, close the log with `run_finished`, export,
-/// and clean up the worktree if the workflow asked — then report the run
-/// finished.
-pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<RunReport, RunError> {
-    // Distill before `run_finished` — nothing is emitted after the close
-    // event, and its findings are events.
-    super::distill::run_distill(ctx, mode_name).await?;
+/// Closes the run's log, whichever way it ends: the one `run_finished`
+/// any ending writes, the forensic export that follows it, and — only at
+/// a real `Done` — the worktree cleanup `on_finish` asked for. Returns
+/// the state the close recorded, which is what every report carries.
+///
+/// One function because one close: three of them meant three places
+/// that could each decide what a run costs and how many tasks it did.
+pub(super) async fn finish(
+    ctx: &RunCtx<'_>,
+    terminal: TerminalState,
+) -> Result<RunState, RunError> {
     let state = ctx.run_view().await?.state;
     ctx.emit(
         None,
-        EventPayload::RunFinished(RunFinishedPayload {
-            terminal_state: TerminalState::Done,
-            metrics: RunMetrics {
-                cptv: cptv(&state),
-                tokens: state.total_tokens,
-            },
-        }),
+        EventPayload::Run(RunEvent::Finished(RunFinishedPayload::closed(
+            terminal,
+            state.total_tokens(),
+            tasks_done(&state),
+        ))),
     )
     .await?;
     ctx.export_events_jsonl().await?;
@@ -56,6 +60,9 @@ pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<Run
     // (a paused run expects a resume in that tree; a promoted one seeds its
     // successor's worktree from it). A cleanup failure warns and never
     // un-finishes the run the log already closed.
+    if terminal != TerminalState::Done {
+        return Ok(state);
+    }
     let wants_cleanup = ctx.manifest.workflow.on_finish.iter().any(|step| {
         matches!(
             step,
@@ -68,6 +75,7 @@ pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<Run
         match crate::worktree::cleanup_worktree(
             ctx.worktree,
             &crate::worktree::run_branch(ctx.run_id),
+            ctx.root_supervision(),
         )
         .await
         {
@@ -78,7 +86,7 @@ pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<Run
                     "cleanup-not-a-worktree",
                     FindingSeverity::Minor,
                     "on_finish.cleanup: worktree skipped".to_string(),
-                    ctx.worktree.display().to_string(),
+                    Location::work(RelativePath::here(), None),
                     "the run's tree is not a linked git worktree, so removing it would delete a \
                      primary checkout — nothing was touched"
                         .to_string(),
@@ -91,43 +99,40 @@ pub(super) async fn finish(ctx: &RunCtx<'_>, mode_name: &ModeName) -> Result<Run
                     "cleanup-failed",
                     FindingSeverity::Minor,
                     "on_finish.cleanup: worktree failed".to_string(),
-                    ctx.worktree.display().to_string(),
+                    Location::work(RelativePath::here(), None),
                     format!("the run's linked worktree could not be removed: {e}"),
                 )
                 .await?;
             }
         }
     }
+    Ok(state)
+}
+
+/// Every node is done: distill what the run learned, then close it.
+/// Distillation runs before the close because nothing is emitted after
+/// `run_finished` and its findings are events.
+pub(super) async fn run_finished(
+    ctx: &RunCtx<'_>,
+    mode_name: &ModeName,
+) -> Result<RunReport, RunError> {
+    super::distill::run_distill(ctx, mode_name).await?;
     Ok(RunReport {
         terminal: RunTerminal::Finished,
-        state,
+        state: finish(ctx, TerminalState::Done).await?,
     })
 }
 
 /// Closes the run as failed: a node failed and `defaults.on_failure`
-/// (`abort`/`continue`) ended the run rather than pausing it. Unlike
-/// [`finish`], nothing is distilled and no worktree is cleaned up — a
-/// failed close is not a real finish (D107), it expects no resume, and
-/// its knowledge is not the attempt's knowledge to keep. The `node_failed`
-/// events already on the log name every failed node; `reason` names one
-/// for the report.
+/// (`abort`/`continue`) ended the run rather than pausing it. Nothing is
+/// distilled and no worktree is cleaned up — a failed close is not a
+/// real finish (D107), it expects no resume, and its knowledge is not
+/// the attempt's knowledge to keep. The `node_failed` events already on
+/// the log name every failed node; `reason` names one for the report.
 pub(super) async fn run_failed(ctx: &RunCtx<'_>, reason: String) -> Result<RunReport, RunError> {
-    let state = ctx.run_view().await?.state;
-    ctx.emit(
-        None,
-        EventPayload::RunFinished(RunFinishedPayload {
-            terminal_state: TerminalState::Failed,
-            metrics: RunMetrics {
-                cptv: cptv(&state),
-                tokens: state.total_tokens,
-            },
-        }),
-    )
-    .await?;
-    ctx.export_events_jsonl().await?;
     Ok(RunReport {
         terminal: RunTerminal::Failed { reason },
-        state,
+        state: finish(ctx, TerminalState::Failed).await?,
     })
 }
 
@@ -139,20 +144,48 @@ pub(super) async fn reroute(
     to: NodeId,
     attempt: u32,
     max_reroutes: u32,
-    cause: String,
+    cause: RerouteCause,
 ) -> Result<(), RunError> {
     ctx.emit(
         Some(&from),
-        EventPayload::NodeRerouted(NodeReroutedPayload {
-            to_node: to,
+        EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+            to,
             cause,
-            attempt: Some(attempt),
-            max_reroutes: Some(max_reroutes),
-            origin: RerouteOrigin::OnFailure,
-        }),
+            RerouteOrigin::OnFailure,
+            Some(attempt),
+            Some(max_reroutes),
+        ))),
     )
     .await?;
     Ok(())
+}
+
+/// A failed node with no re-route of its own, put to a person: `retry`
+/// is recorded and the loop continues, where the scheduler starts the
+/// node's next attempt; `abort`, or nobody to ask, pauses on the failure
+/// itself, so every surface still names it and a resume asks again.
+pub(super) async fn failure_escalation(
+    ctx: &RunCtx<'_>,
+    state: &RunState,
+    node: NodeId,
+    failure: Failure,
+    next_attempt: u32,
+) -> Result<Option<RunReport>, RunError> {
+    let escalation =
+        escalation::build_failure_escalation(&node, &failure, next_attempt).map_err(|source| {
+            RunError::Broken {
+                diagnostic: format!("node `{node}`'s escalation: {source}"),
+            }
+        })?;
+    let choice = escalation::decided(ctx, state, &node, &escalation).await?;
+    if choice
+        .is_some_and(|choice| ReservedOption::of(&choice.option) == Some(ReservedOption::Retry))
+    {
+        return Ok(None);
+    }
+    Ok(Some(
+        pause(ctx, PauseReason::NodeFailed { node, failure }).await?,
+    ))
 }
 
 /// A node used up its re-routes to `goto`: the engine assembles the
@@ -163,12 +196,12 @@ pub(super) async fn reroute(
 /// else pauses. `None` means the loop continues; `Some` ends the run.
 pub(super) async fn gate_exhausted(
     ctx: &RunCtx<'_>,
-    events: &[StoredEvent],
+    state: &RunState,
     mode_name: &ModeName,
     node: NodeId,
     goto: NodeId,
     max_reroutes: u32,
-    cause: String,
+    cause: RerouteCause,
 ) -> Result<Option<RunReport>, RunError> {
     let suggested_mode = schedule::next_mode_after(&ctx.manifest.workflow, mode_name);
     let escalation = escalation::build_reroute_escalation(
@@ -178,44 +211,29 @@ pub(super) async fn gate_exhausted(
         &goto,
         max_reroutes,
         &cause,
-    );
-    // A decision `resolve_gate` pre-seeded onto the log while this run was
-    // parked is consumed here, by this same consequence code — never
-    // re-asked, and its escalation pair is already recorded so it is never
-    // re-emitted. The option is re-validated against the re-derived menu: a
-    // mismatch means ask normally.
-    let pre_seeded = escalation::pre_seeded_resolution(events, &node, &escalation);
-    let already_recorded = pre_seeded.is_some();
-    let choice = match pre_seeded {
-        Some(choice) => Some(choice),
-        None => ctx.ask_human(&escalation).await?,
-    };
-    let Some(choice) = choice else {
+    )
+    .map_err(|source| RunError::Broken {
+        diagnostic: format!("node `{node}`'s escalation: {source}"),
+    })?;
+    let Some(choice) = escalation::decided(ctx, state, &node, &escalation).await? else {
         // No live surface to ask (headless, no TTY, `yunta test`): pause and
         // let a later `yunta resume` (or a future MCP client) carry the
         // decision instead.
-        return Ok(Some(pause(ctx, escalation.summary).await?));
+        return Ok(Some(
+            pause(ctx, PauseReason::Escalation(Box::new(escalation.clone()))).await?,
+        ));
     };
-    if !already_recorded {
-        ctx.emit(Some(&node), EventPayload::GateWaiting(escalation))
-            .await?;
-        ctx.emit(
-            Some(&node),
-            EventPayload::GateResolved(GateResolvedPayload::Chosen(choice.clone())),
-        )
-        .await?;
-    }
     let chosen = ReservedOption::of(&choice.option);
     if chosen == Some(ReservedOption::Retry) {
         ctx.emit(
             Some(&node),
-            EventPayload::NodeRerouted(NodeReroutedPayload {
-                to_node: goto,
+            EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+                goto,
                 cause,
-                attempt: Some(max_reroutes + 1),
-                max_reroutes: Some(max_reroutes),
-                origin: RerouteOrigin::OnFailure,
-            }),
+                RerouteOrigin::OnFailure,
+                Some(max_reroutes + 1),
+                Some(max_reroutes),
+            ))),
         )
         .await?;
         Ok(None)
@@ -230,13 +248,17 @@ pub(super) async fn gate_exhausted(
                 ),
             });
         };
+        let evidence: Evidence = vec![Fact::bare(cause.to_string())].into();
         ctx.emit(
             None,
-            EventPayload::PromotionSignaled(PromotionSignaledPayload {
-                reason: format!("node `{node}` exhausted its re-routes to `{goto}`: {cause}"),
-                evidence: cause,
+            EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload {
+                reason: yunta_core::text::aside(
+                    format!("node `{node}` exhausted its re-routes to `{goto}`"),
+                    &evidence.one_line(),
+                ),
+                evidence,
                 suggested_mode: next_mode.clone(),
-            }),
+            })),
         )
         .await?;
         // A promotion is a real close — the short attempt's knowledge is
@@ -249,55 +271,51 @@ pub(super) async fn gate_exhausted(
         let events_for_close = ctx.load_events().await?;
         let inherited = crate::findings::inherited_findings(&events_for_close);
         if !inherited.is_empty() {
-            let file = yunta_core::FindingsFile::from_findings(inherited);
-            let yaml = yunta_core::yaml::to_string(&file).map_err(|e| RunError::Broken {
-                diagnostic: format!("failed to serialize inherited findings: {e}"),
+            // The one door a findings document is rendered through, so
+            // the run's own is held to `limits.max_artifact_bytes` like
+            // every other artifact it accepts. The run's artifact, not
+            // any node's: it is what this log adds up to, and the
+            // successor inherits it as it does every other one.
+            let derived = crate::artifacts::derive_findings(
+                None,
+                inherited,
+                ctx.manifest
+                    .config
+                    .limits
+                    .as_ref()
+                    .and_then(|limits| limits.max_artifact_bytes),
+            )
+            .map_err(|error| RunError::Broken {
+                diagnostic: error.to_string(),
             })?;
-            // The run's own artifact, not any node's: it is what this
-            // log adds up to, and the successor inherits it as it does
-            // every other artifact this run holds.
             crate::artifacts::accept(
                 &ctx.log(),
                 ctx.run_dir,
                 None,
-                yunta_core::events::ArtifactId::Interpreted {
-                    kind: yunta_core::ArtifactKind::Findings,
-                },
-                yaml.as_bytes(),
-                yunta_core::events::ArtifactOrigin::Derived,
+                derived.artifact.clone(),
+                &derived.bytes,
+                yunta_core::events::RecordedOrigin::Derived,
             )
             .await?;
         }
-        let state = derive(&events_for_close);
-        ctx.emit(
-            None,
-            EventPayload::RunFinished(RunFinishedPayload {
-                terminal_state: TerminalState::Promoted,
-                metrics: RunMetrics {
-                    cptv: cptv(&state),
-                    tokens: state.total_tokens,
-                },
-            }),
-        )
-        .await?;
-        ctx.export_events_jsonl().await?;
         Ok(Some(RunReport {
             terminal: RunTerminal::Promoted {
                 suggested_mode: next_mode,
             },
-            state: ctx.run_view().await?.state,
+            state: finish(ctx, TerminalState::Promoted).await?,
         }))
     } else {
         // The menu offers nothing beyond retry, promote and abort.
-        let reason = format!(
-            "node `{node}`'s gate was resolved to abort{}",
-            choice
-                .free_text
-                .as_deref()
-                .map(|text| format!(": {text}"))
-                .unwrap_or_default()
-        );
-        Ok(Some(pause(ctx, reason).await?))
+        Ok(Some(
+            pause(
+                ctx,
+                PauseReason::GateAborted {
+                    node: node.clone(),
+                    free_text: choice.free_text.clone(),
+                },
+            )
+            .await?,
+        ))
     }
 }
 
@@ -308,7 +326,7 @@ pub(super) async fn gate_exhausted(
 /// surface to lift it, or a child run that paused; `None` continues the loop.
 pub(super) async fn execute_batch(
     ctx: &RunCtx<'_>,
-    events: &[StoredEvent],
+    state: &RunState,
     batch: Vec<(NodeId, u32)>,
 ) -> Result<Option<RunReport>, RunError> {
     // The budget check guards exactly the steps that spend tokens — a run
@@ -322,9 +340,12 @@ pub(super) async fn execute_batch(
             .as_ref()
             .and_then(|limits| limits.max_tokens_per_run)
         {
-            let spent = derive(events).total_tokens.total();
+            let spent = state.total_tokens().total();
             if spent >= cap {
-                let (escalation, reason) = budget::over_budget_escalation(ctx, spent, cap);
+                let (escalation, reason) = budget::over_budget_escalation(ctx, spent, cap)
+                    .map_err(|source| RunError::Broken {
+                        diagnostic: format!("the run's budget escalation: {source}"),
+                    })?;
                 match budget::escalate(ctx, None, escalation, reason).await? {
                     budget::BudgetDecision::Continue => ctx
                         .budget_lifted
@@ -352,15 +373,17 @@ pub(super) async fn execute_batch(
     // waits on the child's *terminal* state) — after the whole batch lands,
     // the parent pauses too, naming the child. A root cancellation takes
     // precedence: the loop-top check handles it as "cancelled by user".
-    let mut child_paused: Option<String> = None;
+    let mut child_paused: Option<(NodeId, String)> = None;
     for result in futures::future::join_all(executions).await {
-        if let node_exec::NodeEnd::ChildPaused { reason } = result? {
-            child_paused.get_or_insert(reason);
+        if let node_exec::NodeEnd::ChildPaused { node, reason } = result? {
+            child_paused.get_or_insert((node, reason));
         }
     }
-    if let Some(reason) = child_paused {
+    if let Some((node, reason)) = child_paused {
         if !ctx.root_cancel.is_cancelled() {
-            return Ok(Some(pause(ctx, reason).await?));
+            return Ok(Some(
+                pause(ctx, PauseReason::ChildPaused { node, reason }).await?,
+            ));
         }
     }
     Ok(None)
@@ -426,13 +449,12 @@ pub(super) async fn resolve_internal_gate(
             ),
         });
     };
-    let step =
+    gate_still_waiting(
+        ctx,
         gate_exec::resolve_internal_gate(ctx, node, assignee, message.as_deref(), options, on)
-            .await?;
-    if let gate_exec::GateStep::StillWaiting { reason } = step {
-        return Ok(Some(pause(ctx, reason).await?));
-    }
-    Ok(None)
+            .await?,
+    )
+    .await
 }
 
 /// Puts a `kind: questions` node's unanswered questions to a human. `Some`
@@ -448,18 +470,31 @@ pub(super) async fn ask_questions(
     }
 }
 
-/// A published/polled gate that is still waiting has already recorded its
-/// pause through the forge round-trip, so the run only needs its paused
-/// report — never a second `run_paused`.
+/// Pays a node the terminal its close deferred: its questions were
+/// answered, and the `node_finished` is all that is left.
+///
+/// No session opens and no attempt starts. The node closed when it
+/// asked — its hooks ran, its diff was audited, its artifacts were
+/// verified — so a resume that lands here after a crash costs an append,
+/// not a session.
+pub(super) async fn finish_answered(
+    ctx: &RunCtx<'_>,
+    node_id: NodeId,
+) -> Result<Option<RunReport>, RunError> {
+    let node = find_node(&ctx.manifest.workflow, &node_id)?;
+    node_close::finish_node(ctx, node, "questions answered", TokenUsage::default()).await?;
+    Ok(None)
+}
+
+/// What a gate's own answer does to the run. The gate decides that it
+/// waits and why; the run is what writes `run_paused`, here and in no
+/// other place — three gate shapes, one pause.
 async fn gate_still_waiting(
     ctx: &RunCtx<'_>,
     step: gate_exec::GateStep,
 ) -> Result<Option<RunReport>, RunError> {
     match step {
-        gate_exec::GateStep::StillWaiting { reason } => Ok(Some(RunReport {
-            terminal: RunTerminal::Paused { reason },
-            state: ctx.run_view().await?.state,
-        })),
+        gate_exec::GateStep::Waiting(reason) => Ok(Some(pause(ctx, reason).await?)),
         gate_exec::GateStep::Resolved => Ok(None),
     }
 }

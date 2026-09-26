@@ -2,33 +2,37 @@
 //! number comes from `yunta_engine::stats`'s pure derivation over the
 //! event log — this module only gathers the right events off disk
 //! (the imperative half) and renders them, either as `--json` or as a
-//! terminal visualization (horizontal bars per node/role, a sparkline
+//! terminal visualization (horizontal bars per node/runner, a sparkline
 //! of a workflow's historical CPTV, a comparison table between modes).
-//! Every rendered line stays inside 80 columns and never depends on
-//! color — see this module's own render functions for how.
+//! Every rendered line stays inside [`crate::render::LINE_WIDTH`] and
+//! reads with its glyphs and color stripped, because the columns, bars,
+//! words and glyphs all come from `crate::render`, which is where both
+//! rules live.
 
-use std::path::Path;
 use std::time::Duration;
 
 use serde::Serialize;
 use yunta_core::events::StoredEvent;
-use yunta_core::{ContentHash, Manifest, ModeName, RunId};
+use yunta_core::{ContentHash, ModeName, RunId, Workflow, WorkflowName};
 use yunta_engine::{
     compute_run_stats, prior_estimation, run_summary, NodeStat, RunStats, RunSummary,
 };
-use yunta_storage::Storage;
 
-use crate::context::Context;
+use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
+use crate::render::{
+    bar, cell_width, format_duration, format_pct, sparkline, truncate, Glyphs, NodeDisplay, INDENT,
+    LABEL_WIDTH, LINE_WIDTH, STATE_WIDTH,
+};
 
-pub fn stats(
+pub async fn stats(
     run_id: Option<&RunId>,
-    workflow: Option<&str>,
+    workflow: Option<&WorkflowName>,
     json: bool,
 ) -> Result<Outcome, CliError> {
     match (run_id, workflow) {
-        (Some(run_id), None) => stats_run(run_id, json),
-        (None, Some(workflow)) => stats_workflow(workflow, json),
+        (Some(run_id), None) => stats_run(run_id, json).await,
+        (None, Some(workflow)) => stats_workflow(workflow, json).await,
         (None, None) => Err(CliError::msg(
             "`yunta stats` needs a run id or `--workflow <name>`",
         )),
@@ -38,25 +42,11 @@ pub fn stats(
     }
 }
 
-fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
+async fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
-    let storage = ctx.storage()?;
-    let events = storage.events_for_run(run_id)?;
-    if events.is_empty() {
-        return Err(CliError::msg(format!(
-            "no run `{run_id}` in {}",
-            ctx.project.storage_path.display()
-        )));
-    }
-
-    // Search order (current runs root, then the default) — the run's
-    // own frozen paths take over once the manifest is open.
-    let manifest_path = ctx
-        .project
-        .run_dir(run_id.as_str())
-        .unwrap_or_else(|| ctx.project.runs_root.join(run_id.as_str()))
-        .join("manifest.yaml");
-    let manifest: Manifest = crate::load_yaml(&manifest_path, "run manifest")?;
+    let open = ctx.open_run(run_id).await?;
+    let events = open.events;
+    let manifest = open.manifest.doc;
 
     let run_stats = compute_run_stats(&manifest.workflow, &events);
     let mode = yunta_core::events::run_mode(&events);
@@ -66,15 +56,25 @@ fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
         let dto = RunStatsJson::from(run_id, mode.as_str(), &run_stats, pricing.as_ref());
         return crate::json::print_json(&dto);
     }
-    render_run_stats(run_id, mode.as_str(), &run_stats, pricing.as_ref());
+    print!(
+        "{}",
+        render_run_stats(
+            run_id,
+            mode.as_str(),
+            &run_stats,
+            &yunta_engine::derive(&events),
+            pricing.as_ref(),
+            Glyphs::from_env(),
+        )
+    );
     Ok(Outcome::Success)
 }
 
-fn stats_workflow(workflow_name: &str, json: bool) -> Result<Outcome, CliError> {
+async fn stats_workflow(workflow_name: &WorkflowName, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
-    let storage = ctx.storage()?;
 
-    let history = collect_history(&ctx.project.runs_root, &storage, workflow_name);
+    let opened = history(&ctx, workflow_name).await;
+    let history = summaries(&opened);
     if history.is_empty() {
         println!("no runs of workflow `{workflow_name}` yet");
         return Ok(Outcome::Success);
@@ -83,8 +83,7 @@ fn stats_workflow(workflow_name: &str, json: bool) -> Result<Outcome, CliError> 
     // Needs the raw per-run logs `RunSummary` doesn't keep, and the
     // workflow shape those runs actually exercised to match
     // criteria/re-routes/gates against.
-    let (raw_history, workflow) =
-        collect_raw_history(&ctx.project.runs_root, &storage, workflow_name);
+    let (raw_history, workflow) = raw_history(&opened);
     let findings = workflow
         .as_ref()
         .map(|wf| yunta_engine::analyze_verification_effectiveness(wf, &raw_history));
@@ -93,7 +92,10 @@ fn stats_workflow(workflow_name: &str, json: bool) -> Result<Outcome, CliError> 
         let dto = WorkflowHistoryJson::from(workflow_name, &history, findings.as_ref());
         return crate::json::print_json(&dto);
     }
-    render_workflow_history(workflow_name, &history);
+    print!(
+        "{}",
+        render_workflow_history(workflow_name, &history, Glyphs::from_env())
+    );
     if let Some(findings) = &findings {
         let text = render_verification_findings(findings);
         if !text.is_empty() {
@@ -103,147 +105,79 @@ fn stats_workflow(workflow_name: &str, json: bool) -> Result<Outcome, CliError> 
     Ok(Outcome::Success)
 }
 
-/// Every past run of `workflow_name` this project's storage knows about,
-/// oldest first — the unit `--workflow`'s sparkline, mode table and
-/// prior estimation all fold over. Skips a run whose manifest is
-/// unreadable or belongs to a different workflow, same "degrade past
-/// what a for-display command can't use" stance `list_runs` already
-/// takes for its own unreadable entries.
-pub(crate) fn collect_history(
-    runs_root: &Path,
-    storage: &Storage,
-    workflow_name: &str,
-) -> Vec<RunSummary> {
+/// Every past run of `workflow_name` this project knows about, oldest
+/// first, each opened.
+///
+/// The one walk over a project's history. Two readings used to make it
+/// separately — a summary for the sparkline and the whole log for the
+/// verification analysis — and both found a run's directory by joining
+/// this project's current runs root, so a run created under the default
+/// state root was invisible to both. `open_run` is where a run is
+/// found, so this walks through it and the two readings fold over what
+/// it hands back.
+///
+/// A run whose manifest cannot be read, or that belongs to a different
+/// workflow, is skipped: the same "degrade past what a for-display
+/// command cannot use" stance `list_runs` already takes.
+pub(crate) async fn history(ctx: &Context, workflow_name: &WorkflowName) -> Vec<Opened> {
+    let Ok(storage) = ctx.storage() else {
+        return Vec::new();
+    };
     let run_ids: Vec<RunId> = storage
         .list_runs()
         .map(|runs| runs.into_iter().map(|run| run.run_id).collect())
         .unwrap_or_default();
-    let mut dated: Vec<(chrono::DateTime<chrono::Utc>, RunSummary)> = Vec::new();
+    let mut dated: Vec<(chrono::DateTime<chrono::Utc>, Opened)> = Vec::new();
     for run_id in run_ids {
-        let Ok(events) = storage.events_for_run(&run_id) else {
+        let Ok(open) = ctx.open_run(&run_id).await else {
             continue;
         };
-        let Some(first) = events.first() else {
+        let Some(first) = open.events.first() else {
             continue;
         };
-        let manifest_path = runs_root.join(run_id.as_str()).join("manifest.yaml");
-        let Some(manifest) = std::fs::read_to_string(&manifest_path)
-            .ok()
-            .and_then(|c| yunta_core::yaml::parse::<Manifest>(&c).ok())
-        else {
-            continue;
-        };
-        if manifest.workflow.name != workflow_name {
+        if open.manifest.doc.workflow.name != *workflow_name {
             continue;
         }
-        let mode = yunta_core::events::run_mode(&events);
-        let summary = run_summary(
-            run_id,
-            mode,
-            manifest.workflow_hash.clone(),
-            &manifest.workflow,
-            &events,
-        );
-        dated.push((first.timestamp, summary));
+        dated.push((first.timestamp, open));
     }
-    dated.sort_by_key(|(ts, _)| *ts);
-    dated.into_iter().map(|(_, s)| s).collect()
+    dated.sort_by_key(|(timestamp, _)| *timestamp);
+    dated.into_iter().map(|(_, open)| open).collect()
 }
 
-/// Every past run's own full event log for `workflow_name`, plus the
-/// most recent run's own frozen workflow definition —
-/// [`collect_history`]'s raw-events twin: `RunSummary` throws away
-/// exactly the per-criterion/re-route/gate detail
-/// `analyze_verification_effectiveness` needs, so this keeps the whole
-/// log instead. The returned workflow isn't necessarily byte-identical
-/// to what's on disk right now — it's the shape those runs actually
-/// exercised, close enough for `analyze` to match nodes/`on_failure`/
-/// gates against. Same skip-what-can't-be-read stance as
-/// [`collect_history`].
-pub(crate) fn collect_raw_history(
-    runs_root: &Path,
-    storage: &Storage,
-    workflow_name: &str,
-) -> (Vec<Vec<StoredEvent>>, Option<yunta_core::Workflow>) {
-    let run_ids: Vec<RunId> = storage
-        .list_runs()
-        .map(|runs| runs.into_iter().map(|run| run.run_id).collect())
-        .unwrap_or_default();
-    let mut logs = Vec::new();
-    let mut latest_workflow = None;
-    for run_id in run_ids {
-        let Ok(events) = storage.events_for_run(&run_id) else {
-            continue;
-        };
-        let Some(first) = events.first() else {
-            continue;
-        };
-        let manifest_path = runs_root.join(run_id.as_str()).join("manifest.yaml");
-        let Some(manifest) = std::fs::read_to_string(&manifest_path)
-            .ok()
-            .and_then(|c| yunta_core::yaml::parse::<Manifest>(&c).ok())
-        else {
-            continue;
-        };
-        if manifest.workflow.name != workflow_name {
-            continue;
-        }
-        let is_newer = match &latest_workflow {
-            Some((ts, _)) => first.timestamp > *ts,
-            None => true,
-        };
-        if is_newer {
-            latest_workflow = Some((first.timestamp, manifest.workflow));
-        }
-        logs.push(events);
-    }
-    (logs, latest_workflow.map(|(_, wf)| wf))
+/// What `--workflow`'s sparkline, mode table and prior estimation fold
+/// over: one summary per past run, oldest first.
+pub(crate) fn summaries(history: &[Opened]) -> Vec<RunSummary> {
+    history
+        .iter()
+        .map(|open| {
+            run_summary(
+                open.run_id.clone(),
+                yunta_core::events::run_mode(&open.events),
+                open.manifest.doc.workflow_hash.clone(),
+                &open.manifest.doc.workflow,
+                &open.events,
+            )
+        })
+        .collect()
 }
 
-// --- Terminal rendering — colorless by construction: degrading
-// without color isn't a fallback mode, it's the only mode. --------------
-
-const BAR_WIDTH: usize = 20;
-const LABEL_WIDTH: usize = 12;
-const SPARK_CHARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-
-fn bar(value: u64, max: u64) -> String {
-    if max == 0 {
-        return "·".repeat(BAR_WIDTH);
-    }
-    let filled = (((value as f64 / max as f64) * BAR_WIDTH as f64).round() as usize).min(BAR_WIDTH);
-    format!("{}{}", "█".repeat(filled), "·".repeat(BAR_WIDTH - filled))
+/// The whole log of every past run, plus the most recent one's own
+/// frozen workflow — what `analyze_verification_effectiveness` needs
+/// and a `RunSummary` throws away. The workflow is not necessarily
+/// byte-identical to what is on disk now: it is the shape those runs
+/// actually exercised, which is what the analysis matches against.
+pub(crate) fn raw_history(history: &[Opened]) -> (Vec<Vec<StoredEvent>>, Option<Workflow>) {
+    let latest = history
+        .last()
+        .map(|open| open.manifest.doc.workflow.clone());
+    (
+        history.iter().map(|open| open.events.clone()).collect(),
+        latest,
+    )
 }
 
-fn truncate(s: &str, width: usize) -> String {
-    let chars: Vec<char> = s.chars().collect();
-    if chars.len() <= width {
-        format!("{s:<width$}")
-    } else {
-        let mut t: String = chars
-            .get(..width.saturating_sub(1))
-            .unwrap_or(chars.as_slice())
-            .iter()
-            .collect();
-        t.push('…');
-        format!("{t:<width$}")
-    }
-}
-
-fn format_duration(d: Duration) -> String {
-    let total = d.as_secs();
-    if total < 60 {
-        format!("{total}s")
-    } else if total < 3600 {
-        format!("{}m{:02}s", total / 60, total % 60)
-    } else {
-        format!("{}h{:02}m", total / 3600, (total % 3600) / 60)
-    }
-}
-
-fn format_pct(fraction: f64) -> String {
-    format!("{:>3.0}%", fraction * 100.0)
-}
+// --- Terminal rendering — every shape, width and word comes from
+// `crate::render`, so this module only decides what to say. -------------
 
 fn currency_line(
     tokens: u64,
@@ -264,111 +198,187 @@ fn currency_line(
         / pricing.len() as f64;
     let estimate = (tokens as f64 / 1000.0) * avg_per_1k;
     Some(format!(
-        "  ~{estimate:.2} (avg of {} priced model(s), never authoritative)",
-        pricing.len()
+        "{INDENT}~{estimate:.2} (avg of {}, never authoritative)",
+        yunta_core::text::counted(pricing.len(), "priced model")
     ))
 }
 
+/// The whole `yunta stats <run_id>` block, ready to print.
+///
+/// A block rather than a run of `println!`s: what this command says
+/// about a run is one thing a test reads whole, and a number nobody can
+/// assert is a number nobody is holding to anything.
 fn render_run_stats(
     run_id: &RunId,
     mode: &str,
     stats: &RunStats,
+    state: &yunta_engine::RunState,
     pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
-) {
-    println!("run {run_id} — mode {mode}");
+    glyphs: Glyphs,
+) -> String {
+    let mut out = format!("run {run_id} — mode {mode}\n");
     if let Some(note) = super::unknown_kinds_note(&stats.unknown_kinds) {
-        println!("{note}");
+        out.push_str(&format!("{note}\n"));
     }
-    match stats.cptv {
-        Some(cptv) => println!(
+    out.push_str(&rates(stats));
+    out.push_str(&spend(stats, pricing));
+    out.push_str(&format!(
+        "{}\n",
+        submissions_line(&stats.artifact_submissions)
+    ));
+    out.push_str(&format!(
+        "{}\n",
+        findings_line(&stats.findings, stats.findings_effective)
+    ));
+    out.push_str(&render_nodes(stats, state, glyphs));
+    out.push_str(&render_runners(stats, glyphs));
+    out
+}
+
+/// The three rates a run is read by, each saying `n/a` and why rather
+/// than a number nothing supports.
+fn rates(stats: &RunStats) -> String {
+    let cptv = match stats.cptv {
+        Some(cptv) => format!(
             "CPTV: {cptv:.1} tokens/task done ({} done)",
             stats.tasks_done
         ),
-        None => println!("CPTV: n/a (no task done yet)"),
-    }
-    match stats.rework_rate {
-        Some(rate) => println!("rework rate: {}", format_pct(rate)),
-        None => println!("rework rate: n/a"),
-    }
-    match stats.cache_rate {
-        Some(rate) => println!("cache rate: {}", format_pct(rate)),
-        None => println!("cache rate: n/a (adapter never reported it)"),
-    }
-    let total = stats.total_tokens.total();
-    print!(
-        "tokens: {} in / {} out",
-        stats.total_tokens.input, stats.total_tokens.output
-    );
-    if let Some(cached) = stats.total_tokens.cached {
-        print!(" ({cached} cached)");
-    }
-    println!();
-    if let Some(line) = currency_line(total, pricing) {
-        println!("{line}");
-    }
-
-    if !stats.nodes.is_empty() {
-        println!("\nnodes:");
-        let max_tokens = stats
-            .nodes
-            .iter()
-            .map(|n| n.tokens.total())
-            .max()
-            .unwrap_or(0);
-        for node in &stats.nodes {
-            println!("{}", node_line(node, max_tokens));
-        }
-    }
-
-    let by_runner = stats.tokens_by_runner();
-    if !by_runner.is_empty() {
-        println!("\nrunners:");
-        let max_runner_tokens = by_runner.iter().map(|(_, t)| t.total()).max().unwrap_or(0);
-        for (runner, tokens) in &by_runner {
-            let total = tokens.total();
-            println!(
-                "  {} {}  {total:>8} tok",
-                truncate(runner.as_str(), LABEL_WIDTH),
-                bar(total, max_runner_tokens),
-            );
-        }
-    }
+        None => "CPTV: n/a (no task done yet)".to_string(),
+    };
+    let rework = match stats.rework_rate {
+        Some(rate) => format!("rework rate: {}", format_pct(rate)),
+        None => "rework rate: n/a".to_string(),
+    };
+    let cache = match stats.cache_rate {
+        Some(rate) => format!("cache rate: {}", format_pct(rate)),
+        None => "cache rate: n/a (adapter never reported it)".to_string(),
+    };
+    format!("{cptv}\n{rework}\n{cache}\n")
 }
 
-fn node_line(node: &NodeStat, max_tokens: u64) -> String {
+/// What the run spent: the tokens, and what they come to in currency
+/// when this project prices the models it used.
+fn spend(
+    stats: &RunStats,
+    pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
+) -> String {
+    let cached = match stats.total_tokens.cached {
+        Some(cached) => format!(" ({cached} cached)"),
+        None => String::new(),
+    };
+    let mut out = format!(
+        "tokens: {} in / {} out{cached}\n",
+        stats.total_tokens.input, stats.total_tokens.output
+    );
+    if let Some(line) = currency_line(stats.total_tokens.total(), pricing) {
+        out.push_str(&format!("{line}\n"));
+    }
+    out
+}
+
+/// What the run handed over, by what the engine answered — the other
+/// half of what a run cost, beside the tokens it spent.
+fn submissions_line(submissions: &yunta_engine::Submissions) -> String {
+    format!(
+        "documents: {} accepted, {} refused",
+        submissions.accepted, submissions.refused
+    )
+}
+
+/// What the run found, by what the engine answered, and how many of
+/// those findings stand now.
+///
+/// The calls and the standing count are two different facts and are
+/// said as two: a log carrying five posts, one update and one
+/// withdrawal stands at four, and a reader shown only one of those
+/// numbers draws the wrong conclusion from either.
+fn findings_line(activity: &yunta_engine::FindingActivity, effective: u64) -> String {
+    format!(
+        "findings: {} posted, {} updated, {} withdrawn, {} refused — {effective} standing",
+        activity.posted, activity.updated, activity.withdrawn, activity.refused
+    )
+}
+
+/// One row per node that started, each opening with the state it is in:
+/// the same token count reads one way under a node that finished and
+/// another under one that failed, so the number never appears without
+/// it.
+fn render_nodes(stats: &RunStats, state: &yunta_engine::RunState, glyphs: Glyphs) -> String {
+    if stats.nodes.is_empty() {
+        return String::new();
+    }
+    let max_tokens = stats
+        .nodes
+        .iter()
+        .map(|n| n.tokens.total())
+        .max()
+        .unwrap_or(0);
+    let mut out = String::from("\nnodes:\n");
+    for node in &stats.nodes {
+        let display = NodeDisplay::of(state.nodes.state(&node.node_id));
+        out.push_str(&format!(
+            "{}\n",
+            node_line(node, max_tokens, &display, glyphs)
+        ));
+    }
+    out
+}
+
+/// The same tokens grouped by the runner that spent them: where the
+/// run's cost went, across however many nodes each runner was given.
+fn render_runners(stats: &RunStats, glyphs: Glyphs) -> String {
+    let by_runner = stats.tokens_by_runner();
+    if by_runner.is_empty() {
+        return String::new();
+    }
+    let max_runner_tokens = by_runner.iter().map(|(_, t)| t.total()).max().unwrap_or(0);
+    let mut out = String::from("\nrunners:\n");
+    for (runner, tokens) in &by_runner {
+        let total = tokens.total();
+        out.push_str(&format!(
+            "{INDENT}{} {}  {total:>8} tok\n",
+            truncate(runner.as_str(), LABEL_WIDTH, glyphs),
+            bar(total, max_runner_tokens, glyphs),
+        ));
+    }
+    out
+}
+
+fn node_line(node: &NodeStat, max_tokens: u64, display: &NodeDisplay, glyphs: Glyphs) -> String {
     let total = node.tokens.total();
     let blocked = node
         .blocked_fraction()
         .map(format_pct)
         .unwrap_or_else(|| " n/a".to_string());
     format!(
-        "  {} {}  {total:>8} tok  {:>8}  blk:{blocked}",
-        truncate(node.node_id.as_str(), LABEL_WIDTH),
-        bar(total, max_tokens),
+        "{INDENT}{} {} {} {}  {total:>8} tok  {:>8}  blk:{blocked}",
+        glyphs.state(display.word),
+        truncate(display.word.short(), STATE_WIDTH, glyphs),
+        truncate(node.node_id.as_str(), LABEL_WIDTH, glyphs),
+        bar(total, max_tokens, glyphs),
         format_duration(node.wall_clock()),
     )
 }
 
-fn render_workflow_history(workflow_name: &str, history: &[RunSummary]) {
-    println!("workflow `{workflow_name}` — {} run(s)", history.len());
-
-    println!("\nCPTV over time:");
-    let cptv_series: Vec<f64> = history.iter().map(|r| r.cptv.unwrap_or(0.0)).collect();
-    println!(
-        "  {}  (oldest -> newest, latest = {})",
-        sparkline(&cptv_series),
-        history
-            .last()
-            .and_then(|r| r.cptv)
-            .map(|c| format!("{c:.1}"))
-            .unwrap_or_else(|| "n/a".to_string())
+/// The whole `yunta stats --workflow <name>` block, ready to print.
+fn render_workflow_history(
+    workflow_name: &WorkflowName,
+    history: &[RunSummary],
+    glyphs: Glyphs,
+) -> String {
+    let mut out = format!(
+        "workflow `{workflow_name}` — {}\n",
+        yunta_core::text::counted(history.len(), "run")
     );
 
-    println!("\nmodes:");
+    out.push_str("\nCPTV over time:\n");
+    out.push_str(&format!("{}\n", cptv_line(history, glyphs)));
+
+    out.push_str("\nmodes:\n");
     for (mode, runs, median_cptv, median_tokens) in mode_table(history) {
-        println!(
-            "  {} {:>3} run(s)   median CPTV {}   median tokens {}",
-            truncate(mode.as_str(), LABEL_WIDTH),
+        out.push_str(&format!(
+            "{INDENT}{} {:>3} runs   median CPTV {}   median tokens {}\n",
+            truncate(mode.as_str(), LABEL_WIDTH, glyphs),
             runs,
             median_cptv
                 .map(|v| format!("{v:.1}"))
@@ -376,18 +386,39 @@ fn render_workflow_history(workflow_name: &str, history: &[RunSummary]) {
             median_tokens
                 .map(|v| format!("{v:.0}"))
                 .unwrap_or_else(|| "n/a".to_string()),
-        );
+        ));
     }
 
-    if let Some(estimation) = prior_estimation(history) {
-        println!("\n{}", format_estimation_line(&estimation));
-    } else {
-        println!(
-            "\nestimation: not enough runs yet (need {}, have {})",
+    match prior_estimation(history) {
+        Some(estimation) => {
+            out.push_str(&format!("\n{}\n", format_estimation_line(&estimation)));
+        }
+        None => out.push_str(&format!(
+            "\nestimation: not enough runs yet (need {}, have {})\n",
             yunta_engine::MIN_SAMPLES_FOR_ESTIMATION,
             history.len()
-        );
+        )),
     }
+    out
+}
+
+/// Every past run's CPTV as one cell, oldest first, with the newest
+/// value spelled out beside it — the sparkline carries the shape and the
+/// number carries the scale.
+///
+/// The sparkline gets whatever [`LINE_WIDTH`] leaves after the indent and
+/// that note, so a workflow with hundreds of runs narrows its window
+/// instead of wrapping the line and breaking the block it sits in.
+fn cptv_line(history: &[RunSummary], glyphs: Glyphs) -> String {
+    let latest = history
+        .last()
+        .and_then(|r| r.cptv)
+        .map(|c| format!("{c:.1}"))
+        .unwrap_or_else(|| "n/a".to_string());
+    let note = format!("  (oldest -> newest, latest = {latest})");
+    let cells = LINE_WIDTH.saturating_sub(cell_width(INDENT) + cell_width(&note));
+    let series: Vec<f64> = history.iter().map(|r| r.cptv.unwrap_or(0.0)).collect();
+    format!("{INDENT}{}{note}", sparkline(&series, cells, glyphs))
 }
 
 /// Verification-effectiveness findings — advisory only, never a reason
@@ -407,60 +438,45 @@ pub(crate) fn render_verification_findings(
     out.push_str("verification performance — advisory, nothing here is acted on automatically:\n");
     for c in &findings.never_red_criteria {
         out.push_str(&format!(
-            "  criterion `{}` was never red in pre-check across {} run(s) — \
+            "{INDENT}criterion `{}` was never red in pre-check across {} — \
              either redundant, or mis-written (both readings shown, never just one)\n",
-            c.cmd, c.sample_count
+            c.cmd,
+            yunta_core::text::counted(c.sample_count, "run")
         ));
     }
     for r in &findings.never_triggered_reroutes {
         out.push_str(&format!(
-            "  node `{}`'s re-route to `{}` never fired across {} run(s) — \
+            "{INDENT}node `{}`'s re-route to `{}` never fired across {} — \
              the prior flow is more reliable than expected\n",
-            r.node, r.goto, r.sample_count
+            r.node,
+            r.goto,
+            yunta_core::text::counted(r.sample_count, "run")
         ));
     }
     for g in &findings.always_approved_gates {
         out.push_str(&format!(
-            "  gate `{}` was approved without adjustment across {} resolution(s) — \
+            "{INDENT}gate `{}` was approved without adjustment across {} — \
              still adding value, or become ritual?\n",
-            g.node, g.sample_count
+            g.node,
+            yunta_core::text::counted(g.sample_count, "resolution")
         ));
     }
     if let Some(t) = &findings.always_first_try_tasks {
         out.push_str(&format!(
-            "  every task passed on its first try across {} task instance(s) — \
+            "{INDENT}every task passed on its first try across {} — \
              the plan may be cutting too fine\n",
-            t.sample_count
+            yunta_core::text::counted(t.sample_count, "task instance")
         ));
     }
     for m in &findings.unused_modes {
         out.push_str(&format!(
-            "  mode `{}` was never chosen across {} run(s) — \
+            "{INDENT}mode `{}` was never chosen across {} — \
              still worth declaring?\n",
-            m.name, m.runs_observed
+            m.name,
+            yunta_core::text::counted(m.runs_observed, "run")
         ));
     }
     out
-}
-
-fn sparkline(values: &[f64]) -> String {
-    if values.is_empty() {
-        return String::new();
-    }
-    let max = values.iter().cloned().fold(0.0_f64, f64::max);
-    if max <= 0.0 {
-        return "·".repeat(values.len());
-    }
-    values
-        .iter()
-        .map(|&v| {
-            let idx = ((v / max) * (SPARK_CHARS.len() - 1) as f64).round() as usize;
-            SPARK_CHARS
-                .get(idx.min(SPARK_CHARS.len() - 1))
-                .copied()
-                .unwrap_or(' ')
-        })
-        .collect()
 }
 
 /// Median CPTV/tokens per mode — a plain historical comparison, not a
@@ -499,8 +515,11 @@ pub(crate) fn format_estimation_line(estimation: &yunta_engine::PriorEstimation)
         None => "n/a".to_string(),
     };
     format!(
-        "{} past run(s) · median {:.0} tokens, p90 {:.0} · median wall-clock {}",
-        estimation.sample_count, estimation.tokens.median, estimation.tokens.p90, wall_clock,
+        "{} · median {:.0} tokens, p90 {:.0} · median wall-clock {}",
+        yunta_core::text::counted(estimation.sample_count, "past run"),
+        estimation.tokens.median,
+        estimation.tokens.p90,
+        wall_clock,
     )
 }
 
@@ -517,10 +536,19 @@ struct NodeStatJson {
     active_secs: f64,
     blocked_secs: f64,
     blocked_fraction: Option<f64>,
+    /// What this node handed over, by what the engine answered. A node
+    /// that submitted nothing carries zeroes rather than nothing: it
+    /// was asked and did not deliver, which is a number, not an absence.
+    submissions: yunta_engine::Submissions,
+    /// What this node found, by what the engine answered — zeroes for a
+    /// node the log carries no finding call from, for the same reason.
+    findings: yunta_engine::FindingActivity,
 }
 
-impl From<&NodeStat> for NodeStatJson {
-    fn from(n: &NodeStat) -> Self {
+impl NodeStatJson {
+    /// One node's row, with the per-node counts the run's own maps hold
+    /// beside the numbers the node stat carries itself.
+    fn of(n: &NodeStat, stats: &RunStats) -> Self {
         Self {
             node_id: n.node_id.to_string(),
             runner: n.runner.as_ref().map(ToString::to_string),
@@ -531,6 +559,16 @@ impl From<&NodeStat> for NodeStatJson {
             active_secs: n.active.as_secs_f64(),
             blocked_secs: n.blocked.as_secs_f64(),
             blocked_fraction: n.blocked_fraction(),
+            submissions: stats
+                .submissions_by_node
+                .get(&n.node_id)
+                .copied()
+                .unwrap_or_default(),
+            findings: stats
+                .findings_by_node
+                .get(&n.node_id)
+                .copied()
+                .unwrap_or_default(),
         }
     }
 }
@@ -552,6 +590,15 @@ struct RunStatsJson {
     currency_estimate: Option<String>,
     nodes: Vec<NodeStatJson>,
     unknown_kinds: Vec<yunta_engine::UnknownKindCount>,
+    /// Every document the run handed over, by what the engine answered.
+    submissions: yunta_engine::Submissions,
+    /// Every finding call the log carries, by what the engine answered.
+    findings: yunta_engine::FindingActivity,
+    /// How many findings stand now — the fold over the whole log, where
+    /// an update replaces and a withdrawal removes. Never the count of
+    /// posts: a reader given only `findings.posted` reads a withdrawn
+    /// finding as one that still stands.
+    findings_standing: u64,
 }
 
 impl RunStatsJson {
@@ -576,8 +623,15 @@ impl RunStatsJson {
             tasks_done: stats.tasks_done,
             wall_clock_secs: stats.wall_clock.map(|d| d.as_secs_f64()),
             currency_estimate: currency_line(total, pricing),
-            nodes: stats.nodes.iter().map(NodeStatJson::from).collect(),
+            nodes: stats
+                .nodes
+                .iter()
+                .map(|node| NodeStatJson::of(node, stats))
+                .collect(),
             unknown_kinds: stats.unknown_kinds.clone(),
+            submissions: stats.artifact_submissions,
+            findings: stats.findings,
+            findings_standing: stats.findings_effective,
         }
     }
 }
@@ -636,7 +690,7 @@ impl From<&yunta_engine::PriorEstimation> for EstimationJson {
 #[derive(Serialize)]
 struct WorkflowHistoryJson {
     schema_version: u32,
-    workflow: String,
+    workflow: WorkflowName,
     runs: Vec<RunSummaryJson>,
     estimation: Option<EstimationJson>,
     verification_findings: Option<VerificationFindingsJson>,
@@ -644,13 +698,13 @@ struct WorkflowHistoryJson {
 
 impl WorkflowHistoryJson {
     fn from(
-        workflow: &str,
+        workflow: &WorkflowName,
         history: &[RunSummary],
         findings: Option<&yunta_engine::VerificationFindings>,
     ) -> Self {
         Self {
             schema_version: crate::json::SCHEMA_VERSION,
-            workflow: workflow.to_string(),
+            workflow: workflow.clone(),
             runs: history.iter().map(RunSummaryJson::from).collect(),
             estimation: prior_estimation(history).as_ref().map(EstimationJson::from),
             verification_findings: findings.map(VerificationFindingsJson::from),
@@ -733,5 +787,98 @@ impl VerificationFindingsJson {
                 })
                 .collect(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn summary(cptv: f64) -> RunSummary {
+        RunSummary {
+            run_id: RunId::from_static("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+            mode: ModeName::default(),
+            workflow_hash: ContentHash::sha256(b"workflow"),
+            tokens: 1000,
+            wall_clock: None,
+            tasks_total: 1,
+            cptv: Some(cptv),
+        }
+    }
+
+    #[test]
+    fn stats_renders_to_a_string_a_test_can_read() {
+        // What this command says about a run is one block, not a run of
+        // `println!`s: a number nobody can read back is a number nobody
+        // is holding to anything. The two counts a run's documents and
+        // findings come to are in it, each said as itself.
+        let stats = RunStats {
+            cptv: Some(500.0),
+            rework_rate: None,
+            cache_rate: None,
+            total_tokens: yunta_core::events::TokenUsage {
+                input: 300,
+                output: 200,
+                cached: None,
+            },
+            tasks_total: 2,
+            tasks_done: 1,
+            wall_clock: Some(Duration::from_secs(90)),
+            nodes: Vec::new(),
+            unknown_kinds: Vec::new(),
+            artifact_submissions: yunta_engine::Submissions {
+                accepted: 3,
+                refused: 1,
+            },
+            submissions_by_node: Default::default(),
+            findings: yunta_engine::FindingActivity {
+                posted: 5,
+                updated: 1,
+                withdrawn: 1,
+                refused: 0,
+            },
+            findings_by_node: Default::default(),
+            findings_effective: 4,
+        };
+        let text = render_run_stats(
+            &RunId::from_static("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+            "default",
+            &stats,
+            &yunta_engine::derive(&[]),
+            None,
+            Glyphs::Ascii,
+        );
+        assert!(
+            text.contains("documents: 3 accepted, 1 refused"),
+            "what the run handed over: {text}"
+        );
+        assert!(
+            text.contains("findings: 5 posted, 1 updated, 1 withdrawn, 0 refused — 4 standing"),
+            "what it found, and what still stands: {text}"
+        );
+        assert!(
+            text.contains("CPTV: 500.0 tokens/task done (1 done)"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_long_history_narrows_its_sparkline_instead_of_wrapping_the_line() {
+        let history: Vec<RunSummary> = (1..=200).map(|n| summary(f64::from(n))).collect();
+        let line = cptv_line(&history, Glyphs::Ascii);
+        let cells = cell_width(&line);
+        assert!(cells <= LINE_WIDTH, "{cells} cells: {line}");
+        assert!(
+            line.contains(Glyphs::Ascii.ellipsis()),
+            "a narrowed window says so: {line}"
+        );
+    }
+
+    #[test]
+    fn a_history_that_fits_draws_every_run_and_marks_no_window() {
+        let history: Vec<RunSummary> = (1..=3).map(|n| summary(f64::from(n))).collect();
+        let line = cptv_line(&history, Glyphs::Ascii);
+        assert!(!line.contains(Glyphs::Ascii.ellipsis()), "{line}");
+        assert!(line.contains("latest = 3.0"), "{line}");
     }
 }

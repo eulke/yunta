@@ -1,0 +1,23 @@
+# quick mode in a repository with no `docs/architecture.md`: `plan` reads
+# it as optional, so the planner is told the file is absent and plans
+# anyway, and the run pauses at `ship` exactly as it does with the file
+# there — nothing a missing optional file costs is a stopped run.
+workflow: fragua
+mode: quick
+inputs: { idea: "add dark mode" }
+worktree: worktrees/no-architecture
+fixture: fixtures/build-feature.yaml
+expect:
+  final_state: paused
+  nodes:
+    grill: finished
+    brief: finished
+    plan: finished
+    implement: finished
+    lint: finished
+    fix-lint: never ran
+    tests: finished
+    review: never ran
+    pr: never ran
+  tasks:
+    T001: done

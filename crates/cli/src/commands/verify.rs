@@ -20,7 +20,7 @@ use yunta_storage::{ChainVerification, Storage};
 use crate::context::Context;
 use crate::error::{note, CliError, Outcome};
 
-pub fn verify(run_id: &RunId) -> Result<Outcome, CliError> {
+pub async fn verify(run_id: &RunId) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let storage = ctx.storage()?;
     // The chain first, and reported before anything else is attempted:
@@ -28,7 +28,7 @@ pub fn verify(run_id: &RunId) -> Result<Outcome, CliError> {
     // that reads the rows as bytes rather than as events — so it still
     // answers about a log whose payloads no longer parse.
     let chain = chain(run_id, &storage)?;
-    let objects = objects(run_id, &ctx, &storage)?;
+    let objects = objects(run_id, &ctx, &storage).await?;
     Ok(match (chain, objects) {
         (Outcome::Success, Outcome::Success) => Outcome::Success,
         _ => Outcome::Reported,
@@ -39,7 +39,10 @@ pub fn verify(run_id: &RunId) -> Result<Outcome, CliError> {
 fn chain(run_id: &RunId, storage: &Storage) -> Result<Outcome, CliError> {
     match storage.verify_chain(run_id)? {
         ChainVerification::Intact { events } => {
-            println!("run {run_id}: chain intact — {events} event(s) verified");
+            println!(
+                "run {run_id}: chain intact — {} verified",
+                yunta_core::text::counted(events, "event")
+            );
             Ok(Outcome::Success)
         }
         ChainVerification::Broken { seq, detail } => {
@@ -56,7 +59,7 @@ fn chain(run_id: &RunId, storage: &Storage) -> Result<Outcome, CliError> {
 /// Reads back every object the run's log names and reports what the
 /// store answered — the same verification a resume runs before it wakes
 /// the run.
-fn objects(run_id: &RunId, ctx: &Context, storage: &Storage) -> Result<Outcome, CliError> {
+async fn objects(run_id: &RunId, ctx: &Context, storage: &Storage) -> Result<Outcome, CliError> {
     let Some(run_dir) = ctx.project.run_dir(run_id.as_str()) else {
         // The log outlives the directory: `yunta gc` removes a run's
         // directory before purging its events. The chain still answers
@@ -82,19 +85,18 @@ fn objects(run_id: &RunId, ctx: &Context, storage: &Storage) -> Result<Outcome, 
         }
     };
 
-    let integrity = ArtifactIntegrity::of(&run_dir, &events);
+    let integrity = ArtifactIntegrity::of(&run_dir, &events).await;
     let verdict = if integrity.faults.is_empty() {
         println!(
-            "run {run_id}: objects intact — {} artifact(s) verified",
-            integrity.verified
+            "run {run_id}: objects intact — {} verified",
+            yunta_core::text::counted(integrity.verified, "artifact")
         );
         Outcome::Success
     } else {
         note(format!(
-            "run {run_id}: objects BROKEN — {} of {} artifact(s) are not the bytes the run \
-             accepted",
+            "run {run_id}: objects BROKEN — {} of {} are not the bytes the run accepted",
             integrity.faults.len(),
-            integrity.verified + integrity.faults.len()
+            yunta_core::text::counted(integrity.verified + integrity.faults.len(), "artifact")
         ));
         for fault in &integrity.faults {
             note(format!("  {}: {}", fault.artifact, fault.error));

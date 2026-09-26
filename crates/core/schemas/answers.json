@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "yunta answers",
+  "description": "The answers artifact's document — written by the ENGINE, never an\nagent, next to the questions artifact it answers.",
+  "type": "object",
+  "properties": {
+    "answers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Answer"
+      }
+    }
+  },
+  "required": [
+    "answers"
+  ],
+  "$defs": {
+    "Answer": {
+      "description": "One answer: the question's `id` and the human's value, as\ntext — a `boolean` answer is the string `true`/`false`, a `choice`\none of the declared `values`. Strings deliberately, not a typed enum\nper answer kind: the artifact is what a *following node's session*\nreads — meant to be consumed by whatever node comes next — and text\nis the only shape every consumer shares.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/QuestionId"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "value"
+      ]
+    },
+    "QuestionId": {
+      "description": "A question id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

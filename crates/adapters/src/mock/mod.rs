@@ -18,19 +18,23 @@ mod run_tool;
 mod script;
 
 pub use fixture::{
-    MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt, SessionScript, ToolExpectation,
+    FixtureError, MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt, RunPaths,
+    SessionScript, ToolExpectation,
 };
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use yunta_core::events::SessionExit;
+use yunta_core::fence::{Fence, Verdict};
+use yunta_core::FenceLevel;
 
 use async_trait::async_trait;
 use futures::stream::{self, BoxStream};
 use tokio::sync::{mpsc, Notify};
-use yunta_core::{AdapterError, AdapterId, AgentName, Capabilities, Result, SessionId};
+use yunta_core::{AdapterError, AdapterId, AgentName, Capabilities, ModelName, Result, SessionId};
 
-use crate::session::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
+use yunta_core::port::{Adapter, AgentEvent, AgentSession, ProbeReport, SessionRequest};
 
 /// The id config names this adapter by.
 pub static ID: AdapterId = AdapterId::from_static("mock");
@@ -50,6 +54,11 @@ pub struct MockAdapter {
     /// Every `spawn()`'s `req.agent`, in claim order — same
     /// record-the-mount principle as `skills_seen`.
     agents_seen: Mutex<Vec<Option<AgentName>>>,
+    /// Every `spawn()`'s `req.model`, in claim order — same
+    /// record-the-mount principle as `skills_seen`: the model a session
+    /// runs on is the runner's, and a test reads it here rather than
+    /// through a real CLI.
+    models_seen: Mutex<Vec<Option<ModelName>>>,
     /// Every `resume()`'s session id, in call order: the mock's
     /// "resume" is serving the next script under the SAME session id —
     /// recording which one proves the engine handed back the
@@ -59,15 +68,24 @@ pub struct MockAdapter {
     /// record-the-mount principle as `skills_seen`: engine tests prove
     /// the endpoint reached the session (or deliberately didn't)
     /// without a real CLI.
-    endpoints_seen: Mutex<Vec<Option<crate::RunToolsEndpoint>>>,
+    endpoints_seen: Mutex<Vec<Option<yunta_core::port::RunToolsEndpoint>>>,
     /// Every session's `req.artifact_dir`, in claim order — same
     /// record-the-mount principle as `skills_seen`: engine tests prove
     /// which sessions were granted the run's artifact directory without
     /// a real CLI.
     artifact_dirs_seen: Mutex<Vec<Option<std::path::PathBuf>>>,
+    /// Every request a session was opened with, in claim order — the
+    /// whole contract, for a test that asserts two sessions were opened
+    /// by the same door rather than field by field.
+    requests_seen: Mutex<Vec<SessionRequest>>,
     /// The next session id's number: every adapter counts from one, so
     /// a fixture's ids never depend on what else ran in the process.
     next_session: AtomicU64,
+    /// Whether any session of this adapter was asked how its process
+    /// ended. A mock has no process, so what this records is the
+    /// engine's own rule: the question is put only to a session whose
+    /// stream ended saying nothing.
+    interrogated: Arc<AtomicBool>,
 }
 
 impl MockAdapter {
@@ -78,11 +96,19 @@ impl MockAdapter {
             consumed,
             skills_seen: Mutex::new(Vec::new()),
             agents_seen: Mutex::new(Vec::new()),
+            models_seen: Mutex::new(Vec::new()),
             resumes_seen: Mutex::new(Vec::new()),
             endpoints_seen: Mutex::new(Vec::new()),
             artifact_dirs_seen: Mutex::new(Vec::new()),
+            requests_seen: Mutex::new(Vec::new()),
             next_session: AtomicU64::new(1),
+            interrogated: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Whether any session this adapter opened was asked how it exited.
+    pub fn interrogated(&self) -> bool {
+        self.interrogated.load(Ordering::SeqCst)
     }
 
     /// The scripts no `spawn()` claimed, by index in the fixture — what
@@ -107,13 +133,18 @@ impl MockAdapter {
         read(&self.agents_seen)
     }
 
+    /// The `model` of every session spawned so far, in claim order.
+    pub fn models_seen(&self) -> Vec<Option<ModelName>> {
+        read(&self.models_seen)
+    }
+
     /// The `skills` of every session spawned so far, in claim order.
     pub fn skills_seen(&self) -> Vec<Vec<std::path::PathBuf>> {
         read(&self.skills_seen)
     }
 
     /// The `run_tools_endpoint` of every session so far, in claim order.
-    pub fn endpoints_seen(&self) -> Vec<Option<crate::RunToolsEndpoint>> {
+    pub fn endpoints_seen(&self) -> Vec<Option<yunta_core::port::RunToolsEndpoint>> {
         read(&self.endpoints_seen)
     }
 
@@ -124,29 +155,43 @@ impl MockAdapter {
         read(&self.artifact_dirs_seen)
     }
 
-    pub fn from_yaml(yaml: &str) -> std::result::Result<Self, yunta_core::yaml::YamlError> {
-        Ok(Self::new(yunta_core::yaml::parse(yaml)?))
+    /// The whole request of every session opened so far, in claim order.
+    pub fn requests_seen(&self) -> Vec<SessionRequest> {
+        read(&self.requests_seen)
     }
 
-    /// Whether an effect at `path` is blocked by the request's edit
-    /// constraints: only a hook-capable adapter blocks, and only a path
-    /// no declared glob matches. No constraints means nothing to block.
-    fn is_blocked(&self, req: &SessionRequest, path: &std::path::Path) -> bool {
-        self.fixture.capabilities.edit_hooks
-            && req.edit_constraints.as_ref().is_some_and(|globs| {
-                yunta_core::scope_globset(globs).is_ok_and(|set| !set.is_match(path))
-            })
+    /// One adapter from a fixture that names no run directory — every
+    /// caller with a run in hand goes through [`MockFixture::parse`]
+    /// instead, and a fixture that names a directory is refused here.
+    pub fn from_yaml(yaml: &str) -> std::result::Result<Self, FixtureError> {
+        Ok(Self::new(MockFixture::parse_without_a_run(yaml)?))
+    }
+
+    /// Whether the fence refuses an effect at `path` — by the same
+    /// judge every adapter asks, so a fixture exercises the rule the
+    /// real ones enforce.
+    ///
+    /// A filesystem sandbox knows nothing of globs: at that level the
+    /// judgement is against the directories alone. A fixture with no
+    /// fence at all writes whatever it scripts, and the engine's own
+    /// post-check diff is what catches it.
+    fn refuses(&self, req: &SessionRequest, path: &std::path::Path) -> bool {
+        let fence = match self.fixture.capabilities.fence {
+            FenceLevel::None => return false,
+            FenceLevel::ToolCalls => req.fence.clone(),
+            FenceLevel::Filesystem => Fence::everything(req.fence.roots.clone(), req.fence.advice),
+        };
+        matches!(fence.judge(&req.cwd, path), Verdict::Refused(_))
     }
 
     /// Applies one session's filesystem effects under the request's
-    /// `cwd`, leaving out the ones its edit constraints block: a
-    /// hook-capable adapter installs the block before the edit ever
-    /// lands; without the capability, the engine's own post-check scope
-    /// diff is what catches it instead.
+    /// `cwd`, leaving out the ones the fence refuses: an adapter that
+    /// can judge a write blocks it before it lands, and the session
+    /// says so.
     fn apply_effects(&self, script: &SessionScript, req: &SessionRequest) -> Result<()> {
         let cwd = &req.cwd;
         for effect in &script.effects {
-            if self.is_blocked(req, &effect.path) {
+            if self.refuses(req, &effect.path) {
                 continue;
             }
             let full_path = cwd.join(&effect.path);
@@ -226,17 +271,27 @@ impl MockAdapter {
         let played = script::Script {
             session_id: self.session_id(resume_as)?,
             model: script.model.clone(),
-            blocked_markers: self.blocked_markers(script, &req),
+            refused: self.refused(script, &req),
+            fence: self.fixture.fence_coverage.map(|coverage| {
+                coverage.resolve(
+                    std::iter::once(req.cwd.clone())
+                        .chain(req.fence.roots.iter().cloned())
+                        .collect(),
+                )
+            }),
+
             steps: script.steps.clone(),
             outcome: script.outcome.clone(),
             run_tools_endpoint: req.run_tools_endpoint.clone(),
         };
-        tokio::spawn(script::play(played, events, stops));
+        let player = tokio::spawn(script::play(played, events, stops));
 
         Ok(Box::new(MockSession {
             receiver: Some(receiver),
             interrupt,
             kill,
+            player,
+            interrogated: Arc::clone(&self.interrogated),
         }))
     }
 
@@ -246,6 +301,8 @@ impl MockAdapter {
         record(&self.endpoints_seen, req.run_tools_endpoint.clone());
         record(&self.artifact_dirs_seen, req.artifact_dir.clone());
         record(&self.agents_seen, req.agent.clone());
+        record(&self.models_seen, req.model.clone());
+        record(&self.requests_seen, req.clone());
     }
 
     /// The index of the script this request claims, marked consumed so no
@@ -341,13 +398,13 @@ impl MockAdapter {
         }
     }
 
-    /// The effects this request's edit constraints kept from landing —
-    /// what the session reports as refused edits.
-    fn blocked_markers(&self, script: &SessionScript, req: &SessionRequest) -> Vec<PathBuf> {
+    /// The effects the fence kept from landing — what the session
+    /// reports as writes it refused.
+    fn refused(&self, script: &SessionScript, req: &SessionRequest) -> Vec<PathBuf> {
         script
             .effects
             .iter()
-            .filter(|e| self.is_blocked(req, &e.path))
+            .filter(|e| self.refuses(req, &e.path))
             .map(|e| e.path.clone())
             .collect()
     }
@@ -371,6 +428,20 @@ pub struct MockSession {
     receiver: Option<mpsc::UnboundedReceiver<AgentEvent>>,
     interrupt: Arc<Notify>,
     kill: Arc<Notify>,
+    /// The task playing this session's script. A session that ends
+    /// before its script does — a cancelled run, a caller that drops
+    /// the stream — leaves a player waiting on a step that will never
+    /// be read, so the session owns it and takes it down with itself.
+    player: tokio::task::JoinHandle<()>,
+    /// Shared with the adapter that opened this session: see
+    /// [`MockAdapter::interrogated`].
+    interrogated: Arc<AtomicBool>,
+}
+
+impl Drop for MockSession {
+    fn drop(&mut self) {
+        self.player.abort();
+    }
 }
 
 #[async_trait]
@@ -394,5 +465,13 @@ impl AgentSession for MockSession {
     async fn kill(&mut self) -> Result<()> {
         self.kill.notify_one();
         Ok(())
+    }
+
+    /// Nothing, because there is no process — and a record that the
+    /// question was put, which is what a test of the engine's rule
+    /// reads.
+    async fn exit(&mut self) -> yunta_core::Result<Option<SessionExit>> {
+        self.interrogated.store(true, Ordering::SeqCst);
+        Ok(None)
     }
 }

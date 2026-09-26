@@ -48,7 +48,10 @@ yunta run acme/review
 yunta check acme/review
 ```
 
-and the same form works inside a workflow (`use: acme/qa-review`) and a
+The reference pack's workflow is `fragua.yaml`, so run it with
+`yunta run yunta/fragua` after installing the pack.
+
+The same form works inside a workflow (`use: acme/qa-review`) and a
 node's `skills:` list (`skills: [acme/review-rubric]`). Resolution always
 tries the repo's own `.yunta/workflows/` first — a repo file at the same
 `publisher/name` path always wins over the pack: a local workflow with the
@@ -201,6 +204,13 @@ Field by field:
 - **No composition outside the pack's own contents.** A workflow inside your
   pack can `use:` another workflow from the same pack; reaching into another
   pack or back out to the installing repo is rejected by `check`.
+- **No silent assumption about the installing repo's files.** A path a node
+  reads through `files:` is a guess about repositories you have never seen.
+  Declare the entry `{ path: <path>, optional: true }` when the node can do
+  without the file — a missing optional file is marked in the session's
+  context instead of failing the node — and name the files your pack reads in
+  its README. `yunta check` and `yunta doctor` tell the person installing it
+  which required ones their last commit lacks.
 
 ## Testing a pack before sharing it
 
@@ -234,7 +244,30 @@ case — `mode: standard` and `inputs: { idea: "add dark mode" }` — see
 [`packs/fragua/.yunta/tests/`](../packs/fragua/.yunta/tests) for mode-specific
 cases.
 
-Every case runs in a fresh, empty repository. A workflow whose nodes read
+A case answers a gate the way a person does, under `decisions:`, by node id
+and by the option that gate's own menu offers:
+
+```yaml
+# .yunta/tests/approved.yaml
+workflow: review
+fixture: fixtures/review.yaml
+decisions:
+  approve-plan: approve
+expect:
+  final_state: finished
+```
+
+The decision goes on the run's log and the run is handed back, so what it
+reaches afterwards is what a real answer reaches — a promotion included, which
+is what `final_state: promoted` asserts. A gate no entry names is a gate nobody
+answers, and the run parks on it; each answer is spent once, so a workflow that
+parks on the same gate twice stops there the second time.
+
+A fixture describes what the run does, so every session it scripts has to be one
+the run opens. A script nothing opened fails the case, naming which: two modes of
+one workflow that open different sessions read different fixtures.
+
+Every case runs in a copy of the pack's own `.yunta/` inside a fresh repository. A workflow whose nodes read
 files (`files:`), take a `path` input or run the project's own toolchain
 declares `worktree: <directory>` (relative to the case file): the directory's
 contents become the sandbox's initial commit before any session starts, so

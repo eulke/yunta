@@ -40,12 +40,55 @@ codex: unhealthy — `codex` not found on PATH
 The diagnostic names the actual problem: binary missing, version
 incompatible, or auth invalid. Fix that specific thing and re-run — `doctor`
 runs the identical probe `yunta run` runs before spending anything, so a
-healthy `doctor` means a run won't fail on setup for that adapter. See
+healthy `doctor` means the binary is there, answers and authenticates.
+
+It does not mean a session opens. The probe asks for a version, which never
+touches the configuration a run writes the CLI; a CLI that refuses that
+configuration is healthy to a probe and dead to a run. `yunta doctor
+--session` opens one real session per binding, asks it to submit an empty
+`questions` document, and reports success only after the run accepts that
+document and finishes. It costs a prompt per binding. See
 [adapters](adapters.md#yunta-doctor).
 
 If `doctor` reports a pack's `requires:` unmet (a role, an `mcp_servers:`
 name, or a command not on `PATH`), it names the pack — add what's missing to
 your own config, you don't need to touch the pack itself.
+
+## A node failed with "session `<adapter>` exited with code N before any terminal event"
+
+The CLI started and stopped without ever opening a session. The line carries
+how its process ended and the last thing it wrote to stderr, which is
+normally the whole answer: a configuration key it does not accept, a
+credential it could not read, a flag it does not know.
+
+`yunta status <run_id>` shows the rest of what the CLI said on its way out,
+up to its last twenty lines. Values that came from the session's own
+environment — the run tools' token among them — read as `[redacted]`.
+
+`yunta doctor --session` reproduces it outside any run, once per binding, so
+you can fix the configuration and check it without spending a workflow.
+
+## `doctor --session` opened a session but received no questions document
+
+`session opened, no questions document` means the CLI opened, but the probe
+run never accepted its required `yunta_submit_questions` call. The probe
+asks for `{"document":{"questions":[]}}`; this empty document needs no
+human answer. Check the binding's tool access. For a workflow run that
+shows the same symptom, `yunta status <run_id>` can show a failed
+`yunta-run` call. Codex sessions need the per-run server's tool approval;
+Yunta supplies that approval when it mounts the endpoint.
+
+## A run reports a failed `yunta-run` call
+
+The live chronicle shows each failed call, while `yunta status <run_id>` shows
+the **last failed call of the attempt**, with the tool name and either
+`approval_blocked` or `call_failed`. The event log records every failed call
+as `run_tool_failed`. `status --json` exposes the last one on the node as
+`last_tool_failure`, with `session_id`, `tool`, and `cause`. A retry starts a
+new attempt and clears
+that summary. The failed call is diagnostic context: the session may recover
+and finish, and a node failure can have another cause. Arguments, responses,
+tokens and CLI error text are not stored in this event or summary.
 
 ## A node failed with "scope violated: N file(s) outside the declared globs"
 
@@ -116,7 +159,7 @@ once. A document that does not read into its kind is refused with that one probl
 and the path where it sits:
 
 ```
-  1. does not parse at `tasks[1].manual_review`: invalid type: string "yes", expected a boolean
+  1. does not parse at `tasks[1].scope`: invalid type: string "src/**", expected a sequence
 ```
 
 A value of the wrong type stops the read, and the rules only hold over a document
@@ -157,6 +200,17 @@ survives the engine restarting. `yunta status <run_id>` shows what it's
 waiting on and the exact option ids; `yunta resolve-gate <run_id> <option>`
 answers it from any process. See [gates from the
 outside](guide.md#gates-from-the-outside).
+
+## A node failed and `resume` pauses on the same failure
+
+A node with no `on_failure` re-route that fails leaves the decision to you:
+`yunta status <run_id>` lists `retry` and `abort`. Fix the cause in the run's
+own worktree (`~/.yunta/worktrees/<run_id>` by default), not in your checkout:
+the run starts from the commit it was created on and never sees files you add
+or change there afterwards. Then run
+`yunta resolve-gate <run_id> retry`. The node starts a fresh attempt; nothing
+before it runs again. A plain `yunta resume` asks the same question again
+rather than spending on a retry nobody chose.
 
 ## `yunta pack add`/`update` refuses
 

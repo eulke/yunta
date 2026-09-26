@@ -57,7 +57,9 @@ nodes:
     depends_on: [approve-promotion]
     invariant: true
     run: |
-      sed -i "s/^version: .*/version: {{inputs.new_version}}/" pack.yaml
+      set -e
+      awk -v version="{{inputs.new_version}}" '/^version: / { sub(/^version: .*/, "version: " version) } { print }' pack.yaml > pack.yaml.tmp
+      mv pack.yaml.tmp pack.yaml
       git add knowledge pack.yaml
       git commit -q -m "knowledge: promote to {{inputs.new_version}}"
       git tag "v{{inputs.new_version}}"

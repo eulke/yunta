@@ -3,129 +3,11 @@
 //! consolidating deterministically at its join, and every mount/
 //! capability rule observable as run behavior.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::events::{EventBody, EventPayload};
-use yunta_core::SeqIdSource;
-use yunta_core::{AdapterId, ConfigLayer, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
-    RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::{init_repo, FixedClock};
-
-/// Run ids for everything a test run gives birth to — unique across
-/// the binary, so parallel tests never share a run directory.
-static IDS: SeqIdSource = SeqIdSource::new("minted");
-
-const CONFIG: &str = r#"
-runners:
-  executor:
-    - { adapter: mock, model: mock-model }
-"#;
-
-struct Bench {
-    _root: tempfile::TempDir,
-    storage: Storage,
-    run_id: RunId,
-    run_dir: std::path::PathBuf,
-    mock: Arc<MockAdapter>,
-}
-
-impl Bench {
-    async fn run(
-        workflow_yaml: &str,
-        fixture_yaml: &str,
-    ) -> (RunTerminal, yunta_engine::RunState, Self) {
-        let root = tempfile::tempdir().unwrap();
-        let worktree = root.path().join("worktree");
-        std::fs::create_dir_all(&worktree).unwrap();
-        init_repo(&worktree);
-        let runs_root = root.path().join("runs");
-        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        let run_id = RunId::from("run-blackboard");
-
-        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-        let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
-        let manifest = build_manifest(&workflow, &config, &worktree, &worktree, &HashMap::new())
-            .unwrap()
-            .manifest;
-        let run_dir = create_run(
-            CreateRunParams {
-                run_id: &run_id,
-                manifest: &manifest,
-                runs_root: &runs_root,
-                mode: &"default".into(),
-                worktree: &worktree,
-                promoted_from: None,
-                artifacts: &[],
-            },
-            &storage.async_handle(),
-            &FixedClock,
-        )
-        .await
-        .unwrap();
-
-        let mock = Arc::new(MockAdapter::from_yaml(fixture_yaml).unwrap());
-        let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".into(), mock.clone());
-
-        let report = execute_run(RunEnv {
-            run_id: &run_id,
-            manifest: &manifest,
-            run_dir: &run_dir,
-            worktree: &worktree,
-            adapters: &adapters,
-            storage: &storage.async_handle(),
-            clock: std::sync::Arc::new(FixedClock),
-            ids: &IDS,
-            max_task_retries: DEFAULT_MAX_RETRIES,
-            human_interaction: &NoInteraction,
-            forge: None,
-            cancel: None,
-            adapter_override: None,
-            ambient: None,
-        })
-        .await
-        .unwrap();
-        (
-            report.terminal,
-            report.state,
-            Bench {
-                _root: root,
-                storage,
-                run_id,
-                run_dir,
-                mock,
-            },
-        )
-    }
-
-    fn findings_by(&self, node: &str) -> Vec<String> {
-        self.storage
-            .events_for_run(&self.run_id)
-            .unwrap()
-            .into_iter()
-            .filter(|e| e.node_id.as_ref().map(|n| n.as_str()) == Some(node))
-            .filter_map(|e| match e.payload() {
-                Some(EventPayload::FindingPosted(p)) => Some(p.finding.id.to_string()),
-                _ => None,
-            })
-            .collect()
-    }
-
-    fn group_output(&self, group: &str) -> Option<String> {
-        std::fs::read_to_string(
-            self.run_dir
-                .join("node-output")
-                .join(format!("{group}.txt")),
-        )
-        .ok()
-    }
-}
+use yunta_core::events::EventPayload;
+use yunta_core::events::{FindingEvent, SessionEvent};
+use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_testkit::Bench;
+use yunta_testkit_core::Log;
 
 const BLACKBOARD_WORKFLOW: &str = r#"
 name: board
@@ -167,7 +49,10 @@ sessions:
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn blackboard_posts_land_hot_and_the_join_consolidates_them() {
-    let (terminal, state, bench) = Bench::run(BLACKBOARD_WORKFLOW, &blackboard_fixture(true)).await;
+    let bench = Bench::new();
+    let RunReport { terminal, state } = bench
+        .run(BLACKBOARD_WORKFLOW, &blackboard_fixture(true))
+        .await;
 
     // A failure here must self-diagnose — the terminal's own
     // Paused reason only says "child rev-b failed", while the child's
@@ -175,19 +60,34 @@ async fn blackboard_posts_land_hot_and_the_join_consolidates_them() {
     // in the node state this message carries.
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
     assert!(
-        matches!(state.nodes.get("review"), Some(NodeState::Finished { .. })),
+        matches!(
+            state.nodes.state("review"),
+            Some(NodeState::Finished { .. })
+        ),
         "state: {state:?}"
     );
     // Each post is a finding_posted authored by the session's own node,
     // mediated, logged, and attributed.
-    assert_eq!(bench.findings_by("rev-a"), vec!["from-a"]);
-    assert_eq!(bench.findings_by("rev-b"), vec!["from-b"]);
+    let posted_by_a: Vec<String> = bench
+        .findings_by("rev-a")
+        .iter()
+        .map(|finding| finding.id.to_string())
+        .collect();
+    let posted_by_b: Vec<String> = bench
+        .findings_by("rev-b")
+        .iter()
+        .map(|finding| finding.id.to_string())
+        .collect();
+    assert_eq!(posted_by_a, vec!["from-a"]);
+    assert_eq!(posted_by_b, vec!["from-b"]);
 
     // The group's own node-output carries the consolidation —
     // consumable by a node AFTER the parallel, never between siblings.
-    let output = bench
-        .group_output("review")
-        .expect("the blackboard group must consolidate into its node-output");
+    let output = bench.group_output("review");
+    assert!(
+        !output.is_empty(),
+        "the blackboard group must consolidate into its node-output"
+    );
     // The group's node-output wraps the consolidated findings in the same
     // `stdout:`/`stderr:` envelope every node's captured output uses.
     let doc: serde_json::Value = serde_norway::from_str(&output).unwrap();
@@ -202,10 +102,20 @@ async fn blackboard_posts_land_hot_and_the_join_consolidates_them() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn consolidation_is_identical_whatever_order_the_posts_arrived_in() {
-    let (terminal_1, state_1, bench_1) =
-        Bench::run(BLACKBOARD_WORKFLOW, &blackboard_fixture(true)).await;
-    let (terminal_2, state_2, bench_2) =
-        Bench::run(BLACKBOARD_WORKFLOW, &blackboard_fixture(false)).await;
+    let bench_1 = Bench::new();
+    let RunReport {
+        terminal: terminal_1,
+        state: state_1,
+    } = bench_1
+        .run(BLACKBOARD_WORKFLOW, &blackboard_fixture(true))
+        .await;
+    let bench_2 = Bench::new();
+    let RunReport {
+        terminal: terminal_2,
+        state: state_2,
+    } = bench_2
+        .run(BLACKBOARD_WORKFLOW, &blackboard_fixture(false))
+        .await;
 
     // Same self-diagnosis rule as above — the state names which
     // child failed and why; the finding digests distinguish "a post
@@ -220,12 +130,16 @@ async fn consolidation_is_identical_whatever_order_the_posts_arrived_in() {
         RunTerminal::Finished,
         "run 2 (b first) state: {state_2:?}"
     );
-    let output_1 = bench_1
-        .group_output("review")
-        .expect("run 1 must consolidate into its node-output");
-    let output_2 = bench_2
-        .group_output("review")
-        .expect("run 2 must consolidate into its node-output");
+    let output_1 = bench_1.group_output("review");
+    assert!(
+        !output_1.is_empty(),
+        "run 1 must consolidate into its node-output"
+    );
+    let output_2 = bench_2.group_output("review");
+    assert!(
+        !output_2.is_empty(),
+        "run 2 must consolidate into its node-output"
+    );
     assert_eq!(
         output_1,
         output_2,
@@ -261,9 +175,9 @@ sessions:
       - { type: run_tool, tool: yunta_get_blackboard }
     outcome: { type: completed, summary: "never reached" }
 "#;
-    let (terminal, state, _bench) = Bench::run(workflow, fixture).await;
+    let RunReport { terminal, state } = Bench::new().run(workflow, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get("rev-a") {
+    match state.nodes.state("rev-a") {
         Some(NodeState::Failed { failure, .. }) => {
             let outcome = failure.to_string();
             assert!(outcome.contains("blackboard"), "got: {outcome}");
@@ -289,15 +203,14 @@ nodes:
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _, bench) = Bench::run(workflow, fixture).await;
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
-    assert_eq!(bench.mock.endpoints_seen(), vec![None]);
-    assert!(!bench
-        .storage
-        .events_for_run(&bench.run_id)
-        .unwrap()
-        .iter()
-        .any(|e| matches!(e.payload(), Some(EventPayload::CapabilityDegraded(_)))));
+    assert_eq!(bench.mock().endpoints_seen(), vec![None]);
+    assert!(!bench.events().iter().any(|e| matches!(
+        e.payload(),
+        Some(EventPayload::Session(SessionEvent::CapabilityDegraded(_)))
+    )));
 }
 
 #[tokio::test]
@@ -315,9 +228,10 @@ capabilities: { run_tools: true }
 sessions:
   - outcome: { type: completed, summary: "done" }
 "#;
-    let (terminal, _, bench) = Bench::run(workflow, fixture).await;
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench.run(workflow, fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
-    let endpoints = bench.mock.endpoints_seen();
+    let endpoints = bench.mock().endpoints_seen();
     assert_eq!(endpoints.len(), 1);
     let endpoint = endpoints[0]
         .as_ref()
@@ -343,9 +257,9 @@ sessions:
   - outcome: { type: completed, summary: "never reached" }
   - outcome: { type: completed, summary: "never reached" }
 "#;
-    let (terminal, state, _bench) = Bench::run(BLACKBOARD_WORKFLOW, fixture).await;
+    let RunReport { terminal, state } = Bench::new().run(BLACKBOARD_WORKFLOW, fixture).await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
-    match state.nodes.get("rev-a") {
+    match state.nodes.state("rev-a") {
         Some(NodeState::Failed { failure, .. }) => {
             let outcome = failure.to_string();
             assert!(
@@ -361,30 +275,25 @@ sessions:
 
 #[test]
 fn consolidate_blackboard_is_invariant_under_event_shuffling() {
-    use yunta_core::events::{Finding, FindingPostedPayload, FindingSeverity, StoredEvent};
-    let finding = |id: &str| Finding {
-        id: id.into(),
-        severity: FindingSeverity::Minor,
-        title: format!("title {id}"),
-        location: "src/x.rs".to_string(),
-        detail: "detail".to_string(),
-        proposed_criterion: None,
-    };
-    let event = |node: &str, id: &str, seq: u64| StoredEvent {
-        run_id: RunId::from("run-x"),
-        seq: seq.into(),
-        timestamp: chrono::Utc::now(),
-        node_id: Some(node.into()),
-        body: EventBody::Known(EventPayload::FindingPosted(FindingPostedPayload {
-            finding: finding(id),
-        })),
+    use yunta_core::events::{Finding, FindingPostedPayload, FindingSeverity};
+    let posted = |id: &str| {
+        EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
+            finding: Finding {
+                id: id.into(),
+                severity: FindingSeverity::Minor,
+                title: format!("title {id}"),
+                location: "src/x.rs".into(),
+                detail: "detail".to_string(),
+                proposed_criterion: None,
+            },
+        }))
     };
     let members = vec!["a".into(), "b".into()];
-    let forward = vec![
-        event("a", "one", 1),
-        event("b", "two", 2),
-        event("a", "three", 3),
-    ];
+    let forward = Log::for_run("run-x")
+        .node("a", posted("one"))
+        .node("b", posted("two"))
+        .node("a", posted("three"))
+        .build();
     let mut reversed = forward.clone();
     reversed.reverse();
 
@@ -398,4 +307,76 @@ fn consolidate_blackboard_is_invariant_under_event_shuffling() {
         .map(|finding| finding["id"].as_str().unwrap())
         .collect();
     assert_eq!(ids, ["one", "three", "two"]);
+}
+
+/// The events of one group: `a` posts `f1` and `f2`, then takes `f1`
+/// back and rewrites `f2`.
+fn group_log() -> Vec<yunta_core::events::StoredEvent> {
+    use yunta_core::events::{
+        Finding, FindingPostedPayload, FindingSeverity, FindingUpdatedPayload,
+        FindingWithdrawnPayload,
+    };
+    let finding = |id: &str, title: &str| Finding {
+        id: id.into(),
+        severity: FindingSeverity::Minor,
+        title: title.to_string(),
+        location: format!("src/{id}.rs").as_str().into(),
+        detail: "detail".to_string(),
+        proposed_criterion: None,
+    };
+    Log::for_run("run-x")
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
+                finding: finding("f1", "taken back"),
+            })),
+        )
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
+                finding: finding("f2", "first wording"),
+            })),
+        )
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
+                id: "f1".into(),
+                reason: "it was the harness, not the code".to_string(),
+            })),
+        )
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
+                finding: finding("f2", "last wording"),
+            })),
+        )
+        .build()
+}
+
+fn consolidated_titles(events: &[yunta_core::events::StoredEvent]) -> Vec<String> {
+    let rendered = yunta_engine::consolidate_blackboard(events, &["a".into()]);
+    let entries: Vec<serde_json::Value> = serde_norway::from_str(&rendered).unwrap();
+    entries
+        .iter()
+        .map(|entry| entry["title"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn a_withdrawn_finding_leaves_the_blackboard() {
+    let titles = consolidated_titles(&group_log());
+    assert!(
+        !titles.iter().any(|title| title == "taken back"),
+        "a finding its author withdrew is not what the group leaves behind, got {titles:?}",
+    );
+}
+
+#[test]
+fn an_updated_finding_shows_its_last_content() {
+    let titles = consolidated_titles(&group_log());
+    assert_eq!(
+        titles,
+        ["last wording"],
+        "the group leaves the content of the latest posting",
+    );
 }

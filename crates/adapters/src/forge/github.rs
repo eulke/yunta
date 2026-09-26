@@ -19,7 +19,7 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use yunta_core::{CommitSha, GitHubRepo, Responder, Secret};
 
-use super::{
+use yunta_core::port::{
     Forge, ForgeError, PolledGate, PublishRequest, PublishedGate, ReviewComment, ReviewOutcome,
 };
 
@@ -73,7 +73,7 @@ impl GitHubForgeBuilder {
             .build()
             .map_err(|source| ForgeError::Transport {
                 action: "build the HTTP client",
-                source,
+                source: Box::new(source),
             })?;
         Ok(GitHubForge {
             client,
@@ -123,7 +123,10 @@ impl GitHubForge {
         let response = request
             .send()
             .await
-            .map_err(|source| ForgeError::Transport { action, source })?;
+            .map_err(|source| ForgeError::Transport {
+                action,
+                source: Box::new(source),
+            })?;
         answer(action, response).await
     }
 
@@ -137,7 +140,10 @@ impl GitHubForge {
             .await?
             .json()
             .await
-            .map_err(|source| ForgeError::Response { action, source })
+            .map_err(|source| ForgeError::Response {
+                action,
+                source: Box::new(source),
+            })
     }
 
     /// Every item of a paginated list, read page after page.
@@ -223,10 +229,14 @@ impl GitHubForge {
         );
         match self.send(action, request).await {
             Ok(response) => {
-                let meta: ContentsMeta = response
-                    .json()
-                    .await
-                    .map_err(|source| ForgeError::Response { action, source })?;
+                let meta: ContentsMeta =
+                    response
+                        .json()
+                        .await
+                        .map_err(|source| ForgeError::Response {
+                            action,
+                            source: Box::new(source),
+                        })?;
                 Ok(Some(meta.sha))
             }
             Err(ForgeError::Http { status: 404, .. }) => Ok(None),

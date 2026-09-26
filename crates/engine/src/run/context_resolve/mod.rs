@@ -76,6 +76,7 @@ use sources::{
     materialize, resolve_artifact, resolve_command, resolve_files, resolve_node_output,
     resolve_run_events, resolve_tasks,
 };
+use yunta_core::events::NodeEvent;
 
 pub(super) use sources::write_node_output;
 
@@ -111,7 +112,26 @@ pub(super) async fn resolve_and_assemble(
 /// reason they're a class of their own.
 #[derive(Default)]
 pub(super) struct StableContextMemo {
-    cache: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+    cache: std::sync::Mutex<std::collections::HashMap<String, Resolved>>,
+}
+
+/// What one source resolved to: the bytes the session is given, and the
+/// optional `files:` paths it went without (D186) — which the bytes
+/// already mark in place, and `context_assembled` names.
+#[derive(Clone)]
+pub(super) struct Resolved {
+    bytes: Vec<u8>,
+    absent: Vec<String>,
+}
+
+impl Resolved {
+    /// A source that found everything it read.
+    fn whole(bytes: Vec<u8>) -> Self {
+        Resolved {
+            bytes,
+            absent: Vec::new(),
+        }
+    }
 }
 
 /// One task brief's context — the same resolution, materialization
@@ -166,7 +186,7 @@ async fn resolve_all(
     let mut run_stable_blocks = Vec::new();
     let mut volatile_blocks = Vec::new();
 
-    mount_artifact_shapes(ctx, node, &mut stable_blocks, &mut sources)?;
+    mount_artifact_shapes(ctx, node, &mut stable_blocks, &mut sources).await?;
 
     for spec in &node.context {
         let source_id = source_id_for(spec);
@@ -182,26 +202,31 @@ async fn resolve_all(
                 .get(&source_id)
                 .cloned()
         });
-        let content = match cached {
-            Some(content) => content,
+        let Resolved {
+            bytes: content,
+            absent,
+        } = match cached {
+            Some(resolved) => resolved,
             None => {
-                let content = resolve_one(ctx, node, &source_id, spec, cancel).await?;
+                let resolved = resolve_one(ctx, node, &source_id, spec, cancel).await?;
                 if let Some(memo) = memoizable {
                     memo.cache
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
-                        .insert(source_id.clone(), content.clone());
+                        .insert(source_id.clone(), resolved.clone());
                 }
-                content
+                resolved
             }
         };
         let (path, content_hash) =
-            materialize(ctx.run_dir, &content).map_err(|source| ContextResolveError::Io {
-                node: node.id.clone(),
-                source_id: source_id.clone(),
-                action: "materialize resolved context".to_string(),
-                source,
-            })?;
+            materialize(ctx.run_dir, &content)
+                .await
+                .map_err(|source| ContextResolveError::Io {
+                    node: node.id.clone(),
+                    source_id: source_id.clone(),
+                    action: "materialize resolved context".to_string(),
+                    source,
+                })?;
 
         // The configurable threshold: `limits.inline_context_bytes`,
         // reference default 32000 — the resolved value lives in
@@ -217,6 +242,7 @@ async fn resolve_all(
             source_id,
             kind: kind.to_string(),
             content_hash,
+            absent,
         });
     }
 
@@ -267,11 +293,11 @@ async fn assembled(
 
     ctx.emit(
         Some(&node.id),
-        EventPayload::ContextAssembled(ContextAssembledPayload {
+        EventPayload::Node(NodeEvent::ContextAssembled(ContextAssembledPayload {
             task_id: task_id.cloned(),
             sources,
             segment_hashes,
-        }),
+        })),
     )
     .await
     .map_err(|source| ContextResolveError::Io {
@@ -290,9 +316,9 @@ async fn resolve_one(
     source_id: &str,
     spec: &ContextSpec,
     cancel: &CancellationToken,
-) -> Result<Vec<u8>, ContextResolveError> {
-    match spec {
-        ContextSpec::Files { files } => resolve_files(ctx, node, source_id, files).await,
+) -> Result<Resolved, ContextResolveError> {
+    let bytes = match spec {
+        ContextSpec::Files { files } => return resolve_files(ctx, node, source_id, files).await,
         ContextSpec::Command { command } => {
             resolve_command(ctx, node, source_id, command, cancel).await
         }
@@ -310,7 +336,8 @@ async fn resolve_one(
             resolve_node_output(ctx, node, source_id, node_output).await
         }
         ContextSpec::Mcp { mcp } => resolve_mcp(ctx, node, source_id, mcp).await,
-    }
+    }?;
+    Ok(Resolved::whole(bytes))
 }
 
 /// Below `inline_threshold` materialized bytes, a source's content is
@@ -368,7 +395,14 @@ fn stability_class(spec: &ContextSpec) -> StabilityClass {
 
 fn source_id_for(spec: &ContextSpec) -> String {
     match spec {
-        ContextSpec::Files { files } => format!("files:{}", files.join(",")),
+        ContextSpec::Files { files } => format!(
+            "files:{}",
+            files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
         ContextSpec::Command { command } => format!("command:{command}"),
         ContextSpec::Artifact { artifact } => match &artifact.node {
             Some(node) => format!("artifact:{}/{}", node, artifact.id),

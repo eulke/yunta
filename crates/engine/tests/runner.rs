@@ -1,3 +1,11 @@
+//! Resolving a runner to the candidate that runs it: the first available
+//! one in declared order, an `--adapter` override ahead of that order,
+//! and the agent the chosen candidate carries.
+//!
+//! A candidate passed over is recorded with the reason it was passed
+//! over, and a runner with nothing available is an error naming
+//! everything that was tried.
+
 use yunta_core::ConfigLayer;
 use yunta_engine::{resolve_runner, RunnerError};
 

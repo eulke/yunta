@@ -10,10 +10,13 @@ use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::ServiceExt;
 use serde_json::json;
-use yunta_core::events::{EventDraft, EventPayload};
-use yunta_core::{NodeId, RunId, TaskId, Workflow};
-use yunta_engine::{open_session_listener, RunToolsHost, RunToolsSession};
-use yunta_storage::Storage;
+use yunta_core::events::{
+    CriteriaCheckedPayload, CriterionResult, CriterionType, EventPayload, FindingEvent, NodeEvent,
+    Phase, ScopeCheckedPayload, TaskEvent, TaskStatus, TaskStatusChangedPayload,
+};
+use yunta_core::TaskId;
+use yunta_engine::RunToolsSession;
+use yunta_testkit::ToolsHost;
 
 const BLACKBOARD_WORKFLOW: &str = r#"
 name: coordinated
@@ -39,149 +42,37 @@ nodes:
         run: "true"
 "#;
 
-struct Bench {
-    _root: tempfile::TempDir,
-    run_dir: std::path::PathBuf,
-    storage: Storage,
-    run_id: RunId,
-    host: Arc<RunToolsHost>,
-}
-
-/// A clock frozen at a distinctive instant, so a test can prove an event
-/// carries the run's injected clock rather than wall time.
-struct FrozenClock;
-
-impl yunta_core::Clock for FrozenClock {
-    fn now(&self) -> chrono::DateTime<chrono::Utc> {
-        chrono::DateTime::parse_from_rfc3339("2020-02-02T02:02:02Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc)
-    }
-}
-
-impl Bench {
-    fn new() -> Self {
-        Self::with_clock(Arc::new(yunta_core::SystemClock))
-    }
-
-    fn with_clock(clock: Arc<dyn yunta_core::Clock>) -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        let run_id = RunId::from("run-tools-1");
-        let workflow: Workflow = serde_norway::from_str(BLACKBOARD_WORKFLOW).unwrap();
-        // Every log opens with run_created — the listener's own
-        // appends land on an already-born run in production too.
-        storage
-            .append(
-                &EventDraft {
-                    run_id: run_id.clone(),
-                    node_id: None,
-                    payload: EventPayload::RunCreated(yunta_core::events::RunCreatedPayload {
-                        manifest_hash: yunta_core::sha256_hex(b"test-manifest"),
-                        inputs: Default::default(),
-                        mode: "default".into(),
-                        promoted_from: None,
-                        yunta_schema: None,
-                        base_branch: "main".to_string(),
-                        base_commit: "deadbeef".into(),
-                    }),
+/// Puts a finding under `node` on the log, as a node that already
+/// reported one leaves it.
+fn seed_finding(host: &ToolsHost, node: &str, id: &str) {
+    host.record(
+        Some(node),
+        EventPayload::Findings(FindingEvent::Posted(
+            yunta_core::events::FindingPostedPayload {
+                finding: yunta_core::events::Finding {
+                    id: id.into(),
+                    severity: yunta_core::events::FindingSeverity::Minor,
+                    title: format!("seeded {id}"),
+                    location: "src/lib.rs".into(),
+                    detail: "seeded directly".to_string(),
+                    proposed_criterion: None,
                 },
-                &yunta_core::SystemClock,
-            )
-            .unwrap();
-        let run_dir = root.path().join("run");
-        // The directories `create_run` gives every run: the view the
-        // engine writes, and the working space every node stages in.
-        for dir in [
-            yunta_core::ARTIFACTS_DIR,
-            yunta_engine::run_dir::SCRATCH_DIR,
-        ] {
-            std::fs::create_dir_all(run_dir.join(dir)).unwrap();
-        }
-        let host = Arc::new(RunToolsHost::new(
-            storage.async_handle(),
-            run_id.clone(),
-            &workflow,
-            clock,
-            run_dir.clone(),
-            None,
-        ));
-        Bench {
-            _root: root,
-            run_dir,
-            storage,
-            run_id,
-            host,
-        }
-    }
-
-    /// Where `node` writes what it declares, created as an attempt of
-    /// that node would create it.
-    fn staging(&self, node: &str) -> std::path::PathBuf {
-        let dir = yunta_engine::run_dir::staging(&self.run_dir, &node.into());
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    async fn listener(&self, node: &str, task: Option<&str>) -> RunToolsSession {
-        self.listener_for(node, task, Vec::new()).await
-    }
-
-    async fn listener_for(
-        &self,
-        node: &str,
-        task: Option<&str>,
-        declared: Vec<yunta_core::ArtifactSpec>,
-    ) -> RunToolsSession {
-        open_session_listener(
-            yunta_engine::RunToolsAccess {
-                host: self.host.clone(),
-                node: NodeId::from(node),
-                declared,
             },
-            task.map(TaskId::from),
-            self._root.path().to_path_buf(),
-        )
-        .await
-        .unwrap()
-    }
+        )),
+    );
+}
 
-    fn seed_finding(&self, node: &str, id: &str) {
-        self.storage
-            .append(
-                &EventDraft {
-                    run_id: self.run_id.clone(),
-                    node_id: Some(NodeId::from(node)),
-                    payload: EventPayload::FindingPosted(
-                        yunta_core::events::FindingPostedPayload {
-                            finding: yunta_core::events::Finding {
-                                id: id.into(),
-                                severity: yunta_core::events::FindingSeverity::Minor,
-                                title: format!("seeded {id}"),
-                                location: "src/lib.rs".to_string(),
-                                detail: "seeded directly".to_string(),
-                                proposed_criterion: None,
-                            },
-                        },
-                    ),
-                },
-                &yunta_core::SystemClock,
-            )
-            .unwrap();
-    }
-
-    fn findings_by(&self, node: &str) -> Vec<String> {
-        self.storage
-            .events_for_run(&self.run_id)
-            .unwrap()
-            .into_iter()
-            .filter(|e| e.node_id.as_ref().map(|n| n.as_str()) == Some(node))
-            .filter_map(|e| match e.payload() {
-                Some(EventPayload::FindingPosted(p)) => Some(p.finding.id.to_string()),
-                _ => None,
-            })
-            .collect()
-    }
+/// The id of every finding posted under `node`, in the order the log
+/// carries them.
+fn findings_by(host: &ToolsHost, node: &str) -> Vec<String> {
+    host.events()
+        .into_iter()
+        .filter(|e| e.node_id.as_ref().map(|n| n.as_str()) == Some(node))
+        .filter_map(|e| match e.payload() {
+            Some(EventPayload::Findings(FindingEvent::Posted(p))) => Some(p.finding.id.to_string()),
+            _ => None,
+        })
+        .collect()
 }
 
 async fn client_for(
@@ -228,8 +119,8 @@ async fn call(
 
 #[tokio::test]
 async fn a_wrong_bearer_token_is_rejected_before_any_tool_runs() {
-    let bench = Bench::new();
-    let session = bench.listener("solo", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
 
     let denied = client_for(&session, Some("not-the-token")).await;
     assert!(
@@ -247,8 +138,8 @@ async fn a_wrong_bearer_token_is_rejected_before_any_tool_runs() {
 
 #[tokio::test]
 async fn post_finding_lands_on_the_log_under_the_sessions_own_node() {
-    let bench = Bench::new();
-    let session = bench.listener("solo", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
     let client = client_for(&session, None).await.unwrap();
 
     let (is_error, text) = call(
@@ -264,7 +155,7 @@ async fn post_finding_lands_on_the_log_under_the_sessions_own_node() {
     )
     .await;
     assert!(!is_error, "got: {text}");
-    assert_eq!(bench.findings_by("solo"), vec!["hot-1"]);
+    assert_eq!(findings_by(&host, "solo"), vec!["hot-1"]);
 
     // An incomplete report is a visible error naming the schema — and a
     // no-op on the log: reporting badly must fail visibly, not silently.
@@ -276,7 +167,7 @@ async fn post_finding_lands_on_the_log_under_the_sessions_own_node() {
     .await;
     assert!(is_error);
     assert!(text.contains("severity"), "got: {text}");
-    assert_eq!(bench.findings_by("solo").len(), 1);
+    assert_eq!(findings_by(&host, "solo").len(), 1);
     client.cancel().await.unwrap();
 }
 
@@ -285,8 +176,9 @@ async fn a_tool_written_event_carries_the_runs_injected_clock() {
     // The finding a tool writes is stamped by the run's own clock, not a
     // fresh `SystemClock` — so a run driven by a fixed clock is
     // reproducible through its listener's events too.
-    let bench = Bench::with_clock(Arc::new(FrozenClock));
-    let session = bench.listener("solo", None).await;
+    let clock = Arc::new(yunta_testkit_core::AtClock::rfc3339("2020-02-02T02:02:02Z"));
+    let host = ToolsHost::stamped_by(BLACKBOARD_WORKFLOW, clock.clone());
+    let session = host.session("solo", None).await;
     let client = client_for(&session, None).await.unwrap();
 
     let (is_error, text) = call(
@@ -304,30 +196,28 @@ async fn a_tool_written_event_carries_the_runs_injected_clock() {
     assert!(!is_error, "got: {text}");
     client.cancel().await.unwrap();
 
-    let event = bench
-        .storage
-        .events_for_run(&bench.run_id)
-        .unwrap()
+    let event = host
+        .events()
         .into_iter()
         .find(|e| {
             matches!(
                 e.payload(),
-                Some(EventPayload::FindingPosted(p)) if p.finding.id.as_str() == "clocked"
+                Some(EventPayload::Findings(FindingEvent::Posted(p))) if p.finding.id.as_str() == "clocked"
             )
         })
         .expect("the finding is on the log");
-    assert_eq!(event.timestamp, yunta_core::Clock::now(&FrozenClock));
+    assert_eq!(event.timestamp, yunta_core::Clock::now(clock.as_ref()));
 }
 
 // --- yunta_get_blackboard (mount rule, read rule) --------------------
 
 #[tokio::test]
 async fn blackboard_is_not_mounted_outside_a_blackboard_group() {
-    let bench = Bench::new();
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
     // `solo` is no group's child; `reviewer` sits in an `independent`
     // group — neither may even see the tool.
     for node in ["solo", "reviewer"] {
-        let session = bench.listener(node, None).await;
+        let session = host.session(node, None).await;
         let client = client_for(&session, None).await.unwrap();
         let tools = client.list_tools(None).await.unwrap();
         assert!(
@@ -347,12 +237,12 @@ async fn blackboard_is_not_mounted_outside_a_blackboard_group() {
 
 #[tokio::test]
 async fn blackboard_serves_own_posts_only_while_the_group_runs() {
-    let bench = Bench::new();
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
     // A sibling (worker-b) and a foreign node (reviewer) already posted.
-    bench.seed_finding("worker-b", "sibling-post");
-    bench.seed_finding("reviewer", "foreign-post");
+    seed_finding(&host, "worker-b", "sibling-post");
+    seed_finding(&host, "reviewer", "foreign-post");
 
-    let session = bench.listener("worker-a", None).await;
+    let session = host.session("worker-a", None).await;
     let client = client_for(&session, None).await.unwrap();
 
     let (is_error, text) = call(
@@ -381,6 +271,23 @@ async fn blackboard_serves_own_posts_only_while_the_group_runs() {
         .map(|finding| finding["id"].as_str().unwrap())
         .collect();
     assert_eq!(ids, ["own-post"]);
+
+    // Taken back, it leaves the board its author reads, the same way it
+    // leaves the group's consolidation.
+    let (is_error, text) = call(
+        &client,
+        "yunta_withdraw_finding",
+        json!({ "id": "own-post", "reason": "it was the harness, not the code" }),
+    )
+    .await;
+    assert!(!is_error, "got: {text}");
+    let (is_error, text) = call(&client, "yunta_get_blackboard", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    let board: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(
+        board["findings"].as_array().unwrap().is_empty(),
+        "a withdrawn post is not what its author still stands by: {text}",
+    );
     client.cancel().await.unwrap();
 }
 
@@ -388,25 +295,20 @@ async fn blackboard_serves_own_posts_only_while_the_group_runs() {
 
 #[tokio::test]
 async fn task_status_reflects_the_task_state_derived_from_the_log() {
-    let bench = Bench::new();
-    bench
-        .storage
-        .append(
-            &EventDraft {
-                run_id: bench.run_id.clone(),
-                node_id: Some(NodeId::from("implement")),
-                payload: EventPayload::TaskRegistered(yunta_core::events::TaskRegisteredPayload {
-                    task_id: TaskId::from("T001"),
-                    criteria: Vec::new(),
-                    scope: Vec::new(),
-                    depends_on: Vec::new(),
-                }),
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    host.record(
+        Some("implement"),
+        EventPayload::Tasks(TaskEvent::Registered(
+            yunta_core::events::TaskRegisteredPayload {
+                task_id: TaskId::from("T001"),
+                criteria: Vec::new(),
+                scope: Vec::new(),
+                depends_on: Vec::new(),
             },
-            &yunta_core::SystemClock,
-        )
-        .unwrap();
+        )),
+    );
 
-    let session = bench.listener("solo", None).await;
+    let session = host.session("solo", None).await;
     let client = client_for(&session, None).await.unwrap();
     let (is_error, text) = call(&client, "yunta_task_status", json!({})).await;
     assert!(!is_error, "got: {text}");
@@ -419,8 +321,8 @@ async fn task_status_reflects_the_task_state_derived_from_the_log() {
 
 #[tokio::test]
 async fn scope_expansion_request_round_trips_through_the_real_consumer() {
-    let bench = Bench::new();
-    let session = bench.listener("implement", Some("T001")).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("implement", Some("T001")).await;
     let client = client_for(&session, None).await.unwrap();
 
     let (is_error, text) = call(
@@ -452,7 +354,8 @@ async fn scope_expansion_request_round_trips_through_the_real_consumer() {
     // The file the tool wrote is the exact artifact the engine's
     // existing post-attempt evaluation consumes — proven by parsing it
     // with the real consumer, not a mirror type.
-    let request = yunta_engine::scope_expansion::load_request(bench._root.path())
+    let request = yunta_engine::scope_expansion::load_request(&host.attempt_dir())
+        .await
         .unwrap()
         .expect("the request file must exist and parse");
     assert_eq!(request.paths, vec!["src/session/store.rs"]);
@@ -465,8 +368,8 @@ async fn scope_expansion_request_round_trips_through_the_real_consumer() {
 
 #[tokio::test]
 async fn scope_expansion_is_refused_for_sessions_without_a_task() {
-    let bench = Bench::new();
-    let session = bench.listener("solo", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
     let client = client_for(&session, None).await.unwrap();
 
     let tools = client.list_tools(None).await.unwrap();
@@ -491,13 +394,225 @@ async fn scope_expansion_is_refused_for_sessions_without_a_task() {
     client.cancel().await.unwrap();
 }
 
+// --- yunta_task / yunta_check_task (task sessions only) ----------------
+
+/// A task as the tasks document writes it: notes for a runner with no
+/// history of the repo, one criterion red until the work is done, and a
+/// guard that must stay green.
+fn greeting_task() -> yunta_core::Task {
+    serde_norway::from_str(
+        r#"
+id: T001
+title: Write the greeting
+notes: the greeting lives in hello.txt
+scope: [hello.txt]
+criteria:
+  - cmd: test -f hello.txt
+  - { cmd: "true", type: guard }
+"#,
+    )
+    .unwrap()
+}
+
+/// A unit that is only a place to stand: a tool that reads never looks
+/// at its tree.
+fn unit_at(worktree: std::path::PathBuf) -> yunta_engine::Unit {
+    yunta_engine::Unit {
+        who: yunta_engine::UnitId::Task(TaskId::from("T001")),
+        worktree,
+        base: yunta_core::CommitSha::from_static("deadbeef"),
+        from: yunta_core::TreeId::from_static("deadbeef"),
+    }
+}
+
+/// A `criteria_checked` of T001, with each command's exit code.
+fn checked(phase: Phase, exits: [i32; 2]) -> EventPayload {
+    EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
+        task_id: TaskId::from("T001"),
+        phase,
+        results: vec![
+            CriterionResult {
+                cmd: "test -f hello.txt".to_string(),
+                exit_code: exits[0],
+                r#type: None,
+                reused: false,
+                duration_ms: None,
+            },
+            CriterionResult {
+                cmd: "true".to_string(),
+                exit_code: exits[1],
+                r#type: Some(CriterionType::Guard),
+                reused: false,
+                duration_ms: None,
+            },
+        ],
+    }))
+}
+
+/// A log in the middle of T001's second cycle: a check from the cycle
+/// before, the loop setting it running again, this cycle's pre-check,
+/// and one attempt that left the criterion red and wrote outside scope.
+fn a_second_cycle_with_one_attempt(host: &ToolsHost) {
+    let registered = host.record(
+        Some("plan"),
+        EventPayload::Tasks(TaskEvent::Registered(
+            yunta_core::events::TaskRegisteredPayload {
+                task_id: TaskId::from("T001"),
+                criteria: Vec::new(),
+                scope: Vec::new(),
+                depends_on: Vec::new(),
+            },
+        )),
+    );
+    // A check from a cycle that already ended is not this cycle's.
+    host.record(Some("implement"), checked(Phase::Post, [0, 0]));
+    host.record(
+        Some("implement"),
+        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+            TaskId::from("T001"),
+            TaskStatus::Running,
+            registered,
+        ))),
+    );
+    host.record(Some("implement"), checked(Phase::Pre, [1, 0]));
+    host.record(Some("implement"), checked(Phase::Post, [1, 0]));
+    host.record(
+        Some("implement"),
+        EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {
+            task_id: Some(TaskId::from("T001")),
+            diff: vec!["notes.md".into()],
+            violations: vec!["notes.md".into()],
+        })),
+    );
+}
+
+#[tokio::test]
+async fn a_task_session_reads_its_task_and_its_cycle_from_the_run() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    a_second_cycle_with_one_attempt(&host);
+
+    let mut access = host.task_access(greeting_task(), unit_at(host.attempt_dir()));
+    access.scope.push("docs/**".into());
+    let session = host.task_session("implement", access).await;
+    let client = client_for(&session, None).await.unwrap();
+    let (is_error, text) = call(&client, "yunta_task", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    let red = json!({"cmd": "test -f hello.txt", "guard": false, "exit_code": 1});
+    let guard = json!({"cmd": "true", "guard": true, "exit_code": 0});
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+        json!({
+            "id": "T001",
+            "title": "Write the greeting",
+            "notes": "the greeting lives in hello.txt",
+            "scope": ["hello.txt", "docs/**"],
+            "criteria": [
+                {"cmd": "test -f hello.txt", "guard": false},
+                {"cmd": "true", "guard": true},
+            ],
+            "checks": [
+                {"phase": "pre", "criteria": [red, guard]},
+                {"phase": "post", "attempt": 1, "criteria": [red, guard], "outside_scope": ["notes.md"]},
+            ],
+        }),
+        "the task the cycle judges by, its granted scope included, and only this cycle's checks"
+    );
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_check_judges_the_work_the_way_its_close_will() {
+    let owner = yunta_testkit::Owner::new();
+    let repo = tempfile::tempdir().unwrap();
+    yunta_testkit::init_repo(repo.path());
+    let unit = yunta_engine::Unit {
+        from: yunta_engine::head_tree(repo.path(), owner.supervision())
+            .await
+            .unwrap(),
+        base: yunta_engine::head_commit(repo.path(), owner.supervision())
+            .await
+            .unwrap(),
+        ..unit_at(repo.path().to_path_buf())
+    };
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let access = host.task_access(greeting_task(), unit);
+    let session = host.task_session("implement", access).await;
+    let client = client_for(&session, None).await.unwrap();
+
+    // The criterion is still red, and the work strayed outside the scope.
+    tokio::fs::write(repo.path().join("notes.md"), "draft")
+        .await
+        .unwrap();
+    let (is_error, text) = call(&client, "yunta_check_task", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+        json!({
+            "closes": false,
+            "criteria": [
+                {"cmd": "test -f hello.txt", "guard": false, "exit_code": 1},
+                {"cmd": "true", "guard": true, "exit_code": 0},
+            ],
+            "outside_scope": ["notes.md"],
+        })
+    );
+
+    // The work done, and nothing left outside: the close would take it.
+    tokio::fs::remove_file(repo.path().join("notes.md"))
+        .await
+        .unwrap();
+    tokio::fs::write(repo.path().join("hello.txt"), "hello")
+        .await
+        .unwrap();
+    let (is_error, text) = call(&client, "yunta_check_task", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    let verdict: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(verdict["closes"], json!(true), "got: {text}");
+    assert_eq!(verdict["outside_scope"], json!([]));
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn the_task_tools_are_served_to_task_sessions_only() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+
+    let task_session = host.session("implement", Some("T001")).await;
+    let client = client_for(&task_session, None).await.unwrap();
+    let listed = client.list_tools(None).await.unwrap();
+    for tool in ["yunta_task", "yunta_check_task"] {
+        assert!(
+            listed.tools.iter().any(|t| t.name == tool),
+            "a task session is served `{tool}`"
+        );
+    }
+    client.cancel().await.unwrap();
+
+    let session = host.session("solo", None).await;
+    let client = client_for(&session, None).await.unwrap();
+    let listed = client.list_tools(None).await.unwrap();
+    for tool in ["yunta_task", "yunta_check_task"] {
+        assert!(
+            !listed.tools.iter().any(|t| t.name == tool),
+            "a session with no task is not even offered `{tool}`"
+        );
+    }
+    let (is_error, text) = call(&client, "yunta_task", json!({})).await;
+    assert!(is_error);
+    assert_eq!(
+        text,
+        "`yunta_task` answers about a task, and this session works none — only a loop's task \
+         sessions are served it"
+    );
+    client.cancel().await.unwrap();
+}
+
 // --- ✓ del plan: concurrent posts, no race -----------------------------------
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_concurrent_sessions_post_interleaved_without_losing_or_misattributing_any() {
-    let bench = Bench::new();
-    let session_a = bench.listener("worker-a", None).await;
-    let session_b = bench.listener("worker-b", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session_a = host.session("worker-a", None).await;
+    let session_b = host.session("worker-b", None).await;
     let client_a = client_for(&session_a, None).await.unwrap();
     let client_b = client_for(&session_b, None).await.unwrap();
 
@@ -521,8 +636,8 @@ async fn two_concurrent_sessions_post_interleaved_without_losing_or_misattributi
         assert!(!is_error, "got: {text}");
     }
 
-    let by_a = bench.findings_by("worker-a");
-    let by_b = bench.findings_by("worker-b");
+    let by_a = findings_by(&host, "worker-a");
+    let by_b = findings_by(&host, "worker-b");
     assert_eq!(by_a.len(), 8, "worker-a posts lost: {by_a:?}");
     assert_eq!(by_b.len(), 8, "worker-b posts lost: {by_b:?}");
     assert!(by_a.iter().all(|id| id.starts_with("worker-a-")));
@@ -535,13 +650,25 @@ async fn two_concurrent_sessions_post_interleaved_without_losing_or_misattributi
 
 #[tokio::test]
 async fn dropping_the_session_closes_the_endpoint() {
-    let bench = Bench::new();
-    let session = bench.listener("solo", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
     let url = session.endpoint.url.clone();
     let token = session.endpoint.token.expose().clone();
     drop(session);
-    // Give the graceful shutdown a beat to release the socket.
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    // The graceful shutdown releases the socket on its own schedule.
+    yunta_testkit::wait_until_async(
+        || {
+            let (url, token) = (url.clone(), token.clone());
+            async move {
+                let config = StreamableHttpClientTransportConfig::with_uri(url).auth_header(token);
+                let transport =
+                    StreamableHttpClientTransport::with_client(reqwest::Client::default(), config);
+                ().serve(transport).await.is_err()
+            }
+        },
+        || "the dropped session's endpoint went on serving clients".to_string(),
+    )
+    .await;
 
     let config = StreamableHttpClientTransportConfig::with_uri(url).auth_header(token);
     let transport = StreamableHttpClientTransport::with_client(reqwest::Client::default(), config);
@@ -602,8 +729,10 @@ async fn submit_plan(client: &rmcp::service::RunningService<rmcp::RoleClient, ()
 
 #[tokio::test]
 async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
-    let bench = Bench::new();
-    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host
+        .session_declaring("plan", None, vec![tasks_spec()])
+        .await;
     let client = client_for(&session, None).await.unwrap();
     submit_plan(&client).await;
 
@@ -611,28 +740,31 @@ async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
     assert!(!is_error, "got: {text}");
     assert!(text.contains("tasks — ok"), "{text}");
     assert!(
-        text.contains("1 task(s) registered: `t1`"),
+        text.contains("1 task registered: `t1`"),
         "the session sees its meaning survived, not only its syntax: {text}"
     );
 }
 
 #[tokio::test]
 async fn a_check_before_the_document_is_handed_over_says_what_the_close_would() {
-    let bench = Bench::new();
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
     // A tasks document written by hand where a command node writes one.
     // This node's document arrives through the tool, so the file is not
     // it — and the session is told exactly what its close would say,
     // word for word, instead of a confidence the close will not honour.
     std::fs::write(
-        bench.staging("plan").join("tasks.yaml"),
+        host.staging("plan").join("tasks.yaml"),
         "tasks:\n  - id: t1\n    title: Work\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
     )
     .unwrap();
-    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let session = host
+        .session_declaring("plan", None, vec![tasks_spec()])
+        .await;
     let client = client_for(&session, None).await.unwrap();
     let (_, text) = call(&client, "yunta_check_artifact", json!({"name": "tasks"})).await;
 
-    let close = yunta_engine::close_artifacts(&plan_node(), &bench.run_dir, &[], None)
+    let close = yunta_engine::close_artifacts(&plan_node(), &host.run_dir, &[], None)
+        .await
         .expect_err("the close owes the document nobody handed over");
     assert!(
         text.contains(&close[0].to_string()),
@@ -646,13 +778,15 @@ async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() 
     // Once a document is handed over it is a fact of the run. The verdict
     // is about that document, so a file somebody wrote over afterwards
     // does not change what the session is told.
-    let bench = Bench::new();
-    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host
+        .session_declaring("plan", None, vec![tasks_spec()])
+        .await;
     let client = client_for(&session, None).await.unwrap();
     submit_plan(&client).await;
 
     std::fs::write(
-        bench.staging("plan").join("tasks.yaml"),
+        host.staging("plan").join("tasks.yaml"),
         "not a tasks document at all\n",
     )
     .unwrap();
@@ -660,15 +794,17 @@ async fn a_check_of_a_submitted_document_reads_the_run_not_the_file_beside_it() 
     assert!(!is_error, "got: {text}");
     assert!(text.contains("tasks — ok"), "{text}");
     assert!(
-        text.contains("1 task(s) registered: `t1`"),
+        text.contains("1 task registered: `t1`"),
         "the verdict is about the document the run holds: {text}"
     );
 }
 
 #[tokio::test]
 async fn a_check_of_an_artifact_this_node_never_declared_says_which_it_declares() {
-    let bench = Bench::new();
-    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host
+        .session_declaring("plan", None, vec![tasks_spec()])
+        .await;
     let client = client_for(&session, None).await.unwrap();
     let (is_error, text) = call(
         &client,
@@ -690,8 +826,10 @@ async fn a_check_of_an_artifact_this_node_never_declared_says_which_it_declares(
 /// tool to arrive through.
 #[tokio::test]
 async fn only_the_kinds_this_node_declares_have_a_submission_tool() {
-    let bench = Bench::new();
-    let session = bench.listener_for("plan", None, vec![tasks_spec()]).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host
+        .session_declaring("plan", None, vec![tasks_spec()])
+        .await;
     let client = client_for(&session, None).await.unwrap();
 
     let tools = client.list_tools(None).await.unwrap();
@@ -720,8 +858,8 @@ async fn only_the_kinds_this_node_declares_have_a_submission_tool() {
 
 #[tokio::test]
 async fn a_node_with_nothing_to_check_says_so_rather_than_reporting_success() {
-    let bench = Bench::new();
-    let session = bench.listener("plan", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("plan", None).await;
     let client = client_for(&session, None).await.unwrap();
     let (is_error, text) = call(&client, "yunta_check_artifact", json!({})).await;
     assert!(is_error, "{text}");
@@ -840,8 +978,8 @@ fn assert_serves_the_session_tools(result: &serde_json::Value) {
 
 #[tokio::test]
 async fn a_modern_client_lists_the_session_tools_without_a_handshake() {
-    let bench = Bench::new();
-    let session = bench.listener("solo", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
 
     let discovered = post(
         &session,
@@ -892,8 +1030,8 @@ async fn a_modern_client_lists_the_session_tools_without_a_handshake() {
 
 #[tokio::test]
 async fn a_legacy_client_still_initializes_and_lists_the_same_tools() {
-    let bench = Bench::new();
-    let session = bench.listener("solo", None).await;
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
 
     let opened = post(
         &session,
@@ -946,4 +1084,35 @@ async fn a_legacy_client_still_initializes_and_lists_the_same_tools() {
     assert_eq!(listed.status(), 200, "the list is answered");
     let listed = result_of(&listed.text().await.unwrap());
     assert_serves_the_session_tools(&listed);
+}
+
+#[test]
+fn the_catalog_and_the_dispatch_name_the_same_tools() {
+    // A tool's name is written once. These are the two readings of that
+    // one place: the catalog offers a session the name, and the dispatch
+    // reads a call back by it — so a name that parses is a name the
+    // catalog can offer, and a name the catalog offers is one the
+    // dispatch answers.
+    for tool in yunta_engine::RunTool::all() {
+        assert_eq!(
+            yunta_engine::RunTool::parse(tool.name()),
+            Some(tool),
+            "`{}` is offered and must be answered",
+            tool.name()
+        );
+        assert!(
+            tool.name().starts_with("yunta_"),
+            "a run tool is named in the engine's own namespace: {}",
+            tool.name()
+        );
+    }
+    assert_eq!(yunta_engine::RunTool::parse("yunta_nonesuch"), None);
+
+    // And the set is exactly the submittable kinds plus the nine fixed
+    // tools, so a kind that gains a submission tool gains its tool here.
+    let submissions = yunta_core::ArtifactKind::ALL
+        .into_iter()
+        .filter(|kind| kind.submit_tool().is_some())
+        .count();
+    assert_eq!(yunta_engine::RunTool::all().len(), 9 + submissions);
 }

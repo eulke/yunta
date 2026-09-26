@@ -2,7 +2,7 @@
 # tasks document's one task, lint and the baseline check pass on the crate it
 # bootstrapped, and the run pauses at `ship` — the first human decision
 # this mode keeps — before anything is pushed.
-workflow: build-feature
+workflow: fragua
 mode: quick
 inputs: { idea: "add dark mode" }
 worktree: worktrees/library
@@ -11,6 +11,7 @@ expect:
   final_state: paused
   nodes:
     grill: finished
+    brief: finished
     plan: finished
     implement: finished
     lint: finished

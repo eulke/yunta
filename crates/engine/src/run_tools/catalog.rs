@@ -12,26 +12,53 @@
 use rmcp::model::Tool;
 use serde_json::{json, Value};
 use yunta_core::ArtifactKind;
+pub use yunta_core::RunTool;
 
 use super::session::SessionTools;
 
+trait RunToolCatalog {
+    fn offered_to(self, session: &SessionTools) -> bool;
+    fn declared(self) -> Tool;
+}
+
+impl RunToolCatalog for RunTool {
+    /// Whether `session` is served this tool.
+    fn offered_to(self, session: &SessionTools) -> bool {
+        match self {
+            RunTool::RequestScopeExpansion | RunTool::Task | RunTool::CheckTask => {
+                session.task.is_some()
+            }
+            RunTool::GetBlackboard => session.in_blackboard_group(),
+            RunTool::Submit(kind) => session.submits(kind),
+            _ => true,
+        }
+    }
+
+    /// The tool as the session is offered it: its name, what it does,
+    /// and the shape of what it takes.
+    fn declared(self) -> Tool {
+        match self {
+            RunTool::CheckArtifact => check_artifact_tool(),
+            RunTool::TaskStatus => task_status_tool(),
+            RunTool::Task => task_tool(),
+            RunTool::CheckTask => check_task_tool(),
+            RunTool::GetBlackboard => blackboard_tool(),
+            RunTool::RequestScopeExpansion => scope_expansion_tool(),
+            RunTool::PostFinding => post_finding_tool(),
+            RunTool::UpdateFinding => update_finding_tool(),
+            RunTool::WithdrawFinding => withdraw_finding_tool(),
+            RunTool::Submit(kind) => submit_tool(self.name(), kind),
+        }
+    }
+}
+
 /// The tools this session is served, in the order it reads them.
 pub(super) fn mounted(session: &SessionTools) -> Vec<Tool> {
-    let mut tools = vec![
-        check_artifact_tool(),
-        post_finding_tool(),
-        update_finding_tool(),
-        withdraw_finding_tool(),
-    ];
-    tools.extend(submission_tools(session));
-    tools.push(task_status_tool());
-    if session.task.is_some() {
-        tools.push(scope_expansion_tool());
-    }
-    if session.in_blackboard_group() {
-        tools.push(blackboard_tool());
-    }
-    tools
+    RunTool::all()
+        .into_iter()
+        .filter(|tool| tool.offered_to(session))
+        .map(RunTool::declared)
+        .collect()
 }
 
 fn check_artifact_tool() -> Tool {
@@ -104,6 +131,33 @@ fn task_status_tool() -> Tool {
     )
 }
 
+fn task_tool() -> Tool {
+    Tool::new(
+        RunTool::Task.name(),
+        "Read the task this session works, from the run's tasks document: its id, title \
+         and notes; `scope`, the globs every change must stay inside (what the task declared \
+         plus what was granted to it); and `criteria`, the commands that must all exit 0 \
+         when your session ends — a criterion is red before the work starts, and a `guard` \
+         is green before it and must stay green. `checks` lists what the engine found in \
+         this task's current cycle: the pre-check, then each earlier attempt's criteria \
+         and the paths it changed outside the scope. The tasks document is not in your \
+         checkout; this is where it is read.",
+        no_arguments(),
+    )
+}
+
+fn check_task_tool() -> Tool {
+    Tool::new(
+        RunTool::CheckTask.name(),
+        "Judge your work on this task exactly as the engine will when your session \
+         ends: run every criterion on the checkout as it stands and audit what changed \
+         against the task's scope. `closes` is true when every criterion exits 0 and \
+         nothing changed lies outside the scope — the task is then done if the tree does \
+         not change again. A scope expansion you asked for counts only once granted.",
+        no_arguments(),
+    )
+}
+
 fn scope_expansion_tool() -> Tool {
     Tool::new(
         "yunta_request_scope_expansion",
@@ -131,24 +185,6 @@ fn blackboard_tool() -> Tool {
          group's consolidated output, so results never depend on arrival order).",
         no_arguments(),
     )
-}
-
-/// One tool per submittable kind this node declares.
-///
-/// A node produces at most one document of each kind, so declaring the
-/// kind is the whole decision: the tool exists exactly when the close
-/// will look for that document, and there is nothing left for the
-/// session to name.
-fn submission_tools(session: &SessionTools) -> Vec<Tool> {
-    let mut tools = Vec::new();
-    for kind in ArtifactKind::ALL {
-        if let Some(tool) = kind.submit_tool() {
-            if session.submits(kind) {
-                tools.push(submit_tool(tool, kind));
-            }
-        }
-    }
-    tools
 }
 
 /// The tool a session submits a whole `kind` document through.

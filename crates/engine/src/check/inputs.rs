@@ -1,12 +1,13 @@
 //! See [`super`]. One family of workflow-check rules.
 
 use super::*;
+use yunta_core::template::TemplateVar;
 
 /// Each declared input's own fields are internally consistent
 /// — independent of anything else in the workflow, so this runs once
 /// over `inputs:` rather than per reference site.
 pub(crate) fn check_input_specs(
-    inputs: &std::collections::BTreeMap<String, InputSpec>,
+    inputs: &std::collections::BTreeMap<yunta_core::InputName, InputSpec>,
     errors: &mut Vec<CheckError>,
 ) {
     for (name, spec) in inputs {
@@ -91,8 +92,8 @@ pub(crate) fn check_input_references_in_nodes(
         for source in &node.context {
             match source {
                 yunta_core::ContextSpec::Files { files } => {
-                    for pattern in files {
-                        check_template_text(&node.id, pattern, workflow, errors);
+                    for file in files {
+                        check_template_text(&node.id, &file.path, workflow, errors);
                     }
                 }
                 yunta_core::ContextSpec::Command { command } => {
@@ -114,14 +115,15 @@ pub(crate) fn check_template_text(
     errors: &mut Vec<CheckError>,
 ) {
     let Ok(variables) = template_variables(text) else {
-        // An unclosed `{{` is a template-syntax error, not an inputs
-        // one — the runtime's own `render_template` reports that when
-        // this node actually executes; nothing new to say here.
+        // A `{{` that never closes, and a name that is not a variable,
+        // are template-syntax errors rather than inputs ones — the
+        // runtime's own `render_template` reports both when this node
+        // actually executes; nothing new to say here.
         return;
     };
     for variable in variables {
-        if let Some(name) = variable.strip_prefix("inputs.") {
-            if !workflow.inputs.contains_key(name) {
+        if let TemplateVar::Input(name) = variable {
+            if !workflow.inputs.contains_key(&name) {
                 errors.push(CheckError::UndeclaredInput {
                     node: node.clone(),
                     name: name.to_string(),

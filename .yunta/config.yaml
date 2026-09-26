@@ -10,15 +10,18 @@ project:
 runners:
   planner:
     - { adapter: claude-code, model: claude-opus-4-8 }
-    - { adapter: codex, model: gpt-5-codex }
+    - { adapter: codex, model: gpt-6-luna }
   executor:
     - { adapter: claude-code, model: claude-sonnet-4-6 }
+    - { adapter: codex, model: gpt-6-luna }
   mechanical:
     - { adapter: claude-code, model: claude-haiku-4-5 }
+    - { adapter: codex, model: gpt-6-luna }
   reviewer:
     - { adapter: claude-code, model: claude-sonnet-4-6 }
+    - { adapter: codex, model: gpt-6-luna }
   reviewer-alt:
-    - { adapter: codex, model: gpt-5-codex }
+    - { adapter: codex, model: gpt-6-luna }
 
 defaults:
   runner: executor
@@ -26,5 +29,3 @@ defaults:
   timeout_minutes: 45
   on_failure: pause
 
-baseline:
-  suite: "cargo test --workspace"

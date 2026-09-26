@@ -1,14 +1,15 @@
 # full mode: every node is in play and, as in standard, the run pauses
 # at `approve-plan` before any task runs.
-workflow: build-feature
+workflow: fragua
 mode: full
 inputs: { idea: "add dark mode" }
 worktree: worktrees/library
-fixture: fixtures/build-feature.yaml
+fixture: fixtures/up-to-the-plan.yaml
 expect:
   final_state: paused
   nodes:
     grill: finished
+    brief: finished
     plan: finished
     implement: never ran
   tasks:

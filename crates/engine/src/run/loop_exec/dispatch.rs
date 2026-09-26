@@ -1,49 +1,32 @@
 //! Dispatching one task of a batch in its own worktree, with the
 //! attempt number and the expansions already granted to it.
 
-use std::path::PathBuf;
+use yunta_core::ScopeGlob;
 
 use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload};
-use yunta_core::{CommitSha, Isolation, Node, Task};
+use yunta_core::{CommitSha, Node, Task};
 
 use crate::task_cycle::{run_task, AttemptEnv, ScopeGovernance, TaskCycleReport};
-use crate::worktree::prepare_worktree;
+use crate::worktree::{open_unit, Unit, UnitHome, UnitId};
 
+use crate::replay::RunState;
 use crate::run::{RunCtx, RunError};
+use yunta_core::events::TaskEvent;
 
 /// How many times this task has already been dispatched `Running` in the
 /// log — 1-indexed, so the first dispatch is attempt 1. Used only to keep
 /// worktree/branch names unique across a resumed orphan's fresh attempt;
 /// never fed into retry-limit logic (that's `run_task`'s own
 /// `max_retries`, scoped to one dispatch).
-pub(super) fn attempt_number(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> u32 {
-    events
-        .iter()
-        .filter(|event| {
-            matches!(
-                event.payload(),
-                Some(EventPayload::TaskStatusChanged(p))
-                    if p.task_id == *task_id && p.new_status == TaskStatus::Running
-            )
-        })
-        .count() as u32
-        + 1
+pub(super) fn attempt_number(state: &RunState, task_id: &yunta_core::TaskId) -> u32 {
+    state.tasks.get(task_id).map_or(0, |record| record.attempts) + 1
 }
 
 /// Every path a prior `scope_expansion_granted` on the log authorized
 /// for `task_id` — the retry after a human grant derives its
 /// widened scope from here, never from in-memory state.
-fn granted_paths_for(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> Vec<String> {
-    events
-        .iter()
-        .filter_map(|event| match event.payload() {
-            Some(EventPayload::ScopeExpansionGranted(p)) if &p.task_id == task_id => {
-                Some(p.paths.iter().cloned())
-            }
-            _ => None,
-        })
-        .flatten()
-        .collect()
+fn granted_paths_for(state: &RunState, task_id: &yunta_core::TaskId) -> Vec<ScopeGlob> {
+    state.grants.paths_for(task_id).to_vec()
 }
 
 /// Isolates one batch member in its own worktree — each task in the
@@ -62,7 +45,7 @@ fn granted_paths_for(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> Ve
 pub(super) struct BatchDispatchEnv<'a> {
     pub(super) events: &'a [StoredEvent],
     pub(super) base_commit: &'a CommitSha,
-    pub(super) adapter: &'a dyn yunta_adapters::Adapter,
+    pub(super) adapter: &'a dyn yunta_core::port::Adapter,
     pub(super) scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
     pub(super) grants: &'a crate::scope_expansion::GrantLedger,
     pub(super) cancel: &'a tokio_util::sync::CancellationToken,
@@ -75,7 +58,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     env: &BatchDispatchEnv<'_>,
     task: &'a Task,
     instruction: &str,
-) -> Result<(&'a Task, PathBuf, TaskCycleReport), RunError> {
+) -> Result<(&'a Task, Unit, TaskCycleReport), RunError> {
     let BatchDispatchEnv {
         events,
         base_commit,
@@ -85,18 +68,18 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         cancel,
         setup,
     } = *env;
-    let attempt = attempt_number(events, &task.id);
-    let task_worktree = ctx
-        .run_dir
-        .join("task-worktrees")
-        .join(format!("{}-{attempt}", task.id));
-    let branch = crate::worktree::task_branch(ctx.run_id, &task.id, attempt);
-    prepare_worktree(
-        ctx.worktree,
-        &task_worktree,
-        base_commit,
-        &branch,
-        Isolation::Worktree,
+    let state = crate::replay::derive(events);
+    let attempt = attempt_number(&state, &task.id);
+    let unit = open_unit(
+        UnitHome {
+            repo: ctx.worktree,
+            run_dir: ctx.run_dir,
+            run_id: ctx.run_id,
+            base: base_commit,
+        },
+        UnitId::Task(task.id.clone()),
+        attempt,
+        ctx.root_supervision(),
     )
     .await?;
 
@@ -105,7 +88,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         .find(|event| {
             matches!(
                 event.payload(),
-                Some(EventPayload::TaskRegistered(p)) if p.task_id == task.id
+                Some(EventPayload::Tasks(TaskEvent::Registered(p))) if p.task_id == task.id
             )
         })
         .map(|event| event.seq)
@@ -117,12 +100,11 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         })?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
-            task_id: task.id.clone(),
-            new_status: TaskStatus::Running,
-            caused_by: registered_seq,
-            commit: None,
-        }),
+        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+            task.id.clone(),
+            TaskStatus::Running,
+            registered_seq,
+        ))),
     )
     .await?;
 
@@ -131,11 +113,13 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         instruction,
         AttemptEnv {
             adapter,
-            cwd: &task_worktree,
+            node,
+            unit: &unit,
             max_retries: ctx.max_task_retries,
             budget: ctx.session_budget().await?,
             memo: &ctx.memo,
-            registry: ctx.process_registry.as_ref(),
+            history: &state.tasks,
+            supervision: ctx.supervision(cancel),
         },
         ScopeGovernance {
             permissions: ctx.manifest.config.permissions.as_ref(),
@@ -143,7 +127,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
             scope_expansion,
             max_expansion_files: ctx.manifest.config.resolved_max_expansion_files(),
             grants,
-            already_granted_paths: &granted_paths_for(events, &task.id),
+            already_granted_paths: &granted_paths_for(&state, &task.id),
         },
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
         cancel,
@@ -151,5 +135,5 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     )
     .await?;
 
-    Ok((task, task_worktree, report))
+    Ok((task, unit, report))
 }

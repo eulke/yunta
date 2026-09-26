@@ -163,3 +163,37 @@ fn the_tasks_context_source_reads_under_both_spellings_and_writes_tasks() {
         serde_json::json!({ "tasks": {} })
     );
 }
+
+#[test]
+fn an_artifact_name_with_a_parent_segment_is_refused() {
+    for climbing in ["../escaped.md", "out/../../escaped.md", "..", "/etc/passwd"] {
+        assert!(
+            yunta_core::ArtifactName::parse(climbing).is_err(),
+            "`{climbing}` leaves the run directory",
+        );
+    }
+    assert_eq!(
+        yunta_core::ArtifactName::parse("report.md")
+            .expect("a plain file name is a name")
+            .as_str(),
+        "report.md",
+    );
+    assert_eq!(
+        yunta_core::ArtifactName::parse("out/report.md")
+            .expect("a name may sit in a directory of its own")
+            .as_str(),
+        "out/report.md",
+    );
+}
+
+#[test]
+fn an_artifact_name_that_claims_what_the_engine_writes_is_refused() {
+    for identity in yunta_core::ReservedIdentity::all() {
+        let claimed = identity.file_name();
+        assert!(
+            yunta_core::ArtifactName::parse(&claimed).is_err(),
+            "`{claimed}` is what the run's view writes for {identity}",
+        );
+    }
+    assert!(yunta_core::ArtifactName::parse("tasks.yml").is_ok());
+}

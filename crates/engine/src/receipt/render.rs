@@ -7,6 +7,7 @@
 //! file reads the log, this one reads the receipt.
 
 use super::{DiagnosticCount, EventChainStatus, Receipt, RunnerUsage};
+use yunta_core::events::BaselineOrigin;
 use yunta_core::NodeId;
 
 /// Fan-out siblings share their base id (`<base>@<runner>`, see
@@ -73,12 +74,16 @@ pub fn render_markdown(receipt: &Receipt) -> String {
     }
     match &receipt.baseline {
         Some(b) => out.push_str(&format!(
-            "- {} {} regression(s) vs baseline across {} comparison(s) (suite `{}`, hash `{}`)\n",
+            "- {} {} regression(s) vs baseline across {} comparison(s) (suite `{}`, hash `{}`{})\n",
             mark(b.regressions == 0),
             b.regressions,
             b.compared,
             b.suite,
-            b.hash.as_str().get(..12).unwrap_or_default()
+            b.hash.as_str().get(..12).unwrap_or_default(),
+            match &b.origin {
+                BaselineOrigin::Measured => String::new(),
+                BaselineOrigin::Inherited { run } => format!(", measured by run {run}"),
+            }
         )),
         None => out.push_str("- baseline: not used by this workflow\n"),
     }
@@ -119,9 +124,10 @@ pub fn render_markdown(receipt: &Receipt) -> String {
         EventChainStatus::Intact { events } => out.push_str(&format!(
             "- ✓ event chain: {events} event(s), hash-linked, replayable\n"
         )),
-        EventChainStatus::Broken { seq, detail } => {
-            out.push_str(&format!("- ✗ event chain BROKEN at seq {seq}: {detail}\n"))
-        }
+        EventChainStatus::Broken { seq, detail } => out.push_str(&format!(
+            "{}\n",
+            yunta_core::text::detailed(format!("- ✗ event chain BROKEN at seq {seq}"), detail)
+        )),
     }
 
     if !receipt.criteria.entries.is_empty() {

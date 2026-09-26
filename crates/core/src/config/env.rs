@@ -3,6 +3,8 @@
 
 use std::path::PathBuf;
 
+use crate::Secret;
+
 /// Rewrites `path` in place when it starts with `~`: `~` alone becomes
 /// `home`, `~/rest` becomes `home/rest`; `~user/...` is refused.
 pub(super) fn expand_path(
@@ -46,6 +48,11 @@ pub struct Env {
     pub yunta_home: Option<PathBuf>,
     /// `$YUNTA_ORG_CONFIG` — the org config path override.
     pub org_config: Option<PathBuf>,
+    /// `$YUNTA_FENCE` — the fence a session's CLI was handed, read back
+    /// by the hook it runs (`crate::fence::ENV_VAR`). Set only in the
+    /// environment an adapter built for its child; every other
+    /// invocation sees `None`.
+    pub fence_var: Option<String>,
     /// Variables layered onto every subprocess the run spawns (bash nodes,
     /// hooks, executors) on top of the inherited environment — a test
     /// prepends a stub directory to `PATH` here instead of mutating the
@@ -106,5 +113,104 @@ mod env_tests {
     #[test]
     fn neither_known_is_none() {
         assert_eq!(user_state_root(&Env::default()), None);
+    }
+}
+
+/// Where a secret's value comes from.
+///
+/// The config names the variables; the values live only in the process
+/// environment of whatever spawned the run, and only the shell that
+/// started it may read them. The engine asks here instead, so a test
+/// hands it a value it chose and a run can never take one nobody
+/// declared.
+pub trait SecretSource: Send + Sync {
+    /// The value bound to `name`, or `None` when nothing is.
+    fn get(&self, name: &str) -> Option<Secret<String>>;
+}
+
+/// The real environment of the process the CLI runs in — the one
+/// implementation that reads it, so every other module is handed values
+/// rather than reaching for them.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ProcessSecrets;
+
+impl SecretSource for ProcessSecrets {
+    fn get(&self, name: &str) -> Option<Secret<String>> {
+        std::env::var(name).ok().map(Secret::from)
+    }
+}
+
+/// Every declared secret's value, for keeping them out of the log.
+///
+/// A secret reaches a session's environment on purpose, and the session
+/// may then say it back: a note quoting a command line, an error
+/// repeating a URL with a token in it. The log is the run's permanent
+/// record and read by whoever reads the run, so what the config named as
+/// a secret is taken back out of it on the way in — once, at the one
+/// door every event goes through.
+#[derive(Debug, Clone, Default)]
+pub struct Redactor {
+    /// Longest first, so a value that contains another is replaced whole
+    /// rather than leaving the shorter one's remainder behind.
+    values: Vec<String>,
+}
+
+/// What stands in the log where a secret was.
+pub const REDACTED: &str = "[redacted]";
+
+impl Redactor {
+    /// The redactor for the secrets `config` names, as `source` has
+    /// them. A name nothing binds contributes nothing: there is no value
+    /// to keep out.
+    ///
+    /// A value shorter than four characters is left alone — `true`, a
+    /// one-letter flag, an empty string. Replacing those would blank out
+    /// unrelated text everywhere it appeared, which hides more than it
+    /// protects.
+    pub fn of(names: &[String], source: Option<&dyn SecretSource>) -> Self {
+        let Some(source) = source else {
+            return Redactor::default();
+        };
+        let mut values: Vec<String> = names
+            .iter()
+            .filter_map(|name| source.get(name))
+            .map(|secret| secret.expose().to_string())
+            .filter(|value| value.chars().count() >= 4)
+            .collect();
+        values.sort_by_key(|value| std::cmp::Reverse(value.len()));
+        values.dedup();
+        Redactor { values }
+    }
+
+    /// Whether this redactor has anything to take out.
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    /// `text` with every secret value replaced.
+    pub fn text(&self, text: &str) -> String {
+        self.values.iter().fold(text.to_string(), |text, value| {
+            text.replace(value, REDACTED)
+        })
+    }
+
+    /// `value` with every secret replaced wherever a string carries one
+    /// — at any depth, in a field name as well as a field value, since
+    /// neither is a place a secret belongs.
+    pub fn json(&self, value: serde_json::Value) -> serde_json::Value {
+        use serde_json::Value;
+        match value {
+            Value::String(text) => Value::String(self.text(&text)),
+            Value::Array(items) => {
+                Value::Array(items.into_iter().map(|item| self.json(item)).collect())
+            }
+            Value::Object(fields) => Value::Object(
+                fields
+                    .into_iter()
+                    .map(|(name, field)| (self.text(&name), self.json(field)))
+                    .collect(),
+            ),
+            other => other,
+        }
     }
 }

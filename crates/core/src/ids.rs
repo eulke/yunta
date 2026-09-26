@@ -353,6 +353,31 @@ string_id!(
 );
 
 string_id!(
+    /// A workflow's own `name:`, and the key the catalog files it under
+    /// — what a `kind: workflow` node's `use:` names and what `yunta
+    /// run` takes: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    WorkflowName, what = "workflow name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// A skill's name as a node's `skills:` lists it and a pack
+    /// declares it: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    SkillName, what = "skill name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// An input's name — the key under `inputs:` that `{{inputs.<name>}}`
+    /// resolves: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    InputName, what = "input name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// An MCP server's name — the key under `mcp_servers:` a node's
+    /// `mcp:` refers to: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    McpServerName, what = "MCP server name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
     /// A model's name as the adapter's CLI accepts it — one printable
     /// word, opaque to the engine.
     ModelName, what = "model name", rule = TOKEN_RULE, check = is_token

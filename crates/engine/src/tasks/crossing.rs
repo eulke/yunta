@@ -11,9 +11,10 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use yunta_core::events::{EventPayload, StoredEvent, TaskStatus};
+use yunta_core::events::{EventPayload, StoredEvent, TaskEvent, TaskStatus};
 use yunta_core::{CommitSha, RunId, TaskId, TasksFile};
 
+use crate::process::Supervision;
 use crate::run::RunError;
 
 /// What a source run's log leaves standing about the tasks it was given:
@@ -48,7 +49,7 @@ pub(crate) fn standing_of(run: &RunId, events: &[StoredEvent]) -> Result<Standin
     // log's, and only for the tasks replay leaves `done`.
     let mut placed: BTreeMap<TaskId, Option<CommitSha>> = BTreeMap::new();
     for event in events {
-        if let Some(EventPayload::TaskStatusChanged(p)) = event.payload() {
+        if let Some(EventPayload::Tasks(TaskEvent::StatusChanged(p))) = event.payload() {
             if p.new_status == TaskStatus::Done {
                 placed.insert(p.task_id.clone(), p.commit.clone());
             }
@@ -57,7 +58,7 @@ pub(crate) fn standing_of(run: &RunId, events: &[StoredEvent]) -> Result<Standin
     let done = state
         .tasks
         .iter()
-        .filter(|(_, status)| **status == TaskStatus::Done)
+        .filter(|(_, record)| record.status == TaskStatus::Done)
         .map(|(id, _)| (id.clone(), placed.get(id).cloned().flatten()))
         .collect();
     Ok(Standing { done })
@@ -77,6 +78,7 @@ pub(crate) async fn carried_into(
     standing: &Standing,
     document: &TasksFile,
     tree: &Path,
+    supervision: Supervision<'_>,
 ) -> Result<BTreeMap<TaskId, CommitSha>, RunError> {
     let placed: Vec<(&TaskId, &CommitSha)> = document
         .tasks
@@ -90,14 +92,14 @@ pub(crate) async fn carried_into(
         return Ok(BTreeMap::new());
     }
 
-    let head = crate::worktree::head_commit(tree).await?;
+    let head = crate::worktree::head_commit(tree, supervision).await?;
     let mut answered: BTreeMap<&CommitSha, bool> = BTreeMap::new();
     let mut carried = BTreeMap::new();
     for (id, commit) in placed {
         let in_tree = match answered.get(commit) {
             Some(answer) => *answer,
             None => {
-                let answer = has_commit(tree, commit, &head).await?;
+                let answer = has_commit(tree, commit, &head, supervision).await?;
                 answered.insert(commit, answer);
                 answer
             }
@@ -113,7 +115,12 @@ pub(crate) async fn carried_into(
 /// "no", not a failure: git says the same when the commit is on a branch
 /// this tree never took and when this repository does not have it at
 /// all, and either way the work is not here.
-async fn has_commit(tree: &Path, commit: &CommitSha, head: &CommitSha) -> Result<bool, RunError> {
+async fn has_commit(
+    tree: &Path,
+    commit: &CommitSha,
+    head: &CommitSha,
+    supervision: Supervision<'_>,
+) -> Result<bool, RunError> {
     crate::git::success(
         tree,
         &[
@@ -122,27 +129,19 @@ async fn has_commit(tree: &Path, commit: &CommitSha, head: &CommitSha) -> Result
             commit.as_str(),
             head.as_str(),
         ],
+        supervision,
     )
     .await
-    .map_err(|e| {
-        let detail = e.detail();
-        RunError::Git {
-            context: format!(
-                "ask whether `{tree}` has commit {commit}",
-                tree = tree.display()
-            ),
-            detail,
-        }
-    })
+    .map_err(RunError::Git)
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
-    use yunta_core::events::{StoredEvent, TaskStatus};
-    use yunta_core::{CommitSha, RunId, Task, TaskId};
+    use yunta_core::{CommitSha, RunId, Seq, Task, TaskId};
     use yunta_testkit::{git, git_output, init_repo, tasks_document, INITIAL_BRANCH};
+    use yunta_testkit_core::{FixedClock, Log};
 
     use super::*;
     use crate::run::RunError;
@@ -174,26 +173,34 @@ mod tests {
     /// A source run's log: each task registered, then left where the
     /// entry says, at the commit the entry names.
     fn source_log(entries: &[(&Task, TaskStatus, Option<&CommitSha>)]) -> Vec<StoredEvent> {
-        let run = source();
-        let mut events = Vec::new();
-        for (task, status, commit) in entries {
-            let registered = events.len() as u64 + 1;
-            events.push(yunta_testkit::stored(
-                &run,
-                registered,
-                yunta_testkit::task_registered(task),
-            ));
-            events.push(yunta_testkit::stored(
-                &run,
-                registered + 1,
-                yunta_testkit::task_status_changed(&task.id, *status, *commit, registered.into()),
-            ));
+        let mut log = Log::for_run(source().as_str());
+        for (index, (task, status, commit)) in entries.iter().enumerate() {
+            let registered = Seq::from(index as u64 * 2 + 1);
+            // Every status carries a commit here, including the five
+            // that have no business naming one: the point is what a
+            // receiving run stands behind when it reads a log that
+            // holds them anyway.
+            let changed = match commit {
+                Some(commit) => {
+                    yunta_testkit::status_changed_carrying(&task.id, *status, commit, registered)
+                }
+                None => yunta_testkit::task_status_changed(&task.id, *status, None, registered),
+            };
+            log = log
+                .event(yunta_testkit::task_registered(task))
+                .event(changed);
         }
-        events
+        log.build()
     }
 
     #[tokio::test]
     async fn work_in_the_tree_crosses() {
+        // The engine's own unit tests cannot borrow `yunta_testkit::Owner`:
+        // it names this crate's `Supervision` from outside, and the lib
+        // under test is a different build of it. The constructor says the
+        // same thing in two lines.
+        let stop = tokio_util::sync::CancellationToken::new();
+        let owner = Supervision::outside_any_run(&stop, &FixedClock);
         let tree = tree();
         let landed = commit(tree.path(), "a.txt");
         let document = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
@@ -203,7 +210,7 @@ mod tests {
         )
         .expect("a log that replays");
 
-        let carried = carried_into(&standing, &document, tree.path())
+        let carried = carried_into(&standing, &document, tree.path(), owner)
             .await
             .expect("git answers");
 
@@ -216,6 +223,12 @@ mod tests {
 
     #[tokio::test]
     async fn work_on_a_branch_the_tree_never_took_does_not_cross() {
+        // The engine's own unit tests cannot borrow `yunta_testkit::Owner`:
+        // it names this crate's `Supervision` from outside, and the lib
+        // under test is a different build of it. The constructor says the
+        // same thing in two lines.
+        let stop = tokio_util::sync::CancellationToken::new();
+        let owner = Supervision::outside_any_run(&stop, &FixedClock);
         let tree = tree();
         git(tree.path(), &["checkout", "-q", "-b", "aside"]);
         let aside = commit(tree.path(), "a.txt");
@@ -227,7 +240,7 @@ mod tests {
         )
         .expect("a log that replays");
 
-        let carried = carried_into(&standing, &document, tree.path())
+        let carried = carried_into(&standing, &document, tree.path(), owner)
             .await
             .expect("git answers");
 
@@ -239,6 +252,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_done_the_log_never_placed_does_not_cross() {
+        // The engine's own unit tests cannot borrow `yunta_testkit::Owner`:
+        // it names this crate's `Supervision` from outside, and the lib
+        // under test is a different build of it. The constructor says the
+        // same thing in two lines.
+        let stop = tokio_util::sync::CancellationToken::new();
+        let owner = Supervision::outside_any_run(&stop, &FixedClock);
         let tree = tree();
         let document = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
         let standing = standing_of(
@@ -247,7 +266,7 @@ mod tests {
         )
         .expect("a log that replays");
 
-        let carried = carried_into(&standing, &document, tree.path())
+        let carried = carried_into(&standing, &document, tree.path(), owner)
             .await
             .expect("git answers");
 
@@ -259,6 +278,12 @@ mod tests {
 
     #[tokio::test]
     async fn a_task_the_document_no_longer_has_is_not_carried() {
+        // The engine's own unit tests cannot borrow `yunta_testkit::Owner`:
+        // it names this crate's `Supervision` from outside, and the lib
+        // under test is a different build of it. The constructor says the
+        // same thing in two lines.
+        let stop = tokio_util::sync::CancellationToken::new();
+        let owner = Supervision::outside_any_run(&stop, &FixedClock);
         let tree = tree();
         let landed = commit(tree.path(), "a.txt");
         let source_document = tasks_document(&[
@@ -275,7 +300,7 @@ mod tests {
         .expect("a log that replays");
         let document = tasks_document(&[("T001", "a.txt", "test -f a.txt")]);
 
-        let carried = carried_into(&standing, &document, tree.path())
+        let carried = carried_into(&standing, &document, tree.path(), owner)
             .await
             .expect("git answers");
 
@@ -289,6 +314,12 @@ mod tests {
 
     #[tokio::test]
     async fn only_done_stands_from_a_source_log() {
+        // The engine's own unit tests cannot borrow `yunta_testkit::Owner`:
+        // it names this crate's `Supervision` from outside, and the lib
+        // under test is a different build of it. The constructor says the
+        // same thing in two lines.
+        let stop = tokio_util::sync::CancellationToken::new();
+        let owner = Supervision::outside_any_run(&stop, &FixedClock);
         let tree = tree();
         let landed = commit(tree.path(), "a.txt");
         let document = tasks_document(&[
@@ -315,7 +346,7 @@ mod tests {
             .collect();
         let standing = standing_of(&source(), &source_log(&entries)).expect("a log that replays");
 
-        let carried = carried_into(&standing, &document, tree.path())
+        let carried = carried_into(&standing, &document, tree.path(), owner)
             .await
             .expect("git answers");
 
@@ -330,18 +361,16 @@ mod tests {
     fn a_source_log_that_does_not_replay_is_refused_naming_the_run() {
         // A status about a task nobody registered: a log stops replaying
         // right there.
-        let orphan = yunta_testkit::stored(
-            &source(),
-            1,
-            yunta_testkit::task_status_changed(
+        let orphan = Log::for_run(source().as_str())
+            .event(yunta_testkit::task_status_changed(
                 &TaskId::from("T001"),
                 TaskStatus::Done,
                 None,
                 1u64.into(),
-            ),
-        );
+            ))
+            .build();
 
-        let error = standing_of(&source(), &[orphan]).unwrap_err();
+        let error = standing_of(&source(), &orphan).unwrap_err();
 
         let RunError::Broken { diagnostic } = &error else {
             panic!("a source that cannot answer for itself is refused: {error:?}");

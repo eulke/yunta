@@ -1,6 +1,7 @@
 //! See [`super`]. One family of workflow-check rules.
 
 use super::*;
+use yunta_core::template::TemplateVar;
 
 /// Scans every literal `bash`/hook command for a `git push`
 /// aimed at the base branch — the `{{project.base_branch}}` template,
@@ -23,12 +24,9 @@ pub(crate) fn collect_push_to_base_warnings(
         if !command.contains("git push") {
             return None;
         }
-        if command.contains("{{project.base_branch}}") {
-            return Some(
-                base_branch
-                    .map(str::to_string)
-                    .unwrap_or_else(|| "{{project.base_branch}}".to_string()),
-            );
+        let templated = TemplateVar::ProjectBaseBranch.braced();
+        if command.contains(&templated) {
+            return Some(base_branch.map(str::to_string).unwrap_or(templated));
         }
         let base = base_branch?;
         let named = command
@@ -112,14 +110,13 @@ pub(crate) fn collect_push_to_base_warnings(
     }
 }
 
-/// A `kind: gate` with `external:` needs
-/// `forge.github` configured (`external.kind` is a closed enum with one
-/// variant today, so this is a total match); an internal gate's own
-/// `on:` mapping must reference declared options and existing targets —
-/// the same broken-reference class `BrokenReference` already catches.
+/// A `kind: gate` with `external:` needs `forge.github` configured
+/// (`external.kind` is a closed enum with one variant today, so this is
+/// a total match), and an internal gate's `on:` maps only options it
+/// declares. That each `on:` target is a node the workflow declares is
+/// the reading door's, like every other reference.
 pub(crate) fn check_gate(
     node: &Node,
-    known_ids: &HashSet<NodeId>,
     config: &yunta_core::ConfigLayer,
     errors: &mut Vec<CheckError>,
 ) {
@@ -147,18 +144,11 @@ pub(crate) fn check_gate(
             }
         }
     }
-    for (option, target) in on {
+    for option in on.keys() {
         if !options.iter().any(|declared| declared == option) {
             errors.push(CheckError::GateOnUndeclaredOption {
                 node: node.id.clone(),
                 option: option.clone(),
-            });
-        }
-        if !known_ids.contains(target) {
-            errors.push(CheckError::BrokenReference {
-                node: node.id.clone(),
-                field: format!("on.{option}"),
-                target: target.clone(),
             });
         }
     }
@@ -167,6 +157,35 @@ pub(crate) fn check_gate(
 /// A `parallel` group's children share a worktree
 /// and join semantics a forge round-trip has no defined relationship to
 /// — refused outright rather than guessing one.
+/// A node that asks, inside a `parallel` group, would never be asked:
+/// the scheduler puts questions to a person one top-level node at a
+/// time, so the child's wait has nothing to end it and whatever follows
+/// the group mounts answers that never arrive. Refused outright rather
+/// than left to hang.
+pub(crate) fn check_no_questions_in_parallel(
+    nodes: &[Node],
+    parent_group: Option<&Node>,
+    errors: &mut Vec<CheckError>,
+) {
+    for node in nodes {
+        if let Some(group) = parent_group {
+            if node.asks() {
+                errors.push(CheckError::QuestionsInsideParallel {
+                    node: node.id.clone(),
+                    group: group.id.clone(),
+                });
+            }
+        }
+        if let NodeKind::Parallel {
+            nodes: children, ..
+        } = &node.kind
+        {
+            check_no_questions_in_parallel(children, Some(node), errors);
+        }
+    }
+}
+
+/// A `parallel` group holds no gate and no group of its own.
 pub(crate) fn check_no_gate_in_parallel(
     nodes: &[Node],
     parent_group: Option<&Node>,
@@ -176,6 +195,12 @@ pub(crate) fn check_no_gate_in_parallel(
         if let Some(group) = parent_group {
             if matches!(node.kind, NodeKind::Gate { .. }) {
                 errors.push(CheckError::GateInsideParallel {
+                    node: node.id.clone(),
+                    group: group.id.clone(),
+                });
+            }
+            if matches!(node.kind, NodeKind::Parallel { .. }) {
+                errors.push(CheckError::ParallelInsideParallel {
                     node: node.id.clone(),
                     group: group.id.clone(),
                 });
