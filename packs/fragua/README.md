@@ -52,6 +52,9 @@ something's missing.
   ecosystem it fails after `implement`, the most expensive node, and uses
   two `fix-lint` attempts before asking you. Copy the workflow into
   `.yunta/workflows/` and change `lint` to your own linter first.
-- **Code under `src/`**: `fix-lint` and the loop's scope expansions are
-  limited to `src/**`.
+- **Rust sources**: `fix-lint` may edit any `*.rs` file, so a workspace
+  with its code under `crates/*/src` works as well as a single crate. A
+  task that needs files outside its scope asks a person
+  (`scope_expansion.mode: ask`); the loop's `within: ["src/**"]` only
+  bounds what `mode: rules` would grant without asking.
 - **`baseline.suite`** in your config, for the `tests` node.

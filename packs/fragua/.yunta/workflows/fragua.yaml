@@ -5,9 +5,11 @@
 # server, which a pack's own mock self-test has no reason to stand up)
 # and `node_defaults.hooks` is dropped (an ecosystem-specific
 # convenience, not something a reference pack needs to demonstrate).
-# One deliberate change: `plan` reads `docs/architecture.md` as optional
-# (D186) — a pack runs in repositories its author has never seen, and
-# the planner can explore the code without it.
+# Two deliberate changes, both because a pack runs in repositories its
+# author has never seen: `plan` reads `docs/architecture.md` as optional,
+# since the planner can explore the code without it; and `fix-lint` may
+# edit any Rust source, since a workspace keeps its code under
+# `crates/*/src`, not `src/`.
 name: fragua
 description: Full feature cycle — grill, verified tasks document, lint/fix, baseline, multi-runner review, PR
 yunta_schema: ">=1 <2"
@@ -93,7 +95,7 @@ nodes:
     runner: mechanical
     context: [{ node-output: { node: lint } }]
     prompt: "Fix exclusively the errors in the report."
-    scope: ["src/**"]
+    scope: ["**/*.rs"]
 
   - id: tests
     kind: check
