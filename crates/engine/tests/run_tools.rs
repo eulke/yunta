@@ -10,7 +10,10 @@ use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::ServiceExt;
 use serde_json::json;
-use yunta_core::events::{EventPayload, FindingEvent, TaskEvent};
+use yunta_core::events::{
+    CriteriaCheckedPayload, CriterionResult, CriterionType, EventPayload, FindingEvent, NodeEvent,
+    Phase, ScopeCheckedPayload, TaskEvent, TaskStatus, TaskStatusChangedPayload,
+};
 use yunta_core::TaskId;
 use yunta_engine::RunToolsSession;
 use yunta_testkit::ToolsHost;
@@ -387,6 +390,218 @@ async fn scope_expansion_is_refused_for_sessions_without_a_task() {
     assert_eq!(
         text,
         "scope expansion is task machinery, keyed by task — this session has no task; a prompt node's scope is fixed by its own declaration"
+    );
+    client.cancel().await.unwrap();
+}
+
+// --- yunta_task / yunta_check_task (task sessions only) ----------------
+
+/// A task as the tasks document writes it: notes for a runner with no
+/// history of the repo, one criterion red until the work is done, and a
+/// guard that must stay green.
+fn greeting_task() -> yunta_core::Task {
+    serde_norway::from_str(
+        r#"
+id: T001
+title: Write the greeting
+notes: the greeting lives in hello.txt
+scope: [hello.txt]
+criteria:
+  - cmd: test -f hello.txt
+  - { cmd: "true", type: guard }
+"#,
+    )
+    .unwrap()
+}
+
+/// A unit that is only a place to stand: a tool that reads never looks
+/// at its tree.
+fn unit_at(worktree: std::path::PathBuf) -> yunta_engine::Unit {
+    yunta_engine::Unit {
+        who: yunta_engine::UnitId::Task(TaskId::from("T001")),
+        worktree,
+        base: yunta_core::CommitSha::from_static("deadbeef"),
+        from: yunta_core::TreeId::from_static("deadbeef"),
+    }
+}
+
+/// A `criteria_checked` of T001, with each command's exit code.
+fn checked(phase: Phase, exits: [i32; 2]) -> EventPayload {
+    EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
+        task_id: TaskId::from("T001"),
+        phase,
+        results: vec![
+            CriterionResult {
+                cmd: "test -f hello.txt".to_string(),
+                exit_code: exits[0],
+                r#type: None,
+                reused: false,
+                duration_ms: None,
+            },
+            CriterionResult {
+                cmd: "true".to_string(),
+                exit_code: exits[1],
+                r#type: Some(CriterionType::Guard),
+                reused: false,
+                duration_ms: None,
+            },
+        ],
+    }))
+}
+
+/// A log in the middle of T001's second cycle: a check from the cycle
+/// before, the loop setting it running again, this cycle's pre-check,
+/// and one attempt that left the criterion red and wrote outside scope.
+fn a_second_cycle_with_one_attempt(host: &ToolsHost) {
+    let registered = host.record(
+        Some("plan"),
+        EventPayload::Tasks(TaskEvent::Registered(
+            yunta_core::events::TaskRegisteredPayload {
+                task_id: TaskId::from("T001"),
+                criteria: Vec::new(),
+                scope: Vec::new(),
+                depends_on: Vec::new(),
+            },
+        )),
+    );
+    // A check from a cycle that already ended is not this cycle's.
+    host.record(Some("implement"), checked(Phase::Post, [0, 0]));
+    host.record(
+        Some("implement"),
+        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+            TaskId::from("T001"),
+            TaskStatus::Running,
+            registered,
+        ))),
+    );
+    host.record(Some("implement"), checked(Phase::Pre, [1, 0]));
+    host.record(Some("implement"), checked(Phase::Post, [1, 0]));
+    host.record(
+        Some("implement"),
+        EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {
+            task_id: Some(TaskId::from("T001")),
+            diff: vec!["notes.md".into()],
+            violations: vec!["notes.md".into()],
+        })),
+    );
+}
+
+#[tokio::test]
+async fn a_task_session_reads_its_task_and_its_cycle_from_the_run() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    a_second_cycle_with_one_attempt(&host);
+
+    let mut access = host.task_access(greeting_task(), unit_at(host.attempt_dir()));
+    access.scope.push("docs/**".into());
+    let session = host.task_session("implement", access).await;
+    let client = client_for(&session, None).await.unwrap();
+    let (is_error, text) = call(&client, "yunta_task", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    let red = json!({"cmd": "test -f hello.txt", "guard": false, "exit_code": 1});
+    let guard = json!({"cmd": "true", "guard": true, "exit_code": 0});
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+        json!({
+            "id": "T001",
+            "title": "Write the greeting",
+            "notes": "the greeting lives in hello.txt",
+            "scope": ["hello.txt", "docs/**"],
+            "criteria": [
+                {"cmd": "test -f hello.txt", "guard": false},
+                {"cmd": "true", "guard": true},
+            ],
+            "checks": [
+                {"phase": "pre", "criteria": [red, guard]},
+                {"phase": "post", "attempt": 1, "criteria": [red, guard], "outside_scope": ["notes.md"]},
+            ],
+        }),
+        "the task the cycle judges by, its granted scope included, and only this cycle's checks"
+    );
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_check_judges_the_work_the_way_its_close_will() {
+    let owner = yunta_testkit::Owner::new();
+    let repo = tempfile::tempdir().unwrap();
+    yunta_testkit::init_repo(repo.path());
+    let unit = yunta_engine::Unit {
+        from: yunta_engine::head_tree(repo.path(), owner.supervision())
+            .await
+            .unwrap(),
+        base: yunta_engine::head_commit(repo.path(), owner.supervision())
+            .await
+            .unwrap(),
+        ..unit_at(repo.path().to_path_buf())
+    };
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let access = host.task_access(greeting_task(), unit);
+    let session = host.task_session("implement", access).await;
+    let client = client_for(&session, None).await.unwrap();
+
+    // The criterion is still red, and the work strayed outside the scope.
+    tokio::fs::write(repo.path().join("notes.md"), "draft")
+        .await
+        .unwrap();
+    let (is_error, text) = call(&client, "yunta_check_task", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+        json!({
+            "closes": false,
+            "criteria": [
+                {"cmd": "test -f hello.txt", "guard": false, "exit_code": 1},
+                {"cmd": "true", "guard": true, "exit_code": 0},
+            ],
+            "outside_scope": ["notes.md"],
+        })
+    );
+
+    // The work done, and nothing left outside: the close would take it.
+    tokio::fs::remove_file(repo.path().join("notes.md"))
+        .await
+        .unwrap();
+    tokio::fs::write(repo.path().join("hello.txt"), "hello")
+        .await
+        .unwrap();
+    let (is_error, text) = call(&client, "yunta_check_task", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    let verdict: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(verdict["closes"], json!(true), "got: {text}");
+    assert_eq!(verdict["outside_scope"], json!([]));
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn the_task_tools_are_served_to_task_sessions_only() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+
+    let task_session = host.session("implement", Some("T001")).await;
+    let client = client_for(&task_session, None).await.unwrap();
+    let listed = client.list_tools(None).await.unwrap();
+    for tool in ["yunta_task", "yunta_check_task"] {
+        assert!(
+            listed.tools.iter().any(|t| t.name == tool),
+            "a task session is served `{tool}`"
+        );
+    }
+    client.cancel().await.unwrap();
+
+    let session = host.session("solo", None).await;
+    let client = client_for(&session, None).await.unwrap();
+    let listed = client.list_tools(None).await.unwrap();
+    for tool in ["yunta_task", "yunta_check_task"] {
+        assert!(
+            !listed.tools.iter().any(|t| t.name == tool),
+            "a session with no task is not even offered `{tool}`"
+        );
+    }
+    let (is_error, text) = call(&client, "yunta_task", json!({})).await;
+    assert!(is_error);
+    assert_eq!(
+        text,
+        "`yunta_task` answers about a task, and this session works none — only a loop's task \
+         sessions are served it"
     );
     client.cancel().await.unwrap();
 }
@@ -893,11 +1108,11 @@ fn the_catalog_and_the_dispatch_name_the_same_tools() {
     }
     assert_eq!(yunta_engine::RunTool::parse("yunta_nonesuch"), None);
 
-    // And the set is exactly the submittable kinds plus the seven fixed
+    // And the set is exactly the submittable kinds plus the nine fixed
     // tools, so a kind that gains a submission tool gains its tool here.
     let submissions = yunta_core::ArtifactKind::ALL
         .into_iter()
         .filter(|kind| kind.submit_tool().is_some())
         .count();
-    assert_eq!(yunta_engine::RunTool::all().len(), 7 + submissions);
+    assert_eq!(yunta_engine::RunTool::all().len(), 9 + submissions);
 }

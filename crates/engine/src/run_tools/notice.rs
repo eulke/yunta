@@ -39,6 +39,26 @@ pub(crate) fn submission_notice(
     (!text.is_empty()).then_some(text)
 }
 
+/// What a task session is told about its task: where its contract is
+/// read, and how its work is judged before the session ends. `None` when
+/// nothing is mounted, or the session works no task.
+pub(crate) fn task_notice(
+    session: Option<&RunToolsSession>,
+    task: Option<&super::host::TaskAccess>,
+) -> Option<String> {
+    session?;
+    task?;
+    Some(format!(
+        "\n\nRead this task's scope, criteria and notes with `{read}` before you change \
+         anything — the tasks document is not in your checkout, and the same call shows \
+         what earlier attempts left red. When your session ends the engine runs every \
+         criterion and rejects any change outside the scope; `{check}` judges your work \
+         exactly that way, so call it before you finish.",
+        read = super::catalog::RunTool::Task.name(),
+        check = super::catalog::RunTool::CheckTask.name(),
+    ))
+}
+
 /// The documents this node declares under a kind that has a submission
 /// tool, each paired with the tool that takes it.
 fn documents_to_submit(declared: &[ArtifactSpec]) -> Option<String> {

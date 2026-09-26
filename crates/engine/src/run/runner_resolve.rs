@@ -136,6 +136,25 @@ pub enum RunToolsSetupError {
         #[source]
         source: std::io::Error,
     },
+    #[error(
+        "node `{node}` is a loop, whose task sessions read their task and check their work \
+         through the run tools, and adapter `{adapter}` declares no `run_tools` capability — \
+         a session there could not learn what its task asks; pick a runner on an adapter \
+         that can be a client of the per-run MCP endpoint"
+    )]
+    TaskNeedsRunTools {
+        node: yunta_core::NodeId,
+        adapter: AdapterId,
+    },
+    #[error(
+        "node `{node}` is a loop, whose task sessions read their task through the run tools, \
+         and its per-run MCP listener failed to start: {source}"
+    )]
+    TaskListenerFailed {
+        node: yunta_core::NodeId,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// The first interpreted artifact this node declares, if any: the one a
@@ -154,9 +173,10 @@ pub(crate) fn declared_typed_artifact(
 ///
 /// The adapter's capability decides, and what the node declared decides
 /// what its absence costs: a document that reaches the engine through
-/// these tools and nowhere else, or a `coordination: blackboard` group
-/// whose semantics the engine never emulates, is a refusal before any
-/// token is spent; anything else runs without them.
+/// these tools and nowhere else, a `coordination: blackboard` group
+/// whose semantics the engine never emulates, or a loop whose task
+/// sessions read their task nowhere else, is a refusal before any token
+/// is spent; anything else runs without them.
 ///
 /// Asked once per node, and answered without binding anything: a
 /// listener belongs to a session, and a node that opens many owns none
@@ -184,6 +204,12 @@ pub(crate) fn run_tools_allowed(
         return Err(RunToolsSetupError::TypedArtifactNeedsRunTools {
             node: node.id.clone(),
             kind,
+            adapter: adapter.id().clone(),
+        });
+    }
+    if matches!(node.kind, yunta_core::NodeKind::Loop { .. }) {
+        return Err(RunToolsSetupError::TaskNeedsRunTools {
+            node: node.id.clone(),
             adapter: adapter.id().clone(),
         });
     }

@@ -154,9 +154,6 @@ pub(super) async fn execute_prompt(
             cwd: ctx.worktree.to_path_buf(),
             profile: session_profile(node),
             budget: ctx.session_budget().await?,
-            // A node's own session works a task nobody granted
-            // anything to: its scope is what it declared, whole.
-            granted: Vec::new(),
         },
         adapter.as_ref(),
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),

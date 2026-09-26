@@ -2662,6 +2662,8 @@
         "yunta_submit_tasks",
         "yunta_submit_questions",
         "yunta_task_status",
+        "yunta_task",
+        "yunta_check_task",
         "yunta_request_scope_expansion",
         "yunta_get_blackboard"
       ]

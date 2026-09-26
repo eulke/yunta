@@ -24,10 +24,11 @@ use rmcp::model::{
 use rmcp::model::{ServerCapabilities, ServerInfo};
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
+use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, StoredEvent};
-use yunta_core::{ArtifactSpec, NodeId, NodeKind, TaskId};
+use yunta_core::{ArtifactSpec, NodeId, NodeKind};
 
-use super::host::RunToolsHost;
+use super::host::{RunToolsHost, TaskAccess};
 use crate::run_log::RunLog;
 
 /// The run tools of one session. Which of them are even *listed* depends
@@ -43,8 +44,14 @@ pub(super) struct SessionTools {
     /// What the node is, so a verdict asks who answers for an artifact
     /// the same way its close does.
     pub(super) node_kind: NodeKind,
-    pub(super) task: Option<TaskId>,
+    /// The task this session works, for a loop's task session: what
+    /// the task tools read and judge, and what makes this a session a
+    /// scope expansion can be asked for.
+    pub(super) task: Option<Arc<TaskAccess>>,
     pub(super) cwd: PathBuf,
+    /// What stops a command a tool runs for this session: the task's own
+    /// token, and the session's end.
+    pub(super) stop: CancellationToken,
     /// The artifacts this node's close will verify, names already
     /// rendered.
     pub(super) declared: Vec<ArtifactSpec>,
@@ -86,6 +93,16 @@ pub(super) enum RunToolError {
         "a scope expansion request is already pending for this attempt — one request per attempt"
     )]
     RequestPending,
+    #[error(
+        "`{tool}` answers about a task, and this session works none — only a loop's task \
+         sessions are served it"
+    )]
+    NotATaskSession { tool: &'static str },
+    #[error("the task's work could not be checked")]
+    Check {
+        #[source]
+        source: crate::task_cycle::TaskCycleError,
+    },
     #[error("the run's log cannot be reached")]
     Storage {
         #[source]
@@ -181,6 +198,8 @@ impl ServerHandler for SessionTools {
             Some(RunTool::WithdrawFinding) => self.withdraw_finding(args).await,
             Some(RunTool::GetBlackboard) => self.get_blackboard().await,
             Some(RunTool::TaskStatus) => self.task_status().await,
+            Some(RunTool::Task) => self.task().await,
+            Some(RunTool::CheckTask) => self.check_task().await,
             Some(RunTool::RequestScopeExpansion) => self.request_scope_expansion(args).await,
             Some(RunTool::Submit(kind)) => self.submit(kind, args).await,
             None => Err(RunToolError::UnknownTool {

@@ -11,14 +11,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::host::{RunToolsAccess, TaskAccess};
+use super::session::SessionTools;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio_util::sync::CancellationToken;
 use yunta_core::port::RunToolsEndpoint;
-use yunta_core::TaskId;
-
-use super::host::RunToolsAccess;
-use super::session::SessionTools;
 
 /// One live listener, tied to one session attempt. Dropping it tears
 /// the server down — the structured-concurrency shape (the spawner owns
@@ -38,13 +36,13 @@ impl Drop for RunToolsSession {
 }
 
 /// Starts the listener for one session attempt: fresh port, fresh
-/// single-use token. `task` is `Some` for task sessions — the
-/// only ones `yunta_request_scope_expansion` exists for (scope expansion
-/// is task-keyed machinery); `cwd` is where that request file lands (the
-/// same worktree `scope_expansion::load_request` consumes it from).
+/// single-use token. `task` is `Some` for task sessions — the only ones
+/// the task tools and `yunta_request_scope_expansion` exist for (both are
+/// task-keyed machinery); `cwd` is where a request file lands (the same
+/// worktree `scope_expansion::load_request` consumes it from).
 pub async fn open_session_listener(
     access: RunToolsAccess,
-    task: Option<TaskId>,
+    task: Option<Arc<TaskAccess>>,
     cwd: PathBuf,
 ) -> std::io::Result<RunToolsSession> {
     let RunToolsAccess {
@@ -56,7 +54,10 @@ pub async fn open_session_listener(
     let token = mint_token();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let url = format!("http://127.0.0.1:{}/mcp", listener.local_addr()?.port());
-    let shutdown = CancellationToken::new();
+    // What a tool runs for a task session stops with the task, and with the listener.
+    let shutdown = task
+        .as_ref()
+        .map_or_else(CancellationToken::new, |t| t.cancel.child_token());
 
     let tools = SessionTools {
         host,
@@ -64,6 +65,7 @@ pub async fn open_session_listener(
         node_kind,
         task,
         cwd,
+        stop: shutdown.clone(),
         declared,
     };
     let service = StreamableHttpService::new(

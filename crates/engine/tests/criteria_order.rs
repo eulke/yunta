@@ -94,6 +94,8 @@ sessions:
 /// What the resumed run's one session does: the work the second task's
 /// criteria are about.
 const FINISHES_THE_SECOND_TASK: &str = "\
+capabilities:
+  run_tools: true
 sessions:
   - effects:
       - path: world.txt

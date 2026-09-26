@@ -264,6 +264,7 @@ tasks:
     write(
         &repo.join(".yunta/tests/fixtures/one-task.yaml"),
         r#"
+capabilities: { run_tools: true }
 sessions:
   - effects:
       - { path: made.txt, content: "made" }

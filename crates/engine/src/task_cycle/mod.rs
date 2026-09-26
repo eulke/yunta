@@ -10,6 +10,7 @@
 
 mod attempt;
 mod criteria;
+mod judge;
 mod outcome;
 mod record;
 mod session;
@@ -36,6 +37,7 @@ pub(crate) use record::to_results;
 use record::Recorder;
 
 pub use criteria::{post_check, pre_check, Memo, Memoized};
+pub(crate) use judge::{judge, Work};
 pub(crate) use session::dispatch_session;
 pub(crate) use session::Dispatched;
 pub use session::{DispatchError, RunToolsNeed, SessionObserver, SessionSetup};

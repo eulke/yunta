@@ -13,6 +13,7 @@
 //! workspace that composes the two into a request.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use yunta_core::fence::{Advice, Fence};
 use yunta_core::port::{Adapter, Budget, PermissionProfile, SessionRequest};
@@ -21,7 +22,7 @@ use yunta_core::{Node, Task};
 
 use crate::run::node_exec::NodeEnd;
 use crate::run::runner_resolve::RunToolsSetupError;
-use crate::run_tools::RunToolsSession;
+use crate::run_tools::{RunToolsSession, TaskAccess};
 use crate::task_cycle::{SessionObserver, SessionSetup};
 
 /// Everything a node resolves once for every session it opens: which
@@ -180,8 +181,11 @@ fn mandatory_tools(
     if ctx.run_tools_host.is_blackboard_member(&node.id) {
         return Some(crate::task_cycle::RunToolsNeed::Blackboard);
     }
-    crate::run::runner_resolve::declared_typed_artifact(ctx, node)
-        .map(crate::task_cycle::RunToolsNeed::TypedArtifact)
+    if let Some(kind) = crate::run::runner_resolve::declared_typed_artifact(ctx, node) {
+        return Some(crate::task_cycle::RunToolsNeed::TypedArtifact(kind));
+    }
+    matches!(node.kind, yunta_core::NodeKind::Loop { .. })
+        .then_some(crate::task_cycle::RunToolsNeed::Task)
 }
 
 /// What one session is: its prompt, where it works, and the decisions
@@ -190,9 +194,10 @@ pub(crate) struct SessionPlan<'a> {
     /// The node this session serves. A task session serves the loop
     /// node, not the task: the file it writes is the node's.
     pub node: &'a Node,
-    /// The task this session was opened for, when a loop opened it.
-    /// Names the session's own scratch slot and scopes its edits.
-    pub task: Option<&'a Task>,
+    /// The task this session was opened for, when a loop opened it:
+    /// what its tools read and judge, the scope its edits are held to
+    /// (declared plus granted), and the name of its own scratch slot.
+    pub task: Option<Arc<TaskAccess>>,
     /// Already rendered, templates resolved. `open_session` appends the
     /// tool sentence when — and only when — this session holds tools.
     pub prompt: String,
@@ -202,10 +207,6 @@ pub(crate) struct SessionPlan<'a> {
     pub profile: PermissionProfile,
     /// What it may spend.
     pub budget: Budget,
-    /// The expansions this session's task has already been granted:
-    /// part of what it may write, exactly as the post-check evaluates
-    /// it.
-    pub granted: Vec<ScopeGlob>,
 }
 
 /// What stops a session from opening.
@@ -231,8 +232,8 @@ pub(crate) struct OpenedSession {
 /// owes, and writes the request.
 ///
 /// A listener that fails to bind degrades — the session runs without
-/// tools and the log says so — rather than sinking the attempt: the
-/// tools are an offer, the node's own criteria are the contract.
+/// tools and the log says so — unless the node cannot do without them:
+/// a task session reads its task and checks its work nowhere else.
 pub(crate) async fn open_session(
     setup: &SessionSetup,
     plan: SessionPlan<'_>,
@@ -242,49 +243,64 @@ pub(crate) async fn open_session(
     let run_tools = mount_tools(setup, &plan, adapter, observer).await?;
     let scratch_dir = scratch_dir(setup, &plan);
     let fence = fence(setup, &plan, run_tools.is_some());
+    let task = plan.task.clone();
 
-    // The tool sentence is produced by the mount, so a session is never
-    // told to call something this adapter did not give it.
-    let mut prompt = plan.prompt;
-    if let Some(notice) = crate::run_tools::submission_notice(
-        run_tools.as_ref(),
-        setup
-            .run_tools
-            .as_ref()
-            .map(|access| access.declared.as_slice())
-            .unwrap_or_default(),
-        setup.artifact_dir.as_deref(),
-    ) {
+    let request = SessionRequest {
+        prompt: told(setup, plan.prompt, run_tools.as_ref(), task.as_deref()),
+        cwd: plan.cwd,
+        model: Some(setup.chosen.model.clone()),
+        agent: setup.chosen.agent.clone(),
+        permissions: plan.profile,
+        env: setup.env.clone(),
+        fence,
+        fence_hook: setup.fence_hook.clone(),
+        budget: plan.budget,
+        adapter_settings: setup.adapter_settings.clone(),
+        skills: setup.skills.clone(),
+        run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
+        // The file this node closes on is written from what its
+        // sessions hand over, so a session that has one to write is
+        // told where it belongs.
+        artifact_dir: setup.artifact_dir.clone(),
+        scratch_dir,
+    };
+    // What the adapter stages for its own mechanics is known only now,
+    // and no call can reach the session's tools before it is dispatched:
+    // a check the session asks for leaves out exactly what its close will.
+    if let Some(task) = &task {
+        let _ = task.staged.set(adapter.staged_paths(&request));
+    }
+    Ok(OpenedSession { request, run_tools })
+}
+
+/// The session's prompt with every sentence its mount produces: which
+/// documents to submit, and — for a task session — where its task is
+/// read and how its work is judged. Produced by the mount, so a session
+/// is never told to call something this adapter did not give it.
+fn told(
+    setup: &SessionSetup,
+    mut prompt: String,
+    run_tools: Option<&RunToolsSession>,
+    task: Option<&TaskAccess>,
+) -> String {
+    let declared = setup
+        .run_tools
+        .as_ref()
+        .map(|access| access.declared.as_slice())
+        .unwrap_or_default();
+    let notices = [
+        crate::run_tools::submission_notice(run_tools, declared, setup.artifact_dir.as_deref()),
+        crate::run_tools::task_notice(run_tools, task),
+    ];
+    for notice in notices.into_iter().flatten() {
         prompt.push_str(&notice);
     }
-
-    Ok(OpenedSession {
-        request: SessionRequest {
-            prompt,
-            cwd: plan.cwd,
-            model: Some(setup.chosen.model.clone()),
-            agent: setup.chosen.agent.clone(),
-            permissions: plan.profile,
-            env: setup.env.clone(),
-            fence,
-            fence_hook: setup.fence_hook.clone(),
-            budget: plan.budget,
-            adapter_settings: setup.adapter_settings.clone(),
-            skills: setup.skills.clone(),
-            run_tools_endpoint: run_tools.as_ref().map(|session| session.endpoint.clone()),
-            // The file this node closes on is written from what its
-            // sessions hand over, so a session that has one to write is
-            // told where it belongs.
-            artifact_dir: setup.artifact_dir.clone(),
-            scratch_dir,
-        },
-        run_tools,
-    })
+    prompt
 }
 
 /// What this session may write: its profile, the scope it works to — a
-/// task session its task's, a node's own session the node's — the
-/// expansions already granted, and the one directory outside the
+/// task session its task's, the expansions already granted included; a
+/// node's own session the node's — and the one directory outside the
 /// worktree its declared files belong in.
 ///
 /// A session that mounted the scope-expansion tool is told to ask for
@@ -299,14 +315,14 @@ fn fence(setup: &SessionSetup, plan: &SessionPlan<'_>, holds_run_tools: bool) ->
     } else {
         Advice::ReportFinding
     };
-    let scope: Option<&[ScopeGlob]> = match plan.task {
+    let scope: Option<&[ScopeGlob]> = match &plan.task {
         Some(task) => Some(&task.scope),
         None => (!plan.node.scope.is_empty()).then_some(plan.node.scope.as_slice()),
     };
     Fence::for_session(
         plan.profile,
         scope,
-        &plan.granted,
+        &[],
         setup.artifact_dir.as_deref(),
         advice,
     )
@@ -316,10 +332,9 @@ fn fence(setup: &SessionSetup, plan: &SessionPlan<'_>, holds_run_tools: bool) ->
 /// of one node never scaffold over each other, so a task's slot carries
 /// its own id.
 fn scratch_dir(setup: &SessionSetup, plan: &SessionPlan<'_>) -> PathBuf {
-    match plan.task {
-        Some(task) => {
-            crate::session_dir::SessionSlot::Task(&setup.node, &task.id).scratch_dir(&setup.run_dir)
-        }
+    match &plan.task {
+        Some(task) => crate::session_dir::SessionSlot::Task(&setup.node, &task.task.id)
+            .scratch_dir(&setup.run_dir),
         None => crate::session_dir::SessionSlot::Node(&setup.node).scratch_dir(&setup.run_dir),
     }
 }
@@ -342,7 +357,7 @@ async fn mount_tools(
     };
     let source = match crate::run_tools::open_session_listener(
         access.clone(),
-        plan.task.map(|task| task.id.clone()),
+        plan.task.clone(),
         plan.cwd.clone(),
     )
     .await
@@ -363,6 +378,10 @@ async fn mount_tools(
                     source,
                 }
             }
+            crate::task_cycle::RunToolsNeed::Task => RunToolsSetupError::TaskListenerFailed {
+                node: plan.node.id.clone(),
+                source,
+            },
         }));
     }
     if let Some((observer, node)) = observer {
@@ -384,21 +403,14 @@ async fn mount_tools(
     Ok(None)
 }
 
-/// The brief a task session gets: the node's instruction, which task is
-/// this session's, and whatever the document noted about it — context a
-/// runner with no history of this repo has no other way to get.
+/// The brief a task session gets: the node's instruction and which task
+/// is this session's — never the task's contents. Its scope, criteria and
+/// notes live in the run's tasks document, and the session reads them
+/// there through its tools, so what it is told and what it is judged by
+/// can never be two copies that disagree.
 pub(crate) fn task_brief(instruction: &str, task: &Task) -> String {
-    let mut brief = format!(
-        "{instruction}\n\nYour task: `{}` — {}. Stay within its declared scope.",
+    format!(
+        "{instruction}\n\nYour task: `{}` — {}.",
         task.id, task.title
-    );
-    if let Some(notes) = task
-        .notes
-        .as_deref()
-        .map(str::trim)
-        .filter(|n| !n.is_empty())
-    {
-        brief.push_str(&format!("\n\nNotes on this task: {notes}"));
-    }
-    brief
+    )
 }

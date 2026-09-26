@@ -1167,14 +1167,49 @@ nodes:
     );
 }
 
-/// What a tasks document noted about a task reaches the session that
-/// implements it. `notes` is context for a runner with no history of
-/// this repo; a brief that left it out asked the session to work
-/// without the one thing the document wrote down for it.
+/// A task session's brief names its task and says where its contract is
+/// read — never the contract itself. The notes, scope and criteria stay
+/// in the run's tasks document, which the session reads and checks its
+/// work against through its own tools; and a check it asks for is the
+/// close's own judgement, so the close answers that tree from it.
 #[tokio::test]
-async fn a_task_brief_carries_the_notes_its_document_wrote() {
+async fn a_task_session_reads_its_task_through_its_tools_and_its_check_is_the_close_s() {
     let bench = Bench::new();
-    let workflow = r#"
+    let tasks = "tasks:\n  - id: task-1\n    title: \"Write a1\"\n    notes: \"the parser lives in src/lex.rs\"\n    scope: [\"a1.txt\"]\n    criteria:\n      - cmd: \"test -f a1.txt\"\n";
+    let mut fixture = plan_session(tasks);
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    steps:\n      - { type: run_tool, tool: yunta_task }\n      - { type: run_tool, tool: yunta_check_task }\n    outcome: { type: completed, summary: did-1 }\n",
+    );
+
+    let RunReport { terminal, state: _ } = bench.run(PLAN_THEN_LOOP_WORKFLOW, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let brief = bench
+        .mock()
+        .requests_seen()
+        .into_iter()
+        .map(|request| request.prompt)
+        .find(|prompt| prompt.contains("task-1"))
+        .expect("the task session's brief");
+    assert!(brief.contains("Your task: `task-1` — Write a1."), "{brief}");
+    assert!(
+        brief.contains("`yunta_task`") && brief.contains("`yunta_check_task`"),
+        "the brief says where the task is read and how the work is judged: {brief}"
+    );
+    assert!(
+        !brief.contains("the parser lives in src/lex.rs") && !brief.contains("test -f a1.txt"),
+        "the brief carries no copy of the task's contract: {brief}"
+    );
+
+    assert_eq!(
+        first_post_check_reused(&bench.events()),
+        Some(true),
+        "the attempt's close answers the tree the session's own check already judged"
+    );
+}
+
+/// A planner that hands over a tasks document, and a loop that works it.
+const PLAN_THEN_LOOP_WORKFLOW: &str = r#"
 name: noted
 nodes:
   - id: plan
@@ -1190,25 +1225,54 @@ nodes:
     until: all_tasks_complete
     prompt: "Implement your task."
 "#;
-    let tasks = "tasks:\n  - id: task-1\n    title: \"Write a1\"\n    notes: \"the parser lives in src/lex.rs\"\n    scope: [\"a1.txt\"]\n    criteria:\n      - cmd: \"test -f a1.txt\"\n";
-    let mut fixture = plan_session(tasks);
-    fixture.push_str(
-        "  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
-    );
 
-    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
-    assert_eq!(terminal, RunTerminal::Finished);
+/// Whether the run's first post-check answered from the cache rather
+/// than running its first criterion again.
+fn first_post_check_reused(events: &[yunta_core::events::StoredEvent]) -> Option<bool> {
+    events.iter().find_map(|event| match event.payload() {
+        Some(yunta_core::events::EventPayload::Node(NodeEvent::CriteriaChecked(p)))
+            if p.phase == yunta_core::events::Phase::Post =>
+        {
+            p.results.first().map(|result| result.reused)
+        }
+        _ => None,
+    })
+}
 
-    let brief = bench
-        .mock()
-        .requests_seen()
-        .into_iter()
-        .map(|request| request.prompt)
-        .find(|prompt| prompt.contains("task-1"))
-        .expect("the task session's brief");
+/// A loop whose runner cannot hold the run tools is refused before any
+/// session opens: its task sessions would have no way to read what their
+/// task asks, and a session working blind is what the refusal prevents.
+#[tokio::test]
+async fn a_loop_on_a_runner_without_run_tools_fails_before_any_session_opens() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: no-tools
+nodes:
+  - id: plan
+    kind: bash
+    run: "printf 'tasks:\n  - id: T001\n    title: Create hello\n    scope: [hello.txt]\n    criteria:\n      - cmd: test -f hello.txt\n' > {{node.artifacts}}/tasks.yaml"
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Implement your task."
+"#;
+    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []\n").await;
+
+    let RunTerminal::Paused { reason } = &terminal else {
+        panic!("the loop is refused, and the run waits on it: {terminal:?}");
+    };
     assert!(
-        brief.contains("the parser lives in src/lex.rs"),
-        "the brief carries what the document noted: {brief}"
+        reason.contains("node `implement` is a loop")
+            && reason.contains("declares no `run_tools` capability"),
+        "{reason}"
+    );
+    assert!(
+        bench.mock().requests_seen().is_empty(),
+        "no session opened, so no token was spent"
     );
 }
 

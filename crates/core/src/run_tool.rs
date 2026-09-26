@@ -8,6 +8,8 @@ use crate::ArtifactKind;
 pub enum RunTool {
     CheckArtifact,
     TaskStatus,
+    Task,
+    CheckTask,
     GetBlackboard,
     RequestScopeExpansion,
     PostFinding,
@@ -59,6 +61,8 @@ impl RunTool {
         );
         all.extend([
             Self::TaskStatus,
+            Self::Task,
+            Self::CheckTask,
             Self::RequestScopeExpansion,
             Self::GetBlackboard,
         ]);
@@ -69,6 +73,8 @@ impl RunTool {
         match self {
             Self::CheckArtifact => "yunta_check_artifact",
             Self::TaskStatus => "yunta_task_status",
+            Self::Task => "yunta_task",
+            Self::CheckTask => "yunta_check_task",
             Self::GetBlackboard => "yunta_get_blackboard",
             Self::RequestScopeExpansion => "yunta_request_scope_expansion",
             Self::PostFinding => ArtifactKind::POST_FINDING_TOOL,

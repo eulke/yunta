@@ -1206,6 +1206,7 @@ const WRITES_ONE_TASK: &str = r#"
 /// The one executor session the loop dispatches for `T001`: it writes
 /// what the task's criterion checks for.
 const DOES_ONE_TASK: &str = r#"
+capabilities: { run_tools: true }
 sessions:
   - match_prompt_contains: "T001"
     effects:

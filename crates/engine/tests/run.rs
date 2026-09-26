@@ -996,6 +996,7 @@ nodes:
         view = bench.run_dir().join(yunta_core::ARTIFACTS_DIR).display()
     );
     let fixture = r#"
+capabilities: { run_tools: true }
 sessions:
   - effects:
       - { path: hello.txt, content: "hello" }
@@ -1113,7 +1114,16 @@ nodes:
 #[tokio::test]
 async fn a_loop_over_a_tasks_document_the_run_never_registered_is_broken_not_stuck() {
     let bench = Bench::new();
-    let run_dir = bench.birth(LOOP_ONLY_WORKFLOW).await.unwrap();
+    // A runner that can hold the run tools, which a loop's task sessions
+    // read their task through: the loop gets as far as its tasks.
+    let run_dir = bench
+        .try_create(
+            LOOP_ONLY_WORKFLOW,
+            "capabilities: { run_tools: true }\nsessions: []\n",
+            yunta_testkit::MOCK_CONFIG,
+        )
+        .await
+        .unwrap();
 
     // A document the run holds and never said what to do about — the
     // one shape that reaches a loop with no registration behind it.

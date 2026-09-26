@@ -9,12 +9,17 @@
 //! [`Bench`]: crate::Bench
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use tempfile::TempDir;
+use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventDraft, EventPayload, RunCreatedPayload, RunEvent, StoredEvent};
-use yunta_core::{Clock, NodeId, RunId, Seq, SystemClock, TaskId, Workflow};
-use yunta_engine::{open_session_listener, RunToolsHost, RunToolsSession};
+use yunta_core::{
+    Clock, CommitSha, NodeId, RunId, Seq, SystemClock, Task, TaskId, TreeId, Workflow,
+};
+use yunta_engine::{
+    open_session_listener, RunToolsHost, RunToolsSession, TaskAccess, Unit, UnitId,
+};
 use yunta_storage::Storage;
 
 /// A born run, the directories it owns, and the host its tools answer
@@ -46,15 +51,7 @@ impl ToolsHost {
         let storage = Storage::open(&root.path().join("yunta.db")).expect("open storage");
         let run_id = RunId::from("run-tools-1");
         let workflow: Workflow = serde_norway::from_str(workflow_yaml).expect("parse workflow");
-        let run_dir = root.path().join("run");
-        // The directories `create_run` gives every run: the view the
-        // engine writes, and the working space every node stages in.
-        for dir in [
-            yunta_core::ARTIFACTS_DIR,
-            yunta_engine::run_dir::SCRATCH_DIR,
-        ] {
-            std::fs::create_dir_all(run_dir.join(dir)).expect("create the run's own directories");
-        }
+        let run_dir = born_run_dir(root.path());
         let host = Arc::new(RunToolsHost::new(
             &workflow,
             yunta_engine::HostOf {
@@ -67,6 +64,11 @@ impl ToolsHost {
                 run_dir: run_dir.clone(),
                 max_artifact_bytes: None,
                 redactor: yunta_core::Redactor::default(),
+                memo: Arc::new(yunta_engine::Memo::new(yunta_core::sha256_hex(
+                    b"test-config",
+                ))),
+                process_registry: None,
+                subprocess_vars: Vec::new(),
             },
         ));
         let hosted = ToolsHost {
@@ -131,7 +133,9 @@ impl ToolsHost {
         self._root.path().to_path_buf()
     }
 
-    /// Opens the listener one node's session reaches its tools through.
+    /// Opens the listener one node's session reaches its tools through —
+    /// a task session's, when `task` names one: a task with nothing
+    /// declared, worked in [`attempt_dir`](Self::attempt_dir).
     pub async fn session(&self, node: &str, task: Option<&str>) -> RunToolsSession {
         self.session_declaring(node, task, Vec::new()).await
     }
@@ -144,6 +148,54 @@ impl ToolsHost {
         task: Option<&str>,
         declared: Vec<yunta_core::ArtifactSpec>,
     ) -> RunToolsSession {
+        let task = task.map(|id| {
+            self.task_access(
+                Task {
+                    id: TaskId::from(id),
+                    title: String::new(),
+                    scope: Vec::new(),
+                    criteria: Vec::new(),
+                    depends_on: Vec::new(),
+                    notes: None,
+                },
+                Unit {
+                    who: UnitId::Task(TaskId::from(id)),
+                    worktree: self.attempt_dir(),
+                    base: CommitSha::from_static("deadbeef"),
+                    from: TreeId::from_static("deadbeef"),
+                },
+            )
+        });
+        self.open(node, task, declared).await
+    }
+
+    /// The listener a loop's session on `task` reaches its tools through.
+    pub async fn task_session(&self, node: &str, task: TaskAccess) -> RunToolsSession {
+        self.open(node, Some(task), Vec::new()).await
+    }
+
+    /// What a task session's tools reach for `task` worked in `unit`: the
+    /// scope the task declared, nothing granted, and nothing staged.
+    pub fn task_access(&self, task: Task, unit: Unit) -> TaskAccess {
+        TaskAccess {
+            scope: task.scope.clone(),
+            task,
+            unit,
+            index: self.run_dir.join("check-index"),
+            cancel: CancellationToken::new(),
+            staged: Arc::new(OnceLock::from(Vec::new())),
+        }
+    }
+
+    async fn open(
+        &self,
+        node: &str,
+        task: Option<TaskAccess>,
+        declared: Vec<yunta_core::ArtifactSpec>,
+    ) -> RunToolsSession {
+        let cwd = task
+            .as_ref()
+            .map_or_else(|| self.attempt_dir(), |task| task.unit.worktree.clone());
         open_session_listener(
             yunta_engine::RunToolsAccess {
                 host: self.host.clone(),
@@ -155,10 +207,23 @@ impl ToolsHost {
                 },
                 declared,
             },
-            task.map(TaskId::from),
-            self.attempt_dir(),
+            task.map(Arc::new),
+            cwd,
         )
         .await
         .expect("open the session's listener")
     }
+}
+
+/// A run directory under `root` holding what `create_run` gives every run:
+/// the view the engine writes, and the working space every node stages in.
+fn born_run_dir(root: &std::path::Path) -> PathBuf {
+    let run_dir = root.join("run");
+    for dir in [
+        yunta_core::ARTIFACTS_DIR,
+        yunta_engine::run_dir::SCRATCH_DIR,
+    ] {
+        std::fs::create_dir_all(run_dir.join(dir)).expect("create the run's own directories");
+    }
+    run_dir
 }

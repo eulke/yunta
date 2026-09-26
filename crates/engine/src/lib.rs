@@ -136,7 +136,7 @@ pub use run::{
 };
 pub use run_tools::{
     consolidate_blackboard, open_session_listener, HostOf, RunTool, RunToolsAccess, RunToolsHost,
-    RunToolsSession,
+    RunToolsSession, TaskAccess,
 };
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{

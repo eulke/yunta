@@ -410,6 +410,10 @@ fn build_ctx(
     // surface reach the listener's own event appends.
     let clock_for_host = clock.clone();
     let observer_for_host = observer.clone();
+    // One cache of criterion results per invocation, read by every task
+    // cycle and by every check a task session asks for through the host.
+    let memo = std::sync::Arc::new(Memo::new(manifest.config_hash.clone()));
+    let registry_for_host = registry.clone();
     let ctx = RunCtx {
         fence_hook,
         run_id,
@@ -421,7 +425,7 @@ fn build_ctx(
         clock,
         ids,
         max_task_retries,
-        memo: std::sync::Arc::new(Memo::new(manifest.config_hash.clone())),
+        memo: memo.clone(),
         human_interaction,
         adapter_override,
         budget_lifted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -452,6 +456,11 @@ fn build_ctx(
                     .as_ref()
                     .and_then(|limits| limits.max_artifact_bytes),
                 redactor,
+                memo,
+                process_registry: registry_for_host,
+                subprocess_vars: ambient
+                    .map(|ambient| ambient.subprocess_vars.clone())
+                    .unwrap_or_default(),
             },
         )),
     };

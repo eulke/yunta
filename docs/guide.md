@@ -319,8 +319,11 @@ Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:
   of the MCP session that started it.
 - **Per-run tools**: a loopback HTTP MCP endpoint opened for the duration of a single
   agent session that declared `run_tools` capability — `yunta_post_finding`,
-  `yunta_update_finding`, `yunta_withdraw_finding`, `yunta_check_artifact`,
-  `yunta_task_status` and `yunta_request_scope_expansion` for every such session;
+  `yunta_update_finding`, `yunta_withdraw_finding`, `yunta_check_artifact` and
+  `yunta_task_status` for every such session; `yunta_task`, `yunta_check_task`
+  and `yunta_request_scope_expansion` for a loop's task sessions, which read their
+  task and judge their work through them (a loop therefore needs a runner that can
+  hold these tools);
   a `yunta_submit_<kind>` tool for each submittable kind the node declares under
   `artifacts.produces` (see [artifacts the engine reads](#artifacts-the-engine-reads));
   and `yunta_get_blackboard` for a `coordination: blackboard` parallel group's own

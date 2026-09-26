@@ -25,7 +25,9 @@ impl RunToolCatalog for RunTool {
     /// Whether `session` is served this tool.
     fn offered_to(self, session: &SessionTools) -> bool {
         match self {
-            RunTool::RequestScopeExpansion => session.task.is_some(),
+            RunTool::RequestScopeExpansion | RunTool::Task | RunTool::CheckTask => {
+                session.task.is_some()
+            }
             RunTool::GetBlackboard => session.in_blackboard_group(),
             RunTool::Submit(kind) => session.submits(kind),
             _ => true,
@@ -38,6 +40,8 @@ impl RunToolCatalog for RunTool {
         match self {
             RunTool::CheckArtifact => check_artifact_tool(),
             RunTool::TaskStatus => task_status_tool(),
+            RunTool::Task => task_tool(),
+            RunTool::CheckTask => check_task_tool(),
             RunTool::GetBlackboard => blackboard_tool(),
             RunTool::RequestScopeExpansion => scope_expansion_tool(),
             RunTool::PostFinding => post_finding_tool(),
@@ -123,6 +127,33 @@ fn task_status_tool() -> Tool {
         "yunta_task_status",
         "Read-only view of the run's tasks document (task id -> status) — the same data \
          the `tasks` context source mounts, queryable mid-session.",
+        no_arguments(),
+    )
+}
+
+fn task_tool() -> Tool {
+    Tool::new(
+        RunTool::Task.name(),
+        "Read the task this session works, from the run's tasks document: its id, title \
+         and notes; `scope`, the globs every change must stay inside (what the task declared \
+         plus what was granted to it); and `criteria`, the commands that must all exit 0 \
+         when your session ends — a criterion is red before the work starts, and a `guard` \
+         is green before it and must stay green. `checks` lists what the engine found in \
+         this task's current cycle: the pre-check, then each earlier attempt's criteria \
+         and the paths it changed outside the scope. The tasks document is not in your \
+         checkout; this is where it is read.",
+        no_arguments(),
+    )
+}
+
+fn check_task_tool() -> Tool {
+    Tool::new(
+        RunTool::CheckTask.name(),
+        "Judge your work on this task exactly as the engine will when your session \
+         ends: run every criterion on the checkout as it stands and audit what changed \
+         against the task's scope. `closes` is true when every criterion exits 0 and \
+         nothing changed lies outside the scope — the task is then done if the tree does \
+         not change again. A scope expansion you asked for counts only once granted.",
         no_arguments(),
     )
 }

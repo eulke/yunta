@@ -636,7 +636,7 @@ async fn killing_the_engine_mid_batch_and_resuming_only_reruns_the_orphan() {
     let bench = Bench::new();
 
     let workflow = concurrency_workflow(2);
-    let fixture = "sessions:\n  - match_prompt_contains: \"task-q\"\n    effects:\n      - { path: q.txt, content: \"q\" }\n    outcome: { type: completed, summary: did-q }\n";
+    let fixture = "capabilities: { run_tools: true }\nsessions:\n  - match_prompt_contains: \"task-q\"\n    effects:\n      - { path: q.txt, content: \"q\" }\n    outcome: { type: completed, summary: did-q }\n";
 
     let RunReport { terminal, state } = bench
         .run_sabotaged(&workflow, fixture, |run_dir| {

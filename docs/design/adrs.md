@@ -193,3 +193,4 @@ lista.
 **D184 — Declarar `scope:` es pedir un árbol propio.** `accepted` → [`adr/D184-declarar-scope-es-pedir-un-arbol-propio.md`](adr/D184-declarar-scope-es-pedir-un-arbol-propio.md)
 **D185 — Cerrar un process group exige una observación estable de sus miembros.** `accepted` → [`adr/D185-cierre-estable-de-process-groups.md`](adr/D185-cierre-estable-de-process-groups.md)
 **D186 — A `files:` entry may be declared optional; its absence is recorded, never silent.** `accepted` → [`adr/D186-a-files-entry-may-be-declared-optional.md`](adr/D186-a-files-entry-may-be-declared-optional.md)
+**D187 — A task session reads its task and checks its work through the engine's tools; each check is on the log when it runs.** `accepted` → [`adr/D187-a-task-session-reads-its-task-through-the-engine.md`](adr/D187-a-task-session-reads-its-task-through-the-engine.md)

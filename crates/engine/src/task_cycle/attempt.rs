@@ -9,12 +9,12 @@ use yunta_core::events::{Phase, SessionDeath, TokenUsage};
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::Task;
 
-use super::criteria::{post_check, Memo};
+use super::criteria::Memo;
+use super::judge::{judge, Judgement, Work};
 use super::record::Recorder;
 use super::session::{dispatch_session, DispatchError, SessionObserver, SessionSetup};
 use super::{AttemptRecord, DispatchOutcome, TaskCycleError, TaskOutcome};
 use crate::process::Supervision;
-use crate::scope::audit;
 
 /// Everything one attempt of [`run_task`] reads: the per-cycle context that
 /// never changes between attempts, so an attempt takes just this and its
@@ -69,8 +69,6 @@ pub(super) async fn run_one_attempt(
         supervision,
         ..
     } = params;
-    let cwd = unit.worktree.as_path();
-
     // A cancelled dispatch ends the cycle right here — no post-check, no
     // verdict, no retry. The attempt is on record; what the cancellation
     // means for the task is the caller's decision, because only it knows
@@ -125,29 +123,31 @@ pub(super) async fn run_one_attempt(
         .chain(granted_paths.iter().cloned())
         .collect();
 
-    let post_runs = post_check(task, cwd, memo, supervision).await?;
     // The final diff is evaluated against the declared scope plus any
     // authorized expansions — never against a denied or escalated request's
     // paths.
-    // What this unit began with, recorded when it opened — the same
-    // starting point for every attempt, so an attempt answers for what
-    // an earlier one of its own left in the tree.
-    let scope = audit(
-        cwd,
-        &unit.from,
-        &crate::run_dir::index_for(&params.setup.run_dir, &unit.who),
+    let judgement = judge(
+        task,
         &effective_scope,
-        &last_staged,
+        Work {
+            unit,
+            index: &crate::run_dir::index_for(&params.setup.run_dir, &unit.who),
+            staged: &last_staged,
+        },
+        memo,
         supervision,
     )
     .await?;
+    let succeeded = judgement.closes();
+    let Judgement {
+        criteria: post_runs,
+        scope,
+    } = judgement;
     // On the log before anything else happens to this task, so the next
     // attempt's session can read why this one did not close.
     let recorded = recorder.criteria(Phase::Post, &post_runs).await?;
     recorder.scope(&scope).await?;
 
-    let criteria_green = post_runs.iter().all(|r| r.exit_code == 0);
-    let succeeded = criteria_green && scope.violations.is_empty();
     let escalated = matches!(
         expansion_outcome.as_ref().map(|o| &o.decision),
         Some(crate::scope_expansion::Decision::Escalate)
@@ -270,11 +270,29 @@ async fn open_and_dispatch(
         cancel,
         setup,
         already_granted_paths,
+        supervision,
         ..
     } = params;
     let cwd = unit.worktree.as_path();
-    // One door for every session: the per-attempt listener (its bind
-    // failure degrades to no tools, recorded, never fatal), the brief,
+    // What this session's tools read and judge: the task the cycle
+    // holds, the scope it is held to — declared plus what the log had
+    // granted when the cycle began — and the unit it works in. A check
+    // stages its diff through an index of its own, never the close's.
+    let access = std::sync::Arc::new(crate::run_tools::TaskAccess {
+        task: task.clone(),
+        scope: task
+            .scope
+            .iter()
+            .chain(already_granted_paths)
+            .cloned()
+            .collect(),
+        unit: unit.clone(),
+        index: crate::run_dir::index_for(&setup.run_dir, &unit.who).with_extension("check"),
+        cancel: supervision.cancel.clone(),
+        staged: Default::default(),
+    });
+    // One door for every session: the per-attempt listener (mandatory
+    // for a task session, which reads its task through it), the brief,
     // and the request itself.
     let crate::run::session_plan::OpenedSession {
         request,
@@ -283,12 +301,11 @@ async fn open_and_dispatch(
         setup,
         crate::run::session_plan::SessionPlan {
             node,
-            task: Some(task),
+            task: Some(access),
             prompt: crate::run::session_plan::task_brief(instruction, task),
             cwd: cwd.to_path_buf(),
             profile,
             budget,
-            granted: already_granted_paths.to_vec(),
         },
         adapter,
         audit,
