@@ -107,10 +107,11 @@ fn yunta_fragua_installs_and_checks_every_declared_mode_through_the_real_pack_pi
         ]
     );
     assert!(add_out.status.success(), "{}", stderr(&add_out));
-    // fragua ships one case per declared mode; `--run-tests` runs them
-    // against the mock once the pack is installed.
+    // fragua ships one case per declared mode, and one that runs without
+    // the file `plan` reads as optional; `--run-tests` runs them against
+    // the mock once the pack is installed.
     assert!(
-        stdout(&add_out).contains("tests: 3 cases, 0 failed"),
+        stdout(&add_out).contains("tests: 4 cases, 0 failed"),
         "{}",
         stdout(&add_out)
     );

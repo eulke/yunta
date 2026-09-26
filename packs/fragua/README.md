@@ -40,3 +40,18 @@ Your own `runners:` needs `planner`, `executor`, `mechanical`, `reviewer`
 and `reviewer-alt` resolvable, and `baseline.suite` configured for the
 `tests` node's `baseline_compare` check — `yunta doctor` says so if
 something's missing.
+
+## What this pack assumes about your repository
+
+- **`docs/architecture.md`** (optional, recommended): `plan` reads it as
+  context when it is there. Without it the session is told the file is
+  absent and the planner explores the code on its own, which costs more
+  tokens and plans with less of your intent. The run starts from your last
+  commit, so commit the file before `yunta run`.
+- **A Rust toolchain**: `lint` runs `cargo clippy -- -D warnings`. In another
+  ecosystem it fails after `implement`, the most expensive node, and uses
+  two `fix-lint` attempts before asking you. Copy the workflow into
+  `.yunta/workflows/` and change `lint` to your own linter first.
+- **Code under `src/`**: `fix-lint` and the loop's scope expansions are
+  limited to `src/**`.
+- **`baseline.suite`** in your config, for the `tests` node.
