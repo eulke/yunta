@@ -13,13 +13,14 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use nix::pty::{openpty, Winsize};
 use nix::sys::signal::{kill, Signal};
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, LocalFlags, SetArg};
 use nix::unistd::Pid;
 
-use crate::wait::{wait_for, wait_until};
+use crate::wait::{wait_for, wait_until, WAIT_DEADLINE};
 
 /// What a terminal is told to do, as the bytes a run writes to say it:
 /// the introducer every sequence opens with, and the three sequences
@@ -274,6 +275,19 @@ impl Terminal {
 
 impl Drop for Terminal {
     fn drop(&mut self) {
+        // A run still going is stopped the way a person stops one, so it
+        // closes the process trees it started. Killed outright, it
+        // leaves its nodes running in their own groups, and the reader
+        // below waits on them for as long as they run.
+        if self.ended.is_none() && matches!(self.child.try_wait(), Ok(None)) {
+            if let Err(error) = kill(Pid::from_raw(self.child.id() as i32), Signal::SIGINT) {
+                eprintln!("could not interrupt the run while dropping its terminal: {error}");
+            }
+            let deadline = Instant::now() + WAIT_DEADLINE;
+            while Instant::now() < deadline && matches!(self.child.try_wait(), Ok(None)) {
+                std::thread::yield_now();
+            }
+        }
         drop(self.child.kill());
         drop(self.child.wait());
         if let Some(reader) = self.reader.take() {

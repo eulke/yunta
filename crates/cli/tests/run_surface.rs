@@ -756,9 +756,9 @@ fn the_live_view_indents_a_groups_children_under_it() {
     );
 
     terminal.interrupt();
+    let drawn = terminal.ended();
     assert!(
         !terminal.ran_to_the_end(),
-        "a run stopped by a person is not a success:\n{}",
-        terminal.ended()
+        "a run stopped by a person is not a success:\n{drawn}"
     );
 }
