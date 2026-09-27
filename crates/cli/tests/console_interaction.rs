@@ -155,6 +155,16 @@ fn a_console_prompt_does_not_stall_the_run_tools_listener() {
 }
 
 #[test]
+fn a_decision_on_the_console_says_where_the_run_works() {
+    let root = tempfile::tempdir().unwrap();
+    let terminal = gated(root.path());
+    terminal.wait_for(
+        "the run works in",
+        "the decision never said where a node run again would start from",
+    );
+}
+
+#[test]
 fn the_live_region_comes_off_the_terminal_before_a_prompt_draws_on_it() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());

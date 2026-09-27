@@ -8,12 +8,15 @@
 //! person, a budget or loop cap — they differ in what they say, never
 //! in how they are answered.
 
+use std::path::Path;
+
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::OptionId;
 
 use super::field::ask_line;
 use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, ANSWER};
+use crate::commands::status::decision::run_tree_line;
 use crate::render::{evidence, option_headline, option_tradeoff, INDENT};
 
 /// Free text is offered on every decision, whatever was on the menu:
@@ -21,9 +24,14 @@ use crate::render::{evidence, option_headline, option_tradeoff, INDENT};
 /// only answer available.
 const ASIDE: &str = "anything to add?";
 
-/// Puts `escalation` to the person and returns what they decided.
-pub(crate) fn decide(console: &Console, escalation: &GateWaitingPayload) -> Answered<HumanChoice> {
-    present(console, escalation)?;
+/// Puts `escalation` to the person and returns what they decided,
+/// saying where the run works when the caller knows.
+pub(crate) fn decide(
+    console: &Console,
+    escalation: &GateWaitingPayload,
+    tree: Option<&Path>,
+) -> Answered<HumanChoice> {
+    present(console, escalation, tree)?;
     let option = choose(console, "choose", options(escalation))?;
     console.say(&format!("chose `{option}`"))?;
     console.say(&format!(
@@ -49,7 +57,15 @@ pub(crate) fn decide(console: &Console, escalation: &GateWaitingPayload) -> Answ
 /// record has nothing left to audit it against, and a heading over a
 /// second copy of one sentence costs more room at a prompt someone is
 /// waiting at than it gives them.
-fn present(console: &Console, escalation: &GateWaitingPayload) -> std::io::Result<()> {
+///
+/// The run's tree goes last: it is not evidence of what happened but
+/// where to act on it, which is what a person reads before choosing to
+/// run a node again.
+fn present(
+    console: &Console,
+    escalation: &GateWaitingPayload,
+    tree: Option<&Path>,
+) -> std::io::Result<()> {
     console.say("")?;
     console.say("a decision is needed")?;
     console.block(escalation.summary(), INDENT)?;
@@ -60,6 +76,10 @@ fn present(console: &Console, escalation: &GateWaitingPayload) -> std::io::Resul
         for fact in &attached {
             console.block(fact, INDENT)?;
         }
+    }
+    if let Some(tree) = tree {
+        console.say("")?;
+        console.say(&run_tree_line(tree))?;
     }
     console.say("")
 }

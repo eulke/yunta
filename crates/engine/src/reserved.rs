@@ -129,12 +129,15 @@ pub(crate) mod offers {
     }
 
     /// Run a failed node that has no re-route of its own once more,
-    /// from a fresh attempt.
+    /// from a fresh attempt. The tradeoff says what the attempt starts
+    /// from, because that is the one thing a person can change before
+    /// choosing it.
     pub(crate) fn retry_node(node: &NodeId, attempt: u32) -> GateOption {
         ReservedOption::Retry.offer(
             format!("Run `{node}` again (attempt {attempt})"),
-            "Starts a fresh attempt and reuses nothing the failed one did; fix what it \
-             failed on first, or it fails the same way and asks again",
+            "Starts a fresh attempt from the run's tree as it stands, under the same scope, \
+             and reuses nothing the failed one did; change what it failed on in that tree \
+             first, or it fails the same way and asks again",
         )
     }
 

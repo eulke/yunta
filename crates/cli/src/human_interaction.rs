@@ -102,7 +102,21 @@ impl ConsoleInteraction {
 impl HumanInteraction for ConsoleInteraction {
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         let escalation = escalation.clone();
-        self.prompted(move |console| decide(console, &escalation))
+        self.prompted(move |console| decide(console, &escalation, None))
+            .await
+    }
+
+    /// The decision, with the tree the run works in said under what it
+    /// is about: where a person changes what a node failed on before
+    /// running it again, in the other terminal they would do it from.
+    async fn resolve_in(
+        &self,
+        escalation: &GateWaitingPayload,
+        tree: &std::path::Path,
+    ) -> Option<HumanChoice> {
+        let escalation = escalation.clone();
+        let tree = tree.to_path_buf();
+        self.prompted(move |console| decide(console, &escalation, Some(&tree)))
             .await
     }
 

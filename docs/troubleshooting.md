@@ -102,7 +102,8 @@ When the run pauses on it, the decision offers three ways on:
   one.
 - `retry` runs the node again under the same scope. It only helps after you
   change what it failed on in the run's tree yourself; otherwise the node
-  writes the same paths and asks again.
+  writes the same paths and asks again. The decision, at the prompt and in
+  `yunta status`, says where that tree is ("the run works in …").
 - `abort` pauses the run.
 
 `grant` is not offered to a `read-only` node, or when a config layer sets

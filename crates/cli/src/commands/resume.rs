@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use yunta_core::{AdapterId, Isolation, Manifest, RunId};
+use yunta_core::{AdapterId, Manifest, RunId};
 
 use crate::commands::drive::{drive, Driving, Prepared};
 use crate::context::Context;
@@ -42,13 +42,7 @@ async fn parked(ctx: &Context, run_id: &RunId) -> Result<Parked, CliError> {
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let adapters = super::real_adapters(&manifest.config);
     super::refuse_unrunnable(&manifest.workflow, &adapters)?;
-    let worktree = match manifest.isolation {
-        Isolation::Worktree => ctx
-            .project
-            .worktrees_root_for(&manifest)
-            .join(run_id.as_str()),
-        Isolation::None => ctx.cwd.clone(),
-    };
+    let worktree = ctx.project.run_tree(&manifest, run_id, &ctx.cwd);
     Ok(Parked {
         run_dir,
         manifest,

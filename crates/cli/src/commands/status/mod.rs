@@ -13,6 +13,8 @@
 pub(crate) mod decision;
 pub(crate) mod progress;
 
+use std::path::Path;
+
 use yunta_core::events::{Failure, StoredEvent, TaskStatus};
 use yunta_core::Clock;
 use yunta_core::{Manifest, NodeId, RunId};
@@ -52,7 +54,8 @@ pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let state = yunta_engine::derive(&events);
     println!("run {run_id}: {}", progress::summary(&frame));
     print_derived(&frame, &state);
-    print_decision(run_id, &manifest, &events, &frame.phase);
+    let tree = ctx.project.run_tree(&manifest, run_id, &ctx.cwd);
+    print_decision((run_id, &manifest, &tree), &events, &frame.phase);
     Ok(Outcome::Success)
 }
 
@@ -119,15 +122,24 @@ fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState) {
 /// command that answers it, or — for a pause that reconstructs none —
 /// the sentence the frame carries for it and the way back into the run.
 /// A run that is not parked prints nothing here.
-fn print_decision(run_id: &RunId, manifest: &Manifest, events: &[StoredEvent], phase: &RunPhase) {
+fn print_decision(
+    (run_id, manifest, tree): (&RunId, &Manifest, &Path),
+    events: &[StoredEvent],
+    phase: &RunPhase,
+) {
     let Some(waiting) = advice::parked(phase) else {
         return;
     };
     match yunta_engine::current_escalation(manifest, &yunta_engine::derive(events)) {
-        Some((node, escalation)) => print!(
-            "{}",
-            decision::block(decision::Layout::Page, run_id, &node, &escalation)
-        ),
+        Some((node, escalation)) => {
+            // Where a person acts before answering, said once above the
+            // page and whole, so it can be copied into another terminal.
+            println!("{}", decision::run_tree_line(tree));
+            print!(
+                "{}",
+                decision::block(decision::Layout::Page, run_id, &node, &escalation)
+            );
+        }
         None => print!(
             "{}",
             decision::without_menu(run_id, &advice::parked_in_full(waiting))

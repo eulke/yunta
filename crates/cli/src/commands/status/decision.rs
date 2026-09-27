@@ -26,6 +26,8 @@
 //! what they are waiting on, and what to do instead of choosing an
 //! option.
 
+use std::path::Path;
+
 use yunta_core::events::{GateOption, GateWaitingPayload};
 use yunta_core::{NodeId, RunId};
 
@@ -33,6 +35,19 @@ use crate::commands::advice;
 use crate::render::{
     cell_width, evidence, indent, option_headline, option_tradeoff, wrap, INDENT, LINE_WIDTH,
 };
+
+/// Where a run works, on the one line every surface says it with: the
+/// path whole — it is copied into another terminal, never wrapped — and
+/// what it means for a decision about the run.
+pub(crate) fn run_tree_line(tree: &Path) -> String {
+    yunta_core::text::detailed(
+        "the run works in",
+        &format!(
+            "{} — a node run again starts from what is there",
+            tree.display()
+        ),
+    )
+}
 
 /// Which shape of the block to draw.
 ///
@@ -403,6 +418,15 @@ mod tests {
                 "no heading promises a record that is not there: {drawn}"
             );
         }
+    }
+
+    #[test]
+    fn where_the_run_works_is_said_with_its_path_whole() {
+        let line = run_tree_line(std::path::Path::new("/state/worktrees/run-1"));
+        assert_eq!(
+            line,
+            "the run works in: /state/worktrees/run-1 — a node run again starts from what is there"
+        );
     }
 
     #[test]

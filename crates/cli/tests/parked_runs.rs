@@ -448,6 +448,10 @@ fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
         text.contains(&format!("yunta resolve-gate {run_id} <option>")),
         "{text}"
     );
+    assert!(
+        text.contains("the run works in") && text.contains(&format!("worktrees/{run_id}")),
+        "the page says where to change what the node failed on: {text}"
+    );
 
     let status_json = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
     let state: serde_json::Value = serde_json::from_slice(&status_json.stdout)

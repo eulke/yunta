@@ -225,8 +225,9 @@ impl<'a> RunCtx<'a> {
         Ok(self.log().events().await?)
     }
 
-    /// Puts `escalation` to the run's human surface and returns its
-    /// choice, verified against the menu the surface was shown. `None`
+    /// Puts `escalation` to the run's human surface, with the tree this
+    /// run works in, and returns its choice, verified against the menu
+    /// the surface was shown. `None`
     /// keeps its meaning: no surface can answer right now. An answer off
     /// the menu is refused as [`RunError::OffMenuAnswer`] before anything
     /// is recorded.
@@ -234,7 +235,11 @@ impl<'a> RunCtx<'a> {
         &self,
         escalation: &GateWaitingPayload,
     ) -> Result<Option<HumanChoice>, RunError> {
-        let Some(choice) = self.human_interaction.resolve(escalation).await else {
+        let Some(choice) = self
+            .human_interaction
+            .resolve_in(escalation, self.worktree)
+            .await
+        else {
             return Ok(None);
         };
         if !escalation.offers(&choice.option) {

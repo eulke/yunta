@@ -13,6 +13,8 @@
 //! concrete UI and never writes to the console itself); the MCP one is a
 //! `resolve_gate` tool, not built here.
 
+use std::path::Path;
+
 use async_trait::async_trait;
 use yunta_core::events::{Channel, GateWaitingPayload, HumanChoice};
 use yunta_core::{Answer, QuestionsFile, Responder};
@@ -44,6 +46,21 @@ pub trait HumanInteraction: Send + Sync {
     /// checks the pick against the menu before recording it; a surface
     /// that answers off the menu is a bug, not a decision.
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice>;
+
+    /// [`resolve`](Self::resolve), told where the run works: the tree a
+    /// node's next attempt starts from, which is where a person changes
+    /// what a node failed on before choosing to run it again. It is the
+    /// asking's context, not the escalation's — the escalation is what
+    /// the log records and a parked run rebuilds, and a run's tree is
+    /// where this invocation found it. A surface with nowhere to show it
+    /// answers as `resolve` does.
+    async fn resolve_in(
+        &self,
+        escalation: &GateWaitingPayload,
+        _tree: &Path,
+    ) -> Option<HumanChoice> {
+        self.resolve(escalation).await
+    }
 
     /// Puts a `kind: questions` artifact to the human,
     /// question by question. `None` = this surface can't ask (same

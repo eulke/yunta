@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{ConfigLayer, Manifest};
+use yunta_core::{ConfigLayer, Isolation, Manifest, RunId};
 
 pub struct Project {
     pub config: ConfigLayer,
@@ -51,6 +51,16 @@ impl Project {
             .as_ref()
             .map(|paths| paths.worktrees_root().to_path_buf())
             .unwrap_or_else(|| self.worktrees_root.clone())
+    }
+
+    /// The tree run `run_id` works in: its own checkout under the
+    /// worktrees root its manifest froze, or — for a run that isolates
+    /// nothing — the checkout this invocation runs in, `cwd`.
+    pub fn run_tree(&self, manifest: &Manifest, run_id: &RunId, cwd: &Path) -> PathBuf {
+        match manifest.isolation {
+            Isolation::Worktree => self.worktrees_root_for(manifest).join(run_id.as_str()),
+            Isolation::None => cwd.to_path_buf(),
+        }
     }
 }
 

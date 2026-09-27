@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use yunta_adapters::MOCK_ID;
-use yunta_core::{AdapterId, Clock, IdSource, InputName, Isolation, Manifest, ModeName, Workflow};
+use yunta_core::{AdapterId, Clock, IdSource, InputName, Manifest, ModeName, Workflow};
 use yunta_engine::{FrozenRun, PriorEstimation};
 use yunta_storage::AsyncStorage;
 
@@ -408,10 +408,7 @@ pub(super) async fn create_run_from(
     }
 
     let run_id = ctx.ids.mint_run_id(ctx.clock.now());
-    let worktree = match manifest.isolation {
-        Isolation::Worktree => ctx.project.worktrees_root.join(run_id.as_str()),
-        Isolation::None => ctx.cwd.clone(),
-    };
+    let worktree = ctx.project.run_tree(manifest, &run_id, &ctx.cwd);
     match yunta_engine::prepare_worktree(
         &ctx.cwd,
         &worktree,
