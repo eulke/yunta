@@ -765,6 +765,89 @@ async fn submit_plan(client: &rmcp::service::RunningService<rmcp::RoleClient, ()
     assert!(!is_error, "got: {text}");
 }
 
+/// Hands a tasks document of `tasks` over from `plan`'s own session,
+/// answering whether it was refused and what the tool said.
+async fn submitted(host: &ToolsHost, tasks: serde_json::Value) -> (bool, String) {
+    let session = host
+        .session_declaring("plan", None, vec![tasks_spec()])
+        .await;
+    let client = client_for(&session, None).await.unwrap();
+    let answer = call(
+        &client,
+        "yunta_submit_tasks",
+        json!({ "document": { "tasks": tasks } }),
+    )
+    .await;
+    client.cancel().await.unwrap();
+    answer
+}
+
+#[tokio::test]
+async fn a_tasks_document_whose_criterion_cannot_run_is_refused_saying_why() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+
+    let (refused, text) = submitted(
+        &host,
+        json!([{ "id": "t1", "title": "Work", "scope": ["src/**"],
+                 "criteria": [{ "cmd": "yunta-no-such-tool --version" }] }]),
+    )
+    .await;
+
+    assert!(refused, "got: {text}");
+    for said in [
+        "`yunta-no-such-tool --version` exits 127 (command not found) where the engine runs \
+         criteria",
+        "yunta-no-such-tool: command not found",
+        "under sh with PATH=/usr/bin:/bin",
+    ] {
+        assert!(text.contains(said), "`{said}` is missing from:\n{text}");
+    }
+}
+
+#[tokio::test]
+async fn a_criterion_that_checks_its_file_exists_first_is_accepted() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+
+    let (refused, text) = submitted(
+        &host,
+        json!([{ "id": "t1", "title": "Work", "scope": ["check.sh"],
+                 "criteria": [{ "cmd": "test -f check.sh && sh check.sh" }] }]),
+    )
+    .await;
+
+    assert!(
+        !refused,
+        "a file the task creates is red before it, not missing: {text}"
+    );
+}
+
+#[tokio::test]
+async fn only_a_task_that_starts_from_this_tree_is_refused_for_passing_already() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let tasks = |first: &str| {
+        json!([
+            { "id": "t1", "title": "First", "scope": ["a.txt"], "criteria": [{ "cmd": first }] },
+            { "id": "t2", "title": "Second", "scope": ["b.txt"], "depends_on": ["t1"],
+              "criteria": [{ "cmd": "true" }] },
+        ])
+    };
+
+    let (refused, text) = submitted(&host, tasks("true")).await;
+    assert!(refused, "got: {text}");
+    assert!(
+        text.contains("`true` already exits 0, before any work"),
+        "{text}"
+    );
+    assert_eq!(
+        text.matches("already exits 0").count(),
+        1,
+        "the task that depends on another only meets its tree after that work: {text}"
+    );
+
+    let (refused, text) = submitted(&host, tasks("test -f a.txt")).await;
+    assert!(!refused, "got: {text}");
+}
+
 #[tokio::test]
 async fn a_check_reports_what_the_engine_read_not_only_that_it_parsed() {
     let host = ToolsHost::over(BLACKBOARD_WORKFLOW);

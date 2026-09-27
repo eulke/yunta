@@ -87,6 +87,21 @@ pub(crate) struct Planned<'a> {
     pub follow: Option<Follow>,
 }
 
+/// Whether registering `task` leaves it `done`: this log already holds
+/// it done, and the document cuts it the way the log registered it. Such
+/// a task never runs again, so nothing it checks is asked of the tree
+/// before its work.
+pub(crate) fn stays_done(
+    task: &Task,
+    prior: &BTreeMap<TaskId, Identity>,
+    current: &TaskLedger,
+) -> bool {
+    current.status(&task.id) == Some(TaskStatus::Done)
+        && prior
+            .get(&task.id)
+            .is_none_or(|identity| *identity == Identity::of(task))
+}
+
 /// What registering `document` states, one entry per task in document
 /// order: a total function of what the two logs say.
 ///

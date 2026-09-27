@@ -465,6 +465,7 @@ fn build_ctx(
                     .map(|ambient| ambient.subprocess_vars.clone())
                     .unwrap_or_default(),
                 environment: crate::process::execution_environment(ambient),
+                worktree: worktree.to_path_buf(),
             },
         )),
     };

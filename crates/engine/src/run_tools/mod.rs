@@ -44,6 +44,7 @@
 mod blackboard;
 pub mod catalog;
 mod findings;
+mod handover;
 mod host;
 mod listener;
 mod notice;

@@ -2519,6 +2519,21 @@
           "const": "overlapping-scope"
         },
         {
+          "description": "A criterion's command never answers where the engine runs\ncriteria: it is not found, not executable, or never returns.",
+          "type": "string",
+          "const": "criterion-cannot-run"
+        },
+        {
+          "description": "A criterion that has to fail before the work already passes.",
+          "type": "string",
+          "const": "criterion-already-passes"
+        },
+        {
+          "description": "A guard that has to pass before the work already fails.",
+          "type": "string",
+          "const": "guard-already-red"
+        },
+        {
           "description": "An update or a withdrawal names a finding this node never posted.",
           "type": "string",
           "const": "unknown-id"

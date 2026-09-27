@@ -53,6 +53,12 @@ pub trait Document: DeserializeOwned + serde::Serialize + sealed::Sealed {
     /// A writer who never heard a rule pays a whole attempt for
     /// something the system already knew.
     const RULES: &'static [Rule];
+
+    /// What the engine demands of the commands this document hands it,
+    /// checked when the document is submitted by running each one where
+    /// the engine runs it — the rules no reading of the document can
+    /// settle, because only that environment can answer them.
+    const RUN_RULES: &'static [Rule] = &[];
 }
 
 mod sealed {
@@ -170,6 +176,17 @@ pub fn rules(kind: ArtifactKind) -> &'static [Rule] {
     }
 }
 
+/// The rules a kind's commands are held to where the engine runs them,
+/// checked when the document is submitted.
+pub fn run_rules(kind: ArtifactKind) -> &'static [Rule] {
+    match kind {
+        ArtifactKind::Tasks => TasksFile::RUN_RULES,
+        ArtifactKind::Findings => FindingsFile::RUN_RULES,
+        ArtifactKind::Questions => QuestionsFile::RUN_RULES,
+        ArtifactKind::Answers => crate::AnswersFile::RUN_RULES,
+    }
+}
+
 fn rendered<T: Document>() -> String {
     let mut text = T::EXAMPLE.trim_end().to_string();
     if T::RULES.is_empty() {
@@ -179,6 +196,16 @@ fn rendered<T: Document>() -> String {
     text.push_str("\n\n# The engine also refuses the document, and fails the node, unless:\n");
     for rule in T::RULES {
         text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+    }
+    if !T::RUN_RULES.is_empty() {
+        text.push_str(
+            "#\n# When it is submitted, the engine runs every criterion under `sh`, where it \
+             runs criteria — not in your shell, whose tools it may not have — and refuses \
+             the document unless:\n",
+        );
+        for rule in T::RUN_RULES {
+            text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+        }
     }
     text
 }
@@ -260,7 +287,12 @@ mod tests {
     fn every_rule_code_belongs_to_a_published_contract() {
         let published: BTreeSet<crate::diagnostic::RuleCode> = ArtifactKind::ALL
             .into_iter()
-            .flat_map(|kind| rules(kind).iter().map(|rule| rule.code))
+            .flat_map(|kind| {
+                rules(kind)
+                    .iter()
+                    .chain(run_rules(kind))
+                    .map(|rule| rule.code)
+            })
             .chain(crate::workflow::read::RULES.iter().map(|rule| rule.code))
             .collect();
         for code in crate::diagnostic::RuleCode::ALL {

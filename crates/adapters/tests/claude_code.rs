@@ -798,6 +798,10 @@ async fn the_per_run_tools_reach_the_session_without_the_token_on_the_command_li
         server["headers"]["Authorization"], "Bearer s3cr3t-token-value",
         "the listener authenticates every call"
     );
+    assert_eq!(
+        server["timeout"], 3_600_000,
+        "a call that runs criteria is waited for as long as a session with no wall clock may run"
+    );
 
     // The token is secret material: argv is world-readable through `ps`.
     assert!(

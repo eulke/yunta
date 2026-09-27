@@ -15,10 +15,10 @@ use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventDraft, EventPayload, RunCreatedPayload, RunEvent, StoredEvent};
 use yunta_core::{
-    Clock, CommitSha, NodeId, RunId, Seq, SystemClock, Task, TaskId, TreeId, Workflow,
+    sha256_hex, Clock, CommitSha, NodeId, RunId, Seq, SystemClock, Task, TaskId, TreeId, Workflow,
 };
 use yunta_engine::{
-    open_session_listener, RunToolsHost, RunToolsSession, TaskAccess, Unit, UnitId,
+    open_session_listener, Memo, RunToolsHost, RunToolsSession, TaskAccess, Unit, UnitId,
 };
 use yunta_storage::Storage;
 
@@ -52,6 +52,7 @@ impl ToolsHost {
         let run_id = RunId::from("run-tools-1");
         let workflow: Workflow = serde_norway::from_str(workflow_yaml).expect("parse workflow");
         let run_dir = born_run_dir(root.path());
+        let worktree = born_tree(root.path());
         let host = Arc::new(RunToolsHost::new(
             &workflow,
             yunta_engine::HostOf {
@@ -64,12 +65,11 @@ impl ToolsHost {
                 run_dir: run_dir.clone(),
                 max_artifact_bytes: None,
                 redactor: yunta_core::Redactor::default(),
-                memo: Arc::new(yunta_engine::Memo::new(yunta_core::sha256_hex(
-                    b"test-config",
-                ))),
+                memo: Arc::new(Memo::new(sha256_hex(b"test-config"))),
                 process_registry: None,
                 subprocess_vars: Vec::new(),
                 environment: Some(tools_environment()),
+                worktree,
             },
         ));
         let hosted = ToolsHost {
@@ -239,4 +239,13 @@ pub fn tools_environment() -> yunta_core::events::ExecutionEnvironment {
         shell: "sh".to_string(),
         path: vec!["/usr/bin".to_string(), "/bin".to_string()],
     }
+}
+
+/// The run's own tree under `root`, a repository like any a run works
+/// in: a handed-over document's commands are proven in a checkout of it.
+fn born_tree(root: &std::path::Path) -> PathBuf {
+    let tree = root.join("tree");
+    std::fs::create_dir_all(&tree).expect("create the run's tree");
+    crate::init_repo(&tree);
+    tree
 }

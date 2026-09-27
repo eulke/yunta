@@ -943,6 +943,11 @@ async fn the_per_run_tools_reach_the_session_with_the_token_only_in_the_environm
         "calls on the ephemeral server are approved without prompting: {args}"
     );
     assert!(
+        args.contains("mcp_servers.yunta-run.tool_timeout_sec=3600.0"),
+        "a call that runs criteria is waited for as long as a session with no wall clock \
+         may run: {args}"
+    );
+    assert!(
         env.contains("YUNTA_RUN_TOOLS_TOKEN=s3cr3t-token-value"),
         "the token reaches the child by environment"
     );
@@ -1041,8 +1046,9 @@ async fn no_dead_config_override_reaches_the_cli() {
         .collect();
     assert_eq!(
         server.len(),
-        3,
-        "the per-run server takes its url, credential variable and approval mode: {args:?}"
+        4,
+        "the per-run server takes its url, credential variable, approval mode and call \
+         timeout: {args:?}"
     );
     assert!(
         server

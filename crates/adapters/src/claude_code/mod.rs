@@ -50,6 +50,9 @@ fn write_mcp_config(req: &SessionRequest) -> Result<Option<PathBuf>> {
                 "type": "http",
                 "url": endpoint.url,
                 "headers": { "Authorization": format!("Bearer {}", endpoint.token.expose()) },
+                // A call can run a task's criteria; the CLI waits for it
+                // as long as the session may run, in milliseconds.
+                "timeout": RunToolsEndpoint::call_timeout(&req.budget).as_millis(),
             }
         }
     });

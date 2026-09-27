@@ -253,6 +253,89 @@ fn median_duration(history: &TaskLedger, cmd: &str) -> Option<u64> {
     crate::stats::median(&sorted).map(|ms| ms as u64)
 }
 
+/// One criterion as a door that has to tell its writer why sees it: what
+/// it answered, and — when it never answered — the last of what it said
+/// on stderr, which is where a shell says what it could not find.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Probe {
+    pub(crate) run: CriterionRun,
+    pub(crate) said: Option<String>,
+}
+
+/// Runs every criterion of `task` on `cwd` as its pre-check would —
+/// through the same cache, which keeps what they answered for that
+/// tree — but with their output collected rather than shown, so what a
+/// command that could not run said can be handed back to whoever wrote
+/// it.
+pub(crate) async fn probe(
+    task: &Task,
+    cwd: &Path,
+    memo: &Memo,
+    supervision: Supervision<'_>,
+) -> Result<Vec<Probe>, TaskCycleError> {
+    let tree_hash = tree_hash(cwd, supervision).await?;
+    let mut probes = Vec::with_capacity(task.criteria.len());
+    for criterion in &task.criteria {
+        let is_guard = criterion.r#type == Some(CriterionType::Guard);
+        if let Some(exit_code) = memo.get(&criterion.cmd, &tree_hash) {
+            probes.push(Probe {
+                run: CriterionRun {
+                    cmd: criterion.cmd.clone(),
+                    exit_code,
+                    is_guard,
+                    reused: true,
+                    duration_ms: None,
+                },
+                said: None,
+            });
+            continue;
+        }
+        let started = std::time::Instant::now();
+        let outcome = spawn_governed(GovernedCommand::shell(cwd, &criterion.cmd), supervision)
+            .await
+            .map_err(|source| TaskCycleError::Criterion {
+                task: task.id.clone(),
+                cmd: criterion.cmd.clone(),
+                source,
+            })?;
+        let said = last_words(stderr_of(&outcome));
+        let exit_code = exit_code_of(outcome);
+        memo.put(&criterion.cmd, &tree_hash, exit_code);
+        probes.push(Probe {
+            run: CriterionRun {
+                cmd: criterion.cmd.clone(),
+                exit_code,
+                is_guard,
+                reused: false,
+                duration_ms: Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64),
+            },
+            said: could_not_run(exit_code).and(said),
+        });
+    }
+    Ok(probes)
+}
+
+fn stderr_of(outcome: &Outcome) -> &[u8] {
+    match outcome {
+        Outcome::Exited { stderr, .. }
+        | Outcome::TimedOut { stderr, .. }
+        | Outcome::Cancelled { stderr, .. } => stderr,
+    }
+}
+
+/// The last non-empty line of `stderr`, cut to a line's worth of
+/// characters: enough to name what a shell could not find, never a whole
+/// build log.
+fn last_words(stderr: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(stderr);
+    let line = text
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())?
+        .trim();
+    Some(line.chars().take(240).collect())
+}
+
 /// Pre-check in rojo: every non-`guard` criterion must
 /// fail, every `guard` must pass. Runs every criterion regardless — the
 /// report should show all of them, not stop at the first surprise.

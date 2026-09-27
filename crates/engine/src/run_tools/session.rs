@@ -98,6 +98,8 @@ pub(super) enum RunToolError {
          sessions are served it"
     )]
     NotATaskSession { tool: &'static str },
+    #[error("the criteria could not be run where the engine runs them: {detail}")]
+    Handover { detail: String },
     #[error("the task's work could not be checked")]
     Check {
         #[source]

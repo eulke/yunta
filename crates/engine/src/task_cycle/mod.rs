@@ -36,7 +36,7 @@ use attempt::{run_one_attempt, AttemptParams, AttemptStep};
 pub(crate) use record::to_results;
 use record::Recorder;
 
-pub(crate) use criteria::could_not_run;
+pub(crate) use criteria::{could_not_run, probe, Probe};
 pub use criteria::{post_check, pre_check, Memo, Memoized};
 pub(crate) use judge::{judge, Work};
 pub(crate) use session::dispatch_session;

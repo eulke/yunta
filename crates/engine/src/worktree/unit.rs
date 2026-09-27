@@ -31,6 +31,10 @@ pub enum UnitId {
     Node(NodeId),
     /// A task of a `loop` node.
     Task(TaskId),
+    /// The checkout a node's handed-over document is proven in: a tasks
+    /// document's criteria, run where the engine runs criteria before
+    /// the document is accepted.
+    Handover(NodeId),
 }
 
 impl std::fmt::Display for UnitId {
@@ -41,6 +45,7 @@ impl std::fmt::Display for UnitId {
         match self {
             UnitId::Node(id) => write!(f, "node/{id}"),
             UnitId::Task(id) => write!(f, "task/{id}"),
+            UnitId::Handover(id) => write!(f, "handover/{id}"),
         }
     }
 }

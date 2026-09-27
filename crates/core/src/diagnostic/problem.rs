@@ -84,6 +84,13 @@ rule_codes! {
     DependencyCycle => "dependency-cycle",
     /// Two independent tasks reach for the same files.
     OverlappingScope => "overlapping-scope",
+    /// A criterion's command never answers where the engine runs
+    /// criteria: it is not found, not executable, or never returns.
+    CriterionCannotRun => "criterion-cannot-run",
+    /// A criterion that has to fail before the work already passes.
+    CriterionAlreadyPasses => "criterion-already-passes",
+    /// A guard that has to pass before the work already fails.
+    GuardAlreadyRed => "guard-already-red",
     EmptyText => "empty-text",
     EmptyDetail => "empty-detail",
     /// An update or a withdrawal names a finding this node never posted.

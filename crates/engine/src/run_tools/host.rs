@@ -53,6 +53,9 @@ pub struct HostOf {
     /// What those subprocesses run with, so an answer about a command
     /// that could not run can say where it was looked for.
     pub environment: Option<ExecutionEnvironment>,
+    /// The run's own tree: what a handed-over document's commands are
+    /// proven against, in a checkout of their own.
+    pub worktree: PathBuf,
 }
 
 pub struct RunToolsHost {
@@ -96,6 +99,8 @@ pub struct RunToolsHost {
     subprocess_vars: Vec<(String, String)>,
     /// What every subprocess the run starts runs with.
     pub(super) environment: Option<ExecutionEnvironment>,
+    /// The run's own tree.
+    pub(super) worktree: PathBuf,
 }
 
 impl RunToolsHost {
@@ -112,6 +117,7 @@ impl RunToolsHost {
             process_registry,
             subprocess_vars,
             environment,
+            worktree,
         } = host;
         let mut groups = HashMap::new();
         let mut member_of = HashMap::new();
@@ -145,6 +151,7 @@ impl RunToolsHost {
             process_registry,
             subprocess_vars,
             environment,
+            worktree,
         }
     }
 

@@ -183,6 +183,12 @@ fn config_overrides(req: &SessionRequest) -> Vec<String> {
                 format!("mcp_servers.{server}.default_tools_approval_mode"),
                 "approve",
             ),
+            // A call can run a task's criteria; the CLI waits for it as
+            // long as the session may run.
+            ConfigOverride::float(
+                format!("mcp_servers.{server}.tool_timeout_sec"),
+                RunToolsEndpoint::call_timeout(&req.budget).as_secs_f64(),
+            ),
         ] {
             args.extend(setting.into_args());
         }

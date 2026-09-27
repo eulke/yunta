@@ -15,7 +15,7 @@
 //! session to choose.
 
 use serde_json::Value;
-use yunta_core::diagnostic::ArtifactFailure;
+use yunta_core::diagnostic::{ArtifactFailure, DocumentRef, Report};
 use yunta_core::events::{
     ArtifactId, ArtifactSubmittedPayload, EventPayload, RecordedOrigin, SubmissionOutcome,
 };
@@ -131,7 +131,33 @@ impl SessionTools {
             document.clone(),
             self.host.max_artifact_bytes,
         );
+        let offered = match offered {
+            Ok(verified) => self.proven(kind, verified).await?,
+            refused => refused,
+        };
         self.record(kind, offered).await
+    }
+
+    /// A readable document, held to what only running its commands can
+    /// settle: a tasks document's criteria, run where the engine runs
+    /// them. Refused with every rule they break, exactly as a document
+    /// that broke its shape is.
+    async fn proven(
+        &self,
+        kind: ArtifactKind,
+        verified: VerifiedArtifact,
+    ) -> Result<Result<VerifiedArtifact, crate::artifacts::SubmitError>, RunToolError> {
+        let crate::artifacts::ArtifactContent::Tasks(tasks) = &verified.content else {
+            return Ok(Ok(verified));
+        };
+        let broken = self.handover(tasks).await?;
+        if broken.is_empty() {
+            return Ok(Ok(verified));
+        }
+        Ok(Err(crate::artifacts::SubmitError::Refused(Report::new(
+            DocumentRef::new(kind, verified.path.display().to_string()),
+            broken,
+        ))))
     }
 
     /// Records the engine's verdict on a submitted document and answers

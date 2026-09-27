@@ -351,6 +351,23 @@ tasks where it matters, or once at the workflow's close via a `kind: check` node
 per task. `lint-fix.yaml` in the quickstart is this pattern in miniature: `lint`
 verifies the whole workspace once, not per file changed.
 
+A criterion runs under `sh` with the run's own `PATH`, not in the shell of the
+agent that wrote it — an agent's CLI can put tools on its own `PATH` (a bundled
+`rg`, say) that the engine's commands never see. When a planner submits a tasks
+document, the engine runs every criterion there before accepting it and refuses one
+that cannot run, quoting what the shell said. A criterion that calls a file the task
+itself will create checks for it first, so it fails before the work instead of not
+running at all:
+
+```yaml
+tasks:
+  - id: verify-script
+    title: Add the verification script
+    scope: ["scripts/verify.sh"]
+    criteria:
+      - cmd: "test -f scripts/verify.sh && sh scripts/verify.sh"
+```
+
 ### Shared build caches across worktrees
 
 Isolation-by-worktree (the engine's default) means every run — and, under

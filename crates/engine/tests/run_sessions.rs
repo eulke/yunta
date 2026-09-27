@@ -1239,6 +1239,50 @@ fn first_post_check_reused(events: &[yunta_core::events::StoredEvent]) -> Option
     })
 }
 
+/// A planner that hands over a criterion the engine cannot run hears so
+/// in the same session, fixes it, and the loop's pre-check reads what the
+/// handover already ran rather than running it again.
+#[tokio::test]
+async fn a_plan_refused_for_a_criterion_that_cannot_run_is_fixed_in_its_own_session() {
+    let bench = Bench::new();
+    let task = |criterion: &str| {
+        format!(
+            "{{ tasks: [{{ id: task-1, title: Write a1, scope: [a1.txt], \
+             criteria: [{{ cmd: \"{criterion}\" }}] }}] }}"
+        )
+    };
+    let fixture = format!(
+        "capabilities: {{ run_tools: true }}\nsessions:\n  - steps:\n\
+         \x20     - {{ type: run_tool, tool: yunta_submit_tasks, expect: refused, arguments: {{ document: {} }} }}\n\
+         \x20     - {{ type: run_tool, tool: yunta_submit_tasks, arguments: {{ document: {} }} }}\n\
+         \x20   outcome: {{ type: completed, summary: planned }}\n\
+         \x20 - match_prompt_contains: \"task-1\"\n    effects:\n      - {{ path: a1.txt, content: \"a\" }}\n\
+         \x20   outcome: {{ type: completed, summary: did-1 }}\n",
+        task("yunta-no-such-tool --version"),
+        task("test -f a1.txt"),
+    );
+
+    let RunReport { terminal, state } = bench.run(PLAN_THEN_LOOP_WORKFLOW, &fixture).await;
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+
+    let pre = bench
+        .events()
+        .iter()
+        .find_map(|event| match event.payload() {
+            Some(yunta_core::events::EventPayload::Node(NodeEvent::CriteriaChecked(p)))
+                if p.phase == yunta_core::events::Phase::Pre =>
+            {
+                Some(p.results.clone())
+            }
+            _ => None,
+        });
+    let pre = pre.expect("the loop pre-checked its task");
+    assert!(
+        pre[0].reused,
+        "the handover ran this criterion on the same tree: {pre:?}"
+    );
+}
+
 /// A loop whose runner cannot hold the run tools is refused before any
 /// session opens: its task sessions would have no way to read what their
 /// task asks, and a session working blind is what the refusal prevents.

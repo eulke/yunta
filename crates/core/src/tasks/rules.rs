@@ -63,6 +63,29 @@ pub(super) const RULES: &[Rule] = &[
     },
 ];
 
+/// What the engine demands of a task's criteria where it runs them,
+/// checked by running each one when the document is submitted: in a
+/// checkout of the run's tree, with the shell and `PATH` the run's
+/// commands get. A task that depends on another is checked only for the
+/// first: its criteria meet the tree only after that other task's work.
+pub(super) const RUN_RULES: &[Rule] = &[
+    Rule {
+        code: RuleCode::CriterionCannotRun,
+        demand: "every criterion runs where the engine runs criteria: each program it calls is \
+                 on that `PATH`, and a file the task will create is only run after checking \
+                 it exists (`test -f x && ./x`)",
+    },
+    Rule {
+        code: RuleCode::CriterionAlreadyPasses,
+        demand: "in a task with no `depends_on`, every criterion that is not a `guard` fails \
+                 before the work",
+    },
+    Rule {
+        code: RuleCode::GuardAlreadyRed,
+        demand: "in a task with no `depends_on`, every `guard` passes before the work",
+    },
+];
+
 fn broke(index: usize, id: &TaskId, code: RuleCode, detail: impl Into<String>) -> Diagnostic {
     Diagnostic::new(
         Subject::Task(Named::new(id.clone(), index)),
