@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
+use yunta_core::events::ExecutionEnvironment;
 use yunta_core::{ArtifactSpec, Coordination, NodeId, NodeKind, RunId, ScopeGlob, Task, Workflow};
 use yunta_storage::AsyncStorage;
 
@@ -49,6 +50,9 @@ pub struct HostOf {
     pub process_registry: Option<Arc<ProcessRegistry>>,
     /// The variables the run sets on every subprocess it starts.
     pub subprocess_vars: Vec<(String, String)>,
+    /// What those subprocesses run with, so an answer about a command
+    /// that could not run can say where it was looked for.
+    pub environment: Option<ExecutionEnvironment>,
 }
 
 pub struct RunToolsHost {
@@ -90,6 +94,8 @@ pub struct RunToolsHost {
     process_registry: Option<Arc<ProcessRegistry>>,
     /// What the run sets on every subprocess it starts.
     subprocess_vars: Vec<(String, String)>,
+    /// What every subprocess the run starts runs with.
+    pub(super) environment: Option<ExecutionEnvironment>,
 }
 
 impl RunToolsHost {
@@ -105,6 +111,7 @@ impl RunToolsHost {
             memo,
             process_registry,
             subprocess_vars,
+            environment,
         } = host;
         let mut groups = HashMap::new();
         let mut member_of = HashMap::new();
@@ -137,6 +144,7 @@ impl RunToolsHost {
             memo,
             process_registry,
             subprocess_vars,
+            environment,
         }
     }
 

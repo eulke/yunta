@@ -87,6 +87,7 @@ pub(crate) async fn drive_promotions(
                 storage: env.storage,
                 ids: &env.ctx.ids,
                 supervision: env.ctx.supervision(),
+                environment: yunta_engine::process::execution_environment(Some(&env.ctx.env)),
             },
         )
         .await?;
@@ -229,6 +230,7 @@ nodes:
                 promoted_from: None,
                 artifacts: &[],
                 baseline: None,
+                environment: None,
             },
             &storage.async_handle(),
             ctx.supervision(),

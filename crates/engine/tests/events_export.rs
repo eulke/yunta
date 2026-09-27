@@ -21,6 +21,7 @@ fn sample_events() -> Vec<StoredEvent> {
             yunta_schema: None,
             base_branch: "main".to_string(),
             base_commit: "deadbeef".into(),
+            environment: None,
         })))
         .node(
             "lint",

@@ -447,6 +447,7 @@ pub(super) async fn create_run_from(
             // A run a caller starts is the root of its lineage: it
             // measures on its first wake, if its config names a suite.
             baseline: None,
+            environment: yunta_engine::process::execution_environment(Some(&ctx.env)),
         },
         storage,
         ctx.supervision(),

@@ -101,6 +101,7 @@ fn created(mode: &str) -> EventPayload {
         yunta_schema: None,
         base_branch: "main".to_string(),
         base_commit: CommitSha::from("abc1234"),
+        environment: None,
     }))
 }
 
@@ -1022,6 +1023,7 @@ fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
             EventPayload::Run(RunEvent::Resumed(RunResumedPayload {
                 resume_policy_applied: None,
                 policies: Vec::new(),
+                environment: None,
             })),
         ),
         (5, Some("build"), started(1)),

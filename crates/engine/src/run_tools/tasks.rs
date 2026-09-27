@@ -21,8 +21,8 @@ use std::path::PathBuf;
 use serde::Serialize;
 use serde_json::Value;
 use yunta_core::events::{
-    CriterionResult, CriterionType, EventPayload, NodeEvent, Phase, StoredEvent, TaskEvent,
-    TaskStatus,
+    CriterionResult, CriterionType, EventPayload, ExecutionEnvironment, NodeEvent, Phase,
+    StoredEvent, TaskEvent, TaskStatus,
 };
 use yunta_core::{ScopeGlob, TaskId};
 
@@ -82,6 +82,16 @@ impl SessionTools {
                 })
                 .collect(),
             checks: checks_of(&events, &task.id),
+            runs_under: None,
+        };
+        let any_unrunnable = sheet
+            .checks
+            .iter()
+            .flat_map(|check| &check.criteria)
+            .any(|answered| answered.cannot_run.is_some());
+        let sheet = TaskSheet {
+            runs_under: self.host.environment.as_ref().filter(|_| any_unrunnable),
+            ..sheet
         };
         render(&sheet)
     }
@@ -102,10 +112,15 @@ impl SessionTools {
         )
         .await
         .map_err(|source| RunToolError::Check { source })?;
+        let any_unrunnable = judgement
+            .criteria
+            .iter()
+            .any(|run| run.could_not_run().is_some());
         render(&Verdict {
             closes: judgement.closes(),
             criteria: judgement.criteria.iter().map(Answered::of_run).collect(),
             outside_scope: judgement.scope.violations,
+            runs_under: self.host.environment.as_ref().filter(|_| any_unrunnable),
         })
     }
 
@@ -167,6 +182,10 @@ struct TaskSheet<'a> {
     scope: &'a [ScopeGlob],
     criteria: Vec<Declared<'a>>,
     checks: Vec<Check>,
+    /// What the engine ran these checks with, told only when one of them
+    /// could not run: the shell and the `PATH` its command was looked up in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runs_under: Option<&'a ExecutionEnvironment>,
 }
 
 /// A criterion as the task declares it.
@@ -223,11 +242,14 @@ struct Check {
 
 /// What `yunta_check_task` answers.
 #[derive(Serialize)]
-struct Verdict {
+struct Verdict<'a> {
     /// Whether the task would be done if the session ended now.
     closes: bool,
     criteria: Vec<Answered>,
     outside_scope: Vec<PathBuf>,
+    /// What the criteria ran with, told only when one could not run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runs_under: Option<&'a ExecutionEnvironment>,
 }
 
 /// `task`'s checks in its current cycle — everything after the last time

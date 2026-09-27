@@ -94,6 +94,9 @@ pub struct CreateRunParams<'a> {
     /// lineage — it measures on its first wake, if its config names a
     /// suite.
     pub baseline: Option<&'a super::BirthBaseline>,
+    /// What the run's commands will run with, recorded on `run_created`
+    /// so a later wake can tell whether that changed.
+    pub environment: Option<yunta_core::events::ExecutionEnvironment>,
 }
 
 /// Creates the run's anatomy: run.dir with `artifacts/` and
@@ -136,6 +139,7 @@ pub async fn create_run(
         promoted_from,
         artifacts,
         baseline,
+        environment,
     } = params;
     if *mode != ModeName::default() {
         match &manifest.workflow.modes {
@@ -241,6 +245,7 @@ pub async fn create_run(
             ),
             base_branch: manifest.base_branch.clone(),
             base_commit: manifest.base_commit.clone(),
+            environment,
         })),
     )
     .await?;

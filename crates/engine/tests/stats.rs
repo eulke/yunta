@@ -84,6 +84,7 @@ fn fixture_events() -> Vec<StoredEvent> {
             yunta_schema: None,
             base_branch: "main".to_string(),
             base_commit: "deadbeef".into(),
+            environment: None,
         })))
         .node(
             "a",
@@ -235,6 +236,7 @@ fn cache_rate_is_none_without_input() {
             yunta_schema: None,
             base_branch: "main".to_string(),
             base_commit: "deadbeef".into(),
+            environment: None,
         })))
         .node(
             "a",

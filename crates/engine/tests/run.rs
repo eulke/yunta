@@ -1287,3 +1287,30 @@ sessions:
         "a CLI that would not start is worth another run"
     );
 }
+
+#[tokio::test]
+async fn a_run_records_what_its_commands_run_with_when_it_is_born() {
+    let bench =
+        Bench::new().with_subprocess_vars(vec![("PATH".to_string(), "/usr/bin:/bin".to_string())]);
+    let workflow = "name: one\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n";
+
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let born_in = bench
+        .events()
+        .iter()
+        .find_map(|event| match event.payload() {
+            Some(yunta_core::events::EventPayload::Run(RunEvent::Created(p))) => {
+                p.environment.clone()
+            }
+            _ => None,
+        });
+    let born_in = born_in.expect("run_created says what the run's commands run with");
+    assert_eq!(born_in.path, vec!["/usr/bin", "/bin"]);
+    assert!(
+        born_in.shell.ends_with("/sh"),
+        "the shell is the one found on that PATH: {}",
+        born_in.shell
+    );
+}

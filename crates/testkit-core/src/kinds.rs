@@ -23,6 +23,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
             yunta_schema: None,
             base_branch: "main".to_string(),
             base_commit: "deadbeef".into(),
+            environment: None,
         })),
         EventPayload::Node(NodeEvent::RunnerResolved(RunnerResolvedPayload {
             runner: "executor".into(),
@@ -295,6 +296,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
         EventPayload::Run(RunEvent::Resumed(RunResumedPayload {
             resume_policy_applied: Some("restart_node".to_string()),
             policies: Vec::new(),
+            environment: None,
         })),
         EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
             terminal_state: TerminalState::Done,

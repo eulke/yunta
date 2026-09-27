@@ -358,6 +358,7 @@ fn run_created_in_mode(mode: &str) -> Vec<StoredEvent> {
                 yunta_schema: None,
                 base_branch: "main".to_string(),
                 base_commit: "deadbeef".into(),
+                environment: None,
             },
         )))
         .build()

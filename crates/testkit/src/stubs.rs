@@ -68,6 +68,17 @@ pub fn git_holding(
     vars
 }
 
+/// This process's own `PATH` with `first` looked up before everything on
+/// it — what a test hands a command it spawns to put a directory ahead
+/// of the real programs without changing what else it finds.
+pub fn path_with(first: &Path) -> std::ffi::OsString {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    std::env::join_paths(
+        std::iter::once(first.to_path_buf()).chain(std::env::split_paths(&inherited)),
+    )
+    .expect("a PATH made of the directories it already had")
+}
+
 /// The git the stub delegates to: the first one on this process's own
 /// `PATH`, resolved now so the stub never finds itself.
 fn real_git() -> PathBuf {

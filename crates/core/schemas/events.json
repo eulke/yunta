@@ -1660,6 +1660,25 @@
         }
       ]
     },
+    "ExecutionEnvironment": {
+      "description": "What the engine hands every command it runs — criteria, `bash` nodes,\nhooks: the shell that interprets it, and the directories that shell\nlooks programs up in, in order. A command that works in an agent's\nown shell proves nothing about this one.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "shell": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "shell",
+        "path"
+      ]
+    },
     "Fact": {
       "description": "One fact the engine read off the log: the label a reader scans for,\nand the value under it.\n\nThe label is optional because not every fact needs one. A cause like\n`exit 1` or a sentence like `no forge reachable from this machine`\nalready names itself, and putting a word in front of it would add\nreading without adding meaning; a bare number like `400` says\nnothing until `limits.max_tokens_per_run` is in front of it. A fact\nthat carries a label states it here rather than writing it into the\nvalue, so every surface sets the two apart the same way.",
       "type": "object",
@@ -2545,6 +2564,17 @@
         "base_commit": {
           "$ref": "#/$defs/CommitSha"
         },
+        "environment": {
+          "description": "What the run's commands ran with when it was born. Absent from a\nlog written before it was recorded.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionEnvironment"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "inputs": {
           "type": "object",
           "additionalProperties": true
@@ -2636,6 +2666,17 @@
     "RunResumedPayload": {
       "type": "object",
       "properties": {
+        "environment": {
+          "description": "What the run's commands run with from this wake on. Absent from a\nlog written before it was recorded.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExecutionEnvironment"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "policies": {
           "description": "Every node the log left running with no terminal event, and the\n`on_interrupt` it resolved to: its own, or the config's default.",
           "type": "array",

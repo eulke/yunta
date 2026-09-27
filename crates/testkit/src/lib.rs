@@ -52,7 +52,7 @@ pub use repo::{git, git_output, init_repo, read, write, INITIAL_BRANCH};
 pub use stack::on_a_deep_stack;
 pub use tasks::tasks_document;
 pub use terminal::{runs_root, Terminal};
-pub use tools::ToolsHost;
+pub use tools::{tools_environment, ToolsHost};
 pub use wait::{wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};
 
 /// Runs the `yunta` binary in a [`Checkout`], with whatever that

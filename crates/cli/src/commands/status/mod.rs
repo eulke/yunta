@@ -109,6 +109,9 @@ fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState) {
         state.total_tokens().input,
         state.total_tokens().output
     );
+    if let Some(drift) = state.run.environment_drift() {
+        println!("environment: {drift}");
+    }
 }
 
 /// What a parked run is waiting on, printed last because it is what the

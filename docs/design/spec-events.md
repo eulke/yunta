@@ -133,6 +133,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `promoted_from` | `Option<RunId>` | no | presente solo si este run nace de una promoción |
 | `yunta_schema` [inferido] | string (semver-range) | no | declarado o inferido del binario — congelado junto al resto |
 | `base_branch` / `base_commit` [inferido] | string | sí | necesarios para el worktree y forman parte del manifest congelado |
+| `environment` | `{shell, path}` | no | con qué corren los comandos del run —criterios, nodos `bash`, hooks—: el `sh` encontrado en ese `PATH` y el `PATH` en orden; ausente en logs anteriores |
 
 ### 5.2 `runner_resolved` — engine
 **Fuente:** rol, candidato elegido, candidatos descartados y causa
@@ -555,6 +556,7 @@ The payload contains no arguments, tool response, or free-form error text.
 | `reason` | string | solo en `run_paused` | presupuesto excedido, gate esperando, etc. |
 | `resume_policy_applied` [inferido] | `Option<string>` | solo en `run_resumed` | el único `on_interrupt` que todos los huérfanos resolvieron; ausente sin huérfanos o con políticas distintas |
 | `policies` | lista de `{node, on_interrupt}` | solo en `run_resumed` (puede ser vacía) | cada nodo que el log dejó `running` sin evento terminal y la política a la que resolvió: la propia o el default de la config |
+| `environment` | `{shell, path}` | no, solo en `run_resumed` | con qué corren los comandos desde este wake; si difiere del de `run_created`, `yunta status` lo dice |
 | `terminal_state` | estado | solo en `run_finished` | — |
 | `metrics` | `{cptv?, tokens, ...}` | solo en `run_finished` | derivadas del log, nunca estimadas |
 

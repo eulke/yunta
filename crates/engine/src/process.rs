@@ -19,8 +19,12 @@ use yunta_core::process::signal::{signal_group, Signal};
 use yunta_core::{Clock, Pid};
 
 use crate::process_registry::{self, ProcessRegistry};
+mod environment;
 mod pipes;
 mod state;
+
+pub use environment::execution_environment;
+use environment::SHELL;
 use pipes::{read_to_capture, stdio, Captured, PipeFailure};
 use state::{child_has_exited, observation_interval, wait_for_deadline, Waited};
 
@@ -121,7 +125,7 @@ impl GovernedCommand {
 
     /// `sh -c <script>` in `cwd`, both streams collected.
     pub fn shell(cwd: &Path, script: &str) -> Self {
-        Self::new("sh", cwd)
+        Self::new(SHELL, cwd)
             .arg("-c")
             .arg(script)
             .stdout(Capture::Collect)

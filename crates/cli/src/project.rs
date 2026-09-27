@@ -92,11 +92,15 @@ pub enum ProjectError {
 /// the resulting [`Env`](yunta_core::Env). A run leaves `subprocess_vars`
 /// empty: its nodes inherit this process's environment unchanged.
 pub(crate) fn process_env() -> yunta_core::Env {
+    let var = std::env::var_os;
     yunta_core::Env {
-        home: std::env::var_os("HOME").map(PathBuf::from),
-        yunta_home: std::env::var_os("YUNTA_HOME").map(PathBuf::from),
-        org_config: std::env::var_os("YUNTA_ORG_CONFIG").map(PathBuf::from),
-        fence_var: std::env::var(yunta_core::fence::ENV_VAR).ok(),
+        home: var("HOME").map(PathBuf::from),
+        yunta_home: var("YUNTA_HOME").map(PathBuf::from),
+        org_config: var("YUNTA_ORG_CONFIG").map(PathBuf::from),
+        path: var("PATH")
+            .map(|path| std::env::split_paths(&path).collect())
+            .unwrap_or_default(),
+        fence_var: var(yunta_core::fence::ENV_VAR).and_then(|value| value.into_string().ok()),
         subprocess_vars: Vec::new(),
     }
 }

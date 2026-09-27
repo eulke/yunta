@@ -69,6 +69,7 @@ impl ToolsHost {
                 ))),
                 process_registry: None,
                 subprocess_vars: Vec::new(),
+                environment: Some(tools_environment()),
             },
         ));
         let hosted = ToolsHost {
@@ -91,6 +92,7 @@ impl ToolsHost {
                 yunta_schema: None,
                 base_branch: "main".to_string(),
                 base_commit: "deadbeef".into(),
+                environment: None,
             })),
         );
         hosted
@@ -226,4 +228,15 @@ fn born_run_dir(root: &std::path::Path) -> PathBuf {
         std::fs::create_dir_all(run_dir.join(dir)).expect("create the run's own directories");
     }
     run_dir
+}
+
+/// The environment a [`ToolsHost`] reports its commands running with —
+/// what a test compares an answer's `runs_under` against. It is a label
+/// the host carries, not the environment its checks actually run in,
+/// which stays the test process's own.
+pub fn tools_environment() -> yunta_core::events::ExecutionEnvironment {
+    yunta_core::events::ExecutionEnvironment {
+        shell: "sh".to_string(),
+        path: vec!["/usr/bin".to_string(), "/bin".to_string()],
+    }
 }

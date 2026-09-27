@@ -285,6 +285,7 @@ impl Bench {
                 // measures on its first wake, if its config names a
                 // suite.
                 baseline: None,
+                environment: yunta_engine::process::execution_environment(self.ambient.as_ref()),
             },
             &self.storage.async_handle(),
             self.supervision(),

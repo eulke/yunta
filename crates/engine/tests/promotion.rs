@@ -330,6 +330,7 @@ async fn successor_of(
             storage: &bench.storage.async_handle(),
             ids,
             supervision: bench.supervision(),
+            environment: None,
         },
     )
     .await

@@ -619,6 +619,7 @@ fn created_draft(run_id: &str) -> EventDraft {
             yunta_schema: None,
             base_branch: "main".to_string(),
             base_commit: "deadbeef".into(),
+            environment: None,
         })),
     }
 }

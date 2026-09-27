@@ -388,6 +388,7 @@ pub(super) async fn execute_workflow(
             // its root measured, so its comparisons see what its parent
             // did to the tree.
             baseline: crate::run::baseline::inherited(ctx.run_id, &state).as_ref(),
+            environment: crate::process::execution_environment(ctx.ambient),
         },
         ctx.storage,
         ctx.supervision(cancel),
@@ -617,6 +618,7 @@ async fn drive_child(
                         storage: ctx.storage,
                         ids: ctx.ids,
                         supervision: ctx.root_supervision(),
+                        environment: crate::process::execution_environment(ctx.ambient),
                     },
                 )
                 .await

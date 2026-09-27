@@ -9,7 +9,10 @@ use chrono::{DateTime, Utc};
 
 use crate::events::meta::EventMeta;
 use crate::events::run::kinds::RunEvent;
-use crate::events::{BaselineCapturedPayload, BaselineOrigin, Evidence, TerminalState, TokenUsage};
+use crate::events::{
+    BaselineCapturedPayload, BaselineOrigin, EnvironmentDrift, Evidence, ExecutionEnvironment,
+    TerminalState, TokenUsage,
+};
 use crate::ids::{ModeName, Seq};
 
 /// Where the run stands, as its own events say — without reference to
@@ -58,9 +61,20 @@ pub struct RunLedger {
     /// number of events — what the run is, what it holds, the
     /// measurement it was handed — and none of them is a wake.
     woken: bool,
+    /// What the run's commands ran with at birth, and at its latest wake
+    /// that recorded one.
+    born_in: Option<ExecutionEnvironment>,
+    woken_in: Option<ExecutionEnvironment>,
 }
 
 impl RunLedger {
+    /// How the environment the run's commands run with changed since
+    /// the run was born, as of its latest wake. `None` when it did not,
+    /// or when the log does not say.
+    pub fn environment_drift(&self) -> Option<EnvironmentDrift> {
+        self.born_in.as_ref()?.drift_to(self.woken_in.as_ref()?)
+    }
+
     /// The measurement this run holds — its own, or the one it was born
     /// holding. `None` for a lineage whose root declared no suite.
     pub fn baseline(&self) -> Option<&BaselineCapturedPayload> {
@@ -136,16 +150,20 @@ impl RunLedger {
             RunEvent::Created(p) => {
                 self.phase = RunPhaseRaw::Open;
                 self.mode = p.mode.clone();
+                self.born_in = p.environment.clone();
             }
             RunEvent::Paused(p) => {
                 self.woken = true;
                 self.phase = RunPhaseRaw::Paused;
                 self.paused = Some((p.reason().to_string(), meta.seq));
             }
-            RunEvent::Resumed(_) => {
+            RunEvent::Resumed(p) => {
                 self.woken = true;
                 self.phase = RunPhaseRaw::Open;
                 self.resumed_after = Some(meta.seq);
+                if p.environment.is_some() {
+                    self.woken_in = p.environment.clone();
+                }
             }
             RunEvent::Finished(p) => {
                 self.phase = RunPhaseRaw::Closed;

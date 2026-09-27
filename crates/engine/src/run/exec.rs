@@ -354,7 +354,10 @@ async fn record_resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError>
     );
     ctx.emit(
         None,
-        EventPayload::Run(RunEvent::Resumed(RunResumedPayload::new(policies))),
+        EventPayload::Run(RunEvent::Resumed(RunResumedPayload::new(
+            policies,
+            crate::process::execution_environment(ctx.ambient),
+        ))),
     )
     .await?;
     Ok(())
@@ -461,6 +464,7 @@ fn build_ctx(
                 subprocess_vars: ambient
                     .map(|ambient| ambient.subprocess_vars.clone())
                     .unwrap_or_default(),
+                environment: crate::process::execution_environment(ambient),
             },
         )),
     };

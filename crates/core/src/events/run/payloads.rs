@@ -78,6 +78,92 @@ pub struct RunCreatedPayload {
     pub yunta_schema: Option<crate::SchemaRange>,
     pub base_branch: String,
     pub base_commit: CommitSha,
+    /// What the run's commands ran with when it was born. Absent from a
+    /// log written before it was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<ExecutionEnvironment>,
+}
+
+/// What the engine hands every command it runs — criteria, `bash` nodes,
+/// hooks: the shell that interprets it, and the directories that shell
+/// looks programs up in, in order. A command that works in an agent's
+/// own shell proves nothing about this one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ExecutionEnvironment {
+    pub shell: String,
+    pub path: Vec<String>,
+}
+
+impl ExecutionEnvironment {
+    /// What changed from this environment to `now`, or `None` when
+    /// nothing a command could notice did.
+    pub fn drift_to(&self, now: &ExecutionEnvironment) -> Option<EnvironmentDrift> {
+        let gained: Vec<String> = now
+            .path
+            .iter()
+            .filter(|dir| !self.path.contains(dir))
+            .cloned()
+            .collect();
+        let lost: Vec<String> = self
+            .path
+            .iter()
+            .filter(|dir| !now.path.contains(dir))
+            .cloned()
+            .collect();
+        let shell = (self.shell != now.shell).then(|| (self.shell.clone(), now.shell.clone()));
+        let reordered = gained.is_empty() && lost.is_empty() && self.path != now.path;
+        (shell.is_some() || reordered || !gained.is_empty() || !lost.is_empty()).then_some(
+            EnvironmentDrift {
+                shell,
+                gained,
+                lost,
+                reordered,
+            },
+        )
+    }
+}
+
+impl std::fmt::Display for ExecutionEnvironment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} with PATH={}", self.shell, self.path.join(":"))
+    }
+}
+
+/// How the environment a run's commands run with changed between the
+/// run's birth and its latest wake.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvironmentDrift {
+    /// The shell before and after, when it changed.
+    pub shell: Option<(String, String)>,
+    /// `PATH` directories the latest wake has and the birth did not.
+    pub gained: Vec<String>,
+    /// `PATH` directories the birth had and the latest wake does not.
+    pub lost: Vec<String>,
+    /// The same directories, looked up in another order.
+    pub reordered: bool,
+}
+
+impl std::fmt::Display for EnvironmentDrift {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut said: Vec<String> = Vec::new();
+        if let Some((before, after)) = &self.shell {
+            said.push(format!("the shell went from {before} to {after}"));
+        }
+        if !self.gained.is_empty() {
+            said.push(format!("PATH gained {}", self.gained.join(", ")));
+        }
+        if !self.lost.is_empty() {
+            said.push(format!("PATH lost {}", self.lost.join(", ")));
+        }
+        if self.reordered {
+            said.push("PATH looks its directories up in another order".to_string());
+        }
+        write!(
+            f,
+            "commands now run in another environment than the run was born in: {}",
+            said.join("; ")
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -248,6 +334,10 @@ pub struct RunResumedPayload {
     /// `on_interrupt` it resolved to: its own, or the config's default.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub policies: Vec<ResumePolicy>,
+    /// What the run's commands run with from this wake on. Absent from a
+    /// log written before it was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<ExecutionEnvironment>,
 }
 
 impl RunResumedPayload {
@@ -259,7 +349,7 @@ impl RunResumedPayload {
     /// the resume found no orphan or when two of them resolved
     /// differently. Deriving it here is what keeps the summary and the
     /// record from disagreeing.
-    pub fn new(policies: Vec<ResumePolicy>) -> Self {
+    pub fn new(policies: Vec<ResumePolicy>, environment: Option<ExecutionEnvironment>) -> Self {
         let agreed = policies.split_first().and_then(|(first, rest)| {
             rest.iter()
                 .all(|policy| policy.on_interrupt == first.on_interrupt)
@@ -268,6 +358,7 @@ impl RunResumedPayload {
         RunResumedPayload {
             resume_policy_applied: agreed,
             policies,
+            environment,
         }
     }
 }

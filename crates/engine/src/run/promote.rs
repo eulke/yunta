@@ -69,6 +69,8 @@ pub struct CallerInfra<'a> {
     /// creation spawns is born under — the successor's birth reads the
     /// time by the same clock its git answers to.
     pub supervision: crate::process::Supervision<'a>,
+    /// What the successor's commands will run with, recorded at its birth.
+    pub environment: Option<yunta_core::events::ExecutionEnvironment>,
 }
 
 /// `repo` is the checkout a fresh worktree branches from (the original
@@ -88,6 +90,7 @@ pub async fn create_promotion_successor(
         storage,
         ids,
         supervision,
+        environment,
     } = caller;
     let Predecessor {
         id: predecessor_id,
@@ -142,6 +145,7 @@ pub async fn create_promotion_successor(
                 &crate::replay::derive(&predecessor_events),
             )
             .as_ref(),
+            environment,
         },
         storage,
         supervision,

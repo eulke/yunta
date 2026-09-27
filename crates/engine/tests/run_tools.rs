@@ -573,6 +573,44 @@ async fn a_check_judges_the_work_the_way_its_close_will() {
 }
 
 #[tokio::test]
+async fn a_check_says_which_criterion_could_not_run_and_where_it_was_looked_for() {
+    let owner = yunta_testkit::Owner::new();
+    let repo = tempfile::tempdir().unwrap();
+    yunta_testkit::init_repo(repo.path());
+    let unit = yunta_engine::Unit {
+        from: yunta_engine::head_tree(repo.path(), owner.supervision())
+            .await
+            .unwrap(),
+        ..unit_at(repo.path().to_path_buf())
+    };
+    let mut task = greeting_task();
+    task.criteria = vec![yunta_core::Criterion {
+        cmd: "yunta-no-such-tool --version".to_string(),
+        r#type: None,
+    }];
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host
+        .task_session("implement", host.task_access(task, unit))
+        .await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let (is_error, text) = call(&client, "yunta_check_task", json!({})).await;
+
+    assert!(!is_error, "got: {text}");
+    let verdict: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        verdict["criteria"][0]["cannot_run"],
+        json!("command not found")
+    );
+    assert_eq!(
+        verdict["runs_under"],
+        serde_json::to_value(yunta_testkit::tools_environment()).unwrap(),
+        "an answer about a command that was not found says where it was looked for"
+    );
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
 async fn the_task_tools_are_served_to_task_sessions_only() {
     let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
 
