@@ -166,6 +166,29 @@ pub fn audited_scope(node: &yunta_core::Node) -> Option<&[ScopeGlob]> {
     (!node.scope.is_empty()).then_some(node.scope.as_slice())
 }
 
+/// What a node's work is held to on this run: [`audited_scope`], plus
+/// every path a person granted the node on the run's log after it
+/// failed on its scope. `None` exactly when no audit is owed.
+///
+/// A read-only node is held to its word alone: nothing ever offers it a
+/// grant, and one on the log would still widen nothing.
+pub fn effective_scope(
+    node: &yunta_core::Node,
+    grants: &yunta_core::events::GrantLedger,
+) -> Option<Vec<ScopeGlob>> {
+    let declared = audited_scope(node)?;
+    if node.permissions == Some(yunta_core::NodePermissions::ReadOnly) {
+        return Some(Vec::new());
+    }
+    Some(
+        declared
+            .iter()
+            .chain(grants.paths_for_node(&node.id))
+            .cloned()
+            .collect(),
+    )
+}
+
 /// A write that reached the diff despite an exact fence.
 ///
 /// Only an exact fence makes this a finding: the adapter said it judged

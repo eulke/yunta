@@ -26,7 +26,8 @@ pub(crate) enum ReservedOption {
     Promote,
     /// Approve a published gate.
     Approve,
-    /// Grant a scope expansion a task requested.
+    /// Grant a scope expansion a task requested, or widen a failed
+    /// node's scope by the paths its failure needs and run it again.
     Grant,
     /// Deny a scope expansion a task requested.
     Deny,
@@ -54,9 +55,12 @@ impl ReservedOption {
     }
 
     /// Whether choosing this runs the failed node again — from scratch,
-    /// or from the work it left.
+    /// from the work it left, or with its scope widened first.
     pub(crate) fn runs_again(self) -> bool {
-        matches!(self, ReservedOption::Retry | ReservedOption::ContinueWork)
+        matches!(
+            self,
+            ReservedOption::Retry | ReservedOption::ContinueWork | ReservedOption::Grant
+        )
     }
 
     /// The option as an escalation offers it.
@@ -202,6 +206,18 @@ pub(crate) mod offers {
         )
     }
 
+    /// Widen a node that failed on its scope by the paths that failure
+    /// needs, and run it again.
+    pub(crate) fn grant_to_node(node: &NodeId, paths: &str, attempt: u32) -> GateOption {
+        ReservedOption::Grant.offer(
+            format!("Allow `{node}` to also write {paths} and run it again (attempt {attempt})"),
+            format!(
+                "Adds these paths to `{node}`'s scope for the rest of this run; the new \
+                 attempt starts fresh, fenced and judged against the widened scope"
+            ),
+        )
+    }
+
     /// Refuse the widening, leaving the task to finish inside its scope.
     pub(crate) fn deny() -> GateOption {
         ReservedOption::Deny.offer(
@@ -273,6 +289,7 @@ mod tests {
             offers::approve_from_console(),
             offers::reject_from_console(),
             offers::grant("src/session/"),
+            offers::grant_to_node(&node, "crates/cli/Cargo.toml", 2),
             offers::deny(),
             offers::declared(&declared_id, Some(&node)),
             offers::declared(&declared_id, None),

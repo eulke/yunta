@@ -28,8 +28,8 @@ use yunta_core::events::findings::FindingLedger;
 use yunta_core::events::tasks::ledger::UnknownTask;
 use yunta_core::events::{
     ChildLedger, DegradationLedger, EventMeta, EventPayload, Finding, GateEvent, GateLedger,
-    GateResolvedPayload, GrantLedger, NodeEvent, NodeLedger, RunLedger, StoredEvent, TaskLedger,
-    TokenUsage,
+    GateResolvedPayload, GrantLedger, HumanChoice, NodeEvent, NodeLedger, RunLedger, StoredEvent,
+    TaskLedger, TokenUsage,
 };
 use yunta_core::{NodeId, NonEmpty, Seq, TaskId};
 
@@ -182,6 +182,22 @@ impl RunState {
         let blocker = consumed.flatten().chain(self.run.last_paused_at()).max();
         let standing = record.waiting.as_ref().map(|(_, seq)| *seq);
         (Some(*at) > blocker && Some(*at) > standing).then_some(resolution)
+    }
+
+    /// The choice a person made about `node` after its latest failure,
+    /// and where the log holds it. `None` when the node never failed, or
+    /// its latest decision came before that failure or chose nothing.
+    ///
+    /// Whether anything already acted on the choice is the caller's
+    /// question: what it does with it — reopen tasks, widen a scope —
+    /// leaves its own mark on the log.
+    pub fn choice_after_failure(&self, node: &NodeId) -> Option<(Seq, &HumanChoice)> {
+        let failed = self.nodes.get(node)?.last_failed?;
+        let (resolution, at) = self.gates.get(node)?.resolved.last()?;
+        let GateResolvedPayload::Chosen(choice) = resolution else {
+            return None;
+        };
+        (*at > failed).then_some((*at, choice))
     }
 
     /// Folds one event into every ledger its domain reaches.

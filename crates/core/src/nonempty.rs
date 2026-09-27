@@ -51,6 +51,12 @@ impl<T> NonEmpty<T> {
     pub fn into_vec(self) -> Vec<T> {
         self.0
     }
+
+    /// The same list with `first` in front of it.
+    pub fn preceded_by(mut self, first: T) -> Self {
+        self.0.insert(0, first);
+        self
+    }
 }
 
 impl<T> From<(T, Vec<T>)> for NonEmpty<T> {

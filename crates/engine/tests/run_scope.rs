@@ -46,7 +46,7 @@ async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_i
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Requested(p))) if p.task_id.as_str() == "task-s"
+            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Requested(p))) if p.task_id.as_ref().is_some_and(|t| t.as_str() == "task-s")
         )),
         "no scope_expansion_* event may fire when the agent never wrote a request"
     );
@@ -263,7 +263,7 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
             .iter()
             .find_map(|e| match e.payload() {
                 Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Requested(p)))
-                    if p.task_id.as_str() == "task-g" =>
+                    if p.task_id.as_ref().is_some_and(|t| t.as_str() == "task-g") =>
                 {
                     Some(p.clone())
                 }
@@ -334,7 +334,7 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
         .iter()
         .find_map(|e| match e.payload() {
             Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Granted(p)))
-                if p.task_id.as_str() == "task-h" =>
+                if p.task_id.as_ref().is_some_and(|t| t.as_str() == "task-h") =>
             {
                 Some(p)
             }

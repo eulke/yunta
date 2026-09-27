@@ -92,11 +92,23 @@ tokens and CLI error text are not stored in this event or summary.
 
 ## A node failed with "scope violated: N file(s) outside the declared globs"
 
-The session edited something outside the node's `scope:` globs. This is a
-hard post-check, not a warning — the fix is either narrowing what the
-session actually touches (tighten the prompt, or the `scope:` boundary was
-too aggressive for what the task legitimately needs) or widening `scope:` if
-the edit was legitimate. See [scope and permissions](guide.md#scope-and-permissions).
+The session edited something outside the node's `scope:` globs, and the
+failure names each of those paths. This is a hard post-check, not a warning.
+
+When the run pauses on it, the decision offers three ways on:
+
+- `grant` widens the node's scope by exactly those paths, for the rest of
+  this run, and runs the node again. Choose it when the edit was the right
+  one.
+- `retry` runs the node again under the same scope. It only helps after you
+  change what it failed on in the run's tree yourself; otherwise the node
+  writes the same paths and asks again.
+- `abort` pauses the run.
+
+`grant` is not offered to a `read-only` node, or when a config layer sets
+`permissions.scope_expansion.max_mode: deny`. If the edit is legitimate for
+every run, widen `scope:` in the workflow instead. See
+[scope and permissions](guide.md#scope-and-permissions).
 
 ## A node failed on an artifact it declared
 

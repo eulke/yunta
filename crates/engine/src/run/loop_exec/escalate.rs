@@ -72,7 +72,7 @@ pub(super) async fn resolve_escalations(
             ctx.emit(
                 Some(&node.id),
                 EventPayload::Scope(ScopeEvent::Granted(ScopeExpansionGrantedPayload {
-                    task_id: pending.task_id.clone(),
+                    task_id: Some(pending.task_id.clone()),
                     decided_by,
                     mode,
                     count_this_run: *expansions_granted_this_run,
@@ -248,7 +248,7 @@ pub(super) async fn emit_scope_expansion_events(
     ctx.emit(
         Some(&node.id),
         EventPayload::Scope(ScopeEvent::Requested(ScopeExpansionRequestedPayload {
-            task_id: task_id.clone(),
+            task_id: Some(task_id.clone()),
             paths: outcome.request.paths.clone(),
             reason: outcome.request.reason.clone(),
             proposed_criterion: outcome.request.proposed_criterion.clone().map(Into::into),
@@ -265,7 +265,7 @@ pub(super) async fn emit_scope_expansion_events(
             ctx.emit(
                 Some(&node.id),
                 EventPayload::Scope(ScopeEvent::Granted(ScopeExpansionGrantedPayload {
-                    task_id: task_id.clone(),
+                    task_id: Some(task_id.clone()),
                     decided_by: Decider::Rule,
                     mode,
                     count_this_run: *granted_this_run,

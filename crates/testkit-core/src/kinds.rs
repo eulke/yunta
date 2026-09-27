@@ -109,14 +109,14 @@ pub fn all_kinds() -> Vec<EventPayload> {
             violations: vec![],
         })),
         EventPayload::Scope(ScopeEvent::Requested(ScopeExpansionRequestedPayload {
-            task_id: "graph-cmd".into(),
+            task_id: Some("graph-cmd".into()),
             paths: vec!["crates/cli/src/**".into()],
             reason: "need to touch main.rs too".to_string(),
             proposed_criterion: None,
             proposed_criterion_precheck: None,
         })),
         EventPayload::Scope(ScopeEvent::Granted(ScopeExpansionGrantedPayload {
-            task_id: "graph-cmd".into(),
+            task_id: Some("graph-cmd".into()),
             decided_by: Decider::Rule,
             mode: ScopeExpansionMode::Rules,
             count_this_run: 1,

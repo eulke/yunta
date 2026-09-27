@@ -59,6 +59,11 @@ pub struct SessionSetup {
     /// harness with no binary to run; an adapter whose fence needs it
     /// and does not have it fails the session.
     pub fence_hook: Option<yunta_core::fence::FenceHook>,
+    /// What a node's own session is fenced to: the scope the node
+    /// declared plus every path a person granted it on this run. `None`
+    /// for a node that declares no scope. A task session is fenced to
+    /// its task's scope instead.
+    pub node_scope: Option<Vec<yunta_core::ScopeGlob>>,
 }
 
 /// Why a node cannot proceed without the run tools.
@@ -99,6 +104,7 @@ impl SessionSetup {
             chosen,
             artifact_dir: None,
             run_tools_required: None,
+            node_scope: None,
         }
     }
 

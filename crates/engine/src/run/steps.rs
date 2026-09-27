@@ -160,23 +160,23 @@ pub(super) async fn reroute(
     Ok(())
 }
 
-/// A failed node with no re-route of its own, put to a person: `retry`
-/// is recorded and the loop continues, where the scheduler starts the
-/// node's next attempt; `abort`, or nobody to ask, pauses on the failure
+/// A failed node with no re-route of its own, put to a person: a choice
+/// that runs it again — `retry`, `continue-work`, `grant` — is recorded
+/// and the loop continues, where the scheduler starts the node's next
+/// attempt and that attempt applies what was chosen; `abort`, or nobody
+/// to ask, pauses on the failure
 /// itself, so every surface still names it and a resume asks again.
 pub(super) async fn failure_escalation(
     ctx: &RunCtx<'_>,
     state: &RunState,
     node: NodeId,
     failure: Failure,
-    (next_attempt, continuable): (u32, bool),
+    (next_attempt, ways_back): (u32, (bool, bool)),
 ) -> Result<Option<RunReport>, RunError> {
-    let escalation =
-        escalation::build_failure_escalation(&node, &failure, next_attempt, continuable).map_err(
-            |source| RunError::Broken {
-                diagnostic: format!("node `{node}`'s escalation: {source}"),
-            },
-        )?;
+    let escalation = escalation::build_failure_escalation(&node, &failure, next_attempt, ways_back)
+        .map_err(|source| RunError::Broken {
+            diagnostic: format!("node `{node}`'s escalation: {source}"),
+        })?;
     let choice = escalation::decided(ctx, state, &node, &escalation).await?;
     if choice.is_some_and(|choice| {
         ReservedOption::of(&choice.option).is_some_and(ReservedOption::runs_again)

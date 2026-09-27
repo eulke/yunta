@@ -47,6 +47,7 @@ pub(crate) async fn resolve_setup(
         Err(end) => return Ok(Err(end)),
     };
     state_run_wide_absences(ctx, node, adapter.as_ref()).await?;
+    let grants = ctx.run_view().await?.state.grants;
     Ok(Ok(SessionSetup {
         skills,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
@@ -58,6 +59,7 @@ pub(crate) async fn resolve_setup(
         chosen: chosen.clone(),
         artifact_dir: crate::run::node_exec::artifact_dir(ctx, node),
         run_tools_required: mandatory_tools(ctx, node),
+        node_scope: crate::effective_scope(node, &grants).filter(|_| !node.scope.is_empty()),
     }))
 }
 
@@ -299,9 +301,9 @@ fn told(
 }
 
 /// What this session may write: its profile, the scope it works to — a
-/// task session its task's, the expansions already granted included; a
-/// node's own session the node's — and the one directory outside the
-/// worktree its declared files belong in.
+/// task session its task's, a node's own session the node's, the
+/// expansions already granted included either way — and the one
+/// directory outside the worktree its declared files belong in.
 ///
 /// A session that mounted the scope-expansion tool is told to ask for
 /// more when it is refused; one that did not is told to report the need
@@ -317,7 +319,7 @@ fn fence(setup: &SessionSetup, plan: &SessionPlan<'_>, holds_run_tools: bool) ->
     };
     let scope: Option<&[ScopeGlob]> = match &plan.task {
         Some(task) => Some(&task.scope),
-        None => (!plan.node.scope.is_empty()).then_some(plan.node.scope.as_slice()),
+        None => setup.node_scope.as_deref(),
     };
     Fence::for_session(
         plan.profile,

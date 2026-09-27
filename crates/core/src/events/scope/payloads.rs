@@ -1,5 +1,5 @@
-//! A node asking to write outside the scope it declared, and the answer
-//! it got.
+//! A task or a node asking to write outside the scope it declared, and
+//! the answer it got.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +22,11 @@ pub struct ProposedCriterion {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeExpansionRequestedPayload {
-    pub task_id: TaskId,
+    /// The task that asked. Absent when the session that asked works a
+    /// node of its own rather than a task: the request is then that
+    /// node's, the one the event is written under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<TaskId>,
     pub paths: Vec<ScopeGlob>,
     pub reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -38,7 +42,10 @@ pub struct ProposedCriterionPrecheck {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ScopeExpansionGrantedPayload {
-    pub task_id: TaskId,
+    /// The task the grant widens. Absent for a grant to a node's own
+    /// scope — the node the event is written under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<TaskId>,
     pub decided_by: Decider,
     pub mode: ScopeExpansionMode,
     pub count_this_run: u32,

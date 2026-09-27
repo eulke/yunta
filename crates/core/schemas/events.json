@@ -2913,11 +2913,18 @@
           }
         },
         "task_id": {
-          "$ref": "#/$defs/TaskId"
+          "description": "The task the grant widens. Absent for a grant to a node's own\nscope — the node the event is written under.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
-        "task_id",
         "decided_by",
         "mode",
         "count_this_run"
@@ -2965,11 +2972,18 @@
           "type": "string"
         },
         "task_id": {
-          "$ref": "#/$defs/TaskId"
+          "description": "The task that asked. Absent when the session that asked works a\nnode of its own rather than a task: the request is then that\nnode's, the one the event is written under.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
-        "task_id",
         "paths",
         "reason"
       ]

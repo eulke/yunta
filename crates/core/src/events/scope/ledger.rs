@@ -1,24 +1,35 @@
-//! What a run granted beyond the scope a task declared, folded once.
+//! What a run granted beyond the scope a task or a node declared, folded
+//! once.
 //!
 //! Three places used to read the three expansion kinds with their own
 //! rule: one for the paths an attempt may write, one to tell whether
 //! anything was ever granted, one to summarize the run. Every surface
-//! that asks what a task may reach reads it here.
+//! that asks what a task or a node may reach reads it here.
 
 use std::collections::BTreeMap;
 
 use crate::events::meta::EventMeta;
 use crate::events::scope::kinds::ScopeEvent;
 use crate::glob::ScopeGlob;
-use crate::ids::TaskId;
+use crate::ids::{NodeId, Seq, TaskId};
 
-/// Every grant this run made, by task.
+/// Every grant this run made, by task and by node.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GrantLedger {
     per_task: BTreeMap<TaskId, Vec<ScopeGlob>>,
+    per_node: BTreeMap<NodeId, NodeGrants>,
     granted: u32,
     denied: u32,
     requested: u32,
+}
+
+/// What a node was granted, and where the last grant stands on the log —
+/// what tells a decision to widen it already acted on from one still
+/// owed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NodeGrants {
+    paths: Vec<ScopeGlob>,
+    last_at: Seq,
 }
 
 impl GrantLedger {
@@ -26,6 +37,21 @@ impl GrantLedger {
     /// attempt's effective scope adds to what the task declared.
     pub fn paths_for(&self, task: &TaskId) -> &[ScopeGlob] {
         self.per_task.get(task).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// The paths granted to `node`'s own scope, in grant order — what
+    /// its later attempts are fenced to and audited against beside what
+    /// it declared.
+    pub fn paths_for_node(&self, node: &NodeId) -> &[ScopeGlob] {
+        self.per_node
+            .get(node)
+            .map(|grants| grants.paths.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Where the latest grant to `node`'s own scope stands on the log.
+    pub fn last_granted_to_node(&self, node: &NodeId) -> Option<Seq> {
+        self.per_node.get(node).map(|grants| grants.last_at)
     }
 
     /// How many grants this run made — the count `max_per_run` is
@@ -44,16 +70,30 @@ impl GrantLedger {
         self.requested
     }
 
-    /// Folds one scope-domain event.
-    pub fn apply(&mut self, event: &ScopeEvent, _meta: &EventMeta<'_>) {
+    /// Folds one scope-domain event. A grant that names no task widens
+    /// the node it is written under; one that names neither widens
+    /// nothing, and is still counted.
+    pub fn apply(&mut self, event: &ScopeEvent, meta: &EventMeta<'_>) {
         match event {
             ScopeEvent::Requested(_) => self.requested += 1,
             ScopeEvent::Granted(p) => {
                 self.granted += 1;
-                self.per_task
-                    .entry(p.task_id.clone())
-                    .or_default()
-                    .extend(p.paths.iter().cloned());
+                match (&p.task_id, meta.node) {
+                    (Some(task), _) => self
+                        .per_task
+                        .entry(task.clone())
+                        .or_default()
+                        .extend(p.paths.iter().cloned()),
+                    (None, Some(node)) => {
+                        let grants = self.per_node.entry(node.clone()).or_insert(NodeGrants {
+                            paths: Vec::new(),
+                            last_at: meta.seq,
+                        });
+                        grants.paths.extend(p.paths.iter().cloned());
+                        grants.last_at = meta.seq;
+                    }
+                    (None, None) => {}
+                }
             }
             ScopeEvent::Denied(_) => self.denied += 1,
         }

@@ -45,6 +45,7 @@ fn policy() -> SchedulingPolicy {
         on_failure: DefaultOnFailure::Pause,
         mode_nodes: None,
         baseline_suite: None,
+        grants_scope: true,
     }
 }
 
@@ -246,6 +247,7 @@ fn a_failed_node_escalates_until_a_person_chooses_to_retry_it() {
             failure: failure.clone(),
             next_attempt: 2,
             continuable: false,
+            grantable: false,
         }
     );
 
@@ -265,6 +267,90 @@ fn a_failed_node_escalates_until_a_person_chooses_to_retry_it() {
         decide(&workflow(), &derive(&log(retried)), &policy()),
         Decision::Execute(vec![(NodeId::from("plan"), 2)])
     );
+}
+
+/// A `grant` is a choice to run the node again, its scope widened first
+/// by the attempt that starts.
+#[test]
+fn a_grant_after_a_scope_failure_runs_the_node_again() {
+    let failure = Failure::scope_violated(vec!["Cargo.toml".into()]);
+    let mut events = vec![
+        (None, created()),
+        (
+            Some("plan"),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        ),
+        (
+            Some("plan"),
+            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+                failure.clone(),
+                false,
+                TokenUsage::default(),
+            ))),
+        ),
+    ];
+    events.extend(chose(&failure, "grant"));
+    assert_eq!(
+        decide(&workflow(), &derive(&log(events)), &policy()),
+        Decision::Execute(vec![(NodeId::from("plan"), 2)])
+    );
+}
+
+/// Whether the menu of `node`'s failure offers `grant`, for a workflow
+/// that declares one scoped node and one read-only node.
+fn grantable(node: &'static str, failure: Failure, policy: &SchedulingPolicy) -> Decision {
+    let workflow = yunta_core::yaml::parse(
+        r#"
+name: scoped
+nodes:
+  - { id: fix, kind: bash, run: "true", scope: ["src/**"] }
+  - { id: audit, kind: prompt, runner: planner, prompt: "look", permissions: read-only }
+"#,
+    )
+    .expect("the test workflow parses");
+    let events = log(vec![
+        (None, created()),
+        (
+            Some(node),
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        ),
+        (
+            Some(node),
+            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+                failure,
+                false,
+                TokenUsage::default(),
+            ))),
+        ),
+    ]);
+    decide(&workflow, &derive(&events), policy)
+}
+
+/// A node that failed on its scope may have it widened by a person —
+/// but not a read-only node, whose word is its whole ceiling, and not
+/// under a permission ceiling that denies every expansion.
+#[test]
+fn a_scope_failure_offers_a_grant_only_where_a_person_may_widen_it() {
+    let outside = || Failure::scope_violated(vec!["Cargo.toml".into()]);
+    let offers = |decision: Decision| match decision {
+        Decision::EscalateFailure { grantable, .. } => grantable,
+        other => panic!("a failed node is a decision, got {other:?}"),
+    };
+
+    assert!(offers(grantable("fix", outside(), &policy())));
+    assert!(
+        !offers(grantable("fix", Failure::message("exit 1"), &policy())),
+        "a wider scope changes nothing about a failure that is not about scope"
+    );
+    assert!(
+        !offers(grantable("audit", outside(), &policy())),
+        "a read-only node is never widened"
+    );
+    let denying = SchedulingPolicy {
+        grants_scope: false,
+        ..policy()
+    };
+    assert!(!offers(grantable("fix", outside(), &denying)));
 }
 
 /// The suite a run owes is a decision of the scheduler, like every other

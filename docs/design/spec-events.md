@@ -266,7 +266,7 @@ registra.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `task_id` | string | sí | — |
+| `task_id` | `Option<string>` | no | la tarea que pide; ausente cuando pide la sesión de un nodo, y el pedido es de ese nodo — el que figura en el evento |
 | `paths` | lista de globs | sí | ampliación pedida |
 | `reason` | string | sí | — |
 | `proposed_criterion` | `Option<{cmd}>` | no | si el agente propone además un criterio nuevo |
@@ -277,7 +277,8 @@ registra.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
-| `task_id` | string | sí | — |
+| `task_id` | string | sí, en `scope_expansion_denied` | — |
+| `task_id` | `Option<string>` | no, en `scope_expansion_granted` | la tarea que la concesión amplía; ausente en la concesión al scope de un nodo — el que figura en el evento — que una persona hace desde el menú de su falla |
 | `decided_by` | enum `rule \| person` + identificador | sí | — |
 | `mode` | enum `rules \| ask \| deny` | sí | modo vigente en el momento de la decisión |
 | `count_this_run` | `u32` | sí | para el cap `max_per_run` |

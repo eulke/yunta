@@ -33,7 +33,9 @@ use std::collections::HashSet;
 use yunta_core::events::{
     Failure, GateResolvedPayload, NodeWait, PauseReason, RerouteCause, ResumePolicy,
 };
-use yunta_core::{DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, Workflow};
+use yunta_core::{
+    DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, ScopeExpansionMode, Workflow,
+};
 
 use crate::modes::dependencies_in_mode;
 use crate::replay::{NodeState, RunState};
@@ -115,6 +117,9 @@ pub enum Decision {
         /// Whether a task the node's loop blocked left work to continue
         /// from — what decides whether the menu offers to.
         continuable: bool,
+        /// Whether a person may widen the node's scope by what its
+        /// failure needs — what decides whether the menu offers `grant`.
+        grantable: bool,
     },
     /// A `kind: gate` node is ready and has never been published —
     /// the imperative shell commits its declared artifacts,
@@ -265,6 +270,10 @@ pub struct Policy {
     /// The suite this run's lineage measures, from `baseline.suite`;
     /// `None` when the config names none and nothing is measured.
     pub baseline_suite: Option<String>,
+    /// Whether a person may widen a node's scope from the menu of a
+    /// failure it had on that scope: `false` only under a permission
+    /// ceiling of `scope_expansion.max_mode: deny`.
+    pub grants_scope: bool,
 }
 
 impl Policy {
@@ -283,6 +292,12 @@ impl Policy {
                 .baseline
                 .as_ref()
                 .map(|baseline| baseline.suite.clone()),
+            grants_scope: manifest
+                .config
+                .permissions
+                .as_ref()
+                .and_then(|permissions| permissions.scope_expansion)
+                .is_none_or(|ceiling| ceiling.max_mode != ScopeExpansionMode::Deny),
         }
     }
 }
@@ -357,6 +372,16 @@ impl<'a> Board<'a> {
             Some(GateResolvedPayload::Chosen(choice))
                 if ReservedOption::of(&choice.option).is_some_and(ReservedOption::runs_again)
         )
+    }
+
+    /// Whether a person may widen `node`'s scope by what `failure`
+    /// needs: the failure is about scope, the node is not read-only —
+    /// its word is the whole of its ceiling — and the run's permission
+    /// ceiling lets a person grant.
+    fn grantable(&self, node: &Node, failure: &Failure) -> bool {
+        self.policy.grants_scope
+            && node.permissions != Some(yunta_core::NodePermissions::ReadOnly)
+            && failure.wants_scope()
     }
 
     /// How a ready or re-opened gate is driven: poll the handle it was
@@ -611,6 +636,7 @@ fn unrerouted(
             failure: failure.clone(),
             next_attempt: board.next_attempt(&node.id),
             continuable: board.state.tasks.continuable_by(&node.id),
+            grantable: board.grantable(node, failure),
         }),
         DefaultOnFailure::Abort => Some(Decision::Fail {
             reason: reason.to_string(),

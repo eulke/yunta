@@ -66,24 +66,32 @@ pub(crate) fn build_reroute_escalation(
 /// to hand the node back: a resume alone finds it failed and pauses
 /// again.
 ///
-/// A loop whose blocked tasks left work behind is also offered to
-/// continue from it — and only then: with no work to pick up, running it
+/// Two more ways back are offered only where they change the outcome. A
+/// node that failed on its scope is offered to have it widened by
+/// exactly what the failure needs — a fresh attempt under the same scope
+/// meets the same wall. A loop whose blocked tasks left work behind is
+/// offered to continue from it — with no work to pick up, running it
 /// again from scratch is the one way back.
 pub(crate) fn build_failure_escalation(
     node: &NodeId,
     failure: &Failure,
     next_attempt: u32,
-    continuable: bool,
+    (continuable, grantable): (bool, bool),
 ) -> Result<Escalation, EscalationError> {
-    let retry = offers::retry_node(node, next_attempt);
-    let options = if continuable {
-        NonEmpty::from((
-            offers::continue_work(node, next_attempt),
-            vec![retry, offers::abort()],
-        ))
-    } else {
-        NonEmpty::from((retry, vec![offers::abort()]))
-    };
+    let mut options = NonEmpty::from((
+        offers::retry_node(node, next_attempt),
+        vec![offers::abort()],
+    ));
+    if continuable {
+        options = options.preceded_by(offers::continue_work(node, next_attempt));
+    }
+    if grantable {
+        options = options.preceded_by(offers::grant_to_node(
+            node,
+            &failure.scope_wanted_listed(),
+            next_attempt,
+        ));
+    }
     Escalation::new(
         format!("node `{node}` failed"),
         vec![Fact::bare(failure.to_string())].into(),
@@ -182,9 +190,11 @@ pub fn current_escalation(manifest: &Manifest, state: &RunState) -> Option<(Node
             failure,
             next_attempt,
             continuable,
+            grantable,
         } => {
             let escalation =
-                build_failure_escalation(&node, &failure, next_attempt, continuable).ok()?;
+                build_failure_escalation(&node, &failure, next_attempt, (continuable, grantable))
+                    .ok()?;
             Some((node, escalation))
         }
         Decision::ResolveInternalGate { node } => {

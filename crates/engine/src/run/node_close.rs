@@ -319,22 +319,23 @@ fn close_title(node: &Node) -> String {
 /// audit — it constrains nothing, or nothing named the tree it began
 /// from.
 ///
-/// Which scope is audited — a declared one, or nothing whatsoever for a
-/// `read-only` node — is [`audited_scope`](crate::audited_scope)'s call,
-/// not this one's.
+/// Which scope is audited — a declared one with whatever a person
+/// granted it, or nothing whatsoever for a `read-only` node — is
+/// [`effective_scope`](crate::effective_scope)'s call, not this one's.
 async fn audited_diff(
     ctx: &RunCtx<'_>,
     node: &Node,
     staged: &[PathBuf],
 ) -> Result<Option<crate::ScopeCheckResult>, RunError> {
-    let Some(scope) = crate::audited_scope(node) else {
+    // The tree this attempt began from, as its own `node_started`
+    // recorded it, and the grants the log holds for the node. Read back
+    // from the log rather than remembered across the node's execution: a
+    // crash between the start and this close must not change what the
+    // node answers for.
+    let view = ctx.run_view().await?;
+    let Some(scope) = crate::effective_scope(node, &view.state.grants) else {
         return Ok(None);
     };
-    // The tree this attempt began from, as its own `node_started`
-    // recorded it. Read back from the log rather than remembered across
-    // the node's execution: a crash between the start and this close
-    // must not change what the node answers for.
-    let view = ctx.run_view().await?;
     let Some(from) = view.state.nodes.from_tree(&node.id).cloned() else {
         // A log written before a start named its tree. Nothing to
         // compare against but the run's own base, which is what that log
@@ -345,7 +346,7 @@ async fn audited_diff(
         ctx.worktree,
         &from,
         &crate::run_dir::index_for(ctx.run_dir, &UnitId::Node(node.id.clone())),
-        scope,
+        &scope,
         staged,
         ctx.root_supervision(),
     )

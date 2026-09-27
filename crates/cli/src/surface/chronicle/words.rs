@@ -174,20 +174,26 @@ fn status(status: TaskStatus) -> &'static str {
 fn scope_words(happening: &scope::happening::Happening) -> String {
     use scope::happening::{Happening as H, Step};
     let H::Expansion { task, step } = happening;
-    match step {
+    let said = match step {
         Step::Requested { paths } => format!(
-            "{task} asks for {}",
+            "asks for {}",
             paths
                 .iter()
                 .map(|glob| glob.as_str().to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
-        Step::Granted { by } => format!("{task} scope granted by {}", decider(by)),
+        Step::Granted { by } => format!("scope granted by {}", decider(by)),
         Step::Denied { by, reason } => detailed(
-            format!("{task} scope denied by {}", decider(by)),
+            format!("scope denied by {}", decider(by)),
             &one_line(reason.as_deref().unwrap_or_default()),
         ),
+    };
+    // A node's own request needs no name in front of it: the moment
+    // already carries the node it is written under.
+    match task {
+        Some(task) => format!("{task} {said}"),
+        None => said,
     }
 }
 

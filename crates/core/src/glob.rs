@@ -5,6 +5,7 @@
 //! interpretation its syntax allows.
 
 use std::fmt;
+use std::path::Path;
 use std::str::FromStr;
 
 use globset::{Glob, GlobBuilder, GlobSet, GlobSetBuilder};
@@ -27,6 +28,13 @@ impl ScopeGlob {
     /// The compiled glob, for a caller building its own set.
     pub fn compiled(&self) -> &Glob {
         &self.0
+    }
+
+    /// The pattern that selects exactly `path`: every character globset
+    /// reads as syntax is escaped, so a file named `a[1].rs` is that file
+    /// rather than a character class.
+    pub fn exact(path: &Path) -> Result<Self, InvalidScopeGlob> {
+        globset::escape(&path.to_string_lossy()).parse()
     }
 }
 
@@ -205,6 +213,14 @@ fn literal_prefix(glob: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_exact_glob_selects_its_path_and_nothing_its_characters_could_spell() {
+        let exact = ScopeGlob::exact(Path::new("src/a[1].rs")).unwrap();
+        let set = scope_globset(&[exact]).unwrap();
+        assert!(set.is_match("src/a[1].rs"));
+        assert!(!set.is_match("src/a1.rs"));
+    }
 
     #[test]
     fn a_star_never_crosses_a_directory_and_a_double_star_does() {

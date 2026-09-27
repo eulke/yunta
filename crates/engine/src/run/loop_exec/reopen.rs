@@ -2,9 +2,7 @@
 //! it left blocked: they start a fresh cycle, once per decision — from
 //! the run's tree, or from the work their last attempt left.
 
-use yunta_core::events::{
-    EventPayload, GateResolvedPayload, TaskEvent, TaskStatus, TaskStatusChangedPayload,
-};
+use yunta_core::events::{EventPayload, TaskEvent, TaskStatus, TaskStatusChangedPayload};
 use yunta_core::{Node, NodeId, Seq, TasksFile};
 
 use crate::replay::RunState;
@@ -68,11 +66,7 @@ pub(super) async fn after_retry(
 /// after its latest failure, and which one it was — if its latest
 /// decision is one.
 fn run_again_after_failure(state: &RunState, node: &NodeId) -> Option<(Seq, ReservedOption)> {
-    let failed = state.nodes.get(node)?.last_failed?;
-    let (resolution, at) = state.gates.get(node)?.resolved.last()?;
-    let GateResolvedPayload::Chosen(choice) = resolution else {
-        return None;
-    };
+    let (at, choice) = state.choice_after_failure(node)?;
     let chosen = ReservedOption::of(&choice.option).filter(|option| option.runs_again())?;
-    (*at > failed).then_some((*at, chosen))
+    Some((at, chosen))
 }

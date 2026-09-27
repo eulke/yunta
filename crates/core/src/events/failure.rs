@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::diagnostic::{ArtifactFailure, Report};
+use crate::glob::{InvalidScopeGlob, ScopeGlob};
 use crate::ids::AdapterId;
 
 /// How many stderr lines a session keeps for its exit (D180): enough to
@@ -123,6 +124,32 @@ impl Failure {
                 &[]
             }
         }
+    }
+
+    /// Whether a wider scope is what this failure needs — what makes a
+    /// grant a way forward rather than a guess.
+    pub fn wants_scope(&self) -> bool {
+        !self.outside_scope().is_empty()
+    }
+
+    /// What a grant would add to the node's scope for the work behind
+    /// this failure to stand: each path it wrote outside, exactly. Empty
+    /// for a failure a wider scope would not change.
+    pub fn scope_wanted(&self) -> Result<Vec<ScopeGlob>, InvalidScopeGlob> {
+        self.outside_scope()
+            .iter()
+            .map(|path| ScopeGlob::exact(path))
+            .collect()
+    }
+
+    /// [`scope_wanted`](Self::scope_wanted) as a sentence lists it: the
+    /// paths as a person reads them, comma-separated.
+    pub fn scope_wanted_listed(&self) -> String {
+        self.outside_scope()
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// Every report behind this failure, each carrying the document it

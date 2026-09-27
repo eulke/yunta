@@ -3,10 +3,12 @@
 use crate::events::{Decider, ScopeEvent};
 use crate::{ScopeGlob, TaskId};
 
-/// One step of one task's request to work outside its declared scope.
+/// One step of a request to work outside a declared scope: a task's,
+/// or — with no task named — the node's own, the one the event is
+/// written under.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Happening {
-    Expansion { task: TaskId, step: Step },
+    Expansion { task: Option<TaskId>, step: Step },
 }
 
 /// Where a request stands: asked for, granted, or turned down.
@@ -43,7 +45,7 @@ impl From<&ScopeEvent> for Happening {
                 },
             },
             ScopeEvent::Denied(p) => Happening::Expansion {
-                task: p.task_id.clone(),
+                task: Some(p.task_id.clone()),
                 step: Step::Denied {
                     by: p.decided_by.clone(),
                     reason: p.denial_reason.clone(),
