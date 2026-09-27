@@ -7,6 +7,11 @@ license.workspace = true
 repository.workspace = true
 description = "The Yunta workflow engine: scheduler, verification cycle, resumability."
 
+# What a doc example shows, the crate's own tests assert: a doctest would
+# build a binary of its own to say it again.
+[lib]
+doctest = false
+
 [lints]
 workspace = true
 

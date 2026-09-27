@@ -10,6 +10,11 @@ description = "Test scaffolding for the Yunta crates that depend on yunta-core a
 # is never part of a published package and never itself published.
 publish = false
 
+# What a doc example shows, the crate's own tests assert: a doctest would
+# build a binary of its own to say it again.
+[lib]
+doctest = false
+
 [lints]
 workspace = true
 

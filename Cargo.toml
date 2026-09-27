@@ -85,3 +85,23 @@ lto = "fat"
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# A debug build carries what a backtrace needs to name the workspace's
+# own frames, and nothing for dependencies. Debug information kept in
+# its split form leaves each rebuild's object files beside the binaries;
+# on macOS nothing ever removes them, and a directory holding hundreds of
+# thousands of them makes every program started from it wait while the
+# system reads it. Kept off, a macOS backtrace names frames without
+# their lines, and a panic still says where it happened.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "off"
+
+[profile.dev.package."*"]
+debug = false
+
+# The build a debugger wants: `--profile debugging`.
+[profile.debugging]
+inherits = "dev"
+debug = true
+split-debuginfo = "unpacked"
