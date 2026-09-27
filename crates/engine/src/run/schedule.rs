@@ -107,7 +107,7 @@ pub enum Decision {
     /// again. The imperative shell asks — or consumes a decision
     /// `resolve_gate` seeded while the run was parked — and pauses when
     /// nobody is there to ask. A `retry` it records comes back through
-    /// [`unrerouted`] as an `Execute` of `next_attempt`.
+    /// `unrerouted` as an `Execute` of `next_attempt`.
     EscalateFailure {
         node: NodeId,
         failure: Failure,
