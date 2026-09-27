@@ -8,6 +8,7 @@
 //! once and three surfaces taking it apart again.
 
 use std::fmt;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -61,7 +62,8 @@ pub struct SessionDeath {
 ///
 /// Untagged, with `Message` last: a payload carrying `artifacts:` reads
 /// as [`Failure::Artifacts`], one carrying `died:` as
-/// [`Failure::SessionDied`], and a log written before failures were
+/// [`Failure::SessionDied`], one carrying `outside_scope:` as
+/// [`Failure::ScopeViolated`], and a log written before failures were
 /// data carries `outcome:` alone and reads back as
 /// [`Failure::Message`]. That tolerance is the rule for what is
 /// persisted and versioned, and it is why no reader needs to know which
@@ -76,6 +78,10 @@ pub enum Failure {
     /// The session the node was working in ended without a terminal
     /// event, and how its process went.
     SessionDied { died: SessionDeath },
+    /// The node's diff reached paths no glob of its scope allows. Named
+    /// one by one, because what a person does next — widen the scope,
+    /// or change those files in the run's tree — is about exactly them.
+    ScopeViolated { outside_scope: Vec<PathBuf> },
     /// A failure the engine states in one sentence.
     Message { outcome: String },
 }
@@ -102,6 +108,23 @@ impl Failure {
         }
     }
 
+    /// A diff that reached `outside_scope`, which the node's scope does
+    /// not allow.
+    pub fn scope_violated(outside_scope: Vec<PathBuf>) -> Self {
+        Failure::ScopeViolated { outside_scope }
+    }
+
+    /// The paths the node wrote outside its scope. Empty for a failure
+    /// that is not about scope.
+    pub fn outside_scope(&self) -> &[PathBuf] {
+        match self {
+            Failure::ScopeViolated { outside_scope } => outside_scope,
+            Failure::Artifacts { .. } | Failure::SessionDied { .. } | Failure::Message { .. } => {
+                &[]
+            }
+        }
+    }
+
     /// Every report behind this failure, each carrying the document it
     /// is about. What a diagnostic is rendered from; a failure whose
     /// artifacts name no document yields none.
@@ -115,9 +138,11 @@ impl Failure {
         match self {
             Failure::Artifacts { artifacts } => artifacts.iter(),
             // A dead session names no artifact, and neither does a
-            // sentence: the count of documents that did not close is
-            // about documents this node declared.
-            Failure::SessionDied { .. } | Failure::Message { .. } => [].iter(),
+            // scope or a sentence: the count of documents that did not
+            // close is about documents this node declared.
+            Failure::SessionDied { .. }
+            | Failure::ScopeViolated { .. }
+            | Failure::Message { .. } => [].iter(),
         }
     }
 }
@@ -130,6 +155,20 @@ impl fmt::Display for Failure {
         match self {
             Failure::Message { outcome } => f.write_str(outcome),
             Failure::SessionDied { died } => write!(f, "{died}"),
+            Failure::ScopeViolated { outside_scope } => {
+                write!(
+                    f,
+                    "scope violated: {} file(s) outside the declared globs — ",
+                    outside_scope.len()
+                )?;
+                for (position, path) in outside_scope.iter().enumerate() {
+                    if position > 0 {
+                        f.write_str(", ")?;
+                    }
+                    write!(f, "{}", path.display())?;
+                }
+                Ok(())
+            }
             Failure::Artifacts { artifacts } => {
                 for (position, artifact) in artifacts.iter().enumerate() {
                     if position > 0 {

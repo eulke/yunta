@@ -365,8 +365,8 @@ async fn audited_diff(
 }
 
 /// The node's whole diff against its declared `scope:`, audited as
-/// `scope_checked` and failing the node when anything falls outside.
-/// `staged` is what the adapter declared it wrote for itself, which is
+/// `scope_checked` and failing the node, naming every path that falls
+/// outside. `staged` is what the adapter declared it wrote for itself, which is
 /// not the node's doing and so is not the node's diff.
 ///
 /// `None` when the node owes no audit at all, or when its diff is
@@ -394,13 +394,10 @@ async fn scope_violation(
         }
     }
     Ok(Some(
-        fail_with_tokens(
+        fail_with(
             ctx,
             node,
-            format!(
-                "scope violated: {} file(s) outside the declared globs",
-                result.violations.len()
-            ),
+            Failure::scope_violated(result.violations),
             false,
             tokens,
         )

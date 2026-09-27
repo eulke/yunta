@@ -661,6 +661,39 @@ fn a_node_failed_by_a_dead_session_round_trips_with_its_exit() {
 }
 
 #[test]
+fn a_node_failed_outside_its_scope_round_trips_naming_each_path() {
+    let payload = EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+        Failure::scope_violated(vec!["crates/cli/Cargo.toml".into(), "clippy.toml".into()]),
+        false,
+        TokenUsage::default(),
+    )));
+
+    let json: serde_json::Value = serde_json::to_value(&payload).unwrap();
+    assert_eq!(
+        json["outside_scope"],
+        serde_json::json!(["crates/cli/Cargo.toml", "clippy.toml"])
+    );
+
+    let parsed: EventPayload = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(payload, parsed, "{json}");
+}
+
+#[test]
+fn a_scope_violation_says_which_files_fell_outside() {
+    let failure =
+        Failure::scope_violated(vec!["crates/cli/Cargo.toml".into(), "clippy.toml".into()]);
+    assert_eq!(
+        failure.to_string(),
+        "scope violated: 2 file(s) outside the declared globs — crates/cli/Cargo.toml, clippy.toml"
+    );
+    assert_eq!(failure.outside_scope().len(), 2);
+    assert!(
+        Failure::message("exit 1").outside_scope().is_empty(),
+        "a failure that is not about scope names no path outside it"
+    );
+}
+
+#[test]
 fn a_session_end_this_build_does_not_know_reads_back_as_unknown() {
     let end: SessionEnd =
         serde_json::from_value(serde_json::json!({"type": "stopped", "by": "a debugger"})).unwrap();

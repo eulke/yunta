@@ -462,3 +462,35 @@ fn status_json_publishes_a_session_death_on_its_node() {
     // A dead session names no document, so it is not a diagnostic.
     assert!(document.get("diagnostics").is_none(), "{document:#}");
 }
+
+/// A node allowed only `src/**` that writes two files outside it.
+const WRITES_OUTSIDE: &str = r#"
+name: writes-outside
+nodes:
+  - id: fix
+    kind: bash
+    scope: ["src/**"]
+    run: "echo a > Cargo.toml && echo b > clippy.toml"
+"#;
+
+#[test]
+fn status_lists_each_path_a_node_wrote_outside_its_scope() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = (root.path().join("repo"), root.path().join("state"));
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    write(&repo.join("wf.yaml"), WRITES_OUTSIDE);
+    let run_id = run_id_from(&yunta_in!(&repo, &home, &["run", "wf.yaml"]));
+
+    let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    let block: Vec<&str> = text
+        .lines()
+        .skip_while(|line| *line != "failures:")
+        .collect();
+    for path in ["Cargo.toml", "clippy.toml"] {
+        assert!(
+            block.iter().any(|line| line.trim() == path),
+            "every path outside the scope on a line of its own: {text}"
+        );
+    }
+}

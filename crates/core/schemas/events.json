@@ -2169,7 +2169,7 @@
       ]
     },
     "NodeFailedPayload": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "type": "object",
       "properties": {
         "retryable": {
@@ -2206,6 +2206,21 @@
           },
           "required": [
             "died"
+          ]
+        },
+        {
+          "description": "The node's diff reached paths no glob of its scope allows. Named\none by one, because what a person does next — widen the scope,\nor change those files in the run's tree — is about exactly them.",
+          "type": "object",
+          "properties": {
+            "outside_scope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "outside_scope"
           ]
         },
         {
