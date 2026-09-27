@@ -292,14 +292,21 @@ impl Policy {
                 .baseline
                 .as_ref()
                 .map(|baseline| baseline.suite.clone()),
-            grants_scope: manifest
-                .config
-                .permissions
-                .as_ref()
-                .and_then(|permissions| permissions.scope_expansion)
-                .is_none_or(|ceiling| ceiling.max_mode != ScopeExpansionMode::Deny),
+            grants_scope: person_may_grant_scope(&manifest.config),
         }
     }
+}
+
+/// Whether a person may widen a node's scope on this run: every layer
+/// allows it but a permission ceiling of `scope_expansion.max_mode:
+/// deny`. The one reading of that rule — the menu, the node's close and
+/// its session all ask here.
+pub(crate) fn person_may_grant_scope(config: &yunta_core::ConfigLayer) -> bool {
+    config
+        .permissions
+        .as_ref()
+        .and_then(|permissions| permissions.scope_expansion)
+        .is_none_or(|ceiling| ceiling.max_mode != ScopeExpansionMode::Deny)
 }
 
 /// Everything the six questions read, resolved once so none of them

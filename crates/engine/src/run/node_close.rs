@@ -17,8 +17,6 @@ use yunta_core::events::{
 use yunta_core::{HookFailurePolicy, Node, RunId};
 
 use crate::artifacts::close_artifacts;
-use crate::scope::audit;
-use crate::worktree::UnitId;
 
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};
 use super::node_artifacts::{acquire_from_child, asked, derive_findings, record_artifacts};
@@ -111,7 +109,10 @@ pub(super) async fn close_node(
         }
     }
 
-    if let Some(end) = scope_violation(ctx, node, close.staged, tokens).await? {
+    if let Some(end) = super::node_scope::scope_request(ctx, node, tokens).await? {
+        return Ok(end);
+    }
+    if let Some(end) = super::node_scope::scope_violation(ctx, node, close.staged, tokens).await? {
         return Ok(end);
     }
     if let Some(end) = land_unit(ctx, node, tokens).await? {
@@ -312,98 +313,6 @@ fn close_title(node: &Node) -> String {
     node.description
         .clone()
         .unwrap_or_else(|| node.id.to_string())
-}
-
-/// What the node changed and what of it falls outside its declared
-/// `scope:`, recorded as `scope_checked`. `None` when the node owes no
-/// audit — it constrains nothing, or nothing named the tree it began
-/// from.
-///
-/// Which scope is audited — a declared one with whatever a person
-/// granted it, or nothing whatsoever for a `read-only` node — is
-/// [`effective_scope`](crate::effective_scope)'s call, not this one's.
-async fn audited_diff(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    staged: &[PathBuf],
-) -> Result<Option<crate::ScopeCheckResult>, RunError> {
-    // The tree this attempt began from, as its own `node_started`
-    // recorded it, and the grants the log holds for the node. Read back
-    // from the log rather than remembered across the node's execution: a
-    // crash between the start and this close must not change what the
-    // node answers for.
-    let view = ctx.run_view().await?;
-    let Some(scope) = crate::effective_scope(node, &view.state.grants) else {
-        return Ok(None);
-    };
-    let Some(from) = view.state.nodes.from_tree(&node.id).cloned() else {
-        // A log written before a start named its tree. Nothing to
-        // compare against but the run's own base, which is what that log
-        // meant, so the audit it asks for is the one it always got.
-        return Ok(None);
-    };
-    let result = audit(
-        ctx.worktree,
-        &from,
-        &crate::run_dir::index_for(ctx.run_dir, &UnitId::Node(node.id.clone())),
-        &scope,
-        staged,
-        ctx.root_supervision(),
-    )
-    .await?;
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Node(NodeEvent::ScopeChecked(
-            yunta_core::events::ScopeCheckedPayload {
-                task_id: None,
-                diff: result.diff.clone(),
-                violations: result.violations.clone(),
-            },
-        )),
-    )
-    .await?;
-    Ok(Some(result))
-}
-
-/// The node's whole diff against its declared `scope:`, audited as
-/// `scope_checked` and failing the node, naming every path that falls
-/// outside. `staged` is what the adapter declared it wrote for itself, which is
-/// not the node's doing and so is not the node's diff.
-///
-/// `None` when the node owes no audit at all, or when its diff is
-/// inside what it may touch.
-async fn scope_violation(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    staged: &[PathBuf],
-    tokens: TokenUsage,
-) -> Result<Option<NodeEnd>, RunError> {
-    let Some(result) = audited_diff(ctx, node, staged).await? else {
-        return Ok(None);
-    };
-    if result.violations.is_empty() {
-        return Ok(None);
-    }
-    // A write the adapter said it judged before it happened, and which
-    // reached the diff anyway: the adapter answers for it, beside the
-    // failure the violation causes either way.
-    let coverage = ctx.last_coverage(&node.id).await?;
-    if let Some(breach) = crate::scope::fence_breach(coverage.as_ref(), &result) {
-        let adapter = ctx.resolved_adapter(&node.id).await?;
-        if let Some(adapter) = adapter {
-            ctx.record_breach(&node.id, &adapter, &breach).await?;
-        }
-    }
-    Ok(Some(
-        fail_with(
-            ctx,
-            node,
-            Failure::scope_violated(result.violations),
-            false,
-            tokens,
-        )
-        .await?,
-    ))
 }
 
 pub(super) async fn fail(

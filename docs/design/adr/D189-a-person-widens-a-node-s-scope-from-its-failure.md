@@ -1,12 +1,12 @@
 ---
 number: D189
-title: "A node that fails on its scope names the paths, and a person may widen the node by exactly those from the failure's menu"
+title: "A node that fails on its scope names the paths, and a person may widen the node by exactly those from the failure's menu; a node's session can check its scope and ask first"
 status: accepted
 revises: []
 revised_by: []
 ---
 
-# D189 — A node that fails on its scope names the paths, and a person may widen the node by exactly those from the failure's menu
+# D189 — A node that fails on its scope names the paths, and a person may widen the node by exactly those from the failure's menu; a node's session can check its scope and ask first
 
 ## Context
 
@@ -42,6 +42,15 @@ even read which file the node had written: the paths were on
    before the attempt it widens starts. A restart finds it after the
    decision and does not write it again. The live prompt and a decision
    seeded by `resolve_gate` reach the same attempt and the same grant.
+5. **A node's session can check its scope and ask first.** The session
+   of a node that declares `scope:` gets `yunta_check_scope`, which runs
+   the close's own audit and lists what lies outside, and, where a person
+   may grant, `yunta_request_scope_expansion`. The close takes the request
+   out of the checkout, records it as `scope_expansion_requested` with no
+   `task_id`, and fails the node with it (`requested_scope`), so the
+   failure's menu offers the same `grant` with the session's reason as
+   evidence. A node has no rules to decide a request by; a person always
+   does.
 
 ## Rationale
 
@@ -58,6 +67,14 @@ The grant is written by the attempt that consumes the decision, as a
 loop's `retry` reopens its tasks. The same decision then works whether a
 person answered at the terminal or from another process.
 
+Telling a session its scope is not enough on its own. A session that
+obeys it and cannot ask finishes without the fix, and the dead end moves
+to the node whose failure it was correcting, whose re-routes then run
+out. Asking turns the need into the same decision a violation reaches,
+one attempt earlier and with the reason attached. The session learns its
+scope from a tool that runs the close's audit, not from a copy in its
+prompt.
+
 ## Rejected alternatives
 
 **Accepting the failed attempt's work under the widened scope.** It saves
@@ -70,3 +87,7 @@ ceiling already lets a layer forbid it.
 
 **Letting `retry` widen the scope.** One option would mean two things
 depending on the failure.
+
+**Giving node sessions the loop's modes (`rules`, `ask`, `deny`,
+`within`, `max_per_run`).** A node has no criteria to pre-check a request
+against, and a person already answers the failure's menu.

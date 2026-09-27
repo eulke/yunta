@@ -389,7 +389,109 @@ async fn scope_expansion_is_refused_for_sessions_without_a_task() {
     assert!(is_error);
     assert_eq!(
         text,
-        "scope expansion is task machinery, keyed by task — this session has no task; a prompt node's scope is fixed by its own declaration"
+        "this session has no scope an answer could widen — it works no task, and its node either declares no scope or may not be granted more on this run"
+    );
+    client.cancel().await.unwrap();
+}
+
+// --- yunta_check_scope / a node's request (node sessions with a scope) --
+
+/// A checkout at its first commit, and the log saying `fix`'s attempt
+/// began from that tree — what a node's close audits from.
+async fn scoped_node_checkout(host: &ToolsHost) -> tempfile::TempDir {
+    let owner = yunta_testkit::Owner::new();
+    let repo = tempfile::tempdir().unwrap();
+    yunta_testkit::init_repo(repo.path());
+    let from = yunta_engine::head_tree(repo.path(), owner.supervision())
+        .await
+        .unwrap();
+    host.record(
+        Some("fix"),
+        yunta_core::events::EventPayload::Node(yunta_core::events::NodeEvent::Started(
+            yunta_core::events::NodeStartedPayload::attempt_from(1, from),
+        )),
+    );
+    repo
+}
+
+#[tokio::test]
+async fn a_node_session_checks_its_work_against_its_scope_the_way_its_close_will() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let repo = scoped_node_checkout(&host).await;
+    let session = host
+        .scoped_session(
+            "fix",
+            vec!["src/**".into()],
+            true,
+            repo.path().to_path_buf(),
+        )
+        .await;
+    let client = client_for(&session, None).await.unwrap();
+
+    tokio::fs::create_dir_all(repo.path().join("src"))
+        .await
+        .unwrap();
+    tokio::fs::write(repo.path().join("src/lib.rs"), "fn fixed() {}")
+        .await
+        .unwrap();
+    tokio::fs::write(repo.path().join("Cargo.toml"), "[lib]")
+        .await
+        .unwrap();
+    let (is_error, text) = call(&client, "yunta_check_scope", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+        json!({
+            "within": false,
+            "scope": ["src/**"],
+            "outside_scope": ["Cargo.toml"],
+        })
+    );
+
+    // Asking is how a session gets that path, and the request is the
+    // one file the node's close takes out of its checkout.
+    let (is_error, text) = call(
+        &client,
+        "yunta_request_scope_expansion",
+        json!({"paths": ["Cargo.toml"], "reason": "the lint's cause is the manifest"}),
+    )
+    .await;
+    assert!(!is_error, "got: {text}");
+    assert!(text.contains("a person decides"), "got: {text}");
+    let request = yunta_engine::scope_expansion::load_request(repo.path())
+        .await
+        .unwrap()
+        .expect("the request file must exist and parse");
+    assert_eq!(request.paths, vec!["Cargo.toml"]);
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_node_nobody_may_widen_is_not_offered_the_request() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let repo = scoped_node_checkout(&host).await;
+    let session = host
+        .scoped_session(
+            "fix",
+            vec!["src/**".into()],
+            false,
+            repo.path().to_path_buf(),
+        )
+        .await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let offered: Vec<String> = client
+        .list_tools(None)
+        .await
+        .unwrap()
+        .tools
+        .into_iter()
+        .map(|tool| tool.name.to_string())
+        .collect();
+    assert!(offered.contains(&"yunta_check_scope".to_string()));
+    assert!(
+        !offered.contains(&"yunta_request_scope_expansion".to_string()),
+        "asking for what nobody may grant would be a promise: {offered:?}"
     );
     client.cancel().await.unwrap();
 }
@@ -1248,11 +1350,11 @@ fn the_catalog_and_the_dispatch_name_the_same_tools() {
     }
     assert_eq!(yunta_engine::RunTool::parse("yunta_nonesuch"), None);
 
-    // And the set is exactly the submittable kinds plus the nine fixed
+    // And the set is exactly the submittable kinds plus the ten fixed
     // tools, so a kind that gains a submission tool gains its tool here.
     let submissions = yunta_core::ArtifactKind::ALL
         .into_iter()
         .filter(|kind| kind.submit_tool().is_some())
         .count();
-    assert_eq!(yunta_engine::RunTool::all().len(), 9 + submissions);
+    assert_eq!(yunta_engine::RunTool::all().len(), 10 + submissions);
 }

@@ -11,6 +11,7 @@ pub enum RunTool {
     Task,
     CheckTask,
     GetBlackboard,
+    CheckScope,
     RequestScopeExpansion,
     PostFinding,
     UpdateFinding,
@@ -63,6 +64,7 @@ impl RunTool {
             Self::TaskStatus,
             Self::Task,
             Self::CheckTask,
+            Self::CheckScope,
             Self::RequestScopeExpansion,
             Self::GetBlackboard,
         ]);
@@ -76,6 +78,7 @@ impl RunTool {
             Self::Task => "yunta_task",
             Self::CheckTask => "yunta_check_task",
             Self::GetBlackboard => "yunta_get_blackboard",
+            Self::CheckScope => "yunta_check_scope",
             Self::RequestScopeExpansion => "yunta_request_scope_expansion",
             Self::PostFinding => ArtifactKind::POST_FINDING_TOOL,
             Self::UpdateFinding => ArtifactKind::UPDATE_FINDING_TOOL,

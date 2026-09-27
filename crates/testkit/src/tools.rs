@@ -18,7 +18,8 @@ use yunta_core::{
     sha256_hex, Clock, CommitSha, NodeId, RunId, Seq, SystemClock, Task, TaskId, TreeId, Workflow,
 };
 use yunta_engine::{
-    open_session_listener, Memo, RunToolsHost, RunToolsSession, TaskAccess, Unit, UnitId,
+    open_session_listener, Memo, NodeScopeAccess, RunToolsHost, RunToolsSession, TaskAccess, Unit,
+    UnitId,
 };
 use yunta_storage::Storage;
 
@@ -168,12 +169,35 @@ impl ToolsHost {
                 },
             )
         });
-        self.open(node, task, declared).await
+        let cwd = task
+            .as_ref()
+            .map_or_else(|| self.attempt_dir(), |task| task.unit.worktree.clone());
+        self.open(node, (task, None), cwd, declared).await
     }
 
     /// The listener a loop's session on `task` reaches its tools through.
     pub async fn task_session(&self, node: &str, task: TaskAccess) -> RunToolsSession {
-        self.open(node, Some(task), Vec::new()).await
+        let cwd = task.unit.worktree.clone();
+        self.open(node, (Some(task), None), cwd, Vec::new()).await
+    }
+
+    /// The listener a node's own session reaches its tools through, when
+    /// the node works to `scope` in `cwd`: nothing staged, and `may_ask`
+    /// saying whether a person may widen it on this run.
+    pub async fn scoped_session(
+        &self,
+        node: &str,
+        scope: Vec<yunta_core::ScopeGlob>,
+        may_ask: bool,
+        cwd: PathBuf,
+    ) -> RunToolsSession {
+        let access = NodeScopeAccess {
+            scope,
+            index: self.run_dir.join("node-check-index"),
+            may_ask,
+            staged: Arc::new(OnceLock::from(Vec::new())),
+        };
+        self.open(node, (None, Some(access)), cwd, Vec::new()).await
     }
 
     /// What a task session's tools reach for `task` worked in `unit`: the
@@ -192,12 +216,10 @@ impl ToolsHost {
     async fn open(
         &self,
         node: &str,
-        task: Option<TaskAccess>,
+        (task, node_scope): (Option<TaskAccess>, Option<NodeScopeAccess>),
+        cwd: PathBuf,
         declared: Vec<yunta_core::ArtifactSpec>,
     ) -> RunToolsSession {
-        let cwd = task
-            .as_ref()
-            .map_or_else(|| self.attempt_dir(), |task| task.unit.worktree.clone());
         open_session_listener(
             yunta_engine::RunToolsAccess {
                 host: self.host.clone(),
@@ -209,7 +231,7 @@ impl ToolsHost {
                 },
                 declared,
             },
-            task.map(Arc::new),
+            (task.map(Arc::new), node_scope.map(Arc::new)),
             cwd,
         )
         .await

@@ -28,15 +28,17 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, StoredEvent};
 use yunta_core::{ArtifactSpec, NodeId, NodeKind};
 
-use super::host::{RunToolsHost, TaskAccess};
+use super::host::{NodeScopeAccess, RunToolsAccess, RunToolsHost, TaskAccess};
 use crate::run_log::RunLog;
 
 /// The run tools of one session. Which of them are even *listed* depends
 /// on the session: `yunta_get_blackboard` only inside a
 /// `coordination: blackboard` group (for `independent` they aren't
-/// mounted at all), `yunta_request_scope_expansion` only for task
-/// sessions (scope expansion is task-keyed), and one submission tool per
-/// kind of document this node declares.
+/// mounted at all), the task tools only for task sessions,
+/// `yunta_check_scope` only for a node's own session with a scope of its
+/// own, `yunta_request_scope_expansion` for either when an answer can
+/// widen it, and one submission tool per kind of document this node
+/// declares.
 #[derive(Clone)]
 pub(super) struct SessionTools {
     pub(super) host: Arc<RunToolsHost>,
@@ -48,6 +50,10 @@ pub(super) struct SessionTools {
     /// the task tools read and judge, and what makes this a session a
     /// scope expansion can be asked for.
     pub(super) task: Option<Arc<TaskAccess>>,
+    /// The node's own scope, for a node's session when the node declares
+    /// one: what `yunta_check_scope` judges against, and whether the
+    /// session may ask for more.
+    pub(super) node_scope: Option<Arc<NodeScopeAccess>>,
     pub(super) cwd: PathBuf,
     /// What stops a command a tool runs for this session: the task's own
     /// token, and the session's end.
@@ -55,6 +61,35 @@ pub(super) struct SessionTools {
     /// The artifacts this node's close will verify, names already
     /// rendered.
     pub(super) declared: Vec<ArtifactSpec>,
+}
+
+impl SessionTools {
+    /// The tools one session is served: what its node's setup allows,
+    /// what its work is held to — a loop's task, or the node's own scope
+    /// — where it works, and what stops what a tool runs for it.
+    pub(super) fn new(
+        access: RunToolsAccess,
+        (task, node_scope): (Option<Arc<TaskAccess>>, Option<Arc<NodeScopeAccess>>),
+        cwd: PathBuf,
+        stop: CancellationToken,
+    ) -> Self {
+        let RunToolsAccess {
+            host,
+            node,
+            node_kind,
+            declared,
+        } = access;
+        SessionTools {
+            host,
+            node,
+            node_kind,
+            task,
+            node_scope,
+            cwd,
+            stop,
+            declared,
+        }
+    }
 }
 
 /// Why a tool call could not be honored — rendered once, at the MCP
@@ -85,10 +120,21 @@ pub(super) enum RunToolError {
     )]
     NotInBlackboardGroup,
     #[error(
-        "scope expansion is task machinery, keyed by task — this session has no task; a \
-         prompt node's scope is fixed by its own declaration"
+        "this session has no scope an answer could widen — it works no task, and its node \
+         either declares no scope or may not be granted more on this run"
     )]
-    NoTask,
+    NoScopeToWiden,
+    #[error(
+        "`yunta_check_scope` judges a node's own scope, and this session's node declares none"
+    )]
+    NoNodeScope,
+    #[error("this attempt's start is not on the log, so there is no tree to judge its work from")]
+    NoStartingTree,
+    #[error("the node's work could not be audited")]
+    Audit {
+        #[source]
+        source: crate::ScopeCheckError,
+    },
     #[error(
         "a scope expansion request is already pending for this attempt — one request per attempt"
     )]
@@ -202,6 +248,7 @@ impl ServerHandler for SessionTools {
             Some(RunTool::TaskStatus) => self.task_status().await,
             Some(RunTool::Task) => self.task().await,
             Some(RunTool::CheckTask) => self.check_task().await,
+            Some(RunTool::CheckScope) => self.check_scope().await,
             Some(RunTool::RequestScopeExpansion) => self.request_scope_expansion(args).await,
             Some(RunTool::Submit(kind)) => self.submit(kind, args).await,
             None => Err(RunToolError::UnknownTool {

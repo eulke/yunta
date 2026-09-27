@@ -11,7 +11,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::host::{RunToolsAccess, TaskAccess};
+use super::host::{NodeScopeAccess, RunToolsAccess, TaskAccess};
 use super::session::SessionTools;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
@@ -37,20 +37,16 @@ impl Drop for RunToolsSession {
 
 /// Starts the listener for one session attempt: fresh port, fresh
 /// single-use token. `task` is `Some` for task sessions — the only ones
-/// the task tools and `yunta_request_scope_expansion` exist for (both are
-/// task-keyed machinery); `cwd` is where a request file lands (the same
-/// worktree `scope_expansion::load_request` consumes it from).
+/// the task tools exist for; `node_scope` is `Some` for a node's own
+/// session when the node declares a scope, which is what `yunta_check_scope`
+/// judges. Either can ask with `yunta_request_scope_expansion`; `cwd` is
+/// where a request file lands (the same worktree
+/// `scope_expansion::load_request` consumes it from).
 pub async fn open_session_listener(
     access: RunToolsAccess,
-    task: Option<Arc<TaskAccess>>,
+    (task, node_scope): (Option<Arc<TaskAccess>>, Option<Arc<NodeScopeAccess>>),
     cwd: PathBuf,
 ) -> std::io::Result<RunToolsSession> {
-    let RunToolsAccess {
-        host,
-        node,
-        node_kind,
-        declared,
-    } = access;
     let token = mint_token();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let url = format!("http://127.0.0.1:{}/mcp", listener.local_addr()?.port());
@@ -59,15 +55,7 @@ pub async fn open_session_listener(
         .as_ref()
         .map_or_else(CancellationToken::new, |t| t.cancel.child_token());
 
-    let tools = SessionTools {
-        host,
-        node,
-        node_kind,
-        task,
-        cwd,
-        stop: shutdown.clone(),
-        declared,
-    };
+    let tools = SessionTools::new(access, (task, node_scope), cwd, shutdown.clone());
     let service = StreamableHttpService::new(
         move || Ok(tools.clone()),
         Arc::new(LocalSessionManager::default()),

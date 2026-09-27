@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::diagnostic::{ArtifactFailure, Report};
-use crate::glob::{InvalidScopeGlob, ScopeGlob};
+use crate::glob::{listed_globs, InvalidScopeGlob, ScopeGlob};
 use crate::ids::AdapterId;
 
 /// How many stderr lines a session keeps for its exit (D180): enough to
@@ -64,7 +64,8 @@ pub struct SessionDeath {
 /// Untagged, with `Message` last: a payload carrying `artifacts:` reads
 /// as [`Failure::Artifacts`], one carrying `died:` as
 /// [`Failure::SessionDied`], one carrying `outside_scope:` as
-/// [`Failure::ScopeViolated`], and a log written before failures were
+/// [`Failure::ScopeViolated`], one carrying `requested_scope:` as
+/// [`Failure::ScopeRequested`], and a log written before failures were
 /// data carries `outcome:` alone and reads back as
 /// [`Failure::Message`]. That tolerance is the rule for what is
 /// persisted and versioned, and it is why no reader needs to know which
@@ -83,8 +84,19 @@ pub enum Failure {
     /// one by one, because what a person does next — widen the scope,
     /// or change those files in the run's tree — is about exactly them.
     ScopeViolated { outside_scope: Vec<PathBuf> },
+    /// The node's session asked for more scope than it has: its work is
+    /// not done until a person answers, and the answer is theirs.
+    ScopeRequested { requested_scope: RequestedScope },
     /// A failure the engine states in one sentence.
     Message { outcome: String },
+}
+
+/// What a node's session asked to be allowed to write, and why, in its
+/// own words.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RequestedScope {
+    pub paths: Vec<ScopeGlob>,
+    pub reason: String,
 }
 
 impl Failure {
@@ -115,41 +127,67 @@ impl Failure {
         Failure::ScopeViolated { outside_scope }
     }
 
+    /// A session that asked to be allowed `paths`, for `reason`.
+    pub fn scope_requested(paths: Vec<ScopeGlob>, reason: impl Into<String>) -> Self {
+        Failure::ScopeRequested {
+            requested_scope: RequestedScope {
+                paths,
+                reason: reason.into(),
+            },
+        }
+    }
+
     /// The paths the node wrote outside its scope. Empty for a failure
-    /// that is not about scope.
+    /// that is not a violation of it.
     pub fn outside_scope(&self) -> &[PathBuf] {
         match self {
             Failure::ScopeViolated { outside_scope } => outside_scope,
-            Failure::Artifacts { .. } | Failure::SessionDied { .. } | Failure::Message { .. } => {
-                &[]
-            }
+            Failure::Artifacts { .. }
+            | Failure::SessionDied { .. }
+            | Failure::ScopeRequested { .. }
+            | Failure::Message { .. } => &[],
         }
     }
 
     /// Whether a wider scope is what this failure needs — what makes a
     /// grant a way forward rather than a guess.
     pub fn wants_scope(&self) -> bool {
-        !self.outside_scope().is_empty()
+        match self {
+            Failure::ScopeViolated { outside_scope } => !outside_scope.is_empty(),
+            Failure::ScopeRequested { requested_scope } => !requested_scope.paths.is_empty(),
+            Failure::Artifacts { .. } | Failure::SessionDied { .. } | Failure::Message { .. } => {
+                false
+            }
+        }
     }
 
     /// What a grant would add to the node's scope for the work behind
-    /// this failure to stand: each path it wrote outside, exactly. Empty
-    /// for a failure a wider scope would not change.
+    /// this failure to stand: each path it wrote outside, exactly, or
+    /// what its session asked for. Empty for a failure a wider scope
+    /// would not change.
     pub fn scope_wanted(&self) -> Result<Vec<ScopeGlob>, InvalidScopeGlob> {
-        self.outside_scope()
-            .iter()
-            .map(|path| ScopeGlob::exact(path))
-            .collect()
+        match self {
+            Failure::ScopeRequested { requested_scope } => Ok(requested_scope.paths.clone()),
+            _ => self
+                .outside_scope()
+                .iter()
+                .map(|path| ScopeGlob::exact(path))
+                .collect(),
+        }
     }
 
     /// [`scope_wanted`](Self::scope_wanted) as a sentence lists it: the
     /// paths as a person reads them, comma-separated.
     pub fn scope_wanted_listed(&self) -> String {
-        self.outside_scope()
-            .iter()
-            .map(|path| path.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
+        match self {
+            Failure::ScopeRequested { requested_scope } => listed_globs(&requested_scope.paths),
+            _ => self
+                .outside_scope()
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        }
     }
 
     /// Every report behind this failure, each carrying the document it
@@ -169,6 +207,7 @@ impl Failure {
             // close is about documents this node declared.
             Failure::SessionDied { .. }
             | Failure::ScopeViolated { .. }
+            | Failure::ScopeRequested { .. }
             | Failure::Message { .. } => [].iter(),
         }
     }
@@ -196,6 +235,12 @@ impl fmt::Display for Failure {
                 }
                 Ok(())
             }
+            Failure::ScopeRequested { requested_scope } => write!(
+                f,
+                "asked for scope beyond its own — {}: {}",
+                listed_globs(&requested_scope.paths),
+                requested_scope.reason
+            ),
             Failure::Artifacts { artifacts } => {
                 for (position, artifact) in artifacts.iter().enumerate() {
                     if position > 0 {

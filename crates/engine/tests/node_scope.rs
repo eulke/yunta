@@ -230,3 +230,103 @@ sessions:
         "the session is held to what the node declared and what a person granted it"
     );
 }
+
+/// A prompt node allowed only `src/**`, whose first session asks for the
+/// manifest instead of writing it, and whose second writes it.
+const ASKS_FIRST_WORKFLOW: &str = r#"
+name: asks-first
+nodes:
+  - id: fix
+    kind: prompt
+    runner: executor
+    prompt: "Fix the lint."
+    scope: ["src/**"]
+"#;
+
+const ASKS_FIRST_FIXTURE: &str = r#"
+capabilities: { run_tools: true }
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_request_scope_expansion
+        arguments: { paths: [Cargo.toml], reason: "the lint's cause is the manifest" }
+    outcome: { type: completed, summary: "asked" }
+  - effects:
+      - { path: Cargo.toml, content: "[lib]" }
+    outcome: { type: completed, summary: "fixed" }
+"#;
+
+#[tokio::test]
+async fn a_node_session_that_asks_for_scope_puts_its_request_to_a_person() {
+    let bench = parked(ASKS_FIRST_WORKFLOW, ASKS_FIRST_FIXTURE).await;
+
+    let failure = last_failure(&bench, "fix");
+    assert!(
+        matches!(failure, Failure::ScopeRequested { .. }),
+        "the node's work waits on the answer: {failure}"
+    );
+    assert_eq!(menu(&bench), ["grant", "retry", "abort"]);
+    let (_, escalation) =
+        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events())).unwrap();
+    let evidence = escalation.evidence().lines().join("\n");
+    assert!(
+        evidence.contains("the lint's cause is the manifest"),
+        "the person reads the session's own reason: {evidence}"
+    );
+    let requested = events_matching(
+        &bench,
+        |p| matches!(p, EventPayload::Scope(ScopeEvent::Requested(r)) if r.task_id.is_none()),
+    );
+    assert_eq!(requested, 1, "the request is on the log as the node's own");
+    assert_eq!(
+        bench.mock().requests_seen()[0].fence.advice,
+        yunta_core::fence::Advice::RequestExpansion,
+        "a node's session that can ask is told to"
+    );
+}
+
+#[tokio::test]
+async fn a_granted_request_lets_the_next_attempt_write_what_was_asked_for() {
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(
+            ASKS_FIRST_WORKFLOW,
+            ASKS_FIRST_FIXTURE,
+            &SequencedInteraction::choosing(&["grant"]),
+        )
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    let grants = grants(&bench);
+    assert_eq!(grants.len(), 1);
+    assert_eq!(grants[0].1.paths, ["Cargo.toml"]);
+}
+
+#[tokio::test]
+async fn under_a_ceiling_that_denies_expansions_a_node_session_is_not_offered_the_request() {
+    let bench = Bench::new();
+    let config = format!("{MOCK_CONFIG}permissions:\n  scope_expansion:\n    max_mode: deny\n");
+    let fixture = r#"
+capabilities: { run_tools: true }
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_request_scope_expansion
+        arguments: { paths: [Cargo.toml], reason: "the lint's cause is the manifest" }
+        expect: refused
+    outcome: { type: completed, summary: "stayed inside" }
+"#;
+    let RunReport { terminal, .. } = bench
+        .run_with_config(ASKS_FIRST_WORKFLOW, fixture, &config)
+        .await;
+
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "nothing was written outside"
+    );
+    assert_eq!(
+        bench.mock().requests_seen()[0].fence.advice,
+        yunta_core::fence::Advice::ReportFinding
+    );
+}

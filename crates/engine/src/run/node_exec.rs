@@ -130,7 +130,7 @@ pub(super) async fn execute_node(
     attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    super::node_grant::grant_chosen_scope(ctx, node).await?;
+    super::node_scope::grant_chosen_scope(ctx, node).await?;
     // Boxed on both paths: this function opens a unit and then holds a
     // whole `RunCtx` across the await below, and node execution nests —
     // a group inside a workflow inside a group — so an inlined future

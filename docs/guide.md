@@ -323,7 +323,9 @@ Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:
   `yunta_task_status` for every such session; `yunta_task`, `yunta_check_task`
   and `yunta_request_scope_expansion` for a loop's task sessions, which read their
   task and judge their work through them (a loop therefore needs a runner that can
-  hold these tools);
+  hold these tools); `yunta_check_scope` and `yunta_request_scope_expansion` for
+  the session of a node that declares `scope:`, which audits its work against that
+  scope and asks a person to widen it rather than writing outside it;
   a `yunta_submit_<kind>` tool for each submittable kind the node declares under
   `artifacts.produces` (see [artifacts the engine reads](#artifacts-the-engine-reads));
   and `yunta_get_blackboard` for a `coordination: blackboard` parallel group's own

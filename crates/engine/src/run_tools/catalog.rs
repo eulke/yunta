@@ -25,8 +25,14 @@ impl RunToolCatalog for RunTool {
     /// Whether `session` is served this tool.
     fn offered_to(self, session: &SessionTools) -> bool {
         match self {
-            RunTool::RequestScopeExpansion | RunTool::Task | RunTool::CheckTask => {
+            RunTool::Task | RunTool::CheckTask => session.task.is_some(),
+            RunTool::CheckScope => session.node_scope.is_some(),
+            RunTool::RequestScopeExpansion => {
                 session.task.is_some()
+                    || session
+                        .node_scope
+                        .as_ref()
+                        .is_some_and(|access| access.may_ask)
             }
             RunTool::GetBlackboard => session.in_blackboard_group(),
             RunTool::Submit(kind) => session.submits(kind),
@@ -43,6 +49,7 @@ impl RunToolCatalog for RunTool {
             RunTool::Task => task_tool(),
             RunTool::CheckTask => check_task_tool(),
             RunTool::GetBlackboard => blackboard_tool(),
+            RunTool::CheckScope => check_scope_tool(),
             RunTool::RequestScopeExpansion => scope_expansion_tool(),
             RunTool::PostFinding => post_finding_tool(),
             RunTool::UpdateFinding => update_finding_tool(),
@@ -158,13 +165,26 @@ fn check_task_tool() -> Tool {
     )
 }
 
+fn check_scope_tool() -> Tool {
+    Tool::new(
+        RunTool::CheckScope.name(),
+        "Audit what this node changed against its scope exactly as the engine will \
+         when your session ends. `scope` is what you may write — what the node declared \
+         plus what a person granted it — and `outside_scope` lists every path you \
+         changed outside it. A path outside fails the node; if your fix needs one, ask \
+         with yunta_request_scope_expansion instead of writing it.",
+        no_arguments(),
+    )
+}
+
 fn scope_expansion_tool() -> Tool {
     Tool::new(
         "yunta_request_scope_expansion",
-        "Ask the engine to widen this task's scope — you never widen it \
-         yourself. Provide the paths, the reason, and a verifiable criterion that \
-         is red today; the request is evaluated when this attempt ends, and a \
-         denial becomes a finding rather than silence.",
+        "Ask for the scope you work to be widened — you never widen it yourself. \
+         Provide the paths and the reason; for a task, also a verifiable criterion \
+         that is red today. The request is decided when this attempt ends: a task's by \
+         its loop's rules or a person, and a denial becomes a finding rather than \
+         silence; a node's by a person, who is shown your reason.",
         object(json!({
             "type": "object",
             "properties": {

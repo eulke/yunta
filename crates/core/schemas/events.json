@@ -2169,7 +2169,7 @@
       ]
     },
     "NodeFailedPayload": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "type": "object",
       "properties": {
         "retryable": {
@@ -2221,6 +2221,18 @@
           },
           "required": [
             "outside_scope"
+          ]
+        },
+        {
+          "description": "The node's session asked for more scope than it has: its work is\nnot done until a person answers, and the answer is theirs.",
+          "type": "object",
+          "properties": {
+            "requested_scope": {
+              "$ref": "#/$defs/RequestedScope"
+            }
+          },
+          "required": [
+            "requested_scope"
           ]
         },
         {
@@ -2469,6 +2481,25 @@
       "required": [
         "document",
         "diagnostics"
+      ]
+    },
+    "RequestedScope": {
+      "description": "What a node's session asked to be allowed to write, and why, in its\nown words.",
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeGlob"
+          }
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "paths",
+        "reason"
       ]
     },
     "RerouteOrigin": {
@@ -2735,6 +2766,7 @@
         "yunta_task_status",
         "yunta_task",
         "yunta_check_task",
+        "yunta_check_scope",
         "yunta_request_scope_expansion",
         "yunta_get_blackboard"
       ]

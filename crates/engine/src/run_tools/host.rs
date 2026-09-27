@@ -232,3 +232,23 @@ pub struct TaskAccess {
     /// which is before any call can arrive.
     pub staged: Arc<std::sync::OnceLock<Vec<PathBuf>>>,
 }
+
+/// What a node's own session's scope tools reach: the scope its close
+/// will hold the diff to, where a check keeps its index, and what the
+/// audit leaves out — the values the close uses, never a copy of them.
+#[derive(Clone)]
+pub struct NodeScopeAccess {
+    /// The scope the node declared plus every path the log granted it
+    /// when this attempt began.
+    pub scope: Vec<ScopeGlob>,
+    /// Where a check keeps its private index — apart from the close's
+    /// own, so a check cut short never leaves the close a lock behind.
+    pub index: PathBuf,
+    /// Whether the session may ask for more: whether a person may grant
+    /// this node anything on this run.
+    pub may_ask: bool,
+    /// What the adapter stages in the checkout for its own mechanics,
+    /// which no audit counts. Known once the session's request is built,
+    /// which is before any call can arrive.
+    pub staged: Arc<std::sync::OnceLock<Vec<PathBuf>>>,
+}

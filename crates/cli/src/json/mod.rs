@@ -405,11 +405,12 @@ fn node_diagnostics(events: &[StoredEvent]) -> BTreeMap<String, Vec<ArtifactProb
                     );
                 }
                 // A failure stated in one sentence names no document,
-                // and neither does a session that died or a diff outside
+                // and neither does a session that died or anything about
                 // scope: the node's own entry carries each of them whole.
                 Failure::Message { .. }
                 | Failure::SessionDied { .. }
-                | Failure::ScopeViolated { .. } => {
+                | Failure::ScopeViolated { .. }
+                | Failure::ScopeRequested { .. } => {
                     latest.remove(node_id.as_str());
                 }
             },

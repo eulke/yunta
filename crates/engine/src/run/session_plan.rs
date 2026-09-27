@@ -22,7 +22,7 @@ use yunta_core::{Node, Task};
 
 use crate::run::node_exec::NodeEnd;
 use crate::run::runner_resolve::RunToolsSetupError;
-use crate::run_tools::{RunToolsSession, TaskAccess};
+use crate::run_tools::{NodeScopeAccess, RunToolsSession, TaskAccess};
 use crate::task_cycle::{SessionObserver, SessionSetup};
 
 /// Everything a node resolves once for every session it opens: which
@@ -47,7 +47,7 @@ pub(crate) async fn resolve_setup(
         Err(end) => return Ok(Err(end)),
     };
     state_run_wide_absences(ctx, node, adapter.as_ref()).await?;
-    let grants = ctx.run_view().await?.state.grants;
+    let node_scope = super::node_scope::session_access(ctx, node).await?;
     Ok(Ok(SessionSetup {
         skills,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
@@ -59,7 +59,7 @@ pub(crate) async fn resolve_setup(
         chosen: chosen.clone(),
         artifact_dir: crate::run::node_exec::artifact_dir(ctx, node),
         run_tools_required: mandatory_tools(ctx, node),
-        node_scope: crate::effective_scope(node, &grants).filter(|_| !node.scope.is_empty()),
+        node_scope,
     }))
 }
 
@@ -242,9 +242,10 @@ pub(crate) async fn open_session(
     adapter: &dyn Adapter,
     observer: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
 ) -> Result<OpenedSession, OpenSessionError> {
-    let run_tools = mount_tools(setup, &plan, adapter, observer).await?;
+    let held_to = HeldTo::of(setup, &plan);
+    let run_tools = mount_tools(setup, &plan, &held_to, adapter, observer).await?;
     let scratch_dir = scratch_dir(setup, &plan);
-    let fence = fence(setup, &plan, run_tools.is_some());
+    let fence = fence(setup, &plan, &held_to, run_tools.is_some());
     let task = plan.task.clone();
 
     let request = SessionRequest {
@@ -269,8 +270,8 @@ pub(crate) async fn open_session(
     // What the adapter stages for its own mechanics is known only now,
     // and no call can reach the session's tools before it is dispatched:
     // a check the session asks for leaves out exactly what its close will.
-    if let Some(task) = &task {
-        let _ = task.staged.set(adapter.staged_paths(&request));
+    if let Some(staged) = held_to.staged() {
+        let _ = staged.set(adapter.staged_paths(&request));
     }
     Ok(OpenedSession { request, run_tools })
 }
@@ -308,26 +309,82 @@ fn told(
 /// A session that mounted the scope-expansion tool is told to ask for
 /// more when it is refused; one that did not is told to report the need
 /// and move on, because asking is not something it can do.
-fn fence(setup: &SessionSetup, plan: &SessionPlan<'_>, holds_run_tools: bool) -> Fence {
-    // Scope expansion is task-keyed, so only a task session is offered
-    // the tool that asks for it: every other session is told to report
-    // the need instead of asking with something it does not hold.
-    let advice = if holds_run_tools && plan.task.is_some() {
+fn fence(
+    setup: &SessionSetup,
+    plan: &SessionPlan<'_>,
+    held_to: &HeldTo,
+    holds_run_tools: bool,
+) -> Fence {
+    let advice = if holds_run_tools && held_to.may_ask() {
         Advice::RequestExpansion
     } else {
         Advice::ReportFinding
     };
-    let scope: Option<&[ScopeGlob]> = match &plan.task {
-        Some(task) => Some(&task.scope),
-        None => setup.node_scope.as_deref(),
-    };
     Fence::for_session(
         plan.profile,
-        scope,
+        held_to.scope(),
         &[],
         setup.artifact_dir.as_deref(),
         advice,
     )
+}
+
+/// What one session's work is held to: a loop's task, the node's own
+/// scope, or nothing a tool could judge it by. Its fence, its tools and
+/// what they leave out all read this one answer.
+enum HeldTo {
+    Task(Arc<TaskAccess>),
+    NodeScope(Arc<NodeScopeAccess>),
+    Nothing,
+}
+
+impl HeldTo {
+    fn of(setup: &SessionSetup, plan: &SessionPlan<'_>) -> Self {
+        match (&plan.task, &setup.node_scope) {
+            (Some(task), _) => HeldTo::Task(task.clone()),
+            (None, Some(access)) => HeldTo::NodeScope(access.clone()),
+            (None, None) => HeldTo::Nothing,
+        }
+    }
+
+    /// The globs the session may write under the worktree, when anything
+    /// holds it to some.
+    fn scope(&self) -> Option<&[ScopeGlob]> {
+        match self {
+            HeldTo::Task(task) => Some(&task.scope),
+            HeldTo::NodeScope(access) => Some(&access.scope),
+            HeldTo::Nothing => None,
+        }
+    }
+
+    /// Whether the session may ask for more: a task session always may,
+    /// and a node's own session when a person may widen its scope.
+    fn may_ask(&self) -> bool {
+        match self {
+            HeldTo::Task(_) => true,
+            HeldTo::NodeScope(access) => access.may_ask,
+            HeldTo::Nothing => false,
+        }
+    }
+
+    /// Where what the adapter stages for itself is recorded, for the
+    /// tools that audit this session's work to leave out.
+    fn staged(&self) -> Option<&std::sync::OnceLock<Vec<PathBuf>>> {
+        match self {
+            HeldTo::Task(task) => Some(&task.staged),
+            HeldTo::NodeScope(access) => Some(&access.staged),
+            HeldTo::Nothing => None,
+        }
+    }
+
+    /// The two halves a session's tools are opened with.
+    fn parts(&self) -> (Option<Arc<TaskAccess>>, Option<Arc<NodeScopeAccess>>) {
+        match self {
+            HeldTo::Task(task) => (Some(task.clone()), None),
+            HeldTo::NodeScope(access) => (None, Some(access.clone())),
+            HeldTo::Nothing => (None, None),
+        }
+    }
 }
 
 /// Where this session may drop its own scaffolding. Concurrent sessions
@@ -351,6 +408,7 @@ fn scratch_dir(setup: &SessionSetup, plan: &SessionPlan<'_>) -> PathBuf {
 async fn mount_tools(
     setup: &SessionSetup,
     plan: &SessionPlan<'_>,
+    held_to: &HeldTo,
     adapter: &dyn Adapter,
     observer: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
 ) -> Result<Option<RunToolsSession>, OpenSessionError> {
@@ -359,7 +417,7 @@ async fn mount_tools(
     };
     let source = match crate::run_tools::open_session_listener(
         access.clone(),
-        plan.task.clone(),
+        held_to.parts(),
         plan.cwd.clone(),
     )
     .await

@@ -36,7 +36,7 @@ mod loop_exec;
 mod node_artifacts;
 mod node_close;
 pub(crate) mod node_exec;
-mod node_grant;
+mod node_scope;
 mod parallel_exec;
 mod promote;
 mod prompt_exec;
