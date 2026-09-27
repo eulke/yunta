@@ -1060,3 +1060,123 @@ fn ran(cmd: &str, exit_code: i32, is_guard: bool) -> CriterionRun {
         duration_ms: None,
     }
 }
+
+/// One task cycle with nothing but the task and its mock: two retries
+/// after the first attempt, no observer, no grants.
+async fn cycle(
+    owner: &Owner,
+    unit: &Unit,
+    run_dir: &std::path::Path,
+    t: &Task,
+    adapter: &MockAdapter,
+) -> yunta_engine::TaskCycleReport {
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    run_task(
+        t,
+        "Implement your task.",
+        AttemptEnv {
+            node: &build_node(),
+            adapter,
+            unit,
+            max_retries: 2,
+            budget: Budget::default(),
+            memo: &memo,
+            history: &unpriced(),
+            supervision: owner.supervision(),
+        },
+        ungoverned(&GrantLedger::new(0)),
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &bare_setup(run_dir),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_criterion_that_cannot_run_blocks_before_any_attempt() {
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
+    // A program no `PATH` has: the shell answers 127 whatever the tree
+    // holds, so the criterion proves nothing about the work.
+    let t = task(
+        "no-such-tool",
+        &["output.txt"],
+        vec![cmd("yunta-no-such-tool --version")],
+    );
+    let adapter = MockAdapter::from_yaml(r#"outcome: { type: completed, summary: "ok" }"#).unwrap();
+
+    let report = cycle(&owner, &unit, run.path(), &t, &adapter).await;
+
+    assert!(report.attempts.is_empty(), "no session was spent on it");
+    assert!(adapter.requests_seen().is_empty());
+    let TaskOutcome::Blocked { cause } = report.outcome else {
+        panic!("expected Blocked, got {:?}", report.outcome);
+    };
+    assert_eq!(
+        cause.to_string(),
+        "criterion `yunta-no-such-tool --version` could not run: exit 127 (command not \
+         found) — the criteria need fixing, or the environment the engine runs them in does"
+    );
+}
+
+#[tokio::test]
+async fn a_criterion_that_could_not_run_runs_again_on_the_same_tree() {
+    let owner = Owner::new();
+    let (dir, _run, _unit) = a_unit(&owner).await;
+    let t = task("memo", &["output.txt"], vec![cmd("yunta-no-such-tool")]);
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    for check in 0..2 {
+        let runs = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
+            .await
+            .unwrap();
+        assert_eq!(runs[0].exit_code, 127);
+        assert!(
+            !runs[0].reused,
+            "check {check}: a command that was not found says nothing about the tree, so \
+             it is never answered from the cache"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_criterion_that_cannot_run_after_an_attempt_ends_the_cycle() {
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
+    // Red before the work, and a missing program once the work is there.
+    let t = task(
+        "breaks-after",
+        &["made.txt"],
+        vec![cmd(
+            "if [ -f made.txt ]; then yunta-no-such-tool; else exit 1; fi",
+        )],
+    );
+    let adapter = MockAdapter::from_yaml(
+        r#"
+sessions:
+  - effects:
+      - { path: made.txt, content: "made" }
+    outcome: { type: completed, summary: "attempt 1" }
+  - outcome: { type: completed, summary: "attempt 2" }
+  - outcome: { type: completed, summary: "attempt 3" }
+"#,
+    )
+    .unwrap();
+
+    let report = cycle(&owner, &unit, run.path(), &t, &adapter).await;
+
+    assert_eq!(
+        report.attempts.len(),
+        1,
+        "another attempt would not change it"
+    );
+    let TaskOutcome::Blocked { cause } = report.outcome else {
+        panic!("expected Blocked, got {:?}", report.outcome);
+    };
+    assert!(matches!(cause, BlockedCause::Unrunnable { .. }), "{cause}");
+    assert!(
+        cause.to_string().contains("exits 127 (command not found)"),
+        "{cause}"
+    );
+}

@@ -48,7 +48,14 @@ impl Memo {
         cache.get(&self.key(cmd, tree_hash)).copied()
     }
 
+    /// Remembers what `cmd` answered on this tree — unless it could not
+    /// run at all. A command that was not found says nothing about the
+    /// tree, and the next check on the same tree must run it again: the
+    /// program may be on the `PATH` by then.
     fn put(&self, cmd: &str, tree_hash: &ContentHash, exit_code: i32) {
+        if could_not_run(exit_code).is_some() {
+            return;
+        }
         let key = self.key(cmd, tree_hash);
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.insert(key, exit_code);
@@ -74,20 +81,45 @@ impl Memo {
         let command = GovernedCommand::shell(cwd, cmd)
             .stdout(Capture::Inherit)
             .stderr(Capture::Inherit);
-        let exit_code = match spawn_governed(command, supervision)
-            .await
-            .map_err(|source| TaskCycleError::MemoizedCommand {
+        let exit_code = exit_code_of(spawn_governed(command, supervision).await.map_err(
+            |source| TaskCycleError::MemoizedCommand {
                 cmd: cmd.to_string(),
                 source,
-            })? {
-            Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
-            Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
-        };
+            },
+        )?);
         self.put(cmd, &tree_hash, exit_code);
         Ok(Memoized {
             exit_code,
             reused: false,
         })
+    }
+}
+
+/// The exit code the log records for how a criterion's command ended.
+/// A command the engine stopped before it answered — a timeout, or a
+/// cancellation — has no exit code of its own, so it is recorded as
+/// `-2`, which no process exits with; one killed by a signal as `-1`.
+fn exit_code_of(outcome: Outcome) -> i32 {
+    match outcome {
+        Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
+        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
+    }
+}
+
+/// Why a criterion never answered, when its exit code says it did not:
+/// the shell could not find its command (127), found it but could not
+/// execute it (126), or the engine stopped it first (`-2`, see
+/// [`exit_code_of`]). `None` for every other exit code, which is the
+/// command's own answer.
+///
+/// A criterion that could not run is neither red nor green: no work on
+/// the tree changes it, so it is never taken for a verdict about one.
+pub fn could_not_run(exit_code: i32) -> Option<&'static str> {
+    match exit_code {
+        127 => Some("command not found"),
+        126 => Some("command not executable"),
+        -2 => Some("stopped before it answered"),
+        _ => None,
     }
 }
 
@@ -159,18 +191,15 @@ async fn run_criterion(
     let command = GovernedCommand::shell(cwd, cmd)
         .stdout(Capture::Inherit)
         .stderr(Capture::Inherit);
-    let exit_code = match spawn_governed(command, supervision)
-        .await
-        .map_err(|source| TaskCycleError::Criterion {
-            task: task_id.clone(),
-            cmd: cmd.to_string(),
-            source,
-        })? {
-        Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
-        // Stopped by the engine before it could answer — never a real
-        // exit code, so the record says so.
-        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
-    };
+    let exit_code = exit_code_of(
+        spawn_governed(command, supervision)
+            .await
+            .map_err(|source| TaskCycleError::Criterion {
+                task: task_id.clone(),
+                cmd: cmd.to_string(),
+                source,
+            })?,
+    );
     let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     Ok((exit_code, duration_ms))
 }

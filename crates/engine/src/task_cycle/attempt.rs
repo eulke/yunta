@@ -209,6 +209,27 @@ pub(super) async fn run_one_attempt(
             },
         ));
     }
+    // A criterion that never answered is the environment's, not the
+    // work's: the next session would change the tree, never whether the
+    // engine can run the command. The cycle stops here and says which.
+    let unrunnable: Vec<super::CriterionRun> = record
+        .post_check
+        .iter()
+        .filter(|run| run.could_not_run().is_some())
+        .cloned()
+        .collect();
+    if !unrunnable.is_empty() {
+        return Ok((
+            last_staged,
+            AttemptStep::Stop {
+                record,
+                outcome: TaskOutcome::Blocked {
+                    cause: super::BlockedCause::Unrunnable { runs: unrunnable },
+                },
+                needs_human_decision: false,
+            },
+        ));
+    }
     // A session that died says so instead of leaving the tail to report
     // criteria that were never run.
     if let Some(died) = session_death {

@@ -36,6 +36,7 @@ use attempt::{run_one_attempt, AttemptParams, AttemptStep};
 pub(crate) use record::to_results;
 use record::Recorder;
 
+pub(crate) use criteria::could_not_run;
 pub use criteria::{post_check, pre_check, Memo, Memoized};
 pub(crate) use judge::{judge, Work};
 pub(crate) use session::dispatch_session;
@@ -108,6 +109,22 @@ pub struct CriterionRun {
     /// Wall-clock milliseconds the execution took — what the
     /// learned ordering feeds on. `None` when `reused` (nothing ran).
     pub duration_ms: Option<u64>,
+}
+
+impl CriterionRun {
+    /// Why this criterion never answered, if it did not.
+    pub fn could_not_run(&self) -> Option<&'static str> {
+        criteria::could_not_run(self.exit_code)
+    }
+
+    /// How its exit code reads to a person: the code, and what it means
+    /// when the command never answered.
+    pub fn exit_described(&self) -> String {
+        match self.could_not_run() {
+            Some(why) => format!("{} ({why})", self.exit_code),
+            None => self.exit_code.to_string(),
+        }
+    }
 }
 
 /// Default retry cap ("cap configurable, default 2").
@@ -258,6 +275,19 @@ pub async fn run_task(
 
     let pre_runs = pre_check(task, &unit.worktree, memo, history, supervision).await?;
     let mut last_check = recorder.criteria(Phase::Pre, &pre_runs).await?;
+    // A token that fired during the pre-check stopped its commands before
+    // they answered: the task was cut, not found wanting.
+    if supervision.cancel.is_cancelled() {
+        return Ok(TaskCycleReport {
+            task_id: task.id.clone(),
+            staged: last_staged.clone(),
+            pre_check: pre_runs,
+            attempts: Vec::new(),
+            outcome: TaskOutcome::Interrupted,
+            needs_human_decision: false,
+            last_check,
+        });
+    }
 
     // The pre-check validates the criteria before any work: a non-guard
     // that already passes, or a guard already red, means the criteria

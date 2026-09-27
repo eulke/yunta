@@ -29,7 +29,7 @@ use yunta_core::{ScopeGlob, TaskId};
 use super::catalog::RunTool;
 use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
-use crate::task_cycle::{judge, CriterionRun, Work};
+use crate::task_cycle::{could_not_run, judge, CriterionRun, Work};
 
 impl SessionTools {
     pub(super) async fn task_status(&self) -> Result<String, RunToolError> {
@@ -182,6 +182,10 @@ struct Answered {
     cmd: String,
     guard: bool,
     exit_code: i32,
+    /// Why the command never answered, when it did not: no work on the
+    /// tree turns this green.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cannot_run: Option<&'static str>,
 }
 
 impl Answered {
@@ -190,6 +194,7 @@ impl Answered {
             cmd: result.cmd.clone(),
             guard: result.r#type == Some(CriterionType::Guard),
             exit_code: result.exit_code,
+            cannot_run: could_not_run(result.exit_code),
         }
     }
 
@@ -198,6 +203,7 @@ impl Answered {
             cmd: run.cmd.clone(),
             guard: run.is_guard,
             exit_code: run.exit_code,
+            cannot_run: run.could_not_run(),
         }
     }
 }

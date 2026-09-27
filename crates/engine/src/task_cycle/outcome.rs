@@ -21,8 +21,18 @@ use super::CriterionRun;
 /// the task nobody has started.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Surprise {
-    TrivialCriterion { cmd: String },
-    BrokenGuard { cmd: String },
+    TrivialCriterion {
+        cmd: String,
+    },
+    BrokenGuard {
+        cmd: String,
+    },
+    /// A criterion that never answered: its command could not be found
+    /// or executed where the engine runs criteria, or it was stopped.
+    /// No work on the tree changes that.
+    Unrunnable {
+        run: CriterionRun,
+    },
 }
 
 impl std::fmt::Display for Surprise {
@@ -36,6 +46,13 @@ impl std::fmt::Display for Surprise {
             Surprise::BrokenGuard { cmd } => {
                 write!(f, "guard `{cmd}` is already red before any work started")
             }
+            Surprise::Unrunnable { run } => write!(
+                f,
+                "criterion `{}` could not run: exit {} — the criteria need fixing, or \
+                 the environment the engine runs them in does",
+                run.cmd,
+                run.exit_described()
+            ),
         }
     }
 }
@@ -59,6 +76,9 @@ pub fn surprises(task: &yunta_core::Task, runs: &[CriterionRun]) -> Vec<Surprise
             let run = runs
                 .iter()
                 .find(|run| run.cmd == criterion.cmd && run.is_guard == is_guard)?;
+            if run.could_not_run().is_some() {
+                return Some(Surprise::Unrunnable { run: run.clone() });
+            }
             match (run.is_guard, run.exit_code) {
                 (true, code) if code != 0 => Some(Surprise::BrokenGuard {
                     cmd: run.cmd.clone(),
@@ -94,6 +114,10 @@ pub enum BlockedCause {
     /// The session reported a failure nothing will retry, and the
     /// criteria the engine checked itself are still red.
     NonRetryable,
+    /// After an attempt, a criterion never answered: its command could
+    /// not be found or executed where the engine runs criteria. Another
+    /// attempt would change the tree, never that.
+    Unrunnable { runs: Vec<CriterionRun> },
     /// A criterion's own command is one the run's permissions refuse,
     /// so the task cannot be verified at all. `rule` is the refusal the
     /// permission check wrote, naming the pattern and the field.
@@ -117,32 +141,7 @@ impl std::fmt::Display for BlockedCause {
                 attempts,
                 red,
                 outside,
-            } => {
-                write!(f, "not done after {attempts} attempt(s)")?;
-                let red: Vec<String> = red
-                    .iter()
-                    .map(|run| format!("`{}` still exits {}", run.cmd, run.exit_code))
-                    .collect();
-                let outside: Vec<String> = outside
-                    .iter()
-                    .map(|path| path.display().to_string())
-                    .collect();
-                match (red.is_empty(), outside.is_empty()) {
-                    (false, false) => write!(
-                        f,
-                        ": {}, and the work changed {} outside its scope",
-                        red.join(", "),
-                        outside.join(", ")
-                    ),
-                    (false, true) => write!(f, ": {}", red.join(", ")),
-                    (true, false) => write!(
-                        f,
-                        ": the criteria pass, but the work changed {} outside its scope",
-                        outside.join(", ")
-                    ),
-                    (true, true) => Ok(()),
-                }
-            }
+            } => write_unmet(f, *attempts, red, outside),
             BlockedCause::ScopeDecisionOwed => {
                 write!(f, "a scope expansion request needs a human decision")
             }
@@ -150,9 +149,52 @@ impl std::fmt::Display for BlockedCause {
                 f,
                 "the session reported a non-retryable failure and the criteria are still red"
             ),
+            BlockedCause::Unrunnable { runs } => write!(
+                f,
+                "a criterion could not run, and another attempt would not change that: {}",
+                exits(runs, "exits")
+            ),
             BlockedCause::CommandDenied { rule } => write!(f, "{rule}"),
             BlockedCause::SessionDied(died) => write!(f, "{died}"),
         }
+    }
+}
+
+/// Each run as "`cmd` <verb> <exit code and what it means>", in order.
+fn exits(runs: &[CriterionRun], verb: &str) -> String {
+    runs.iter()
+        .map(|run| format!("`{}` {verb} {}", run.cmd, run.exit_described()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// What an exhausted task's last attempt left: the criteria still red,
+/// and the paths it changed outside the scope.
+fn write_unmet(
+    f: &mut std::fmt::Formatter<'_>,
+    attempts: u32,
+    red: &[CriterionRun],
+    outside: &[PathBuf],
+) -> std::fmt::Result {
+    write!(f, "not done after {attempts} attempt(s)")?;
+    let outside: Vec<String> = outside
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect();
+    match (red.is_empty(), outside.is_empty()) {
+        (false, false) => write!(
+            f,
+            ": {}, and the work changed {} outside its scope",
+            exits(red, "still exits"),
+            outside.join(", ")
+        ),
+        (false, true) => write!(f, ": {}", exits(red, "still exits")),
+        (true, false) => write!(
+            f,
+            ": the criteria pass, but the work changed {} outside its scope",
+            outside.join(", ")
+        ),
+        (true, true) => Ok(()),
     }
 }
 
