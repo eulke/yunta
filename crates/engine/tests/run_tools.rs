@@ -449,10 +449,11 @@ fn checked(phase: Phase, exits: [i32; 2]) -> EventPayload {
     }))
 }
 
-/// A log in the middle of T001's second cycle: a check from the cycle
-/// before, the loop setting it running again, this cycle's pre-check,
-/// and one attempt that left the criterion red and wrote outside scope.
-fn a_second_cycle_with_one_attempt(host: &ToolsHost) {
+/// A log in the middle of T001's second cycle: a first cycle whose one
+/// attempt broke the guard, then the loop setting it running again, this
+/// cycle's pre-check, and one attempt that left the criterion red and
+/// wrote outside scope.
+fn two_cycles_of_one_attempt_each(host: &ToolsHost) {
     let registered = host.record(
         Some("plan"),
         EventPayload::Tasks(TaskEvent::Registered(
@@ -464,16 +465,17 @@ fn a_second_cycle_with_one_attempt(host: &ToolsHost) {
             },
         )),
     );
-    // A check from a cycle that already ended is not this cycle's.
-    host.record(Some("implement"), checked(Phase::Post, [0, 0]));
-    host.record(
-        Some("implement"),
+    let running = || {
         EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
             TaskId::from("T001"),
             TaskStatus::Running,
             registered,
-        ))),
-    );
+        )))
+    };
+    // A first cycle whose one attempt broke the guard.
+    host.record(Some("implement"), running());
+    host.record(Some("implement"), checked(Phase::Post, [1, 1]));
+    host.record(Some("implement"), running());
     host.record(Some("implement"), checked(Phase::Pre, [1, 0]));
     host.record(Some("implement"), checked(Phase::Post, [1, 0]));
     host.record(
@@ -487,9 +489,9 @@ fn a_second_cycle_with_one_attempt(host: &ToolsHost) {
 }
 
 #[tokio::test]
-async fn a_task_session_reads_its_task_and_its_cycle_from_the_run() {
+async fn a_task_session_reads_its_task_and_every_cycle_it_ran_from_the_run() {
     let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
-    a_second_cycle_with_one_attempt(&host);
+    two_cycles_of_one_attempt_each(&host);
 
     let mut access = host.task_access(greeting_task(), unit_at(host.attempt_dir()));
     access.scope.push("docs/**".into());
@@ -499,6 +501,7 @@ async fn a_task_session_reads_its_task_and_its_cycle_from_the_run() {
     assert!(!is_error, "got: {text}");
     let red = json!({"cmd": "test -f hello.txt", "guard": false, "exit_code": 1});
     let guard = json!({"cmd": "true", "guard": true, "exit_code": 0});
+    let broken_guard = json!({"cmd": "true", "guard": true, "exit_code": 1});
     assert_eq!(
         serde_json::from_str::<serde_json::Value>(&text).unwrap(),
         json!({
@@ -510,12 +513,17 @@ async fn a_task_session_reads_its_task_and_its_cycle_from_the_run() {
                 {"cmd": "test -f hello.txt", "guard": false},
                 {"cmd": "true", "guard": true},
             ],
-            "checks": [
-                {"phase": "pre", "criteria": [red, guard]},
-                {"phase": "post", "attempt": 1, "criteria": [red, guard], "outside_scope": ["notes.md"]},
+            "cycles": [
+                {"cycle": 1, "checks": [
+                    {"phase": "post", "attempt": 1, "criteria": [red, broken_guard]},
+                ]},
+                {"cycle": 2, "checks": [
+                    {"phase": "pre", "criteria": [red, guard]},
+                    {"phase": "post", "attempt": 1, "criteria": [red, guard], "outside_scope": ["notes.md"]},
+                ]},
             ],
         }),
-        "the task the cycle judges by, its granted scope included, and only this cycle's checks"
+        "the task the cycle judges by, its granted scope included, and every cycle it ran"
     );
     client.cancel().await.unwrap();
 }

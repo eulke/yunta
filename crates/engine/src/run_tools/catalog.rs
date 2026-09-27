@@ -138,10 +138,10 @@ fn task_tool() -> Tool {
          and notes; `scope`, the globs every change must stay inside (what the task declared \
          plus what was granted to it); and `criteria`, the commands that must all exit 0 \
          when your session ends — a criterion is red before the work starts, and a `guard` \
-         is green before it and must stay green. `checks` lists what the engine found in \
-         this task's current cycle: the pre-check, then each earlier attempt's criteria \
-         and the paths it changed outside the scope. The tasks document is not in your \
-         checkout; this is where it is read.",
+         is green before it and must stay green. `cycles` lists what the engine found each \
+         time the task ran, the current cycle last: its pre-check, then each attempt's \
+         criteria and the paths it changed outside the scope. The tasks document is not \
+         in your checkout; this is where it is read.",
         no_arguments(),
     )
 }

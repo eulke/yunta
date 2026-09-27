@@ -81,12 +81,13 @@ impl SessionTools {
                     guard: criterion.r#type == Some(CriterionType::Guard),
                 })
                 .collect(),
-            checks: checks_of(&events, &task.id),
+            cycles: cycles_of(&events, &task.id),
             runs_under: None,
         };
         let any_unrunnable = sheet
-            .checks
+            .cycles
             .iter()
+            .flat_map(|cycle| &cycle.checks)
             .flat_map(|check| &check.criteria)
             .any(|answered| answered.cannot_run.is_some());
         let sheet = TaskSheet {
@@ -181,7 +182,7 @@ struct TaskSheet<'a> {
     /// What the diff is held to: declared plus granted.
     scope: &'a [ScopeGlob],
     criteria: Vec<Declared<'a>>,
-    checks: Vec<Check>,
+    cycles: Vec<Cycle>,
     /// What the engine ran these checks with, told only when one of them
     /// could not run: the shell and the `PATH` its command was looked up in.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -227,13 +228,22 @@ impl Answered {
     }
 }
 
-/// One check of the task's current cycle, as the log holds it.
+/// One cycle of the task: every check between the loop setting it
+/// running and the next time it does.
+#[derive(Serialize)]
+struct Cycle {
+    cycle: usize,
+    checks: Vec<Check>,
+}
+
+/// One check of a cycle, as the log holds it.
 #[derive(Serialize)]
 struct Check {
     phase: Phase,
-    /// Which attempt a post-check closed; a pre-check belongs to none.
+    /// Which attempt of its cycle a post-check closed; a pre-check
+    /// belongs to none.
     #[serde(skip_serializing_if = "Option::is_none")]
-    attempt: Option<u32>,
+    attempt: Option<usize>,
     criteria: Vec<Answered>,
     /// What that attempt changed outside the task's scope.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -252,34 +262,40 @@ struct Verdict<'a> {
     runs_under: Option<&'a ExecutionEnvironment>,
 }
 
-/// `task`'s checks in its current cycle — everything after the last time
-/// the loop set it running — as the log holds them: the pre-check, then
-/// each attempt's post-check carrying what that attempt's scope audit
-/// found outside the scope.
-fn checks_of(events: &[StoredEvent], task: &TaskId) -> Vec<Check> {
-    let start = events
-        .iter()
-        .rposition(|event| {
-            matches!(
-                event.payload(),
-                Some(EventPayload::Tasks(TaskEvent::StatusChanged(p)))
-                    if p.task_id == *task && p.new_status == TaskStatus::Running
-            )
-        })
-        .map_or(0, |at| at + 1);
-    let mut checks: Vec<Check> = Vec::new();
-    let mut attempts = 0;
-    for event in events.iter().skip(start) {
+/// Every cycle `task` has run, oldest first, as the log holds them: a
+/// cycle begins each time the loop sets the task running, and holds its
+/// pre-check, then each attempt's post-check carrying what that
+/// attempt's scope audit found outside the scope. The last cycle is the
+/// one under way; the ones before it are what earlier attempts — a
+/// retried loop's among them — already learned.
+fn cycles_of(events: &[StoredEvent], task: &TaskId) -> Vec<Cycle> {
+    let mut cycles: Vec<Cycle> = Vec::new();
+    for event in events {
         match event.payload() {
+            Some(EventPayload::Tasks(TaskEvent::StatusChanged(p)))
+                if p.task_id == *task && p.new_status == TaskStatus::Running =>
+            {
+                cycles.push(Cycle {
+                    cycle: cycles.len() + 1,
+                    checks: Vec::new(),
+                });
+            }
             Some(EventPayload::Node(NodeEvent::CriteriaChecked(p))) if p.task_id == *task => {
+                let Some(cycle) = cycles.last_mut() else {
+                    continue;
+                };
                 let attempt = match p.phase {
                     Phase::Pre => None,
-                    Phase::Post => {
-                        attempts += 1;
-                        Some(attempts)
-                    }
+                    Phase::Post => Some(
+                        cycle
+                            .checks
+                            .iter()
+                            .filter(|check| check.phase == Phase::Post)
+                            .count()
+                            + 1,
+                    ),
                 };
-                checks.push(Check {
+                cycle.checks.push(Check {
                     phase: p.phase,
                     attempt,
                     criteria: p.results.iter().map(Answered::of_result).collect(),
@@ -289,14 +305,14 @@ fn checks_of(events: &[StoredEvent], task: &TaskId) -> Vec<Check> {
             Some(EventPayload::Node(NodeEvent::ScopeChecked(p)))
                 if p.task_id.as_ref() == Some(task) =>
             {
-                if let Some(check) = checks.last_mut() {
+                if let Some(check) = cycles.last_mut().and_then(|cycle| cycle.checks.last_mut()) {
                     check.outside_scope = p.violations.clone();
                 }
             }
             _ => {}
         }
     }
-    checks
+    cycles
 }
 
 fn render(answer: &impl Serialize) -> Result<String, RunToolError> {
