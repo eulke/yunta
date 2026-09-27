@@ -18,7 +18,9 @@
 
 mod common;
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use proptest::prelude::*;
 
@@ -36,7 +38,7 @@ use yunta_core::events::{EventDraft, SessionEvent};
 use yunta_core::ArtifactKind;
 use yunta_core::NodeId;
 use yunta_engine::{
-    chronicle, derive, ArtifactIntegrity, Happening, NodeState, ObjectStore, RunState,
+    chronicle, derive, ArtifactIntegrity, Happening, NodeState, ObjectStore, RunReport, RunState,
 };
 use yunta_testkit::Bench;
 use yunta_testkit_core::{all_kinds, FixedClock, Log};
@@ -425,6 +427,40 @@ fn bash_chain(nodes: usize) -> String {
 
 /// The fixture of a run whose nodes open no session.
 const NO_SESSIONS: &str = "sessions: []\n";
+
+/// What a run of a chain left when nothing stopped it: the bench it ran
+/// on, whose store a resume copies objects from, its log, and how it
+/// ended.
+struct Uninterrupted {
+    bench: Bench,
+    whole: Vec<StoredEvent>,
+    report: RunReport,
+}
+
+thread_local! {
+    static UNINTERRUPTED: RefCell<BTreeMap<usize, Rc<Uninterrupted>>> = RefCell::default();
+}
+
+/// The uninterrupted run of a chain of `nodes`, run once per thread. A
+/// bench runs on a fixed clock and hands out ids in sequence, so the same
+/// chain leaves the same log every time — all but its creation, which
+/// names the commit the bench's repository started from and which a
+/// resume never replays — and every case that cuts it can cut the one
+/// copy.
+fn uninterrupted(nodes: usize) -> Rc<Uninterrupted> {
+    UNINTERRUPTED.with(|runs| {
+        Rc::clone(runs.borrow_mut().entry(nodes).or_insert_with(|| {
+            let bench = Bench::new();
+            let report = block_on(bench.run(&bash_chain(nodes), NO_SESSIONS));
+            let whole = bench.events();
+            Rc::new(Uninterrupted {
+                bench,
+                whole,
+                report,
+            })
+        }))
+    })
+}
 
 /// Puts a freshly created run where a machine that died left one: the
 /// objects the interrupted run had stored, and every event it had
@@ -861,9 +897,9 @@ proptest! {
     }
 }
 
-// The properties that drive whole runs. Each case executes the engine
-// twice against real subprocesses, so the number of cases is stated
-// here rather than left at the default a pure fold can afford.
+// The properties that drive whole runs. Each case resumes a run against
+// real subprocesses, so the number of cases is stated here rather than
+// left at the default a pure fold can afford.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(32))]
 
@@ -880,19 +916,18 @@ proptest! {
         at in any::<prop::sample::Index>(),
     ) {
         let workflow = bash_chain(nodes);
-        let uninterrupted = Bench::new();
-        let expected = block_on(uninterrupted.run(&workflow, NO_SESSIONS));
-        let whole = uninterrupted.events();
+        let uninterrupted = uninterrupted(nodes);
+        let Uninterrupted { whole, report: expected, .. } = uninterrupted.as_ref();
         let cut = at.index(whole.len() + 1);
 
         let resumed = Bench::new();
         let report = block_on(resumed.run_sabotaged(&workflow, NO_SESSIONS, |run_dir| {
-            interrupted_after(&resumed, &whole[..cut], &uninterrupted.run_dir(), run_dir)
+            interrupted_after(&resumed, &whole[..cut], &uninterrupted.bench.run_dir(), run_dir)
         }));
 
         let state = derive(&resumed.events());
         prop_assert_eq!(&state.broken, &None, "cut at {}", cut);
-        prop_assert_eq!(report.terminal, expected.terminal, "cut at {}", cut);
+        prop_assert_eq!(&report.terminal, &expected.terminal, "cut at {}", cut);
         prop_assert_eq!(node_states(&state), node_states(&expected.state), "cut at {}", cut);
     }
 
@@ -912,9 +947,8 @@ proptest! {
         at in any::<prop::sample::Index>(),
     ) {
         let workflow = bash_chain(nodes);
-        let uninterrupted = Bench::new();
-        block_on(uninterrupted.run(&workflow, NO_SESSIONS));
-        let whole = uninterrupted.events();
+        let uninterrupted = uninterrupted(nodes);
+        let whole = &uninterrupted.whole;
 
         // Only a cut that catches a node running is a crash a re-run
         // answers; every run of this workflow has such a point.
@@ -927,7 +961,7 @@ proptest! {
 
         let resumed = Bench::new();
         block_on(resumed.run_sabotaged(&workflow, NO_SESSIONS, |run_dir| {
-            interrupted_after(&resumed, &whole[..cut], &uninterrupted.run_dir(), run_dir)
+            interrupted_after(&resumed, &whole[..cut], &uninterrupted.bench.run_dir(), run_dir)
         }));
 
         // The attempt the crash cut short is the last one the
