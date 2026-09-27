@@ -8,7 +8,7 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use yunta_core::Pid;
 use yunta_engine::process::{spawn_governed, GovernedCommand, Outcome, Supervision};
-use yunta_testkit::Owner;
+use yunta_testkit::{Owner, ProcessGroupCleanup};
 use yunta_testkit_core::FixedClock;
 
 struct CancelOnDrop(CancellationToken);
@@ -132,6 +132,54 @@ async fn cancellation_kills_the_tree_and_drains_the_pipes() {
         !group_running(pgid),
         "process group {pgid} still has a running member after the cancellation"
     );
+}
+
+/// A caller can stop waiting before the command ends — a `select!` whose
+/// other branch won, a tool call whose client went away — and drop the
+/// command mid-flight. No outcome is left to close the group then, so
+/// being dropped is itself what kills the whole tree, not only the
+/// process the engine started.
+#[tokio::test]
+async fn a_command_whose_caller_stops_waiting_dies_with_its_whole_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    let owner = Owner::new();
+    let leader = dir.path().join("leader.pid");
+    let command = GovernedCommand::shell(
+        dir.path(),
+        "tail -f /dev/null & echo $$ > leader.pid; tail -f /dev/null",
+    );
+
+    let running = || async {
+        tokio::fs::read_to_string(&leader)
+            .await
+            .is_ok_and(|pid| pid.ends_with('\n'))
+    };
+    tokio::select! {
+        outcome = spawn_governed(command, owner.supervision()) => {
+            panic!("the command never ends on its own, yet it answered {outcome:?}")
+        }
+        () = yunta_testkit::wait_until_async(running, || "the shell never started".to_string()) => {}
+    }
+    let pgid = tokio::fs::read_to_string(&leader)
+        .await
+        .unwrap()
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .and_then(|raw| Pid::try_from(raw).ok())
+        .expect("the shell wrote its pid, which leads its group");
+    let mut group = ProcessGroupCleanup::new(pgid);
+
+    yunta_testkit::wait_until_async(
+        || async { !group_running(pgid) },
+        || {
+            format!(
+                "process group {pgid} still has a running member after its caller stopped waiting"
+            )
+        },
+    )
+    .await;
+    group.disarm();
 }
 
 #[tokio::test]

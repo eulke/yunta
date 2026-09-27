@@ -246,6 +246,45 @@ pub fn force_kill_process_group(pgid: Pid) -> io::Result<()> {
     .map_err(|_| io::Error::other("process-group cleanup thread panicked"))?
 }
 
+/// A process group a test started and must not outlive it: dropped while
+/// armed — a failed assertion unwinding past it included — it closes the
+/// group. Disarm it once the test has seen the group gone, so a later
+/// group that reuses the id is never touched.
+pub struct ProcessGroupCleanup {
+    pgid: Pid,
+    armed: bool,
+}
+
+impl ProcessGroupCleanup {
+    pub fn new(pgid: Pid) -> Self {
+        Self { pgid, armed: true }
+    }
+
+    /// Closes the group now, and leaves nothing for the drop to do.
+    pub fn close(&mut self) -> io::Result<()> {
+        force_kill_process_group(self.pgid)?;
+        self.armed = false;
+        Ok(())
+    }
+
+    pub fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ProcessGroupCleanup {
+    fn drop(&mut self) {
+        if self.armed {
+            if let Err(error) = force_kill_process_group(self.pgid) {
+                eprintln!(
+                    "could not clean test-owned process group {}: {error}",
+                    self.pgid
+                );
+            }
+        }
+    }
+}
+
 impl Drop for CliChild {
     fn drop(&mut self) {
         if self.status.is_none() {

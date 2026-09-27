@@ -11,7 +11,7 @@ use yunta_core::process::signal::{liveness, signal_group, signal_process, Livene
 use yunta_core::Pid;
 use yunta_testkit::{
     git, hermetic, init_repo, run_id_from, stderr, stdout, wait_for, wait_until, write, yunta_at,
-    yunta_in, Checkout, CliChild,
+    yunta_in, Checkout, CliChild, ProcessGroupCleanup,
 };
 
 fn claude_code_stub() -> PathBuf {
@@ -1385,6 +1385,9 @@ nodes:
         .unwrap()
         .trim()
         .to_string();
+    // The child ignores SIGINT on purpose: if anything below fails before
+    // the engine kills it, this is what keeps it from outliving the test.
+    let mut child_group = ProcessGroupCleanup::new(parse_pid(&child_pid));
 
     // Simulated Ctrl-C: SIGINT to the yunta process.
     signal_process(pid_of(&yunta), Signal::SIGINT).expect("yunta is alive to be interrupted");
@@ -1402,6 +1405,7 @@ nodes:
         Liveness::Dead,
         "the stubborn child must be dead"
     );
+    child_group.disarm();
 
     // The `none` lock is released, and engine.json is gone.
     assert!(!repo.join(".git/yunta-none.lock").exists());
@@ -1485,6 +1489,13 @@ nodes:
 
     let yunta = spawn_run_until(&repo, &home, &repo.join("child.pid"));
     let run_id = only_run_id(&home);
+    let child_pid = std::fs::read_to_string(repo.join("child.pid"))
+        .unwrap()
+        .trim()
+        .to_string();
+    // If anything below fails before `cancel` kills the child, this is
+    // what keeps it from outliving the test.
+    let mut child_group = ProcessGroupCleanup::new(parse_pid(&child_pid));
 
     let cancel = yunta_in!(&repo, &home, &["cancel", &run_id]);
     assert!(
@@ -1502,15 +1513,12 @@ nodes:
     // The run process exits, its child is dead, the log is terminal.
     let output = yunta.wait_with_output().unwrap();
     assert!(String::from_utf8_lossy(&output.stdout).contains("cancelled by user"));
-    let child_pid = std::fs::read_to_string(repo.join("child.pid"))
-        .unwrap()
-        .trim()
-        .to_string();
     assert_eq!(
         liveness(parse_pid(&child_pid)),
         Liveness::Dead,
         "the blocked child must be dead"
     );
+    child_group.disarm();
 
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     assert!(
@@ -2397,40 +2405,6 @@ fn parse_pid(text: &str) -> Pid {
         .ok()
         .and_then(|raw| Pid::try_from(raw).ok())
         .unwrap_or_else(|| panic!("`{text}` is not a pid"))
-}
-
-struct ProcessGroupCleanup {
-    pgid: Pid,
-    armed: bool,
-}
-
-impl ProcessGroupCleanup {
-    fn new(pgid: Pid) -> Self {
-        Self { pgid, armed: true }
-    }
-
-    fn close(&mut self) -> std::io::Result<()> {
-        yunta_testkit::force_kill_process_group(self.pgid)?;
-        self.armed = false;
-        Ok(())
-    }
-
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for ProcessGroupCleanup {
-    fn drop(&mut self) {
-        if self.armed {
-            if let Err(error) = yunta_testkit::force_kill_process_group(self.pgid) {
-                eprintln!(
-                    "could not clean test-owned process group {}: {error}",
-                    self.pgid
-                );
-            }
-        }
-    }
 }
 
 /// §8.6 of the run contract hands the prior distribution — and the budget

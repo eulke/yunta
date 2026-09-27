@@ -1,7 +1,8 @@
 //! One way to run a subprocess. Every command the engine spawns is born
 //! in its own process group, registered for the run so `yunta cancel`
 //! can find it, bounded by a timeout and by the run's cancellation, and
-//! killed with its whole tree on either. Its pipes are read to the end
+//! killed with its whole tree on either — or when its caller stops
+//! waiting and drops it mid-flight. Its pipes are read to the end
 //! on every path, so the outcome always carries what the child wrote —
 //! whether it exited, timed out or was cancelled.
 
@@ -11,7 +12,6 @@ use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
 use thiserror::Error;
-use tokio::io::AsyncWriteExt;
 use tokio::task::{JoinError, JoinSet};
 use tokio_util::sync::CancellationToken;
 use yunta_core::process::group::{force_kill_group, GroupError};
@@ -20,12 +20,14 @@ use yunta_core::{Clock, Pid};
 
 use crate::process_registry::{self, ProcessRegistry};
 mod environment;
+mod leader;
 mod pipes;
 mod state;
 
 pub use environment::execution_environment;
 use environment::SHELL;
-use pipes::{read_to_capture, stdio, Captured, PipeFailure};
+use leader::Leader;
+use pipes::{read_to_capture, stdio, write_then_close, Captured, PipeFailure};
 use state::{child_has_exited, observation_interval, wait_for_deadline, Waited};
 
 /// The run context a governed subprocess runs under: who watches it — the
@@ -261,10 +263,11 @@ pub enum PipeKind {
 
 /// Runs `command` to its end under the engine's governance: in its own
 /// process group, registered while it lives, killed with its whole
-/// tree when its timeout elapses or the supervision's token fires.
-/// The leader stays waitable until the process group has been closed and
-/// its pipes have drained. This keeps its PID from being reused while any
-/// signal can still target the group.
+/// tree when its timeout elapses, the supervision's token fires or its
+/// caller drops it before it ends. The leader stays waitable until the
+/// process group has been closed and its pipes have drained. This keeps
+/// its PID from being reused while any signal can still target the
+/// group.
 pub async fn spawn_governed(
     command: GovernedCommand,
     supervision: Supervision<'_>,
@@ -308,19 +311,8 @@ pub async fn spawn_governed(
     let stderr = Captured::default();
     let mut pipes = JoinSet::new();
 
-    if let Some((bytes, mut pipe)) = command.stdin.zip(child.stdin.take()) {
-        pipes.spawn(async move {
-            let result = match pipe.write_all(&bytes).await {
-                Ok(()) => match pipe.shutdown().await {
-                    Ok(()) => Ok(()),
-                    Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
-                    Err(error) => Err(error),
-                },
-                Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
-                Err(error) => Err(error),
-            };
-            (PipeKind::Stdin, result)
-        });
+    if let Some((bytes, pipe)) = command.stdin.zip(child.stdin.take()) {
+        pipes.spawn(async move { (PipeKind::Stdin, write_then_close(pipe, &bytes).await) });
     }
     if let Some(pipe) = child.stdout.take() {
         let capture = stdout.clone();
@@ -330,6 +322,7 @@ pub async fn spawn_governed(
         let capture = stderr.clone();
         pipes.spawn(async move { (PipeKind::Stderr, read_to_capture(pipe, capture).await) });
     }
+    let mut child = Leader::new(child, pgid);
 
     let mut observe_error = None;
     let mut child_observation = observation_interval();

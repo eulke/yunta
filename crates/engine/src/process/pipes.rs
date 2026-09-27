@@ -1,7 +1,8 @@
 use std::process::Stdio;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::process::ChildStdin;
 use tokio::task::JoinError;
 use yunta_core::process::group::GroupError;
 
@@ -57,5 +58,19 @@ pub(super) async fn read_to_capture<R: AsyncRead + Unpin>(
             )
         })?;
         capture.append(chunk);
+    }
+}
+
+/// Writes all of `bytes` to the child and closes its stdin. A child that
+/// closes its end before reading everything decided it had read enough:
+/// that is its own business, not a failure of the pipe.
+pub(super) async fn write_then_close(mut pipe: ChildStdin, bytes: &[u8]) -> std::io::Result<()> {
+    let written = match pipe.write_all(bytes).await {
+        Ok(()) => pipe.shutdown().await,
+        Err(error) => Err(error),
+    };
+    match written {
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        other => other,
     }
 }
