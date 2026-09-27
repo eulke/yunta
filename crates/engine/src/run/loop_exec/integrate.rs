@@ -88,13 +88,16 @@ pub(super) async fn integrate_batch(
         }
         let blocked_cause = match report.outcome {
             TaskOutcome::Blocked { cause } => {
+                let left_work = left_work(ctx, task, &unit, cancel).await?;
                 ctx.emit(
                     Some(&node.id),
-                    EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
-                        task.id.clone(),
-                        TaskStatus::Blocked,
-                        last_check_seq,
-                    ))),
+                    EventPayload::Tasks(TaskEvent::StatusChanged(
+                        TaskStatusChangedPayload::blocked(
+                            task.id.clone(),
+                            last_check_seq,
+                            left_work,
+                        ),
+                    )),
                 )
                 .await?;
                 Some(cause)
@@ -170,6 +173,26 @@ pub(super) async fn integrate_batch(
         }
     }
     Ok(BatchIntegration::Done(pending_escalations))
+}
+
+/// What a blocked task's last attempt left in its unit, committed on the
+/// unit's own branch so a person can have the next cycle continue from
+/// it. `None` when the attempt changed nothing.
+async fn left_work(
+    ctx: &RunCtx<'_>,
+    task: &Task,
+    unit: &Unit,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<Option<CommitSha>, RunError> {
+    let supervision = ctx.supervision(cancel);
+    commit_work(
+        unit,
+        &format!("task {}: the work its last attempt left", task.id),
+        supervision,
+    )
+    .await?;
+    let head = crate::worktree::head_commit(&unit.worktree, supervision).await?;
+    Ok((head != unit.base).then_some(head))
 }
 
 enum IntegrationOutcome {

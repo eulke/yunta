@@ -153,6 +153,58 @@ pub async fn open_unit(
     })
 }
 
+/// What putting a blocked task's work back into a fresh unit came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Carried {
+    /// The work is in the checkout, as uncommitted changes.
+    Applied,
+    /// It no longer applies on the tree the unit began from: these are
+    /// the paths it stopped on. The checkout is back as it began.
+    NoLongerApplies { paths: Vec<PathBuf> },
+}
+
+/// Puts the work `left` holds into `unit`'s checkout as uncommitted
+/// changes on top of the tree the unit began from — exactly where an
+/// attempt's own edits sit, so the unit's audit answers for all of it.
+/// When it no longer applies there, the checkout is put back as it
+/// began and the paths it stopped on are named.
+pub async fn carry_work(
+    unit: &Unit,
+    left: &CommitSha,
+    supervision: Supervision<'_>,
+) -> Result<Carried, WorktreeError> {
+    let tree = unit.worktree.as_path();
+    if crate::git::success(
+        tree,
+        &["cherry-pick", "--no-commit", left.as_str()],
+        supervision,
+    )
+    .await?
+    {
+        crate::git::output(tree, &["reset", "-q"], supervision).await?;
+        return Ok(Carried::Applied);
+    }
+    let stopped = crate::git::output(
+        tree,
+        &["diff", "--name-only", "--diff-filter=U"],
+        supervision,
+    )
+    .await?;
+    for undo in [
+        ["cherry-pick", "--abort"].as_slice(),
+        ["reset", "-q", "--hard", unit.base.as_str()].as_slice(),
+        ["clean", "-q", "-fd"].as_slice(),
+    ] {
+        // The abort has nothing to do when git never started the pick,
+        // and its answer is not the point: the reset and the clean are
+        // what leave the checkout as it began.
+        crate::git::success(tree, undo, supervision).await?;
+    }
+    Ok(Carried::NoLongerApplies {
+        paths: stopped.lines().map(PathBuf::from).collect(),
+    })
+}
+
 /// Commits everything the unit did, under `message`.
 ///
 /// A unit that changed nothing produces no commit and is not an error:

@@ -118,6 +118,10 @@ pub enum BlockedCause {
     /// not be found or executed where the engine runs criteria. Another
     /// attempt would change the tree, never that.
     Unrunnable { runs: Vec<CriterionRun> },
+    /// A person chose to continue from the work the task's last attempt
+    /// left, and that work no longer applies on the run's tree: these are
+    /// the paths it stopped on.
+    CarriedWorkNoLongerApplies { paths: Vec<PathBuf> },
     /// A criterion's own command is one the run's permissions refuse,
     /// so the task cannot be verified at all. `rule` is the refusal the
     /// permission check wrote, naming the pattern and the field.
@@ -154,6 +158,18 @@ impl std::fmt::Display for BlockedCause {
                 "a criterion could not run, and another attempt would not change that: {}",
                 exits(runs, "exits")
             ),
+            BlockedCause::CarriedWorkNoLongerApplies { paths } => {
+                let listed: Vec<String> = paths
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect();
+                write!(
+                    f,
+                    "the work its last attempt left no longer applies on the run's tree \
+                     (conflicts in {}); run it again from scratch",
+                    listed.join(", ")
+                )
+            }
             BlockedCause::CommandDenied { rule } => write!(f, "{rule}"),
             BlockedCause::SessionDied(died) => write!(f, "{died}"),
         }

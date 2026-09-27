@@ -160,9 +160,16 @@ pub(crate) async fn execute_run_at_depth(
                 node,
                 failure,
                 next_attempt,
+                continuable,
             } => {
-                if let Some(report) =
-                    steps::failure_escalation(&ctx, &state, node, failure, next_attempt).await?
+                if let Some(report) = steps::failure_escalation(
+                    &ctx,
+                    &state,
+                    node,
+                    failure,
+                    (next_attempt, continuable),
+                )
+                .await?
                 {
                     return Ok(report);
                 }

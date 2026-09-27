@@ -19,6 +19,9 @@ pub(crate) enum ReservedOption {
     /// Run a failed node again: through its corrective node once more,
     /// past the reroute cap, or — for a node with no re-route — itself.
     Retry,
+    /// Run a failed loop again from the work its blocked tasks left,
+    /// judging that work before any session opens.
+    ContinueWork,
     /// Accept promotion to the next declared mode.
     Promote,
     /// Approve a published gate.
@@ -40,6 +43,7 @@ impl ReservedOption {
         match self {
             ReservedOption::Abort => "abort",
             ReservedOption::Retry => "retry",
+            ReservedOption::ContinueWork => "continue-work",
             ReservedOption::Promote => "promote",
             ReservedOption::Approve => "approve",
             ReservedOption::Grant => "grant",
@@ -47,6 +51,12 @@ impl ReservedOption {
             ReservedOption::Continue => "continue",
             ReservedOption::Reject => "reject",
         }
+    }
+
+    /// Whether choosing this runs the failed node again — from scratch,
+    /// or from the work it left.
+    pub(crate) fn runs_again(self) -> bool {
+        matches!(self, ReservedOption::Retry | ReservedOption::ContinueWork)
     }
 
     /// The option as an escalation offers it.
@@ -101,6 +111,16 @@ pub(crate) mod offers {
                 "Uses one extra correction attempt beyond the declared max_reroutes \
                  ({max_reroutes}); escalates again if `{goto}` doesn't fix it"
             ),
+        )
+    }
+
+    /// Run a failed loop once more from the work its blocked tasks left.
+    pub(crate) fn continue_work(node: &NodeId, attempt: u32) -> GateOption {
+        ReservedOption::ContinueWork.offer(
+            format!("Continue `{node}` from the work its blocked tasks left (attempt {attempt})"),
+            "Keeps each blocked task's last changes and judges them before any session \
+             opens; a task they close is done without one. Fix what they failed on first, \
+             or they fail the same way",
         )
     }
 
@@ -213,6 +233,7 @@ impl FromStr for ReservedOption {
         match s {
             "abort" => Ok(ReservedOption::Abort),
             "retry" => Ok(ReservedOption::Retry),
+            "continue-work" => Ok(ReservedOption::ContinueWork),
             "promote" => Ok(ReservedOption::Promote),
             "approve" => Ok(ReservedOption::Approve),
             "grant" => Ok(ReservedOption::Grant),
@@ -243,6 +264,7 @@ mod tests {
             offers::abort(),
             offers::retry(&node, 0),
             offers::retry_node(&node, 2),
+            offers::continue_work(&node, 2),
             offers::promote(&next, &mode),
             offers::continue_past_tokens(),
             offers::abort_on_tokens(),

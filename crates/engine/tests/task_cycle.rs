@@ -175,6 +175,7 @@ outcome: { type: completed, summary: "wrote it" }
             memo: &memo,
             history: &unpriced(),
             supervision: owner.supervision(),
+            carry: None,
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -225,6 +226,7 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
             memo: &memo,
             history: &unpriced(),
             supervision: owner.supervision(),
+            carry: None,
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -261,6 +263,7 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
             memo: &memo,
             history: &unpriced(),
             supervision: owner.supervision(),
+            carry: None,
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -309,6 +312,7 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
             memo: &memo,
             history: &unpriced(),
             supervision: owner.supervision(),
+            carry: None,
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -366,6 +370,7 @@ outcome: { type: completed, summary: "done" }
             memo: &memo,
             history: &unpriced(),
             supervision: owner.supervision(),
+            carry: None,
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -418,6 +423,7 @@ sessions:
             memo: &memo,
             history: &unpriced(),
             supervision: owner.supervision(),
+            carry: None,
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -466,6 +472,7 @@ sessions:
             memo: &memo,
             history: &unpriced(),
             supervision: owner.supervision(),
+            carry: None,
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -511,6 +518,7 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
             memo: &memo,
             history: &unpriced(),
             supervision: owner.supervision(),
+            carry: None,
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -552,6 +560,7 @@ async fn a_task_whose_session_died_blocks_naming_the_exit() {
             memo: &memo,
             history: &unpriced(),
             supervision: owner.supervision(),
+            carry: None,
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -701,6 +710,7 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
                 memo: &memo,
                 history: &unpriced(),
                 supervision: owner.supervision(),
+                carry: None,
             },
             ungoverned(&GrantLedger::new(0)),
             None,
@@ -759,6 +769,7 @@ outcome: { type: completed, summary: "should never be reached" }
             memo: &memo,
             history: &unpriced(),
             supervision: owner.supervision(),
+            carry: None,
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -986,6 +997,7 @@ outcome: { type: completed, summary: "wrote it" }
             memo: &memo,
             history: &unpriced(),
             supervision: owner.supervision(),
+            carry: None,
         },
         ungoverned(&GrantLedger::new(0)),
         Some((&observer as &dyn yunta_engine::SessionObserver, &node)),
@@ -1083,6 +1095,7 @@ async fn cycle(
             memo: &memo,
             history: &unpriced(),
             supervision: owner.supervision(),
+            carry: None,
         },
         ungoverned(&GrantLedger::new(0)),
         None,
@@ -1178,5 +1191,87 @@ sessions:
     assert!(
         cause.to_string().contains("exits 127 (command not found)"),
         "{cause}"
+    );
+}
+
+/// A unit whose tree moved on since a task's last attempt left its work:
+/// both changed `a.txt` from the same line, so the work no longer
+/// applies. Answers with the unit and the commit holding that work.
+async fn a_unit_the_left_work_no_longer_fits(
+    owner: &Owner,
+    repo: &std::path::Path,
+) -> (Unit, yunta_core::CommitSha) {
+    init_repo(repo);
+    yunta_testkit::write(&repo.join("a.txt"), "base\n");
+    yunta_testkit::git(repo, &["add", "a.txt"]);
+    yunta_testkit::git(repo, &["commit", "-q", "-m", "base"]);
+    yunta_testkit::git(repo, &["checkout", "-q", "-b", "left"]);
+    yunta_testkit::write(&repo.join("a.txt"), "left\n");
+    yunta_testkit::git(repo, &["commit", "-q", "-am", "left"]);
+    let left = yunta_testkit::git_output(repo, &["rev-parse", "HEAD"])
+        .parse()
+        .unwrap();
+    yunta_testkit::git(repo, &["checkout", "-q", yunta_testkit::INITIAL_BRANCH]);
+    yunta_testkit::write(&repo.join("a.txt"), "moved\n");
+    yunta_testkit::git(repo, &["commit", "-q", "-am", "moved"]);
+    let unit = Unit {
+        who: UnitId::Task("carried".into()),
+        worktree: repo.to_path_buf(),
+        base: yunta_engine::head_commit(repo, owner.supervision())
+            .await
+            .unwrap(),
+        from: yunta_engine::head_tree(repo, owner.supervision())
+            .await
+            .unwrap(),
+    };
+    (unit, left)
+}
+
+#[tokio::test]
+async fn work_that_no_longer_applies_blocks_the_task_and_leaves_the_checkout_as_it_began() {
+    let owner = Owner::new();
+    let dir = tempfile::tempdir().unwrap();
+    let run = tempfile::tempdir().unwrap();
+    let repo = dir.path();
+    let (unit, left) = a_unit_the_left_work_no_longer_fits(&owner, repo).await;
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    let adapter = MockAdapter::from_yaml("sessions: []\n").unwrap();
+
+    let report = run_task(
+        &task("carried", &["a.txt"], vec![cmd("grep -q left a.txt")]),
+        "Implement your task.",
+        AttemptEnv {
+            node: &build_node(),
+            adapter: &adapter,
+            unit: &unit,
+            max_retries: 2,
+            budget: Budget::default(),
+            memo: &memo,
+            history: &unpriced(),
+            supervision: owner.supervision(),
+            carry: Some(&left),
+        },
+        ungoverned(&GrantLedger::new(0)),
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &bare_setup(run.path()),
+    )
+    .await
+    .unwrap();
+
+    let TaskOutcome::Blocked { cause } = report.outcome else {
+        panic!("expected Blocked, got {:?}", report.outcome);
+    };
+    assert_eq!(
+        cause,
+        BlockedCause::CarriedWorkNoLongerApplies {
+            paths: vec!["a.txt".into()]
+        }
+    );
+    assert!(adapter.requests_seen().is_empty(), "no session was spent");
+    assert_eq!(
+        yunta_testkit::git_output(repo, &["status", "--porcelain"]),
+        "",
+        "the checkout is back as the unit began"
     );
 }

@@ -35,6 +35,11 @@ pub struct TaskRecord {
     pub attempts: u32,
     /// The commit its work landed at, which only a `done` names.
     pub commit: Option<CommitSha>,
+    /// The work its last attempt left, and the node whose loop left it:
+    /// on a blocked task, what a continuation can pick up; on a task
+    /// reopened to continue, what it picks up. Cleared by every status
+    /// change that names none.
+    pub left_work: Option<(NodeId, CommitSha)>,
 }
 
 /// Every task's record, by id, and what the criteria they were checked
@@ -94,6 +99,15 @@ impl TaskLedger {
     /// Every task's status, in id order.
     pub fn statuses(&self) -> impl Iterator<Item = TaskStatus> + '_ {
         self.per_task.values().map(|record| record.status)
+    }
+
+    /// Whether a task `node`'s loop blocked left work behind — what makes
+    /// continuing from that work a choice worth offering.
+    pub fn continuable_by(&self, node: &NodeId) -> bool {
+        self.per_task.values().any(|record| {
+            record.status == TaskStatus::Blocked
+                && record.left_work.as_ref().is_some_and(|(by, _)| by == node)
+        })
     }
 
     /// How many tasks reached `done` — the denominator of cost per
@@ -172,6 +186,10 @@ impl TaskLedger {
                 if let Some(commit) = &p.commit {
                     record.commit = Some(commit.clone());
                 }
+                record.left_work = p
+                    .left_work
+                    .clone()
+                    .and_then(|work| meta.node.cloned().map(|node| (node, work)));
                 Ok(())
             }
         }
@@ -186,6 +204,7 @@ impl Default for TaskRecord {
             registered_at: None,
             attempts: 0,
             commit: None,
+            left_work: None,
         }
     }
 }

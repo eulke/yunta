@@ -194,3 +194,4 @@ lista.
 **D185 — Cerrar un process group exige una observación estable de sus miembros.** `accepted` → [`adr/D185-cierre-estable-de-process-groups.md`](adr/D185-cierre-estable-de-process-groups.md)
 **D186 — A `files:` entry may be declared optional; its absence is recorded, never silent.** `accepted` → [`adr/D186-a-files-entry-may-be-declared-optional.md`](adr/D186-a-files-entry-may-be-declared-optional.md)
 **D187 — A task session reads its task and checks its work through the engine's tools; each check is on the log when it runs.** `accepted` → [`adr/D187-a-task-session-reads-its-task-through-the-engine.md`](adr/D187-a-task-session-reads-its-task-through-the-engine.md)
+**D188 — A command handed to the engine is proven where it runs; one that cannot run is neither red nor green; a failed loop continues from the work it left only when there is some.** `accepted` → [`adr/D188-commands-are-proven-where-they-run.md`](adr/D188-commands-are-proven-where-they-run.md)

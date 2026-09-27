@@ -112,6 +112,9 @@ pub enum Decision {
         node: NodeId,
         failure: Failure,
         next_attempt: u32,
+        /// Whether a task the node's loop blocked left work to continue
+        /// from — what decides whether the menu offers to.
+        continuable: bool,
     },
     /// A `kind: gate` node is ready and has never been published —
     /// the imperative shell commits its declared artifacts,
@@ -352,7 +355,7 @@ impl<'a> Board<'a> {
         matches!(
             self.state.pre_seeded(id),
             Some(GateResolvedPayload::Chosen(choice))
-                if ReservedOption::of(&choice.option) == Some(ReservedOption::Retry)
+                if ReservedOption::of(&choice.option).is_some_and(ReservedOption::runs_again)
         )
     }
 
@@ -607,6 +610,7 @@ fn unrerouted(
             node: node.id.clone(),
             failure: failure.clone(),
             next_attempt: board.next_attempt(&node.id),
+            continuable: board.state.tasks.continuable_by(&node.id),
         }),
         DefaultOnFailure::Abort => Some(Decision::Fail {
             reason: reason.to_string(),

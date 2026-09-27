@@ -9,6 +9,7 @@
 //! still leaves the task not-done.
 
 mod attempt;
+mod carry;
 mod criteria;
 mod judge;
 mod outcome;
@@ -72,6 +73,12 @@ pub enum TaskCycleError {
     },
     #[error(transparent)]
     ScopeCheck(#[from] ScopeCheckError),
+    #[error("failed to put the work task `{task}` left back into its checkout")]
+    Carry {
+        task: TaskId,
+        #[source]
+        source: Box<crate::worktree::WorktreeError>,
+    },
     #[error("failed to evaluate task `{task}`'s scope expansion request: {source}")]
     ScopeExpansion {
         task: TaskId,
@@ -186,6 +193,11 @@ pub struct AttemptEnv<'a> {
     /// run's clock. It reaches the spawn by parameter, so a criterion
     /// runs under the same governance as the session before it.
     pub supervision: Supervision<'a>,
+    /// The work a person chose to have this cycle continue from: what
+    /// the task's last attempt left, put back into this unit and judged
+    /// before any session opens. `None` for a cycle that starts from the
+    /// unit's own tree.
+    pub carry: Option<&'a yunta_core::CommitSha>,
 }
 
 /// Runs a task through the full cycle: pre-check once, then
@@ -223,6 +235,7 @@ pub async fn run_task(
         memo,
         history,
         supervision,
+        carry,
     } = env;
     let ScopeGovernance {
         permissions,
@@ -273,41 +286,6 @@ pub async fn run_task(
         });
     }
 
-    let pre_runs = pre_check(task, &unit.worktree, memo, history, supervision).await?;
-    let mut last_check = recorder.criteria(Phase::Pre, &pre_runs).await?;
-    // A token that fired during the pre-check stopped its commands before
-    // they answered: the task was cut, not found wanting.
-    if supervision.cancel.is_cancelled() {
-        return Ok(TaskCycleReport {
-            task_id: task.id.clone(),
-            staged: last_staged.clone(),
-            pre_check: pre_runs,
-            attempts: Vec::new(),
-            outcome: TaskOutcome::Interrupted,
-            needs_human_decision: false,
-            last_check,
-        });
-    }
-
-    // The pre-check validates the criteria before any work: a non-guard
-    // that already passes, or a guard already red, means the criteria
-    // are wrong, not the task. Nothing prejudged — the empty verdict —
-    // proceeds to the attempts; anything found blocks the task naming
-    // every one of them.
-    if let Some(found) = yunta_core::NonEmpty::new(surprises(task, &pre_runs)) {
-        return Ok(TaskCycleReport {
-            task_id: task.id.clone(),
-            staged: last_staged.clone(),
-            pre_check: pre_runs,
-            attempts: Vec::new(),
-            outcome: TaskOutcome::Blocked {
-                cause: BlockedCause::PreCheck(found),
-            },
-            needs_human_decision: false,
-            last_check,
-        });
-    }
-
     let params = AttemptParams {
         task,
         instruction,
@@ -326,6 +304,61 @@ pub async fn run_task(
         setup,
         supervision,
     };
+
+    // A cycle a person had continue from the work its task's last
+    // attempt left judges that work before anything else: the first
+    // cycle's pre-check already proved the criteria red, and a session
+    // opens only when the work does not close the task.
+    let (pre_runs, mut last_check) = match carry {
+        Some(left) => match carry::continue_from(&params, recorder, left).await? {
+            carry::Carry::Settled {
+                outcome,
+                last_check,
+            } => {
+                return Ok(TaskCycleReport {
+                    task_id: task.id.clone(),
+                    staged: Vec::new(),
+                    pre_check: Vec::new(),
+                    attempts: Vec::new(),
+                    outcome,
+                    needs_human_decision: false,
+                    last_check,
+                })
+            }
+            carry::Carry::Unsettled { last_check } => (Vec::new(), last_check),
+        },
+        None => {
+            let pre_runs = pre_check(task, &unit.worktree, memo, history, supervision).await?;
+            let last_check = recorder.criteria(Phase::Pre, &pre_runs).await?;
+            // A token that fired during the pre-check stopped its
+            // commands before they answered: the task was cut, not found
+            // wanting. The pre-check validates the criteria before any
+            // work: a non-guard that already passes, or a guard already
+            // red, means the criteria are wrong, not the task.
+            let outcome = if supervision.cancel.is_cancelled() {
+                Some(TaskOutcome::Interrupted)
+            } else {
+                yunta_core::NonEmpty::new(surprises(task, &pre_runs)).map(|found| {
+                    TaskOutcome::Blocked {
+                        cause: BlockedCause::PreCheck(found),
+                    }
+                })
+            };
+            if let Some(outcome) = outcome {
+                return Ok(TaskCycleReport {
+                    task_id: task.id.clone(),
+                    staged: last_staged.clone(),
+                    pre_check: pre_runs,
+                    attempts: Vec::new(),
+                    outcome,
+                    needs_human_decision: false,
+                    last_check,
+                });
+            }
+            (pre_runs, last_check)
+        }
+    };
+
     let mut attempts = Vec::new();
     for attempt in 1..=(max_retries + 1) {
         let (staged, step) = run_one_attempt(&params, recorder, attempt).await?;

@@ -42,7 +42,8 @@ use crate::process::Supervision;
 pub use branches::{run_branch, unit_branch};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
 pub use unit::{
-    commit_work, land, open_unit, rebase_onto, snapshot_commit, Rebase, Unit, UnitHome, UnitId,
+    carry_work, commit_work, land, open_unit, rebase_onto, snapshot_commit, Carried, Rebase, Unit,
+    UnitHome, UnitId,
 };
 
 #[derive(Debug, Error)]

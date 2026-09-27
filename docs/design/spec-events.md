@@ -250,6 +250,7 @@ registra.
 | `new_status` | enum `pending \| ready \| running \| done \| blocked \| failed` [inferido, valores exactos a confirmar contra la implementación del scheduler] | sí | solo el engine emite este evento — ningún agente tiene vía para marcarlo |
 | `caused_by` | referencia a `seq` de otro evento | sí | el evento (p. ej. `criteria_checked`) que justifica la transición |
 | `commit` | `Option<CommitSha>` | no | dónde aterrizó el trabajo de la tarea, en un `done` y en ningún otro estado: el commit que el árbol del run llevaba tras integrarlo. Es lo que vuelve a un `done` respondible desde otro run — un árbol desciende de ese commit o no tiene el trabajo |
+| `left_work` | `Option<CommitSha>` | no | el commit con el trabajo que dejó el último intento de la tarea, commiteado en la rama de su unidad: en un `blocked`, trabajo desde el que una persona puede elegir continuar (`continue-work`); en el `pending` de esa reapertura, el trabajo desde el que continúa. Ausente cuando el intento no cambió nada, y en cualquier otra transición |
 
 ### 5.12 `scope_checked` — engine
 **Fuente:** task_id/node_id, diff observado, violaciones

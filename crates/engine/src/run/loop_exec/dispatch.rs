@@ -120,6 +120,13 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
             memo: &ctx.memo,
             history: &state.tasks,
             supervision: ctx.supervision(cancel),
+            // A task a person reopened to continue carries the work it
+            // continues from on the reopening itself.
+            carry: state
+                .tasks
+                .get(&task.id)
+                .and_then(|record| record.left_work.as_ref())
+                .map(|(_, work)| work),
         },
         ScopeGovernance {
             permissions: ctx.manifest.config.permissions.as_ref(),

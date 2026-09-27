@@ -169,18 +169,18 @@ pub(super) async fn failure_escalation(
     state: &RunState,
     node: NodeId,
     failure: Failure,
-    next_attempt: u32,
+    (next_attempt, continuable): (u32, bool),
 ) -> Result<Option<RunReport>, RunError> {
     let escalation =
-        escalation::build_failure_escalation(&node, &failure, next_attempt).map_err(|source| {
-            RunError::Broken {
+        escalation::build_failure_escalation(&node, &failure, next_attempt, continuable).map_err(
+            |source| RunError::Broken {
                 diagnostic: format!("node `{node}`'s escalation: {source}"),
-            }
-        })?;
+            },
+        )?;
     let choice = escalation::decided(ctx, state, &node, &escalation).await?;
-    if choice
-        .is_some_and(|choice| ReservedOption::of(&choice.option) == Some(ReservedOption::Retry))
-    {
+    if choice.is_some_and(|choice| {
+        ReservedOption::of(&choice.option).is_some_and(ReservedOption::runs_again)
+    }) {
         return Ok(None);
     }
     Ok(Some(

@@ -3176,6 +3176,17 @@
             }
           ]
         },
+        "left_work": {
+          "description": "The commit holding the work the task's last attempt left: on a\n`blocked`, work a person can have the next cycle continue from;\non a `pending` a person reopened that way, the work it continues\nfrom. Absent when the attempt left nothing, and on every other\ntransition.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommitSha"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "new_status": {
           "$ref": "#/$defs/TaskStatus"
         },

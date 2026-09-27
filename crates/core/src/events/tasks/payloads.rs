@@ -41,6 +41,13 @@ pub struct TaskStatusChangedPayload {
     /// this commit or does not have the work.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<CommitSha>,
+    /// The commit holding the work the task's last attempt left: on a
+    /// `blocked`, work a person can have the next cycle continue from;
+    /// on a `pending` a person reopened that way, the work it continues
+    /// from. Absent when the attempt left nothing, and on every other
+    /// transition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left_work: Option<CommitSha>,
 }
 
 impl TaskStatusChangedPayload {
@@ -55,6 +62,23 @@ impl TaskStatusChangedPayload {
             new_status: status,
             caused_by,
             commit: None,
+            left_work: None,
+        }
+    }
+
+    /// A task blocked, and the work its last attempt left, if it left any.
+    pub fn blocked(task: TaskId, caused_by: Seq, left_work: Option<CommitSha>) -> Self {
+        TaskStatusChangedPayload {
+            left_work,
+            ..Self::to(task, TaskStatus::Blocked, caused_by)
+        }
+    }
+
+    /// A blocked task reopened to continue from the work at `from`.
+    pub fn continuing(task: TaskId, caused_by: Seq, from: CommitSha) -> Self {
+        TaskStatusChangedPayload {
+            left_work: Some(from),
+            ..Self::to(task, TaskStatus::Pending, caused_by)
         }
     }
 
@@ -70,6 +94,7 @@ impl TaskStatusChangedPayload {
             new_status: TaskStatus::Done,
             caused_by,
             commit: Some(commit),
+            left_work: None,
         }
     }
 }

@@ -245,6 +245,7 @@ fn a_failed_node_escalates_until_a_person_chooses_to_retry_it() {
             node: NodeId::from("plan"),
             failure: failure.clone(),
             next_attempt: 2,
+            continuable: false,
         }
     );
 

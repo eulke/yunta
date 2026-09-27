@@ -304,3 +304,94 @@ async fn a_plain_resume_leaves_a_blocked_task_blocked() {
         "nobody chose to spend again, so no session opened"
     );
 }
+
+/// A loop whose one task writes `made.txt`, and whose criterion also
+/// needs `marker` — a file outside the repository that only a person
+/// provides. The sessions do the task's work; the criterion stays red
+/// until the person does their part.
+fn needs_a_person(marker: &std::path::Path) -> String {
+    format!(
+        r#"
+name: needs-a-person
+nodes:
+  - id: plan
+    kind: bash
+    run: "printf 'tasks:\n  - id: T001\n    title: Make it\n    scope: [made.txt]\n    criteria:\n      - cmd: test -f made.txt && test -f {marker}\n' > {{{{node.artifacts}}}}/tasks.yaml"
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Implement your task."
+"#,
+        marker = marker.display()
+    )
+}
+
+/// Three attempts: the first writes the task's own work, none can meet
+/// what the person has to provide.
+const DOES_ITS_PART: &str = "\
+capabilities: { run_tools: true }
+sessions:
+  - effects:
+      - { path: made.txt, content: made }
+    outcome: { type: completed, summary: made }
+  - outcome: { type: completed, summary: nothing more to do }
+  - outcome: { type: completed, summary: nothing more to do }
+";
+
+fn options(bench: &Bench) -> Vec<String> {
+    let (_, escalation) =
+        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events()))
+            .expect("a failed loop is a decision");
+    escalation
+        .options()
+        .iter()
+        .map(|option| option.id.to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn continuing_a_loop_from_the_work_it_left_closes_the_task_without_a_session() {
+    let outside = tempfile::tempdir().unwrap();
+    let marker = outside.path().join("provided");
+    let bench = parked(&needs_a_person(&marker), DOES_ITS_PART).await;
+    assert_eq!(
+        options(&bench),
+        ["continue-work", "retry", "abort"],
+        "the blocked task left work, so continuing from it is offered"
+    );
+
+    write(&marker, "done");
+    answer_parked(&bench, "continue-work").await.unwrap();
+    let RunReport { terminal, state } = bench
+        .wake_on_fixture("capabilities: { run_tools: true }\nsessions: []\n")
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
+    assert_eq!(
+        state.tasks.status("T001"),
+        Some(yunta_core::events::TaskStatus::Done)
+    );
+    assert!(
+        bench.mock().requests_seen().is_empty(),
+        "the work it left closed the task, so no session was spent on it"
+    );
+}
+
+#[tokio::test]
+async fn a_task_blocked_before_any_work_is_only_offered_to_run_again() {
+    let bench = parked(
+        &ONE_TASK_LOOP_WORKFLOW.replace("test -f made.txt", "yunta-no-such-tool"),
+        THREE_MISSES,
+    )
+    .await;
+
+    assert_eq!(
+        options(&bench),
+        ["retry", "abort"],
+        "the pre-check blocked it before any work, so there is nothing to continue from"
+    );
+}

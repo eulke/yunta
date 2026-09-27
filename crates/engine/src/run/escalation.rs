@@ -65,18 +65,29 @@ pub(crate) fn build_reroute_escalation(
 /// a file the node reads, a variable a source needs — has no other way
 /// to hand the node back: a resume alone finds it failed and pauses
 /// again.
+///
+/// A loop whose blocked tasks left work behind is also offered to
+/// continue from it — and only then: with no work to pick up, running it
+/// again from scratch is the one way back.
 pub(crate) fn build_failure_escalation(
     node: &NodeId,
     failure: &Failure,
     next_attempt: u32,
+    continuable: bool,
 ) -> Result<Escalation, EscalationError> {
+    let retry = offers::retry_node(node, next_attempt);
+    let options = if continuable {
+        NonEmpty::from((
+            offers::continue_work(node, next_attempt),
+            vec![retry, offers::abort()],
+        ))
+    } else {
+        NonEmpty::from((retry, vec![offers::abort()]))
+    };
     Escalation::new(
         format!("node `{node}` failed"),
         vec![Fact::bare(failure.to_string())].into(),
-        NonEmpty::from((
-            offers::retry_node(node, next_attempt),
-            vec![offers::abort()],
-        )),
+        options,
     )
 }
 
@@ -170,8 +181,10 @@ pub fn current_escalation(manifest: &Manifest, state: &RunState) -> Option<(Node
             node,
             failure,
             next_attempt,
+            continuable,
         } => {
-            let escalation = build_failure_escalation(&node, &failure, next_attempt).ok()?;
+            let escalation =
+                build_failure_escalation(&node, &failure, next_attempt, continuable).ok()?;
             Some((node, escalation))
         }
         Decision::ResolveInternalGate { node } => {
