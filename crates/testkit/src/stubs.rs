@@ -4,7 +4,9 @@
 //! for: a `git` that is still running when the test asserts about it, a
 //! session that dies the way a crash kills one. It is the real program
 //! everywhere else, so what a test asserts is about the engine's
-//! governance and not about what git happens to do.
+//! governance and not about what git happens to do. Or it stands in for
+//! a program whose answer is not what the test is about: a `cargo` whose
+//! lint a workflow runs, in a test about the workflow.
 
 use std::path::{Path, PathBuf};
 
@@ -25,27 +27,44 @@ const GIT_REAL: &str = "YUNTA_STUB_GIT_REAL";
 /// subcommand to hold, and where the pid goes — because that is what
 /// the test is about.
 pub fn git(dir: &Path) -> Vec<(String, String)> {
+    let bin = install(dir, "git", include_str!("../stubs/git_stub.sh"));
+    vec![
+        ("PATH".to_string(), first_on_path(&bin)),
+        (GIT_REAL.to_string(), real_git().display().to_string()),
+    ]
+}
+
+/// Writes the `cargo` stub into `dir/bin` and answers with the `PATH` a
+/// run must carry for it to be the `cargo` its subprocesses find. It
+/// answers every command with success and does nothing else.
+pub fn cargo_that_passes(dir: &Path) -> Vec<(String, String)> {
+    let bin = install(dir, "cargo", include_str!("../stubs/cargo_stub.sh"));
+    vec![("PATH".to_string(), first_on_path(&bin))]
+}
+
+/// Writes `script` as the executable `dir/bin/<name>`, and answers with
+/// that directory.
+fn install(dir: &Path, name: &str, script: &str) -> PathBuf {
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin).expect("create the stub directory");
-    let stub = bin.join("git");
-    std::fs::write(&stub, include_str!("../stubs/git_stub.sh")).expect("write the git stub");
+    let stub = bin.join(name);
+    std::fs::write(&stub, script).unwrap_or_else(|error| panic!("write the {name} stub: {error}"));
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
-            .expect("make the git stub executable");
+            .unwrap_or_else(|error| panic!("make the {name} stub executable: {error}"));
     }
-    vec![
-        (
-            "PATH".to_string(),
-            format!(
-                "{}:{}",
-                bin.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        ),
-        (GIT_REAL.to_string(), real_git().display().to_string()),
-    ]
+    bin
+}
+
+/// This process's own `PATH` with `bin` looked up before everything on it.
+fn first_on_path(bin: &Path) -> String {
+    format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    )
 }
 
 /// Everything a test needs for a `git` that runs for real until it is

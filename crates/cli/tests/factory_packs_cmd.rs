@@ -85,7 +85,12 @@ fn yunta_starter_installs_checks_and_self_tests_through_the_real_pack_pipeline()
 #[test]
 fn yunta_fragua_installs_and_checks_every_declared_mode_through_the_real_pack_pipeline() {
     let pack_source = git_ify(&repo_root().join("packs/fragua"));
-    let project = setup_project();
+    // fragua's cases lint the crate they bootstrap with `cargo clippy`.
+    // What that lint finds is the business of the cases themselves; this
+    // test is about the pipeline that installs the pack and runs them, so
+    // its cargo passes every lint without building anything.
+    let stubs = tempfile::tempdir().unwrap();
+    let project = setup_project().with_stubs(yunta_testkit::stubs::cargo_that_passes(stubs.path()));
     // fragua's own runners, beyond the review-fanout pair setup() already
     // configures.
     let config_path = project.repo.join(".yunta/config.yaml");
