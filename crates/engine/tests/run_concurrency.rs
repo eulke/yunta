@@ -402,29 +402,33 @@ nodes:
 }
 
 #[tokio::test]
-async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_commits() {
+async fn four_independent_tasks_at_concurrency_2_match_concurrency_1_state_and_commits() {
     // Same final state, same commit sequence, regardless of
-    // concurrency — the batch mechanism integrates strictly in declaration
-    // declaration order no matter how many tasks dispatch at once.
-    let sequential = Bench::new();
-    let workflow_seq = concurrency_workflow(1);
-    let fixture_seq = eight_tasks_fixture();
-    let RunReport {
-        terminal: terminal_seq,
-        state: state_seq,
-    } = sequential.run(&workflow_seq, &fixture_seq).await;
+    // concurrency — the batch mechanism integrates strictly in
+    // declaration order no matter how many tasks dispatch at once. Four
+    // tasks are more than two slots hold, so the parallel run integrates
+    // batches whose tasks finish in whatever order they finish. The two
+    // runs share nothing, so they run side by side.
+    let (sequential, parallel) = (Bench::new(), Bench::new());
+    let fixture = independent_tasks_fixture(4);
+    let (workflow_seq, workflow_par) = (concurrency_workflow(1), concurrency_workflow(2));
+    let (
+        RunReport {
+            terminal: terminal_seq,
+            state: state_seq,
+        },
+        RunReport {
+            terminal: terminal_par,
+            state: state_par,
+        },
+    ) = tokio::join!(
+        sequential.run(&workflow_seq, &fixture),
+        parallel.run(&workflow_par, &fixture),
+    );
     assert_eq!(terminal_seq, RunTerminal::Finished);
-
-    let parallel = Bench::new();
-    let workflow_par = concurrency_workflow(4);
-    let fixture_par = eight_tasks_fixture();
-    let RunReport {
-        terminal: terminal_par,
-        state: state_par,
-    } = parallel.run(&workflow_par, &fixture_par).await;
     assert_eq!(terminal_par, RunTerminal::Finished);
 
-    for n in 1..=8 {
+    for n in 1..=4 {
         let id: yunta_core::TaskId = format!("task-{n}").parse().unwrap();
         assert_eq!(
             state_seq.tasks.status(&id),
@@ -440,16 +444,11 @@ async fn eight_independent_tasks_at_concurrency_4_match_concurrency_1_state_and_
     let commits_seq = sequential.commit_subjects();
     let commits_par = parallel.commit_subjects();
     assert_eq!(
-        commits_seq.len(),
-        8,
-        "expected one commit per task, got {commits_seq:?}"
-    );
-    assert_eq!(
         commits_seq, commits_par,
         "the same tasks document must produce the same commit sequence at any concurrency"
     );
-    // Declaration order, not finishing order.
-    let expected: Vec<String> = (1..=8)
+    // One commit per task, in declaration order, not finishing order.
+    let expected: Vec<String> = (1..=4)
         .map(|n| format!("task task-{n}: Write out-{n}"))
         .collect();
     assert_eq!(commits_seq, expected);

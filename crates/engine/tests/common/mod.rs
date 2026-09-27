@@ -227,9 +227,10 @@ pub fn task_yaml(id: &str, title: &str, scope: &str, criterion: &str) -> String 
     )
 }
 
-pub fn eight_independent_tasks() -> String {
+/// A tasks document of `count` tasks, each writing a file of its own.
+pub fn independent_tasks(count: usize) -> String {
     let mut yaml = String::from("tasks:\n");
-    for n in 1..=8 {
+    for n in 1..=count {
         yaml.push_str(&format!(
             "  - id: task-{n}\n    title: \"Write out-{n}\"\n    scope: [\"out-{n}.txt\"]\n    criteria:\n      - cmd: \"test -f out-{n}.txt\"\n"
         ));
@@ -240,7 +241,7 @@ pub fn eight_independent_tasks() -> String {
 pub fn concurrency_workflow(concurrency: u32) -> String {
     format!(
         r#"
-name: eight-tasks
+name: independent-tasks
 nodes:
   - id: plan
     kind: prompt
@@ -259,13 +260,13 @@ nodes:
     )
 }
 
-/// One mock session per task of [`eight_independent_tasks`],
+/// One mock session per task of [`independent_tasks`],
 /// matched by its own id (never by call order — concurrent dispatch
 /// races several `spawn()` calls at once), behind the planner's own
 /// session.
-pub fn eight_tasks_fixture() -> String {
-    let mut yaml = plan_session(&eight_independent_tasks());
-    for n in 1..=8 {
+pub fn independent_tasks_fixture(count: usize) -> String {
+    let mut yaml = plan_session(&independent_tasks(count));
+    for n in 1..=count {
         yaml.push_str(&format!(
             "  - match_prompt_contains: \"task-{n}\"\n    effects:\n      - {{ path: out-{n}.txt, content: \"{n}\" }}\n    outcome: {{ type: completed, summary: \"did task-{n}\" }}\n"
         ));
