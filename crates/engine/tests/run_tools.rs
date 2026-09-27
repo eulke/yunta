@@ -805,11 +805,22 @@ async fn a_tasks_document_whose_criterion_cannot_run_is_refused_saying_why() {
     for said in [
         "`yunta-no-such-tool --version` exits 127 (command not found) where the engine runs \
          criteria",
-        "yunta-no-such-tool: command not found",
         "under sh with PATH=/usr/bin:/bin",
     ] {
         assert!(text.contains(said), "`{said}` is missing from:\n{text}");
     }
+    // What the shell said is quoted as it said it, and each `sh` words it
+    // its own way: dash says `not found`, bash `command not found`. Both
+    // name the program they could not find.
+    let quoted = text
+        .split_once("it said `")
+        .and_then(|(_, rest)| rest.split_once('`'))
+        .map(|(quoted, _)| quoted)
+        .unwrap_or_else(|| panic!("the refusal quotes what the shell said:\n{text}"));
+    assert!(
+        quoted.contains("yunta-no-such-tool"),
+        "the shell's own words name the program it could not find: `{quoted}`"
+    );
 }
 
 #[tokio::test]
