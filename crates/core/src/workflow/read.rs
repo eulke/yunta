@@ -47,7 +47,7 @@ pub const RULES: &[crate::diagnostic::Rule] = &[
     crate::diagnostic::Rule {
         code: RuleCode::IncoherentMode,
         demand: "a declared mode keeps every `invariant` node, and keeps whatever the nodes it \
-                 keeps reroute to",
+                 keeps reroute to or read from",
     },
 ];
 
@@ -225,7 +225,7 @@ fn parallel_scopes(nodes: &[Node]) -> Vec<Diagnostic> {
 
 /// Every declared mode leaves a graph that still runs: it names nodes
 /// the file declares, keeps every node the workflow cannot run without,
-/// and keeps whatever the nodes it kept reroute to.
+/// and keeps whatever the nodes it kept reroute to or read from by name.
 ///
 /// A mode's `include:` names top-level nodes only — a `parallel` group
 /// is in or out as a whole — so the ids it is read against are the
@@ -236,6 +236,11 @@ fn modes_still_run(workflow: &Workflow) -> Vec<Diagnostic> {
         return Vec::new();
     };
     let top_level: HashSet<&NodeId> = workflow.nodes.iter().map(|node| &node.id).collect();
+    // A `parallel` child is in a mode exactly when its group is.
+    let top_of: std::collections::HashMap<&NodeId, &NodeId> = workflow
+        .iter_nodes_with_group()
+        .map(|(node, group)| (&node.id, group.map_or(&node.id, |group| &group.id)))
+        .collect();
     let invariants: Vec<&NodeId> = workflow
         .nodes
         .iter()
@@ -294,6 +299,23 @@ fn modes_still_run(workflow: &Workflow) -> Vec<Diagnostic> {
                     );
                 }
             }
+            // An unknown source is the unknown-reference rule's to name.
+            for (field, source) in read_sources(node) {
+                if top_of
+                    .get(source)
+                    .is_some_and(|top| !included.contains(*top))
+                {
+                    fails(
+                        index,
+                        &node.id,
+                        RuleCode::IncoherentMode,
+                        format!(
+                            "`{field}` reads from `{source}`, and mode `{mode}` leaves \
+                             `{source}` out; a mode that keeps a node keeps what it reads from"
+                        ),
+                    );
+                }
+            }
         }
     }
     broken
@@ -310,6 +332,36 @@ fn reroute_targets(node: &Node) -> Vec<(&'static str, &NodeId)> {
         targets.extend(on.values().map(|target| ("on", target)));
     }
     targets
+}
+
+/// The nodes a node reads from by name — a context artifact, a captured
+/// output, a mount — its `parallel` children's included, since a group
+/// is kept or left out whole.
+fn read_sources(node: &Node) -> Vec<(&'static str, &NodeId)> {
+    let mut sources = Vec::new();
+    for source in &node.context {
+        match source {
+            crate::ContextSpec::Artifact { artifact } => {
+                if let Some(named) = &artifact.node {
+                    sources.push(("context: artifact", named));
+                }
+            }
+            crate::ContextSpec::NodeOutput { node_output } => {
+                sources.push(("context: node-output", &node_output.node));
+            }
+            _ => {}
+        }
+    }
+    match &node.kind {
+        NodeKind::Workflow { mounts, .. } => {
+            sources.extend(mounts.iter().map(|mount| ("mounts", &mount.artifact.node)));
+        }
+        NodeKind::Parallel { nodes, .. } => {
+            sources.extend(nodes.iter().flat_map(read_sources));
+        }
+        _ => {}
+    }
+    sources
 }
 
 fn about(index: usize, id: &NodeId, code: RuleCode, detail: String) -> Diagnostic {

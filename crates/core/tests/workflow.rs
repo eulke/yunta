@@ -1288,6 +1288,51 @@ modes:
         ));
     }
 
+    /// A node a mode keeps reads its context, output and mounts from
+    /// nodes by name; a mode that leaves the source out leaves the reader
+    /// a read that can never be answered.
+    #[test]
+    fn a_mode_that_keeps_a_node_keeps_what_it_reads_from() {
+        for (reader, field) in [
+            (
+                "  - id: fix\n    kind: prompt\n    prompt: p\n    \
+                 context: [{ artifact: { node: lint, name: report.md } }]\n",
+                "context: artifact",
+            ),
+            (
+                "  - id: fix\n    kind: prompt\n    prompt: p\n    \
+                 context: [{ node-output: { node: lint } }]\n",
+                "context: node-output",
+            ),
+            (
+                "  - id: fix\n    kind: workflow\n    use: child\n    \
+                 mounts: [{ artifact: { node: lint, name: report.md } }]\n",
+                "mounts",
+            ),
+            (
+                "  - id: fix\n    kind: parallel\n    nodes:\n      - id: inner\n        \
+                 kind: prompt\n        prompt: p\n        \
+                 context: [{ node-output: { node: lint } }]\n",
+                "context: node-output",
+            ),
+        ] {
+            let nodes = format!(
+                "nodes:\n  - {{ id: lint, kind: bash, run: \"true\", \
+                 artifacts: {{ produces: [report.md] }} }}\n{reader}"
+            );
+            let text = refuse(&format!(
+                "name: ship\n{nodes}modes:\n  quick:\n    include: [fix]\n"
+            ));
+            assert!(
+                text.contains("`lint`") && text.contains("quick") && text.contains(field),
+                "{text}"
+            );
+            reads(&format!(
+                "name: ship\n{nodes}modes:\n  quick:\n    include: [lint, fix]\n"
+            ));
+        }
+    }
+
     #[test]
     fn a_reroute_from_a_node_the_mode_leaves_out_is_not_that_modes_problem() {
         reads(
