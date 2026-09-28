@@ -1,5 +1,16 @@
 //! `yunta check`.
 //!
+//! **What refuses and what warns.** A run freezes its workflow and its
+//! config when it is created and starts from one commit, so whatever
+//! those make certain to stop it is known before the first token — and
+//! is an error: a key a node cannot run without, a read nothing in the
+//! run can answer, a comparison with no suite to measure, a file nothing
+//! before its reader can write, what a pack requires and the machine
+//! lacks. A warning is for what the run may still get through — a risk,
+//! a waste, a case the author may be right about, or one only the run
+//! can settle — and it says what would make it certain. A rule that
+//! cannot tell which it is looking at warns; one that can refuses.
+//!
 //! [`check`] validates one workflow file against the merged config and
 //! **never reads other files**: node-id uniqueness (every `parallel`
 //! child included), `depends_on` references and acyclicity (never
@@ -16,9 +27,9 @@
 //! catalog; and [`check_context_files`], whether the `files:` a node
 //! reads are in the tree a run would start from.
 //!
-//! Capability-aware checks (agent existence, required
-//! capabilities) wait for the `Adapter` trait to exist — there is
-//! nothing to probe yet.
+//! What a node declares of its adapter is checked against what this
+//! binary builds: a declaration no candidate adapter can honor is
+//! refused.
 //!
 //! The rules live in families — one submodule per subject; this file owns
 //! the two entries that run them all and the shared re-exports each family
@@ -32,14 +43,21 @@ mod gates;
 mod graph;
 mod inputs;
 mod packs;
+mod programs;
 mod refs;
 mod runners;
 mod scopes;
+mod sources;
+mod unset;
 mod warning;
 
-pub use context_files::{check_context_files, MissingContextFile, RunTreeOrigin};
+pub use context_files::{
+    check_context_files, ContextFilesCheck, MissingContextFile, RunTreeOrigin,
+};
 pub use error::CheckError;
+pub use programs::programs_named;
 pub use refs::{check_workflow_refs, RefsCheck};
+pub use sources::Unanswerable;
 pub use warning::CheckWarning;
 
 // One home for what every family reads: the workspace types, the
@@ -54,7 +72,9 @@ pub(crate) use inputs::*;
 pub(crate) use packs::*;
 pub(crate) use runners::*;
 pub(crate) use scopes::*;
+pub(crate) use sources::*;
 pub(crate) use std::collections::{HashMap, HashSet};
+pub(crate) use unset::*;
 pub(crate) use yunta_core::template::template_variables;
 pub(crate) use yunta_core::{
     might_overlap, ArtifactSpec, ConfigLayer, InputSpec, Node, NodeId, NodeKind, RunnerName,
@@ -75,6 +95,18 @@ pub fn check(
     workflow: &Workflow,
     config: &ConfigLayer,
     declared: &dyn Fn(&yunta_core::AdapterId) -> Option<yunta_core::Capabilities>,
+) -> Vec<CheckError> {
+    check_mounted(workflow, config, declared, &[])
+}
+
+/// [`check`] for a run born holding what `mounts` carry in from the
+/// workflow that composes it — what a composed workflow's reads may be
+/// answered by, and a workflow a person starts never is.
+pub fn check_mounted(
+    workflow: &Workflow,
+    config: &ConfigLayer,
+    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<yunta_core::Capabilities>,
+    mounts: &[yunta_core::MountSpec],
 ) -> Vec<CheckError> {
     // `read` hands back the expanded graph, and this is asked of a
     // workflow that read — so the shape here is the one a run builds.
@@ -97,12 +129,16 @@ pub fn check(
     check_resume_session(workflow, &mut errors);
     check_yunta_schema(workflow, &mut errors);
     check_config_defaults(config, &mut errors);
+    check_unset_keys(workflow, config, &mut errors);
     check_distill_paths(workflow, &mut errors);
     check_artifact_declarations(workflow, &mut errors);
     check_asking_nodes(workflow, &mut errors);
     check_input_documents(workflow, &mut errors);
     check_reserved_artifact_names(workflow, &mut errors);
     check_answer_sources(workflow, &mut errors);
+    errors.extend(check_reads(workflow, &Birth::of(workflow, mounts), None).errors);
+    check_named_artifact_sources(workflow, &mut errors);
+    check_node_outputs(workflow, &mut errors);
 
     if let Some(permissions) = &config.permissions {
         check_commands(&workflow.nodes, permissions, &mut errors);
@@ -195,6 +231,20 @@ pub fn check(
     errors
 }
 
+/// What starting a run in `mode` — fresh, not promoted into it — would
+/// meet: a read only an earlier mode's work answers, which such a run
+/// does not hold. Nothing for a mode the workflow does not declare.
+pub fn check_mode_start(workflow: &Workflow, mode: &yunta_core::ModeName) -> Vec<CheckError> {
+    if workflow
+        .modes
+        .as_ref()
+        .is_none_or(|modes| !modes.contains_key(mode))
+    {
+        return Vec::new();
+    }
+    check_reads(workflow, &Birth::of(workflow, &[]), Some(mode)).errors
+}
+
 /// Non-blocking findings — the "can't verify, so warn" case.
 /// Separate entry point from [`check`] rather than a severity field on
 /// `CheckError`, so nothing that already treats `check()`'s output as
@@ -206,7 +256,7 @@ pub fn check(
 /// collision count by declaration. A child without the field stays
 /// implicitly write-capable (the engine's default profile is `edit`).
 pub fn check_warnings(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckWarning> {
-    let mut warnings = Vec::new();
+    let mut warnings = check_reads(workflow, &Birth::of(workflow, &[]), None).warnings;
     collect_parallel_warnings(&workflow.nodes, &mut warnings);
     collect_fanout_warnings(workflow, config, &mut warnings);
     collect_push_to_base_warnings(workflow, config, &mut warnings);

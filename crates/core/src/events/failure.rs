@@ -65,7 +65,8 @@ pub struct SessionDeath {
 /// as [`Failure::Artifacts`], one carrying `died:` as
 /// [`Failure::SessionDied`], one carrying `outside_scope:` as
 /// [`Failure::ScopeViolated`], one carrying `requested_scope:` as
-/// [`Failure::ScopeRequested`], and a log written before failures were
+/// [`Failure::ScopeRequested`], one carrying `unset:` as
+/// [`Failure::Unset`], and a log written before failures were
 /// data carries `outcome:` alone and reads back as
 /// [`Failure::Message`]. That tolerance is the rule for what is
 /// persisted and versioned, and it is why no reader needs to know which
@@ -87,6 +88,10 @@ pub enum Failure {
     /// The node's session asked for more scope than it has: its work is
     /// not done until a person answers, and the answer is theirs.
     ScopeRequested { requested_scope: RequestedScope },
+    /// A config key the node cannot run without, left unset in the
+    /// config the run froze when it was created — so no attempt of this
+    /// run can go differently.
+    Unset { unset: crate::config::ConfigKey },
     /// A failure the engine states in one sentence.
     Message { outcome: String },
 }
@@ -127,6 +132,20 @@ impl Failure {
         Failure::ScopeViolated { outside_scope }
     }
 
+    /// A node whose kind cannot run without `key`, which the run's config
+    /// leaves unset.
+    pub fn unset(key: crate::config::ConfigKey) -> Self {
+        Failure::Unset { unset: key }
+    }
+
+    /// Whether another attempt of the node, in this same run, can end
+    /// differently. Not when the cause is the config the run froze at
+    /// birth: every attempt reads the same one, and the way out is a new
+    /// run under a config that declares what is missing.
+    pub fn retry_can_change(&self) -> bool {
+        !matches!(self, Failure::Unset { .. })
+    }
+
     /// A session that asked to be allowed `paths`, for `reason`.
     pub fn scope_requested(paths: Vec<ScopeGlob>, reason: impl Into<String>) -> Self {
         Failure::ScopeRequested {
@@ -145,6 +164,7 @@ impl Failure {
             Failure::Artifacts { .. }
             | Failure::SessionDied { .. }
             | Failure::ScopeRequested { .. }
+            | Failure::Unset { .. }
             | Failure::Message { .. } => &[],
         }
     }
@@ -155,9 +175,10 @@ impl Failure {
         match self {
             Failure::ScopeViolated { outside_scope } => !outside_scope.is_empty(),
             Failure::ScopeRequested { requested_scope } => !requested_scope.paths.is_empty(),
-            Failure::Artifacts { .. } | Failure::SessionDied { .. } | Failure::Message { .. } => {
-                false
-            }
+            Failure::Artifacts { .. }
+            | Failure::SessionDied { .. }
+            | Failure::Unset { .. }
+            | Failure::Message { .. } => false,
         }
     }
 
@@ -208,6 +229,7 @@ impl Failure {
             Failure::SessionDied { .. }
             | Failure::ScopeViolated { .. }
             | Failure::ScopeRequested { .. }
+            | Failure::Unset { .. }
             | Failure::Message { .. } => [].iter(),
         }
     }
@@ -220,6 +242,7 @@ impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Failure::Message { outcome } => f.write_str(outcome),
+            Failure::Unset { unset } => write!(f, "{unset}"),
             Failure::SessionDied { died } => write!(f, "{died}"),
             Failure::ScopeViolated { outside_scope } => {
                 write!(

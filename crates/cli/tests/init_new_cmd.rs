@@ -213,11 +213,16 @@ fn new_rejects_an_unsafe_workflow_name() {
 #[test]
 fn new_works_before_init_ever_ran() {
     let (_root, repo, home) = setup();
-    // No `.yunta/config.yaml` exists yet — `check` must still pass, since
-    // these skeletons never reference a `runner:` a missing config could
-    // fail to resolve.
+    // The repository holds no `.yunta/config.yaml`. The skeleton names no
+    // `runner:`, so the file itself is sound; what it cannot do is run,
+    // and `new` says what the config has to declare first.
     let result = yunta_in!(&repo, &home, &["new", "standalone", "--shape", "tasks"]);
     assert!(result.status.success(), "stderr: {}", stderr(&result));
+    let said = stdout(&result);
+    assert!(
+        said.contains("OK") && said.contains("node `plan`") && said.contains("defaults.runner"),
+        "got: {said}"
+    );
 }
 
 #[test]

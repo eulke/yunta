@@ -57,6 +57,38 @@ async fn a_plain_failure_reconstructs_a_retry_and_abort_escalation() {
     );
 }
 
+/// A failure on a key the run's frozen config leaves unset fails every
+/// attempt the same way: the menu offers no retry, says the way out is a
+/// new run, and a `retry` sent from elsewhere is refused.
+#[tokio::test]
+async fn a_failure_on_the_frozen_config_offers_no_retry_and_names_the_way_out() {
+    let bench = parked(
+        "name: gated\nnodes:\n  - { id: gate, kind: check, builtin: coverage_gate }\n",
+        "sessions: []\n",
+    )
+    .await;
+    let (node, escalation) =
+        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events()))
+            .expect("a failed node is a pause with a menu");
+    assert_eq!(node.as_str(), "gate");
+    let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(ids, vec!["abort"]);
+    let said = escalation.evidence().lines().join("\n");
+    assert!(
+        said.contains("`coverage.cmd`") && said.contains("start a new run"),
+        "{said}"
+    );
+
+    let refused = answer_parked(&bench, "retry").await;
+    assert!(
+        matches!(
+            refused,
+            Err(yunta_engine::ResolveGateError::UnknownOption { .. })
+        ),
+        "{refused:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_plain_failure_retried_after_its_cause_is_fixed_finishes() {
     let bench = parked(FAILS_UNTIL_FIXED_WORKFLOW, "sessions: []\n").await;

@@ -56,7 +56,7 @@ pub(super) async fn detached(detaching: Detaching<'_>) -> Result<Outcome, CliErr
     // No fixture ever reaches here: a detached child resolves the
     // adapters `runners:` names and reads none.
     let (frozen, _) = runnable(ctx, workflow_path, raw_inputs, adapter, None).await?;
-    let preflight = preflight(ctx, &frozen.manifest, mode, quiet, json).await;
+    let preflight = preflight(ctx, &frozen.manifest, mode, quiet, json).await?;
     let run_id = create_and_detach(ctx, storage, &frozen, mode).await?;
     if json {
         // The run's own log, read the instant it was handed off: the
@@ -101,7 +101,7 @@ pub(crate) async fn start_detached(
     // stream: the distribution line the estimation prints for a person
     // would land in the middle of a response. What it has to say
     // travels in the answer instead.
-    let preflight = preflight(ctx, &frozen.manifest, mode, true, false).await;
+    let preflight = preflight(ctx, &frozen.manifest, mode, true, false).await?;
     let run_id = create_and_detach(ctx, storage, &frozen, mode).await?;
     Ok(Started {
         run_id,

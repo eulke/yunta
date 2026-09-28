@@ -304,3 +304,84 @@ fn doctor_without_session_opens_none() {
         "and the command says what it did not check: {text}"
     );
 }
+
+/// What a pack requires is what its workflows cannot run without: a run
+/// that lacks it stops where the need is, so `check` and `run` refuse
+/// before the first token instead of leaving it to `doctor`.
+#[test]
+fn check_and_run_refuse_a_pack_workflow_whose_requires_are_unmet() {
+    let (root, upstream, home) = setup();
+    let repo = root.path().join("repo");
+    let add_out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(add_out.status.success(), "{}", stderr(&add_out));
+
+    let check_out = yunta_in!(&repo, &home, &["check", "acme/review"]);
+    assert!(!check_out.status.success(), "{}", stdout(&check_out));
+    let said = stderr(&check_out);
+    for named in [
+        "pack `acme/review-pack` requires runner `reviewer`",
+        "pack `acme/review-pack` requires MCP server `internal-docs`",
+        "pack `acme/review-pack` requires command \
+         `this-binary-almost-certainly-does-not-exist-anywhere`",
+    ] {
+        assert!(said.contains(named), "`{named}` in: {said}");
+    }
+
+    let run_out = yunta_in!(&repo, &home, &["run", "acme/review"]);
+    assert!(!run_out.status.success(), "{}", stdout(&run_out));
+    assert!(
+        stderr(&run_out).contains("requires command"),
+        "{}",
+        stderr(&run_out)
+    );
+    let runs = home.join("runs");
+    assert!(
+        !runs.exists() || std::fs::read_dir(&runs).unwrap().next().is_none(),
+        "a refused workflow never becomes a run"
+    );
+}
+
+/// A pack's workflows are checked against this project's config the way
+/// `yunta run` would check them: a comparison against a baseline this
+/// config never measures is named right after the pack is installed.
+#[test]
+fn doctor_names_what_this_config_leaves_an_installed_workflow_without() {
+    let root = tempfile::tempdir().unwrap();
+    let upstream = root.path().join("upstream");
+    std::fs::create_dir_all(upstream.join("workflows")).unwrap();
+    init_repo(&upstream);
+    std::fs::write(
+        upstream.join("pack.yaml"),
+        "name: guard-pack\n\
+         publisher: acme\n\
+         version: 1.0.0\n\
+         declares:\n  permissions: read-only\n  network: false\n  executors: []\n\
+         contents:\n  workflows: [workflows/guard.yaml]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        upstream.join("workflows/guard.yaml"),
+        "name: guard\nnodes:\n  - { id: tests, kind: check, builtin: baseline_compare }\n",
+    )
+    .unwrap();
+    git(&upstream, &["add", "."]);
+    git(&upstream, &["commit", "-q", "-m", "v1"]);
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    let add = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(add.status.success(), "{}", stderr(&add));
+
+    let doctor = yunta_in!(&repo, &home, &["doctor"]);
+    assert!(!doctor.status.success(), "{}", stdout(&doctor));
+    let text = stdout(&doctor);
+    assert!(
+        text.lines().any(
+            |line| line.starts_with("pack acme/guard-pack: node `tests`")
+                && line.contains("`baseline.suite`")
+        ),
+        "{text}"
+    );
+}

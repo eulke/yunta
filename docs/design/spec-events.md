@@ -291,16 +291,20 @@ registra.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `outcome` [inferido] | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter | solo en `node_finished` | el outcome del agente es telemetría, esto es el veredicto |
-| `outcome` / `artifacts` / `died` / `outside_scope` / `requested_scope` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió | solo en `node_failed` | por qué falló, como dato: uno de los cinco, plano sobre el payload; ver abajo |
+| `outcome` / `artifacts` / `died` / `outside_scope` / `requested_scope` / `unset` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara | solo en `node_failed` | por qué falló, como dato: uno de los seis, plano sobre el payload; ver abajo |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage` |
 | `retryable` | `bool` | solo en `node_failed` | guía la política de reintento; lo fija quien gobierna el presupuesto, de modo que un intento terminal nunca se registra como reintentable |
 
-**La falla es dato, no prosa.** La falla toma una de cinco formas, planas sobre el
+**La falla es dato, no prosa.** La falla toma una de seis formas, planas sobre el
 payload: `outcome: <frase>`, una falla que el engine enuncia en una oración,
 `artifacts: [...]`, un elemento por artifact declarado que no cerró, `died:
 {adapter, exit?}`, una sesión que terminó sin evento terminal, `outside_scope:
 [...]`, cada path que el diff del nodo alcanzó fuera de su `scope:`, o
-`requested_scope: {paths, reason}`, la ampliación que pidió la sesión del nodo. Cada elemento
+`requested_scope: {paths, reason}`, la ampliación que pidió la sesión del nodo, o
+`unset: {key, ...}` —`baseline_suite`, `coverage`, `executor` (con `executor`) o
+`runner`—, la clave de config sin la que el nodo no corre y que la config congelada
+del run no declara: ningún intento de ese run puede terminar distinto, así que su
+menú no ofrece `retry`. Cada elemento de `artifacts`
 es una de cuatro: el archivo — `path` y uno de `artifact-missing`, `artifact-empty`,
 `artifact-oversized` (con bytes y techo) o `artifact-unreadable` —, un documento que
 nadie entregó (`artifact-undelivered`): el `node` que lo declaró y el `artifact`

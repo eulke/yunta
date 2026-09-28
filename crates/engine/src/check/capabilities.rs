@@ -1,12 +1,14 @@
 //! See [`super`]. What a workflow asks of its adapters, checked before a
 //! run is born.
 //!
-//! Two of a node's declarations are the adapter's to honor or not:
-//! `permissions:` needs `permission_profiles`, and `agent:` needs
-//! `custom_agents`. Neither has a fallback — a session that silently
-//! ignored the profile it was given would edit under permissions nobody
-//! granted — so the workflow is refused here rather than at the node
-//! that would have run under the wrong ones.
+//! Three of a node's declarations are the adapter's to honor or not:
+//! `permissions:` needs `permission_profiles`, `agent:` needs
+//! `custom_agents`, and what a session can only hand over or read through
+//! the engine — a document, a task, a blackboard — needs `run_tools`. None
+//! has a fallback — a session that silently ignored the profile it was
+//! given would edit under permissions nobody granted, and one without the
+//! run tools has no way to hand over what it declared — so the workflow is
+//! refused here rather than at the node that would have run without it.
 
 use super::*;
 use yunta_core::port::{absence_of, Absence};
@@ -27,7 +29,7 @@ pub(crate) fn check_adapter_capabilities(
     declared: &dyn Fn(&AdapterId) -> Option<Capabilities>,
     errors: &mut Vec<CheckError>,
 ) {
-    for node in workflow.iter_nodes() {
+    for (node, group) in workflow.iter_nodes_with_group() {
         let adapters = candidate_adapters(node, config);
         if node.permissions.is_some() {
             refuse_if_none_can(
@@ -46,6 +48,32 @@ pub(crate) fn check_adapter_capabilities(
                 declared,
                 Capability::CustomAgents,
                 "agent:",
+                errors,
+            );
+        }
+        let blackboard_member = group.is_some_and(|group| {
+            matches!(
+                group.kind,
+                NodeKind::Parallel {
+                    coordination: yunta_core::Coordination::Blackboard,
+                    ..
+                }
+            )
+        });
+        let declared_artifacts = node
+            .artifacts
+            .as_ref()
+            .map(|artifacts| artifacts.produces.as_slice())
+            .unwrap_or_default();
+        if let Some(need) =
+            crate::run_tools::RunToolsNeed::of(node, blackboard_member, declared_artifacts)
+        {
+            refuse_if_none_can(
+                node,
+                &adapters,
+                declared,
+                Capability::RunTools,
+                &need.declaration(),
                 errors,
             );
         }

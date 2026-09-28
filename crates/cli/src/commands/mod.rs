@@ -313,14 +313,15 @@ pub(crate) fn resolve_workflow_ref(cwd: &Path, reference: &Path) -> Result<PathB
 
 /// The literal `files:` paths the nodes of `workflow` that `mode_nodes`
 /// includes (every node when `None`) read and a run started at
-/// `ctx.cwd` from `base` would not find.
-pub(crate) async fn context_file_warnings(
+/// `ctx.cwd` from `base` would not find: refused when nothing that runs
+/// before the reader can write them, warned about when something might.
+pub(crate) async fn context_files(
     ctx: &crate::context::Context,
     workflow: &Workflow,
     mode_nodes: Option<&std::collections::HashSet<yunta_core::NodeId>>,
     isolation: yunta_core::Isolation,
     base: &yunta_core::CommitSha,
-) -> Vec<yunta_engine::CheckWarning> {
+) -> yunta_engine::ContextFilesCheck {
     yunta_engine::check_context_files(
         workflow,
         mode_nodes,
@@ -334,7 +335,7 @@ pub(crate) async fn context_file_warnings(
     .await
 }
 
-/// [`context_file_warnings`] for a run started here now, from the commit
+/// [`context_files`] for a run started here now, from the commit
 /// `ctx.cwd` is on. Every node counts, since nothing has chosen a mode.
 /// Nothing to say outside a repository with a commit, where no run starts
 /// either.
@@ -342,11 +343,11 @@ pub(crate) async fn context_files_at_head(
     ctx: &crate::context::Context,
     workflow: &Workflow,
     isolation: yunta_core::Isolation,
-) -> Vec<yunta_engine::CheckWarning> {
+) -> yunta_engine::ContextFilesCheck {
     let Ok(base) = yunta_engine::head_commit(&ctx.cwd, ctx.supervision()).await else {
-        return Vec::new();
+        return Default::default();
     };
-    context_file_warnings(ctx, workflow, None, isolation, &base).await
+    context_files(ctx, workflow, None, isolation, &base).await
 }
 
 /// `yunta check` before running anything — a workflow that fails static
@@ -372,11 +373,17 @@ pub(crate) fn check_or_refuse(
     // directory — the same `.yunta/workflows/` a run's children resolve
     // against at birth.
     let origin = yunta_engine::origin_of(cwd, workflow_path);
-    let refs = yunta_engine::check_workflow_refs(workflow, config, cwd, &origin);
+    let refs =
+        yunta_engine::check_workflow_refs(workflow, config, cwd, &origin, &declared_capabilities);
     for warning in &refs.warnings {
         warn(warning);
     }
     errors.extend(refs.errors);
+    let (unprovided, missing_programs) = environment(cwd, workflow, config, &origin);
+    for warning in &missing_programs {
+        warn(warning);
+    }
+    errors.extend(unprovided);
     if errors.is_empty() {
         return Ok(());
     }
@@ -384,6 +391,51 @@ pub(crate) fn check_or_refuse(
         "the workflow fails `yunta check`",
         &errors,
     )))
+}
+
+/// What the machine a run would use has to provide for `workflow`: what
+/// the pack it comes from `requires:`, refused when this project or
+/// machine lacks it, and the programs its literal commands start, warned
+/// about when they are not on `PATH` — a node before them may install
+/// them.
+pub(crate) fn environment(
+    cwd: &Path,
+    workflow: &Workflow,
+    config: &ConfigLayer,
+    origin: &yunta_engine::WorkflowOrigin,
+) -> (
+    Vec<yunta_engine::CheckError>,
+    Vec<yunta_engine::CheckWarning>,
+) {
+    let unprovided = match origin {
+        yunta_engine::WorkflowOrigin::Pack {
+            publisher,
+            pack_name,
+        } => yunta_engine::packs_for_publisher(cwd, publisher)
+            .installed
+            .iter()
+            .find(|(_, manifest)| manifest.name == *pack_name)
+            .map(|(_, manifest)| {
+                yunta_engine::check_pack_requires(manifest, config).unmet(&command_on_path)
+            })
+            .unwrap_or_default(),
+        yunta_engine::WorkflowOrigin::Repo => Vec::new(),
+    };
+    let missing_programs = yunta_engine::programs_named(workflow)
+        .into_iter()
+        .filter(|(_, program)| !command_on_path(program))
+        .map(|(node, program)| yunta_engine::CheckWarning::ProgramNotOnPath { node, program })
+        .collect();
+    (unprovided, missing_programs)
+}
+
+/// Whether `command` names a file in a directory of this process's
+/// `PATH` — the one a run started here inherits.
+pub(crate) fn command_on_path(command: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|dir| dir.join(command).is_file())
 }
 
 #[cfg(test)]

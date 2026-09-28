@@ -155,3 +155,34 @@ fn a_fully_satisfied_pack_reports_nothing_missing() {
     assert!(gap.missing_runners.is_empty());
     assert!(gap.missing_mcp_servers.is_empty());
 }
+
+/// What a gap leaves a run without, as the refusals `check` gives: a
+/// command counts only when the caller's lookup cannot find it.
+#[test]
+fn a_gap_is_refused_for_each_thing_the_run_would_lack() {
+    let manifest = manifest(
+        vec![RequiredRunner {
+            name: RunnerName::from("reviewer"),
+            permissions: None,
+        }],
+        vec!["internal-docs"],
+        vec!["gh", "cargo"],
+    );
+    let gap = check_pack_requires(&manifest, &ConfigLayer::default());
+
+    let refused: Vec<String> = gap
+        .unmet(&|command| command == "cargo")
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(refused.len(), 3, "{refused:?}");
+    assert!(refused[0].starts_with("pack `acme/review-pack` requires runner `reviewer`"));
+    assert!(refused[1].starts_with("pack `acme/review-pack` requires MCP server `internal-docs`"));
+    assert!(refused[2].starts_with("pack `acme/review-pack` requires command `gh`"));
+
+    let satisfied = check_pack_requires(
+        &self::manifest(vec![], vec![], vec!["cargo"]),
+        &ConfigLayer::default(),
+    );
+    assert!(satisfied.unmet(&|_| true).is_empty());
+}

@@ -189,8 +189,9 @@ fn has_detail(failure: &Failure) -> bool {
         // One path fits in the node's own line; a list reads better a
         // path to a line.
         Failure::ScopeViolated { outside_scope } => outside_scope.len() > 1,
-        // What was asked for and why fit in the node's own line.
-        Failure::ScopeRequested { .. } => false,
+        // What was asked for and why fit in the node's own line, and so
+        // does the key a config leaves unset.
+        Failure::ScopeRequested { .. } | Failure::Unset { .. } => false,
         Failure::Message { outcome } => outcome.contains('\n'),
     }
 }
@@ -223,7 +224,7 @@ fn print_detail(failure: &Failure) {
                 println!("{}{}", indent(3), path.display());
             }
         }
-        Failure::ScopeRequested { .. } | Failure::Message { .. } => {
+        Failure::ScopeRequested { .. } | Failure::Unset { .. } | Failure::Message { .. } => {
             println!(
                 "{}",
                 yunta_core::text::indent(&failure.to_string(), &detail)

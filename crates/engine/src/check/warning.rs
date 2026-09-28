@@ -3,12 +3,12 @@
 use super::*;
 use thiserror::Error;
 
-/// A non-blocking finding — the run can still start (`check`
-/// warns, it doesn't refuse, when a collision can't be verified for lack
-/// of declared scope). Kept separate from `CheckError` rather than adding
-/// a severity field to it: every existing caller of `check()` keeps
-/// treating its `Vec<CheckError>` as "must be empty to proceed" without
-/// learning to filter by severity.
+/// What the run may still get through: a risk, a waste, a case its
+/// author may be right about, or one only the run can settle — each
+/// saying what would make it certain. The run starts. Kept separate from
+/// `CheckError` rather than adding a severity field to it: every caller
+/// of `check()` treats its `Vec<CheckError>` as "must be empty to
+/// proceed" without learning to filter by severity.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CheckWarning {
     #[error(
@@ -53,10 +53,41 @@ pub enum CheckWarning {
     )]
     BaselineNeverCompared { suite: String },
 
+    /// A read a mode answers only with what an earlier mode made: a run
+    /// promoted into the mode is born holding it, and one started in it
+    /// is not — which `yunta run --mode` refuses.
+    #[error(
+        "{site} reads {what}, which mode `{mode}` holds only when a run is promoted into it \
+         from an earlier mode — a run started with `--mode {mode}` is refused for it"
+    )]
+    ReadOnlyThroughPromotion {
+        site: String,
+        what: String,
+        mode: yunta_core::ModeName,
+    },
+
+    /// A literal command starts a program this machine does not have on
+    /// `PATH`. A warning: a node that runs earlier may install it, and a
+    /// shell script read without a shell is read by heuristic.
+    #[error(
+        "node `{node}` runs `{program}`, which is not on this machine's `PATH` — install it \
+         before the run reaches `{node}`, or it stops there"
+    )]
+    ProgramNotOnPath { node: NodeId, program: String },
+
     /// A literal `files:` path a node reads that the tree a run would
     /// start from does not hold — said before the first token, since the
     /// run only meets it once every node ahead of the reader has spent.
-    #[error("{}", context_file_missing(node, path, base.as_deref(), missing))]
+    #[error(
+        "{}",
+        super::context_files::missing_sentence(
+            node,
+            path,
+            base.as_deref(),
+            missing,
+            super::context_files::Reach::EarlierNodeMay,
+        )
+    )]
     ContextFileMissing {
         node: NodeId,
         path: String,
@@ -65,34 +96,4 @@ pub enum CheckWarning {
         base: Option<String>,
         missing: super::context_files::MissingContextFile,
     },
-}
-
-/// The sentence for a missing `files:` path: what is missing, why the run
-/// would not see it, and what to do — each shape its own remedy.
-fn context_file_missing(
-    node: &NodeId,
-    path: &str,
-    base: Option<&str>,
-    missing: &super::context_files::MissingContextFile,
-) -> String {
-    use super::context_files::MissingContextFile as M;
-    let reads = format!("node `{node}` reads `{path}` (a `files:` context source)");
-    let stops = format!("unless a node before it writes the file, `{node}` stops there");
-    let optional = "or declare the entry `optional: true` if the node can do without it";
-    match (missing, base) {
-        (M::Nowhere, Some(base)) => format!(
-            "{reads}, which commit `{base}` — the one a run starts from — does not hold: \
-             {stops}; commit the file first, {optional}"
-        ),
-        (M::Nowhere, None) => format!("{reads}, which does not exist: {stops}; {optional}"),
-        (M::Uncommitted, _) => format!(
-            "{reads}, which is in your checkout but not committed: a run starts from commit \
-             `{}` and never sees it, so {stops}; commit it first",
-            base.unwrap_or("HEAD")
-        ),
-        (M::Ignored, _) => format!(
-            "{reads}, which git ignores: a run's tree never carries an ignored file, so \
-             {stops}; add it with `git add -f`, or read a file git tracks"
-        ),
-    }
 }

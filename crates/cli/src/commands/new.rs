@@ -4,8 +4,10 @@
 //! paper to edit, not a working pipeline. Never references a pack and
 //! never touches `yunta.lock` — `new` creates the team's own content,
 //! `pack add` is the only verb that brings in someone else's, and the
-//! two stay disjoint on purpose. Runs `check` on what it wrote and
-//! reports the result, same as `yunta check` would.
+//! two stay disjoint on purpose. Runs `check` on what it wrote: a
+//! problem with the file is reported as `yunta check` would, and what
+//! the config still has to declare before the workflow can run is said
+//! without failing, since the file is not where that gets fixed.
 
 use yunta_core::text::problems;
 use yunta_core::{ConfigLayer, Workflow};
@@ -214,20 +216,29 @@ pub async fn new_workflow(
     // Same layered config `yunta check` resolves without an explicit
     // `--config` — an empty/default layer set (no `.yunta/config.yaml`
     // yet, e.g. `new` run before `init`) is a legal, empty `ConfigLayer`,
-    // not an error: these skeletons never reference a `runner:`
-    // precisely so `check` never depends on that config existing.
+    // not an error. These skeletons name no `runner:`, so the file stands
+    // on its own; what the config still has to declare before the
+    // workflow can run is said, and is not the file's to fix.
     let config = ConfigLayer::merge_layers(
         project::load_named_layers(&cwd)?
             .into_iter()
             .map(|(_, l)| l),
     );
 
-    let errors = yunta_engine::check(&workflow, &config, &super::declared_capabilities);
-    if errors.is_empty() {
-        println!("{}: OK", path.display());
-        Ok(Outcome::Success)
-    } else {
+    let (unset, errors): (Vec<_>, Vec<_>) =
+        yunta_engine::check(&workflow, &config, &super::declared_capabilities)
+            .into_iter()
+            .partition(|error| matches!(error, yunta_engine::CheckError::Unset { .. }));
+    if !errors.is_empty() {
         note(problems(path.display(), &errors));
-        Ok(Outcome::Reported)
+        return Ok(Outcome::Reported);
     }
+    println!("{}: OK", path.display());
+    if !unset.is_empty() {
+        println!("before it can run, the config has to declare:");
+        for key in &unset {
+            println!("  {key}");
+        }
+    }
+    Ok(Outcome::Success)
 }

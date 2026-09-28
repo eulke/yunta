@@ -21,13 +21,6 @@ use crate::error::{CliError, Outcome};
 use yunta_core::port::ProbeReport;
 use yunta_core::AdapterId;
 
-fn command_on_path(command: &str) -> bool {
-    let Some(path) = std::env::var_os("PATH") else {
-        return false;
-    };
-    std::env::split_paths(&path).any(|dir| dir.join(command).is_file())
-}
-
 pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let (healthy, all_probed) = probe_adapters(&ctx).await;
@@ -36,7 +29,7 @@ pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
     if !check_installed_pack_requires(&ctx.cwd, &ctx.project.config) {
         all_well = false;
     }
-    if !check_installed_pack_context_files(&ctx).await {
+    if !check_installed_pack_workflows(&ctx).await {
         all_well = false;
     }
 
@@ -121,7 +114,7 @@ fn check_installed_pack_requires(cwd: &std::path::Path, config: &yunta_core::Con
             let missing_commands: Vec<&String> = gap
                 .required_commands
                 .iter()
-                .filter(|cmd| !command_on_path(cmd))
+                .filter(|cmd| !super::command_on_path(cmd))
                 .collect();
             if gap.is_satisfied() && missing_commands.is_empty() {
                 continue;
@@ -149,13 +142,18 @@ fn check_installed_pack_requires(cwd: &std::path::Path, config: &yunta_core::Con
     all_satisfied
 }
 
-/// Checks that every `files:` path an installed pack's workflows read
-/// is in the commit this repository is on — the part of a pack's needs
-/// no manifest declares, because only the workflow says it. Returns
-/// `false` (and prints a line per path) when any is missing; a broken
-/// pack is `check_installed_pack_requires`'s to name.
-async fn check_installed_pack_context_files(ctx: &Context) -> bool {
-    let isolation = ctx.project.config.resolved_isolation();
+/// Checks every installed pack's workflows as `yunta run` would check
+/// them in this project, before anyone starts one: against this
+/// project's config — a key a node cannot run without, a comparison
+/// with no suite to measure — and with every `files:` path they read in
+/// the commit this repository is on, the part of a pack's needs no
+/// manifest declares, because only the workflow says it. Returns `false`
+/// (and prints a line per problem) when any has one; what the manifest
+/// `requires:` and a broken pack are `check_installed_pack_requires`'s
+/// to name.
+async fn check_installed_pack_workflows(ctx: &Context) -> bool {
+    let config = &ctx.project.config;
+    let isolation = config.resolved_isolation();
     let mut all_present = true;
     for publisher in yunta_engine::installed_publishers(&ctx.cwd) {
         for (pack_dir, manifest) in
@@ -165,9 +163,30 @@ async fn check_installed_pack_context_files(ctx: &Context) -> bool {
                 let Ok(workflow) = crate::load_workflow(&pack_dir.join(declared)) else {
                     continue;
                 };
-                for warning in super::context_files_at_head(ctx, &workflow, isolation).await {
+                let origin = yunta_engine::WorkflowOrigin::Pack {
+                    publisher: publisher.clone(),
+                    pack_name: manifest.name.clone(),
+                };
+                let refused = yunta_engine::check(&workflow, config, &super::declared_capabilities)
+                    .into_iter()
+                    .chain(
+                        yunta_engine::check_workflow_refs(
+                            &workflow,
+                            config,
+                            &ctx.cwd,
+                            &origin,
+                            &super::declared_capabilities,
+                        )
+                        .errors,
+                    );
+                let found = super::context_files_at_head(ctx, &workflow, isolation).await;
+                let said = refused
+                    .chain(found.errors)
+                    .map(|error| error.to_string())
+                    .chain(found.warnings.iter().map(ToString::to_string));
+                for line in said {
                     all_present = false;
-                    println!("pack {}: {warning}", manifest.reference());
+                    println!("pack {}: {line}", manifest.reference());
                 }
             }
         }

@@ -248,9 +248,15 @@ fn modes_still_run(workflow: &Workflow) -> Vec<Diagnostic> {
         .map(|node| &node.id)
         .collect();
     let mut broken = Vec::new();
+    // What the modes declared before this one keep: a run promoted into
+    // a mode is born holding what its predecessor's nodes produced, so a
+    // source one of them keeps is not missing from a mode that drops it.
+    let mut earlier: HashSet<&NodeId> = HashSet::new();
+    let mut earlier_all = false;
     for (mode, spec) in modes {
         let ModeInclude::Nodes(named) = &spec.include else {
             // `all` holds every invariant vacuously.
+            earlier_all = true;
             continue;
         };
         let included: HashSet<&NodeId> = named.iter().collect();
@@ -301,22 +307,23 @@ fn modes_still_run(workflow: &Workflow) -> Vec<Diagnostic> {
             }
             // An unknown source is the unknown-reference rule's to name.
             for (field, source) in read_sources(node) {
-                if top_of
-                    .get(source)
-                    .is_some_and(|top| !included.contains(*top))
-                {
+                if top_of.get(source).is_some_and(|top| {
+                    !included.contains(*top) && !earlier_all && !earlier.contains(*top)
+                }) {
                     fails(
                         index,
                         &node.id,
                         RuleCode::IncoherentMode,
                         format!(
                             "`{field}` reads from `{source}`, and mode `{mode}` leaves \
-                             `{source}` out; a mode that keeps a node keeps what it reads from"
+                             `{source}` out, as does every mode before it; a mode that keeps \
+                             a node keeps what it reads from"
                         ),
                     );
                 }
             }
         }
+        earlier.extend(included);
     }
     broken
 }
@@ -336,8 +343,8 @@ fn reroute_targets(node: &Node) -> Vec<(&'static str, &NodeId)> {
 
 /// The nodes a node reads from by name — a context artifact, a captured
 /// output, a mount — its `parallel` children's included, since a group
-/// is kept or left out whole.
-fn read_sources(node: &Node) -> Vec<(&'static str, &NodeId)> {
+/// is kept or left out whole. Each with the field it is named in.
+pub fn read_sources(node: &Node) -> Vec<(&'static str, &NodeId)> {
     let mut sources = Vec::new();
     for source in &node.context {
         match source {

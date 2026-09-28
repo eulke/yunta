@@ -90,8 +90,9 @@ pub use catalog::{
     PublisherPacks, ResolvedWorkflow, WorkflowOrigin,
 };
 pub use check::{
-    check, check_context_files, check_warnings, check_workflow_refs, CheckError, CheckWarning,
-    MissingContextFile, RefsCheck, RunTreeOrigin,
+    check, check_context_files, check_mode_start, check_mounted, check_warnings,
+    check_workflow_refs, programs_named, CheckError, CheckWarning, ContextFilesCheck,
+    MissingContextFile, RefsCheck, RunTreeOrigin, Unanswerable,
 };
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;

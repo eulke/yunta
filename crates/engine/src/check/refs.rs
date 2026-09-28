@@ -8,36 +8,65 @@ use super::*;
 /// point from [`check`], deliberately: `check` never reads files (its
 /// own doc-comment rule), while this walk exists precisely to read the
 /// catalog — the CLI calls both.
+///
+/// Every workflow the composition reaches is also checked as the run
+/// that composes it would check it at birth — against the same config,
+/// holding what its node mounts — so a child that would be refused
+/// halfway through the parent's run is refused before the parent spends
+/// anything.
 pub fn check_workflow_refs(
     workflow: &Workflow,
     config: &ConfigLayer,
     repo_root: &std::path::Path,
     workflow_origin: &crate::catalog::WorkflowOrigin,
+    declared: &dyn Fn(&yunta_core::AdapterId) -> Option<yunta_core::Capabilities>,
 ) -> RefsCheck {
     let mut errors = check_declares_ceiling(workflow, workflow_origin, repo_root);
     let max_depth = config.resolved_max_workflow_depth();
     let mut path: Vec<String> = Vec::new();
-    let mut compares = compares_baseline(workflow);
+    let mut compares = comparisons(workflow, &path);
     walk_workflow_refs(
         workflow,
-        repo_root,
+        Walk {
+            repo_root,
+            config,
+            declared,
+            max_depth,
+        },
         workflow_origin,
-        max_depth,
         &mut path,
         &mut errors,
         &mut compares,
     );
     let mut warnings = Vec::new();
-    // Only the walk can answer this: `check` reads no files, so it
-    // cannot know whether a workflow this one composes compares.
-    if let Some(baseline) = &config.baseline {
-        if !compares {
+    // Only the walk can answer either: `check` reads no files, so it
+    // cannot know whether a workflow this one composes compares. The
+    // lineage measures once, before its first node, and only when the
+    // config names a suite — so a comparison under a config that names
+    // none has nothing to compare against, wherever it sits.
+    match &config.baseline {
+        Some(baseline) if compares.is_empty() => {
             warnings.push(CheckWarning::BaselineNeverCompared {
                 suite: baseline.suite.clone(),
             });
         }
+        None if !compares.is_empty() => {
+            errors.push(CheckError::BaselineWithoutSuite {
+                sites: compares.join(", "),
+            });
+        }
+        _ => {}
     }
     RefsCheck { errors, warnings }
+}
+
+/// What the walk carries down unchanged to every level.
+#[derive(Clone, Copy)]
+pub(crate) struct Walk<'a> {
+    repo_root: &'a std::path::Path,
+    config: &'a ConfigLayer,
+    declared: &'a dyn Fn(&yunta_core::AdapterId) -> Option<yunta_core::Capabilities>,
+    max_depth: u32,
 }
 
 /// What the composition walk found: the errors that refuse the run, and
@@ -47,14 +76,22 @@ pub struct RefsCheck {
     pub warnings: Vec<CheckWarning>,
 }
 
-/// Whether any node of `workflow` compares against the baseline.
-fn compares_baseline(workflow: &Workflow) -> bool {
-    workflow.iter_nodes().any(|node| {
-        matches!(
-            &node.kind,
-            NodeKind::Check(yunta_core::CheckBuiltin::BaselineCompare)
-        )
-    })
+/// Every node of `workflow` that compares against the baseline, named
+/// with the composition `path` that reaches it.
+fn comparisons(workflow: &Workflow, path: &[String]) -> Vec<String> {
+    workflow
+        .iter_nodes()
+        .filter(|node| {
+            matches!(
+                &node.kind,
+                NodeKind::Check(yunta_core::CheckBuiltin::BaselineCompare)
+            )
+        })
+        .map(|node| match path {
+            [] => format!("node `{}`", node.id),
+            _ => format!("node `{}` of `{}`", node.id, path.join(" -> ")),
+        })
+        .collect()
 }
 
 /// Every `(node, use-name)` reference, `parallel` children included.
@@ -70,14 +107,19 @@ pub(crate) fn workflow_uses(workflow: &Workflow) -> Vec<(NodeId, String)> {
 
 pub(crate) fn walk_workflow_refs(
     workflow: &Workflow,
-    repo_root: &std::path::Path,
+    walk: Walk<'_>,
     current_origin: &crate::catalog::WorkflowOrigin,
-    max_depth: u32,
     path: &mut Vec<String>,
     errors: &mut Vec<CheckError>,
-    compares: &mut bool,
+    compares: &mut Vec<String>,
 ) {
     use crate::catalog::{resolve_workflow, CatalogError, WorkflowOrigin};
+    let Walk {
+        repo_root,
+        config,
+        declared,
+        max_depth,
+    } = walk;
 
     for (node, name) in workflow_uses(workflow) {
         if path.contains(&name) {
@@ -171,17 +213,33 @@ pub(crate) fn walk_workflow_refs(
             }
         };
         errors.extend(check_declares_ceiling(&child, &resolved.origin, repo_root));
-        *compares |= compares_baseline(&child);
+        let problems =
+            crate::check::check_mounted(&child, config, declared, mounts_of(workflow, &node));
+        if !problems.is_empty() {
+            errors.push(CheckError::ComposedWorkflowFails {
+                node: node.clone(),
+                name: name.clone(),
+                problems: problems
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            });
+        }
         path.push(name);
-        walk_workflow_refs(
-            &child,
-            repo_root,
-            &resolved.origin,
-            max_depth,
-            path,
-            errors,
-            compares,
-        );
+        compares.extend(comparisons(&child, path));
+        walk_workflow_refs(&child, walk, &resolved.origin, path, errors, compares);
         path.pop();
     }
+}
+
+/// What the `kind: workflow` node `id` of `workflow` mounts into its child.
+fn mounts_of<'a>(workflow: &'a Workflow, id: &NodeId) -> &'a [yunta_core::MountSpec] {
+    workflow
+        .iter_nodes()
+        .find_map(|node| match &node.kind {
+            NodeKind::Workflow { mounts, .. } if node.id == *id => Some(mounts.as_slice()),
+            _ => None,
+        })
+        .unwrap_or(&[])
 }

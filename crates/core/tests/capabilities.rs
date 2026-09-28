@@ -48,11 +48,13 @@ fn every_capability_is_a_field_an_adapter_can_declare() {
     }
 }
 
-/// Only the two the engine refuses at `check` are refusals: everything
-/// else has a stated fallback, so a missing capability never stops a run
-/// that already started.
+/// Only what a workflow's own declarations need is refused, and at
+/// `check`: a permission profile, an agent, and the run tools a document,
+/// a task or a blackboard reaches the engine through. Everything else has
+/// a stated fallback, so a missing capability never stops a run that
+/// already started.
 #[test]
-fn the_only_capabilities_a_check_refuses_are_the_two_a_workflow_names() {
+fn the_only_capabilities_a_check_refuses_are_the_ones_a_workflow_declares_a_need_for() {
     let refused: Vec<Capability> = POLICY
         .iter()
         .filter(|(_, absence)| matches!(absence, Absence::FailAtCheck))
@@ -60,8 +62,12 @@ fn the_only_capabilities_a_check_refuses_are_the_two_a_workflow_names() {
         .collect();
     assert_eq!(
         refused,
-        vec![Capability::PermissionProfiles, Capability::CustomAgents],
-        "a workflow that names a permission profile or an agent says so \
-         before a run is born; everything else degrades"
+        vec![
+            Capability::PermissionProfiles,
+            Capability::CustomAgents,
+            Capability::RunTools
+        ],
+        "a workflow that names a permission profile, an agent, or what only \
+         the run tools carry says so before a run is born; everything else degrades"
     );
 }

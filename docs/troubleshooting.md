@@ -26,6 +26,28 @@ names the node and the exact problem:
   [packs](packs.md#installing-and-using-a-pack) — the ceiling can't be
   exceeded from the consuming side; it's the pack's own manifest that has to
   change.
+- **`node "x": `baseline_compare` has nothing to compare against ...`** (or
+  `coverage_gate`, an unregistered executor, a session with no runner) — the
+  node's kind cannot run without a key the config leaves unset. A run
+  freezes its config, so it would stop there every time: declare the key
+  (`baseline.suite`, `coverage`, `skills.executors`, `defaults.runner`)
+  and check again.
+- **`loop "x" works through the run's tasks document, and nothing ... gives it
+  one`** / **`... reads the ... of node "y", which does not declare it`** /
+  **`... reads the run's ..., and nothing can hold one`** — a read nothing in
+  the run can answer, in the named mode when there is one. Declare the
+  artifact on the node that writes it, bring it in as a `type: document`
+  input, or mount it from the composing workflow.
+- **`node "x" reads "path" (a `files:` context source) ... stops there every
+  time`** — the commit the run starts from lacks the file and no node that
+  runs before the reader can write it. Commit it, or declare the entry
+  `optional: true`. When an earlier node might write it, this is a warning
+  instead.
+- **`node "x": `use: y` fails check — ...`** — a composed workflow its birth
+  would refuse, reported before the parent spends anything.
+- **`pack "p" requires ...`** — a pack workflow needs a runner, an MCP server
+  or a command on `PATH` this project or machine lacks. `yunta doctor` lists
+  the same gaps for every installed pack.
 - **`yunta_schema: "..."` — ... (this binary speaks schema N)`** — the
   workflow (or an installed pack) declares a schema range your installed
   `yunta` binary doesn't satisfy. Check [compatibility](compatibility.md) for
@@ -224,6 +246,12 @@ or change there afterwards. Then run
 `yunta resolve-gate <run_id> retry`. The node starts a fresh attempt; nothing
 before it runs again. A plain `yunta resume` asks the same question again
 rather than spending on a retry nobody chose.
+
+When the failure is a config key the node cannot run without — `baseline.suite`,
+`coverage`, an executor's registration, a runner — the menu offers only
+`abort`: the run's config was frozen when it was created, so no attempt of it
+can go differently. Declare the key in `.yunta/config.yaml` and start a new
+run; `yunta check` refuses the workflow until you do.
 
 ## `yunta pack add`/`update` refuses
 

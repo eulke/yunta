@@ -79,9 +79,9 @@ fn the_readme_command_table_names_exactly_the_subcommands_the_binary_has() {
 }
 
 /// A project every documented workflow can be checked in: the runners
-/// the examples name, bound to the mock, and the catalog the documented
-/// composition resolves its `use:` against — `build-feature` as the
-/// reference itself writes it, and the two names that composition
+/// the examples name bound to the mock, a suite for their comparisons,
+/// and the catalog the documented composition resolves `use:` against —
+/// `build-feature` as the reference writes it, plus the two names it
 /// reaches for which no document spells out.
 fn check_project() -> Checkout {
     let build_feature = fenced_blocks(&reference_schema(), "yaml")
@@ -98,7 +98,7 @@ fn check_project() -> Checkout {
              \x20 planner: [{ adapter: mock, model: m }]\n\
              \x20 mechanical: [{ adapter: mock, model: m }]\n\
              \x20 reviewer: [{ adapter: mock, model: m }]\n\
-             \x20 reviewer-alt: [{ adapter: mock, model: m }]\n",
+             \x20 reviewer-alt: [{ adapter: mock, model: m }]\nbaseline: { suite: \"true\" }\n",
         )
         .file(".yunta/workflows/build-feature.yaml", &build_feature.text)
         .file(

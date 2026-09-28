@@ -181,12 +181,18 @@ pub(super) async fn execute_workflow(
     };
     // The same static gate `yunta run` applies before spending anything
     // — a child born broken is refused at birth, with the check's own
-    // diagnostics.
-    let check_errors = crate::check::check(&child_workflow, &ctx.manifest.config, &|adapter| {
-        ctx.adapters
-            .get(adapter)
-            .map(|adapter| adapter.capabilities())
-    });
+    // diagnostics — asked of the child as it is born: holding what this
+    // node mounts into it.
+    let check_errors = crate::check::check_mounted(
+        &child_workflow,
+        &ctx.manifest.config,
+        &|adapter| {
+            ctx.adapters
+                .get(adapter)
+                .map(|adapter| adapter.capabilities())
+        },
+        mounts,
+    );
     if !check_errors.is_empty() {
         let listed = check_errors
             .iter()

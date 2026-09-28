@@ -666,6 +666,67 @@
       "type": "string",
       "minLength": 1
     },
+    "ConfigKey": {
+      "description": "A config key a node's kind cannot run without.",
+      "oneOf": [
+        {
+          "description": "`baseline_compare` compares against what the lineage measured\nbefore its first node, and `baseline.suite` is what it measures.",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "const": "baseline_suite"
+            }
+          },
+          "required": [
+            "key"
+          ]
+        },
+        {
+          "description": "`coverage_gate` runs `coverage.cmd` and holds it to\n`coverage.threshold`.",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "const": "coverage"
+            }
+          },
+          "required": [
+            "key"
+          ]
+        },
+        {
+          "description": "`kind: executor` runs the binary registered under its name.",
+          "type": "object",
+          "properties": {
+            "executor": {
+              "$ref": "#/$defs/ExecutorName"
+            },
+            "key": {
+              "type": "string",
+              "const": "executor"
+            }
+          },
+          "required": [
+            "key",
+            "executor"
+          ]
+        },
+        {
+          "description": "A session opens on a runner: the node's own, or `defaults.runner`.",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "const": "runner"
+            }
+          },
+          "required": [
+            "key"
+          ]
+        }
+      ]
+    },
     "ContentHash": {
       "description": "A content hash: 64 lowercase hex digits, the SHA-256 of the content",
       "type": "string",
@@ -1679,6 +1740,11 @@
         "path"
       ]
     },
+    "ExecutorName": {
+      "description": "An executor name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
     "Fact": {
       "description": "One fact the engine read off the log: the label a reader scans for,\nand the value under it.\n\nThe label is optional because not every fact needs one. A cause like\n`exit 1` or a sentence like `no forge reachable from this machine`\nalready names itself, and putting a word in front of it would add\nreading without adding meaning; a bare number like `400` says\nnothing until `limits.max_tokens_per_run` is in front of it. A fact\nthat carries a label states it here rather than writing it into the\nvalue, so every surface sets the two apart the same way.",
       "type": "object",
@@ -2169,7 +2235,7 @@
       ]
     },
     "NodeFailedPayload": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "type": "object",
       "properties": {
         "retryable": {
@@ -2233,6 +2299,18 @@
           },
           "required": [
             "requested_scope"
+          ]
+        },
+        {
+          "description": "A config key the node cannot run without, left unset in the\nconfig the run froze when it was created — so no attempt of this\nrun can go differently.",
+          "type": "object",
+          "properties": {
+            "unset": {
+              "$ref": "#/$defs/ConfigKey"
+            }
+          },
+          "required": [
+            "unset"
           ]
         },
         {

@@ -5,6 +5,9 @@ use thiserror::Error;
 use yunta_core::OptionId;
 use yunta_core::{InputName, SchemaRange, ScopeGlob};
 
+/// What refuses a workflow: something its frozen inputs make certain to
+/// stop the run, found before anything is spent. Every sentence names
+/// where and what to change.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CheckError {
     #[error("cycle in depends_on: {path}")]
@@ -31,6 +34,39 @@ pub enum CheckError {
         "node `{node}` references runner `{runner}`, which `runners:` defines with zero candidates"
     )]
     RunnerHasNoCandidates { node: NodeId, runner: RunnerName },
+
+    /// A config key the node's kind cannot run without, left unset. A
+    /// run freezes its config when it is created, so the node would stop
+    /// the run every time it is reached.
+    #[error("node `{node}`: {key}")]
+    Unset {
+        node: NodeId,
+        key: yunta_core::ConfigKey,
+    },
+
+    /// A literal `files:` path the tree a run starts from does not hold,
+    /// read by a node nothing that runs before can write it for.
+    #[error(
+        "{}",
+        super::context_files::missing_sentence(
+            node,
+            path,
+            base.as_deref(),
+            missing,
+            super::context_files::Reach::NothingEarlierCan,
+        )
+    )]
+    ContextFileUnreachable {
+        node: NodeId,
+        path: String,
+        base: Option<String>,
+        missing: super::MissingContextFile,
+    },
+
+    /// A read nothing in the run can answer, so the node that makes it
+    /// stops every time it runs.
+    #[error(transparent)]
+    Unanswerable(#[from] Unanswerable),
 
     /// `runner:` and `runners:` on one node is a contradiction,
     /// not a merge.
@@ -404,6 +440,21 @@ pub enum CheckError {
         detail: String,
     },
 
+    /// A workflow this one composes that its birth would refuse, found
+    /// before the run that would compose it spends anything.
+    #[error("node `{node}`: `use: {name}` fails check — {problems}")]
+    ComposedWorkflowFails {
+        node: NodeId,
+        name: String,
+        problems: String,
+    },
+
+    /// A comparison against a baseline nothing measures: the lineage
+    /// measures once, before its first node, and only the suite the
+    /// config names.
+    #[error("{sites}: {}", yunta_core::ConfigKey::BaselineSuite)]
+    BaselineWithoutSuite { sites: String },
+
     /// The graph of references between workflows must be acyclic.
     #[error("workflow composition cycle: {chain}")]
     WorkflowRefCycle { chain: String },
@@ -416,6 +467,12 @@ pub enum CheckError {
          `limits.max_workflow_depth` is {max} — flatten the composition or raise the limit"
     )]
     WorkflowRefTooDeep { chain: String, depth: u32, max: u32 },
+
+    /// A pack says what it needs from the project and the machine under
+    /// `requires:`; a run of its workflows without it stops where the need
+    /// is.
+    #[error("pack `{pack}` requires {requirement}")]
+    PackRequirementUnmet { pack: String, requirement: String },
 
     /// A pack's `declares` field is a ceiling, not a description — a
     /// pack's own `prompt`/`loop` node can never request a session

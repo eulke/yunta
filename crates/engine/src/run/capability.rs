@@ -49,7 +49,7 @@ pub(crate) async fn require(
         // run reaching here was born under an older binary or a
         // hand-edited manifest. It states the same refusal the check
         // would have.
-        Absence::FailAtCheck | Absence::FailNode => Ok(Decision::Refused(RunError::Broken {
+        Absence::FailAtCheck => Ok(Decision::Refused(RunError::Broken {
             diagnostic: format!(
                 "node `{}` needs `{capability}` and adapter `{}` declares none — \
                  pick a runner on an adapter that has it",

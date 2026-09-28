@@ -57,8 +57,8 @@ pub use capabilities::{Capabilities, Capability, FenceLevel};
 pub use clock::{Clock, SystemClock};
 pub use config::{
     permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
-    CommandPermissions, ConfigLayer, CoverageConfig, DefaultOnFailure, DefaultsConfig, Env,
-    ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, HomeExpansionError,
+    CommandPermissions, ConfigKey, ConfigLayer, CoverageConfig, DefaultOnFailure, DefaultsConfig,
+    Env, ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, HomeExpansionError,
     Isolation, LimitsConfig, McpServerConfig, NetworkPermissions, PackExecutorPolicy,
     PackPermissions, PathsConfig, PermissionsConfig, PricingEntry, ProcessSecrets, ProjectConfig,
     PublisherPermissions, Redactor, RunnerCandidate, SecretSource, SkillsConfig, StorageConfig,

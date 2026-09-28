@@ -25,17 +25,7 @@ pub(super) async fn resolve_node_runner(
         .as_ref()
         .and_then(|defaults| defaults.runner.as_ref());
     let Some(role) = node.runner.as_ref().or(default_runner) else {
-        let end = fail(
-            ctx,
-            node,
-            format!(
-                "node `{}` has no `runner:` and the config declares no `defaults.runner` — \
-                 declare one",
-                node.id
-            ),
-            false,
-        )
-        .await?;
+        let end = super::check_exec::unset(ctx, node, yunta_core::ConfigKey::Runner).await?;
         return Ok(Step::Ended(end));
     };
 
@@ -192,28 +182,28 @@ pub(crate) fn run_tools_allowed(
     {
         return Ok(());
     }
-    // The blackboard's own reason comes first: it is the older one, and
-    // a node can owe both.
-    if ctx.run_tools_host.is_blackboard_member(&node.id) {
-        return Err(RunToolsSetupError::NoRunToolsCapability {
-            node: node.id.clone(),
-            adapter: adapter.id().clone(),
-        });
+    let need = crate::run_tools::RunToolsNeed::of(
+        node,
+        ctx.run_tools_host.is_blackboard_member(&node.id),
+        &crate::run::node_exec::declared_artifacts(ctx, node),
+    );
+    let (node, adapter) = (node.id.clone(), adapter.id().clone());
+    match need {
+        None => Ok(()),
+        Some(crate::run_tools::RunToolsNeed::Blackboard) => {
+            Err(RunToolsSetupError::NoRunToolsCapability { node, adapter })
+        }
+        Some(crate::run_tools::RunToolsNeed::Document(kind)) => {
+            Err(RunToolsSetupError::TypedArtifactNeedsRunTools {
+                node,
+                kind,
+                adapter,
+            })
+        }
+        Some(crate::run_tools::RunToolsNeed::Tasks) => {
+            Err(RunToolsSetupError::TaskNeedsRunTools { node, adapter })
+        }
     }
-    if let Some(kind) = declared_typed_artifact(ctx, node) {
-        return Err(RunToolsSetupError::TypedArtifactNeedsRunTools {
-            node: node.id.clone(),
-            kind,
-            adapter: adapter.id().clone(),
-        });
-    }
-    if matches!(node.kind, yunta_core::NodeKind::Loop { .. }) {
-        return Err(RunToolsSetupError::TaskNeedsRunTools {
-            node: node.id.clone(),
-            adapter: adapter.id().clone(),
-        });
-    }
-    Ok(())
 }
 
 /// Records that a node's `network: false` is declarative only when the

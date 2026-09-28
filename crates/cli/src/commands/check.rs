@@ -49,7 +49,13 @@ pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<O
     // under `cwd` (`.yunta/workflows/`), then packs — the same catalog a
     // run's children resolve against at birth.
     let origin = yunta_engine::origin_of(&cwd, &workflow_path);
-    let refs = yunta_engine::check_workflow_refs(&workflow, &config, &cwd, &origin);
+    let refs = yunta_engine::check_workflow_refs(
+        &workflow,
+        &config,
+        &cwd,
+        &origin,
+        &super::declared_capabilities,
+    );
     errors.extend(refs.errors);
     for warning in &yunta_engine::check_warnings(&workflow, &config) {
         warn(warning);
@@ -57,10 +63,17 @@ pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<O
     for warning in &refs.warnings {
         warn(warning);
     }
-    for warning in &super::context_files_at_head(&ctx, &workflow, config.resolved_isolation()).await
-    {
+    let (unprovided, missing_programs) = super::environment(&cwd, &workflow, &config, &origin);
+    for warning in &missing_programs {
         warn(warning);
     }
+    errors.extend(unprovided);
+    let context_files =
+        super::context_files_at_head(&ctx, &workflow, config.resolved_isolation()).await;
+    for warning in &context_files.warnings {
+        warn(warning);
+    }
+    errors.extend(context_files.errors);
 
     // Verification-effectiveness findings, surfaced here too — right when
     // someone is already looking at this workflow — not only via `stats

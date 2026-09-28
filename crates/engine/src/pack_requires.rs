@@ -33,6 +33,35 @@ impl PackRequiresGap {
     pub fn is_satisfied(&self) -> bool {
         self.missing_runners.is_empty() && self.missing_mcp_servers.is_empty()
     }
+
+    /// Everything this gap leaves a run of the pack's workflows without,
+    /// with `on_path` answering whether a required command is installed
+    /// where the run would look.
+    pub fn unmet(&self, on_path: &dyn Fn(&str) -> bool) -> Vec<crate::CheckError> {
+        let runners = self.missing_runners.iter().map(|runner| {
+            format!(
+                "runner `{runner}`, which `runners:` does not define with a candidate — define it"
+            )
+        });
+        let servers = self.missing_mcp_servers.iter().map(|server| {
+            format!("MCP server `{server}`, which `mcp_servers:` does not define — define it")
+        });
+        let commands = self
+            .required_commands
+            .iter()
+            .filter(|command| !on_path(command))
+            .map(|command| {
+                format!("command `{command}`, which is not on this machine's `PATH` — install it")
+            });
+        runners
+            .chain(servers)
+            .chain(commands)
+            .map(|requirement| crate::CheckError::PackRequirementUnmet {
+                pack: self.pack.to_string(),
+                requirement,
+            })
+            .collect()
+    }
 }
 
 pub fn check_pack_requires(manifest: &PackManifest, config: &ConfigLayer) -> PackRequiresGap {

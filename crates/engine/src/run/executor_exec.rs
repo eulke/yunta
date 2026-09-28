@@ -74,11 +74,12 @@ pub(super) async fn execute_executor(
         .as_ref()
         .and_then(|skills| skills.executors.iter().find(|e| e.name == *executor))
     else {
-        return fail(
+        return super::check_exec::unset(
             ctx,
             node,
-            format!("executor `{executor}` needs a matching entry under `skills.executors`"),
-            false,
+            yunta_core::ConfigKey::Executor {
+                executor: executor.clone(),
+            },
         )
         .await;
     };

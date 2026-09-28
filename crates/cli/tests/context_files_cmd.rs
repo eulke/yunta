@@ -1,6 +1,7 @@
 //! A `files:` path the run would not find is said before the first token
 //! — by `yunta run`, `yunta check` and `yunta doctor` — end to end
-//! against the real compiled binary.
+//! against the real compiled binary: refused when nothing that runs
+//! before its reader can write it, warned about when something might.
 
 use std::path::Path;
 
@@ -18,13 +19,62 @@ nodes:
       - files: ["docs/architecture.md"]
 "#;
 
+/// The same read, after a command that might write the file.
+const READS_AFTER_A_COMMAND: &str = r#"
+name: reads-architecture
+nodes:
+  - { id: prepare, kind: bash, run: "true" }
+  - id: plan
+    kind: prompt
+    runner: planner
+    depends_on: [prepare]
+    prompt: "Plan."
+    context:
+      - files: ["docs/architecture.md"]
+"#;
+
 const ONE_SESSION: &str = "sessions:\n  - outcome: { type: completed, summary: planned }\n";
+
+#[test]
+fn run_refuses_a_file_nothing_before_its_reader_can_write_and_creates_no_run() {
+    let checkout = Checkout::new()
+        .config(MOCK_CONFIG)
+        .workflow("reads", READS_ARCHITECTURE)
+        .file("fixture.yaml", ONE_SESSION)
+        .committed();
+
+    let run = yunta_in!(
+        &checkout.repo,
+        &checkout.home,
+        &[
+            "run",
+            "reads.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml"
+        ]
+    );
+
+    assert!(!run.status.success(), "{}", stdout(&run));
+    let said = stderr(&run);
+    assert!(
+        said.contains("node `plan` reads `docs/architecture.md`")
+            && said.contains("stops there every time"),
+        "{said}"
+    );
+    let runs = checkout.home.join("runs");
+    assert!(
+        !runs.exists() || std::fs::read_dir(&runs).unwrap().next().is_none(),
+        "a refused workflow never becomes a run"
+    );
+}
 
 #[test]
 fn run_warns_before_the_first_token_and_its_document_carries_the_warning() {
     let checkout = Checkout::new()
         .config(MOCK_CONFIG)
-        .workflow("reads", READS_ARCHITECTURE)
+        .workflow("reads", READS_AFTER_A_COMMAND)
         .file("fixture.yaml", ONE_SESSION)
         .committed();
 
@@ -62,10 +112,27 @@ fn run_warns_before_the_first_token_and_its_document_carries_the_warning() {
 }
 
 #[test]
-fn check_names_a_file_the_commit_does_not_hold_without_refusing() {
+fn check_refuses_a_file_nothing_before_its_reader_can_write() {
     let checkout = Checkout::new()
         .config(MOCK_CONFIG)
         .workflow("reads", READS_ARCHITECTURE)
+        .committed();
+
+    let check = yunta_in!(&checkout.repo, &checkout.home, &["check", "reads.yaml"]);
+
+    assert!(!check.status.success(), "{}", stdout(&check));
+    assert!(
+        stderr(&check).contains("node `plan` reads `docs/architecture.md`"),
+        "{}",
+        stderr(&check)
+    );
+}
+
+#[test]
+fn check_names_a_file_the_commit_does_not_hold_without_refusing() {
+    let checkout = Checkout::new()
+        .config(MOCK_CONFIG)
+        .workflow("reads", READS_AFTER_A_COMMAND)
         .committed();
 
     let check = yunta_in!(&checkout.repo, &checkout.home, &["check", "reads.yaml"]);

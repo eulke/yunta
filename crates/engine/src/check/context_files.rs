@@ -3,10 +3,12 @@
 //! the repository, beside [`super::check_workflow_refs`], so `check` keeps
 //! reading none.
 //!
-//! A warning and never a refusal: a node that runs earlier may write the
-//! file, and only the run knows. What this answers is the question a
-//! person can still act on for free — before the first token, not after
-//! the nodes ahead of the reader have spent theirs.
+//! A missing file nothing that runs before its reader can write stops
+//! that node every time it runs, and is refused. One a node that runs
+//! earlier might write is only the run's to know, and is a warning. Both
+//! are said when a person can still act on them for free — before the
+//! first token, not after the nodes ahead of the reader have spent
+//! theirs.
 
 use std::path::{Path, PathBuf};
 
@@ -39,6 +41,22 @@ pub struct RunTreeOrigin<'a> {
     pub base: &'a CommitSha,
 }
 
+/// What the `files:` walk found: the paths no node could supply before
+/// their reader, and the ones only a node that runs earlier could.
+#[derive(Debug, Default)]
+pub struct ContextFilesCheck {
+    pub errors: Vec<CheckError>,
+    pub warnings: Vec<CheckWarning>,
+}
+
+/// Whether anything could still put a missing file where its reader
+/// looks: what tells a refusal from a warning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Reach {
+    EarlierNodeMay,
+    NothingEarlierCan,
+}
+
 /// Every literal `files:` path a node of `workflow` would read and the run
 /// would not find, among the nodes `mode_nodes` includes (every node when
 /// `None`). A path built from a template is only known once the run
@@ -49,7 +67,7 @@ pub async fn check_context_files(
     mode_nodes: Option<&HashSet<NodeId>>,
     origin: RunTreeOrigin<'_>,
     supervision: Supervision<'_>,
-) -> Vec<CheckWarning> {
+) -> ContextFilesCheck {
     let mut read = Vec::new();
     for node in workflow
         .nodes
@@ -58,24 +76,138 @@ pub async fn check_context_files(
     {
         literal_files(node, &mut read);
     }
+    let mut found = ContextFilesCheck::default();
     if read.is_empty() {
-        return Vec::new();
+        return found;
     }
     let root = repository_root(origin.checkout, supervision).await;
-    let mut warnings = Vec::new();
     for (node, path) in read {
         if let Some(missing) = missing(&path, root.as_deref(), origin, supervision).await {
             let base = (origin.isolation == Isolation::Worktree && !Path::new(&path).is_absolute())
                 .then(|| origin.base.abbreviated().to_string());
-            warnings.push(CheckWarning::ContextFileMissing {
-                node,
-                path,
-                base,
-                missing,
-            });
+            match reach(workflow, &node, &path, mode_nodes) {
+                Reach::EarlierNodeMay => found.warnings.push(CheckWarning::ContextFileMissing {
+                    node,
+                    path,
+                    base,
+                    missing,
+                }),
+                Reach::NothingEarlierCan => found.errors.push(CheckError::ContextFileUnreachable {
+                    node,
+                    path,
+                    base,
+                    missing,
+                }),
+            }
         }
     }
-    warnings
+    found
+}
+
+/// Whether something that can run before `reader` might write `path`: a
+/// `before` hook of its own or of its group, an ancestor in the mode, the
+/// node its failure re-routes to and that node's ancestors (the reader
+/// runs again after them), or a sibling in its `parallel` group.
+fn reach(
+    workflow: &Workflow,
+    reader: &NodeId,
+    path: &str,
+    mode_nodes: Option<&HashSet<NodeId>>,
+) -> Reach {
+    let defaults = workflow
+        .node_defaults
+        .as_ref()
+        .and_then(|defaults| defaults.hooks.as_ref());
+    let Some((node, group)) = workflow
+        .iter_nodes_with_group()
+        .find(|(node, _)| node.id == *reader)
+    else {
+        return Reach::EarlierNodeMay;
+    };
+    let runs_before_hooks =
+        |node: &Node| hooks_of(node, defaults).is_some_and(|hooks| !hooks.before.is_empty());
+    if runs_before_hooks(node) || group.is_some_and(runs_before_hooks) {
+        return Reach::EarlierNodeMay;
+    }
+
+    let dependencies = crate::modes::dependencies_in_mode(workflow, mode_nodes);
+    let top = group.map_or(&node.id, |group| &group.id);
+    let mut earlier = ancestors(&dependencies, top);
+    if let Some(on_failure) = &node.on_failure {
+        earlier.extend(ancestors(&dependencies, &on_failure.goto));
+        earlier.insert(on_failure.goto.clone());
+    }
+    let siblings = group
+        .into_iter()
+        .flat_map(|group| match &group.kind {
+            NodeKind::Parallel { nodes, .. } => nodes.as_slice(),
+            _ => &[],
+        })
+        .filter(|sibling| sibling.id != *reader);
+    let writes = workflow
+        .nodes
+        .iter()
+        .filter(|node| earlier.contains(&node.id))
+        .chain(siblings)
+        .any(|node| may_write(node, path, defaults));
+    match writes {
+        true => Reach::EarlierNodeMay,
+        false => Reach::NothingEarlierCan,
+    }
+}
+
+/// Every node `id` waits on, directly or through another, in the graph
+/// `dependencies` describes.
+fn ancestors(dependencies: &HashMap<NodeId, Vec<NodeId>>, id: &NodeId) -> HashSet<NodeId> {
+    let mut seen = HashSet::new();
+    let mut stack: Vec<&NodeId> = dependencies.get(id).into_iter().flatten().collect();
+    while let Some(next) = stack.pop() {
+        if seen.insert(next.clone()) {
+            stack.extend(dependencies.get(next).into_iter().flatten());
+        }
+    }
+    seen
+}
+
+/// Whether `node` might leave `path` written in the run's tree: it runs a
+/// command or a session that can edit, or a hook, and its scope — when it
+/// declares one — reaches the path. A write outside a declared scope fails
+/// the node, so its reader never runs after it.
+fn may_write(node: &Node, path: &str, defaults: Option<&yunta_core::Hooks>) -> bool {
+    let hooks = hooks_of(node, defaults)
+        .is_some_and(|hooks| !hooks.before.is_empty() || !hooks.after.is_empty());
+    let writes = match &node.kind {
+        NodeKind::Bash { .. } | NodeKind::Executor { .. } | NodeKind::Workflow { .. } => true,
+        NodeKind::Check(builtin) => {
+            !matches!(builtin, yunta_core::CheckBuiltin::FindingsGate { .. })
+        }
+        NodeKind::Prompt { .. } | NodeKind::Loop { .. } => {
+            node.permissions != Some(yunta_core::NodePermissions::ReadOnly)
+        }
+        NodeKind::Gate { .. } => false,
+        NodeKind::Parallel { nodes, .. } => {
+            nodes.iter().any(|child| may_write(child, path, defaults))
+        }
+    };
+    (hooks || writes) && within_scope(node, path)
+}
+
+/// The hooks a node runs: its own, or the workflow's defaults when it
+/// declares none.
+fn hooks_of<'a>(
+    node: &'a Node,
+    defaults: Option<&'a yunta_core::Hooks>,
+) -> Option<&'a yunta_core::Hooks> {
+    node.hooks.as_ref().or(defaults)
+}
+
+/// A scope audits the run's tree, so a path outside it — an absolute one
+/// — is one any writer might reach.
+fn within_scope(node: &Node, path: &str) -> bool {
+    if node.scope.is_empty() || Path::new(path).is_absolute() {
+        return true;
+    }
+    yunta_core::scope_globset(&node.scope).map_or(true, |set| set.is_match(path))
 }
 
 /// `(node, path)` for every literal, required `files:` entry of `node`
@@ -145,4 +277,43 @@ async fn missing(
     } else {
         MissingContextFile::Uncommitted
     })
+}
+
+/// The sentence for a missing `files:` path: what is missing, why the run
+/// would not see it, whether anything could still write it, and what to
+/// do — each shape its own remedy.
+pub(super) fn missing_sentence(
+    node: &NodeId,
+    path: &str,
+    base: Option<&str>,
+    missing: &MissingContextFile,
+    reach: Reach,
+) -> String {
+    use MissingContextFile as M;
+    let reads = format!("node `{node}` reads `{path}` (a `files:` context source)");
+    let stops = match reach {
+        Reach::EarlierNodeMay => {
+            format!("unless a node before it writes the file, `{node}` stops there")
+        }
+        Reach::NothingEarlierCan => format!(
+            "`{node}` stops there every time, since no node that runs before it can write the file"
+        ),
+    };
+    let optional = "or declare the entry `optional: true` if the node can do without it";
+    match (missing, base) {
+        (M::Nowhere, Some(base)) => format!(
+            "{reads}, which commit `{base}` — the one a run starts from — does not hold: \
+             {stops}; commit the file first, {optional}"
+        ),
+        (M::Nowhere, None) => format!("{reads}, which does not exist: {stops}; {optional}"),
+        (M::Uncommitted, _) => format!(
+            "{reads}, which is in your checkout but not committed: a run starts from commit \
+             `{}` and never sees it, so {stops}; commit it first",
+            base.unwrap_or("HEAD")
+        ),
+        (M::Ignored, _) => format!(
+            "{reads}, which git ignores: a run's tree never carries an ignored file, so \
+             {stops}; add it with `git add -f`, or read a file git tracks"
+        ),
+    }
 }

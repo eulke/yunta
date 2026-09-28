@@ -6,10 +6,11 @@
 
 use std::path::Path;
 
+use yunta_core::events::Failure;
 use yunta_core::events::{FindingSeverity, TokenUsage};
-use yunta_core::{CheckBuiltin, Node};
+use yunta_core::{CheckBuiltin, ConfigKey, Node};
 
-use super::node_close::{close_node, fail, Close};
+use super::node_close::{close_node, fail, fail_with, Close};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
@@ -85,17 +86,11 @@ async fn execute_baseline_compare(
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let held = ctx.run_view().await?.state.run.baseline().cloned();
+    // The lineage measures before its first node, and only when its
+    // config names a suite: a run that holds no measurement was born under
+    // one that names none.
     let Some(captured) = held else {
-        return fail(
-            ctx,
-            node,
-            "check `baseline_compare` has nothing to compare against: this run holds no \
-             baseline because its lineage's root declared none — declare `baseline.suite` \
-             in config"
-                .to_string(),
-            false,
-        )
-        .await;
+        return unset(ctx, node, ConfigKey::BaselineSuite).await;
     };
 
     // The same memo the criteria use: two comparisons of one suite on a
@@ -153,14 +148,7 @@ async fn execute_coverage_gate(
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
     let Some(coverage) = &ctx.manifest.config.coverage else {
-        return fail(
-            ctx,
-            node,
-            "check `coverage_gate` needs `coverage.cmd` and `coverage.threshold` configured"
-                .to_string(),
-            false,
-        )
-        .await;
+        return unset(ctx, node, ConfigKey::Coverage).await;
     };
 
     let output = match run_command(ctx.supervision(cancel), ctx.worktree, &coverage.cmd).await? {
@@ -290,4 +278,14 @@ fn severity_rank(severity: FindingSeverity) -> u8 {
         FindingSeverity::Minor => 2,
         FindingSeverity::Note => 3,
     }
+}
+
+/// Fails `node` on a config key the run's frozen config leaves unset —
+/// the failure no attempt of this run can change, and which says so.
+pub(super) async fn unset(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    key: ConfigKey,
+) -> Result<NodeEnd, RunError> {
+    fail_with(ctx, node, Failure::unset(key), false, TokenUsage::default()).await
 }

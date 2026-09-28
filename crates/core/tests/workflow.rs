@@ -1330,6 +1330,12 @@ modes:
             reads(&format!(
                 "name: ship\n{nodes}modes:\n  quick:\n    include: [lint, fix]\n"
             ));
+            // A run promoted into `followup` is born holding what `first`
+            // produced, so the source an earlier mode keeps is not missing.
+            reads(&format!(
+                "name: ship\n{nodes}modes:\n  first:\n    include: [lint]\n  \
+                 followup:\n    include: [fix]\n"
+            ));
         }
     }
 

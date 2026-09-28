@@ -261,7 +261,7 @@ y dinámicamente al despachar cada nodo. La degradación dinámica emite un even
 | `custom_agents` | runner con `agent:` sobre este adapter, o nodo con `agent:` que lo use → error en check, nunca ignorado |
 | `usage_reporting` | presupuesto de tokens no exigible → solo timeout y max_turns; warning por run |
 | `skills` | la sesión corre sin las skills que el nodo declara · `capability_degraded` |
-| `run_tools` | un nodo que declara un artifact interpretado o que está en un grupo `coordination: blackboard` falla: no tiene otra puerta, y correrlo sin lo que declaró sería emular en silencio. El resto de los nodos corre; sus findings llegan sólo por artifacts |
+| `run_tools` | un nodo que declara un artifact interpretado, que está en un grupo `coordination: blackboard` o que es un `loop` no tiene otra puerta, y correrlo sin lo que declaró sería emular en silencio: `yunta check` lo rechaza cuando ningún candidato de su runner declara la capacidad, y un run que igual llegue rechaza la sesión. El resto de los nodos corre; sus findings llegan sólo por artifacts |
 | `network_isolation` | `network: false` queda registrado para política y auditoría, no exigido · `capability_degraded` |
 | `run_tools` montado y sin efecto | el adapter reporta cuántas tools del servidor por sesión trae la sesión; cero con endpoint entregado emite `capability_degraded` al abrir la sesión, antes de gastarla |
 

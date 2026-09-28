@@ -13,6 +13,7 @@
 //! [`PermissionsConfig`] and [`permission_layer_conflicts`]).
 
 mod env;
+mod keys;
 mod merge;
 mod permissions;
 mod sections;
@@ -29,6 +30,7 @@ use merge::merge;
 pub use env::{
     user_state_root, Env, HomeExpansionError, ProcessSecrets, Redactor, SecretSource, REDACTED,
 };
+pub use keys::ConfigKey;
 pub use permissions::{
     permission_layer_conflicts, CommandPermissions, NetworkPermissions, PackExecutorPolicy,
     PackPermissions, PermissionsConfig, PublisherPermissions,

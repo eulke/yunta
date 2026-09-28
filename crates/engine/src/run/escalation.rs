@@ -66,18 +66,36 @@ pub(crate) fn build_reroute_escalation(
 /// to hand the node back: a resume alone finds it failed and pauses
 /// again.
 ///
-/// Two more ways back are offered only where they change the outcome. A
-/// node that failed on its scope is offered to have it widened by
-/// exactly what the failure needs — a fresh attempt under the same scope
-/// meets the same wall. A loop whose blocked tasks left work behind is
-/// offered to continue from it — with no work to pick up, running it
-/// again from scratch is the one way back.
+/// Every way back is offered only where it changes the outcome. A node
+/// that failed on its scope is offered to have it widened by exactly what
+/// the failure needs — a fresh attempt under the same scope meets the
+/// same wall. A loop whose blocked tasks left work behind is offered to
+/// continue from it — with no work to pick up, running it again from
+/// scratch is the one way back. And a node that failed on the config the
+/// run froze at birth is offered none: every attempt reads the same
+/// config, so the menu says so and names the way out, a new run.
 pub(crate) fn build_failure_escalation(
     node: &NodeId,
     failure: &Failure,
     next_attempt: u32,
     (continuable, grantable): (bool, bool),
 ) -> Result<Escalation, EscalationError> {
+    if !failure.retry_can_change() {
+        return Escalation::new(
+            format!("node `{node}` failed"),
+            vec![
+                Fact::bare(failure.to_string()),
+                Fact::labelled(
+                    "way out",
+                    "this run's config was frozen when it was created, so no attempt of it \
+                     can go differently — declare what is missing in the config and start a \
+                     new run",
+                ),
+            ]
+            .into(),
+            NonEmpty::from((offers::abort(), Vec::new())),
+        );
+    }
     let mut options = NonEmpty::from((
         offers::retry_node(node, next_attempt),
         vec![offers::abort()],

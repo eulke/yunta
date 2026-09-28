@@ -243,25 +243,41 @@ pub(super) async fn preflight(
     mode: Option<&ModeName>,
     quiet: bool,
     json: bool,
-) -> Preflight {
+) -> Result<Preflight, CliError> {
+    // A run started here is started fresh in its mode: what only a run
+    // promoted into that mode would hold, it does not.
+    let started_in = resolve_mode(manifest, mode);
+    let refused = yunta_engine::check_mode_start(&manifest.workflow, &started_in);
+    if !refused.is_empty() {
+        return Err(CliError::msg(yunta_core::text::problems(
+            "the workflow fails `yunta check`",
+            &refused,
+        )));
+    }
+    let context_files = context_files(ctx, manifest, mode).await?;
     let (prior, budget) = estimate(ctx, manifest, quiet, json).await;
-    Preflight {
+    Ok(Preflight {
         prior,
         warnings: PreRunWarnings {
             budget,
-            context_files: context_files(ctx, manifest, mode).await,
+            context_files,
         },
-    }
+    })
 }
 
 /// The literal `files:` paths the nodes of this run's mode read that the
-/// commit it starts from does not hold, each warned about now — before
-/// the nodes ahead of them spend, which is when the run itself would
-/// find out.
-async fn context_files(ctx: &Context, manifest: &Manifest, mode: Option<&ModeName>) -> Vec<String> {
+/// commit it starts from does not hold — said now, before the nodes
+/// ahead of them spend, which is when the run itself would find out. One
+/// nothing before its reader can write refuses the run; one a node that
+/// runs earlier might write is warned about.
+async fn context_files(
+    ctx: &Context,
+    manifest: &Manifest,
+    mode: Option<&ModeName>,
+) -> Result<Vec<String>, CliError> {
     let mode = resolve_mode(manifest, mode);
     let included = yunta_engine::mode_included_nodes(&manifest.workflow, &mode);
-    let warnings = super::context_file_warnings(
+    let found = super::context_files(
         ctx,
         &manifest.workflow,
         included.as_ref(),
@@ -269,13 +285,20 @@ async fn context_files(ctx: &Context, manifest: &Manifest, mode: Option<&ModeNam
         &manifest.base_commit,
     )
     .await;
-    warnings
+    if !found.errors.is_empty() {
+        return Err(CliError::msg(yunta_core::text::problems(
+            "the workflow fails `yunta check`",
+            &found.errors,
+        )));
+    }
+    Ok(found
+        .warnings
         .iter()
         .map(|warning| {
             warn(warning);
             warning.to_string()
         })
-        .collect()
+        .collect())
 }
 
 /// What this workflow's past runs cost, shown before anything is spent
