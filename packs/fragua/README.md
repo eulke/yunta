@@ -50,7 +50,7 @@ something's missing.
   commit, so commit the file before `yunta run`.
 - **A Rust toolchain**: `lint` runs `cargo clippy -- -D warnings`. In another
   ecosystem it fails after `implement`, the most expensive node, and uses
-  two `fix-lint` attempts before asking you. Copy the workflow into
+  its one `fix-lint` round before asking you. Copy the workflow into
   `.yunta/workflows/` and change `lint` to your own linter first.
 - **Rust sources**: `fix-lint` may edit any `*.rs` file, so a workspace
   with its code under `crates/*/src` works as well as a single crate. A

@@ -573,7 +573,7 @@ El grafo de `depends_on` es acíclico y lo sigue siendo. Las **aristas de re-rut
   kind: bash
   depends_on: [implement]
   run: "npm run lint"
-  on_failure: { goto: fix-lint, max_reroutes: 2 }
+  on_failure: { goto: fix-lint, max_reroutes: 1 }
 ```
 Semántica: al fallar el nodo, el engine emite `node_rerouted` y transfiere control al destino (que puede ser un nodo fuera del camino principal, existente solo para esto). Cuando el destino y su subgrafo completan, **el nodo fallido vuelve a ****`ready`**** y re-corre**. El contador `max_reroutes` es por nodo fallido; al agotarse, `run_paused` + gate de escalación en formato cuestionario — el ciclo jamás es infinito ni silencioso. `yunta check` valida que todo `goto` apunte a un nodo existente y que el subgrafo de corrección no dependa del nodo fallido.
 El output del nodo fallido (stdout/stderr, acotado) se captura como artifact automático, y el nodo de corrección lo monta con la fuente builtin `node-output`:

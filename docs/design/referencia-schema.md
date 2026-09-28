@@ -186,7 +186,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     invariant: true
     depends_on: [implement]
     run: "cargo clippy -- -D warnings"
-    on_failure: { goto: fix-lint, max_reroutes: 2 }
+    on_failure: { goto: fix-lint, max_reroutes: 1 }
 
   - id: fix-lint
     kind: prompt

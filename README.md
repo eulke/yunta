@@ -60,7 +60,7 @@ nodes:
   - id: lint
     kind: bash
     run: "cargo clippy --workspace -- -D warnings"
-    on_failure: { goto: fix-lint, max_reroutes: 2 }
+    on_failure: { goto: fix-lint, max_reroutes: 1 }
 
   - id: fix-lint
     kind: prompt

@@ -92,12 +92,13 @@ name: {{workflow-name}}
 # `on_failure.goto` re-routes to `fix`, which gets an
 # agent session to address what's wrong, then control returns to
 # `lint` to re-verify. `max_reroutes` caps how many correction
-# attempts run before escalating to a person.
+# rounds run before escalating to a person: one, since a round that
+# did not fix it has told you what a person needs to look at.
 nodes:
   - id: lint
     kind: bash
     run: \"true\"  # replace with your real lint/test command
-    on_failure: { goto: fix, max_reroutes: 2 }
+    on_failure: { goto: fix, max_reroutes: 1 }
   - id: fix
     kind: prompt
     # runner: implementer  # uncomment once runners: defines this role
