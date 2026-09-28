@@ -29,3 +29,8 @@ defaults:
   timeout_minutes: 45
   on_failure: pause
 
+# The suite a run measures before its first node; `baseline_compare`
+# nodes (fragua's `tests`) fail when something that passed stops passing.
+baseline:
+  suite: "cargo test --workspace"
+
