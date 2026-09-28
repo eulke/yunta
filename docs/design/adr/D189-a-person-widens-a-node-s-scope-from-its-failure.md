@@ -1,9 +1,9 @@
 ---
 number: D189
 title: "A node that fails on its scope names the paths, and a person may widen the node by exactly those from the failure's menu; a node's session can check its scope and ask first"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D192]
 ---
 
 # D189 — A node that fails on its scope names the paths, and a person may widen the node by exactly those from the failure's menu; a node's session can check its scope and ask first

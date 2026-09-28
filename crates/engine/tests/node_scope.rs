@@ -330,3 +330,52 @@ sessions:
         yunta_core::fence::Advice::ReportFinding
     );
 }
+
+/// The session that asked for the manifest is the one that writes it:
+/// picked back up in the checkout it saw, told what was granted and which
+/// tool shows its scope, rather than a fresh session reading the brief.
+#[tokio::test]
+async fn a_granted_request_resumes_the_node_session_that_asked() {
+    let fixture = ASKS_FIRST_FIXTURE.replace(
+        "capabilities: { run_tools: true }",
+        "capabilities: { run_tools: true, resume_session: true }",
+    );
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(
+            ASKS_FIRST_WORKFLOW,
+            &fixture,
+            &SequencedInteraction::choosing(&["grant"]),
+        )
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    let opened: Vec<_> = bench
+        .events()
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(EventPayload::Session(yunta_core::events::SessionEvent::Opened(p))) => {
+                Some(p.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(opened.len(), 2, "{opened:?}");
+    assert_eq!(opened[1].continues.as_ref(), Some(&opened[0].session_id));
+    assert_eq!(
+        bench.mock().resumes_seen(),
+        vec![opened[0].session_id.clone()]
+    );
+    let resumed = bench.mock().requests_seen()[1].clone();
+    assert!(
+        resumed.cwd.ends_with("unit-worktrees/node/fix-1"),
+        "{}",
+        resumed.cwd.display()
+    );
+    assert!(
+        resumed.prompt.contains("was granted: Cargo.toml")
+            && resumed.prompt.contains("yunta_check_scope"),
+        "{}",
+        resumed.prompt
+    );
+}

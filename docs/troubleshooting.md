@@ -120,8 +120,11 @@ failure names each of those paths. This is a hard post-check, not a warning.
 When the run pauses on it, the decision offers three ways on:
 
 - `grant` widens the node's scope by exactly those paths, for the rest of
-  this run, and runs the node again. Choose it when the edit was the right
-  one.
+  this run, and picks the same session back up in the checkout it worked
+  in, with its work — told what was granted — rather than starting over.
+  When the adapter cannot resume it, or that checkout is gone, a fresh
+  session runs the node again and the log records a `capability_degraded`.
+  Choose it when the edit was the right one.
 - `retry` runs the node again under the same scope. It only helps after you
   change what it failed on in the run's tree yourself; otherwise the node
   writes the same paths and asks again. The decision, at the prompt and in
@@ -256,7 +259,10 @@ run; `yunta check` refuses the workflow until you do.
 A loop task that ends an attempt with its criteria red is `blocked` right
 away: another session on the same task and tree would have nothing the first
 did not. The decision is yours — `retry`, `continue-work` when its attempt
-left work behind, or `grant` when it asked for scope.
+left work behind, or `grant` when it asked for scope. After an answer to a
+task's scope request, granted or denied, the session that asked picks its work
+back up where it left it; if that work already closes the task, no session
+opens at all.
 
 ## `yunta pack add`/`update` refuses
 

@@ -41,8 +41,8 @@ pub(crate) use criteria::{could_not_run, probe, Probe};
 pub use criteria::{post_check, pre_check, Memo, Memoized};
 pub(crate) use judge::{judge, Work};
 pub(crate) use session::dispatch_session;
-pub(crate) use session::Dispatched;
 pub use session::{DispatchError, RunToolsNeed, SessionObserver, SessionSetup};
+pub(crate) use session::{Dispatched, Opening, Resume};
 
 #[derive(Debug, Error)]
 pub enum TaskCycleError {
@@ -194,6 +194,19 @@ pub struct AttemptEnv<'a> {
     /// before any session opens. `None` for a cycle that starts from the
     /// unit's own tree.
     pub carry: Option<&'a yunta_core::CommitSha>,
+    /// The session this cycle picks back up after the answer to the scope
+    /// it asked for, instead of opening its first session fresh. `None`
+    /// for a cycle that starts a conversation of its own.
+    pub resume: Option<Continuing>,
+}
+
+/// A session a cycle picks back up, and the answer it is told: what
+/// changed since it stopped, which is the one reason it is continued
+/// rather than started over.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Continuing {
+    pub session: yunta_core::SessionId,
+    pub answer: yunta_core::events::ScopeAnswer,
 }
 
 /// Runs a task through the full cycle: pre-check once, then dispatch →
@@ -234,6 +247,7 @@ pub async fn run_task(
         history,
         supervision,
         carry,
+        resume,
     } = env;
     let ScopeGovernance {
         permissions,
@@ -297,6 +311,7 @@ pub async fn run_task(
         max_expansion_files,
         grants,
         already_granted_paths,
+        resume: None,
         audit,
         cancel,
         setup,
@@ -306,9 +321,16 @@ pub async fn run_task(
     // A cycle a person had continue from the work its task's last
     // attempt left judges that work before anything else: the first
     // cycle's pre-check already proved the criteria red, and a session
-    // opens only when the work does not close the task.
-    let (pre_runs, mut last_check) = match carry {
-        Some(left) => match carry::continue_from(&params, recorder, left).await? {
+    // opens only when the work does not close the task. A cycle resuming
+    // the session that left the work finds it already in its unit, and
+    // judges it where it is.
+    let carried = match (carry, &resume) {
+        (Some(left), _) => Some(carry::continue_from(&params, recorder, left).await?),
+        (None, Some(_)) => Some(carry::judge_in_place(&params, recorder).await?),
+        (None, None) => None,
+    };
+    let (pre_runs, mut last_check) = match carried {
+        Some(carried) => match carried {
             carry::Carry::Settled {
                 outcome,
                 last_check,
@@ -361,9 +383,13 @@ pub async fn run_task(
     // What the engine grants during an attempt holds for every attempt
     // after it: the one it is granted for is the next.
     let mut granted: Vec<ScopeGlob> = params.already_granted_paths.to_vec();
+    // The session the next attempt picks back up: the one this cycle was
+    // reopened to continue, then the one an engine grant widened.
+    let mut continuing = resume;
     for attempt in 1.. {
         let attempt_params = AttemptParams {
             already_granted_paths: &granted,
+            resume: continuing.as_ref(),
             ..params
         };
         let (staged, step) = run_one_attempt(&attempt_params, recorder, attempt).await?;
@@ -388,12 +414,16 @@ pub async fn run_task(
             }
             AttemptStep::Again(record) => {
                 last_check = record.recorded.or(last_check);
-                granted.extend(
-                    record
-                        .scope_expansion
-                        .iter()
-                        .flat_map(|outcome| outcome.request.paths.iter().cloned()),
-                );
+                let widened: Vec<ScopeGlob> = record
+                    .scope_expansion
+                    .iter()
+                    .flat_map(|outcome| outcome.request.paths.iter().cloned())
+                    .collect();
+                granted.extend(widened.iter().cloned());
+                continuing = record.session.clone().map(|session| Continuing {
+                    session,
+                    answer: yunta_core::events::ScopeAnswer::Granted(widened),
+                });
                 attempts.push(record);
             }
             AttemptStep::Unmet(record) => {

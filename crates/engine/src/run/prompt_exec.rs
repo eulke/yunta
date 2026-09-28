@@ -142,36 +142,40 @@ pub(super) async fn execute_prompt(
         Ok(setup) => setup,
         Err(end) => return Ok(end),
     };
-    let super::session_plan::OpenedSession {
-        request,
-        run_tools: _run_tools,
-    } = match super::session_plan::open_session(
-        &setup,
-        super::session_plan::SessionPlan {
-            node,
-            task: None,
-            prompt: rendered,
-            cwd: ctx.worktree.to_path_buf(),
-            profile: session_profile(node),
-            budget: ctx.session_budget().await?,
-        },
-        adapter.as_ref(),
-        Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
-    )
-    .await
-    {
-        Ok(opened) => opened,
-        // A node that cannot proceed without the run tools it declared:
-        // refused before a token is spent, naming what has no way in.
-        Err(super::session_plan::OpenSessionError::RunTools(error)) => {
-            return super::node_close::fail(ctx, node, error.to_string(), false).await
-        }
-        Err(super::session_plan::OpenSessionError::Audit(source)) => {
-            return Err(RunError::Storage(source))
-        }
-    };
+    let super::session_plan::OpenedSession { request, run_tools } =
+        match super::session_plan::open_session(
+            &setup,
+            super::session_plan::SessionPlan {
+                node,
+                task: None,
+                prompt: rendered,
+                cwd: ctx.worktree.to_path_buf(),
+                profile: session_profile(node),
+                budget: ctx.session_budget().await?,
+            },
+            adapter.as_ref(),
+            Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
+        )
+        .await
+        {
+            Ok(opened) => opened,
+            // A node that cannot proceed without the run tools it declared:
+            // refused before a token is spent, naming what has no way in.
+            Err(super::session_plan::OpenSessionError::RunTools(error)) => {
+                return super::node_close::fail(ctx, node, error.to_string(), false).await
+            }
+            Err(super::session_plan::OpenSessionError::Audit(source)) => {
+                return Err(RunError::Storage(source))
+            }
+        };
 
-    let resume_session = resume_target(ctx, node, adapter.as_ref()).await?;
+    // An attempt picking up the session that asked for scope resumes it,
+    // told the answer; an interrupted one resumes under its policy.
+    let continuing = ctx.unit.and_then(|mine| mine.continues);
+    let resume_session = match continuing {
+        Some(continuing) => Some(continuing.session.clone()),
+        None => resume_target(ctx, node, adapter.as_ref()).await?,
+    };
     // The staging is the session's. A session continuing here already
     // wrote in it and what it left is work it did; a fresh session —
     // including one replacing an interrupted session the adapter cannot
@@ -189,16 +193,39 @@ pub(super) async fn execute_prompt(
     .await?;
 
     let staged = adapter.staged_paths(&request);
+    let brief = request.prompt.clone();
+    let request = match continuing {
+        Some(continuing) => super::session_plan::with_prompt(
+            request,
+            crate::run_tools::continuation_notice(
+                run_tools.as_ref(),
+                &continuing.answer,
+                crate::run_tools::Asker::Node,
+            ),
+        ),
+        None => request,
+    };
     let crate::task_cycle::Dispatched {
         outcome,
         tokens,
         fence: _fence,
+        session: _session,
     } = dispatch_session(
         adapter.as_ref(),
         request,
         cancel,
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
-        resume_session.as_ref(),
+        crate::task_cycle::Opening {
+            task: None,
+            // A continued session has the brief to fall back on; an
+            // interrupted one was already checked to be resumable.
+            resume: resume_session
+                .as_ref()
+                .map(|session| crate::task_cycle::Resume {
+                    session,
+                    fresh_prompt: continuing.map(|_| brief.as_str()),
+                }),
+        },
     )
     .await
     .map_err(|error| match error {

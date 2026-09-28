@@ -14,7 +14,7 @@ use crate::events::node::kinds::NodeEvent;
 use crate::events::tasks::kinds::TaskEvent;
 use crate::events::TaskStatus;
 use crate::hash::CommitSha;
-use crate::ids::{NodeId, Seq, TaskId};
+use crate::ids::{NodeId, Seq, SessionId, TaskId};
 
 /// What the log says about one task.
 #[derive(Debug, Clone, PartialEq)]
@@ -40,6 +40,12 @@ pub struct TaskRecord {
     /// reopened to continue, what it picks up. Cleared by every status
     /// change that names none.
     pub left_work: Option<(NodeId, CommitSha)>,
+    /// The session a task reopened after the answer to its scope request
+    /// resumes. Cleared, like `left_work`, by every status change that
+    /// names none.
+    pub resumes: Option<SessionId>,
+    /// The last session that worked this task.
+    pub last_session: Option<SessionId>,
 }
 
 /// Every task's record, by id, and what the criteria they were checked
@@ -190,9 +196,27 @@ impl TaskLedger {
                     .left_work
                     .clone()
                     .and_then(|work| meta.node.cloned().map(|node| (node, work)));
+                record.resumes = p.resumes.clone();
                 Ok(())
             }
         }
+    }
+
+    /// Folds a session a loop opened for one of its tasks: the task's
+    /// last session. A session that names no task, or a task nothing
+    /// registered, moves nothing.
+    pub fn apply_session(&mut self, event: &crate::events::session::kinds::SessionEvent) {
+        let crate::events::session::kinds::SessionEvent::Opened(p) = event else {
+            return;
+        };
+        let Some(record) = p
+            .task_id
+            .as_ref()
+            .and_then(|task| self.per_task.get_mut(task))
+        else {
+            return;
+        };
+        record.last_session = Some(p.session_id.clone());
     }
 }
 
@@ -205,6 +229,8 @@ impl Default for TaskRecord {
             attempts: 0,
             commit: None,
             left_work: None,
+            resumes: None,
+            last_session: None,
         }
     }
 }

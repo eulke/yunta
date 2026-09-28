@@ -247,6 +247,9 @@ pub enum DispatchOutcome {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AttemptRecord {
     pub attempt: u32,
+    /// The session this attempt ran in, once it opened one — what an
+    /// attempt after an engine grant resumes.
+    pub session: Option<yunta_core::SessionId>,
     pub dispatch: DispatchOutcome,
     /// Tokens this attempt's session consumed, from its `Usage` events.
     pub tokens: TokenUsage,

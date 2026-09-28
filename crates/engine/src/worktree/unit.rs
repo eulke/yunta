@@ -153,6 +153,93 @@ pub async fn open_unit(
     })
 }
 
+/// Reopens the checkout a session saw, for a session picked back up:
+/// the unit of `who` that holds `left` — the work a blocked task's attempt
+/// committed on its branch — or, with no `left`, the last unit `who`
+/// opened, whose attempt left its work as it was. The work goes back to
+/// where the attempt had it: uncommitted changes on the tree the unit
+/// began from, which is what its audit answers for.
+///
+/// Found by what the checkout holds, not by an attempt number: a
+/// session picked back up works on in the unit it saw, so an attempt
+/// does not always open a unit of its own. `None` when no such checkout
+/// is still there — cleaned up, or moved by something else.
+pub async fn reopen_unit(
+    run_dir: &Path,
+    who: UnitId,
+    left: Option<&CommitSha>,
+    supervision: Supervision<'_>,
+) -> Result<Option<Unit>, WorktreeError> {
+    for worktree in units_of(run_dir, &who).await {
+        let Ok(head) = head_commit(&worktree, supervision).await else {
+            if left.is_none() {
+                return Ok(None);
+            }
+            continue;
+        };
+        let base = match left {
+            None => head,
+            Some(left) if head == *left => back_to_base(&worktree, left, supervision).await?,
+            Some(_) => continue,
+        };
+        let from = super::head_tree(&worktree, supervision).await?;
+        return Ok(Some(Unit {
+            who,
+            worktree,
+            base,
+            from,
+        }));
+    }
+    Ok(None)
+}
+
+/// Every checkout `who` opened in this run, the latest first.
+async fn units_of(run_dir: &Path, who: &UnitId) -> Vec<PathBuf> {
+    let named = who.to_string();
+    let (kind, stem) = named.split_once('/').unwrap_or(("", named.as_str()));
+    let Ok(mut entries) =
+        tokio::fs::read_dir(crate::run_dir::unit_worktrees(run_dir).join(kind)).await
+    else {
+        return Vec::new();
+    };
+    let mut opened: Vec<(u32, PathBuf)> = Vec::new();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let attempt = name
+            .strip_prefix(stem)
+            .and_then(|rest| rest.strip_prefix('-'))
+            .and_then(|number| number.parse().ok());
+        if let Some(attempt) = attempt {
+            opened.push((attempt, entry.path()));
+        }
+    }
+    opened.sort_by_key(|(attempt, _)| std::cmp::Reverse(*attempt));
+    opened.into_iter().map(|(_, path)| path).collect()
+}
+
+/// Puts the work committed at `left` back as uncommitted changes on the
+/// commit it was made on — where an attempt's own edits sit — and
+/// answers that commit.
+async fn back_to_base(
+    worktree: &Path,
+    left: &CommitSha,
+    supervision: Supervision<'_>,
+) -> Result<CommitSha, WorktreeError> {
+    let parent = format!("{}^", left.as_str());
+    let base: CommitSha =
+        crate::git::output(worktree, &["rev-parse", parent.as_str()], supervision)
+            .await?
+            .trim()
+            .parse()
+            .map_err(|source| WorktreeError::NotACommit {
+                args: format!("rev-parse {parent}"),
+                cwd: worktree.to_path_buf(),
+                source,
+            })?;
+    crate::git::output(worktree, &["reset", "-q", base.as_str()], supervision).await?;
+    Ok(base)
+}
+
 /// What putting a blocked task's work back into a fresh unit came to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Carried {

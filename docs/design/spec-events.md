@@ -184,6 +184,8 @@ que es lo que ese log significaba (D182).
 | `model` | `Option<ModelName>` | no | el modelo que el CLI reportó para la sesión; ausente cuando no reportó ninguno — nunca el pedido |
 | `capabilities` | `Capabilities` (`fence`: `none \| tool_calls \| filesystem`; el resto bools: resume_session, permission_profiles, custom_agents, usage_reporting, skills, run_tools, network_isolation) | sí | snapshot de capacidades del adapter en ese momento — constantes tras construcción. Un log viejo lleva `edit_hooks` en vez de `fence`, y el lector lo lee como `none` |
 | `fence` | `Coverage` (`{"coverage": "exact"}` · `{"coverage": "widened_to_roots", "roots": [...]}` · `{"coverage": "tools_only"}`) | no | cuánto del canal de escritura cercó realmente la sesión, derivado de lo que el adapter construyó; ausente cuando no construyó ninguno. El nivel viaja una vez, en `capabilities.fence` |
+| `task_id` | `Option<TaskId>` | no | la tarea que trabaja una sesión de `loop`; ausente para la sesión propia de un nodo. Con `concurrency` > 1 las sesiones de un loop se intercalan, y es lo que dice de qué tarea es cada una |
+| `continues` | `Option<SessionId>` | no | la sesión que esta reanuda: la misma conversación, retomada después de la respuesta a lo que pidió (una ampliación de scope concedida o denegada). Ausente para una sesión que abrió nueva; cuando la reanudación no fue posible, un `capability_degraded` (`resume_session` → sesión nueva) lo dice |
 
 ### 5.6 `agent_message` — adapter
 **Fuente:** resumen/uso de tokens (nunca el texto completo)
@@ -251,6 +253,7 @@ registra.
 | `caused_by` | referencia a `seq` de otro evento | sí | el evento (p. ej. `criteria_checked`) que justifica la transición |
 | `commit` | `Option<CommitSha>` | no | dónde aterrizó el trabajo de la tarea, en un `done` y en ningún otro estado: el commit que el árbol del run llevaba tras integrarlo. Es lo que vuelve a un `done` respondible desde otro run — un árbol desciende de ese commit o no tiene el trabajo |
 | `left_work` | `Option<CommitSha>` | no | el commit con el trabajo que dejó el último intento de la tarea, commiteado en la rama de su unidad: en un `blocked`, trabajo desde el que una persona puede elegir continuar (`continue-work`); en el `pending` de esa reapertura, el trabajo desde el que continúa. Ausente cuando el intento no cambió nada, y en cualquier otra transición |
+| `resumes` | `Option<SessionId>` | no | en el `pending` que reabre una tarea después de la respuesta al scope que pidió su sesión: esa sesión, que el ciclo siguiente reanuda en la unidad que tiene su trabajo. Ausente en cualquier otra transición |
 
 ### 5.12 `scope_checked` — engine
 **Fuente:** task_id/node_id, diff observado, violaciones

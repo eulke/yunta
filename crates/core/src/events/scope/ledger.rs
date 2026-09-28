@@ -17,6 +17,8 @@ use crate::ids::{NodeId, Seq, TaskId};
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GrantLedger {
     per_task: BTreeMap<TaskId, Vec<ScopeGlob>>,
+    /// The last answer each task's request got.
+    answers: BTreeMap<TaskId, ScopeAnswer>,
     per_node: BTreeMap<NodeId, NodeGrants>,
     granted: u32,
     denied: u32,
@@ -30,6 +32,18 @@ pub struct GrantLedger {
 struct NodeGrants {
     paths: Vec<ScopeGlob>,
     last_at: Seq,
+    /// What the latest grant added.
+    last_paths: Vec<ScopeGlob>,
+}
+
+/// What a scope request was answered with, as the log states it — what
+/// a session that asked is told when it picks its work back up.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScopeAnswer {
+    /// Granted these paths.
+    Granted(Vec<ScopeGlob>),
+    /// Refused, with the reason the decider gave, when it gave one.
+    Denied(Option<String>),
 }
 
 impl GrantLedger {
@@ -46,6 +60,19 @@ impl GrantLedger {
         self.per_node
             .get(node)
             .map(|grants| grants.paths.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// The last answer `task`'s scope request got.
+    pub fn answer_for(&self, task: &TaskId) -> Option<&ScopeAnswer> {
+        self.answers.get(task)
+    }
+
+    /// What the latest grant to `node`'s own scope added.
+    pub fn last_granted_to_node_paths(&self, node: &NodeId) -> &[ScopeGlob] {
+        self.per_node
+            .get(node)
+            .map(|grants| grants.last_paths.as_slice())
             .unwrap_or(&[])
     }
 
@@ -79,23 +106,34 @@ impl GrantLedger {
             ScopeEvent::Granted(p) => {
                 self.granted += 1;
                 match (&p.task_id, meta.node) {
-                    (Some(task), _) => self
-                        .per_task
-                        .entry(task.clone())
-                        .or_default()
-                        .extend(p.paths.iter().cloned()),
+                    (Some(task), _) => {
+                        self.per_task
+                            .entry(task.clone())
+                            .or_default()
+                            .extend(p.paths.iter().cloned());
+                        self.answers
+                            .insert(task.clone(), ScopeAnswer::Granted(p.paths.clone()));
+                    }
                     (None, Some(node)) => {
                         let grants = self.per_node.entry(node.clone()).or_insert(NodeGrants {
                             paths: Vec::new(),
                             last_at: meta.seq,
+                            last_paths: Vec::new(),
                         });
                         grants.paths.extend(p.paths.iter().cloned());
                         grants.last_at = meta.seq;
+                        grants.last_paths = p.paths.clone();
                     }
                     (None, None) => {}
                 }
             }
-            ScopeEvent::Denied(_) => self.denied += 1,
+            ScopeEvent::Denied(p) => {
+                self.denied += 1;
+                self.answers.insert(
+                    p.task_id.clone(),
+                    ScopeAnswer::Denied(p.denial_reason.clone()),
+                );
+            }
         }
     }
 }

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fence::Coverage;
 use crate::hash::ContentHash;
-use crate::ids::{AdapterId, AgentName, ModelName, SessionId};
+use crate::ids::{AdapterId, AgentName, ModelName, SessionId, TaskId};
 use crate::{Capabilities, Capability};
 
 /// The closed reason a run tool call failed, without adapter error text.
@@ -97,6 +97,15 @@ pub struct AgentSessionOpenedPayload {
     /// The level travels once, in `capabilities.fence`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fence: Option<Coverage>,
+    /// The task a loop's session works. Absent for a node's own session,
+    /// and on a log written before sessions named their task.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<TaskId>,
+    /// The session this one resumes: the same conversation, picked up
+    /// after the answer to what it asked. Absent for a session that
+    /// opened fresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continues: Option<SessionId>,
 }
 
 /// A write the fence refused before it happened.

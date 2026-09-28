@@ -445,12 +445,15 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
         task_yaml("task-n", "n", "a.txt", "test -f a.txt")
     );
     let mut fixture = plan_session(&tasks);
-    // Attempt 1 asks; the human denies; attempt 2 complies with the
-    // original scope (a.txt only) and succeeds.
-    fixture.push_str(&requesting_session("task-n"));
-    fixture.push_str(
-        "  - match_prompt_contains: \"task-n\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-n }\n",
-    );
+    // Attempt 1 writes what its scope allows and asks for b.txt, which a
+    // fence would have refused; the human denies. The work it left already
+    // closes the task within its scope, so no second session opens.
+    let request = "paths:\n  - b.txt\nreason: \"adjacent fix in b.txt\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
+    fixture.push_str(&format!(
+        "  - match_prompt_contains: \"task-n\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: asked }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+        request,
+    ));
 
     let interaction = ScriptedInteraction::new(yunta_core::events::HumanChoice {
         option: "deny".into(),
@@ -984,5 +987,140 @@ async fn a_start_records_the_tree_its_attempt_began_from() {
     assert!(
         started.from_tree.is_some(),
         "un arranque nombra el árbol del que parte: {started:?}"
+    );
+}
+
+/// A task whose session asks for `b.txt` and, as a fence would have it,
+/// writes only `a.txt`; its criterion needs both. After a person grants,
+/// `answered` scripts what the session does next.
+fn asks_then(answered: &str, resumable: bool) -> (String, String) {
+    let tasks = format!(
+        "tasks:\n{}",
+        task_yaml("task-h", "h", "a.txt", "test -f a.txt && test -f b.txt")
+    );
+    let request = "paths:\n  - b.txt\nreason: \"the criterion needs b.txt\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
+    let asks = format!(
+        "  - match_prompt_contains: \"task-h\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: asked }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+        request,
+    );
+    let fixture = plan_session(&tasks).replace(
+        "capabilities: { run_tools: true }",
+        &format!("capabilities: {{ run_tools: true, resume_session: {resumable} }}"),
+    ) + &asks
+        + answered;
+    (scope_expansion_workflow("ask", &[], None), fixture)
+}
+
+fn grants() -> ScriptedInteraction {
+    ScriptedInteraction::new(yunta_core::events::HumanChoice {
+        option: "grant".into(),
+        by: "eulke".into(),
+        free_text: None,
+    })
+}
+
+/// The answer is the one thing that changed for the session that asked:
+/// it is picked back up in the checkout it saw, holding its work, told
+/// what was granted and where to read its scope — not started over.
+#[tokio::test]
+async fn a_granted_request_resumes_the_session_that_asked_on_its_own_work() {
+    let (workflow, fixture) = asks_then(
+        "  - match_prompt_contains: \"was granted: b.txt\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: wrote-b }\n",
+        true,
+    );
+    let bench = Bench::new();
+    let RunReport { terminal, state } = bench
+        .run_with_interaction(&workflow, &fixture, &grants())
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        state.tasks.status("task-h"),
+        Some(yunta_core::events::TaskStatus::Done)
+    );
+
+    let opened = task_sessions(&bench, "task-h");
+    assert_eq!(opened.len(), 2, "{opened:?}");
+    assert_eq!(opened[1].continues.as_ref(), Some(&opened[0].session_id));
+    assert_eq!(
+        bench.mock().resumes_seen(),
+        vec![opened[0].session_id.clone()]
+    );
+    let resumed = bench.mock().requests_seen().last().cloned().unwrap();
+    assert!(
+        resumed.cwd.ends_with("unit-worktrees/task/task-h-1"),
+        "the checkout the session saw: {}",
+        resumed.cwd.display()
+    );
+    assert!(resumed.prompt.contains("yunta_task"), "{}", resumed.prompt);
+}
+
+/// An adapter that cannot resume still keeps the work: a fresh session
+/// opens in the same checkout on the brief, and the log says the
+/// conversation was not continued.
+#[tokio::test]
+async fn an_adapter_that_cannot_resume_opens_fresh_on_the_same_work() {
+    let (workflow, fixture) = asks_then(
+        "  - match_prompt_contains: \"task-h\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: wrote-b }\n",
+        false,
+    );
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(&workflow, &fixture, &grants())
+        .await;
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "a.txt from the first session is still there"
+    );
+
+    let opened = task_sessions(&bench, "task-h");
+    assert_eq!(opened.len(), 2, "{opened:?}");
+    assert_eq!(opened[1].continues, None);
+    assert!(bench.mock().resumes_seen().is_empty());
+    assert!(bench.events().iter().any(|e| matches!(
+        e.payload(),
+        Some(yunta_core::events::EventPayload::Session(
+            yunta_core::events::SessionEvent::CapabilityDegraded(_)
+        ))
+    )));
+}
+
+/// The sessions `task` opened, in order.
+fn task_sessions(bench: &Bench, task: &str) -> Vec<yunta_core::events::AgentSessionOpenedPayload> {
+    bench
+        .events()
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Session(
+                yunta_core::events::SessionEvent::Opened(p),
+            )) if p.task_id.as_ref().is_some_and(|id| id.as_str() == task) => Some(p.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// An engine grant changes what the next attempt may write, and nothing
+/// else: that attempt resumes the session that asked, in the same unit.
+#[tokio::test]
+async fn the_attempt_after_an_engine_grant_resumes_the_session_that_asked() {
+    let (_, fixture) = asks_then(
+        "  - match_prompt_contains: \"was granted: b.txt\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: wrote-b }\n",
+        true,
+    );
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run(
+            &scope_expansion_workflow("rules", &["b.txt"], None),
+            &fixture,
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    let opened = task_sessions(&bench, "task-h");
+    assert_eq!(opened.len(), 2, "{opened:?}");
+    assert_eq!(opened[1].continues.as_ref(), Some(&opened[0].session_id));
+    assert_eq!(
+        bench.mock().resumes_seen(),
+        vec![opened[0].session_id.clone()]
     );
 }

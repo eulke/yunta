@@ -719,3 +719,34 @@ fn a_node_started_without_a_tree_reads_as_the_runs_own_base() {
         named
     );
 }
+
+/// A log written before sessions named their task and the session they
+/// continue, and before a reopening named the session it resumes, reads
+/// as sessions and reopenings that name neither.
+#[test]
+fn a_log_written_before_continuations_reads_as_naming_none() {
+    let opened: EventPayload = serde_json::from_value(serde_json::json!({
+        "kind": "agent_session_opened",
+        "session_id": "s-1",
+        "capabilities": {}
+    }))
+    .unwrap();
+    let EventPayload::Session(yunta_core::events::SessionEvent::Opened(opened)) = opened else {
+        panic!("reads as the session it is: {opened:?}");
+    };
+    assert_eq!((opened.task_id, opened.continues), (None, None));
+
+    let reopened: EventPayload = serde_json::from_value(serde_json::json!({
+        "kind": "task_status_changed",
+        "task_id": "T001",
+        "new_status": "pending",
+        "caused_by": 7,
+        "left_work": "0a753387f5ecb38915805fad12cc4ddba873b0d6"
+    }))
+    .unwrap();
+    let EventPayload::Tasks(yunta_core::events::TaskEvent::StatusChanged(reopened)) = reopened
+    else {
+        panic!("reads as the status change it is: {reopened:?}");
+    };
+    assert_eq!(reopened.resumes, None);
+}

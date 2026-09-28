@@ -160,6 +160,28 @@ pub struct NodeRecord {
     /// start and its verdict. `None` once a later attempt closes
     /// normally, because then nothing was left open.
     pub orphaned_session: Option<OrphanedSession>,
+    /// The last session this node opened of its own — not one a loop
+    /// opened for a task — kept past the attempt's terminal: what a
+    /// continuation after the answer to its scope request picks back up.
+    pub last_session: Option<crate::ids::SessionId>,
+}
+
+impl NodeRecord {
+    /// A session this node's attempt opened: open while the attempt is,
+    /// and — when it is the node's own, not a task's — the one a
+    /// continuation picks back up.
+    fn opened(&mut self, p: &crate::events::AgentSessionOpenedPayload, at: DateTime<Utc>) {
+        if p.task_id.is_none() {
+            self.last_session = Some(p.session_id.clone());
+        }
+        self.sessions.push(OpenSession {
+            session_id: p.session_id.clone(),
+            agent: p.agent.clone(),
+            model: p.model.clone(),
+            fence: p.fence.clone(),
+            opened_at: at,
+        });
+    }
 }
 
 /// What a resume finds of the attempt before this one, when that attempt
@@ -416,13 +438,7 @@ impl NodeLedger {
         let record = self.per_node.entry(node.clone()).or_default();
         record.last_event_at = Some(meta.at);
         match event {
-            SessionEvent::Opened(p) => record.sessions.push(OpenSession {
-                session_id: p.session_id.clone(),
-                agent: p.agent.clone(),
-                model: p.model.clone(),
-                fence: p.fence.clone(),
-                opened_at: meta.at,
-            }),
+            SessionEvent::Opened(p) => record.opened(p, meta.at),
             SessionEvent::WriteRefused(p) => record.refused.push(RefusedWrite {
                 session_id: p.session_id.clone(),
                 target: p.target.clone(),

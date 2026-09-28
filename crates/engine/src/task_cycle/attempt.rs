@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{Phase, SessionDeath, TokenUsage};
+use yunta_core::events::{Phase, SessionDeath};
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::Task;
 
@@ -34,6 +34,9 @@ pub(super) struct AttemptParams<'a> {
     /// Every path granted before this attempt: on the log when the cycle
     /// began, and what the engine granted in the cycle's earlier attempts.
     pub(super) already_granted_paths: &'a [ScopeGlob],
+    /// The session this attempt picks back up, and the answer it is told,
+    /// instead of opening a fresh one.
+    pub(super) resume: Option<&'a super::Continuing>,
     pub(super) audit: Option<(&'a dyn SessionObserver, &'a yunta_core::NodeId)>,
     pub(super) cancel: &'a CancellationToken,
     pub(super) setup: &'a SessionSetup,
@@ -68,7 +71,15 @@ pub(super) async fn run_one_attempt(
     recorder: Recorder<'_>,
     attempt: u32,
 ) -> Result<(Vec<PathBuf>, AttemptStep), TaskCycleError> {
-    let (last_staged, dispatch_outcome, tokens, covered) = open_and_dispatch(params).await?;
+    let (
+        last_staged,
+        super::Dispatched {
+            outcome: dispatch_outcome,
+            tokens,
+            fence: covered,
+            session,
+        },
+    ) = open_and_dispatch(params).await?;
     let &AttemptParams {
         task,
         unit,
@@ -98,6 +109,7 @@ pub(super) async fn run_one_attempt(
         recorder.scope(&scope).await?;
         let record = AttemptRecord {
             attempt,
+            session,
             dispatch: DispatchOutcome::Cancelled,
             tokens,
             fence_breach: None,
@@ -183,6 +195,7 @@ pub(super) async fn run_one_attempt(
 
     let record = AttemptRecord {
         attempt,
+        session,
         dispatch: dispatch_outcome,
         tokens,
         fence_breach: crate::scope::fence_breach(covered.as_ref(), &scope),
@@ -290,15 +303,7 @@ pub(super) async fn run_one_attempt(
 /// tokens it spent.
 async fn open_and_dispatch(
     params: &AttemptParams<'_>,
-) -> Result<
-    (
-        Vec<PathBuf>,
-        DispatchOutcome,
-        TokenUsage,
-        Option<yunta_core::fence::Coverage>,
-    ),
-    TaskCycleError,
-> {
+) -> Result<(Vec<PathBuf>, super::Dispatched), TaskCycleError> {
     let &AttemptParams {
         task,
         instruction,
@@ -312,6 +317,7 @@ async fn open_and_dispatch(
         setup,
         already_granted_paths,
         supervision,
+        resume,
         ..
     } = params;
     let cwd = unit.worktree.as_path();
@@ -335,39 +341,57 @@ async fn open_and_dispatch(
     // One door for every session: the per-attempt listener (mandatory
     // for a task session, which reads its task through it), the brief,
     // and the request itself.
-    let crate::run::session_plan::OpenedSession {
-        request,
-        run_tools: _run_tools,
-    } = crate::run::session_plan::open_session(
-        setup,
-        crate::run::session_plan::SessionPlan {
-            node,
-            task: Some(access),
-            prompt: crate::run::session_plan::task_brief(instruction, task),
-            cwd: cwd.to_path_buf(),
-            profile,
-            budget,
-        },
-        adapter,
-        audit,
-    )
-    .await
-    .map_err(|error| match error {
-        crate::run::session_plan::OpenSessionError::Audit(source) => TaskCycleError::Audit {
-            task: task.id.clone(),
-            source,
-        },
-        crate::run::session_plan::OpenSessionError::RunTools(source) => TaskCycleError::RunTools {
-            task: task.id.clone(),
-            source,
-        },
-    })?;
+    let crate::run::session_plan::OpenedSession { request, run_tools } =
+        crate::run::session_plan::open_session(
+            setup,
+            crate::run::session_plan::SessionPlan {
+                node,
+                task: Some(access),
+                prompt: crate::run::session_plan::task_brief(instruction, task),
+                cwd: cwd.to_path_buf(),
+                profile,
+                budget,
+            },
+            adapter,
+            audit,
+        )
+        .await
+        .map_err(|error| match error {
+            crate::run::session_plan::OpenSessionError::Audit(source) => TaskCycleError::Audit {
+                task: task.id.clone(),
+                source,
+            },
+            crate::run::session_plan::OpenSessionError::RunTools(source) => {
+                TaskCycleError::RunTools {
+                    task: task.id.clone(),
+                    source,
+                }
+            }
+        })?;
     let last_staged = adapter.staged_paths(&request);
-    let crate::task_cycle::Dispatched {
-        outcome: dispatch_outcome,
-        tokens,
-        fence,
-    } = dispatch_session(adapter, request, cancel, audit, None)
+    // A session picked back up is told the answer to what it asked, not
+    // the brief again; the brief is what a fresh session gets when the
+    // adapter cannot pick the conversation up.
+    let brief = request.prompt.clone();
+    let request = match resume {
+        Some(continuing) => crate::run::session_plan::with_prompt(
+            request,
+            crate::run_tools::continuation_notice(
+                run_tools.as_ref(),
+                &continuing.answer,
+                crate::run_tools::Asker::Task,
+            ),
+        ),
+        None => request,
+    };
+    let opening = crate::task_cycle::session::Opening {
+        task: Some(&task.id),
+        resume: resume.map(|continuing| crate::task_cycle::session::Resume {
+            session: &continuing.session,
+            fresh_prompt: Some(&brief),
+        }),
+    };
+    let dispatched = dispatch_session(adapter, request, cancel, audit, opening)
         .await
         .map_err(|error| match error {
             DispatchError::Adapter(source) => TaskCycleError::Spawn {
@@ -379,7 +403,7 @@ async fn open_and_dispatch(
                 source,
             },
         })?;
-    Ok((last_staged, dispatch_outcome, tokens, fence))
+    Ok((last_staged, dispatched))
 }
 
 /// Reads the agent's own scope-expansion request from this attempt's

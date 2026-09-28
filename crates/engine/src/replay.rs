@@ -223,6 +223,7 @@ impl RunState {
             }
             EventPayload::Session(e) => {
                 self.nodes.apply_session(e, &meta);
+                self.tasks.apply_session(e);
                 self.degradations.apply(e, &meta);
             }
             EventPayload::Tasks(e) => {

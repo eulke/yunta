@@ -91,6 +91,70 @@ pub(super) async fn grant_chosen_scope(ctx: &RunCtx<'_>, node: &Node) -> Result<
     Ok(())
 }
 
+/// The session a node's attempt picks back up: the one its last attempt
+/// had open, when that attempt failed on its scope and a person granted
+/// what it needed — the one thing that changed for it. `None` for any
+/// other attempt, and for a node whose kind opens no session of its own.
+pub(super) async fn continuation(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+) -> Result<Option<crate::task_cycle::Continuing>, RunError> {
+    if !matches!(node.kind, yunta_core::NodeKind::Prompt { .. }) {
+        return Ok(None);
+    }
+    let view = ctx.run_view().await?;
+    let state = &view.state;
+    let granted = state
+        .choice_after_failure(&node.id)
+        .is_some_and(|(decided_at, choice)| {
+            ReservedOption::of(&choice.option) == Some(ReservedOption::Grant)
+                && state
+                    .grants
+                    .last_granted_to_node(&node.id)
+                    .is_some_and(|at| at > decided_at)
+        });
+    let session = state
+        .nodes
+        .get(&node.id)
+        .and_then(|record| record.last_session.clone());
+    Ok(granted
+        .then_some(session)
+        .flatten()
+        .map(|session| crate::task_cycle::Continuing {
+            session,
+            answer: yunta_core::events::ScopeAnswer::Granted(
+                state.grants.last_granted_to_node_paths(&node.id).to_vec(),
+            ),
+        }))
+}
+
+/// Says on the log that the session a node's attempt would have picked
+/// back up was not: its checkout is gone, so the attempt opens fresh.
+pub(super) async fn not_resumed(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
+    let view = ctx.run_view().await?;
+    let Some(adapter) = view
+        .state
+        .nodes
+        .get(&node.id)
+        .and_then(|record| record.runner.as_ref())
+        .map(|runner| runner.chosen.adapter.clone())
+    else {
+        return Ok(());
+    };
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Session(yunta_core::events::SessionEvent::CapabilityDegraded(
+            yunta_core::events::CapabilityDegradedPayload::new(
+                yunta_core::Capability::ResumeSession,
+                adapter,
+                yunta_core::events::Policy::FreshSession,
+            ),
+        )),
+    )
+    .await?;
+    Ok(())
+}
+
 /// What the node changed and what of it falls outside its declared
 /// `scope:`, recorded as `scope_checked`. `None` when the node owes no
 /// audit — it constrains nothing, or nothing named the tree it began

@@ -141,3 +141,53 @@ fn files_to_write(
     ));
     Some(text)
 }
+
+/// Whose scope an answer widened or held: a loop's task, or a node's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Asker {
+    Task,
+    Node,
+}
+
+/// What a session is told when it is picked back up after the answer to
+/// the scope it asked for: the answer, that its work is where it left
+/// it, and — when the run tools are mounted — which tool reads what it
+/// may now do. The scope itself is never copied here: the tools read it
+/// from the same log the fence and the close read, so the session and
+/// the engine cannot hold two versions of it.
+pub(crate) fn continuation_notice(
+    session: Option<&RunToolsSession>,
+    answer: &yunta_core::events::ScopeAnswer,
+    asker: Asker,
+) -> String {
+    use yunta_core::events::ScopeAnswer;
+    let answered = match answer {
+        ScopeAnswer::Granted(paths) => format!(
+            "The scope you asked for was granted: {}. You may write there now.",
+            yunta_core::listed_globs(paths)
+        ),
+        ScopeAnswer::Denied(Some(reason)) => format!(
+            "The scope you asked for was refused: {reason}. Stay within the scope you have."
+        ),
+        ScopeAnswer::Denied(None) => {
+            "The scope you asked for was refused. Stay within the scope you have.".to_string()
+        }
+    };
+    let read = session.map(|_| match asker {
+        Asker::Task => format!(
+            " `{read}` shows your task's scope and what still keeps it from closing; call \
+             `{check}` before you finish.",
+            read = super::catalog::RunTool::Task.name(),
+            check = super::catalog::RunTool::CheckTask.name(),
+        ),
+        Asker::Node => format!(
+            " `{check}` shows what your close would find outside your scope.",
+            check = super::catalog::RunTool::CheckScope.name(),
+        ),
+    });
+    format!(
+        "{answered}{} The work you did is still in your checkout; continue from where you \
+         stopped.",
+        read.unwrap_or_default()
+    )
+}

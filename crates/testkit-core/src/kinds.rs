@@ -50,6 +50,8 @@ pub fn all_kinds() -> Vec<EventPayload> {
             model: Some("mock-model".into()),
             capabilities: Capabilities::default(),
             fence: None,
+            task_id: None,
+            continues: None,
         })),
         EventPayload::Session(SessionEvent::Message(AgentMessagePayload {
             message_type: AgentMessageType::Usage,

@@ -130,17 +130,34 @@ pub(super) async fn resolve_escalations(
             )
             .await?;
         }
-        // Granted or denied, the task gets its retry: with the widened scope
-        // (from the log's own granted paths), or within the original one — a
+        // Granted or denied, the task goes on: with the widened scope (from
+        // the log's own granted paths), or within the original one — a
         // denial never kills the task, it re-runs inside what was declared.
+        // The answer is the one thing that changed for the session that
+        // asked, so that session picks its work back up where it left it;
+        // with no work or no session on the log, the task starts over.
         if pending.was_blocked {
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+            let state = ctx.run_view().await?.state;
+            let record = state.tasks.get(&pending.task_id);
+            let reopened = match (
+                record.and_then(|record| record.left_work.as_ref()),
+                record.and_then(|record| record.last_session.clone()),
+            ) {
+                (Some((_, work)), Some(session)) => TaskStatusChangedPayload::resuming(
+                    pending.task_id.clone(),
+                    resolved_seq,
+                    work.clone(),
+                    session,
+                ),
+                _ => TaskStatusChangedPayload::to(
                     pending.task_id.clone(),
                     TaskStatus::Pending,
                     resolved_seq,
-                ))),
+                ),
+            };
+            ctx.emit(
+                Some(&node.id),
+                EventPayload::Tasks(TaskEvent::StatusChanged(reopened)),
             )
             .await?;
         }

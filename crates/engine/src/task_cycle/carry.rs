@@ -57,6 +57,16 @@ pub(super) async fn continue_from(
             },
         });
     }
+    judge_in_place(params, recorder).await
+}
+
+/// Judges the work already in this cycle's unit — what a cycle resuming
+/// the session that left it finds there — before any session opens. The
+/// answer the session waited for may be all the work needed.
+pub(super) async fn judge_in_place(
+    params: &AttemptParams<'_>,
+    recorder: Recorder<'_>,
+) -> Result<Carry, TaskCycleError> {
     let judgement = judged(params).await?;
     let last_check = recorder.criteria(Phase::Post, &judgement.criteria).await?;
     recorder.scope(&judgement.scope).await?;

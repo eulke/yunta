@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::events::node::payloads::Criterion;
 use crate::glob::ScopeGlob;
 use crate::hash::CommitSha;
-use crate::ids::{Seq, TaskId};
+use crate::ids::{Seq, SessionId, TaskId};
 
 /// Exact variant names are provisional.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -48,6 +48,11 @@ pub struct TaskStatusChangedPayload {
     /// transition.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub left_work: Option<CommitSha>,
+    /// On a `pending` that reopens a task after the answer to a scope
+    /// request its session made: that session, which the next cycle
+    /// resumes on the same work. Absent on every other transition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resumes: Option<SessionId>,
 }
 
 impl TaskStatusChangedPayload {
@@ -63,6 +68,7 @@ impl TaskStatusChangedPayload {
             caused_by,
             commit: None,
             left_work: None,
+            resumes: None,
         }
     }
 
@@ -82,6 +88,15 @@ impl TaskStatusChangedPayload {
         }
     }
 
+    /// A blocked task reopened, after the answer to the scope its session
+    /// asked for, to resume that `session` on the work at `from`.
+    pub fn resuming(task: TaskId, caused_by: Seq, from: CommitSha, session: SessionId) -> Self {
+        TaskStatusChangedPayload {
+            resumes: Some(session),
+            ..Self::continuing(task, caused_by, from)
+        }
+    }
+
     /// A task finished, and the commit its work landed at.
     ///
     /// The commit is what makes a `done` answerable by another run: a
@@ -95,6 +110,7 @@ impl TaskStatusChangedPayload {
             caused_by,
             commit: Some(commit),
             left_work: None,
+            resumes: None,
         }
     }
 }

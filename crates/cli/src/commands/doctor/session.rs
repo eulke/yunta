@@ -322,6 +322,8 @@ mod tests {
             model: None,
             capabilities: yunta_core::Capabilities::default(),
             fence: None,
+            task_id: None,
+            continues: None,
         }));
         let accepted =
             EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(

@@ -9,7 +9,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{EventPayload, TokenUsage};
+use yunta_core::events::{EventPayload, SessionEvent, TokenUsage};
 use yunta_core::port::{Adapter, SessionRequest};
 use yunta_core::AdapterError;
 use yunta_storage::StorageError;
@@ -224,6 +224,26 @@ pub(crate) struct Dispatched {
     pub outcome: DispatchOutcome,
     pub tokens: TokenUsage,
     pub fence: Option<yunta_core::fence::Coverage>,
+    /// The session the stream opened, once it did: what the next
+    /// attempt resumes when something it asked for changes.
+    pub session: Option<yunta_core::SessionId>,
+}
+
+/// How a session opens: the task it works, if any, and the conversation
+/// it continues, if any.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Opening<'a> {
+    pub(crate) task: Option<&'a yunta_core::TaskId>,
+    pub(crate) resume: Option<Resume<'a>>,
+}
+
+/// A conversation to pick back up, and what a fresh session is told
+/// instead when the adapter cannot pick it up — `None` when there is no
+/// such way back and not resuming is the caller's failure to report.
+#[derive(Clone, Copy)]
+pub(crate) struct Resume<'a> {
+    pub(crate) session: &'a yunta_core::SessionId,
+    pub(crate) fresh_prompt: Option<&'a str>,
 }
 
 pub(crate) async fn dispatch_session(
@@ -231,7 +251,7 @@ pub(crate) async fn dispatch_session(
     request: SessionRequest,
     cancel: &CancellationToken,
     audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
-    resume: Option<&yunta_core::SessionId>,
+    opening: Opening<'_>,
 ) -> Result<Dispatched, DispatchError> {
     let budget = request.budget;
     let requested_agent = request.agent.clone();
@@ -239,11 +259,43 @@ pub(crate) async fn dispatch_session(
     // session that holds none of those tools only means something went
     // wrong if it was given a server to hold them from.
     let run_tools_offered = request.run_tools_endpoint.is_some();
-    // `Some` continues an interrupted conversation instead of
-    // opening a new one — the caller already verified the capability.
-    let mut session = match resume {
-        Some(session_id) => adapter.resume(session_id, request).await?,
-        None => adapter.spawn(request).await?,
+    // A resume continues a conversation instead of opening a new one. One
+    // the adapter cannot pick up — it declares no resume, or its CLI
+    // refuses this one — opens fresh on what the caller gave for that, and
+    // the log says so; with nothing given, the caller already verified
+    // the capability and not resuming is its failure to report.
+    let (mut session, continues) = match opening.resume {
+        None => (adapter.spawn(request).await?, None),
+        Some(resume) => {
+            let can_resume = adapter
+                .capabilities()
+                .declares(yunta_core::Capability::ResumeSession);
+            let resumed = match (resume.fresh_prompt, can_resume) {
+                (Some(_), false) => None,
+                _ => Some(adapter.resume(resume.session, request.clone()).await),
+            };
+            match resumed {
+                Some(Ok(session)) => (session, Some(resume.session)),
+                Some(Err(error)) if resume.fresh_prompt.is_none() => return Err(error.into()),
+                _ => {
+                    let brief = resume.fresh_prompt.unwrap_or_default();
+                    crate::task_cycle::stream::emit_audit(
+                        audit,
+                        EventPayload::Session(SessionEvent::CapabilityDegraded(
+                            yunta_core::events::CapabilityDegradedPayload::new(
+                                yunta_core::Capability::ResumeSession,
+                                adapter.id().clone(),
+                                yunta_core::events::Policy::FreshSession,
+                            ),
+                        )),
+                    )
+                    .await
+                    .map_err(DispatchError::Audit)?;
+                    let fresh = crate::run::session_plan::with_prompt(request, brief.to_string());
+                    (adapter.spawn(fresh).await?, None)
+                }
+            }
+        }
     };
     // On the map for a separate `yunta cancel` while it lives.
     let _pgid_registration = crate::process_registry::register(
@@ -312,6 +364,8 @@ pub(crate) async fn dispatch_session(
                     tokens: &mut tokens,
                     opened: &mut opened,
                     fence: &mut fence,
+                    task: opening.task,
+                    continues,
                 },
             )
             .await?
@@ -336,6 +390,7 @@ pub(crate) async fn dispatch_session(
             outcome: DispatchOutcome::Cancelled,
             tokens,
             fence,
+            session: opened,
         });
     }
 
@@ -352,5 +407,6 @@ pub(crate) async fn dispatch_session(
         outcome,
         tokens,
         fence,
+        session: opened,
     })
 }

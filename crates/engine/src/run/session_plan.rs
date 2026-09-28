@@ -187,6 +187,17 @@ fn mandatory_tools(
     )
 }
 
+/// The request the plan built, told `prompt` instead: what a session
+/// picked back up is told in place of its brief, and what a fresh one is
+/// told when the conversation cannot be picked up. Everything else the
+/// plan decided stands.
+pub(crate) fn with_prompt(
+    request: yunta_core::port::SessionRequest,
+    prompt: String,
+) -> yunta_core::port::SessionRequest {
+    yunta_core::port::SessionRequest { prompt, ..request }
+}
+
 /// What one session is: its prompt, where it works, and the decisions
 /// that belong to it rather than to the node it serves.
 pub(crate) struct SessionPlan<'a> {

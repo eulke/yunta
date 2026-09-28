@@ -47,6 +47,10 @@ pub(super) struct AgentEventCtx<'a> {
     /// How much of this session's writes its adapter's fence covered,
     /// as the opening reported it.
     pub(super) fence: &'a mut Option<yunta_core::fence::Coverage>,
+    /// The task this session works, when a loop opened it.
+    pub(super) task: Option<&'a yunta_core::TaskId>,
+    /// The session this one resumes, when it does.
+    pub(super) continues: Option<&'a yunta_core::SessionId>,
 }
 
 /// Appends one streamed event to the session's audit trail
@@ -70,6 +74,8 @@ pub(super) async fn apply_agent_event(
         tokens,
         opened,
         fence: covered,
+        task,
+        continues,
     } = ctx;
     match event {
         AgentEvent::SessionOpened {
@@ -90,6 +96,8 @@ pub(super) async fn apply_agent_event(
                         model,
                         capabilities: adapter.capabilities(),
                         fence,
+                        task_id: task.cloned(),
+                        continues: continues.cloned(),
                     },
                 )),
             )
@@ -228,7 +236,7 @@ pub(super) async fn apply_agent_event(
 
 /// Appends one event to the session's audit trail, or does nothing when the
 /// dispatch runs without an observer (a standalone `run_task` in a test).
-async fn emit_audit(
+pub(super) async fn emit_audit(
     audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
     payload: EventPayload,
 ) -> Result<(), StorageError> {

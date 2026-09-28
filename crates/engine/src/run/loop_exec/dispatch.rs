@@ -6,8 +6,8 @@ use yunta_core::ScopeGlob;
 use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload};
 use yunta_core::{CommitSha, Node, Task};
 
-use crate::task_cycle::{run_task, AttemptEnv, ScopeGovernance, TaskCycleReport};
-use crate::worktree::{open_unit, Unit, UnitHome, UnitId};
+use crate::task_cycle::{run_task, AttemptEnv, Continuing, ScopeGovernance, TaskCycleReport};
+use crate::worktree::{open_unit, reopen_unit, Unit, UnitHome, UnitId};
 
 use crate::replay::RunState;
 use crate::run::{RunCtx, RunError};
@@ -19,6 +19,52 @@ use yunta_core::events::TaskEvent;
 /// never fed into the cycle's own decision whether to dispatch again.
 pub(super) fn attempt_number(state: &RunState, task_id: &yunta_core::TaskId) -> u32 {
     state.tasks.get(task_id).map_or(0, |record| record.attempts) + 1
+}
+
+/// The checkout and the session a task reopened to resume picks back
+/// up: the unit holding the work its session left, and that session with
+/// the answer it waited for. `None` for a task reopened any other way —
+/// and for one whose checkout is gone, which then continues from the work
+/// in a fresh unit, with the log saying the session was not resumed.
+async fn continuation(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task: &Task,
+    state: &RunState,
+    adapter: &dyn yunta_core::port::Adapter,
+) -> Result<Option<(Unit, Continuing)>, RunError> {
+    let Some(record) = state.tasks.get(&task.id) else {
+        return Ok(None);
+    };
+    let (Some(session), Some((_, work)), Some(answer)) = (
+        record.resumes.clone(),
+        record.left_work.as_ref(),
+        state.grants.answer_for(&task.id).cloned(),
+    ) else {
+        return Ok(None);
+    };
+    let reopened = reopen_unit(
+        ctx.run_dir,
+        UnitId::Task(task.id.clone()),
+        Some(work),
+        ctx.root_supervision(),
+    )
+    .await?;
+    let Some(unit) = reopened else {
+        ctx.emit(
+            Some(&node.id),
+            EventPayload::Session(yunta_core::events::SessionEvent::CapabilityDegraded(
+                yunta_core::events::CapabilityDegradedPayload::new(
+                    yunta_core::Capability::ResumeSession,
+                    adapter.id().clone(),
+                    yunta_core::events::Policy::FreshSession,
+                ),
+            )),
+        )
+        .await?;
+        return Ok(None);
+    };
+    Ok(Some((unit, Continuing { session, answer })))
 }
 
 /// Every path a prior `scope_expansion_granted` on the log authorized
@@ -69,18 +115,25 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     } = *env;
     let state = crate::replay::derive(events);
     let attempt = attempt_number(&state, &task.id);
-    let unit = open_unit(
-        UnitHome {
-            repo: ctx.worktree,
-            run_dir: ctx.run_dir,
-            run_id: ctx.run_id,
-            base: base_commit,
-        },
-        UnitId::Task(task.id.clone()),
-        attempt,
-        ctx.root_supervision(),
-    )
-    .await?;
+    let continuation = continuation(ctx, node, task, &state, adapter).await?;
+    let (unit, resume) = match continuation {
+        Some((unit, continuing)) => (unit, Some(continuing)),
+        None => (
+            open_unit(
+                UnitHome {
+                    repo: ctx.worktree,
+                    run_dir: ctx.run_dir,
+                    run_id: ctx.run_id,
+                    base: base_commit,
+                },
+                UnitId::Task(task.id.clone()),
+                attempt,
+                ctx.root_supervision(),
+            )
+            .await?,
+            None,
+        ),
+    };
 
     let registered_seq = events
         .iter()
@@ -119,12 +172,15 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
             history: &state.tasks,
             supervision: ctx.supervision(cancel),
             // A task a person reopened to continue carries the work it
-            // continues from on the reopening itself.
+            // continues from on the reopening itself — unless the session
+            // that left it picks it back up in the unit that holds it.
             carry: state
                 .tasks
                 .get(&task.id)
                 .and_then(|record| record.left_work.as_ref())
-                .map(|(_, work)| work),
+                .map(|(_, work)| work)
+                .filter(|_| resume.is_none()),
+            resume,
         },
         ScopeGovernance {
             permissions: ctx.manifest.config.permissions.as_ref(),

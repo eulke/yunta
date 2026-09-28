@@ -168,6 +168,8 @@ fn session_opened(session: &str) -> EventPayload {
         model: Some("mock-model".into()),
         capabilities: Capabilities::default(),
         fence: None,
+        task_id: None,
+        continues: None,
     }))
 }
 

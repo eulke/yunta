@@ -118,6 +118,9 @@ pub(crate) struct RunCtx<'a> {
 pub(crate) struct NodeUnit<'a> {
     pub(crate) unit: &'a crate::worktree::Unit,
     pub(crate) into: &'a Path,
+    /// The session this node's attempt picks back up in the unit, with
+    /// the answer it is told; `None` for an attempt that opens fresh.
+    pub(crate) continues: Option<&'a crate::task_cycle::Continuing>,
 }
 
 impl<'a> RunCtx<'a> {
@@ -130,7 +133,14 @@ impl<'a> RunCtx<'a> {
     /// audit of that node reaches, which is the whole of what working in
     /// a unit means; the tree this context points at now becomes the one
     /// the unit lands in.
-    pub(crate) fn in_unit<'b>(&'b self, unit: &'b crate::worktree::Unit) -> RunCtx<'b>
+    ///
+    /// `continues` is the session an attempt picks back up in the unit
+    /// that session saw, when it does.
+    pub(crate) fn in_unit<'b>(
+        &'b self,
+        unit: &'b crate::worktree::Unit,
+        continues: Option<&'b crate::task_cycle::Continuing>,
+    ) -> RunCtx<'b>
     where
         'a: 'b,
     {
@@ -161,6 +171,7 @@ impl<'a> RunCtx<'a> {
             unit: Some(NodeUnit {
                 unit,
                 into: self.worktree,
+                continues,
             }),
         }
     }
