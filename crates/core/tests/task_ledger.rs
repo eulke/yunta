@@ -16,6 +16,8 @@ fn result(cmd: &str, duration_ms: Option<u64>) -> CriterionResult {
         r#type: None,
         reused: duration_ms.is_none(),
         duration_ms,
+        output: None,
+        tail: Vec::new(),
     }
 }
 

@@ -85,6 +85,21 @@ impl<'a> ObjectStore<'a> {
         Ok(hash)
     }
 
+    /// Stores `bytes` with every secret `redactor` knows taken out, as
+    /// the log takes them out of what it appends — for what a command
+    /// printed, which the run keeps and a secret may have reached.
+    pub async fn put_redacted(
+        &self,
+        bytes: &[u8],
+        redactor: &yunta_core::Redactor,
+    ) -> std::io::Result<ContentHash> {
+        if redactor.is_empty() {
+            return self.put(bytes).await;
+        }
+        self.put(redactor.text(&String::from_utf8_lossy(bytes)).as_bytes())
+            .await
+    }
+
     /// The bytes `hash` names, verified against it.
     pub async fn get(&self, hash: &ContentHash) -> Result<Vec<u8>, ObjectError> {
         let path = self.path_of(hash);

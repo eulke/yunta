@@ -383,6 +383,33 @@ nodes:
 }
 
 #[tokio::test]
+async fn a_failing_hook_fails_its_node_saying_what_it_printed_last() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: hook-says-why
+nodes:
+  - id: only
+    kind: bash
+    run: "true"
+    hooks:
+      before:
+        - run: "echo installing; echo 'lockfile is out of date' >&2; exit 1"
+"#;
+
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
+
+    match terminal {
+        RunTerminal::Paused { reason } => assert_eq!(
+            reason,
+            "node `only` failed: before hook `echo installing; echo 'lockfile is out of date' \
+             >&2; exit 1` failed: installing\nlockfile is out of date"
+        ),
+        other => panic!("expected Paused, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn an_after_hook_defaults_to_failing_the_node() {
     let bench = Bench::new();
 

@@ -37,10 +37,38 @@ pub enum Happening {
         task: TaskId,
         phase: Phase,
         checked: usize,
+        /// The criteria a post-check found not passing, in the order they
+        /// ran. Empty for a pre-check, whose criteria are meant to fail.
+        red: Vec<Red>,
     },
     ScopeChecked {
         violations: usize,
     },
+}
+
+/// A criterion that did not pass, as a person watching reads it: the
+/// command, how it exited, and the last thing it printed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Red {
+    pub cmd: String,
+    pub exit_code: i32,
+    pub said: Option<String>,
+}
+
+impl Red {
+    /// `result` as a red criterion; `None` when it passed.
+    fn of(result: &super::payloads::CriterionResult) -> Option<Self> {
+        (result.exit_code != 0).then(|| Red {
+            cmd: result.cmd.clone(),
+            exit_code: result.exit_code,
+            said: result
+                .tail
+                .iter()
+                .rev()
+                .find(|line| !line.trim().is_empty())
+                .map(|line| line.trim().to_string()),
+        })
+    }
 }
 
 impl Happening {
@@ -97,6 +125,10 @@ impl Happening {
                 task: p.task_id.clone(),
                 phase: p.phase,
                 checked: p.results.len(),
+                red: match p.phase {
+                    Phase::Pre => Vec::new(),
+                    Phase::Post => p.results.iter().filter_map(Red::of).collect(),
+                },
             },
             NodeEvent::ScopeChecked(p) => Happening::ScopeChecked {
                 violations: p.violations.len(),

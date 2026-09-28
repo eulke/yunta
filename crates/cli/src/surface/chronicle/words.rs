@@ -99,14 +99,8 @@ fn node_words(happening: &node::happening::Happening) -> (Option<StateWord>, Str
             task,
             phase,
             checked,
-        } => (
-            None,
-            format!(
-                "{task} {}: {}",
-                phase.as_str(),
-                yunta_core::text::counted(*checked, "criterion")
-            ),
-        ),
+            red,
+        } => (None, criteria_checked(task, *phase, *checked, red)),
         H::ScopeChecked { violations } => (
             None,
             format!(
@@ -115,6 +109,35 @@ fn node_words(happening: &node::happening::Happening) -> (Option<StateWord>, Str
             ),
         ),
     }
+}
+
+/// A task's check: how many criteria ran, and each one a post-check left
+/// red, named with the last thing it printed — the command's own output
+/// never reaches the terminal, so this line is where a person watching
+/// learns why.
+fn criteria_checked(
+    task: &yunta_core::TaskId,
+    phase: yunta_core::events::Phase,
+    checked: usize,
+    red: &[node::happening::Red],
+) -> String {
+    // Not `text::counted`: "criterion" is the one noun here whose
+    // plural is not its `-s`.
+    let mut said = match checked {
+        1 => format!("{task} {}: 1 criterion", phase.as_str()),
+        n => format!("{task} {}: {n} criteria", phase.as_str()),
+    };
+    if !red.is_empty() {
+        let named: Vec<String> = red
+            .iter()
+            .map(|red| match &red.said {
+                Some(line) => format!("`{}` exit {} — {line}", red.cmd, red.exit_code),
+                None => format!("`{}` exit {}", red.cmd, red.exit_code),
+            })
+            .collect();
+        said.push_str(&format!(" · red: {}", named.join("; ")));
+    }
+    said
 }
 
 fn session_words(happening: &session::happening::Happening) -> String {

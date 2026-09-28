@@ -46,6 +46,11 @@ pub struct TaskRecord {
     pub resumes: Option<SessionId>,
     /// The last session that worked this task.
     pub last_session: Option<SessionId>,
+    /// Whether a session opened for the task since its last status
+    /// change. A `running` task without one is having its criteria
+    /// checked, or the work it was reopened on judged, before any agent
+    /// works it.
+    pub in_session: bool,
 }
 
 /// Every task's record, by id, and what the criteria they were checked
@@ -197,14 +202,15 @@ impl TaskLedger {
                     .clone()
                     .and_then(|work| meta.node.cloned().map(|node| (node, work)));
                 record.resumes = p.resumes.clone();
+                record.in_session = false;
                 Ok(())
             }
         }
     }
 
     /// Folds a session a loop opened for one of its tasks: the task's
-    /// last session. A session that names no task, or a task nothing
-    /// registered, moves nothing.
+    /// last session, and one it is in. A session that names no task, or
+    /// a task nothing registered, moves nothing.
     pub fn apply_session(&mut self, event: &crate::events::session::kinds::SessionEvent) {
         let crate::events::session::kinds::SessionEvent::Opened(p) = event else {
             return;
@@ -217,6 +223,7 @@ impl TaskLedger {
             return;
         };
         record.last_session = Some(p.session_id.clone());
+        record.in_session = true;
     }
 }
 
@@ -231,6 +238,7 @@ impl Default for TaskRecord {
             left_work: None,
             resumes: None,
             last_session: None,
+            in_session: false,
         }
     }
 }

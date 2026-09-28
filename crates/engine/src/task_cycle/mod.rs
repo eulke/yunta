@@ -37,7 +37,7 @@ use attempt::{run_one_attempt, AttemptParams, AttemptStep};
 pub(crate) use record::to_results;
 use record::Recorder;
 
-pub(crate) use criteria::{could_not_run, probe, Probe};
+pub(crate) use criteria::{could_not_run, probe};
 pub use criteria::{post_check, pre_check, Memo, Memoized};
 pub(crate) use judge::{judge, Work};
 pub(crate) use session::dispatch_session;
@@ -87,6 +87,12 @@ pub enum TaskCycleError {
     },
     /// A memoized command a caller ran that belongs to no task — a
     /// `baseline_compare` asking the same suite the criteria ask.
+    #[error("failed to keep what task `{task}`'s criteria printed")]
+    KeepOutput {
+        task: TaskId,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("failed to run `{cmd}`")]
     MemoizedCommand {
         cmd: String,
@@ -116,12 +122,22 @@ pub struct CriterionRun {
     /// Wall-clock milliseconds the execution took — what the
     /// learned ordering feeds on. `None` when `reused` (nothing ran).
     pub duration_ms: Option<u64>,
+    /// What the command printed on this tree: in this run of it, or, for
+    /// a red answer the cache reused, in the run that gave it. `None` for
+    /// a green answer reused, and for a check the engine states rather
+    /// than runs.
+    pub output: Option<crate::process::CommandOutput>,
 }
 
 impl CriterionRun {
     /// Why this criterion never answered, if it did not.
     pub fn could_not_run(&self) -> Option<&'static str> {
         criteria::could_not_run(self.exit_code)
+    }
+
+    /// The last line it printed, if it ran and printed anything.
+    pub fn said(&self) -> Option<String> {
+        self.output.as_ref().and_then(|output| output.last_words())
     }
 
     /// How its exit code reads to a person: the code, and what it means

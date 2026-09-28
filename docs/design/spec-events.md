@@ -235,13 +235,13 @@ registra.
 | `depends_on` | lista de `task_id` | sí (puede ser vacía) | vacía cuando la tarea no depende de ninguna |
 
 ### 5.10 `criteria_checked` — engine
-**Fuente:** task_id, fase pre/post, exit code por criterio, ejecutado o reutilizado de caché
+**Fuente:** task_id, fase pre/post, exit code por criterio, ejecutado o reutilizado de caché, lo que imprimió
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `task_id` | string | sí | — |
 | `phase` | enum `pre \| post` | sí | pre-check en rojo vs. post-check |
-| `results` | lista de `{cmd, exit_code, type?, reused: bool, duration_ms?}` | sí | `reused=true` cuando la memoización (fuera de alcance de una implementación completa, salvo lo mínimo necesario) sirvió el resultado sin re-ejecutar; `duration_ms` es el costo observado de la ejecución — ausente en `reused=true` y en eventos emitidos antes de que este campo se agregara |
+| `results` | lista de `{cmd, exit_code, type?, reused: bool, duration_ms?, output?, tail?}` | sí | `reused=true` cuando la memoización (fuera de alcance de una implementación completa, salvo lo mínimo necesario) sirvió el resultado sin re-ejecutar; `duration_ms` es el costo observado de la ejecución — ausente en `reused=true` y en eventos emitidos antes de que este campo se agregara; `output` es el hash del objeto con lo que imprimió el comando, stdout y después stderr, redactado — en `reused=true`, lo que imprimió la ejecución que dio esa respuesta roja sobre el mismo árbol, y ausente si la respuesta reutilizada pasó; `tail` son sus últimas 20 líneas cuando `exit_code` no es 0, y se omite cuando pasó. Un log anterior a estos dos campos los lee ausentes |
 
 ### 5.11 `task_status_changed` — engine
 **Fuente:** task_id, estado nuevo, evento que lo justifica, commit donde aterrizó el trabajo
@@ -331,13 +331,15 @@ Una sesión sin proceso propio no lleva `exit`. El engine pregunta sólo a la se
 cuyo stream terminó sin decir nada; el adapter nunca inventa un terminal (D180).
 
 ### 5.16 `hook_executed` — engine
-**Fuente:** node_id, fase before/after, comando, exit code
+**Fuente:** node_id, fase before/after, comando, exit code, lo que imprimió
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `phase` | enum `before \| after` | sí | hooks son ciclo del engine, no del adapter |
 | `command` | string | sí | — |
 | `exit_code` | `i32` | sí | — |
+| `output` | `ContentHash` | no | el objeto con lo que imprimió el hook, redactado; ausente en un hook que no llegó a correr (`exit_code: -1`) y en logs anteriores al campo |
+| `tail` | lista de string | sí (vacía si pasó) | sus últimas 20 líneas cuando `exit_code` no es 0; vacía, y omitida en el log, cuando pasó o en logs anteriores al campo |
 
 ### 5.17 `node_rerouted` — engine
 **Fuente:** nodo fallido, destino, causa, reintento N de M

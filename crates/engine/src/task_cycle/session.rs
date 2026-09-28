@@ -178,6 +178,14 @@ pub trait SessionObserver: Sync {
         node_id: &yunta_core::NodeId,
         payload: EventPayload,
     ) -> Result<yunta_core::Seq, StorageError>;
+    /// Keeps what a command printed where the run keeps every object it
+    /// holds, with the run's secrets taken out, and answers the hash it
+    /// is named by. What a cycle's commands print is the run's, never
+    /// the terminal's.
+    async fn keep_output(
+        &self,
+        output: &crate::process::CommandOutput,
+    ) -> std::io::Result<yunta_core::ContentHash>;
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry>;
 }
 

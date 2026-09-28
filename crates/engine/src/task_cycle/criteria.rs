@@ -11,7 +11,7 @@ use yunta_core::Criterion;
 use yunta_core::{ContentHash, Task, TaskId};
 
 use super::{CriterionRun, TaskCycleError};
-use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
+use crate::process::{spawn_governed, CommandOutput, GovernedCommand, Outcome, Supervision};
 
 /// Per-invocation memoization cache: a criterion's result is reused
 /// when its command, the working tree's content and the resolved config
@@ -28,7 +28,18 @@ use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervis
 /// can turn on, since a criterion declares no `env:` of its own.
 pub struct Memo {
     config_hash: ContentHash,
-    cache: Mutex<HashMap<ContentHash, i32>>,
+    cache: Mutex<HashMap<ContentHash, Answer>>,
+}
+
+/// What a command answered on one tree. A red answer keeps what the
+/// command printed, so a check that reuses it still says why it fails —
+/// the common case is a session's `yunta_check_task` running the
+/// criteria and the close reusing them on the same tree. A green one
+/// keeps nothing to explain.
+#[derive(Clone)]
+struct Answer {
+    exit_code: i32,
+    output: Option<CommandOutput>,
 }
 
 impl Memo {
@@ -43,22 +54,26 @@ impl Memo {
         yunta_core::sha256_hex(format!("{cmd}\x00{tree_hash}\x00{}", self.config_hash).as_bytes())
     }
 
-    fn get(&self, cmd: &str, tree_hash: &ContentHash) -> Option<i32> {
+    fn get(&self, cmd: &str, tree_hash: &ContentHash) -> Option<Answer> {
         let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        cache.get(&self.key(cmd, tree_hash)).copied()
+        cache.get(&self.key(cmd, tree_hash)).cloned()
     }
 
     /// Remembers what `cmd` answered on this tree — unless it could not
     /// run at all. A command that was not found says nothing about the
     /// tree, and the next check on the same tree must run it again: the
     /// program may be on the `PATH` by then.
-    fn put(&self, cmd: &str, tree_hash: &ContentHash, exit_code: i32) {
+    fn put(&self, cmd: &str, tree_hash: &ContentHash, exit_code: i32, output: &CommandOutput) {
         if could_not_run(exit_code).is_some() {
             return;
         }
         let key = self.key(cmd, tree_hash);
+        let answer = Answer {
+            exit_code,
+            output: (exit_code != 0).then(|| output.clone()),
+        };
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        cache.insert(key, exit_code);
+        cache.insert(key, answer);
     }
 
     /// The exit code of `cmd` on `cwd` as this invocation already knows
@@ -72,25 +87,28 @@ impl Memo {
         supervision: Supervision<'_>,
     ) -> Result<Memoized, TaskCycleError> {
         let tree_hash = tree_hash(cwd, supervision).await?;
-        if let Some(exit_code) = self.get(cmd, &tree_hash) {
+        if let Some(answer) = self.get(cmd, &tree_hash) {
             return Ok(Memoized {
-                exit_code,
+                exit_code: answer.exit_code,
                 reused: true,
+                output: answer.output,
             });
         }
-        let command = GovernedCommand::shell(cwd, cmd)
-            .stdout(Capture::Inherit)
-            .stderr(Capture::Inherit);
-        let exit_code = exit_code_of(spawn_governed(command, supervision).await.map_err(
-            |source| TaskCycleError::MemoizedCommand {
+        // What the command prints is the run's to keep, never the
+        // terminal's: the person watching reads the run's own view.
+        let outcome = spawn_governed(GovernedCommand::shell(cwd, cmd), supervision)
+            .await
+            .map_err(|source| TaskCycleError::MemoizedCommand {
                 cmd: cmd.to_string(),
                 source,
-            },
-        )?);
-        self.put(cmd, &tree_hash, exit_code);
+            })?;
+        let output = CommandOutput::of(&outcome);
+        let exit_code = exit_code_of(outcome);
+        self.put(cmd, &tree_hash, exit_code, &output);
         Ok(Memoized {
             exit_code,
             reused: false,
+            output: Some(output),
         })
     }
 }
@@ -125,10 +143,12 @@ pub fn could_not_run(exit_code: i32) -> Option<&'static str> {
 
 /// What a memoized command answered, and whether this invocation had to
 /// run it to find out.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Memoized {
     pub exit_code: i32,
     pub reused: bool,
+    /// What the command printed, as [`CriterionRun::output`] keeps it.
+    pub output: Option<CommandOutput>,
 }
 
 /// A fingerprint of `cwd`'s current content: the commit it's on,
@@ -184,24 +204,23 @@ async fn run_criterion(
     cwd: &Path,
     cmd: &str,
     supervision: Supervision<'_>,
-) -> Result<(i32, u64), TaskCycleError> {
+) -> Result<(i32, u64, CommandOutput), TaskCycleError> {
     let started = std::time::Instant::now();
-    // A criterion shares the engine's streams: its output is the
-    // person's to read, its exit code the engine's to record.
-    let command = GovernedCommand::shell(cwd, cmd)
-        .stdout(Capture::Inherit)
-        .stderr(Capture::Inherit);
-    let exit_code = exit_code_of(
-        spawn_governed(command, supervision)
-            .await
-            .map_err(|source| TaskCycleError::Criterion {
-                task: task_id.clone(),
-                cmd: cmd.to_string(),
-                source,
-            })?,
-    );
+    // What a criterion prints is the run's, never the terminal's: kept
+    // with its check, so the person watching, the one deciding and the
+    // session after this one read why it did not pass — and the view
+    // the run draws is the only thing on the screen.
+    let outcome = spawn_governed(GovernedCommand::shell(cwd, cmd), supervision)
+        .await
+        .map_err(|source| TaskCycleError::Criterion {
+            task: task_id.clone(),
+            cmd: cmd.to_string(),
+            source,
+        })?;
+    let output = CommandOutput::of(&outcome);
+    let exit_code = exit_code_of(outcome);
     let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-    Ok((exit_code, duration_ms))
+    Ok((exit_code, duration_ms, output))
 }
 
 /// Tree hash computed once per call and shared across every criterion in
@@ -219,13 +238,13 @@ async fn run_all_criteria(
     let tree_hash = tree_hash(cwd, supervision).await?;
     let mut runs = Vec::with_capacity(criteria.len());
     for criterion in criteria {
-        let (exit_code, reused, duration_ms) = match memo.get(&criterion.cmd, &tree_hash) {
-            Some(exit_code) => (exit_code, true, None),
+        let (exit_code, reused, duration_ms, output) = match memo.get(&criterion.cmd, &tree_hash) {
+            Some(answer) => (answer.exit_code, true, None, answer.output),
             None => {
-                let (exit_code, duration_ms) =
+                let (exit_code, duration_ms, output) =
                     run_criterion(task_id, cwd, &criterion.cmd, supervision).await?;
-                memo.put(&criterion.cmd, &tree_hash, exit_code);
-                (exit_code, false, Some(duration_ms))
+                memo.put(&criterion.cmd, &tree_hash, exit_code, &output);
+                (exit_code, false, Some(duration_ms), Some(output))
             }
         };
         runs.push(CriterionRun {
@@ -234,6 +253,7 @@ async fn run_all_criteria(
             is_guard: criterion.r#type == Some(CriterionType::Guard),
             reused,
             duration_ms,
+            output,
         });
     }
     Ok(runs)
@@ -253,87 +273,17 @@ fn median_duration(history: &TaskLedger, cmd: &str) -> Option<u64> {
     crate::stats::median(&sorted).map(|ms| ms as u64)
 }
 
-/// One criterion as a door that has to tell its writer why sees it: what
-/// it answered, and — when it never answered — the last of what it said
-/// on stderr, which is where a shell says what it could not find.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Probe {
-    pub(crate) run: CriterionRun,
-    pub(crate) said: Option<String>,
-}
-
 /// Runs every criterion of `task` on `cwd` as its pre-check would —
 /// through the same cache, which keeps what they answered for that
-/// tree — but with their output collected rather than shown, so what a
-/// command that could not run said can be handed back to whoever wrote
-/// it.
+/// tree — so what a command that could not run said can be handed back
+/// to whoever wrote it.
 pub(crate) async fn probe(
     task: &Task,
     cwd: &Path,
     memo: &Memo,
     supervision: Supervision<'_>,
-) -> Result<Vec<Probe>, TaskCycleError> {
-    let tree_hash = tree_hash(cwd, supervision).await?;
-    let mut probes = Vec::with_capacity(task.criteria.len());
-    for criterion in &task.criteria {
-        let is_guard = criterion.r#type == Some(CriterionType::Guard);
-        if let Some(exit_code) = memo.get(&criterion.cmd, &tree_hash) {
-            probes.push(Probe {
-                run: CriterionRun {
-                    cmd: criterion.cmd.clone(),
-                    exit_code,
-                    is_guard,
-                    reused: true,
-                    duration_ms: None,
-                },
-                said: None,
-            });
-            continue;
-        }
-        let started = std::time::Instant::now();
-        let outcome = spawn_governed(GovernedCommand::shell(cwd, &criterion.cmd), supervision)
-            .await
-            .map_err(|source| TaskCycleError::Criterion {
-                task: task.id.clone(),
-                cmd: criterion.cmd.clone(),
-                source,
-            })?;
-        let said = last_words(stderr_of(&outcome));
-        let exit_code = exit_code_of(outcome);
-        memo.put(&criterion.cmd, &tree_hash, exit_code);
-        probes.push(Probe {
-            run: CriterionRun {
-                cmd: criterion.cmd.clone(),
-                exit_code,
-                is_guard,
-                reused: false,
-                duration_ms: Some(started.elapsed().as_millis().min(u64::MAX as u128) as u64),
-            },
-            said: could_not_run(exit_code).and(said),
-        });
-    }
-    Ok(probes)
-}
-
-fn stderr_of(outcome: &Outcome) -> &[u8] {
-    match outcome {
-        Outcome::Exited { stderr, .. }
-        | Outcome::TimedOut { stderr, .. }
-        | Outcome::Cancelled { stderr, .. } => stderr,
-    }
-}
-
-/// The last non-empty line of `stderr`, cut to a line's worth of
-/// characters: enough to name what a shell could not find, never a whole
-/// build log.
-fn last_words(stderr: &[u8]) -> Option<String> {
-    let text = String::from_utf8_lossy(stderr);
-    let line = text
-        .lines()
-        .rev()
-        .find(|line| !line.trim().is_empty())?
-        .trim();
-    Some(line.chars().take(240).collect())
+) -> Result<Vec<CriterionRun>, TaskCycleError> {
+    run_all_criteria(&task.id, &task.criteria, cwd, memo, supervision).await
 }
 
 /// Pre-check in rojo: every non-`guard` criterion must

@@ -95,17 +95,11 @@ pub(super) async fn close_node(
             HookRun::Violation(rule) => {
                 return fail_with_tokens(ctx, node, rule, false, tokens).await
             }
-            HookRun::Ran(false) if step.on_failure == HookFailurePolicy::Fail => {
-                return fail_with_tokens(
-                    ctx,
-                    node,
-                    format!("after hook `{}` failed", step.run),
-                    false,
-                    tokens,
-                )
-                .await;
+            HookRun::Failed { said } if step.on_failure == HookFailurePolicy::Fail => {
+                let failure = HookRun::failure(HookPhase::After, step, &said);
+                return fail_with_tokens(ctx, node, failure, false, tokens).await;
             }
-            HookRun::Ran(_) => {}
+            HookRun::Passed | HookRun::Failed { .. } => {}
         }
     }
 

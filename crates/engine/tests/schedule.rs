@@ -124,6 +124,8 @@ fn every_decision_is_a_function_of_state_alone() {
                 phase: HookPhase::After,
                 command: "cargo fmt".to_string(),
                 exit_code: 0,
+                output: None,
+                tail: Vec::new(),
             })),
         ),
         (

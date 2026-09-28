@@ -28,7 +28,7 @@ use yunta_core::{
 use yunta_engine::NodeWait;
 use yunta_engine::{
     run_frame, Counter, NodeStanding, NodeState, Percentiles, PriorEstimation, RunFrame, RunPhase,
-    WaitingOn,
+    RunningTask, WaitingOn,
 };
 
 const RUN: &str = "run-1";
@@ -709,7 +709,66 @@ nodes:
         vec![Some("cargo"), Some("rg")],
         "newest first, under the node rather than under either session"
     );
-    assert_eq!(node.running_tasks, vec![TaskId::from("t1")]);
+    assert_eq!(
+        node.running_tasks,
+        vec![RunningTask {
+            id: TaskId::from("t1"),
+            in_session: false,
+        }],
+        "neither session names t1"
+    );
+}
+
+#[test]
+fn a_running_task_is_checking_criteria_until_a_session_opens_for_it() {
+    let workflow = workflow(
+        r#"
+name: ship
+nodes:
+  - { id: implement, kind: loop, until: all_tasks_complete, prompt: "do it" }
+"#,
+    );
+    let opened_for = |session: &str, task: &str| {
+        let EventPayload::Session(SessionEvent::Opened(mut opened)) = session_opened(session)
+        else {
+            unreachable!("session_opened builds an opened session")
+        };
+        opened.task_id = Some(task.into());
+        EventPayload::Session(SessionEvent::Opened(opened))
+    };
+    let in_session = |events: &[EventPayload]| {
+        let log = log(std::iter::once((0, None, created("standard")))
+            .chain(
+                events
+                    .iter()
+                    .cloned()
+                    .zip(1..)
+                    .map(|(payload, offset)| (offset, Some("implement"), payload)),
+            )
+            .collect());
+        let frame = frame(&workflow, &log, 100);
+        let node = frame.nodes.first().expect("declared").clone();
+        node.running_tasks
+            .iter()
+            .map(|task| task.in_session)
+            .collect::<Vec<_>>()
+    };
+
+    let mut events = vec![
+        started(1),
+        registered("t1"),
+        task_now("t1", TaskStatus::Running),
+    ];
+    assert_eq!(in_session(&events), vec![false], "the pre-check runs first");
+    events.push(opened_for("s-1", "t1"));
+    assert_eq!(in_session(&events), vec![true]);
+    events.push(task_now("t1", TaskStatus::Blocked));
+    events.push(task_now("t1", TaskStatus::Running));
+    assert_eq!(
+        in_session(&events),
+        vec![false],
+        "a new dispatch checks its criteria again before a session"
+    );
 }
 
 #[test]

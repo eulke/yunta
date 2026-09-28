@@ -42,6 +42,17 @@ pub struct CriterionResult {
     /// existed (additive, tolerant reader).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
+    /// The run object holding everything the command printed — stdout,
+    /// then stderr — with the run's secrets taken out. Absent when
+    /// nothing ran (`reused`), and on a log written before a run kept
+    /// what its commands printed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<ContentHash>,
+    /// The last lines a criterion that did not pass printed: what a
+    /// reader of the log, a person deciding and the next session read to
+    /// know why, without opening the object. Empty for one that passed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tail: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -245,6 +256,14 @@ pub struct HookExecutedPayload {
     pub phase: HookPhase,
     pub command: String,
     pub exit_code: i32,
+    /// The run object holding everything the hook printed, as a
+    /// criterion's `output`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<ContentHash>,
+    /// The last lines a hook that failed printed. Empty for one that
+    /// exited zero.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tail: Vec<String>,
 }
 
 /// `from_node` is the envelope's own `node_id` (the node that failed) —

@@ -364,10 +364,12 @@ pub struct RunEnv<'a> {
 /// receipt. The last lines are the ones that say why, so those are the
 /// ones kept, in the order the process wrote them.
 fn stderr_tail(bytes: &[u8]) -> String {
-    /// How many lines of stderr a failure quotes.
-    const LINES: usize = 20;
     let text = String::from_utf8_lossy(bytes);
-    let mut tail: Vec<&str> = text.lines().rev().take(LINES).collect();
+    let mut tail: Vec<&str> = text
+        .lines()
+        .rev()
+        .take(crate::process::CommandOutput::TAIL_LINES)
+        .collect();
     tail.reverse();
     tail.join("\n")
 }

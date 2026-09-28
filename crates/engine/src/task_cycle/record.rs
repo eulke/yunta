@@ -32,11 +32,27 @@ impl Recorder<'_> {
         phase: Phase,
         runs: &[CriterionRun],
     ) -> Result<Option<Seq>, TaskCycleError> {
+        let mut results = to_results(runs);
+        // What each command printed goes where the run keeps its objects;
+        // the check names it, and quotes the end of what did not pass.
+        if let Some((observer, _)) = self.audit {
+            for (result, run) in results.iter_mut().zip(runs) {
+                let Some(output) = &run.output else {
+                    continue;
+                };
+                result.output = Some(observer.keep_output(output).await.map_err(|source| {
+                    TaskCycleError::KeepOutput {
+                        task: self.task.clone(),
+                        source,
+                    }
+                })?);
+            }
+        }
         self.record(EventPayload::Node(NodeEvent::CriteriaChecked(
             CriteriaCheckedPayload {
                 task_id: self.task.clone(),
                 phase,
-                results: to_results(runs),
+                results,
             },
         )))
         .await
@@ -79,6 +95,11 @@ pub(crate) fn to_results(runs: &[CriterionRun]) -> Vec<CriterionResult> {
             r#type: run.is_guard.then_some(CriterionType::Guard),
             reused: run.reused,
             duration_ms: run.duration_ms,
+            output: None,
+            tail: match (&run.output, run.exit_code) {
+                (Some(output), exit_code) if exit_code != 0 => output.tail(),
+                _ => Vec::new(),
+            },
         })
         .collect()
 }

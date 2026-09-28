@@ -18,7 +18,7 @@ use yunta_core::events::ExecutionEnvironment;
 use yunta_core::{Task, TasksFile};
 
 use super::session::{RunToolError, SessionTools};
-use crate::task_cycle::{probe, Probe};
+use crate::task_cycle::{probe, CriterionRun};
 use crate::worktree::{open_unit, UnitHome, UnitId};
 
 impl SessionTools {
@@ -100,17 +100,16 @@ impl SessionTools {
 fn judged(
     index: usize,
     task: &Task,
-    probes: &[Probe],
+    probes: &[CriterionRun],
     environment: Option<&ExecutionEnvironment>,
 ) -> Vec<Diagnostic> {
     let independent = task.depends_on.is_empty();
     probes
         .iter()
         .enumerate()
-        .filter_map(|(at, probe)| {
-            let run = &probe.run;
+        .filter_map(|(at, run)| {
             let (code, detail) = if run.could_not_run().is_some() {
-                (RuleCode::CriterionCannotRun, cannot_run(probe, environment))
+                (RuleCode::CriterionCannotRun, cannot_run(run, environment))
             } else if independent && !run.is_guard && run.exit_code == 0 {
                 (
                     RuleCode::CriterionAlreadyPasses,
@@ -140,13 +139,13 @@ fn judged(
 
 /// Why a criterion could not run, in the words a writer fixes it by:
 /// what it exited with, what the shell said, and where it looked.
-fn cannot_run(probe: &Probe, environment: Option<&ExecutionEnvironment>) -> String {
+fn cannot_run(run: &CriterionRun, environment: Option<&ExecutionEnvironment>) -> String {
     let mut detail = format!(
         "`{}` exits {} where the engine runs criteria",
-        probe.run.cmd,
-        probe.run.exit_described()
+        run.cmd,
+        run.exit_described()
     );
-    if let Some(said) = &probe.said {
+    if let Some(said) = run.said() {
         detail.push_str(&format!(" — it said `{said}`"));
     }
     if let Some(environment) = environment {

@@ -37,7 +37,7 @@ use crate::stats::stats_observed_at;
 use node::Reading;
 
 pub use chronicle::{chronicle, Happening, Moment};
-pub use node::{NodeFrame, NodeStanding};
+pub use node::{NodeFrame, NodeStanding, RunningTask};
 pub use phase::{RunPhase, WaitingOn};
 pub use yunta_core::events::{ChildLink, Degradation, Reroute};
 

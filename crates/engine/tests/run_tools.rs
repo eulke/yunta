@@ -539,6 +539,8 @@ fn checked(phase: Phase, exits: [i32; 2]) -> EventPayload {
                 r#type: None,
                 reused: false,
                 duration_ms: None,
+                output: None,
+                tail: Vec::new(),
             },
             CriterionResult {
                 cmd: "true".to_string(),
@@ -546,9 +548,20 @@ fn checked(phase: Phase, exits: [i32; 2]) -> EventPayload {
                 r#type: Some(CriterionType::Guard),
                 reused: false,
                 duration_ms: None,
+                output: None,
+                tail: Vec::new(),
             },
         ],
     }))
+}
+
+/// The same check, with the last lines its red criterion printed.
+fn saying(check: EventPayload, tail: &[&str]) -> EventPayload {
+    let EventPayload::Node(NodeEvent::CriteriaChecked(mut check)) = check else {
+        unreachable!("`checked` builds a criteria check")
+    };
+    check.results[0].tail = tail.iter().map(|line| line.to_string()).collect();
+    EventPayload::Node(NodeEvent::CriteriaChecked(check))
 }
 
 /// A log in the middle of T001's second cycle: a first cycle whose one
@@ -579,7 +592,10 @@ fn two_cycles_of_one_attempt_each(host: &ToolsHost) {
     host.record(Some("implement"), checked(Phase::Post, [1, 1]));
     host.record(Some("implement"), running());
     host.record(Some("implement"), checked(Phase::Pre, [1, 0]));
-    host.record(Some("implement"), checked(Phase::Post, [1, 0]));
+    host.record(
+        Some("implement"),
+        saying(checked(Phase::Post, [1, 0]), &["hello.txt is missing"]),
+    );
     host.record(
         Some("implement"),
         EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {
@@ -602,6 +618,10 @@ async fn a_task_session_reads_its_task_and_every_cycle_it_ran_from_the_run() {
     let (is_error, text) = call(&client, "yunta_task", json!({})).await;
     assert!(!is_error, "got: {text}");
     let red = json!({"cmd": "test -f hello.txt", "guard": false, "exit_code": 1});
+    let red_saying_why = json!({
+        "cmd": "test -f hello.txt", "guard": false, "exit_code": 1,
+        "tail": ["hello.txt is missing"],
+    });
     let guard = json!({"cmd": "true", "guard": true, "exit_code": 0});
     let broken_guard = json!({"cmd": "true", "guard": true, "exit_code": 1});
     assert_eq!(
@@ -621,7 +641,7 @@ async fn a_task_session_reads_its_task_and_every_cycle_it_ran_from_the_run() {
                 ]},
                 {"cycle": 2, "checks": [
                     {"phase": "pre", "criteria": [red, guard]},
-                    {"phase": "post", "attempt": 1, "criteria": [red, guard], "outside_scope": ["notes.md"]},
+                    {"phase": "post", "attempt": 1, "criteria": [red_saying_why, guard], "outside_scope": ["notes.md"]},
                 ]},
             ],
         }),
@@ -679,6 +699,43 @@ async fn a_check_judges_the_work_the_way_its_close_will() {
     let verdict: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(verdict["closes"], json!(true), "got: {text}");
     assert_eq!(verdict["outside_scope"], json!([]));
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_check_says_what_a_red_criterion_printed_last() {
+    let owner = yunta_testkit::Owner::new();
+    let repo = tempfile::tempdir().unwrap();
+    yunta_testkit::init_repo(repo.path());
+    let unit = yunta_engine::Unit {
+        from: yunta_engine::head_tree(repo.path(), owner.supervision())
+            .await
+            .unwrap(),
+        ..unit_at(repo.path().to_path_buf())
+    };
+    let mut task = greeting_task();
+    task.criteria[0].cmd =
+        "echo checking; echo 'hello.txt is missing' >&2; test -f hello.txt".into();
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host
+        .task_session("implement", host.task_access(task, unit))
+        .await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let (is_error, text) = call(&client, "yunta_check_task", json!({})).await;
+
+    assert!(!is_error, "got: {text}");
+    let verdict: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        verdict["criteria"][0]["tail"],
+        json!(["checking", "hello.txt is missing"]),
+        "the session reads why it fails without running the command again"
+    );
+    assert_eq!(
+        verdict["criteria"][1].get("tail"),
+        None,
+        "a criterion that passes has nothing to explain"
+    );
     client.cancel().await.unwrap();
 }
 

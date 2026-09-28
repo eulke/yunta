@@ -308,8 +308,8 @@ nodes:
         .await;
     match terminal {
         RunTerminal::Paused { reason } => assert!(
-            reason.contains("regression"),
-            "expected a regression diagnostic, got: {reason}"
+            reason.contains("regression") && reason.contains("marker.txt: No such file"),
+            "expected a regression diagnostic quoting what the suite printed, got: {reason}"
         ),
         other => panic!(
             "a run's only `baseline_compare` compares against the measurement its first \

@@ -21,12 +21,14 @@ use yunta_core::{Clock, Pid};
 use crate::process_registry::{self, ProcessRegistry};
 mod environment;
 mod leader;
+mod output;
 mod pipes;
 mod state;
 
 pub use environment::execution_environment;
 use environment::SHELL;
 use leader::Leader;
+pub use output::CommandOutput;
 use pipes::{read_to_capture, stdio, write_then_close, Captured, PipeFailure};
 use state::{child_has_exited, observation_interval, wait_for_deadline, Waited};
 
@@ -84,15 +86,15 @@ impl fmt::Debug for Supervision<'_> {
     }
 }
 
-/// What to do with one of the child's output streams.
+/// What to do with one of the child's output streams. Never the
+/// engine's own: the terminal belongs to the run's display, so what a
+/// child prints is kept or dropped, never interleaved with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Capture {
-    /// The child writes to the engine's own stream.
-    #[default]
-    Inherit,
     /// The stream is discarded.
     Discard,
     /// The stream is read to the end and returned in the outcome.
+    #[default]
     Collect,
 }
 
@@ -111,27 +113,23 @@ pub struct GovernedCommand {
 }
 
 impl GovernedCommand {
-    /// `program`, run in `cwd`: no arguments, no stdin, streams
-    /// inherited, no timeout.
+    /// `program`, run in `cwd`: no arguments, no stdin, both streams
+    /// collected, no timeout.
     pub fn new(program: impl Into<PathBuf>, cwd: &Path) -> Self {
         GovernedCommand {
             program: program.into(),
             args: Vec::new(),
             cwd: cwd.to_path_buf(),
             stdin: None,
-            stdout: Capture::Inherit,
-            stderr: Capture::Inherit,
+            stdout: Capture::Collect,
+            stderr: Capture::Collect,
             timeout: None,
         }
     }
 
     /// `sh -c <script>` in `cwd`, both streams collected.
     pub fn shell(cwd: &Path, script: &str) -> Self {
-        Self::new(SHELL, cwd)
-            .arg("-c")
-            .arg(script)
-            .stdout(Capture::Collect)
-            .stderr(Capture::Collect)
+        Self::new(SHELL, cwd).arg("-c").arg(script)
     }
 
     pub fn arg(mut self, arg: impl Into<String>) -> Self {

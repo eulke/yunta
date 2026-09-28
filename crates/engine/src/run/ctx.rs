@@ -483,6 +483,15 @@ impl crate::task_cycle::SessionObserver for RunCtx<'_> {
         self.log().record(Some(node_id), payload).await
     }
 
+    async fn keep_output(
+        &self,
+        output: &crate::process::CommandOutput,
+    ) -> std::io::Result<yunta_core::ContentHash> {
+        crate::artifacts::store::ObjectStore::at(self.run_dir)
+            .put_redacted(output.bytes(), &self.redactor)
+            .await
+    }
+
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry> {
         self.process_registry.as_deref()
     }

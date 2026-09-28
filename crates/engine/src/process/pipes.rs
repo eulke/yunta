@@ -35,7 +35,6 @@ impl Captured {
 
 pub(super) fn stdio(capture: Capture) -> Stdio {
     match capture {
-        Capture::Inherit => Stdio::inherit(),
         Capture::Discard => Stdio::null(),
         Capture::Collect => Stdio::piped(),
     }

@@ -58,7 +58,7 @@ pub struct NodeFrame {
     /// produced is a fact of the log and not of the filesystem.
     pub artifacts: Vec<ArtifactId>,
     /// The ledger tasks this node has in `running`, by id.
-    pub running_tasks: Vec<TaskId>,
+    pub running_tasks: Vec<RunningTask>,
     /// The sessions open on the attempt now running, oldest first — one
     /// per task in the batch for a `loop` node above concurrency 1.
     pub sessions: Vec<OpenSession>,
@@ -74,6 +74,15 @@ pub struct NodeFrame {
     /// The last re-route this node took; `None` for one that never
     /// rerouted.
     pub reroute: Option<Reroute>,
+}
+
+/// A task in `running`, and whether an agent is on it: one no
+/// session has opened for since it started running is having its
+/// criteria checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunningTask {
+    pub id: TaskId,
+    pub in_session: bool,
 }
 
 /// Where one declared node stands — the three cases a frozen DAG and a
@@ -165,17 +174,17 @@ impl Reading<'_> {
 
     /// The ledger tasks `node` has in `running`, by id — sorted, so two
     /// frames of the same log list them in the same order.
-    fn running_tasks(&self, node: &NodeId) -> Vec<TaskId> {
-        let mut tasks: Vec<TaskId> = self
-            .state
+    fn running_tasks(&self, node: &NodeId) -> Vec<RunningTask> {
+        self.state
             .tasks
             .iter()
             .filter(|(_, record)| {
                 matches!(record.status, TaskStatus::Running) && record.owner.as_ref() == Some(node)
             })
-            .map(|(task, _)| task.clone())
-            .collect();
-        tasks.sort();
-        tasks
+            .map(|(task, record)| RunningTask {
+                id: task.clone(),
+                in_session: record.in_session,
+            })
+            .collect()
     }
 }

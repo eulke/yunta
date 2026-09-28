@@ -218,16 +218,11 @@ async fn execute_in_its_tree(
     for step in &hooks.before {
         match run_hook(ctx, node, HookPhase::Before, step).await? {
             HookRun::Violation(rule) => return fail(ctx, node, rule, false).await,
-            HookRun::Ran(false) if step.on_failure == HookFailurePolicy::Fail => {
-                return fail(
-                    ctx,
-                    node,
-                    format!("before hook `{}` failed", step.run),
-                    false,
-                )
-                .await;
+            HookRun::Failed { said } if step.on_failure == HookFailurePolicy::Fail => {
+                let failure = HookRun::failure(HookPhase::Before, step, &said);
+                return fail(ctx, node, failure, false).await;
             }
-            HookRun::Ran(_) => {}
+            HookRun::Passed | HookRun::Failed { .. } => {}
         }
     }
 

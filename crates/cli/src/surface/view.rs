@@ -78,7 +78,10 @@ pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> V
     if !node.running_tasks.is_empty() {
         rows.push(format!(
             "{detail}tasks running: {}",
-            join(node.running_tasks.iter().map(|task| task.to_string()))
+            join(node.running_tasks.iter().map(|task| match task.in_session {
+                true => task.id.to_string(),
+                false => format!("{} (checking criteria)", task.id),
+            }))
         ));
     }
     let calls = recent_calls(node);
@@ -336,6 +339,29 @@ mod tests {
         assert!(
             under[0].starts_with(&indent(CHILD_DEPTH)) && !under[0].starts_with(&indent(2)),
             "its children sit exactly one step under it: {under:?}"
+        );
+    }
+
+    #[test]
+    fn a_running_task_no_session_works_is_said_to_be_checking_its_criteria() {
+        let frame = run_frame(&RUN);
+        let mut node = yunta_testkit::node_frame(&NodeId::from("implement"), NodeStanding::ToGo);
+        node.running_tasks = vec![
+            yunta_engine::RunningTask {
+                id: "T001".into(),
+                in_session: false,
+            },
+            yunta_engine::RunningTask {
+                id: "T002".into(),
+                in_session: true,
+            },
+        ];
+
+        let rows = node_rows(&frame, &node, Glyphs::Ascii);
+        assert!(
+            rows.iter()
+                .any(|row| row.trim() == "tasks running: T001 (checking criteria), T002"),
+            "{rows:?}"
         );
     }
 

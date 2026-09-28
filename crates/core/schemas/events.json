@@ -926,8 +926,26 @@
           "type": "integer",
           "format": "int32"
         },
+        "output": {
+          "description": "The run object holding everything the command printed — stdout,\nthen stderr — with the run's secrets taken out. Absent when\nnothing ran (`reused`), and on a log written before a run kept\nwhat its commands printed.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContentHash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "reused": {
           "type": "boolean"
+        },
+        "tail": {
+          "description": "The last lines a criterion that did not pass printed: what a\nreader of the log, a person deciding and the next session read to\nknow why, without opening the object. Empty for one that passed.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "type": {
           "anyOf": [
@@ -2106,8 +2124,26 @@
           "type": "integer",
           "format": "int32"
         },
+        "output": {
+          "description": "The run object holding everything the hook printed, as a\ncriterion's `output`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContentHash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "phase": {
           "$ref": "#/$defs/HookPhase"
+        },
+        "tail": {
+          "description": "The last lines a hook that failed printed. Empty for one that\nexited zero.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

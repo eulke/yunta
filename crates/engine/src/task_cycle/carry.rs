@@ -140,6 +140,7 @@ fn stopped_on(left: &CommitSha, paths: &[std::path::PathBuf]) -> CriterionRun {
         .collect();
     CriterionRun {
         cmd: format!("git cherry-pick {left}: conflicts in {}", listed.join(", ")),
+        output: None,
         exit_code: 1,
         is_guard: false,
         reused: false,

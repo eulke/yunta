@@ -87,6 +87,8 @@ fn criterion(cmd: &str, exit_code: i32) -> CriterionResult {
         r#type: None,
         reused: false,
         duration_ms: None,
+        output: None,
+        tail: Vec::new(),
     }
 }
 

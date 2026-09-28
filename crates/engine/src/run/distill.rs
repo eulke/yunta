@@ -400,6 +400,8 @@ mod tests {
                             r#type: None,
                             reused: false,
                             duration_ms: Some(1),
+                            output: None,
+                            tail: Vec::new(),
                         },
                         CriterionResult {
                             cmd: "cargo clippy".to_string(),
@@ -407,6 +409,8 @@ mod tests {
                             r#type: None,
                             reused: true,
                             duration_ms: None,
+                            output: None,
+                            tail: Vec::new(),
                         },
                     ],
                 })),

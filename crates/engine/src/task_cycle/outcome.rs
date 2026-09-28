@@ -176,12 +176,19 @@ impl std::fmt::Display for BlockedCause {
     }
 }
 
-/// Each run as "`cmd` <verb> <exit code and what it means>", in order.
+/// Each run as "`cmd` <verb> <exit code and what it means>", and the
+/// last line it printed, in order: a person deciding about the task reads
+/// why it fails without opening what the run kept of it.
 fn exits(runs: &[CriterionRun], verb: &str) -> String {
     runs.iter()
-        .map(|run| format!("`{}` {verb} {}", run.cmd, run.exit_described()))
+        .map(|run| {
+            yunta_core::text::aside(
+                format!("`{}` {verb} {}", run.cmd, run.exit_described()),
+                &run.said().unwrap_or_default(),
+            )
+        })
         .collect::<Vec<_>>()
-        .join(", ")
+        .join("; ")
 }
 
 /// What an exhausted task's last attempt left: the criteria still red,

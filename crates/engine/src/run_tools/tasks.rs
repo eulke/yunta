@@ -112,7 +112,11 @@ impl SessionTools {
             .any(|run| run.could_not_run().is_some());
         render(&Verdict {
             closes: judgement.closes(),
-            criteria: judgement.criteria.iter().map(Answered::of_run).collect(),
+            criteria: judgement
+                .criteria
+                .iter()
+                .map(|run| Answered::of_run(run, &self.host.redactor))
+                .collect(),
             outside_scope: judgement.scope.violations,
             runs_under: self.host.environment.as_ref().filter(|_| any_unrunnable),
         })
@@ -162,24 +166,40 @@ struct Answered {
     /// tree turns this green.
     #[serde(skip_serializing_if = "Option::is_none")]
     cannot_run: Option<&'static str>,
+    /// The last lines a failing command printed: why it fails, without
+    /// running it again.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tail: Vec<String>,
 }
 
 impl Answered {
+    /// A check as the log holds it, its tail already redacted there.
     fn of_result(result: &CriterionResult) -> Self {
         Answered {
             cmd: result.cmd.clone(),
             guard: result.r#type == Some(CriterionType::Guard),
             exit_code: result.exit_code,
             cannot_run: could_not_run(result.exit_code),
+            tail: result.tail.clone(),
         }
     }
 
-    fn of_run(run: &CriterionRun) -> Self {
+    /// A check this call ran, its tail redacted the way the log would.
+    fn of_run(run: &CriterionRun, redactor: &yunta_core::Redactor) -> Self {
+        let tail = match (&run.output, run.exit_code) {
+            (Some(output), exit_code) if exit_code != 0 => redactor
+                .text(&output.tail().join("\n"))
+                .lines()
+                .map(str::to_string)
+                .collect(),
+            _ => Vec::new(),
+        };
         Answered {
             cmd: run.cmd.clone(),
             guard: run.is_guard,
             exit_code: run.exit_code,
             cannot_run: run.could_not_run(),
+            tail,
         }
     }
 }

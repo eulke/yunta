@@ -160,7 +160,7 @@ pub use verification_effectiveness::{
 };
 pub use view::{
     chronicle, run_frame, ChildLink, Counter, Degradation, Happening, Moment, NodeFrame,
-    NodeStanding, Reroute, RunFrame, RunPhase, WaitingOn,
+    NodeStanding, Reroute, RunFrame, RunPhase, RunningTask, WaitingOn,
 };
 pub use worktree::{
     capture_tree, cleanup_worktree, commit_work, hand_over_worktree, head_commit, head_tree, land,

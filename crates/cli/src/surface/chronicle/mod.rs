@@ -110,9 +110,10 @@ pub(super) fn graduation(moment: &Moment, glyphs: Glyphs) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use yunta_core::events::{
-        EventBody, EventPayload, Evidence, Failure, Finding, FindingPostedPayload, FindingSeverity,
-        NodeEvent, NodeFinishedPayload, NodeReroutedPayload, PromotionSignaledPayload,
-        RerouteCause, RerouteOrigin, RunEvent, StoredEvent,
+        CriteriaCheckedPayload, CriterionResult, EventBody, EventPayload, Evidence, Failure,
+        Finding, FindingPostedPayload, FindingSeverity, NodeEvent, NodeFinishedPayload,
+        NodeReroutedPayload, Phase, PromotionSignaledPayload, RerouteCause, RerouteOrigin,
+        RunEvent, StoredEvent,
     };
     use yunta_core::events::{FindingEvent, TokenUsage};
     use yunta_engine::chronicle as derive_chronicle;
@@ -151,6 +152,33 @@ mod tests {
         assert_eq!(
             said_for(rerouted("exit 1")),
             "run — rerouted to `fix-lint`: exit 1"
+        );
+    }
+
+    #[test]
+    fn a_red_post_check_names_each_red_criterion_with_the_last_line_it_printed() {
+        let result = |cmd: &str, exit_code: i32, tail: &[&str]| CriterionResult {
+            cmd: cmd.to_string(),
+            exit_code,
+            r#type: None,
+            reused: false,
+            duration_ms: None,
+            output: None,
+            tail: tail.iter().map(|line| line.to_string()).collect(),
+        };
+        let payload = EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
+            task_id: "T001".into(),
+            phase: Phase::Post,
+            results: vec![
+                result("cargo test", 101, &["failures:", "test result: FAILED", ""]),
+                result("cargo fmt --check", 0, &[]),
+                result("test -f made.txt", 1, &[]),
+            ],
+        }));
+        assert_eq!(
+            said_for(payload),
+            "run — T001 post: 3 criteria · red: `cargo test` exit 101 — test result: FAILED; \
+             `test -f made.txt` exit 1"
         );
     }
 

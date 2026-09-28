@@ -348,14 +348,16 @@ async fn diff_paths(
     Ok(paths)
 }
 
+/// Only the exit code of a proposed criterion's pre-check is recorded,
+/// so what it prints is dropped rather than reaching the terminal.
 async fn run_criterion(
     cwd: &Path,
     cmd: &str,
     supervision: Supervision<'_>,
 ) -> Result<i32, ScopeExpansionError> {
     let command = GovernedCommand::shell(cwd, cmd)
-        .stdout(Capture::Inherit)
-        .stderr(Capture::Inherit);
+        .stdout(Capture::Discard)
+        .stderr(Capture::Discard);
     Ok(
         match spawn_governed(command, supervision)
             .await

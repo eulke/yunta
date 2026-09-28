@@ -212,7 +212,13 @@ saw.
 
 ## A node's criteria never turn green
 
-`yunta status <run_id>` shows which criterion is failing and its exit code.
+`yunta status <run_id>` shows which criterion is failing, its exit code and
+the last line it printed. What a criterion prints never reaches your
+terminal; the run keeps it. The last 20 lines of a red criterion are on its
+`criteria_checked` event, which is what a task session reads through
+`yunta_task`, and the whole output, redacted, is the object under the run's
+`objects/` that the event's `output` names.
+
 If the same criterion keeps failing across every re-route
 (`on_failure.goto`) up to `max_reroutes`, the run pauses on a gate instead of
 looping forever — that's expected, not a hang. Widen what the correction

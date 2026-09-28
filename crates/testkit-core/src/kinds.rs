@@ -98,6 +98,8 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 r#type: None,
                 reused: false,
                 duration_ms: Some(4_200),
+                output: None,
+                tail: Vec::new(),
             }],
         })),
         EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::done(
@@ -148,6 +150,8 @@ pub fn all_kinds() -> Vec<EventPayload> {
             phase: HookPhase::After,
             command: "cargo fmt".to_string(),
             exit_code: 0,
+            output: None,
+            tail: Vec::new(),
         })),
         EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
             "fix-lint".into(),

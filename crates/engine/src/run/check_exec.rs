@@ -105,12 +105,21 @@ async fn execute_baseline_compare(
     }
 
     if captured.results.exit_code == 0 && ran.exit_code != 0 {
+        // What the suite printed says why it fails now.
+        let said = ran
+            .output
+            .as_ref()
+            .map(|output| output.tail().join("\n"))
+            .unwrap_or_default();
         fail(
             ctx,
             node,
-            format!(
-                "regression: `{}` passed at baseline (exit 0) but now exits {}",
-                captured.command, ran.exit_code
+            yunta_core::text::detailed(
+                format!(
+                    "regression: `{}` passed at baseline (exit 0) but now exits {}",
+                    captured.command, ran.exit_code
+                ),
+                &said,
             ),
             false,
         )

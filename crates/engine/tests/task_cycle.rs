@@ -102,6 +102,8 @@ fn priced(entries: &[(&str, &[u64])]) -> TaskLedger {
                 r#type: None,
                 reused: false,
                 duration_ms: Some(duration_ms),
+                output: None,
+                tail: Vec::new(),
             })
         })
         .collect();
@@ -438,6 +440,59 @@ sessions:
             cause: BlockedCause::Unmet { attempts: 1, .. }
         }
     ));
+}
+
+#[tokio::test]
+async fn a_blocked_task_says_what_its_red_criterion_printed_last() {
+    let owner = Owner::new();
+    let (_dir, run, unit) = a_unit(&owner).await;
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    let t = task(
+        "still-red",
+        &["output.txt"],
+        vec![cmd(
+            "echo checking; echo 'output.txt is missing' >&2; test -f output.txt",
+        )],
+    );
+    let adapter = MockAdapter::from_yaml(
+        r#"
+sessions:
+  - outcome: { type: completed, summary: "attempt 1" }
+"#,
+    )
+    .unwrap();
+
+    let report = run_task(
+        &t,
+        "Implement your task.",
+        AttemptEnv {
+            node: &build_node(),
+            adapter: &adapter,
+            unit: &unit,
+            budget: Budget::default(),
+            memo: &memo,
+            history: &unpriced(),
+            supervision: owner.supervision(),
+            carry: None,
+            resume: None,
+        },
+        ungoverned(&GrantLedger::new(0)),
+        None,
+        &tokio_util::sync::CancellationToken::new(),
+        &bare_setup(run.path()),
+    )
+    .await
+    .unwrap();
+
+    let TaskOutcome::Blocked { cause } = report.outcome else {
+        panic!("the attempt left the criterion red: {:?}", report.outcome);
+    };
+    assert_eq!(
+        cause.to_string(),
+        "not done after 1 attempt(s): `echo checking; echo 'output.txt is missing' >&2; \
+         test -f output.txt` still exits 1 — output.txt is missing",
+        "whoever decides reads why it fails, not only that it does"
+    );
 }
 
 #[tokio::test]
@@ -931,18 +986,80 @@ async fn criterion_declaration_order_never_alters_the_pre_check_verdict() {
     );
 }
 
-#[test]
-fn criterion_results_without_duration_still_parse() {
-    // Additive payload evolution — an older event without
-    // `duration_ms` parses, and the field reads back `None`.
-    let old = r#"{ "cmd": "cargo test", "exit_code": 0, "reused": false }"#;
-    let result: yunta_core::events::CriterionResult = serde_json::from_str(old).unwrap();
-    assert_eq!(result.duration_ms, None);
+#[tokio::test]
+async fn a_reused_red_answer_still_says_why_and_a_reused_green_one_names_nothing() {
+    let owner = Owner::new();
+    let dir = tempfile::tempdir().unwrap();
+    init_repo(dir.path());
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+    let t = task(
+        "T1",
+        &["**"],
+        vec![
+            cmd("echo red-said-this; exit 1"),
+            guard("echo green-said-this"),
+        ],
+    );
+    let printed = |run: &CriterionRun| {
+        run.output
+            .as_ref()
+            .map(|output| String::from_utf8_lossy(output.bytes()).into_owned())
+    };
+
+    let ran = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
+    let reused = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
+
+    let by_cmd = |runs: &[CriterionRun], prefix: &str| {
+        runs.iter()
+            .find(|run| run.cmd.starts_with(prefix))
+            .cloned()
+            .expect("declared")
+    };
+    let (red, green) = (by_cmd(&ran, "echo red"), by_cmd(&ran, "echo green"));
+    assert_eq!(printed(&red).as_deref(), Some("red-said-this\n"));
+    assert_eq!(printed(&green).as_deref(), Some("green-said-this\n"));
+
+    let (red, green) = (by_cmd(&reused, "echo red"), by_cmd(&reused, "echo green"));
+    assert!(red.reused && green.reused);
+    assert_eq!(
+        printed(&red).as_deref(),
+        Some("red-said-this\n"),
+        "the close that reuses a session's own check still says why it fails"
+    );
+    assert_eq!(printed(&green), None);
 }
 
-/// A `SessionObserver` whose every append fails, standing in for storage
-/// that has gone down mid-session.
-struct FailingObserver;
+#[test]
+fn criterion_results_from_before_their_later_fields_still_parse() {
+    // Additive payload evolution — an older event without `duration_ms`,
+    // `output` or `tail` parses, and each reads back empty.
+    let old = r#"{ "cmd": "cargo test", "exit_code": 1, "reused": false }"#;
+    let result: yunta_core::events::CriterionResult = serde_json::from_str(old).unwrap();
+    assert_eq!(result.duration_ms, None);
+    assert_eq!(result.output, None);
+    assert!(result.tail.is_empty());
+
+    let old = r#"{ "phase": "before", "command": "npm ci", "exit_code": 1 }"#;
+    let hook: yunta_core::events::HookExecutedPayload = serde_json::from_str(old).unwrap();
+    assert_eq!(hook.output, None);
+    assert!(hook.tail.is_empty());
+}
+
+/// Which store a [`FailingObserver`] stands in for, gone down mid-session.
+#[derive(Clone, Copy)]
+enum Down {
+    /// Every append of an event fails.
+    Log,
+    /// Every object a command's output would be kept as fails.
+    Objects,
+}
+
+/// A `SessionObserver` whose `Down` store fails every write.
+struct FailingObserver(Down);
 
 #[async_trait::async_trait]
 impl yunta_engine::SessionObserver for FailingObserver {
@@ -951,10 +1068,23 @@ impl yunta_engine::SessionObserver for FailingObserver {
         _node_id: &yunta_core::NodeId,
         _payload: yunta_core::events::EventPayload,
     ) -> Result<yunta_core::Seq, yunta_storage::StorageError> {
-        Err(yunta_storage::StorageError::Append {
-            run_id: yunta_core::RunId::from("run-test"),
-            source: "audit storage is down".into(),
-        })
+        match self.0 {
+            Down::Log => Err(yunta_storage::StorageError::Append {
+                run_id: yunta_core::RunId::from("run-test"),
+                source: "audit storage is down".into(),
+            }),
+            Down::Objects => Ok(yunta_core::Seq::from(1)),
+        }
+    }
+
+    async fn keep_output(
+        &self,
+        output: &yunta_engine::process::CommandOutput,
+    ) -> std::io::Result<yunta_core::ContentHash> {
+        match self.0 {
+            Down::Objects => Err(std::io::Error::other("object storage is down")),
+            Down::Log => Ok(yunta_core::sha256_hex(output.bytes())),
+        }
     }
 
     fn process_registry(&self) -> Option<&yunta_engine::ProcessRegistry> {
@@ -964,10 +1094,31 @@ impl yunta_engine::SessionObserver for FailingObserver {
 
 #[tokio::test]
 async fn a_lost_session_audit_event_fails_the_task() {
-    let owner = Owner::new();
     // A session's audit event that cannot be appended is not dropped
     // with a warning: the storage cause travels back and fails the task,
     // so the trail never silently loses an event.
+    let err = a_cycle_with_its_store_down(Down::Log).await;
+    assert!(
+        matches!(err, yunta_engine::TaskCycleError::Audit { .. }),
+        "a lost session audit event must fail the task, got: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn output_the_run_cannot_keep_fails_the_task() {
+    // A check whose output cannot be kept would reach the log naming
+    // nothing to read: the storage cause fails the task instead.
+    let err = a_cycle_with_its_store_down(Down::Objects).await;
+    assert!(
+        matches!(err, yunta_engine::TaskCycleError::KeepOutput { .. }),
+        "output the run cannot keep must fail the task, got: {err:?}"
+    );
+}
+
+/// One task's cycle, audited by an observer whose `down` store fails:
+/// the error the cycle ends with.
+async fn a_cycle_with_its_store_down(down: Down) -> yunta_engine::TaskCycleError {
+    let owner = Owner::new();
     let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
@@ -986,8 +1137,8 @@ outcome: { type: completed, summary: "wrote it" }
     .unwrap();
 
     let node = yunta_core::NodeId::from("build");
-    let observer = FailingObserver;
-    let err = run_task(
+    let observer = FailingObserver(down);
+    run_task(
         &t,
         "Implement your task.",
         AttemptEnv {
@@ -1007,12 +1158,7 @@ outcome: { type: completed, summary: "wrote it" }
         &bare_setup(run.path()),
     )
     .await
-    .unwrap_err();
-
-    assert!(
-        matches!(err, yunta_engine::TaskCycleError::Audit { .. }),
-        "a lost session audit event must fail the task, got: {err:?}"
-    );
+    .unwrap_err()
 }
 
 /// The verdict is a function of what ran, not of the order it ran in
@@ -1072,6 +1218,7 @@ fn ran(cmd: &str, exit_code: i32, is_guard: bool) -> CriterionRun {
         is_guard,
         reused: false,
         duration_ms: None,
+        output: None,
     }
 }
 
