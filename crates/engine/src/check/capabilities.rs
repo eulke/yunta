@@ -66,7 +66,7 @@ pub(crate) fn check_adapter_capabilities(
             .map(|artifacts| artifacts.produces.as_slice())
             .unwrap_or_default();
         if let Some(need) =
-            crate::run_tools::RunToolsNeed::of(node, blackboard_member, declared_artifacts)
+            crate::task_cycle::RunToolsNeed::of(node, blackboard_member, declared_artifacts)
         {
             refuse_if_none_can(
                 node,

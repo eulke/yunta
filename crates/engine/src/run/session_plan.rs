@@ -180,14 +180,11 @@ fn mandatory_tools(
     ctx: &crate::run::RunCtx<'_>,
     node: &Node,
 ) -> Option<crate::task_cycle::RunToolsNeed> {
-    if ctx.run_tools_host.is_blackboard_member(&node.id) {
-        return Some(crate::task_cycle::RunToolsNeed::Blackboard);
-    }
-    if let Some(kind) = crate::run::runner_resolve::declared_typed_artifact(ctx, node) {
-        return Some(crate::task_cycle::RunToolsNeed::TypedArtifact(kind));
-    }
-    matches!(node.kind, yunta_core::NodeKind::Loop { .. })
-        .then_some(crate::task_cycle::RunToolsNeed::Task)
+    crate::task_cycle::RunToolsNeed::of(
+        node,
+        ctx.run_tools_host.is_blackboard_member(&node.id),
+        &crate::run::node_exec::declared_artifacts(ctx, node),
+    )
 }
 
 /// What one session is: its prompt, where it works, and the decisions

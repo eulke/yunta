@@ -82,6 +82,36 @@ pub enum RunToolsNeed {
     Task,
 }
 
+impl RunToolsNeed {
+    /// The reason `node` owes, if any — one answer for `check`, which
+    /// refuses a workflow no candidate adapter can serve, and for the
+    /// run, which refuses the session its adapter cannot: a member of a
+    /// blackboard group first, being the older reason, then a document it
+    /// declares, then the loop it is.
+    pub(crate) fn of(
+        node: &yunta_core::Node,
+        blackboard_member: bool,
+        declared: &[yunta_core::ArtifactSpec],
+    ) -> Option<Self> {
+        if blackboard_member {
+            return Some(RunToolsNeed::Blackboard);
+        }
+        if let Some(kind) = declared.iter().find_map(yunta_core::ArtifactSpec::kind) {
+            return Some(RunToolsNeed::TypedArtifact(kind));
+        }
+        matches!(node.kind, yunta_core::NodeKind::Loop { .. }).then_some(RunToolsNeed::Task)
+    }
+
+    /// The declaration that asks for them, as the workflow spells it.
+    pub(crate) fn declaration(&self) -> String {
+        match self {
+            RunToolsNeed::Blackboard => "coordination: blackboard".to_string(),
+            RunToolsNeed::TypedArtifact(kind) => format!("artifacts.produces: [{kind}]"),
+            RunToolsNeed::Task => "kind: loop".to_string(),
+        }
+    }
+}
+
 impl SessionSetup {
     /// A setup that carries nothing but the run it belongs to, the node
     /// its sessions are of and the runner they run on: no skills, no

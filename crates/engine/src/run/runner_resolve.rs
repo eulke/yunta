@@ -147,17 +147,6 @@ pub enum RunToolsSetupError {
     },
 }
 
-/// The first interpreted artifact this node declares, if any: the one a
-/// refusal names, so a reader has somewhere to look.
-pub(crate) fn declared_typed_artifact(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-) -> Option<yunta_core::ArtifactKind> {
-    crate::run::node_exec::declared_artifacts(ctx, node)
-        .into_iter()
-        .find_map(|spec| spec.kind())
-}
-
 /// Whether this node's sessions may mount the run tools, or why they
 /// must not open at all.
 ///
@@ -182,7 +171,7 @@ pub(crate) fn run_tools_allowed(
     {
         return Ok(());
     }
-    let need = crate::run_tools::RunToolsNeed::of(
+    let need = crate::task_cycle::RunToolsNeed::of(
         node,
         ctx.run_tools_host.is_blackboard_member(&node.id),
         &crate::run::node_exec::declared_artifacts(ctx, node),
@@ -190,17 +179,17 @@ pub(crate) fn run_tools_allowed(
     let (node, adapter) = (node.id.clone(), adapter.id().clone());
     match need {
         None => Ok(()),
-        Some(crate::run_tools::RunToolsNeed::Blackboard) => {
+        Some(crate::task_cycle::RunToolsNeed::Blackboard) => {
             Err(RunToolsSetupError::NoRunToolsCapability { node, adapter })
         }
-        Some(crate::run_tools::RunToolsNeed::Document(kind)) => {
+        Some(crate::task_cycle::RunToolsNeed::TypedArtifact(kind)) => {
             Err(RunToolsSetupError::TypedArtifactNeedsRunTools {
                 node,
                 kind,
                 adapter,
             })
         }
-        Some(crate::run_tools::RunToolsNeed::Tasks) => {
+        Some(crate::task_cycle::RunToolsNeed::Task) => {
             Err(RunToolsSetupError::TaskNeedsRunTools { node, adapter })
         }
     }
