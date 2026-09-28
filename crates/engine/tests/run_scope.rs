@@ -1,6 +1,6 @@
 //! Scope expansion — plain violations, requests across the three modes, and human escalation to a real gate — plus re-plan.
 
-use yunta_engine::{RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{Bench, ScriptedInteraction};
 
 mod common;
@@ -24,11 +24,9 @@ async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_i
     );
 
     let mut fixture = plan_session(&tasks);
-    for _ in 0..=DEFAULT_MAX_RETRIES {
-        fixture.push_str(
-            "  - match_prompt_contains: \"task-s\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-s }\n",
-        );
-    }
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-s\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-s }\n",
+    );
 
     let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
 
@@ -215,9 +213,7 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
     let denied_bench = Bench::new();
     let denied_workflow = scope_expansion_workflow("deny", &[], None);
     let mut denied_fixture = plan_session(&tasks);
-    for _ in 0..=DEFAULT_MAX_RETRIES {
-        denied_fixture.push_str(&session);
-    }
+    denied_fixture.push_str(&session);
     let RunReport {
         state: denied_state,
         ..
@@ -286,6 +282,81 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
             first.proposed_criterion_precheck
         );
     }
+}
+
+/// How many sessions the `implement` loop opened.
+fn implement_sessions(bench: &Bench) -> usize {
+    bench
+        .events()
+        .iter()
+        .filter(|e| {
+            e.node_id
+                .as_ref()
+                .is_some_and(|id| id.as_str() == "implement")
+                && matches!(
+                    e.payload(),
+                    Some(yunta_core::events::EventPayload::Session(
+                        yunta_core::events::SessionEvent::Opened(_)
+                    ))
+                )
+        })
+        .count()
+}
+
+/// A grant the engine makes itself changes what the next session may
+/// write — under a fence, the session that asked could not write it — so
+/// one more attempt follows on its own. It is the only one that does: the
+/// attempt after it, like any red attempt, blocks the task.
+#[tokio::test]
+async fn an_engine_granted_expansion_is_followed_by_the_one_attempt_it_makes_different() {
+    let tasks = format!(
+        "tasks:\n{}",
+        task_yaml("task-w", "w", "a.txt", "test -f a.txt && test -f b.txt")
+    );
+    let request_yaml = "paths:\n  - b.txt\nreason: \"the criterion needs it\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
+    // The attempt that asks writes what its scope allows and the request;
+    // the write to b.txt is what a fence would have refused.
+    let asks = format!(
+        "  - match_prompt_contains: \"task-w\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: asked }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+        request_yaml,
+    );
+    let writes = "  - match_prompt_contains: \"task-w\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: wrote }\n";
+    let bench = Bench::new();
+    let mut fixture = plan_session(&tasks);
+    fixture.push_str(&asks);
+    fixture.push_str(writes);
+    let RunReport { terminal, state } = bench
+        .run(
+            &scope_expansion_workflow("rules", &["b.txt"], None),
+            &fixture,
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        state.tasks.status("task-w"),
+        Some(yunta_core::events::TaskStatus::Done)
+    );
+    assert_eq!(
+        implement_sessions(&bench),
+        2,
+        "the grant's attempt, and no other"
+    );
+
+    // Denied, nothing changed for a next session: the task blocks after
+    // the one attempt.
+    let bench = Bench::new();
+    let mut fixture = plan_session(&tasks);
+    fixture.push_str(&asks);
+    fixture.push_str(writes);
+    let RunReport { state, .. } = bench
+        .run(&scope_expansion_workflow("deny", &[], None), &fixture)
+        .await;
+    assert_eq!(
+        state.tasks.status("task-w"),
+        Some(yunta_core::events::TaskStatus::Blocked)
+    );
+    assert_eq!(implement_sessions(&bench), 1);
 }
 
 #[tokio::test]
@@ -523,11 +594,9 @@ nodes:
     fixture.push_str(
         "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
     );
-    for _ in 0..=DEFAULT_MAX_RETRIES {
-        fixture.push_str(
-            "  - match_prompt_contains: \"task-c\"\n    outcome: { type: completed, summary: \"tried and failed\" }\n",
-        );
-    }
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-c\"\n    outcome: { type: completed, summary: \"tried and failed\" }\n",
+    );
     fixture.push_str(&tasks_session(&tasks_v2, "replanned"));
     fixture.push_str(
         "  - match_prompt_contains: \"task-c\"\n    effects:\n      - { path: c.txt, content: \"c\" }\n    outcome: { type: completed, summary: did-c }\n",

@@ -1,6 +1,6 @@
 //! Concurrent execution: parallel nodes, join:all / join:any groups, per-loop concurrency, and orphan resume across a crash.
 
-use yunta_engine::{NodeState, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::{git, git_output, Bench};
 
 mod common;
@@ -201,17 +201,13 @@ nodes:
     prompt: "Implement your task."
 "#;
 
-    // One task whose criterion the executor never satisfies; with
-    // DEFAULT_MAX_RETRIES=2 that's three executor sessions, then blocked.
+    // One task whose criterion the executor never satisfies: one executor
+    // session leaves it red, and the task blocks there.
     let mut fixture = plan_session(&format!(
         "tasks:\n{}",
         task_yaml("T001", "Impossible", "missing.txt", "test -f missing.txt")
     ));
-    for attempt in 1..=(DEFAULT_MAX_RETRIES + 1) {
-        fixture.push_str(&format!(
-            "  - outcome: {{ type: completed, summary: \"attempt {attempt}\" }}\n"
-        ));
-    }
+    fixture.push_str("  - outcome: { type: completed, summary: \"attempt 1\" }\n");
 
     let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
 
@@ -496,11 +492,11 @@ nodes:
     fixture.push_str(
         "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
     );
-    // Several task-b sessions: the first attempt succeeds in isolation and
-    // is rejected at integration (back to ready); the retried attempt(s)
-    // are now genuinely red (a.txt is already on the integrated tree) and
-    // exhaust run_task's own retries into a real Blocked.
-    for _ in 0..(DEFAULT_MAX_RETRIES + 2) {
+    // Two task-b sessions: the first succeeds in isolation and is rejected
+    // at integration (back to ready, on a tree that changed under it); the
+    // second is genuinely red (a.txt is already on the integrated tree),
+    // and the task blocks.
+    for _ in 0..2 {
         fixture.push_str(
             "  - match_prompt_contains: \"task-b\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-b }\n",
         );
@@ -576,7 +572,7 @@ nodes:
     assert_eq!(
         state.tasks.status("task-b"),
         Some(yunta_core::events::TaskStatus::Blocked),
-        "the run pauses because task-b exhausted its retries into Blocked"
+        "the run pauses because task-b's attempt on the changed tree left it Blocked"
     );
 }
 

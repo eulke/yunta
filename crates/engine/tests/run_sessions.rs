@@ -1321,9 +1321,9 @@ nodes:
 }
 
 /// Every check a task cycle runs reaches the log the moment it runs: the
-/// pre-check before the task's first session opens, and each attempt's
-/// post-check before the next attempt's session does — so what a retry
-/// reads about the attempt before it is already there to read.
+/// pre-check before the task's first session opens, and its post-check
+/// before a person decides — so the session a `retry` opens reads why the
+/// attempt before it did not close.
 #[tokio::test]
 async fn each_check_of_a_task_reaches_the_log_before_the_next_session_opens() {
     let bench = Bench::new();
@@ -1343,25 +1343,36 @@ nodes:
     until: all_tasks_complete
     prompt: "Implement your task."
 "#;
-    let tasks = format!(
+    // The attempt leaves the criterion red, and the task blocks.
+    let fixture = plan_session(&format!(
         "tasks:\n{}",
         task_yaml("task-1", "t1", "a1.txt", "test -f a1.txt")
-    );
-    let mut fixture = plan_session(&tasks);
-    // The first attempt leaves the criterion red; the second meets it.
-    fixture.push_str(
-        "  - match_prompt_contains: \"task-1\"\n    outcome: { type: completed, summary: missed }\n\
-         \x20 - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
-    );
-
+    )) + "  - match_prompt_contains: \"task-1\"\n    outcome: { type: completed, summary: missed }\n";
     let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
-    assert_eq!(terminal, RunTerminal::Finished);
-
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
     assert_eq!(
         sessions_and_checks(&bench.events(), "implement"),
-        ["pre", "session", "post", "session", "post", "post"],
-        "each check lands before the session after it; the last `post` is the \
-         re-verification on the integrated tree"
+        ["pre", "session", "post"],
+        "the red attempt's check is on the log before anyone decides"
+    );
+
+    // A person retries; the session that opens meets the criterion.
+    answer_parked(&bench, "retry").await.unwrap();
+    let RunReport { terminal, state: _ } = bench
+        .wake_on_fixture(
+            "capabilities: { run_tools: true }\nsessions:\n  - match_prompt_contains: \"task-1\"\n    effects:\n      - { path: a1.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-1 }\n",
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    // The log only grows: the first attempt's check stays ahead of it.
+    let order = sessions_and_checks(&bench.events(), "implement");
+    assert_eq!(
+        order.iter().filter(|seen| **seen == "session").count(),
+        2,
+        "one session per attempt, the second one a person's: {order:?}"
     );
 }
 

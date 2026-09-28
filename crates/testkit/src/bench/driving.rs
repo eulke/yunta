@@ -13,7 +13,7 @@ use yunta_core::port::Adapter;
 use yunta_core::{AdapterId, ConfigLayer, Workflow};
 use yunta_engine::{
     build_manifest, create_run, execute_run, BirthArtifact, CreateRunParams, HumanInteraction,
-    NoInteraction, RunEnv, RunReport, DEFAULT_MAX_RETRIES,
+    NoInteraction, RunEnv, RunReport,
 };
 
 use super::{Bench, Driven, MOCK_CONFIG};
@@ -341,7 +341,6 @@ impl Bench {
             storage: &self.storage.async_handle(),
             clock: self.clock.clone(),
             ids: self.ids.as_ref(),
-            max_task_retries: DEFAULT_MAX_RETRIES,
             human_interaction,
             forge: self.forge.as_deref(),
             cancel: &self.cancel,

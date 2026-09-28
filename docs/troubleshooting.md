@@ -253,6 +253,11 @@ When the failure is a config key the node cannot run without — `baseline.suite
 can go differently. Declare the key in `.yunta/config.yaml` and start a new
 run; `yunta check` refuses the workflow until you do.
 
+A loop task that ends an attempt with its criteria red is `blocked` right
+away: another session on the same task and tree would have nothing the first
+did not. The decision is yours — `retry`, `continue-work` when its attempt
+left work behind, or `grant` when it asked for scope.
+
 ## `yunta pack add`/`update` refuses
 
 - **`publisher "x" is not in permissions.packs.publishers.allow`** — your

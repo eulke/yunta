@@ -31,6 +31,8 @@ pub(super) struct AttemptParams<'a> {
     pub(super) scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
     pub(super) max_expansion_files: usize,
     pub(super) grants: &'a crate::scope_expansion::GrantLedger,
+    /// Every path granted before this attempt: on the log when the cycle
+    /// began, and what the engine granted in the cycle's earlier attempts.
     pub(super) already_granted_paths: &'a [ScopeGlob],
     pub(super) audit: Option<(&'a dyn SessionObserver, &'a yunta_core::NodeId)>,
     pub(super) cancel: &'a CancellationToken,
@@ -46,8 +48,14 @@ pub(super) enum AttemptStep {
         outcome: TaskOutcome,
         needs_human_decision: bool,
     },
-    /// Not settled — record this attempt and dispatch another.
+    /// Not settled, and the engine widened the task's scope during this
+    /// attempt — record it and dispatch another, which is the first that
+    /// may write what the grant allows.
     Again(AttemptRecord),
+    /// Not settled, and nothing changed that another session could use:
+    /// the same task, the same tree, the same evidence this one already
+    /// had. Record it; the task blocks and a person decides.
+    Unmet(AttemptRecord),
 }
 
 /// One attempt of the task cycle: opens a fresh session (run tools an offer
@@ -260,7 +268,19 @@ pub(super) async fn run_one_attempt(
             },
         ));
     }
-    Ok((last_staged, AttemptStep::Again(record)))
+    // A grant the engine made itself is the one thing that changes what
+    // the next session can do: the fence refused the write in this one.
+    let granted = record
+        .scope_expansion
+        .as_ref()
+        .is_some_and(|outcome| outcome.decision == crate::scope_expansion::Decision::Granted);
+    Ok((
+        last_staged,
+        match granted {
+            true => AttemptStep::Again(record),
+            false => AttemptStep::Unmet(record),
+        },
+    ))
 }
 
 /// Opens a fresh session for one attempt and drives it to a terminal
@@ -296,8 +316,8 @@ async fn open_and_dispatch(
     } = params;
     let cwd = unit.worktree.as_path();
     // What this session's tools read and judge: the task the cycle
-    // holds, the scope it is held to — declared plus what the log had
-    // granted when the cycle began — and the unit it works in. A check
+    // holds, the scope it is held to — declared plus everything granted
+    // before this attempt — and the unit it works in. A check
     // stages its diff through an index of its own, never the close's.
     let access = std::sync::Arc::new(crate::run_tools::TaskAccess {
         task: task.clone(),

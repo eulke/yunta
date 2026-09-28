@@ -13,7 +13,7 @@ use watch::{watch, Watching};
 use std::path::{Path, PathBuf};
 
 use yunta_core::{AdapterId, Clock, Manifest, RunId};
-use yunta_engine::{PriorEstimation, RunEnv, RunReport, RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_engine::{PriorEstimation, RunEnv, RunReport, RunTerminal};
 use yunta_storage::AsyncStorage;
 
 use crate::context::Context;
@@ -164,7 +164,6 @@ pub(crate) async fn execute(on: Executing<'_>) -> Result<RunReport, yunta_engine
         storage: on.storage,
         clock: on.clock,
         ids: on.ids,
-        max_task_retries: DEFAULT_MAX_RETRIES,
         human_interaction: on.human_interaction,
         forge: on.forge,
         cancel: on.cancel,

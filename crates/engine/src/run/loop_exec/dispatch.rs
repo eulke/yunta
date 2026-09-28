@@ -16,8 +16,7 @@ use yunta_core::events::TaskEvent;
 /// How many times this task has already been dispatched `Running` in the
 /// log — 1-indexed, so the first dispatch is attempt 1. Used only to keep
 /// worktree/branch names unique across a resumed orphan's fresh attempt;
-/// never fed into retry-limit logic (that's `run_task`'s own
-/// `max_retries`, scoped to one dispatch).
+/// never fed into the cycle's own decision whether to dispatch again.
 pub(super) fn attempt_number(state: &RunState, task_id: &yunta_core::TaskId) -> u32 {
     state.tasks.get(task_id).map_or(0, |record| record.attempts) + 1
 }
@@ -32,8 +31,8 @@ fn granted_paths_for(state: &RunState, task_id: &yunta_core::TaskId) -> Vec<Scop
 /// Isolates one batch member in its own worktree — each task in the
 /// batch gets its own worktree derived from the current base commit —
 /// and runs it through the ordinary task cycle there — pre-check,
-/// dispatch, post-check, scope-check, retried up to `max_task_retries`
-/// exactly as the sequential path always has. Never commits or marks
+/// dispatch, post-check, scope-check, exactly as the sequential path
+/// always has. Never commits or marks
 /// the task `done`/`blocked` in the log itself; that's the caller's job
 /// once every batch member's dispatch has settled, so integration can
 /// stay strictly serial and in declaration order.
@@ -115,7 +114,6 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
             adapter,
             node,
             unit: &unit,
-            max_retries: ctx.max_task_retries,
             budget: ctx.session_budget().await?,
             memo: &ctx.memo,
             history: &state.tasks,

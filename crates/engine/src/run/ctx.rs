@@ -37,7 +37,6 @@ pub(crate) struct RunCtx<'a> {
     pub storage: &'a AsyncStorage,
     pub clock: Arc<dyn Clock>,
     pub ids: &'a dyn IdSource,
-    pub max_task_retries: u32,
     /// Criteria memoization — one cache per `execute_run`
     /// call, never persisted: a resume simply starts cold, which is safe
     /// (over-verifying) rather than risking a stale cross-run hit.
@@ -144,7 +143,6 @@ impl<'a> RunCtx<'a> {
             storage: self.storage,
             clock: self.clock.clone(),
             ids: self.ids,
-            max_task_retries: self.max_task_retries,
             memo: self.memo.clone(),
             human_interaction: self.human_interaction,
             budget_lifted: self.budget_lifted.clone(),

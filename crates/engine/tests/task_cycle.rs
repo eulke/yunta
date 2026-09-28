@@ -170,7 +170,6 @@ outcome: { type: completed, summary: "wrote it" }
             node: &build_node(),
             adapter: &adapter,
             unit: &unit,
-            max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
@@ -221,7 +220,6 @@ async fn an_agent_that_claims_success_without_meeting_criteria_never_reaches_don
             node: &build_node(),
             adapter: &adapter,
             unit: &unit,
-            max_retries: 0,
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
@@ -258,7 +256,6 @@ async fn a_trivial_criterion_blocks_before_any_attempt_runs() {
             node: &build_node(),
             adapter: &adapter,
             unit: &unit,
-            max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
@@ -307,7 +304,6 @@ async fn a_broken_guard_blocks_before_any_attempt_runs() {
             node: &build_node(),
             adapter: &adapter,
             unit: &unit,
-            max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
@@ -365,7 +361,6 @@ outcome: { type: completed, summary: "done" }
             node: &build_node(),
             adapter: &adapter,
             unit: &unit,
-            max_retries: 0,
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
@@ -389,7 +384,7 @@ outcome: { type: completed, summary: "done" }
 }
 
 #[tokio::test]
-async fn retries_run_exactly_max_retries_plus_one_attempts_before_blocking() {
+async fn a_red_attempt_blocks_the_task_without_opening_another_session() {
     let owner = Owner::new();
     let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
@@ -399,8 +394,7 @@ async fn retries_run_exactly_max_retries_plus_one_attempts_before_blocking() {
         &["output.txt"],
         vec![cmd("test -f output.txt")],
     );
-    // Every retry is a fresh session, so the fixture scripts one
-    // session per expected attempt.
+    // Three scripted, so a cycle that opened more would find them.
     let adapter = MockAdapter::from_yaml(
         r#"
 sessions:
@@ -418,7 +412,6 @@ sessions:
             node: &build_node(),
             adapter: &adapter,
             unit: &unit,
-            max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
@@ -433,8 +426,12 @@ sessions:
     .await
     .unwrap();
 
-    assert_eq!(report.attempts.len(), 3); // 1 initial + 2 retries
-    assert!(matches!(report.outcome, TaskOutcome::Blocked { .. }));
+    assert!(matches!(
+        report.outcome,
+        TaskOutcome::Blocked {
+            cause: BlockedCause::Unmet { attempts: 1, .. }
+        }
+    ));
 }
 
 #[tokio::test]
@@ -444,12 +441,11 @@ async fn a_non_retryable_failure_ends_the_cycle() {
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
     // Criteria stay red (nothing writes the file) and the session reports a
-    // failure it marks non-retryable — retrying cannot help, so the cycle
-    // stops after the one attempt instead of spending `max_retries` more.
+    // failure it marks non-retryable: the task blocks on what the session
+    // said, after the one attempt.
     let t = task("gives-up", &["output.txt"], vec![cmd("test -f output.txt")]);
-    // Scripts one session per attempt `max_retries` would allow, so the
-    // pre-fix cycle fails on the attempt count, not on running the fixture
-    // dry; the fix leaves the extra sessions unconsumed.
+    // Scripts more sessions than it needs, so a cycle that opened another
+    // would find one.
     let adapter = MockAdapter::from_yaml(
         r#"
 sessions:
@@ -467,7 +463,6 @@ sessions:
             node: &build_node(),
             adapter: &adapter,
             unit: &unit,
-            max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
@@ -513,7 +508,6 @@ async fn a_crashed_session_is_recorded_and_still_fails_post_check() {
             node: &build_node(),
             adapter: &adapter,
             unit: &unit,
-            max_retries: 0,
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
@@ -555,7 +549,6 @@ async fn a_task_whose_session_died_blocks_naming_the_exit() {
             node: &build_node(),
             adapter: &adapter,
             unit: &unit,
-            max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
@@ -705,7 +698,6 @@ async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
                 node: &build_node(),
                 adapter: &adapter,
                 unit: &unit,
-                max_retries: 0,
                 budget,
                 memo: &memo,
                 history: &unpriced(),
@@ -764,7 +756,6 @@ outcome: { type: completed, summary: "should never be reached" }
             node: &build_node(),
             adapter: &adapter,
             unit: &unit,
-            max_retries: 0,
             budget,
             memo: &memo,
             history: &unpriced(),
@@ -992,7 +983,6 @@ outcome: { type: completed, summary: "wrote it" }
             node: &build_node(),
             adapter: &adapter,
             unit: &unit,
-            max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
@@ -1073,8 +1063,8 @@ fn ran(cmd: &str, exit_code: i32, is_guard: bool) -> CriterionRun {
     }
 }
 
-/// One task cycle with nothing but the task and its mock: two retries
-/// after the first attempt, no observer, no grants.
+/// One task cycle with nothing but the task and its mock: no observer,
+/// no grants.
 async fn cycle(
     owner: &Owner,
     unit: &Unit,
@@ -1090,7 +1080,6 @@ async fn cycle(
             node: &build_node(),
             adapter,
             unit,
-            max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),
@@ -1244,7 +1233,6 @@ async fn work_that_no_longer_applies_blocks_the_task_and_leaves_the_checkout_as_
             node: &build_node(),
             adapter: &adapter,
             unit: &unit,
-            max_retries: 2,
             budget: Budget::default(),
             memo: &memo,
             history: &unpriced(),

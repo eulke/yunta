@@ -239,12 +239,10 @@ nodes:
     prompt: "Implement your task."
 "#;
 
-/// Three attempts that never write the file: the task runs out of them.
-const THREE_MISSES: &str = "\
+/// An attempt that never writes the file: the task blocks after it.
+const MISSES: &str = "\
 capabilities: { run_tools: true }
 sessions:
-  - outcome: { type: completed, summary: missed }
-  - outcome: { type: completed, summary: missed }
   - outcome: { type: completed, summary: missed }
 ";
 
@@ -262,8 +260,8 @@ fn status_of(bench: &Bench, task: &str) -> Option<yunta_core::events::TaskStatus
 }
 
 #[tokio::test]
-async fn a_task_out_of_attempts_says_what_its_last_attempt_left_red() {
-    let bench = parked(ONE_TASK_LOOP_WORKFLOW, THREE_MISSES).await;
+async fn a_blocked_task_says_what_its_attempt_left_red() {
+    let bench = parked(ONE_TASK_LOOP_WORKFLOW, MISSES).await;
 
     assert_eq!(
         status_of(&bench, "T001"),
@@ -275,14 +273,14 @@ async fn a_task_out_of_attempts_says_what_its_last_attempt_left_red() {
     let facts = format!("{:?}", escalation.evidence());
     assert!(
         facts.contains("task `T001` blocked")
-            && facts.contains("not done after 3 attempt(s): `test -f made.txt` still exits 1"),
+            && facts.contains("not done after 1 attempt(s): `test -f made.txt` still exits 1"),
         "the decision names the criterion still red: {facts}"
     );
 }
 
 #[tokio::test]
 async fn retrying_a_loop_gives_the_task_it_left_blocked_a_fresh_cycle() {
-    let bench = parked(ONE_TASK_LOOP_WORKFLOW, THREE_MISSES).await;
+    let bench = parked(ONE_TASK_LOOP_WORKFLOW, MISSES).await;
 
     answer_parked(&bench, "retry").await.unwrap();
     let RunReport { terminal, state } = bench.wake_on_fixture(MAKES_IT).await;
@@ -319,7 +317,7 @@ async fn retrying_a_loop_gives_the_task_it_left_blocked_a_fresh_cycle() {
 
 #[tokio::test]
 async fn a_plain_resume_leaves_a_blocked_task_blocked() {
-    let bench = parked(ONE_TASK_LOOP_WORKFLOW, THREE_MISSES).await;
+    let bench = parked(ONE_TASK_LOOP_WORKFLOW, MISSES).await;
 
     let RunReport { terminal, .. } = bench.wake_on_fixture(MAKES_IT).await;
 
@@ -417,7 +415,7 @@ async fn continuing_a_loop_from_the_work_it_left_closes_the_task_without_a_sessi
 async fn a_task_blocked_before_any_work_is_only_offered_to_run_again() {
     let bench = parked(
         &ONE_TASK_LOOP_WORKFLOW.replace("test -f made.txt", "yunta-no-such-tool"),
-        THREE_MISSES,
+        MISSES,
     )
     .await;
 

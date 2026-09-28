@@ -3,7 +3,7 @@ number: D146
 title: "Una sesión puede pedir el veredicto de su nodo antes de terminar"
 status: revised
 revises: []
-revised_by: [D156, D157]
+revised_by: [D156, D157, D191]
 ---
 
 # D146 — Una sesión puede pedir el veredicto de su nodo antes de terminar
@@ -11,7 +11,8 @@ revised_by: [D156, D157]
 *(Revisada por D156: lo interpretado entra por su propia herramienta. Revisada
 por D157: la herramienta confirma un archivo que la sesión escribió o lee el
 documento que el run ya tiene, llamando a las mismas dos funciones que el
-cierre.)* El servidor MCP por sesión ofrece `yunta_check_artifact { name? }`,
+cierre. Revisada por D191: no hay presupuesto de reintentos; una tarea en
+rojo se bloquea y decide una persona.)* El servidor MCP por sesión ofrece `yunta_check_artifact { name? }`,
 que corre `artifacts::verify_one` — la verificación del cierre, no una segunda
 lectura de ella — sobre lo que el nodo declara, con los nombres ya
 renderizados. En éxito informa lo que el engine leyó (`3 task(s) registered:

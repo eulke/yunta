@@ -310,7 +310,6 @@ pub struct RunEnv<'a> {
     /// Mints the ids of the runs this one gives birth to — its
     /// children and its promotion successor.
     pub ids: &'a dyn IdSource,
-    pub max_task_retries: u32,
     pub human_interaction: &'a dyn HumanInteraction,
     pub forge: Option<&'a dyn Forge>,
     /// What stops this run: the invocation's own token, which the shell

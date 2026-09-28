@@ -539,7 +539,6 @@ async fn drive_child(
                     storage: ctx.storage,
                     clock: ctx.clock.clone(),
                     ids: ctx.ids,
-                    max_task_retries: ctx.max_task_retries,
                     human_interaction: ctx.human_interaction,
                     forge: ctx.forge,
                     cancel,

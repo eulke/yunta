@@ -134,9 +134,6 @@ impl CriterionRun {
     }
 }
 
-/// Default retry cap ("cap configurable, default 2").
-pub const DEFAULT_MAX_RETRIES: u32 = 2;
-
 /// The permission/scope policy a task cycle enforces:
 /// `permissions` is the merged model every criterion command is checked
 /// against before anything runs — a violating criterion blocks the whole
@@ -181,7 +178,6 @@ pub struct AttemptEnv<'a> {
     /// starting point, which is what makes one attempt answerable for
     /// what an earlier one of its own left behind.
     pub unit: &'a crate::worktree::Unit,
-    pub max_retries: u32,
     pub budget: Budget,
     pub memo: &'a Memo,
     /// The run's tasks, as its log leaves them — what the pre-check
@@ -200,9 +196,12 @@ pub struct AttemptEnv<'a> {
     pub carry: Option<&'a yunta_core::CommitSha>,
 }
 
-/// Runs a task through the full cycle: pre-check once, then
-/// dispatch → post-check → scope-check per attempt, retrying with a
-/// fresh session up to `max_retries` times before `Blocked`.
+/// Runs a task through the full cycle: pre-check once, then dispatch →
+/// post-check → scope-check. A task its attempt leaves red is `Blocked`:
+/// another session on the same task, tree and evidence has nothing the
+/// first did not, so the next move is a person's. The one attempt that
+/// follows on its own is the one a scope the engine granted during the
+/// last makes different.
 ///
 /// Never trusts the session's own outcome: `succeeded` on each
 /// attempt is decided entirely by re-running criteria and the scope
@@ -230,7 +229,6 @@ pub async fn run_task(
         adapter,
         node,
         unit,
-        max_retries,
         budget,
         memo,
         history,
@@ -360,8 +358,15 @@ pub async fn run_task(
     };
 
     let mut attempts = Vec::new();
-    for attempt in 1..=(max_retries + 1) {
-        let (staged, step) = run_one_attempt(&params, recorder, attempt).await?;
+    // What the engine grants during an attempt holds for every attempt
+    // after it: the one it is granted for is the next.
+    let mut granted: Vec<ScopeGlob> = params.already_granted_paths.to_vec();
+    for attempt in 1.. {
+        let attempt_params = AttemptParams {
+            already_granted_paths: &granted,
+            ..params
+        };
+        let (staged, step) = run_one_attempt(&attempt_params, recorder, attempt).await?;
         last_staged = staged;
         match step {
             AttemptStep::Stop {
@@ -383,7 +388,18 @@ pub async fn run_task(
             }
             AttemptStep::Again(record) => {
                 last_check = record.recorded.or(last_check);
+                granted.extend(
+                    record
+                        .scope_expansion
+                        .iter()
+                        .flat_map(|outcome| outcome.request.paths.iter().cloned()),
+                );
                 attempts.push(record);
+            }
+            AttemptStep::Unmet(record) => {
+                last_check = record.recorded.or(last_check);
+                attempts.push(record);
+                break;
             }
         }
     }
@@ -392,7 +408,7 @@ pub async fn run_task(
     // needs to read: which criteria still fail, and what strayed.
     let last = attempts.last();
     let cause = BlockedCause::Unmet {
-        attempts: max_retries + 1,
+        attempts: attempts.len() as u32,
         red: last
             .map(|attempt| {
                 attempt

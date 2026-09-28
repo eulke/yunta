@@ -151,7 +151,7 @@ pub use stats::{
 pub use task_cycle::{
     post_check, pre_check, run_task, surprises, AttemptEnv, AttemptRecord, BlockedCause,
     CriterionRun, DispatchOutcome, Memo, ScopeGovernance, SessionObserver, SessionSetup, Surprise,
-    TaskCycleError, TaskCycleReport, TaskOutcome, DEFAULT_MAX_RETRIES,
+    TaskCycleError, TaskCycleReport, TaskOutcome,
 };
 pub use verification_effectiveness::{
     analyze as analyze_verification_effectiveness, AlwaysApprovedGate, AlwaysFirstTryTasks,
