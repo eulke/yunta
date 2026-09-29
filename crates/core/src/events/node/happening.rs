@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use crate::events::meta::EventMeta;
 use crate::events::{ChildLedger, ChildLink, NodeEvent, NodeLedger, NodeState, Reroute};
-use crate::events::{HookPhase, Phase, ResolvedRunner};
+use crate::events::{HookPhase, Phase, ResolvedRunner, Suspensions};
 use crate::TaskId;
 
 /// One thing that happened to a node.
@@ -88,6 +88,7 @@ impl Happening {
         before: &NodeLedger,
         after: &NodeLedger,
         children: &ChildLedger,
+        asleep: &Suspensions,
     ) -> Self {
         match event {
             NodeEvent::RunnerResolved(p) => Happening::RunnerResolved(ResolvedRunner {
@@ -102,7 +103,9 @@ impl Happening {
                         .and_then(|node| after.state(node))
                         .cloned()
                         .unwrap_or_else(|| said(event)),
-                    elapsed: meta.node.and_then(|node| worked(before, node, meta)),
+                    elapsed: meta
+                        .node
+                        .and_then(|node| worked(before, node, meta, asleep)),
                     children: meta
                         .node
                         .map(|node| bore(children, node))
@@ -163,11 +166,17 @@ fn said(event: &NodeEvent) -> NodeState {
 
 /// How long the attempt this event closed had been working, or `None`
 /// for a node with no attempt open — one that is starting has worked no
-/// time at all, and saying `0s` would read as a measurement.
-fn worked(before: &NodeLedger, node: &crate::NodeId, meta: &EventMeta<'_>) -> Option<Duration> {
+/// time at all, and saying `0s` would read as a measurement. The time the
+/// host slept inside the attempt is not time it worked.
+fn worked(
+    before: &NodeLedger,
+    node: &crate::NodeId,
+    meta: &EventMeta<'_>,
+    asleep: &Suspensions,
+) -> Option<Duration> {
     let record = before.get(node)?;
     let (_, since) = record.open_since?;
-    (meta.at - since).to_std().ok()
+    (meta.at >= since).then(|| asleep.awake_between(since, meta.at))
 }
 
 /// The child runs this node bore, as the log has them at this event.

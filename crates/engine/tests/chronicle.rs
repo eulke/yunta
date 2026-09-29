@@ -158,3 +158,48 @@ fn a_node_that_settles_twice_is_two_moments() {
         "the second close is its own moment, not a repeat of the first: {reached:?}"
     );
 }
+
+/// A suspension of `minutes`, noticed now.
+fn host_slept(minutes: u64) -> EventPayload {
+    EventPayload::Run(yunta_core::events::RunEvent::HostSuspended(
+        yunta_core::events::HostSuspendedPayload::slept(std::time::Duration::from_secs(
+            minutes * 60,
+        )),
+    ))
+}
+
+/// A node that works from minute 1 to minute 75 while the host sleeps
+/// from minute 10 to minute 70.
+fn worked_through_a_sleep() -> Vec<yunta_core::events::StoredEvent> {
+    Log::for_run("run-asleep")
+        .after(60)
+        .node("work", started())
+        .after(69 * 60)
+        .event(host_slept(60))
+        .after(5 * 60)
+        .node("work", finished("done"))
+        .build()
+}
+
+#[test]
+fn a_moment_after_a_suspension_sits_on_the_runs_awake_clock() {
+    let moments = chronicle(&worked_through_a_sleep());
+    let close = moments.last().expect("the close");
+    assert_eq!(
+        close.elapsed,
+        std::time::Duration::from_secs(14 * 60),
+        "74 minutes after the start, 60 of them asleep"
+    );
+}
+
+#[test]
+fn a_node_closing_after_a_suspension_worked_only_its_awake_time() {
+    let moments = chronicle(&worked_through_a_sleep());
+    let Happening::Node(yunta_core::events::node::happening::Happening::Reached {
+        elapsed, ..
+    }) = &moments.last().expect("the close").happening
+    else {
+        panic!("the close is a node reaching a state");
+    };
+    assert_eq!(*elapsed, Some(std::time::Duration::from_secs(14 * 60)));
+}

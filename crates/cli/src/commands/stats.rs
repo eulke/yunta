@@ -824,6 +824,7 @@ mod tests {
             tasks_total: 2,
             tasks_done: 1,
             wall_clock: Some(Duration::from_secs(90)),
+            asleep: Duration::ZERO,
             nodes: Vec::new(),
             unknown_kinds: Vec::new(),
             artifact_submissions: yunta_engine::Submissions {

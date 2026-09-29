@@ -85,8 +85,15 @@ pub fn chronicle(events: &[StoredEvent]) -> Vec<Moment> {
             Moment {
                 seq: event.seq,
                 at: event.timestamp,
+                // On the run's awake clock: a moment after the host slept
+                // sits where the run's own time put it, not an hour on.
                 elapsed: opened
-                    .and_then(|first| (event.timestamp - first).to_std().ok())
+                    .map(|first| {
+                        state
+                            .run
+                            .suspensions()
+                            .awake_between(first, event.timestamp)
+                    })
                     .unwrap_or_default(),
                 node: event.node_id.clone(),
                 happening: happening(event, &meta, &before, &state),
@@ -115,6 +122,7 @@ fn happening(
             before,
             &after.nodes,
             &after.children,
+            after.run.suspensions(),
         )),
         EventPayload::Session(e) => Happening::Session(e.into()),
         EventPayload::Tasks(e) => Happening::Tasks(e.into()),

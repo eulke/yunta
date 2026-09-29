@@ -609,3 +609,71 @@ fn findings_effective_counts_what_stands_rather_than_what_was_posted() {
     assert_eq!(stats.findings.posted, 2);
     assert_eq!(stats.findings_effective, 1);
 }
+
+/// A suspension of `minutes`, noticed now.
+fn host_slept(minutes: u64) -> EventPayload {
+    EventPayload::Run(RunEvent::HostSuspended(
+        yunta_core::events::HostSuspendedPayload::slept(std::time::Duration::from_secs(
+            minutes * 60,
+        )),
+    ))
+}
+
+fn minutes(n: u64) -> std::time::Duration {
+    std::time::Duration::from_secs(n * 60)
+}
+
+/// The run opens at minute 0 and `work` starts at minute 1; the host
+/// sleeps from minute 10 to minute 70; `work` finishes at minute 75.
+#[test]
+fn the_time_the_host_slept_is_left_out_of_active_and_wall_clock() {
+    let log = Log::for_run("run-asleep")
+        .event(fixture_events()[0].payload().cloned().expect("the birth"))
+        .after(60)
+        .node(
+            "work",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .after(69 * 60)
+        .event(host_slept(60))
+        .after(5 * 60)
+        .node(
+            "work",
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "ok",
+                TokenUsage::default(),
+            ))),
+        )
+        .build();
+
+    let stats = compute_run_stats(&workflow(vec![node("work", &[])]), &log);
+
+    assert_eq!(
+        stats.nodes[0].active,
+        minutes(14),
+        "74 minutes, 60 of them asleep"
+    );
+    assert_eq!(stats.wall_clock, Some(minutes(15)));
+    assert_eq!(stats.asleep, minutes(60));
+}
+
+/// A root node is ready when the run opens at minute 0; the host sleeps
+/// from minute 5 to minute 65, and the node starts at minute 70: it
+/// waited ten minutes the run had a machine for.
+#[test]
+fn a_suspension_before_a_node_started_is_left_out_of_the_time_it_waited() {
+    let log = Log::for_run("run-asleep")
+        .event(fixture_events()[0].payload().cloned().expect("the birth"))
+        .after(65 * 60)
+        .event(host_slept(60))
+        .after(5 * 60)
+        .node(
+            "work",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .build();
+
+    let stats = compute_run_stats(&workflow(vec![node("work", &[])]), &log);
+
+    assert_eq!(stats.nodes[0].blocked, minutes(10));
+}

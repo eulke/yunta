@@ -44,7 +44,8 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 
 use yunta_core::events::{
-    EventPayload, RunFinishedPayload, StoredEvent, SubmissionOutcome, TerminalState, TokenUsage,
+    EventPayload, RunFinishedPayload, StoredEvent, SubmissionOutcome, Suspensions, TerminalState,
+    TokenUsage,
 };
 use yunta_core::{Node, NodeId, RunnerName, Workflow};
 
@@ -149,9 +150,13 @@ pub struct RunStats {
     /// observation instant while the log carries no `run_finished`, and
     /// to its last event once it does — a finished run's clock stops
     /// with it, and a run nobody is observing has only its log to
-    /// measure against. `None` for an empty log; never a prediction of a
-    /// total.
+    /// measure against. The time its host was suspended is left out:
+    /// this is how long the run had a machine to work on. `None` for an
+    /// empty log; never a prediction of a total.
     pub wall_clock: Option<Duration>,
+    /// How long the host was suspended inside that same window — what
+    /// [`RunStats::wall_clock`] and every node's durations leave out.
+    pub asleep: Duration,
     /// Every node that reached at least one `node_started`, in the
     /// workflow's own declaration order.
     pub nodes: Vec<NodeStat>,
@@ -252,8 +257,12 @@ pub(crate) fn stats_observed_at(
     observed_at: Option<DateTime<Utc>>,
 ) -> RunStats {
     let flat: Vec<&Node> = workflow.iter_nodes().collect();
-    let run_start = events.first().map(|e| e.timestamp);
-    let walk = walk_attempts(events);
+    let asleep = state.run.suspensions();
+    let window = events
+        .first()
+        .map(|e| e.timestamp)
+        .zip(measured_until(events, observed_at));
+    let walk = walk_attempts(events, asleep);
 
     let total = state.total_tokens().total();
     let rework_total = walk.rework_tokens.total();
@@ -287,20 +296,18 @@ pub(crate) fn stats_observed_at(
         total_tokens: state.total_tokens(),
         tasks_total: state.tasks.len(),
         tasks_done: state.tasks.done(),
-        wall_clock: run_start
-            .zip(measured_until(events, observed_at))
-            .map(|(start, until)| interval(start, until)),
-        nodes: node_stats(&flat, &walk, run_start, observed_at),
+        wall_clock: window.map(|(start, until)| asleep.awake_between(start, until)),
+        asleep: window
+            .map(|(start, until)| asleep.asleep_between(start, until))
+            .unwrap_or_default(),
+        nodes: node_stats(
+            &flat,
+            &walk,
+            asleep,
+            events.first().map(|e| e.timestamp),
+            observed_at,
+        ),
     }
-}
-
-/// The time from `from` to `to` — how every duration this module reports
-/// reads an interval. [`Duration::ZERO`] when `to` is the earlier of the
-/// two: nothing a log describes has run for a negative time, and a
-/// caller's clock sitting behind the log still gets a measured answer
-/// rather than one that reads as missing.
-fn interval(from: DateTime<Utc>, to: DateTime<Utc>) -> Duration {
-    (to - from).to_std().unwrap_or(Duration::ZERO)
 }
 
 /// The instant a run's wall-clock is measured to: `observed_at` while
@@ -327,6 +334,7 @@ fn measured_until(
 fn node_stats(
     flat: &[&Node],
     walk: &AttemptWalk,
+    asleep: &Suspensions,
     run_start: Option<DateTime<Utc>>,
     observed_at: Option<DateTime<Utc>>,
 ) -> Vec<NodeStat> {
@@ -354,9 +362,9 @@ fn node_stats(
             open_attempt: observed_at.and_then(|now| {
                 walk.open
                     .get(&node.id)
-                    .map(|open| interval(open.started_at, now))
+                    .map(|open| asleep.awake_between(open.started_at, now))
             }),
-            blocked: walk.blocked_before_start(&node.id, deps, run_start),
+            blocked: walk.blocked_before_start(&node.id, deps, run_start, asleep),
         });
     }
     nodes
@@ -401,7 +409,13 @@ impl AttemptWalk {
     /// Folds a `node_finished`/`node_failed` in: its tokens are the
     /// node's, and a retry's are rework on top. A terminal that names no
     /// node closes nothing.
-    fn close_attempt(&mut self, node_id: &Option<NodeId>, at: DateTime<Utc>, tokens: TokenUsage) {
+    fn close_attempt(
+        &mut self,
+        node_id: &Option<NodeId>,
+        at: DateTime<Utc>,
+        tokens: TokenUsage,
+        asleep: &Suspensions,
+    ) {
         let Some(node_id) = node_id else { return };
         self.last_terminal.insert(node_id.clone(), at);
         let entry = self.node_tokens.entry(node_id.clone()).or_default();
@@ -409,7 +423,7 @@ impl AttemptWalk {
         let Some(opened) = self.open.remove(node_id) else {
             return;
         };
-        let duration = interval(opened.started_at, at);
+        let duration = asleep.awake_between(opened.started_at, at);
         *self.node_active.entry(node_id.clone()).or_default() += duration;
         if opened.attempt > 1 {
             self.rework_tokens += tokens;
@@ -426,6 +440,7 @@ impl AttemptWalk {
         node_id: &NodeId,
         deps: &[NodeId],
         run_start: Option<DateTime<Utc>>,
+        asleep: &Suspensions,
     ) -> Duration {
         let ready_at = if deps.is_empty() {
             run_start
@@ -437,7 +452,7 @@ impl AttemptWalk {
                 .or(run_start)
         };
         match (ready_at, self.first_started.get(node_id)) {
-            (Some(ready), Some(started)) => interval(ready, *started),
+            (Some(ready), Some(started)) => asleep.awake_between(ready, *started),
             _ => Duration::ZERO,
         }
     }
@@ -447,7 +462,7 @@ impl AttemptWalk {
 /// attempts into [`AttemptWalk`]. Everything a node stat needs comes
 /// from here, so the log is walked once however many nodes the workflow
 /// declares.
-fn walk_attempts(events: &[StoredEvent]) -> AttemptWalk {
+fn walk_attempts(events: &[StoredEvent], asleep: &Suspensions) -> AttemptWalk {
     let mut walk = AttemptWalk::default();
     for event in events {
         match event.payload() {
@@ -457,10 +472,10 @@ fn walk_attempts(events: &[StoredEvent]) -> AttemptWalk {
                 }
             }
             Some(EventPayload::Node(NodeEvent::Finished(p))) => {
-                walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used);
+                walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used, asleep);
             }
             Some(EventPayload::Node(NodeEvent::Failed(p))) => {
-                walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used);
+                walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used, asleep);
             }
             // A node that asked closed its attempt there: the session is
             // over and what it spent is on this event. The
@@ -468,7 +483,7 @@ fn walk_attempts(events: &[StoredEvent]) -> AttemptWalk {
             // nothing more — its own `close_attempt` finds no open
             // attempt and adds the zero it carries.
             Some(EventPayload::Gates(GateEvent::QuestionsAsked(p))) => {
-                walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used);
+                walk.close_attempt(&event.node_id, event.timestamp, p.tokens_used, asleep);
             }
             Some(EventPayload::Node(NodeEvent::RunnerResolved(p))) => {
                 if let Some(node_id) = &event.node_id {
