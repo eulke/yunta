@@ -222,6 +222,12 @@ fn render_run_stats(
     }
     out.push_str(&rates(stats));
     out.push_str(&spend(stats, pricing));
+    if !stats.asleep.is_zero() {
+        out.push_str(&format!(
+            "host asleep: {} — left out of every duration\n",
+            format_duration(stats.asleep)
+        ));
+    }
     out.push_str(&format!(
         "{}\n",
         submissions_line(&stats.artifact_submissions)
@@ -587,6 +593,9 @@ struct RunStatsJson {
     tasks_total: usize,
     tasks_done: usize,
     wall_clock_secs: Option<f64>,
+    /// How long the host was suspended inside the run's window — what
+    /// `wall_clock_secs` and every node's durations leave out.
+    asleep_secs: f64,
     currency_estimate: Option<String>,
     nodes: Vec<NodeStatJson>,
     unknown_kinds: Vec<yunta_engine::UnknownKindCount>,
@@ -622,6 +631,7 @@ impl RunStatsJson {
             tasks_total: stats.tasks_total,
             tasks_done: stats.tasks_done,
             wall_clock_secs: stats.wall_clock.map(|d| d.as_secs_f64()),
+            asleep_secs: stats.asleep.as_secs_f64(),
             currency_estimate: currency_line(total, pricing),
             nodes: stats
                 .nodes

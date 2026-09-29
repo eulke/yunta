@@ -115,6 +115,13 @@ fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState) {
     if let Some(drift) = state.run.environment_drift() {
         println!("environment: {drift}");
     }
+    if let Some((times, slept)) = state.run.suspensions().summary() {
+        println!(
+            "host: suspended {} for {} in all — durations leave it out",
+            yunta_core::text::counted(times, "time"),
+            crate::render::format_duration(slept)
+        );
+    }
 }
 
 /// What a parked run is waiting on, printed last because it is what the

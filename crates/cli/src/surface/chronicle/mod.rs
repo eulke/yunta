@@ -55,7 +55,8 @@ pub(super) fn kept(happening: &Happening) -> bool {
     match happening {
         Happening::Run(run::happening::Happening::Paused { .. })
         | Happening::Run(run::happening::Happening::Resumed { .. })
-        | Happening::Run(run::happening::Happening::PromotionSignaled { .. }) => true,
+        | Happening::Run(run::happening::Happening::PromotionSignaled { .. })
+        | Happening::Run(run::happening::Happening::HostSuspended { .. }) => true,
         Happening::Run(_) => false,
         Happening::Node(node::happening::Happening::Reached { state, .. }) => {
             !matches!(state, yunta_core::events::NodeState::Running { .. })
@@ -207,6 +208,29 @@ mod tests {
             hash: yunta_core::sha256_hex(b""),
             origin: BaselineOrigin::Measured,
         }))
+    }
+
+    /// A person watching a run learns the machine slept, and that the
+    /// time is not counted as work, above the region that keeps moving.
+    #[test]
+    fn a_host_suspension_stays_above_the_live_region_and_says_how_long() {
+        let payload = EventPayload::Run(RunEvent::HostSuspended(
+            yunta_core::events::HostSuspendedPayload::slept(std::time::Duration::from_secs(
+                38 * 60,
+            )),
+        ));
+        assert_eq!(
+            said_for(payload.clone()),
+            "run — host suspended for 38m00s — durations leave it out"
+        );
+        let events = vec![StoredEvent {
+            seq: 1.into(),
+            run_id: "01JQ0000000000000000000000".into(),
+            node_id: None,
+            timestamp: chrono::DateTime::UNIX_EPOCH,
+            body: EventBody::Known(payload),
+        }];
+        assert!(kept(&derive_chronicle(&events)[0].happening));
     }
 
     #[test]
