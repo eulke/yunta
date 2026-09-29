@@ -13,7 +13,9 @@ use yunta_engine::{ChildLink, Counter, NodeFrame, NodeStanding, RunFrame};
 use yunta_core::{NodeId, RunId};
 
 use crate::commands::advice;
-use crate::render::{format_duration, indent, Glyphs, NodeDisplay, StateWord, CHILD_DEPTH};
+use crate::render::{
+    format_duration, indent, ColorPolicy, ColorRole, Glyphs, NodeDisplay, StateWord, CHILD_DEPTH,
+};
 
 /// How deep a node's detail sits under the node's own row, in steps of
 /// [`indent`] — the step every surface here shares, so the detail lines
@@ -66,7 +68,21 @@ pub(super) fn answer_command(run_id: &RunId, answerable: bool) -> String {
 /// Its liveness is the age of its last event and never a spinner: the age
 /// is measured, it grows while the node says nothing, and it is the one
 /// signal that can tell a busy node from a stuck one.
+#[cfg(test)]
 pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> Vec<String> {
+    node_rows_with_states(frame, node, glyphs)
+        .into_iter()
+        .map(|(row, _)| row)
+        .collect()
+}
+
+/// The node's rows with the state that gives each status line its color.
+/// Detail rows carry no state of their own and remain plain.
+pub(super) fn node_rows_with_states(
+    frame: &RunFrame,
+    node: &NodeFrame,
+    glyphs: Glyphs,
+) -> Vec<(String, Option<StateWord>)> {
     // A `parallel` group's children sit one step under the group, the
     // same step a child run sits under the node that bore it.
     let under = match node.group {
@@ -74,14 +90,18 @@ pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> V
         None => String::new(),
     };
     let detail = format!("{under}{}", indent(DETAIL_DEPTH));
-    let mut rows = vec![format!("{under}{}", headline(node, glyphs))];
+    let state = NodeDisplay::standing(&node.state).word;
+    let mut rows = vec![(format!("{under}{}", headline(node, glyphs)), Some(state))];
     if !node.running_tasks.is_empty() {
-        rows.push(format!(
-            "{detail}tasks running: {}",
-            join(node.running_tasks.iter().map(|task| match task.in_session {
-                true => task.id.to_string(),
-                false => format!("{} (checking criteria)", task.id),
-            }))
+        rows.push((
+            format!(
+                "{detail}tasks running: {}",
+                join(node.running_tasks.iter().map(|task| match task.in_session {
+                    true => task.id.to_string(),
+                    false => format!("{} (checking criteria)", task.id),
+                }))
+            ),
+            None,
         ));
     }
     let calls = recent_calls(node);
@@ -90,13 +110,14 @@ pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> V
         // session, so at loop concurrency above one no log can say which
         // of a node's sessions made a call. Labelling them the node's is
         // the whole truth the log carries.
-        rows.push(format!("{detail}this node's recent calls: {calls}"));
+        rows.push((format!("{detail}this node's recent calls: {calls}"), None));
     }
-    rows.extend(
-        children_of(frame, &node.id)
-            .into_iter()
-            .map(|child| format!("{detail}{}", child_row(child, glyphs))),
-    );
+    rows.extend(children_of(frame, &node.id).into_iter().map(|child| {
+        (
+            format!("{detail}{}", child_row(child, glyphs)),
+            Some(child_standing(child.terminal).0),
+        )
+    }));
     rows
 }
 
@@ -122,6 +143,60 @@ pub(super) fn child_row(child: &ChildLink, glyphs: Glyphs) -> String {
         standing.1,
         child.run_id
     )
+}
+
+/// A state row after it has been fitted to its terminal width.
+pub(super) fn paint_state(policy: ColorPolicy, word: StateWord, row: &str) -> String {
+    role_for_state(word)
+        .map(|role| policy.paint(role, row))
+        .unwrap_or_else(|| row.to_string())
+}
+
+/// The semantic color a state carries across run surfaces.
+pub(super) fn role_for_state(word: StateWord) -> Option<ColorRole> {
+    match word {
+        StateWord::Fail => Some(ColorRole::Error),
+        StateWord::Wait => Some(ColorRole::Warning),
+        StateWord::Done => Some(ColorRole::Info),
+        StateWord::Run | StateWord::Skip | StateWord::Todo => None,
+    }
+}
+
+/// Colors progress totals and state buckets without changing the plain
+/// counter text used by layout and captured output.
+pub(super) fn paint_counter_line(policy: ColorPolicy, line: &str) -> String {
+    paint_counter_line_with(policy, line, true)
+}
+
+/// The live counter row leaves routine progress plain so a multi-row
+/// painting stays one readable terminal update. Attention states retain
+/// their semantic colors; their words carry the same meaning without them.
+pub(super) fn paint_live_counter_line(policy: ColorPolicy, line: &str) -> String {
+    paint_counter_line_with(policy, line, false)
+}
+
+fn paint_counter_line_with(policy: ColorPolicy, line: &str, color_progress: bool) -> String {
+    line.split(" · ")
+        .map(|part| {
+            if color_progress && (part.starts_with("nodes ") || part.starts_with("tasks ")) {
+                return policy.paint(ColorRole::Info, part);
+            }
+            let Some((prefix, state)) = part.rsplit_once(' ') else {
+                return part.to_string();
+            };
+            let role = match state {
+                "fail" => Some(ColorRole::Error),
+                "run" if color_progress => Some(ColorRole::Info),
+                "wait" => Some(ColorRole::Warning),
+                _ => None,
+            };
+            match role {
+                Some(role) => format!("{prefix} {}", policy.paint(role, state)),
+                None => part.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 /// Every child this run bore, grouped under the node that bore it, each

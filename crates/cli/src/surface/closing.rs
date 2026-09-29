@@ -27,7 +27,10 @@ use yunta_engine::{run_frame, NodeFrame, PriorEstimation, RunFrame, RunPhase};
 use crate::commands::status::decision::{self, Layout};
 use crate::commands::{advice, unknown_kinds_note};
 use crate::error::Outcome;
-use crate::render::{format_duration, indent, truncate, Glyphs, StateWord, INDENT, LABEL_WIDTH};
+use crate::render::{
+    format_duration, indent, truncate, ColorPolicy, ColorRole, Glyphs, StateWord, INDENT,
+    LABEL_WIDTH,
+};
 use yunta_core::text::counted;
 
 use super::view;
@@ -99,13 +102,15 @@ impl Closing {
 
     /// The whole block, ready to print.
     pub(crate) fn render(&self, glyphs: Glyphs) -> String {
+        self.render_with_policy(glyphs, super::TerminalEnv::from_process().color_policy())
+    }
+
+    /// The whole block under the invocation's color policy.
+    pub(super) fn render_with_policy(&self, glyphs: Glyphs, color: ColorPolicy) -> String {
         let verdict = self.verdict();
-        let mut out = format!(
-            "run {}: {} {}\n",
-            self.run_id,
-            glyphs.state(verdict.word),
-            verdict.text
-        );
+        let role = view::role_for_state(verdict.word).unwrap_or(ColorRole::Info);
+        let verdict = format!("{} {}", glyphs.state(verdict.word), verdict.text);
+        let mut out = format!("run {}: {}\n", self.run_id, color.paint(role, &verdict));
         if let Some((node, escalation)) = &self.decision {
             out.push_str(&decision::block(
                 Layout::Trailer,
@@ -115,12 +120,18 @@ impl Closing {
             ));
         }
         for (label, value) in self.rows() {
+            let shown_label = truncate(label, LABEL_WIDTH, glyphs);
+            let value = if label == "progress" {
+                view::paint_counter_line(color, &value)
+            } else {
+                value
+            };
             out.push_str(&format!(
                 "{INDENT}{} {value}\n",
-                truncate(label, LABEL_WIDTH, glyphs)
+                color.paint(ColorRole::Info, &shown_label)
             ));
         }
-        out.push_str(&self.children(glyphs));
+        out.push_str(&self.children(glyphs, color));
         out
     }
 
@@ -133,7 +144,7 @@ impl Closing {
     /// opening it: a child is a run of its own, with its own id to go
     /// and read, and what this block is for is the run it closes.
     /// Empty for a run that composed nothing, which is most of them.
-    fn children(&self, glyphs: Glyphs) -> String {
+    fn children(&self, glyphs: Glyphs, color: ColorPolicy) -> String {
         if self.frame.children.is_empty() {
             return String::new();
         }
@@ -141,10 +152,20 @@ impl Closing {
         for (under, born) in view::children_by_node(&self.frame) {
             out.push_str(&format!("{}{under}\n", indent(2)));
             for child in born {
+                let word = match child.terminal {
+                    None => StateWord::Run,
+                    Some(yunta_core::events::TerminalState::Done) => StateWord::Done,
+                    Some(
+                        yunta_core::events::TerminalState::Failed
+                        | yunta_core::events::TerminalState::Cancelled,
+                    ) => StateWord::Fail,
+                    Some(yunta_core::events::TerminalState::Promoted) => StateWord::Wait,
+                };
+                let row = view::child_row(child, glyphs);
                 out.push_str(&format!(
                     "{}{}\n",
                     indent(3),
-                    view::child_row(child, glyphs)
+                    view::paint_state(color, word, &row)
                 ));
             }
         }
@@ -326,4 +347,50 @@ fn history(prior: &PriorEstimation) -> String {
 /// Prose collapsed onto the one line each row of this block has.
 fn one_line(text: &str) -> String {
     yunta_core::text::one_line(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::ColorPolicy;
+
+    const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
+
+    #[test]
+    fn closing_view_colors_the_verdict_and_keeps_plain_words() {
+        let workflow: Workflow = serde_norway::from_str("name: paced\nnodes: []\n")
+            .expect("a workflow with no nodes parses");
+        let outline = Outline {
+            run_dir: Path::new("/tmp/run"),
+            worktree: Path::new("/tmp/worktree"),
+            base_branch: "main",
+            isolation: Isolation::None,
+        };
+        let closing = Closing::of(ClosingEnv {
+            run_id: &RUN,
+            workflow: &workflow,
+            events: &[],
+            prior: None,
+            now: chrono::DateTime::UNIX_EPOCH,
+            decision: None,
+            outline,
+        });
+
+        let colored =
+            closing.render_with_policy(Glyphs::Ascii, ColorPolicy::for_stream(true, None));
+        assert!(colored.contains("\x1b[1;36m> still moving\x1b[0m"));
+        assert!(
+            colored.contains("\x1b[1;36mprogress    \x1b[0m"),
+            "{colored:?}"
+        );
+        assert!(
+            colored.contains("\x1b[1;36mnodes 0/0\x1b[0m"),
+            "{colored:?}"
+        );
+
+        let plain =
+            closing.render_with_policy(Glyphs::Ascii, ColorPolicy::for_stream(true, Some("")));
+        assert!(plain.contains("> still moving"));
+        assert!(!plain.contains("\x1b["));
+    }
 }

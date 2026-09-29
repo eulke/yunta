@@ -161,20 +161,21 @@ impl Surface {
     /// stands: the run's creation is written before any observer exists,
     /// so the first thing a surface knows it reads once, here.
     pub(crate) async fn open(env: SurfaceEnv<'_>) -> Result<Self, StorageError> {
+        let color = TerminalEnv::from_process().color_policy();
         let draw = match env.delivery {
             Delivery::Quiet => {
                 return Ok(Self {
                     feed: None,
                     painter: None,
                     curtain: Curtain::none(),
-                })
+                });
             }
-            Delivery::Lines { reason } => Draw::Lines(Lines::open(stderr(), reason)),
+            Delivery::Lines { reason } => Draw::Lines(Lines::open(stderr(), reason, color)),
             Delivery::Live => {
                 let screen = Screen::watched(Term::buffered_stderr());
-                match Region::open(screen, env.glyphs, stderr()) {
+                match Region::open(screen, env.glyphs, color, stderr()) {
                     Ok(region) => Draw::Live(Box::new(region)),
-                    Err(_) => Draw::Lines(Lines::open(stderr(), ROW_TEMPLATE)),
+                    Err(_) => Draw::Lines(Lines::open(stderr(), ROW_TEMPLATE, color)),
                 }
             }
         };
@@ -437,6 +438,13 @@ impl TermLike for Watched {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::ColorPolicy;
+    use yunta_core::events::{
+        EventPayload, Failure, NodeEvent, NodeFailedPayload, NodeStartedPayload, TokenUsage,
+    };
+    use yunta_testkit_core::{Captured, Log};
+
+    const RUN: RunId = RunId::from_static("01JBZ5X8K3N7Q2W6E4R9T1Y0P5");
 
     fn env(stderr_is_terminal: bool, term: Option<&str>, no_color: Option<&str>) -> TerminalEnv {
         TerminalEnv {
@@ -473,5 +481,92 @@ mod tests {
     fn an_empty_no_color_is_not_a_reader_asking_for_anything() {
         let terminal = env(true, Some("xterm"), Some(""));
         assert_eq!(Delivery::choose(false, &terminal), Delivery::Live);
+    }
+
+    #[test]
+    fn live_and_append_only_surfaces_use_semantic_colors() {
+        const NODE: &str = "lint";
+        let color = ColorPolicy::for_stream(true, None);
+        let plain = ColorPolicy::for_stream(true, Some(""));
+
+        let terminal = Watched::sized(16, 80);
+        let scrollback = Captured::default();
+        let mut region = Region::open(
+            Screen::immediate(terminal.clone()),
+            Glyphs::Ascii,
+            color,
+            Box::new(scrollback),
+        )
+        .expect("the region's row template parses");
+        let node = yunta_testkit::node_frame(
+            &yunta_core::NodeId::from_static(NODE),
+            yunta_engine::NodeStanding::Reached(yunta_engine::NodeState::Waiting {
+                on: yunta_engine::NodeWait::Gate { external_ref: None },
+            }),
+        );
+        let frame = yunta_engine::RunFrame {
+            phase: yunta_engine::RunPhase::Waiting {
+                on: yunta_engine::WaitingOn::Node {
+                    node: yunta_core::NodeId::from_static(NODE),
+                    on: yunta_engine::NodeWait::Gate { external_ref: None },
+                    reason: None,
+                },
+            },
+            flow: yunta_engine::Counter {
+                total: 1,
+                waiting: 1,
+                ..yunta_engine::Counter::default()
+            },
+            nodes: vec![node],
+            ..yunta_testkit::run_frame(&RUN)
+        };
+        region.show(&frame, &RUN, false);
+        let live = terminal.shown();
+        let live_writes = terminal.written();
+        assert!(
+            live.contains("wait") && live_writes.contains("\x1b[1;33m"),
+            "the live view marks a wait in color and words: {live:?}"
+        );
+        region.close();
+
+        let events = Log::for_run(RUN.as_str())
+            .node(
+                NODE,
+                EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+            )
+            .after(1)
+            .node(
+                NODE,
+                EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+                    Failure::message("exit 1"),
+                    true,
+                    TokenUsage::default(),
+                ))),
+            )
+            .build();
+        let moments = yunta_engine::chronicle(&events);
+
+        let colored_output = Captured::default();
+        let mut colored = Lines::open(Box::new(colored_output.clone()), "test", color);
+        for moment in &moments {
+            colored.moment(moment, Glyphs::Ascii);
+        }
+        let colored_text = colored_output.text();
+        assert!(
+            colored_text.contains("\x1b[1;31m") && colored_text.contains("lint — failed"),
+            "an appended failure is red and still says what happened: {colored_text:?}"
+        );
+
+        let plain_output = Captured::default();
+        let mut uncolored = Lines::open(Box::new(plain_output.clone()), "test", plain);
+        for moment in &moments {
+            uncolored.moment(moment, Glyphs::Ascii);
+        }
+        let plain_text = plain_output.text();
+        assert!(plain_text.contains("lint — failed"));
+        assert!(
+            !plain_text.contains("\x1b["),
+            "NO_COLOR removes ANSI: {plain_text:?}"
+        );
     }
 }

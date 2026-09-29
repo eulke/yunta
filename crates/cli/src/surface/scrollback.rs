@@ -59,7 +59,7 @@ mod tests {
     use yunta_testkit::{node_frame, run_frame};
     use yunta_testkit_core::Captured;
 
-    use crate::render::Glyphs;
+    use crate::render::{ColorPolicy, Glyphs};
     use crate::surface::region::Region;
     use crate::surface::{Screen, Watched};
 
@@ -71,6 +71,7 @@ mod tests {
         Region::open(
             Screen::immediate(term.clone()),
             Glyphs::Ascii,
+            ColorPolicy::for_stream(false, None),
             Box::new(out.clone()),
         )
         .expect("the region's row template parses")

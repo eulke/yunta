@@ -17,24 +17,25 @@ use std::io::Write;
 
 use yunta_engine::Moment;
 
-use crate::render::{format_duration, Glyphs};
+use crate::render::{format_duration, ColorPolicy, ColorRole, Glyphs};
 
 use super::{chronicle, write_line};
 
 /// One line per event, written as the event arrives.
 pub(super) struct Lines {
     out: Box<dyn Write + Send>,
+    color: ColorPolicy,
 }
 
 impl Lines {
     /// Opens the surface on `out`, announcing what the reader is getting
     /// instead of the live region and why.
-    pub(super) fn open(mut out: Box<dyn Write + Send>, reason: &str) -> Self {
+    pub(super) fn open(mut out: Box<dyn Write + Send>, reason: &str, color: ColorPolicy) -> Self {
         write_line(
             &mut out,
             &format!("live view off ({reason}): one line per event"),
         );
-        Self { out }
+        Self { out, color }
     }
 
     /// Writes one diagnostic the run raised, as its own line.
@@ -54,13 +55,19 @@ impl Lines {
     /// so the log is all there is and it is all written.
     pub(super) fn moment(&mut self, moment: &Moment, glyphs: Glyphs) {
         let said = chronicle::say(moment);
-        let mark = said
+        let role = said
             .word
-            .map(|word| format!("{} ", glyphs.state(word)))
-            .unwrap_or_default();
+            .and_then(super::view::role_for_state)
+            .unwrap_or(ColorRole::Info);
+        let mark = said.word.map(|word| format!("{} ", glyphs.state(word)));
+        let body = format!("{}{}", mark.unwrap_or_default(), said.text);
         write_line(
             &mut self.out,
-            &format!("[{}] {mark}{}", format_duration(moment.elapsed), said.text),
+            &format!(
+                "[{}] {}",
+                format_duration(moment.elapsed),
+                self.color.paint(role, &body)
+            ),
         );
     }
 }

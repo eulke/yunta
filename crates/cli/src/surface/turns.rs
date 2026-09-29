@@ -137,7 +137,7 @@ mod tests {
     use yunta_testkit::wait_until_async;
     use yunta_testkit_core::{Captured, Log};
 
-    use crate::render::Glyphs;
+    use crate::render::{ColorPolicy, Glyphs};
     use crate::surface::feed::{Beat, Diagnostics, Feed};
     use crate::surface::painter::{paint, Draw, Painter};
     use crate::surface::region::Region;
@@ -234,6 +234,7 @@ mod tests {
                     Region::open(
                         Screen::immediate(screen.clone()),
                         Glyphs::Ascii,
+                        ColorPolicy::for_stream(false, None),
                         Box::new(scrollback.clone()),
                     )
                     .expect("the region's row template parses"),
@@ -241,6 +242,7 @@ mod tests {
                 _ => Draw::Lines(crate::surface::lines::Lines::open(
                     Box::new(scrollback.clone()),
                     "a test",
+                    ColorPolicy::for_stream(false, None),
                 )),
             };
             let (feed, beats) = Feed::open();

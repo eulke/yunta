@@ -22,7 +22,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle, T
 use yunta_core::RunId;
 use yunta_engine::RunFrame;
 
-use crate::render::{truncate, Glyphs, LINE_WIDTH};
+use crate::render::{truncate, ColorPolicy, ColorRole, Glyphs, LINE_WIDTH};
 
 use super::scrollback::Scrollback;
 use super::{view, Screen};
@@ -47,6 +47,7 @@ pub(super) struct Region {
     /// Always the last row.
     counters: ProgressBar,
     glyphs: Glyphs,
+    color: ColorPolicy,
     /// The style every row is drawn with, parsed once so adding a row
     /// later cannot fail.
     style: ProgressStyle,
@@ -65,6 +66,7 @@ impl Region {
     pub(super) fn open(
         screen: Screen,
         glyphs: Glyphs,
+        color: ColorPolicy,
         scrollback: Box<dyn Write + Send>,
     ) -> Result<Self, TemplateError> {
         let style = ProgressStyle::with_template(ROW)?;
@@ -79,6 +81,7 @@ impl Region {
             body: Vec::new(),
             counters,
             glyphs,
+            color,
             style,
             above,
         })
@@ -91,19 +94,30 @@ impl Region {
     /// which decides the command the demand line offers, and which only
     /// the run's frozen manifest can answer.
     pub(super) fn show(&mut self, frame: &RunFrame, run_id: &RunId, answerable: bool) {
-        self.demand
-            .set_message(self.fit(&view::demand_line(frame, run_id, answerable)));
+        let demand = self.fit(&view::demand_line(frame, run_id, answerable));
+        let demand = if matches!(frame.phase, yunta_engine::RunPhase::Waiting { .. }) {
+            self.color.paint(ColorRole::Warning, &demand)
+        } else {
+            demand
+        };
+        self.demand.set_message(demand);
         let rows: Vec<String> = view::working(frame)
             .into_iter()
-            .flat_map(|node| view::node_rows(frame, node, self.glyphs))
-            .map(|row| self.fit(&row))
+            .flat_map(|node| view::node_rows_with_states(frame, node, self.glyphs))
+            .map(|(row, state)| {
+                let row = self.fit(&row);
+                state.map_or(row.clone(), |word| {
+                    view::paint_state(self.color, word, &row)
+                })
+            })
             .collect();
         self.resize(rows.len());
         for (bar, text) in self.body.iter().zip(rows) {
             bar.set_message(text);
         }
+        let counters = self.fit(&view::counter_line(frame));
         self.counters
-            .set_message(self.fit(&view::counter_line(frame)));
+            .set_message(view::paint_live_counter_line(self.color, &counters));
     }
 
     /// Writes one diagnostic into the terminal's history above the
@@ -218,6 +232,7 @@ mod tests {
         Region::open(
             Screen::immediate(term.clone()),
             Glyphs::Ascii,
+            ColorPolicy::for_stream(false, None),
             Box::new(scrollback.clone()),
         )
         .expect("the region's row template parses")
