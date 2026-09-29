@@ -105,41 +105,60 @@ pub(crate) async fn execute_run_at_depth(
     env: RunEnv<'_>,
     depth: u32,
 ) -> Result<RunReport, RunError> {
+    let ready = match start(env, depth).await? {
+        Startup::Finished(report) => return Ok(*report),
+        Startup::Ready(ready) => *ready,
+    };
+    // The run's clock is read every second for as long as the loop
+    // drives it, so a host that slept is on the log even while nothing
+    // else is being written. The loop ending ends the watch. The loop is
+    // boxed: a child run re-enters this function, and carrying both
+    // futures inline would grow every level of that recursion.
+    let log = ready.ctx.log();
+    tokio::select! {
+        biased;
+        report = Box::pin(drive(&ready)) => report,
+        stopped = ready.ctx.awake.watch(&log) => match stopped {
+            Ok(never) => match never {},
+            Err(error) => Err(error.into()),
+        },
+    }
+}
+
+/// The scheduler loop: replays the log, asks what is next, and runs it
+/// until the answer is terminal.
+async fn drive(ready: &Ready<'_>) -> Result<RunReport, RunError> {
     let Ready {
         ctx,
         root_cancel,
         mode_name,
         policy,
-    } = match start(env, depth).await? {
-        Startup::Finished(report) => return Ok(*report),
-        Startup::Ready(ready) => *ready,
-    };
-
+    } = ready;
     loop {
         // A Ctrl-C (or any root cancellation) between scheduler
         // steps pauses here; one that lands mid-batch is honored by the
         // per-node child tokens below, whose failed nodes land in the
         // log first and then reach this same check.
         if root_cancel.is_cancelled() {
-            return pause(&ctx, PauseReason::Cancelled).await;
+            return pause(ctx, PauseReason::Cancelled).await;
         }
         // One read and one replay per iteration: the decision and every
         // handler that needs the run's state read the same derivation.
         let events = ctx.load_events().await?;
         let state = crate::replay::derive(&events);
-        match schedule::decide(&ctx.manifest.workflow, &state, &policy) {
-            Decision::Broken { diagnostic } => return Err(steps::broken(&ctx, diagnostic).await),
-            Decision::MeasureBaseline { suite } => baseline::measure(&ctx, suite).await?,
-            Decision::Finish => return steps::run_finished(&ctx, &mode_name).await,
-            Decision::Pause { reason } => return pause(&ctx, reason).await,
-            Decision::Fail { reason } => return steps::run_failed(&ctx, reason).await,
+        match schedule::decide(&ctx.manifest.workflow, &state, policy) {
+            Decision::Broken { diagnostic } => return Err(steps::broken(ctx, diagnostic).await),
+            Decision::MeasureBaseline { suite } => baseline::measure(ctx, suite).await?,
+            Decision::Finish => return steps::run_finished(ctx, mode_name).await,
+            Decision::Pause { reason } => return pause(ctx, reason).await,
+            Decision::Fail { reason } => return steps::run_failed(ctx, reason).await,
             Decision::Reroute {
                 from,
                 to,
                 attempt,
                 max_reroutes,
                 cause,
-            } => steps::reroute(&ctx, from, to, attempt, max_reroutes, cause).await?,
+            } => steps::reroute(ctx, from, to, attempt, max_reroutes, cause).await?,
             Decision::GateExhaustedReroutes {
                 node,
                 goto,
@@ -147,7 +166,7 @@ pub(crate) async fn execute_run_at_depth(
                 cause,
             } => {
                 if let Some(report) =
-                    steps::gate_exhausted(&ctx, &state, &mode_name, node, goto, max_reroutes, cause)
+                    steps::gate_exhausted(ctx, &state, mode_name, node, goto, max_reroutes, cause)
                         .await?
                 {
                     return Ok(report);
@@ -161,7 +180,7 @@ pub(crate) async fn execute_run_at_depth(
                 grantable,
             } => {
                 if let Some(report) = steps::failure_escalation(
-                    &ctx,
+                    ctx,
                     &state,
                     node,
                     failure,
@@ -173,32 +192,32 @@ pub(crate) async fn execute_run_at_depth(
                 }
             }
             Decision::Execute(batch) => {
-                if let Some(report) = steps::execute_batch(&ctx, &state, batch).await? {
+                if let Some(report) = steps::execute_batch(ctx, &state, batch).await? {
                     return Ok(report);
                 }
             }
             Decision::PublishGate { node } => {
-                if let Some(report) = steps::publish_gate(&ctx, node).await? {
+                if let Some(report) = steps::publish_gate(ctx, node).await? {
                     return Ok(report);
                 }
             }
             Decision::PollGate { node, external_ref } => {
-                if let Some(report) = steps::poll_gate(&ctx, node, external_ref).await? {
+                if let Some(report) = steps::poll_gate(ctx, node, external_ref).await? {
                     return Ok(report);
                 }
             }
             Decision::ResolveInternalGate { node } => {
-                if let Some(report) = steps::resolve_internal_gate(&ctx, node).await? {
+                if let Some(report) = steps::resolve_internal_gate(ctx, node).await? {
                     return Ok(report);
                 }
             }
             Decision::AskQuestions { node } => {
-                if let Some(report) = steps::ask_questions(&ctx, node).await? {
+                if let Some(report) = steps::ask_questions(ctx, node).await? {
                     return Ok(report);
                 }
             }
             Decision::FinishAnswered { node } => {
-                if let Some(report) = steps::finish_answered(&ctx, node).await? {
+                if let Some(report) = steps::finish_answered(ctx, node).await? {
                     return Ok(report);
                 }
             }
@@ -326,6 +345,7 @@ fn build_ctx(
     // borrowing them — the one injected clock and the one display
     // surface reach the listener's own event appends.
     let clock_for_host = clock.clone();
+    let awake = Arc::new(crate::wakefulness::Wakefulness::new(clock.clone()));
     let observer_for_host = observer.clone();
     // One cache of criterion results per invocation, read by every task
     // cycle and by every check a task session asks for through the host.
@@ -355,6 +375,7 @@ fn build_ctx(
         observer,
         unit: None,
         landing: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+        awake,
         // One host per execute_run invocation, shared by every session
         // listener; each of them reads and writes through the host's own
         // clone of the log handle.

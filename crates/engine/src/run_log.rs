@@ -24,6 +24,9 @@ pub(crate) struct RunLog<'a> {
     /// on its way in. Empty for a run that declares none, which is the
     /// ordinary case and costs nothing.
     redactor: &'a yunta_core::Redactor,
+    /// The run's last clock reading, when this log records suspensions
+    /// of the host: every append looks first.
+    awake: Option<&'a crate::wakefulness::Wakefulness>,
 }
 
 impl<'a> RunLog<'a> {
@@ -39,7 +42,32 @@ impl<'a> RunLog<'a> {
             clock,
             observer: None,
             redactor,
+            awake: None,
         }
+    }
+
+    /// The same log, recording a suspension of the host before any event
+    /// appended after it.
+    pub(crate) fn awake(mut self, awake: Option<&'a crate::wakefulness::Wakefulness>) -> Self {
+        self.awake = awake;
+        self
+    }
+
+    /// Reads the run's clock and records `host_suspended` when the host
+    /// slept since the last reading. Nothing when this log records no
+    /// suspension, or the host stayed awake.
+    pub(crate) async fn note_suspension(&self) -> Result<(), StorageError> {
+        let Some(awake) = self.awake else {
+            return Ok(());
+        };
+        let at = self.clock.now();
+        let Some(slept) = awake.observe(at) else {
+            return Ok(());
+        };
+        let payload = EventPayload::Run(yunta_core::events::RunEvent::HostSuspended(
+            yunta_core::events::HostSuspendedPayload::slept(slept),
+        ));
+        self.append(None, payload, at).await.map(|_| ())
     }
 
     /// `payload` with every declared secret taken out of it.
@@ -82,12 +110,25 @@ impl<'a> RunLog<'a> {
         node: Option<&NodeId>,
         payload: EventPayload,
     ) -> Result<Seq, StorageError> {
+        // A host that slept since the last reading says so first, so the
+        // log never puts what came after a suspension before it.
+        self.note_suspension().await?;
+        let at = self.clock.now();
+        self.append(node, payload, at).await
+    }
+
+    /// Appends `payload` stamped `at`, mirroring it to the observer.
+    async fn append(
+        &self,
+        node: Option<&NodeId>,
+        payload: EventPayload,
+        at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Seq, StorageError> {
         let draft = EventDraft {
             run_id: self.run_id.clone(),
             node_id: node.cloned(),
             payload: self.redacted(payload),
         };
-        let at = self.clock.now();
         let Some(observer) = self.observer else {
             return self.storage.append(draft, at).await;
         };

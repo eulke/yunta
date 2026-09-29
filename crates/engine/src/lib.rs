@@ -74,6 +74,7 @@ mod task_cycle;
 mod tasks;
 mod verification_effectiveness;
 mod view;
+mod wakefulness;
 mod worktree;
 
 pub use answers::{

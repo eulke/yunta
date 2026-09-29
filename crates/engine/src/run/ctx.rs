@@ -111,6 +111,10 @@ pub(crate) struct RunCtx<'a> {
     /// refuses. Landing is therefore serial, in whatever order the units
     /// finish, exactly as a loop's own integration already is.
     pub(crate) landing: Arc<tokio::sync::Mutex<()>>,
+    /// The last reading of the run's clock, shared by every append this
+    /// invocation makes, so a suspension of the host is recorded once,
+    /// before whatever comes after it.
+    pub(crate) awake: Arc<crate::wakefulness::Wakefulness>,
 }
 
 /// A node's own checkout, and the tree its work lands in.
@@ -168,6 +172,7 @@ impl<'a> RunCtx<'a> {
             redactor: self.redactor.clone(),
             observer: self.observer.clone(),
             landing: self.landing.clone(),
+            awake: self.awake.clone(),
             unit: Some(NodeUnit {
                 unit,
                 into: self.worktree,
@@ -217,6 +222,7 @@ impl<'a> RunCtx<'a> {
             &self.redactor,
         )
         .observed_by(self.observer.as_deref())
+        .awake(Some(&self.awake))
     }
 
     /// Appends one event and returns the seq storage assigned to it.
