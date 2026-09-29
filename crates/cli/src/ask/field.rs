@@ -18,7 +18,7 @@ use yunta_core::text::one_line;
 use super::keys::{Stroke, Strokes, PASTE_OFF, PASTE_ON};
 use super::{Answered, Console, NoAnswer};
 use crate::error::warn;
-use crate::render::cell_width;
+use crate::render::{cell_width, ColorRole};
 
 /// Said once, when the answer being recorded came from text that
 /// spanned more than one line: a question takes one line, and the
@@ -150,12 +150,13 @@ pub(crate) fn ask_line(console: &Console, prompt: &str) -> Answered<Typed> {
     let marked = Marked::on(console)?;
     let mut field = Field::default();
     let mut strokes = Strokes::default();
+    let shown_prompt = console.paint(ColorRole::Info, prompt);
     let typed = loop {
         // Read every draw: the terminal a run is answered on can be
         // resized while the answer is being typed.
         let room = console.width().saturating_sub(cell_width(prompt) + 1);
         let (row, back) = field.row(room);
-        console.draw_line(prompt, &row, back)?;
+        console.draw_line(&shown_prompt, &row, back)?;
         match field.apply(strokes.read(console.read_key()?)) {
             Edit::Editing => {}
             Edit::Answered(typed) => break typed,
@@ -167,7 +168,7 @@ pub(crate) fn ask_line(console: &Console, prompt: &str) -> Answered<Typed> {
         }
     };
     drop(marked);
-    console.end_line(&format!("{prompt}{}", typed.value))?;
+    console.end_line(&format!("{shown_prompt}{}", typed.value))?;
     if typed.folded {
         console.say(FOLDED)?;
     }

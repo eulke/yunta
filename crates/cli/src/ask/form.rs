@@ -20,6 +20,7 @@ use yunta_engine::QuestionsReply;
 use super::field::ask_line;
 use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, ANSWER};
+use crate::render::{ColorPolicy, ColorRole};
 
 /// The option that leaves a question no answer, offered only where the
 /// question allows one, and what stands for the answer that was not
@@ -38,11 +39,11 @@ pub(crate) fn answer(console: &Console, questions: &QuestionsFile) -> Answered<Q
     let mut answers = Vec::new();
     for (index, question) in questions.questions.iter().enumerate() {
         console.say("")?;
-        console.say(&format!(
-            "{}/{total}  {}{}",
+        console.say(&question_line(
+            console.color_policy(),
             index + 1,
-            question.text,
-            if question.required { "" } else { " (optional)" }
+            total,
+            question,
         ))?;
         answers.extend(asked(console, question)?);
     }
@@ -51,6 +52,16 @@ pub(crate) fn answer(console: &Console, questions: &QuestionsFile) -> Answered<Q
         channel: Channel::Tty,
         responder: Some(attributed(console)?),
     })
+}
+
+/// The question being answered, with its position and requiredness kept
+/// visible when color is unavailable.
+fn question_line(color: ColorPolicy, index: usize, total: usize, question: &Question) -> String {
+    format!(
+        "{index}/{total}  {}{}",
+        color.paint(ColorRole::Info, &question.text),
+        if question.required { "" } else { " (optional)" }
+    )
 }
 
 /// One question, asked until it has an answer its own rules accept.
@@ -96,7 +107,11 @@ fn picked(
         });
     }
     let value = choose(console, "answer", choices)?;
-    console.say(&format!("{ANSWER}{}", value.as_deref().unwrap_or(SKIP)))?;
+    console.say(&format!(
+        "{}{}",
+        console.paint(ColorRole::Info, ANSWER),
+        value.as_deref().unwrap_or(SKIP)
+    ))?;
     Ok(value)
 }
 
@@ -181,6 +196,19 @@ mod tests {
         assert_eq!(
             offered,
             vec![Some("staging".to_string()), Some("production".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_question_keeps_its_text_with_or_without_terminal_color() {
+        let question = question(AnswerType::Text, false);
+        assert_eq!(
+            question_line(ColorPolicy::for_stream(true, None), 1, 2, &question),
+            "1/2  \x1b[1;36mWhich environment?\x1b[0m (optional)"
+        );
+        assert_eq!(
+            question_line(ColorPolicy::for_stream(true, Some("")), 1, 2, &question),
+            "1/2  Which environment? (optional)"
         );
     }
 

@@ -33,6 +33,7 @@
 use dialoguer::FuzzySelect;
 
 use super::{Answered, Console, NoAnswer};
+use crate::render::ColorRole;
 use crate::render::{wrap, INDENT, INDENT_WIDTH, LINE_WIDTH};
 
 /// The keys a list answers to, named above every one of them.
@@ -62,15 +63,24 @@ pub(crate) fn choose<T>(console: &Console, verb: &str, choices: Vec<Choice<T>>) 
         .any(|(option, row)| option.trim_start() != row.as_str())
     {
         for option in &read {
-            console.say(option)?;
+            console.say(&console.paint(ColorRole::Info, option))?;
         }
         console.say("")?;
     }
     console.say(&format!("{KEYS}, {}", console.escape().said()))?;
     let cursor = Cursor::taken(console);
+    // `FuzzySelect` also searches the displayed item strings. Coloring
+    // them here keeps the selection readable without changing which
+    // value a selected row returns; fuzzy highlighting is disabled
+    // because its match offsets would count the ANSI sequences too.
+    let colored_rows: Vec<String> = rows
+        .iter()
+        .map(|row| console.paint(ColorRole::Info, row))
+        .collect();
     let picked = FuzzySelect::new()
-        .with_prompt(verb)
-        .items(&rows)
+        .with_prompt(console.paint(ColorRole::Info, verb))
+        .items(&colored_rows)
+        .highlight_matches(false)
         // Without a highlighted option to start from, the first Enter
         // answers nothing.
         .default(0)

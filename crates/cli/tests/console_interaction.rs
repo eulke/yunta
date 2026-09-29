@@ -89,24 +89,138 @@ fn asking(root: &Path, questions: &str) -> Terminal {
     let (repo, home) = (checkout.repo, checkout.home);
     // `--quiet` leaves the run's progress out: what a person is asked is
     // not progress, and the round is what these tests read.
-    yunta_on_terminal!(
-        &repo,
-        &home,
-        &[
-            "run",
-            "wf.yaml",
-            "--adapter",
-            "mock",
-            "--fixture",
-            "fixture.yaml",
-            "--quiet",
-        ]
+    let args = [
+        "run",
+        "wf.yaml",
+        "--adapter",
+        "mock",
+        "--fixture",
+        "fixture.yaml",
+        "--quiet",
+    ];
+    yunta_on_terminal!(&repo, &home, &args)
+}
+
+/// The same text a person sees on a terminal, without ANSI styling.
+fn visible(drawn: &str) -> String {
+    let mut text = String::with_capacity(drawn.len());
+    let mut characters = drawn.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\x1b' && characters.peek() == Some(&'[') {
+            characters.next();
+            for control in characters.by_ref() {
+                if ('@'..='~').contains(&control) {
+                    break;
+                }
+            }
+        } else {
+            text.push(character);
+        }
+    }
+    text
+}
+
+/// Waits against the text visible to a person while retaining the raw
+/// terminal bytes for tests that assert color sequences.
+fn wait_for_visible(terminal: &Terminal, needle: &str, what: &str) {
+    wait_until(
+        || visible(&terminal.drawn()).contains(needle),
+        || format!("{what}\ndrawn so far:\n{}", visible(&terminal.drawn())),
+    );
+}
+
+/// A wrapper keeps the test harness hermetic while giving the child a
+/// deliberate `NO_COLOR` value after the harness clears its inherited
+/// environment.
+fn no_color_wrapper(root: &Path) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let wrapper = root.join("yunta-no-color");
+    let binary = env!("CARGO_BIN_EXE_yunta");
+    let quoted = format!("'{}'", binary.replace('\'', "'\\''"));
+    std::fs::write(
+        &wrapper,
+        format!("#!/bin/sh\nexport NO_COLOR=1\nexec {quoted} \"$@\"\n"),
+    )
+    .expect("the no-color wrapper");
+    let mut permissions = std::fs::metadata(&wrapper).unwrap().permissions();
+    permissions.set_mode(0o755);
+    std::fs::set_permissions(&wrapper, permissions).unwrap();
+    wrapper
+}
+
+/// Removes SGR styling while preserving cursor controls used to measure
+/// how many rows an interactive menu redraws.
+fn without_sgr(drawn: &str) -> String {
+    let mut text = String::with_capacity(drawn.len());
+    let mut characters = drawn.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\x1b' && characters.peek() == Some(&'[') {
+            let mut sequence = String::from(character);
+            sequence.push(characters.next().unwrap_or_default());
+            let mut final_byte = None;
+            for control in characters.by_ref() {
+                sequence.push(control);
+                if ('@'..='~').contains(&control) {
+                    final_byte = Some(control);
+                    break;
+                }
+            }
+            if final_byte != Some('m') {
+                text.push_str(&sequence);
+            }
+        } else {
+            text.push(character);
+        }
+    }
+    text
+}
+
+fn has_sgr(drawn: &str) -> bool {
+    let mut characters = drawn.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\x1b' && characters.peek() == Some(&'[') {
+            characters.next();
+            for control in characters.by_ref() {
+                if ('@'..='~').contains(&control) {
+                    if control == 'm' {
+                        return true;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn drew_and_cleared(drawn: &str, from: &str) -> (usize, usize) {
+    let drawn = without_sgr(drawn);
+    let list = drawn
+        .split_once(from)
+        .map(|(_, rest)| rest)
+        .unwrap_or_else(|| panic!("the list never drew `{from}`:\n{drawn}"));
+    let (rows, cleared) = list
+        .split_once('\x1b')
+        .unwrap_or_else(|| panic!("the list never cleared what it drew:\n{drawn}"));
+    let cleared = cleared
+        .strip_prefix('[')
+        .and_then(|rest| rest.split_once('A'))
+        .and_then(|(rows, _)| rows.parse().ok())
+        .unwrap_or_else(|| panic!("the list did not move back over its rows:\n{drawn}"));
+    (
+        rows.lines().count() + usize::from(!rows.starts_with('\n')) - 1,
+        cleared,
     )
 }
 
 /// A run that reaches a gate with its re-routes already spent — an
 /// escalation put to a person with no agent anywhere in it.
 fn gated(root: &Path) -> Terminal {
+    gated_with(root, None)
+}
+
+fn gated_with(root: &Path, binary: Option<&Path>) -> Terminal {
     let checkout = Checkout::under(root)
         .working_in_place()
         .workflow(
@@ -117,7 +231,10 @@ fn gated(root: &Path) -> Terminal {
         )
         .committed();
     let (repo, home) = (checkout.repo, checkout.home);
-    yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"])
+    match binary {
+        Some(binary) => Terminal::open(binary, &repo, &home, &["run", "wf.yaml"]),
+        None => yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]),
+    }
 }
 
 /// A run that stops on an unresolved internal gate: the question its
@@ -138,17 +255,84 @@ fn approving(root: &Path) -> Terminal {
 }
 
 #[test]
+fn prompts_use_semantic_colors_when_allowed_and_obey_no_color() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = gated(root.path());
+    wait_for_visible(
+        &terminal,
+        "a decision is needed",
+        "the gate prompt was never opened",
+    );
+    wait_for_visible(&terminal, "> 1  retry", "the choices were never offered");
+    let colored = terminal.drawn();
+    assert!(
+        colored.contains("\x1b[1;36ma decision is needed\x1b[0m"),
+        "the question label carries its informational color:\n{}",
+        visible(&colored)
+    );
+    assert!(
+        colored.contains("\x1b[1;36mchoose\x1b[0m"),
+        "the menu prompt carries its informational color:\n{}",
+        visible(&colored)
+    );
+    assert!(
+        colored.contains("\x1b[1;36m1  retry"),
+        "choice rows carry their informational color:\n{}",
+        visible(&colored)
+    );
+    terminal.keys("\x1b[B\r");
+    terminal.keys("\r");
+    let ended = visible(&terminal.ended());
+    assert!(
+        ended.contains("chose `abort`"),
+        "coloring the question and options leaves the selected answer intact:\n{ended}"
+    );
+
+    let root = tempfile::tempdir().unwrap();
+    let wrapper = no_color_wrapper(root.path());
+    let mut terminal = gated_with(root.path(), Some(&wrapper));
+    wait_for_visible(
+        &terminal,
+        "a decision is needed",
+        "the gate prompt was never opened with NO_COLOR",
+    );
+    wait_for_visible(
+        &terminal,
+        "> 1  retry",
+        "the choices were never offered with NO_COLOR",
+    );
+    let plain = terminal.drawn();
+    assert!(
+        !has_sgr(&plain),
+        "NO_COLOR leaves prompt labels and choices free of color sequences:\n{}",
+        visible(&plain)
+    );
+    terminal.keys("\x1b[B\r");
+    terminal.keys("\r");
+    let ended = visible(&terminal.ended());
+    assert!(
+        ended.contains("chose `abort`"),
+        "the answer stays intact when NO_COLOR disables styling:\n{ended}"
+    );
+}
+
+#[test]
 fn a_console_prompt_does_not_stall_the_run_tools_listener() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
-    terminal.wait_for("> 1  retry", "the gate never put its menu on the console");
+    wait_for_visible(
+        &terminal,
+        "> 1  retry",
+        "the gate never put its menu on the console",
+    );
 
     // While the prompt waits for an answer, a SIGINT must still be
     // handled: the Ctrl-C task shares the run's runtime with the console
     // read and the run-tools listener. A read that blocked the runtime
     // would starve every one of them, and this note would never print.
     terminal.interrupt();
-    terminal.wait_for(
+    wait_for_visible(
+        &terminal,
         "interrupt received",
         "SIGINT went unhandled while the console prompt waited — the read stalled the runtime",
     );
@@ -158,7 +342,8 @@ fn a_console_prompt_does_not_stall_the_run_tools_listener() {
 fn a_decision_on_the_console_says_where_the_run_works() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
-    terminal.wait_for(
+    wait_for_visible(
+        &terminal,
         "the run works in",
         "the decision never said where a node run again would start from",
     );
@@ -168,8 +353,13 @@ fn a_decision_on_the_console_says_where_the_run_works() {
 fn the_live_region_comes_off_the_terminal_before_a_prompt_draws_on_it() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
-    terminal.wait_for("nodes ", "the run never pinned its region to the terminal");
-    terminal.wait_for(
+    wait_for_visible(
+        &terminal,
+        "nodes ",
+        "the run never pinned its region to the terminal",
+    );
+    wait_for_visible(
+        &terminal,
         "a decision is needed",
         "the gate never put its decision on the console",
     );
@@ -177,8 +367,13 @@ fn the_live_region_comes_off_the_terminal_before_a_prompt_draws_on_it() {
     // The region and the prompt write to the same stream, and the one
     // that draws second lands on what the other put there. So the
     // region comes down first, and stays down until the prompt ends.
+    let drawn = without_sgr(&terminal.drawn());
     assert!(
-        terminal.cleared_before("nodes ", "a decision is needed"),
+        drawn.find("a decision is needed").is_some_and(|next_at| {
+            drawn[..next_at]
+                .rfind("nodes ")
+                .is_some_and(|pinned_at| drawn[pinned_at..next_at].contains("\x1b[2K"))
+        }),
         "the region was still pinned to the terminal the prompt drew on:\n{}",
         terminal.drawn()
     );
@@ -188,14 +383,18 @@ fn the_live_region_comes_off_the_terminal_before_a_prompt_draws_on_it() {
 fn an_interrupt_at_an_open_prompt_stops_the_run_and_the_process_with_it() {
     let root = tempfile::tempdir().unwrap();
     let mut terminal = gated(root.path());
-    terminal.wait_for("> 1  retry", "the gate never put its menu on the console");
+    wait_for_visible(
+        &terminal,
+        "> 1  retry",
+        "the gate never put its menu on the console",
+    );
     terminal.interrupt();
 
     // A person at the menu is no longer being asked anything. The read
     // stops waiting on them, the engine unwinds the run, and the
     // process leaves — rather than living on around a thread parked on
     // a key nobody is going to press.
-    let drawn = terminal.ended();
+    let drawn = visible(&terminal.ended());
     assert!(
         !terminal.ran_to_the_end(),
         "a run stopped by a person is not a success:\n{drawn}"
@@ -234,7 +433,11 @@ fn an_interrupt_at_an_open_prompt_stops_the_run_and_the_process_with_it() {
 fn a_keystroke_in_the_list_goes_back_over_the_rows_the_list_drew_and_no_further() {
     let root = tempfile::tempdir().unwrap();
     let mut terminal = gated(root.path());
-    terminal.wait_for("2  abort", "the gate never put its options on the console");
+    wait_for_visible(
+        &terminal,
+        "2  abort",
+        "the gate never put its options on the console",
+    );
     wait_until(
         || !terminal.line_discipline_is_back(),
         || "the gate did not put the terminal in raw mode before reading keys".into(),
@@ -243,9 +446,9 @@ fn a_keystroke_in_the_list_goes_back_over_the_rows_the_list_drew_and_no_further(
     // rows it last wrote. Clearing more than it wrote takes the rows
     // above it — the evidence the decision is being made on.
     terminal.keys("\x1b[B");
-    terminal.wait_for("> 2  abort", "the list never moved");
+    wait_for_visible(&terminal, "> 2  abort", "the list never moved");
 
-    let (drew, cleared) = terminal.drew_and_cleared("> 1  retry");
+    let (drew, cleared) = drew_and_cleared(&terminal.drawn(), "> 1  retry");
     assert_eq!(
         cleared,
         drew,
@@ -258,11 +461,12 @@ fn a_keystroke_in_the_list_goes_back_over_the_rows_the_list_drew_and_no_further(
 fn an_escalation_says_what_happened_above_the_options_it_offers() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
-    terminal.wait_for(
+    wait_for_visible(
+        &terminal,
         "tradeoff:",
         "the gate never put its options, or what they cost, on the console",
     );
-    let drawn = terminal.drawn();
+    let drawn = visible(&terminal.drawn());
     let happened = drawn
         .find("re-route(s) to `fix` are exhausted")
         .expect("a decision opens with the account of what raised it");
@@ -277,11 +481,12 @@ fn an_escalation_says_what_happened_above_the_options_it_offers() {
 fn an_escalation_says_the_record_behind_its_claim_once_and_under_its_own_heading() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
-    terminal.wait_for(
+    wait_for_visible(
+        &terminal,
         "tradeoff:",
         "the gate never put its options, or what they cost, on the console",
     );
-    let drawn = terminal.drawn();
+    let drawn = visible(&terminal.drawn());
 
     // The claim says what happened and the record says what the log
     // holds about it. A person at a prompt audits the first against the
@@ -312,11 +517,12 @@ fn an_escalation_says_the_record_behind_its_claim_once_and_under_its_own_heading
 fn an_escalation_draws_the_evidence_the_engine_attached_above_the_options() {
     let root = tempfile::tempdir().unwrap();
     let terminal = approving(root.path());
-    terminal.wait_for(
+    wait_for_visible(
+        &terminal,
         "tradeoff:",
         "the gate never put its options, or what they cost, on the console",
     );
-    let drawn = terminal.drawn();
+    let drawn = visible(&terminal.drawn());
 
     // The summary is an account of what happened and the evidence is
     // the engine's own record of it. A menu offered without the record
@@ -349,22 +555,28 @@ fn a_pasted_pair_of_lines_answers_one_question() {
          required: true\n  - id: risk\n    text: \"Any risk?\"\n    answer_type: text\n    \
          required: true\n",
     );
-    terminal.wait_for("1/2  What changed?", "the first question was never asked");
+    wait_for_visible(
+        &terminal,
+        "1/2  What changed?",
+        "the first question was never asked",
+    );
     // What a terminal sends for a paste of two lines once it has been
     // asked to mark one: the break between them is inside the markers.
     terminal.keys("\x1b[200~first line\rsecond line\x1b[201~");
-    terminal.wait_for(
+    wait_for_visible(
+        &terminal,
         "first line second line",
         "the paste never reached the answer",
     );
     terminal.keys("\r");
-    terminal.wait_for(
+    wait_for_visible(
+        &terminal,
         "2/2  Any risk?",
         "the paste answered the second question as well as the first",
     );
     terminal.keys("none\r");
 
-    let drawn = terminal.ended();
+    let drawn = visible(&terminal.ended());
     assert!(
         drawn.contains("spanned more than one line"),
         "folding what was pasted into one line is said, never silent:\n{drawn}"
@@ -385,23 +597,31 @@ fn an_answer_wider_than_the_terminal_is_typed_on_one_row() {
          required: true\n",
     );
     terminal.raw();
-    terminal.wait_for("1/1  What changed?", "the question was never asked");
+    wait_for_visible(
+        &terminal,
+        "1/1  What changed?",
+        "the question was never asked",
+    );
     // Half again as wide as the screen. A row redrawn wider than the
     // terminal wraps onto the row below, which the next redraw does not
     // clear, and every keystroke past the edge leaves another one
     // standing.
     let long: String = (0..12).map(|at| format!("{at:02}abcdefgh")).collect();
     terminal.keys(&long);
-    terminal.wait_for("11abcdefgh", "the answer was never typed to its end");
+    wait_for_visible(
+        &terminal,
+        "11abcdefgh",
+        "the answer was never typed to its end",
+    );
 
     // Read while the line is still being edited: what closes a finished
     // answer is a line the terminal lays out over as many rows as it
     // takes, and it is drawn once, with nothing after it to redraw.
     for row in terminal.rows_redrawn() {
         assert!(
-            row.chars().count() <= usize::from(Terminal::COLUMNS),
+            visible(&row).chars().count() <= usize::from(Terminal::COLUMNS),
             "a row {} cells wide on a terminal {} wide: {row:?}",
-            row.chars().count(),
+            visible(&row).chars().count(),
             Terminal::COLUMNS
         );
     }
@@ -425,7 +645,11 @@ fn an_arrow_key_leaves_nothing_of_itself_in_the_answer() {
         "questions:\n  - id: summary\n    text: \"What changed?\"\n    answer_type: text\n    \
          required: true\n",
     );
-    terminal.wait_for("1/1  What changed?", "the question was never asked");
+    wait_for_visible(
+        &terminal,
+        "1/1  What changed?",
+        "the question was never asked",
+    );
     // The cursor goes back one character and types into the gap.
     terminal.keys("ac\x1b[Db\r");
     terminal.ended();
@@ -446,10 +670,14 @@ fn escape_parks_the_run_with_nothing_recorded() {
         "questions:\n  - id: summary\n    text: \"What changed?\"\n    answer_type: text\n    \
          required: true\n",
     );
-    terminal.wait_for("1/1  What changed?", "the question was never asked");
+    wait_for_visible(
+        &terminal,
+        "1/1  What changed?",
+        "the question was never asked",
+    );
     terminal.keys("\x1b");
 
-    let drawn = terminal.ended();
+    let drawn = visible(&terminal.ended());
     assert!(
         drawn.contains("the run parks here"),
         "a declined prompt says what became of the run:\n{drawn}"
@@ -474,14 +702,23 @@ fn a_choice_is_answered_by_arrow_or_by_typing_its_value() {
          values: [staging, production]\n    required: true\n  - id: tier\n    text: \"Which \
          tier?\"\n    answer_type: choice\n    values: [basic, pro]\n    required: true\n",
     );
-    terminal.wait_for(
+    wait_for_visible(
+        &terminal,
         "1/2  Which environment?",
         "the first question was never asked",
     );
-    terminal.wait_for("2  production", "the declared values were never offered");
+    wait_for_visible(
+        &terminal,
+        "2  production",
+        "the declared values were never offered",
+    );
     // Down one, then Enter.
     terminal.keys("\x1b[B\r");
-    terminal.wait_for("2/2  Which tier?", "the first answer never landed");
+    wait_for_visible(
+        &terminal,
+        "2/2  Which tier?",
+        "the first answer never landed",
+    );
     // The declared value, typed.
     terminal.keys("pro\r");
 
@@ -501,10 +738,15 @@ fn an_answer_its_own_rules_refuse_is_asked_again() {
         "questions:\n  - id: summary\n    text: \"What changed?\"\n    answer_type: text\n    \
          required: true\n",
     );
-    terminal.wait_for("1/1  What changed?", "the question was never asked");
+    wait_for_visible(
+        &terminal,
+        "1/1  What changed?",
+        "the question was never asked",
+    );
     // An empty line answers nothing, which this question does not allow.
     terminal.keys("\r");
-    terminal.wait_for(
+    wait_for_visible(
+        &terminal,
         "is `required` and nothing answers it",
         "the refusal a person reads is the engine's own",
     );
@@ -525,7 +767,11 @@ fn a_prompt_that_ends_on_an_interrupt_leaves_the_terminal_its_cursor() {
     let root = tempfile::tempdir().unwrap();
     let mut terminal = gated(root.path());
     terminal.raw();
-    terminal.wait_for("> 1  retry", "the gate never put its menu on the console");
+    wait_for_visible(
+        &terminal,
+        "> 1  retry",
+        "the gate never put its menu on the console",
+    );
     // The list hides the cursor while it draws. Ending any way but
     // answered or declined and leaving it hidden hands the shell the run
     // returns to a terminal with no cursor, which nothing after it puts
@@ -542,7 +788,7 @@ fn a_prompt_that_ends_on_an_interrupt_leaves_the_terminal_its_cursor() {
         },
     );
 
-    let drawn = terminal.ended();
+    let drawn = visible(&terminal.ended());
     assert!(
         terminal.cursor_is_back(),
         "the cursor is put back as often as it is taken away:\n{drawn}"
@@ -553,7 +799,11 @@ fn a_prompt_that_ends_on_an_interrupt_leaves_the_terminal_its_cursor() {
 fn a_prompt_abandoned_mid_read_leaves_the_terminal_reading_and_echoing_again() {
     let root = tempfile::tempdir().unwrap();
     let mut terminal = gated(root.path());
-    terminal.wait_for("> 1  retry", "the gate never put its menu on the console");
+    wait_for_visible(
+        &terminal,
+        "> 1  retry",
+        "the gate never put its menu on the console",
+    );
     // The read turns the line discipline off for as long as it reads,
     // and this is the moment it has: waiting on it is what makes the
     // interrupt below land on a prompt that holds the terminal.
@@ -574,7 +824,7 @@ fn a_prompt_abandoned_mid_read_leaves_the_terminal_reading_and_echoing_again() {
     // going to press, so the process does it on its way out. Left as
     // the read left it, the shell this run returns to echoes nothing a
     // person types into it.
-    let drawn = terminal.ended();
+    let drawn = visible(&terminal.ended());
     assert!(
         terminal.line_discipline_is_back(),
         "the abandoned prompt left the terminal with its echo and line editing \
@@ -591,16 +841,21 @@ fn a_typed_ctrl_c_stops_the_run_the_prompts_raw_mode_hid_it_from() {
          required: true\n",
     );
     terminal.raw();
-    terminal.wait_for("1/1  What changed?", "the question was never asked");
+    wait_for_visible(
+        &terminal,
+        "1/1  What changed?",
+        "the question was never asked",
+    );
     // Nothing but the prompt itself can put this byte back on the run's
     // one cancellation path now.
     terminal.keys("\x03");
-    terminal.wait_for(
+    wait_for_visible(
+        &terminal,
         "interrupt received",
         "a typed Ctrl-C was swallowed by the prompt instead of stopping the run",
     );
 
-    let drawn = terminal.ended();
+    let drawn = visible(&terminal.ended());
     assert!(
         !terminal.ran_to_the_end(),
         "a run stopped by a person is not a success:\n{drawn}"
@@ -625,12 +880,20 @@ fn init_asks_through_the_console_and_honours_escape() {
     let home = root.path().join("state");
 
     let mut terminal = yunta_on_terminal!(&repo, &home, &["init", "-i"]);
-    terminal.wait_for("project name", "init never asked for a project name");
+    wait_for_visible(
+        &terminal,
+        "project name",
+        "init never asked for a project name",
+    );
     terminal.keys("orchard\r");
-    terminal.wait_for("base branch", "init never asked for a base branch");
+    wait_for_visible(
+        &terminal,
+        "base branch",
+        "init never asked for a base branch",
+    );
     terminal.keys("\x1b");
 
-    let drawn = terminal.ended();
+    let drawn = visible(&terminal.ended());
     assert!(terminal.ran_to_the_end(), "{drawn}");
     assert!(
         drawn.contains("esc keeps the detected default"),

@@ -18,7 +18,7 @@ use super::field::ask_line;
 use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, ANSWER};
 use crate::commands::status::decision::run_tree_line;
-use crate::render::{evidence, option_headline, option_tradeoff, INDENT};
+use crate::render::{evidence, option_headline, option_tradeoff, ColorRole, INDENT};
 
 /// Free text is offered on every decision, whatever was on the menu:
 /// the menu is there to make the common answer quick, never to be the
@@ -95,7 +95,7 @@ fn present(
     tree: Option<&Path>,
 ) -> std::io::Result<()> {
     console.say("")?;
-    console.say("a decision is needed")?;
+    console.say(&console.paint(ColorRole::Info, "a decision is needed"))?;
     console.block(escalation.summary(), INDENT)?;
     for document in shown {
         console.say("")?;

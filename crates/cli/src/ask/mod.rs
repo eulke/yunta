@@ -26,6 +26,7 @@ use yunta_core::process::signal::{signal_process, Signal};
 use yunta_core::{Pid, Responder};
 
 use crate::error::warn;
+use crate::render::{ColorPolicy, ColorRole};
 use crate::surface::Diagnostics;
 
 mod decision;
@@ -156,6 +157,8 @@ pub(crate) struct Console {
     /// told.
     escape: Escape,
     term: Term,
+    /// The policy for text drawn on the terminal this console owns.
+    color: ColorPolicy,
     /// The line discipline the terminal was handed over in — what every
     /// key read turns off for as long as it reads, and what
     /// [`Console::restore`] means by putting it back. `None` where the
@@ -206,8 +209,12 @@ impl Console {
                 .await;
             return None;
         }
+        let no_color =
+            std::env::var_os("NO_COLOR").map(|value| value.to_string_lossy().into_owned());
+        let terminal = term.is_term() && std::env::var("TERM").ok().as_deref() != Some("dumb");
         let console = Self {
             term,
+            color: ColorPolicy::for_stream(terminal, no_color.as_deref()),
             escape,
             mode: handed_mode(diagnostics).await,
             hidden: Arc::new(AtomicBool::new(false)),
@@ -235,6 +242,17 @@ impl Console {
     /// The terminal the prompt libraries draw their own blocks on.
     pub(crate) fn term(&self) -> &Term {
         &self.term
+    }
+
+    /// Gives an interactive label its semantic color when this terminal
+    /// allows color, leaving the text itself intact either way.
+    pub(crate) fn paint(&self, role: ColorRole, text: &str) -> String {
+        self.color.paint(role, text)
+    }
+
+    /// The policy used to build a complete prompt line.
+    pub(crate) fn color_policy(&self) -> ColorPolicy {
+        self.color
     }
 
     /// The next keystroke.
@@ -390,6 +408,7 @@ mod tests {
     fn console() -> Console {
         Console {
             term: Term::stderr(),
+            color: ColorPolicy::for_stream(false, None),
             escape: Escape::Parks,
             mode: None,
             hidden: Arc::new(AtomicBool::new(false)),
