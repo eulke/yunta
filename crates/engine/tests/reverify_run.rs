@@ -1,0 +1,93 @@
+//! A run whose tree changes after an invariant verified it runs that
+//! invariant again before it goes on — and stops there when the changed
+//! tree no longer passes.
+
+use yunta_core::events::{EventPayload, GateEvent, NodeEvent};
+use yunta_engine::{RunReport, RunTerminal};
+use yunta_testkit::Bench;
+
+/// How many attempts of `node` the run started.
+fn attempts(bench: &Bench, node: &str) -> usize {
+    bench
+        .events()
+        .iter()
+        .filter(|event| event.node_id.as_ref().is_some_and(|id| id.as_str() == node))
+        .filter(|event| {
+            matches!(
+                event.payload(),
+                Some(EventPayload::Node(NodeEvent::Started(_)))
+            )
+        })
+        .count()
+}
+
+/// A check of the tree, then a node after it running `after`, then a
+/// gate a person would be asked.
+fn checked_then(after: &str) -> String {
+    format!(
+        r#"
+name: checked
+nodes:
+  - id: check
+    kind: bash
+    invariant: true
+    run: "test ! -f broken.txt"
+  - id: after
+    kind: bash
+    depends_on: [check]
+    run: "{after}"
+  - id: ship
+    kind: gate
+    assignee: lead
+    message: "Ship?"
+    depends_on: [after]
+"#
+    )
+}
+
+#[tokio::test]
+async fn an_invariant_reverifies_the_tree_a_later_node_changed_before_the_gate() {
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run(&checked_then("echo more > more.txt"), "sessions: []\n")
+        .await;
+
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "parked at the gate, with nobody to ask: {terminal:?}"
+    );
+    assert_eq!(
+        attempts(&bench, "check"),
+        2,
+        "once, and once for the new tree"
+    );
+}
+
+#[tokio::test]
+async fn an_invariant_that_fails_on_the_changed_tree_stops_the_run_before_the_gate() {
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run(&checked_then("touch broken.txt"), "sessions: []\n")
+        .await;
+
+    let RunTerminal::Paused { reason } = terminal else {
+        panic!("the run stops on the check: {terminal:?}");
+    };
+    assert!(reason.starts_with("node `check` failed"), "{reason}");
+    assert!(
+        !bench.events().iter().any(|event| matches!(
+            event.payload(),
+            Some(EventPayload::Gates(GateEvent::Waiting(_)))
+                if event.node_id.as_ref().is_some_and(|id| id.as_str() == "ship")
+        )),
+        "nobody is asked to ship a tree that fails its check"
+    );
+}
+
+#[tokio::test]
+async fn a_node_that_changes_nothing_leaves_every_invariant_standing() {
+    let bench = Bench::new();
+    bench.run(&checked_then("true"), "sessions: []\n").await;
+
+    assert_eq!(attempts(&bench, "check"), 1);
+}

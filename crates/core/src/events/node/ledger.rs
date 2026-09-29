@@ -125,6 +125,12 @@ pub struct NodeRecord {
     pub state: Option<NodeState>,
     /// Where and when the open attempt started; `None` once it closed.
     pub open_since: Option<(Seq, DateTime<Utc>)>,
+    /// Where the latest attempt started; unlike `open_since`, kept once
+    /// the attempt closes.
+    pub last_started: Option<Seq>,
+    /// The run's tree as the node's latest finish left it; `None` when
+    /// it never finished, or its finish named no tree.
+    pub left_tree: Option<TreeId>,
     /// The tree the open attempt started from — what its diff is judged
     /// against. `None` for an attempt that recorded none, which is what
     /// a log written before the audit had a starting point carries, and
@@ -235,6 +241,23 @@ impl NodeLedger {
         self.per_node.get(node).and_then(|r| r.from_tree.as_ref())
     }
 
+    /// The newest tree the log records the run at, and where: every
+    /// node's latest start, and the latest finish of each node
+    /// `counts_finish` lets through. `None` when no event named a tree.
+    pub fn latest_tree(&self, counts_finish: impl Fn(&NodeId) -> bool) -> Option<(Seq, &TreeId)> {
+        self.per_node
+            .iter()
+            .flat_map(|(id, record)| {
+                let started = record.last_started.zip(record.from_tree.as_ref());
+                let finished = record
+                    .last_finished
+                    .zip(record.left_tree.as_ref())
+                    .filter(|_| counts_finish(id));
+                started.into_iter().chain(finished)
+            })
+            .max_by_key(|(seq, _)| *seq)
+    }
+
     /// `node`'s derived state; `None` for a node with none yet.
     pub fn state<Q>(&self, node: &Q) -> Option<&NodeState>
     where
@@ -338,6 +361,7 @@ impl NodeLedger {
                 record.attempts += 1;
                 record.state = Some(NodeState::Running { attempt: p.attempt });
                 record.open_since = Some((meta.seq, meta.at));
+                record.last_started = Some(meta.seq);
                 record.tokens_in_flight = TokenUsage::default();
                 // A fresh attempt owes nothing for an earlier round's
                 // answer: whatever it produces closes it.
@@ -354,6 +378,7 @@ impl NodeLedger {
                 record.open_since = None;
                 record.last_terminal = Some(meta.seq);
                 record.last_finished = Some(meta.seq);
+                record.left_tree = p.tree.clone();
                 record.sessions.clear();
                 record.calls.clear();
                 record.state = Some(NodeState::Finished {

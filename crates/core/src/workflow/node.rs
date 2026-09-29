@@ -113,6 +113,20 @@ pub struct Node {
 }
 
 impl Node {
+    /// Whether this node's pass is a verdict on the run's tree: an
+    /// `invariant` that runs a command there — a `bash` node, or a check
+    /// that judges the tree. Its pass holds for the tree it left, and a
+    /// later change to that tree asks for it again. A loop, a session or
+    /// a check that reads the log gives no such verdict.
+    pub fn verifies_the_tree(&self) -> bool {
+        self.invariant
+            && match &self.kind {
+                NodeKind::Bash { .. } => true,
+                NodeKind::Check(builtin) => builtin.judges_the_tree(),
+                _ => false,
+            }
+    }
+
     /// Whether this node hands a `questions` document over and waits on
     /// its answers.
     ///

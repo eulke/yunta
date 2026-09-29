@@ -8,12 +8,14 @@
 //! run` and `yunta resume` the same code path: both just keep asking
 //! "what's next" until the answer is terminal.
 //!
-//! Six questions, asked in order, each its own function: is a gate
+//! Seven questions, asked in order, each its own function: is a gate
 //! mid-flight ([`gate_step`]), is a node waiting on a person
 //! ([`waiting_step`]), did an answer leave a node owing its terminal
 //! ([`answered_step`]), did a crash leave nodes running ([`orphan_step`]),
-//! is there a failure to resolve ([`failure_step`]), and what is ready
-//! now ([`ready_batch`]). The first that answers decides.
+//! is there a failure to resolve ([`failure_step`]), does an invariant's
+//! pass no longer speak for the run's tree ([`reverify::reverify_step`]),
+//! and what is ready now ([`ready_batch`]). The first that answers
+//! decides.
 //!
 //! Node states are covered in full: `waiting` is derived (a
 //! published gate, or unanswered questions — sections 0/0b below) and
@@ -36,6 +38,8 @@ use yunta_core::events::{
 use yunta_core::{
     DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, ScopeExpansionMode, Workflow,
 };
+
+mod reverify;
 
 use crate::modes::dependencies_in_mode;
 use crate::replay::{NodeState, RunState};
@@ -309,7 +313,7 @@ pub(crate) fn person_may_grant_scope(config: &yunta_core::ConfigLayer) -> bool {
         .is_none_or(|ceiling| ceiling.max_mode != ScopeExpansionMode::Deny)
 }
 
-/// Everything the six questions read, resolved once so none of them
+/// Everything the seven questions read, resolved once so none of them
 /// re-derives it: the nodes this mode includes, the dependencies that
 /// implies, and which of them exist only as a re-route's destination.
 struct Board<'a> {
@@ -431,6 +435,7 @@ pub fn decide(workflow: &Workflow, state: &RunState, policy: &Policy) -> Decisio
         .or_else(|| answered_step(&board))
         .or_else(|| orphan_step(&board))
         .or_else(|| failure_step(&board))
+        .or_else(|| reverify::reverify_step(&board))
         .unwrap_or_else(|| ready_batch(&board))
 }
 

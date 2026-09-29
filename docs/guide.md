@@ -269,6 +269,13 @@ where that run left it rather than repeating what is already in the tree. A node
 must appear in every declared mode regardless of name or count — a mode narrows how
 much deliberation happens, never how much verification does.
 
+An invariant that runs a command on the tree — a `bash` node, or a `baseline_compare`
+or `coverage_gate` check — verifies the tree it left, not the run forever. When a
+later node changes the tree (a `fix-findings` after the checks, a corrective node, a
+person between two attempts), the run runs that invariant again before it starts
+anything else, asks a gate or finishes. A workflow does not need to repeat `lint`
+and `tests` after every node that edits code; it declares them once, as invariants.
+
 The run freezes that declaration order in its manifest. For a new run with
 `quick`, `standard`, then `full`, a promotion from `standard` can select `full`.
 Older manifests remain readable; if an older writer saved their modes in a
