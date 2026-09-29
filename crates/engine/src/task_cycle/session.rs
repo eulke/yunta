@@ -273,6 +273,9 @@ pub(crate) async fn dispatch_session(
     // refuses this one — opens fresh on what the caller gave for that, and
     // the log says so; with nothing given, the caller already verified
     // the capability and not resuming is its failure to report.
+    // What the adapter staged for this session is taken back once it
+    // ends, which needs the request the opening consumes.
+    let staging = request.clone();
     let (mut session, continues) = match opening.resume {
         None => (adapter.spawn(request).await?, None),
         Some(resume) => {
@@ -393,6 +396,7 @@ pub(crate) async fn dispatch_session(
         tokio::time::sleep(INTERRUPT_GRACE_PERIOD).await;
         let _ = session.kill().await;
     }
+    adapter.unstage(&staging)?;
 
     if cancelled {
         return Ok(Dispatched {

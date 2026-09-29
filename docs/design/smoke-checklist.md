@@ -93,7 +93,7 @@ autenticada.
    el CLI lo descubre — pedirle al agente que lo invoque), que el
    scope-check NO reporta `.claude/skills` como trabajo del agente, y
    que un segundo intento del nodo re-staged sin error (el symlink se
-   reemplaza).
+   reemplaza), y que al terminar la sesión el symlink ya no está.
 2. **`agent:` a nivel nodo**: un nodo con `agent: <nombre>`
    de un agente definido en el repo → la sesión corre con `--agent
    <nombre>` y responde con la persona correcta; un nombre inexistente

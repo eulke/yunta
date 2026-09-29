@@ -511,6 +511,43 @@ async fn capability_skills_are_staged_into_the_clis_discovery_directory() {
     assert_eq!(std::fs::read_link(&staged).unwrap(), skill);
 }
 
+/// What the adapter staged is its own mechanics, never the agent's work,
+/// so it leaves the session's checkout once the session ends — and with
+/// it the discovery directories it created, when nothing else is there.
+#[tokio::test]
+async fn a_skill_mount_is_gone_once_its_session_ends() {
+    let dir = tempfile::tempdir().unwrap();
+    let skill = dir.path().join("skills-src/grill");
+    tokio::fs::create_dir_all(&skill).await.unwrap();
+    tokio::fs::write(skill.join("SKILL.md"), "# grill\n")
+        .await
+        .unwrap();
+    let cwd = dir.path().join("worktree");
+    tokio::fs::create_dir_all(&cwd).await.unwrap();
+    write_lines(&cwd, ".claude-stub-lines.jsonl", &[]);
+
+    let mut req = request(cwd.clone());
+    req.skills = vec![skill.clone()];
+    let session = adapter().spawn(req.clone()).await.unwrap();
+    let _ = drain(session).await;
+    adapter().unstage(&req).unwrap();
+
+    assert!(
+        tokio::fs::symlink_metadata(cwd.join(".claude/skills/grill"))
+            .await
+            .is_err(),
+        "the link is gone"
+    );
+    assert!(
+        !cwd.join(".claude").exists(),
+        "and so are the empty directories"
+    );
+    assert!(
+        skill.join("SKILL.md").exists(),
+        "the skill itself is untouched"
+    );
+}
+
 #[tokio::test]
 async fn budget_max_turns_reaches_the_cli_as_a_flag() {
     let dir = tempfile::tempdir().unwrap();

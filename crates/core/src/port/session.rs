@@ -303,6 +303,14 @@ pub trait Adapter: Send + Sync {
         Vec::new()
     }
 
+    /// Takes back what a session opened for `req` staged for the
+    /// adapter's own mechanics, once that session has ended: it was never
+    /// the agent's work, so it must not stay in the tree the run keeps.
+    /// Default: nothing staged, nothing to take back.
+    fn unstage(&self, _req: &SessionRequest) -> Result<()> {
+        Ok(())
+    }
+
     /// How this adapter translates between [`Fence::judge`] and its
     /// CLI's hook. `Some` exactly when `capabilities().fence` is
     /// [`crate::FenceLevel::ToolCalls`]: a sandbox needs no codec, and nothing

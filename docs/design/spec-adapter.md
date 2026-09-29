@@ -142,6 +142,11 @@ pub trait Adapter: Send + Sync {
     /// esas rutas y ninguna otra. Default: ninguna.
     fn staged_paths(&self, req: &SessionRequest) -> Vec<PathBuf>;
 
+    /// Retira lo que una sesión abierta para `req` montó por su propia
+    /// mecánica, una vez terminada: nunca fue trabajo del agente, y no
+    /// debe quedar en el árbol que el run conserva. Default: nada.
+    fn unstage(&self, req: &SessionRequest) -> Result<()>;
+
     /// Abre una sesión nueva. Contrato de eventos en §4.
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>>;
 

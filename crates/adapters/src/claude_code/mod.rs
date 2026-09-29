@@ -257,6 +257,10 @@ impl Adapter for ClaudeCodeAdapter {
             .collect()
     }
 
+    fn unstage(&self, req: &SessionRequest) -> Result<()> {
+        unstage_skills(req)
+    }
+
     fn fence_codec(&self) -> Option<&dyn yunta_core::port::FenceCodec> {
         Some(&fence::ClaudeFenceCodec)
     }
@@ -323,6 +327,32 @@ fn skill_mounts(req: &SessionRequest) -> Vec<(PathBuf, &Path)> {
             Some((Path::new(SKILLS_MOUNT).join(name), skill.as_path()))
         })
         .collect()
+}
+
+/// Takes back every link [`stage_skills`] made — only links, so nothing
+/// the agent wrote there is touched — and the discovery directories
+/// they left empty.
+fn unstage_skills(req: &SessionRequest) -> Result<()> {
+    for (mount, _) in skill_mounts(req) {
+        let dest = req.cwd.join(mount);
+        let is_link = std::fs::symlink_metadata(&dest).is_ok_and(|m| m.file_type().is_symlink());
+        if is_link {
+            std::fs::remove_file(&dest).map_err(|source| AdapterError::AdapterIo {
+                adapter: ID.clone(),
+                action: format!("take back the skill at {}", dest.display()),
+                source,
+            })?;
+        }
+    }
+    // Removed only when empty: a directory someone else put files in is
+    // theirs, and so is everything above it.
+    let skills_root = req.cwd.join(SKILLS_MOUNT);
+    for dir in skills_root.ancestors().take(2) {
+        if std::fs::remove_dir(dir).is_err() {
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// Mounting is staging a symlink per resolved skill directory under
