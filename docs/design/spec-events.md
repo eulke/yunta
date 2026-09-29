@@ -166,7 +166,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 trabajo tenía cuando el intento arrancó, capturado con un índice privado para no
 disputarle `.git/index` a nadie. Es lo que hace que una auditoría de `scope:` diga
 qué cambió *este* nodo y no qué hay de distinto desde que nació el run: lo que un
-nodo anterior dejó sin commitear es el estado del que este parte, no algo de lo
+nodo anterior dejó en el árbol es el estado del que este parte, no algo de lo
 que responda. Que sea un hecho del log y no memoria del proceso es lo que lo
 sostiene a través de un replay, y que sea un árbol —y no una lista de paths— es lo
 que impide el reverso: un archivo que ya estaba sucio y que este intento *también*
@@ -296,6 +296,7 @@ registra.
 | `outcome` [inferido] | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter | solo en `node_finished` | el outcome del agente es telemetría, esto es el veredicto |
 | `outcome` / `artifacts` / `died` / `outside_scope` / `requested_scope` / `unset` / `unchanged` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló | solo en `node_failed` | por qué falló, como dato: uno de los siete, plano sobre el payload; ver abajo |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage` |
+| `commit` | sha de commit git | no; en `node_finished` y `node_failed`, y ausente cuando el cierre no commiteó nada | el commit que el cierre hizo de lo que el nodo dejó en el árbol del run: ausente si nada cambió, si el nodo aterrizó desde un checkout propio, si otro nodo seguía trabajando en el mismo árbol o si el run trabaja sin árbol propio (D201) |
 | `tree` | id de árbol git | no; en `node_finished` y `node_failed`, y ausente en un log escrito antes del campo | el árbol del run tal como el nodo lo dejó, después de lo que aterrizó ahí —un nodo con checkout propio nombra el árbol del run en que aterrizó, no su checkout—; un gate nombra el que vio quien decidió. Es contra lo que se mide si el pase de un invariante sigue hablando del árbol del run (Contrato §11.3) |
 | `retryable` | `bool` | solo en `node_failed` | guía la política de reintento; lo fija quien gobierna el presupuesto, de modo que un intento terminal nunca se registra como reintentable |
 

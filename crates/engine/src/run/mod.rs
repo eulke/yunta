@@ -46,6 +46,7 @@ mod questions_exec;
 pub(crate) mod runner_resolve;
 pub mod schedule;
 pub(crate) mod session_plan;
+mod shared_tree;
 mod step;
 mod steps;
 mod wake;

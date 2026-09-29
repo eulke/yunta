@@ -1,12 +1,15 @@
 ---
 number: D184
 title: "Declarar `scope:` es pedir un árbol propio"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D201]
 ---
 
 # D184 — Declarar `scope:` es pedir un árbol propio
+
+*(Revisada por D201: un nodo que no declara nada sigue trabajando en el árbol del
+run, pero lo que deja ahí se commitea en la rama del run cuando cierra.)*
 
 ## Contexto
 

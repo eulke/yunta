@@ -2432,6 +2432,17 @@
       "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], one carrying `unchanged:` as\n[`Failure::Unchanged`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "type": "object",
       "properties": {
+        "commit": {
+          "description": "The commit the failed attempt's close made of what it left in the\nrun's own tree — its partial work, so the next attempt or a\ncorrective node starts from it and nothing is blamed on another.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommitSha"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "retryable": {
           "description": "Whether this node will be attempted again. Set by whoever owns\nthe budget, so a failure that nothing will retry is never\nrecorded as retryable.",
           "type": "boolean"
@@ -2551,6 +2562,17 @@
     "NodeFinishedPayload": {
       "type": "object",
       "properties": {
+        "commit": {
+          "description": "The commit the node's close made of what it left in the run's own\ntree. Absent when it made none: nothing changed, the node landed\nits work from a checkout of its own, another node sharing the tree\nwas still working, or the run works without a tree of its own.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommitSha"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "outcome": {
           "type": "string"
         },

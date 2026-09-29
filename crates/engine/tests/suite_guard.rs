@@ -250,3 +250,34 @@ async fn a_task_whose_base_already_fails_the_suite_is_blocked_before_any_session
         "no session opened"
     );
 }
+
+/// The same, when what broke the suite is a node with no scope of its
+/// own: its work is on the run's branch once it closes, so the task's
+/// checkout — opened from that branch — sees it too.
+#[tokio::test]
+async fn a_task_whose_base_an_unscoped_node_broke_is_blocked_before_any_session() {
+    let before = "
+  - id: break
+    kind: bash
+    run: \"touch broken.txt\"";
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_config(&workflow("[made.txt]", before), &session(false), &config())
+        .await;
+    let RunTerminal::Paused { reason } = terminal else {
+        panic!("the loop stops on the red base: {terminal:?}");
+    };
+    assert!(
+        reason.contains(&format!(
+            "guard `{SUITE}` is already red before any work started"
+        )),
+        "{reason}"
+    );
+    assert!(
+        !bench.events().iter().any(|event| matches!(
+            event.payload(),
+            Some(EventPayload::Session(SessionEvent::Opened(_)))
+        )),
+        "no session opened"
+    );
+}

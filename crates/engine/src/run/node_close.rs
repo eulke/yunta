@@ -241,16 +241,34 @@ pub(super) async fn finish_node(
     outcome: impl Into<String>,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
-    let tree = left_tree(ctx, node).await?;
+    let (commit, tree) = Box::pin(closed(ctx, node, super::shared_tree::Closing::Finished)).await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::leaving(
-            outcome, tokens, tree,
-        ))),
+        EventPayload::Node(NodeEvent::Finished(
+            NodeFinishedPayload::leaving(outcome, tokens, tree).committed(commit),
+        )),
     )
     .await?;
     write_progress(ctx).await?;
     Ok(NodeEnd::Finished)
+}
+
+/// What a node's close leaves on the run: the commit it made of its work
+/// in the run's own tree, when it made one, and the tree the run stands
+/// at after it — the committed one, or the tree as it is.
+///
+/// Its callers box it: every node closes through here, a child run's
+/// included, and its git calls would otherwise ride inline in every level
+/// of a composed run's recursion.
+async fn closed(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    closing: super::shared_tree::Closing,
+) -> Result<(Option<yunta_core::CommitSha>, yunta_core::TreeId), RunError> {
+    match super::shared_tree::at_close(ctx, node, closing).await? {
+        Some((commit, tree)) => Ok((Some(commit), tree)),
+        None => Ok((None, left_tree(ctx, node).await?)),
+    }
 }
 
 /// The run's tree as `node` leaves it, after whatever the node landed
@@ -291,10 +309,13 @@ async fn land_unit(
         supervision,
     )
     .await?;
-    let _landing = ctx.landing.lock().await;
+    let landing = ctx.landing.lock().await;
     match crate::worktree::rebase_onto(mine.unit, mine.into, supervision).await? {
         crate::worktree::Rebase::Onto(_) => {}
         crate::worktree::Rebase::Conflicts(paths) => {
+            // Released before the node fails: a close takes the same lock
+            // to decide what it commits.
+            drop(landing);
             return fail_with_tokens(
                 ctx,
                 node,
@@ -372,11 +393,13 @@ pub(super) async fn fail_with(
     retryable: bool,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
-    let tree = left_tree(ctx, node).await?;
+    let (commit, tree) = Box::pin(closed(ctx, node, super::shared_tree::Closing::Failed)).await?;
     ctx.emit(
         Some(&node.id),
         EventPayload::Node(NodeEvent::Failed(
-            NodeFailedPayload::new(failure, retryable, tokens).leaving(tree),
+            NodeFailedPayload::new(failure, retryable, tokens)
+                .leaving(tree)
+                .committed(commit),
         )),
     )
     .await?;

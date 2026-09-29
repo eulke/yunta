@@ -81,6 +81,16 @@ its way past. That diff is the *only* thing enforcing scope: no adapter today bl
 an out-of-scope write while it happens, so an agent can write outside `scope` and the
 node fails afterward for it.
 
+A node that declares no `scope:` works in the run's own tree, and what it leaves
+there is committed on the run's branch when it closes — finished or failed — so what a
+later node pushes is what the run did, and removing the run's worktree loses nothing.
+Two such nodes running at once are committed together by whichever closes last, and a
+`parallel` group commits what its children left when it closes. What git ignores is
+never committed; anything else a node writes is, so keep build output and secrets in
+`.gitignore`. A run with `isolation: none` works in your own checkout and commits
+nothing: what its nodes write stays uncommitted for you. The engine commits without
+running your git hooks.
+
 `permissions: read-only | edit | full` is a separate, coarser ceiling, mapped onto the
 adapter's own session profile: it governs which *tools* the agent may use at all — a
 `read-only` node is handed no editing tools — not which files `scope` allows.

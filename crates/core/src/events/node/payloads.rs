@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::RunnerCandidate;
 use crate::events::session::payloads::TokenUsage;
 use crate::events::Failure;
-use crate::hash::{ContentHash, TreeId};
+use crate::hash::{CommitSha, ContentHash, TreeId};
 use crate::ids::{NodeId, RunnerName, TaskId};
 
 /// A tasks document criterion, frozen into `task_registered` — the same shape
@@ -215,6 +215,12 @@ pub struct NodeFinishedPayload {
     /// recorded, which then says nothing about the tree.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tree: Option<TreeId>,
+    /// The commit the node's close made of what it left in the run's own
+    /// tree. Absent when it made none: nothing changed, the node landed
+    /// its work from a checkout of its own, another node sharing the tree
+    /// was still working, or the run works without a tree of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<CommitSha>,
 }
 
 impl NodeFinishedPayload {
@@ -229,7 +235,13 @@ impl NodeFinishedPayload {
             outcome: outcome.into(),
             tokens_used: tokens,
             tree: None,
+            commit: None,
         }
+    }
+
+    /// The same, naming the commit its close made, when it made one.
+    pub fn committed(self, commit: Option<CommitSha>) -> Self {
+        NodeFinishedPayload { commit, ..self }
     }
 
     /// The same, naming the tree the node left the run at.
@@ -259,6 +271,11 @@ pub struct NodeFailedPayload {
     /// it was recorded, which then says nothing about the tree.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tree: Option<TreeId>,
+    /// The commit the failed attempt's close made of what it left in the
+    /// run's own tree — its partial work, so the next attempt or a
+    /// corrective node starts from it and nothing is blamed on another.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<CommitSha>,
 }
 
 impl NodeFailedPayload {
@@ -268,7 +285,13 @@ impl NodeFailedPayload {
             tokens_used,
             retryable,
             tree: None,
+            commit: None,
         }
+    }
+
+    /// The same, naming the commit its close made, when it made one.
+    pub fn committed(self, commit: Option<CommitSha>) -> Self {
+        NodeFailedPayload { commit, ..self }
     }
 
     /// The same, naming the tree the failed attempt left the run at.

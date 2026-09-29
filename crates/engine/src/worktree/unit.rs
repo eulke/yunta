@@ -85,10 +85,12 @@ pub struct UnitHome<'a> {
 /// plus whatever is lying in its working tree uncommitted.
 ///
 /// A unit branches from what it would have found, not from the last
-/// thing anybody committed — and between two nodes of a run nobody
-/// commits, so those are different trees. Nothing points at this commit
-/// but the unit's own branch: `repo`'s branch does not move, and what is
-/// uncommitted there stays uncommitted, to be landed over later.
+/// thing anybody committed: a node's close commits what it left in the
+/// run's tree, but a person may have written there since, and a run
+/// working in a person's own checkout commits nothing. Nothing points at
+/// this commit but the unit's own branch: `repo`'s branch does not move,
+/// and what is uncommitted there stays uncommitted, to be landed over
+/// later.
 pub async fn snapshot_commit(
     repo: &Path,
     index: &Path,

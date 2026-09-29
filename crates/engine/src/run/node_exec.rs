@@ -117,13 +117,13 @@ pub(super) async fn emit_started(
 ///
 /// A node that declares `scope:` is given a checkout of its own, opened
 /// at what the run's tree holds this moment and landed back onto it when
-/// its work passes its audit (D184). Asking to be audited is asking for
-/// a tree: it is the only way what a node answers for is its own, and
-/// the only way two nodes running at once are not answerable for each
-/// other. A node that declares nothing works where the run works, sees
-/// what the node before it left — including what git ignores, which no
-/// checkout of its own would carry — and lands nothing, because what it
-/// wrote is already there.
+/// its work passes its audit. Asking to be audited is asking for a tree:
+/// it is the only way what a node answers for is its own, and the only
+/// way two nodes running at once are not answerable for each other. A
+/// node that declares nothing works where the run works and sees what
+/// the node before it left — including what git ignores, which no
+/// checkout of its own would carry; what it writes there is committed
+/// on the run's branch when it closes.
 pub(super) async fn execute_node(
     ctx: &RunCtx<'_>,
     node: &Node,

@@ -190,7 +190,7 @@ lista.
 **D181 — Dos Ctrl-C: el primero detiene el trabajo, el segundo aborta lo que detenerlo todavía sostiene.** `accepted` → [`adr/D181-dos-ctrl-c-el-primero-detiene-el-segundo-aborta.md`](adr/D181-dos-ctrl-c-el-primero-detiene-el-segundo-aborta.md)
 **D182 — Una unidad de trabajo se audita contra el árbol del que partió, y ese árbol es un hecho del log.** `accepted` → [`adr/D182-una-unidad-de-trabajo-se-audita-contra-el-arbol-del-que-partio.md`](adr/D182-una-unidad-de-trabajo-se-audita-contra-el-arbol-del-que-partio.md)
 **D183 — Una sola palabra para el árbol que una unidad no aísla: `none` queda, `inherit` se retira.** `accepted` → [`adr/D183-una-sola-palabra-para-el-arbol-que-una-unidad-no-aisla.md`](adr/D183-una-sola-palabra-para-el-arbol-que-una-unidad-no-aisla.md)
-**D184 — Declarar `scope:` es pedir un árbol propio.** `accepted` → [`adr/D184-declarar-scope-es-pedir-un-arbol-propio.md`](adr/D184-declarar-scope-es-pedir-un-arbol-propio.md)
+**D184 — Declarar `scope:` es pedir un árbol propio.** `revised` *(Revisada por D201.)* → [`adr/D184-declarar-scope-es-pedir-un-arbol-propio.md`](adr/D184-declarar-scope-es-pedir-un-arbol-propio.md)
 **D185 — Cerrar un process group exige una observación estable de sus miembros.** `accepted` → [`adr/D185-cierre-estable-de-process-groups.md`](adr/D185-cierre-estable-de-process-groups.md)
 **D186 — A `files:` entry may be declared optional; its absence is recorded, never silent.** `accepted` → [`adr/D186-a-files-entry-may-be-declared-optional.md`](adr/D186-a-files-entry-may-be-declared-optional.md)
 **D187 — A task session reads its task and checks its work through the engine's tools; each check is on the log when it runs.** `accepted` → [`adr/D187-a-task-session-reads-its-task-through-the-engine.md`](adr/D187-a-task-session-reads-its-task-through-the-engine.md)
@@ -207,3 +207,4 @@ lista.
 **D198 — An invariant's pass holds for the tree it left.** `revised` *(Revisada por D200.)* → [`adr/D198-an-invariants-pass-holds-for-the-tree-it-left.md`](adr/D198-an-invariants-pass-holds-for-the-tree-it-left.md)
 **D199 — A run records the time its host was suspended, and its durations leave it out.** `accepted` → [`adr/D199-a-run-records-the-time-its-host-was-suspended.md`](adr/D199-a-run-records-the-time-its-host-was-suspended.md)
 **D200 — An invariant's pass does not hold for a tree that moved while it ran.** `accepted` → [`adr/D200-an-invariants-pass-does-not-hold-for-a-tree-that-moved-while-it-ran.md`](adr/D200-an-invariants-pass-does-not-hold-for-a-tree-that-moved-while-it-ran.md)
+**D201 — Every node's work is committed when it closes.** `accepted` → [`adr/D201-every-nodes-work-is-committed-when-it-closes.md`](adr/D201-every-nodes-work-is-committed-when-it-closes.md)

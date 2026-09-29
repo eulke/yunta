@@ -168,8 +168,8 @@ pub use view::{
     NodeStanding, Reroute, RunFrame, RunPhase, RunningTask, WaitingOn,
 };
 pub use worktree::{
-    capture_tree, cleanup_worktree, commit_work, hand_over_worktree, head_commit, head_tree, land,
-    open_unit, prepare_worktree, rebase_onto, release_worktree, run_branch, snapshot_commit,
-    unit_branch, Rebase, RunWorktree, Unit, UnitHome, UnitId, WorktreeCleanup, WorktreeError,
-    WorktreeIntegrity, WorktreePrepared,
+    capture_tree, cleanup_worktree, commit_tree, commit_work, hand_over_worktree, head_commit,
+    head_tree, land, open_unit, prepare_worktree, rebase_onto, release_worktree, run_branch,
+    snapshot_commit, unit_branch, Rebase, RunWorktree, Unit, UnitHome, UnitId, WorktreeCleanup,
+    WorktreeError, WorktreeIntegrity, WorktreePrepared,
 };

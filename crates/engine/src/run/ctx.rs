@@ -98,8 +98,8 @@ pub(crate) struct RunCtx<'a> {
     pub observer: Option<Arc<dyn RunObserver>>,
     /// The checkout this node was given of its own, and the tree its
     /// work lands in once that work passes its audit. `None` for a node
-    /// working in the run's own tree, which lands nothing because what
-    /// it wrote is already there.
+    /// working in the run's own tree, whose work is committed there when
+    /// it closes.
     pub(crate) unit: Option<NodeUnit<'a>>,
     /// Held while one unit replays its work onto the run's tree and
     /// moves that tree onto it.
