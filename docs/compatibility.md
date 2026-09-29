@@ -219,7 +219,8 @@ The rules a document can break, which is that closed set: `duplicate-id`,
 `criterion-cannot-run`, `criterion-already-passes`, `guard-already-red`, `no-summary`,
 `no-description`, `unexplained-criterion`, `empty-text`,
 `empty-detail`, `unknown-id`, `withdrawn-id`, `empty-reason`, `missing-values`,
-`missing-answer`, `mismatched-answer` and `incoherent-mode`. Together with
+`missing-answer`, `mismatched-answer`, `incoherent-mode` and
+`invariant-in-parallel`. Together with
 `parse` and the six an artifact fails under, they are every stable code this
 system reports: a receipt counts by one, `status --json` publishes one, and a log
 is grepped by one.

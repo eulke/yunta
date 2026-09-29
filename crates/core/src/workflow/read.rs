@@ -49,6 +49,11 @@ pub const RULES: &[crate::diagnostic::Rule] = &[
         demand: "a declared mode keeps every `invariant` node, and keeps whatever the nodes it \
                  keeps reroute to or read from",
     },
+    crate::diagnostic::Rule {
+        code: RuleCode::InvariantInParallel,
+        demand: "`invariant: true` is declared on a top-level node, never on a child of a \
+                 `parallel` group",
+    },
 ];
 
 /// The workflow `bytes` declare, or every problem the file has.
@@ -112,8 +117,34 @@ fn check(workflow: &Workflow) -> Vec<Diagnostic> {
     let mut broken = declared.broken;
     broken.extend(references_reach(workflow, &declared.ids));
     broken.extend(parallel_scopes(&workflow.nodes));
+    broken.extend(invariants_on_top(workflow));
     broken.extend(modes_still_run(workflow));
     broken
+}
+
+/// An `invariant` is a verdict the run keeps for its whole graph: every
+/// mode includes it, and it runs again, alone, when the tree it verified
+/// moves. A child of a `parallel` group only ever runs with its group,
+/// and modes name the group, so neither holds for it — a declaration the
+/// run could not honor is refused rather than ignored.
+fn invariants_on_top(workflow: &Workflow) -> Vec<Diagnostic> {
+    workflow
+        .iter_nodes_with_group()
+        .enumerate()
+        .filter_map(|(index, (node, group))| {
+            let group = group.filter(|_| node.invariant)?;
+            Some(about(
+                index,
+                &node.id,
+                RuleCode::InvariantInParallel,
+                format!(
+                    "`{}` is a child of the `parallel` group `{}` and declares `invariant: \
+                     true`, which only a top-level node can honor; move it out of the group",
+                    node.id, group.id
+                ),
+            ))
+        })
+        .collect()
 }
 
 struct Declared<'a> {

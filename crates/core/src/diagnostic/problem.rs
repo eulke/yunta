@@ -116,6 +116,9 @@ rule_codes! {
     /// A `mode` leaves out a node the workflow cannot run without, or a
     /// node a node it includes reroutes to.
     IncoherentMode => "incoherent-mode",
+    /// `invariant: true` on a child of a `parallel` group, where nothing
+    /// honors it: modes and re-verification read the top level.
+    InvariantInParallel => "invariant-in-parallel",
 }
 
 impl std::fmt::Display for RuleCode {

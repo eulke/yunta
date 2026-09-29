@@ -1252,6 +1252,37 @@ nodes:
         );
     }
 
+    /// Modes name a group, not its children, and a child only ever runs
+    /// with its group: an `invariant` there would be a promise nothing
+    /// keeps, so the file is refused and told where the node belongs.
+    #[test]
+    fn an_invariant_inside_a_parallel_group_is_refused_naming_its_group() {
+        let grouped = "\
+name: ship
+nodes:
+  - id: checks
+    kind: parallel
+    nodes:
+      - { id: lint, kind: bash, run: \"true\", invariant: true }
+      - { id: docs, kind: bash, run: \"true\" }
+";
+        let report = read(grouped, Path::new(PATH)).expect_err("an invariant child is refused");
+        let codes: Vec<String> = report
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code().to_string())
+            .collect();
+        assert_eq!(codes, ["invariant-in-parallel"]);
+        let text = report.to_string();
+        assert!(
+            text.contains("`lint`") && text.contains("`checks`"),
+            "names the child and its group: {text}"
+        );
+        assert!(text.contains("move it out of the group"), "{text}");
+
+        reads("name: ship\nnodes:\n  - { id: lint, kind: bash, run: \"true\", invariant: true }\n");
+    }
+
     #[test]
     fn a_mode_leaves_a_graph_that_still_runs() {
         let nodes = "\

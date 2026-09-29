@@ -275,6 +275,9 @@ later node changes the tree (a `fix-findings` after the checks, a corrective nod
 person between two attempts), the run runs that invariant again before it starts
 anything else, asks a gate or finishes. A workflow does not need to repeat `lint`
 and `tests` after every node that edits code; it declares them once, as invariants.
+An invariant is declared on a top-level node: modes name a `parallel` group rather
+than its children, and a child only ever runs with its group, so `yunta check`
+refuses `invariant: true` on a child and says to move it out.
 
 The run freezes that declaration order in its manifest. For a new run with
 `quick`, `standard`, then `full`, a promotion from `standard` can select `full`.
