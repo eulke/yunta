@@ -3,8 +3,8 @@
 //! uses for its own pure derivation.
 
 use yunta_core::events::{
-    CriteriaCheckedPayload, CriterionResult, EventPayload, Failure, GateResolvedPayload,
-    NodeFailedPayload, NodeReroutedPayload, Phase, StoredEvent,
+    CriteriaCheckedPayload, CriterionResult, CriterionType, EventPayload, Failure,
+    GateResolvedPayload, NodeFailedPayload, NodeReroutedPayload, Phase, StoredEvent,
 };
 use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
 use yunta_core::{Node, NodeKind, OnFailure, Workflow};
@@ -117,6 +117,29 @@ fn a_criterion_never_red_across_enough_samples_is_flagged() {
         findings.never_red_criteria[0].sample_count,
         VERIFICATION_MIN_SAMPLES
     );
+}
+
+/// A guard is there to stay green, before the work and after it, so a
+/// guard that was never red has done exactly its job.
+#[test]
+fn a_guard_green_before_every_task_is_never_flagged() {
+    let guarded = || {
+        Log::for_run("run-1")
+            .event(EventPayload::Node(NodeEvent::CriteriaChecked(
+                CriteriaCheckedPayload {
+                    task_id: "T001".into(),
+                    phase: Phase::Pre,
+                    results: vec![CriterionResult {
+                        r#type: Some(CriterionType::Guard),
+                        ..criterion("cargo test --workspace", 0)
+                    }],
+                },
+            )))
+            .build()
+    };
+    let history: Vec<Vec<StoredEvent>> = (0..VERIFICATION_MIN_SAMPLES).map(|_| guarded()).collect();
+    let findings = analyze(&workflow(vec![]), &history);
+    assert!(findings.never_red_criteria.is_empty(), "{findings:#?}");
 }
 
 #[test]

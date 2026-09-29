@@ -25,7 +25,7 @@
 
 use std::collections::HashMap;
 
-use yunta_core::events::{EventPayload, GateResolvedPayload, Phase, StoredEvent};
+use yunta_core::events::{CriterionType, EventPayload, GateResolvedPayload, Phase, StoredEvent};
 use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
 use yunta_core::{ModeName, NodeId, Workflow};
 
@@ -145,7 +145,14 @@ fn never_red_criteria(history: &[Vec<StoredEvent>]) -> Vec<NeverRedCriterion> {
             if p.phase != Phase::Pre {
                 continue;
             }
-            for result in &p.results {
+            // A guard is green before the work by definition — it is
+            // there to stay green — so never being red is what it is
+            // for, not a sign it checks nothing.
+            for result in p
+                .results
+                .iter()
+                .filter(|result| result.r#type != Some(CriterionType::Guard))
+            {
                 let entry = samples.entry(result.cmd.clone()).or_default();
                 entry.0 += 1;
                 if result.exit_code != 0 {

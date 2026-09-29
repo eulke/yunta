@@ -442,7 +442,7 @@ Sin datos suficientes (menos de tres runs del mismo workflow), el engine **no di
 
 El mismo criterio que el engine aplica al trabajo se aplica a la ceremonia del propio workflow: **si algo no puede fallar, no está probando nada**. Sobre el histórico, el engine detecta verificación que dejó de rendir y lo informa.
 
-La métrica núcleo es la **tasa de rojo en pre-check**, no la de fallos totales — la distinción es esencial y confundirla haría que el sistema sugiriera borrar los criterios que mejor funcionan. Un criterio que **nunca estuvo en rojo antes del trabajo** es sospechoso: no prueba que el trabajo se hizo. Un criterio que está rojo antes y verde después, siempre, está funcionando exactamente como debe.
+La métrica núcleo es la **tasa de rojo en pre-check**, no la de fallos totales — la distinción es esencial y confundirla haría que el sistema sugiriera borrar los criterios que mejor funcionan. Un criterio que **nunca estuvo en rojo antes del trabajo** es sospechoso: no prueba que el trabajo se hizo. Un criterio que está rojo antes y verde después, siempre, está funcionando exactamente como debe. Un `guard` queda fuera de esta métrica: está verde antes del trabajo por definición, y seguir verde es lo que prueba.
 
 Hallazgos y sus lecturas, cada uno acompañado del conteo que lo sostiene — sin el dato crudo, una sugerencia es una opinión:
 
