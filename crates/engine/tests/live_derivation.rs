@@ -79,10 +79,10 @@ fn started(attempt: u32) -> EventPayload {
 }
 
 fn finished(tokens_used: TokenUsage) -> EventPayload {
-    EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-        outcome: "ok".to_string(),
+    EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+        "ok",
         tokens_used,
-    }))
+    )))
 }
 
 fn failed(tokens_used: TokenUsage) -> EventPayload {

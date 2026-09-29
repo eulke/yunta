@@ -241,16 +241,26 @@ pub(super) async fn finish_node(
     outcome: impl Into<String>,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
+    let tree = left_tree(ctx, node).await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-            outcome.into(),
-            tokens,
+        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::leaving(
+            outcome, tokens, tree,
         ))),
     )
     .await?;
     write_progress(ctx).await?;
     Ok(NodeEnd::Finished)
+}
+
+/// The run's tree as `node` leaves it, after whatever the node landed
+/// there: a node with a checkout of its own names the tree it landed in,
+/// not its checkout.
+async fn left_tree(ctx: &RunCtx<'_>, node: &Node) -> Result<yunta_core::TreeId, RunError> {
+    let run_tree = ctx.unit.as_ref().map_or(ctx.worktree, |mine| mine.into);
+    let index =
+        crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
+    Ok(crate::worktree::capture_tree(run_tree, &index, ctx.root_supervision()).await?)
 }
 
 /// Lands what a node did in its own checkout onto the run's tree, and

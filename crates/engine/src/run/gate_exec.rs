@@ -22,12 +22,12 @@
 
 use yunta_core::events::{
     Escalation, EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity,
-    GateResolvedPayload, NodeFinishedPayload, NodeStartedPayload, PauseReason, TokenUsage,
+    GateResolvedPayload, NodeStartedPayload, PauseReason, TokenUsage,
 };
 use yunta_core::port::{Forge, PolledGate, PublishRequest, PublishedGate, ReviewOutcome};
 use yunta_core::{CommitSha, ExternalGate, FindingId, Node, NonEmpty, Responder};
 
-use super::node_close::{fail, write_progress};
+use super::node_close::{fail, finish_node};
 use super::node_exec::template_vars;
 use super::step::{GateRender, Step};
 use super::{RunCtx, RunError};
@@ -191,15 +191,7 @@ async fn resolve_approved(
         })),
     )
     .await?;
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-            outcome,
-            tokens_used: TokenUsage::default(),
-        })),
-    )
-    .await?;
-    write_progress(ctx).await?;
+    finish_node(ctx, node, outcome, TokenUsage::default()).await?;
     Ok(GateStep::Resolved)
 }
 
@@ -420,15 +412,13 @@ async fn degrade_to_console(
     .await?;
     emit_started(ctx, node).await?;
     if ReservedOption::of(&choice.option) == Some(ReservedOption::Approve) {
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                format!("approved from the console by {}", choice.by),
-                TokenUsage::default(),
-            ))),
+        finish_node(
+            ctx,
+            node,
+            format!("approved from the console by {}", choice.by),
+            TokenUsage::default(),
         )
         .await?;
-        write_progress(ctx).await?;
     } else {
         fail(ctx, node, "rejected from the console".to_string(), true).await?;
     }

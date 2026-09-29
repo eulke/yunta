@@ -18,10 +18,10 @@ fn started() -> EventPayload {
 }
 
 fn finished(outcome: &str) -> EventPayload {
-    EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload {
-        outcome: outcome.to_string(),
-        tokens_used: TokenUsage::default(),
-    }))
+    EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+        outcome,
+        TokenUsage::default(),
+    )))
 }
 
 #[test]

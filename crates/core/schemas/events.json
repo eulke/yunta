@@ -2518,6 +2518,17 @@
         },
         "tokens_used": {
           "$ref": "#/$defs/TokenUsage"
+        },
+        "tree": {
+          "description": "The run's tree as the node left it, after whatever it landed —\nwhat a check that verified the tree is measured against when\nsomething later changes it. Absent in a log written before it was\nrecorded, which then says nothing about the tree.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TreeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

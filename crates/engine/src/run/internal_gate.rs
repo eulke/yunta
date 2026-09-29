@@ -6,12 +6,12 @@ use indexmap::IndexMap;
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::{
     ArtifactId, Escalation, EscalationError, EventPayload, Fact, GateEvent, GateResolvedPayload,
-    HumanChoice, NodeEvent, NodeFinishedPayload, PauseReason, Shown, TokenUsage,
+    HumanChoice, NodeEvent, PauseReason, Shown, TokenUsage,
 };
 use yunta_core::{ArtifactContextRef, Node, NodeId, NodeKind, NonEmpty, OptionId, Workflow};
 
 use super::gate_exec::{emit_started, GateStep};
-use super::node_close::{fail, write_progress};
+use super::node_close::{fail, finish_node};
 use super::{RunCtx, RunError};
 use crate::reserved::{offers, ReservedOption};
 
@@ -236,15 +236,8 @@ async fn land(
     let node = gate.node;
     let chosen = choice.option;
     let Some(target) = gate.on.get(&chosen) else {
-        ctx.emit(
-            Some(&node.id),
-            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
-                chosen.to_string(),
-                TokenUsage::default(),
-            ))),
-        )
-        .await?;
-        return write_progress(ctx).await;
+        finish_node(ctx, node, chosen.to_string(), TokenUsage::default()).await?;
+        return Ok(());
     };
     // Same shape as any other reroute: the gate fails (retryable — a
     // person chose a correction lap, not a dead end) and control

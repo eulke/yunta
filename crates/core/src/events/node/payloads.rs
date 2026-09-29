@@ -209,6 +209,12 @@ pub struct ScopeCheckedPayload {
 pub struct NodeFinishedPayload {
     pub outcome: String,
     pub tokens_used: TokenUsage,
+    /// The run's tree as the node left it, after whatever it landed —
+    /// what a check that verified the tree is measured against when
+    /// something later changes it. Absent in a log written before it was
+    /// recorded, which then says nothing about the tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<TreeId>,
 }
 
 impl NodeFinishedPayload {
@@ -222,6 +228,15 @@ impl NodeFinishedPayload {
         NodeFinishedPayload {
             outcome: outcome.into(),
             tokens_used: tokens,
+            tree: None,
+        }
+    }
+
+    /// The same, naming the tree the node left the run at.
+    pub fn leaving(outcome: impl Into<String>, tokens: TokenUsage, tree: TreeId) -> Self {
+        NodeFinishedPayload {
+            tree: Some(tree),
+            ..NodeFinishedPayload::new(outcome, tokens)
         }
     }
 }

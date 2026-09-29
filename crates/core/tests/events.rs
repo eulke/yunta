@@ -744,6 +744,31 @@ fn a_node_started_without_a_tree_reads_as_the_runs_own_base() {
     );
 }
 
+/// A log written before a finish named the tree the node left reads as
+/// a finish that says nothing about the tree; one that names it
+/// round-trips carrying it.
+#[test]
+fn a_node_finished_without_a_tree_reads_as_naming_none() {
+    let old: NodeFinishedPayload = serde_json::from_value(serde_json::json!({
+        "outcome": "exit 0",
+        "tokens_used": {"input": 0, "output": 0}
+    }))
+    .unwrap();
+    assert_eq!(old.tree, None);
+
+    let named = NodeFinishedPayload::leaving(
+        "exit 0",
+        TokenUsage::default(),
+        "a1b2c3d4e5f6".parse().unwrap(),
+    );
+    let json = serde_json::to_value(&named).unwrap();
+    assert_eq!(json["tree"], "a1b2c3d4e5f6");
+    assert_eq!(
+        serde_json::from_value::<NodeFinishedPayload>(json).unwrap(),
+        named
+    );
+}
+
 /// A log written before sessions named their task and the session they
 /// continue, and before a reopening named the session it resumes, reads
 /// as sessions and reopenings that name neither.

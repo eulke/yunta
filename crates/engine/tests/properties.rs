@@ -112,10 +112,7 @@ fn parameterized() -> impl Strategy<Value = EventPayload> {
             NodeStartedPayload::attempt(attempt)
         ))),
         ("[a-z]{0,6}", tokens()).prop_map(|(outcome, tokens_used)| EventPayload::Node(
-            NodeEvent::Finished(NodeFinishedPayload {
-                outcome,
-                tokens_used,
-            })
+            NodeEvent::Finished(NodeFinishedPayload::new(outcome, tokens_used))
         )),
         ("[a-z]{0,6}", tokens(), any::<bool>()).prop_map(|(outcome, tokens_used, retryable)| {
             EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
