@@ -61,6 +61,7 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
             compared: 2,
             regressions: 0,
             origin: yunta_core::events::BaselineOrigin::Measured,
+            red: None,
         }),
         scope: ScopeSummary {
             files_touched: 4,
@@ -205,6 +206,7 @@ fn the_receipt_names_the_run_that_measured_an_inherited_baseline() {
         origin: yunta_core::events::BaselineOrigin::Inherited {
             run: RunId::from("run-2026-08-21-0001"),
         },
+        red: None,
     });
     assert!(
         render_receipt_markdown(&receipt).contains(
@@ -213,6 +215,34 @@ fn the_receipt_names_the_run_that_measured_an_inherited_baseline() {
         ),
         "{}",
         render_receipt_markdown(&receipt)
+    );
+}
+
+/// A suite that was failing when it was measured cannot show that
+/// anything stopped passing, so the receipt must not count its
+/// comparisons as zero regressions found.
+#[test]
+fn a_receipt_over_a_red_measurement_certifies_no_comparison() {
+    let mut receipt = sample_receipt(EventChainStatus::Intact { events: 10 });
+    receipt.baseline = Some(BaselineSummary {
+        suite: "make test".to_string(),
+        hash: yunta_core::sha256_hex(b"make test"),
+        compared: 2,
+        regressions: 0,
+        origin: yunta_core::events::BaselineOrigin::Measured,
+        red: Some(2),
+    });
+    let markdown = render_receipt_markdown(&receipt);
+    assert!(
+        markdown.contains(
+            "- ✗ baseline was already red when measured (exit 2): none of 2 comparison(s) \
+             could find a regression (suite `make test`, hash `22cc66aa7d26`)"
+        ),
+        "{markdown}"
+    );
+    assert!(
+        !markdown.contains("regression(s) vs baseline"),
+        "{markdown}"
     );
 }
 

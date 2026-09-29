@@ -23,7 +23,7 @@ use tasks::happening as tasks_happening;
 /// marked with.
 pub(super) fn carried(happening: &Happening) -> (Option<StateWord>, String) {
     match happening {
-        Happening::Run(it) => (None, run_words(it)),
+        Happening::Run(it) => run_words(it),
         Happening::Node(it) => node_words(it),
         Happening::Session(it) => (None, session_words(it)),
         Happening::Tasks(it) => (None, task_words(it)),
@@ -39,9 +39,9 @@ pub(super) fn carried(happening: &Happening) -> (Option<StateWord>, String) {
     }
 }
 
-fn run_words(happening: &run::happening::Happening) -> String {
+fn run_words(happening: &run::happening::Happening) -> (Option<StateWord>, String) {
     use run::happening::Happening as H;
-    match happening {
+    let said = match happening {
         H::Created { mode, base_branch } => format!("created — mode `{mode}` off {base_branch}"),
         H::Paused { reason } => format!("paused — {reason}"),
         H::Resumed { policies } => match policies.len() {
@@ -51,16 +51,29 @@ fn run_words(happening: &run::happening::Happening) -> String {
                 yunta_core::text::counted(n, "orphan")
             ),
         },
-        H::BaselineCaptured(origin) => match origin {
-            BaselineOrigin::Measured => "baseline measured".to_string(),
-            BaselineOrigin::Inherited { run } => {
-                format!("baseline inherited from run {run}")
-            }
-        },
+        H::BaselineCaptured { origin, red } => return baseline_words(origin, *red),
         H::Closed { terminal, .. } => view::closed_as(*terminal).to_string(),
         H::PromotionSignaled { to, reason, .. } => {
             detailed(format!("promotion to `{to}`"), &one_line(reason))
         }
+    };
+    (None, said)
+}
+
+/// Whose measurement the run holds, and — when the suite was already
+/// failing — that nothing this run does can be compared against it, which
+/// a person watching must learn before trusting a comparison that passes.
+fn baseline_words(origin: &BaselineOrigin, red: Option<i32>) -> (Option<StateWord>, String) {
+    let held = match origin {
+        BaselineOrigin::Measured => "baseline measured".to_string(),
+        BaselineOrigin::Inherited { run } => format!("baseline inherited from run {run}"),
+    };
+    match red {
+        None => (None, held),
+        Some(exit_code) => (
+            Some(StateWord::Wait),
+            format!("{held}, already red (exit {exit_code}): no comparison can find a regression"),
+        ),
     }
 }
 

@@ -6,7 +6,7 @@
 //! derivation is what makes "the receipt IS the evidence" checkable: one
 //! file reads the log, this one reads the receipt.
 
-use super::{DiagnosticCount, EventChainStatus, Receipt, RunnerUsage};
+use super::{BaselineSummary, DiagnosticCount, EventChainStatus, Receipt, RunnerUsage};
 use yunta_core::events::BaselineOrigin;
 use yunta_core::NodeId;
 
@@ -73,18 +73,7 @@ pub fn render_markdown(receipt: &Receipt) -> String {
         ));
     }
     match &receipt.baseline {
-        Some(b) => out.push_str(&format!(
-            "- {} {} regression(s) vs baseline across {} comparison(s) (suite `{}`, hash `{}`{})\n",
-            mark(b.regressions == 0),
-            b.regressions,
-            b.compared,
-            b.suite,
-            b.hash.as_str().get(..12).unwrap_or_default(),
-            match &b.origin {
-                BaselineOrigin::Measured => String::new(),
-                BaselineOrigin::Inherited { run } => format!(", measured by run {run}"),
-            }
-        )),
+        Some(b) => out.push_str(&baseline_line(b)),
         None => out.push_str("- baseline: not used by this workflow\n"),
     }
     out.push_str(&format!(
@@ -150,6 +139,34 @@ pub fn render_markdown(receipt: &Receipt) -> String {
     }
 
     out
+}
+
+/// What the run's comparisons against its baseline found — or, when the
+/// suite was already failing when it was measured, that none of them
+/// could find anything.
+fn baseline_line(b: &BaselineSummary) -> String {
+    let measured_by = match &b.origin {
+        BaselineOrigin::Measured => String::new(),
+        BaselineOrigin::Inherited { run } => format!(", measured by run {run}"),
+    };
+    let hash = b.hash.as_str().get(..12).unwrap_or_default();
+    match b.red {
+        Some(exit_code) => format!(
+            "- {} baseline was already red when measured (exit {exit_code}): none of {} \
+             comparison(s) could find a regression (suite `{}`, hash `{hash}`{measured_by})\n",
+            mark(false),
+            b.compared,
+            b.suite,
+        ),
+        None => format!(
+            "- {} {} regression(s) vs baseline across {} comparison(s) (suite `{}`, hash \
+             `{hash}`{measured_by})\n",
+            mark(b.regressions == 0),
+            b.regressions,
+            b.compared,
+            b.suite,
+        ),
+    }
 }
 
 fn mark(ok: bool) -> &'static str {

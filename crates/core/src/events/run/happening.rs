@@ -23,8 +23,13 @@ pub enum Happening {
         policies: Vec<ResumePolicy>,
     },
     /// Whose measurement the run holds, and so whether this run ran the
-    /// suite or was born holding what its lineage's root ran.
-    BaselineCaptured(BaselineOrigin),
+    /// suite or was born holding what its lineage's root ran — and, when
+    /// the suite was already failing, the code it exited with, since then
+    /// no comparison against it can find anything.
+    BaselineCaptured {
+        origin: BaselineOrigin,
+        red: Option<i32>,
+    },
     Closed {
         terminal: TerminalState,
         tokens: TokenUsage,
@@ -53,7 +58,10 @@ impl From<&RunEvent> for Happening {
                 terminal: p.terminal_state,
                 tokens: p.metrics.tokens,
             },
-            RunEvent::BaselineCaptured(p) => Happening::BaselineCaptured(p.origin.clone()),
+            RunEvent::BaselineCaptured(p) => Happening::BaselineCaptured {
+                origin: p.origin.clone(),
+                red: (!p.passed()).then_some(p.results.exit_code),
+            },
             RunEvent::PromotionSignaled(p) => Happening::PromotionSignaled {
                 to: p.suggested_mode.clone(),
                 reason: p.reason.clone(),

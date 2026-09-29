@@ -92,6 +92,17 @@ async fn execute_baseline_compare(
     let Some(captured) = held else {
         return unset(ctx, node, ConfigKey::BaselineSuite).await;
     };
+    // A suite that was already red when the lineage measured it cannot
+    // show that anything stopped passing, so running it again would
+    // spend its whole duration on an answer known before it starts.
+    if !captured.passed() {
+        return close_node(
+            ctx,
+            node,
+            Close::new(nothing_to_compare(&captured), TokenUsage::default()),
+        )
+        .await;
+    }
 
     // The same memo the criteria use: two comparisons of one suite on a
     // tree nothing changed in between run it once, and the second says
@@ -104,26 +115,8 @@ async fn execute_baseline_compare(
         return super::node_exec::cancelled_end(ctx, node).await;
     }
 
-    if captured.results.exit_code == 0 && ran.exit_code != 0 {
-        // What the suite printed says why it fails now.
-        let said = ran
-            .output
-            .as_ref()
-            .map(|output| output.tail().join("\n"))
-            .unwrap_or_default();
-        fail(
-            ctx,
-            node,
-            yunta_core::text::detailed(
-                format!(
-                    "regression: `{}` passed at baseline (exit 0) but now exits {}",
-                    captured.command, ran.exit_code
-                ),
-                &said,
-            ),
-            false,
-        )
-        .await
+    if ran.exit_code != 0 {
+        fail(ctx, node, regression(&captured, &ran), false).await
     } else {
         close_node(
             ctx,
@@ -132,6 +125,37 @@ async fn execute_baseline_compare(
         )
         .await
     }
+}
+
+/// What a comparison that found the suite failing fails with: the exit
+/// code it passed with and the one it fails with now, then what the
+/// suite printed last, which is what says why.
+fn regression(
+    captured: &yunta_core::events::BaselineCapturedPayload,
+    ran: &crate::task_cycle::Memoized,
+) -> String {
+    let said = ran
+        .output
+        .as_ref()
+        .map(|output| output.tail().join("\n"))
+        .unwrap_or_default();
+    yunta_core::text::detailed(
+        format!(
+            "regression: `{}` passed at baseline (exit 0) but now exits {}",
+            captured.command, ran.exit_code
+        ),
+        &said,
+    )
+}
+
+/// What a comparison closes with when the measurement it would compare
+/// against was already red: there was nothing that passed, so nothing
+/// could be seen to stop passing.
+fn nothing_to_compare(captured: &yunta_core::events::BaselineCapturedPayload) -> String {
+    format!(
+        "nothing to compare: `{}` was already red when the lineage measured it (exit {})",
+        captured.command, captured.results.exit_code
+    )
 }
 
 /// What a comparison that found no regression closes with: the suite's

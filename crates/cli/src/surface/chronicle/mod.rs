@@ -110,10 +110,10 @@ pub(super) fn graduation(moment: &Moment, glyphs: Glyphs) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use yunta_core::events::{
-        CriteriaCheckedPayload, CriterionResult, EventBody, EventPayload, Evidence, Failure,
-        Finding, FindingPostedPayload, FindingSeverity, NodeEvent, NodeFinishedPayload,
-        NodeReroutedPayload, Phase, PromotionSignaledPayload, RerouteCause, RerouteOrigin,
-        RunEvent, StoredEvent,
+        BaselineCapturedPayload, BaselineOrigin, BaselineResults, CriteriaCheckedPayload,
+        CriterionResult, EventBody, EventPayload, Evidence, Failure, Finding, FindingPostedPayload,
+        FindingSeverity, NodeEvent, NodeFinishedPayload, NodeReroutedPayload, Phase,
+        PromotionSignaledPayload, RerouteCause, RerouteOrigin, RunEvent, StoredEvent,
     };
     use yunta_core::events::{FindingEvent, TokenUsage};
     use yunta_engine::chronicle as derive_chronicle;
@@ -195,6 +195,33 @@ mod tests {
             suggested_mode: "ship".into(),
         }));
         assert_eq!(said_for(payload), "run — promotion to `ship`");
+    }
+
+    fn baseline(exit_code: i32) -> EventPayload {
+        EventPayload::Run(RunEvent::BaselineCaptured(BaselineCapturedPayload {
+            command: "make test".to_string(),
+            results: BaselineResults {
+                exit_code,
+                summary: String::new(),
+            },
+            hash: yunta_core::sha256_hex(b""),
+            origin: BaselineOrigin::Measured,
+        }))
+    }
+
+    #[test]
+    fn a_baseline_measured_green_reads_as_measured() {
+        assert_eq!(said_for(baseline(0)), "run — baseline measured");
+    }
+
+    /// A person watching learns, before any comparison passes, that none
+    /// could have failed.
+    #[test]
+    fn a_baseline_measured_red_says_no_comparison_can_find_a_regression() {
+        assert_eq!(
+            said_for(baseline(101)),
+            "run — baseline measured, already red (exit 101): no comparison can find a regression"
+        );
     }
 
     #[test]

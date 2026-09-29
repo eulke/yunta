@@ -282,6 +282,44 @@ nodes:
     );
 }
 
+/// A suite that fails on the tree the run opens on gives a comparison
+/// nothing that passed: the comparison says so, and running the suite
+/// again could not change that answer.
+#[tokio::test]
+async fn a_comparison_under_a_red_measurement_says_nothing_could_be_compared_and_runs_nothing() {
+    let bench = Bench::new();
+    let suite_runs = bench
+        .worktree
+        .parent()
+        .expect("the worktree sits in the bench's world")
+        .join("suite-runs");
+    let suite = format!("echo . >> {}; cat missing.txt", suite_runs.display());
+    let config = format!("{MOCK_CONFIG}baseline:\n  suite: \"{suite}\"\n");
+
+    let workflow = r#"
+name: compared-against-red
+nodes:
+  - id: compare
+    kind: check
+    builtin: baseline_compare
+"#;
+
+    let RunReport { terminal, .. } = bench
+        .run_with_config(workflow, "sessions: []", &config)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        outcome_of(&bench.events(), "compare"),
+        format!(
+            "nothing to compare: `{suite}` was already red when the lineage measured it (exit 1)"
+        )
+    );
+    let ran = tokio::fs::read_to_string(&suite_runs)
+        .await
+        .expect("the measurement ran the suite");
+    assert_eq!(ran.lines().count(), 1, "only the measurement ran it");
+}
+
 #[tokio::test]
 async fn the_first_baseline_compare_fails_on_a_regression_made_before_it() {
     let bench = Bench::new();

@@ -393,6 +393,8 @@ El baseline es del linaje. Antes de su primer nodo, en su primer despertar, el r
 
 Un linaje mide la suite una vez; cada `baseline_compare` la vuelve a correr sobre su árbol, y una invocación no la repite sobre un árbol que no cambió desde otra comparación —la memoización de §5.4—, que es lo que su cierre dice. Coverage se mide en cada gate, porque su veredicto lee la salida y no el código.
 
+Una suite que ya fallaba cuando el linaje la midió no tiene nada que pasara y pudiera dejar de pasar: `baseline_compare` cierra diciendo que no hay nada que comparar, sin volver a correrla —la respuesta se conoce antes de empezar—, la consola lo avisa al medir, y el recibo no cuenta sus comparaciones como cero regresiones sino como ninguna posible.
+
 `yunta check` avisa cuando la config declara una suite y ni el workflow ni los workflows que compone comparan: medir es minutos gastados en una respuesta que nadie lee. Y rechaza el caso inverso —un `baseline_compare`, en el workflow o en uno que compone, bajo una config sin `baseline.suite`—, porque el linaje no mide nada y la comparación falla siempre, después de todo lo que corrió antes. Un run que llegue igual a ese nodo falla con `unset` y su menú no ofrece `retry`: la config del run está congelada, y la salida es un run nuevo (D190).
 
 ## 7.3 Aislamiento del árbol de trabajo

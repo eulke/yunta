@@ -41,6 +41,14 @@ pub struct BaselineCapturedPayload {
     pub origin: BaselineOrigin,
 }
 
+impl BaselineCapturedPayload {
+    /// Whether the suite passed when it was measured — the only
+    /// measurement against which something can be seen to stop passing.
+    pub fn passed(&self) -> bool {
+        self.results.exit_code == 0
+    }
+}
+
 /// What the suite reported: the code it exited with, and the tail a
 /// reader sees without opening what the measuring run kept.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

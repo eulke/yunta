@@ -75,6 +75,11 @@ pub struct BaselineSummary {
     /// Who took the measurement: this run, or the root of the lineage it
     /// was born into.
     pub origin: BaselineOrigin,
+    /// The code the suite exited with when it was measured, when it was
+    /// already failing then: no comparison against it could find a
+    /// regression, so its count of none certifies nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub red: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -377,6 +382,7 @@ fn baseline_summary(manifest: &Manifest, events: &[StoredEvent]) -> Option<Basel
         compared,
         regressions,
         origin: captured.origin.clone(),
+        red: (!captured.passed()).then_some(captured.results.exit_code),
     })
 }
 
