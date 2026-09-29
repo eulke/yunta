@@ -1,5 +1,8 @@
 //! Deterministic clocks, so no assertion ever races the wall clock.
 
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use chrono::{DateTime, Utc};
 use yunta_core::Clock;
 
@@ -46,5 +49,47 @@ impl AtClock {
 impl Clock for AtClock {
     fn now(&self) -> DateTime<Utc> {
         self.0
+    }
+}
+
+/// A [`Clock`] for a host a test puts to sleep: its wall and awake
+/// readings stand still until the test moves them, together — the host
+/// working — or the wall alone — the host suspended.
+pub struct HostClock {
+    wall: Mutex<DateTime<Utc>>,
+    awake: Mutex<Instant>,
+}
+
+impl Default for HostClock {
+    /// Starts at [`FIXED_NOW`], awake since the moment it is built.
+    fn default() -> Self {
+        HostClock {
+            wall: Mutex::new(fixed_now()),
+            awake: Mutex::new(Instant::now()),
+        }
+    }
+}
+
+impl HostClock {
+    /// The host works for `by`: both readings move.
+    pub fn advance(&self, by: Duration) {
+        *self.wall.lock().expect("the wall reading") += by;
+        *self.awake.lock().expect("the awake reading") += by;
+    }
+
+    /// The host sleeps for `for_`: the wall moves and the awake reading
+    /// does not.
+    pub fn suspend(&self, for_: Duration) {
+        *self.wall.lock().expect("the wall reading") += for_;
+    }
+}
+
+impl Clock for HostClock {
+    fn now(&self) -> DateTime<Utc> {
+        *self.wall.lock().expect("the wall reading")
+    }
+
+    fn awake(&self) -> Instant {
+        *self.awake.lock().expect("the awake reading")
     }
 }
