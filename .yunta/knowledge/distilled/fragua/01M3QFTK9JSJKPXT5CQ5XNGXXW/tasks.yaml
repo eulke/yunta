@@ -1,0 +1,111 @@
+summary: Apply terminal-aware ANSI color to CLI messages, reports, run progress, and prompts.
+description: |-
+  The CLI currently colors the warning label, while most statuses, headings, tables, prompts, and run progress remain plain. Add one semantic palette using only the terminal's standard 16 ANSI colors. Each renderer uses the policy for the stream it writes to, and any defined `NO_COLOR` disables escape sequences. Keep the words and symbols that identify a state so the output remains clear without color; machine-readable JSON and graph output stay unchanged.
+
+  ```mermaid
+  flowchart LR
+    Stream["stdout or stderr"] --> Policy["TTY and NO_COLOR policy"]
+    NoColor["NO_COLOR presence"] --> Policy
+    Policy --> Role["semantic color role"]
+    Role --> Paint["ANSI color or original text"]
+    Paint --> View["CLI message, report, run view, or prompt"]
+  ```
+
+  For example, a success label is green on a color-enabled terminal and still says the same thing in a pipe or when color is disabled:
+
+  ```text
+  TTY:      "\x1b[32mdone\x1b[0m"
+  no color: "done"
+  ```
+design: |-
+  ```rust
+  pub(crate) enum ColorRole {
+      Error,
+      Warning,
+      Success,
+      Info,
+      Heading,
+      Prompt,
+      Progress,
+      Muted,
+  }
+
+  pub(crate) struct ColorPolicy {
+      enabled: bool,
+  }
+
+  impl ColorPolicy {
+      fn for_stdout() -> Self;
+      fn for_stderr() -> Self;
+      fn paint(self, role: ColorRole, text: &str) -> String;
+  }
+  ```
+risks:
+- ANSI hues depend on the user's terminal theme and may have low contrast; state words and symbols remain present.
+out_of_scope:
+- Coloring JSON, DOT, Mermaid, and other machine-readable output.
+- Truecolor values or choosing colors from operating-system theme settings.
+tasks:
+- id: color-policy
+  title: Add the shared 16-color policy and color common messages
+  scope:
+  - crates/cli/src/render/color.rs
+  - crates/cli/src/render/mod.rs
+  - crates/cli/src/surface/terminal.rs
+  - crates/cli/src/error.rs
+  - crates/cli/src/main.rs
+  criteria:
+  - cmd: test -f crates/cli/src/render/color.rs && grep -q 'fn standard_palette_uses_only_ansi_16_colors' crates/cli/src/render/color.rs && cargo test -p yunta --bin yunta -- standard_palette_uses_only_ansi_16_colors
+    proves: Each semantic role uses only standard ANSI palette codes and reset sequences.
+  - cmd: test -f crates/cli/src/render/color.rs && grep -q 'fn color_is_disabled_for_non_tty_and_any_no_color_value' crates/cli/src/render/color.rs && cargo test -p yunta --bin yunta -- color_is_disabled_for_non_tty_and_any_no_color_value
+    proves: Color is enabled only for a terminal stream without NO_COLOR, even when NO_COLOR is set to an empty value.
+  - cmd: grep -q 'fn message_roles_are_colored_and_plain_text_survives' crates/cli/src/error.rs && cargo test -p yunta --bin yunta -- message_roles_are_colored_and_plain_text_survives
+    proves: Error, warning, and informational messages use semantic color roles while retaining readable text.
+  description: Introduce `ColorPolicy` and `ColorRole`, then use them for stderr error, warning, and informational messages. This gives other CLI surfaces one place to honor the actual output stream and `NO_COLOR`, including an empty but defined value.
+- id: color-command-output
+  title: Color command reports, tables, and success feedback
+  scope:
+  - crates/cli/src/commands/**
+  - crates/cli/src/render/bars.rs
+  - crates/cli/src/render/state.rs
+  - crates/cli/tests/stats_cmd.rs
+  criteria:
+  - cmd: grep -q 'fn command_reports_apply_semantic_colors_without_touching_json' crates/cli/src/commands/status/mod.rs && cargo test -p yunta --bin yunta -- command_reports_apply_semantic_colors_without_touching_json
+    proves: Status labels and headings use semantic colors and JSON status output stays unchanged.
+  - cmd: grep -q 'fn tables_and_bars_use_standard_color_roles' crates/cli/src/commands/stats.rs && cargo test -p yunta --bin yunta -- tables_and_bars_use_standard_color_roles
+    proves: Statistics headings, table states, and bars use the shared palette.
+  - cmd: grep -q 'fn success_messages_use_success_color_role' crates/cli/src/commands/pack.rs && cargo test -p yunta --bin yunta -- success_messages_use_success_color_role
+    proves: Successful command feedback uses the success role.
+  - cmd: grep -q 'fn list_tables_color_headings_and_waiting_states' crates/cli/src/commands/list/runs.rs && cargo test -p yunta --bin yunta -- list_tables_color_headings_and_waiting_states
+    proves: Run-list headings and waiting states use distinct semantic color roles.
+  - cmd: cargo test -p yunta --test stats_cmd -- stats_run_output_stays_inside_80_columns_and_never_uses_ansi_color
+    type: guard
+    proves: Statistics output captured through a non-terminal remains plain and within its width limit.
+  depends_on:
+  - color-policy
+  description: Use `ColorPolicy` and `ColorRole` throughout command output so status reports, diagnostic summaries, tables, and success feedback share the same visual meaning. Preserve plain captured output and leave JSON rendering unstyled.
+- id: color-run-surface
+  title: Color run progress and event surfaces
+  scope:
+  - crates/cli/src/surface/**
+  - crates/cli/tests/parked_runs.rs
+  criteria:
+  - cmd: grep -q 'fn live_and_append_only_surfaces_use_semantic_colors' crates/cli/src/surface/mod.rs && cargo test -p yunta --bin yunta -- live_and_append_only_surfaces_use_semantic_colors
+    proves: Live and append-only run views apply consistent semantic colors to progress and state.
+  - cmd: cargo test -p yunta --test parked_runs -- status_of_a_parked_run_shows_every_option_and_the_command_that_answers_it
+    type: guard
+    proves: Captured parked-run output remains readable and keeps every decision option.
+  depends_on:
+  - color-policy
+  description: Apply `ColorPolicy` and `ColorRole` to the live region, appended event lines, and closing view. This makes progress and state transitions scannable while each event's words remain understandable without escape sequences.
+- id: color-prompts
+  title: Color interactive prompts and choices
+  scope:
+  - crates/cli/src/ask/**
+  - crates/cli/tests/console_interaction.rs
+  criteria:
+  - cmd: grep -q 'fn prompts_use_semantic_colors_when_allowed_and_obey_no_color' crates/cli/tests/console_interaction.rs && cargo test -p yunta --test console_interaction -- prompts_use_semantic_colors_when_allowed_and_obey_no_color
+    proves: Interactive prompt labels and choices are colored on an enabled terminal and contain no color sequences when NO_COLOR is set.
+  depends_on:
+  - color-policy
+  description: Use `ColorPolicy` and `ColorRole` in the console prompt, question, and choice rendering. This makes the next action easier to scan while preserving the prompt text and answers when color is unavailable or disabled.

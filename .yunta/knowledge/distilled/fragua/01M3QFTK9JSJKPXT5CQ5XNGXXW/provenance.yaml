@@ -1,0 +1,18 @@
+source_run: 01M3QFTK9JSJKPXT5CQ5XNGXXW
+workflow: fragua
+workflow_hash: sha256:d38065fdd15c6498fdff1152737a715d4251c34249fb7afdc2239c6c08ad1c42
+mode: quick
+distilled_at: 2026-09-29T23:53:28.206854+00:00
+artifacts:
+- name: tasks.yaml
+  content_hash: sha256:610dc38c8d1af29d38443796a5f9f09c727346570316e7a14e418fc8ff1d7471
+verification:
+  criteria:
+    executed: 45
+    green: 36
+    reused: 21
+  findings:
+    blocking: 0
+    major: 0
+    minor: 0
+    note: 0
