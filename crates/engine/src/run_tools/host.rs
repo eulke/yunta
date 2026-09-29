@@ -218,7 +218,8 @@ pub struct RunToolsAccess {
 /// values its attempt's close will use rather than a copy of them.
 #[derive(Clone)]
 pub struct TaskAccess {
-    /// The task, as the loop registered it and the cycle judges it.
+    /// The task as the cycle judges it: the criteria the loop registered,
+    /// plus the suite the run holds every task to.
     pub task: Task,
     /// What a scope audit holds the diff to: the scope the task declared
     /// plus every path the log granted it when this cycle began.

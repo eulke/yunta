@@ -51,6 +51,11 @@ ejecuta, así que lo que una persona aprueba es lo que corre (D195).
 Toda tarea necesita **al menos un criterio no-`guard`**: sin él no hay nada que pueda
 estar en rojo antes del trabajo, y el pre-check pierde sentido.
 
+La suite de no-regresión del proyecto no hace falta declararla: cuando el linaje la
+midió en verde, el engine juzga cada tarea contra ella como `guard` (D196), sin
+tocar el documento. Una tarea que la declara igual se juzga por su propia
+declaración.
+
 ### 2.2 Para quien revisa el plan
 
 | Campo | Tipo | Obligatorio | Notas |

@@ -218,6 +218,7 @@ struct LoopPrep<'a> {
     instruction: String,
     adapter: std::sync::Arc<dyn yunta_core::port::Adapter>,
     setup: crate::task_cycle::SessionSetup,
+    /// The registered document, each task as the run judges it.
     tasks: TasksFile,
     concurrency: u32,
     scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
@@ -308,7 +309,19 @@ async fn prepare_loop<'a>(
         return Ok(LoopReady::Ended(end));
     };
     registered_here(&held, &view.state)?;
-    let tasks = held.document;
+    // Every task this loop runs is judged the way the run judges it, once,
+    // here: its pre-check, its session's own checks, its close and its
+    // integration all read these criteria.
+    let baseline = view.state.run.baseline();
+    let tasks = TasksFile {
+        tasks: held
+            .document
+            .tasks
+            .iter()
+            .map(|task| crate::tasks::judged_task(task, baseline))
+            .collect(),
+        ..held.document
+    };
 
     // Absent means the engine's own default, 1 — sequential, deliberately
     // not config-overridable: token spend multiplies with it, so it's

@@ -652,6 +652,47 @@ async fn a_task_session_reads_its_task_and_every_cycle_it_ran_from_the_run() {
     client.cancel().await.unwrap();
 }
 
+/// The suite the run holds every task to is one of the task's guards,
+/// and says what it is there to show, so the session knows why a change
+/// that breaks it keeps the task open.
+#[tokio::test]
+async fn a_task_session_reads_which_guard_is_the_runs_suite() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let baseline = yunta_core::events::BaselineCapturedPayload {
+        command: "make test".to_string(),
+        results: yunta_core::events::BaselineResults {
+            exit_code: 0,
+            summary: String::new(),
+        },
+        hash: yunta_core::sha256_hex(b""),
+        origin: yunta_core::events::BaselineOrigin::Measured,
+    };
+    let task = yunta_engine::judged_task(&greeting_task(), Some(&baseline));
+    let session = host
+        .task_session(
+            "implement",
+            host.task_access(task, unit_at(host.attempt_dir())),
+        )
+        .await;
+    let client = client_for(&session, None).await.unwrap();
+    let (is_error, text) = call(&client, "yunta_task", json!({})).await;
+    assert!(!is_error, "got: {text}");
+    let sheet: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let criteria = sheet["criteria"].as_array().expect("the task's criteria");
+    assert_eq!(
+        criteria[..2],
+        [
+            json!({"cmd": "test -f hello.txt", "guard": false}),
+            json!({"cmd": "true", "guard": true}),
+        ],
+        "what the document declares, as it declares it"
+    );
+    assert_eq!(criteria[2]["cmd"], "make test");
+    assert_eq!(criteria[2]["guard"], true);
+    assert!(criteria[2]["proves"].is_string(), "{sheet:#}");
+    client.cancel().await.unwrap();
+}
+
 #[tokio::test]
 async fn a_check_judges_the_work_the_way_its_close_will() {
     let owner = yunta_testkit::Owner::new();

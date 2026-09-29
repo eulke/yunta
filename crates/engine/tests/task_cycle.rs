@@ -1195,7 +1195,8 @@ fn surprises_names_every_trivial_criterion_and_every_broken_guard_in_declaration
                 cmd: "already-green".to_string()
             },
             Surprise::BrokenGuard {
-                cmd: "build".to_string()
+                cmd: "build".to_string(),
+                proves: None,
             },
         ],
         "every surprise, in the order the task declares its criteria"

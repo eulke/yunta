@@ -145,7 +145,9 @@ fn task_tool() -> Tool {
          and notes; `scope`, the globs every change must stay inside (what the task declared \
          plus what was granted to it); and `criteria`, the commands that must all exit 0 \
          when your session ends — a criterion is red before the work starts, and a `guard` \
-         is green before it and must stay green. `cycles` lists what the engine found each \
+         is green before it and must stay green; each may say what it `proves`. When the run \
+         measured its suite green before changing anything, that suite is among the guards: \
+         a change that breaks what passed keeps the task open. `cycles` lists what the engine found each \
          time the task ran, the current cycle last: its pre-check, then each attempt's \
          criteria and the paths it changed outside the scope. The tasks document is not \
          in your checkout; this is where it is read.",

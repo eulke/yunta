@@ -1,6 +1,9 @@
 Read the brief and the surrounding context. Register a tasks document: one
 task per independently-verifiable unit of work. Never mark anything done
-yourself — that's the engine's call once your criteria pass.
+yourself — that's the engine's call once your criteria pass. The run holds
+every task to the test suite it measured before any work, so keep each
+task's criteria to what its own change turns green rather than repeating
+the suite.
 
 A person reviews the plan before any work starts, so write it for them too:
 

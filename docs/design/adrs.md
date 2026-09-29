@@ -71,7 +71,7 @@ lista.
 **D62 — Short-circuit con orden aprendido del log.** `revised` *(Revisada por D167, D177.)* → [`adr/D62-short-circuit-con-orden-aprendido-del-log.md`](adr/D62-short-circuit-con-orden-aprendido-del-log.md)
 **D63 — `isolation: worktree | none`; `container` eliminado del schema (Contrato §7.3).** `accepted` → [`adr/D63-isolation-worktree-none-container-eliminado.md`](adr/D63-isolation-worktree-none-container-eliminado.md)
 **D64 — La preparación del árbol es el costo dominante de wall-clock; se ataca con cachés compartidas, no salteando aislamiento.** `accepted` → [`adr/D64-la-preparacion-del-arbol-es-el-costo-dominante.md`](adr/D64-la-preparacion-del-arbol-es-el-costo-dominante.md)
-**D65 — Paralelismo de tareas del ledger: aislar para trabajar, serializar para verificar (Contrato §5.5).** `accepted` → [`adr/D65-paralelismo-de-tareas-del-ledger-aislar.md`](adr/D65-paralelismo-de-tareas-del-ledger-aislar.md)
+**D65 — Paralelismo de tareas del ledger: aislar para trabajar, serializar para verificar (Contrato §5.5).** `revised` *(Revisada por D196.)* → [`adr/D65-paralelismo-de-tareas-del-ledger-aislar.md`](adr/D65-paralelismo-de-tareas-del-ledger-aislar.md)
 **D66 — Gates externos por pull request como sustrato multi-persona de v1 (Contrato §5.6).** `accepted` → [`adr/D66-gates-externos-por-pull-request-como-sustrato.md`](adr/D66-gates-externos-por-pull-request-como-sustrato.md)
 **D67 — Proyecto personal en repo personal, abierto bajo Apache-2.0 (RFC-0004).** `accepted` → [`adr/D67-proyecto-personal-en-repo-personal-abierto.md`](adr/D67-proyecto-personal-en-repo-personal-abierto.md)
 **D68 — Distribución por binarios precompilados, con instalador, cargo, Homebrew y Action oficial.** `accepted` → [`adr/D68-distribucion-por-binarios-precompilados.md`](adr/D68-distribucion-por-binarios-precompilados.md)
@@ -202,3 +202,4 @@ lista.
 **D193 — What a run's commands print belongs to the run, never to the terminal.** `accepted` → [`adr/D193-what-a-run-s-commands-print-belongs-to-the-run.md`](adr/D193-what-a-run-s-commands-print-belongs-to-the-run.md)
 **D194 — A gate shows what it asks about, and a correction goes back to the session that made the work.** `accepted` → [`adr/D194-a-gate-shows-what-it-asks-about.md`](adr/D194-a-gate-shows-what-it-asks-about.md)
 **D195 — A plan a person reviews explains itself, in the same document the engine runs.** `accepted` → [`adr/D195-a-plan-a-person-reviews-explains-itself.md`](adr/D195-a-plan-a-person-reviews-explains-itself.md)
+**D196 — Every task is held to the suite its lineage measured green.** `accepted` → [`adr/D196-every-task-is-held-to-the-suite-its-lineage-measured-green.md`](adr/D196-every-task-is-held-to-the-suite-its-lineage-measured-green.md)

@@ -344,6 +344,15 @@ sessions:
     outcome: { type: completed, summary: "reviewed" }
 "#;
 
+/// The commands a receipt's criteria summary counts, in its order.
+fn commands(criteria: &CriteriaSummary) -> Vec<&str> {
+    criteria
+        .entries
+        .iter()
+        .map(|entry| entry.cmd.as_str())
+        .collect()
+}
+
 #[tokio::test]
 async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     let bench = Bench::new();
@@ -358,9 +367,9 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
 
     assert_eq!(receipt.terminal_state, TerminalState::Done);
 
-    assert_eq!(receipt.criteria.total, 1, "T001's one criterion");
-    assert_eq!(receipt.criteria.green, 1);
-    assert_eq!(receipt.criteria.entries[0].cmd, "test -f hello.txt");
+    // T001's one criterion, and the suite the run holds every task to.
+    assert_eq!(commands(&receipt.criteria), ["test -f hello.txt", "true"]);
+    assert_eq!(receipt.criteria.green, 2);
 
     let baseline = receipt.baseline.clone().expect("baseline_compare was used");
     assert_eq!(baseline.suite, "true");

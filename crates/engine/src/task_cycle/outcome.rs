@@ -24,8 +24,12 @@ pub enum Surprise {
     TrivialCriterion {
         cmd: String,
     },
+    /// A guard already red on the tree the task starts from: what broke
+    /// it came before the task. `proves` is what the guard is there to
+    /// show, when the task or the run says so.
     BrokenGuard {
         cmd: String,
+        proves: Option<String>,
     },
     /// A criterion that never answered: its command could not be found
     /// or executed where the engine runs criteria, or it was stopped.
@@ -43,8 +47,12 @@ impl std::fmt::Display for Surprise {
                 "criterion `{cmd}` already passes before any work — the criteria need \
                  fixing, not the task"
             ),
-            Surprise::BrokenGuard { cmd } => {
-                write!(f, "guard `{cmd}` is already red before any work started")
+            Surprise::BrokenGuard { cmd, proves } => {
+                write!(f, "guard `{cmd}` is already red before any work started")?;
+                match proves {
+                    Some(proves) => write!(f, " — it is there to show that {proves}"),
+                    None => Ok(()),
+                }
             }
             Surprise::Unrunnable { run } => write!(
                 f,
@@ -82,6 +90,7 @@ pub fn surprises(task: &yunta_core::Task, runs: &[CriterionRun]) -> Vec<Surprise
             match (run.is_guard, run.exit_code) {
                 (true, code) if code != 0 => Some(Surprise::BrokenGuard {
                     cmd: run.cmd.clone(),
+                    proves: criterion.proves.clone(),
                 }),
                 (false, 0) => Some(Surprise::TrivialCriterion {
                     cmd: run.cmd.clone(),

@@ -72,7 +72,10 @@ fn baseline_words(origin: &BaselineOrigin, red: Option<i32>) -> (Option<StateWor
         None => (None, held),
         Some(exit_code) => (
             Some(StateWord::Wait),
-            format!("{held}, already red (exit {exit_code}): no comparison can find a regression"),
+            format!(
+                "{held}, already red (exit {exit_code}): no comparison can find a regression, \
+                 and no task is held to it"
+            ),
         ),
     }
 }

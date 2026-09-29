@@ -388,16 +388,25 @@ retrofitting once wall-clock or noisy criteria become a problem.
 A task's `criteria` (see the [tasks schema](design/spec-tasks.md#21-criteria)) run
 red-before-green: the pre-check proves the criterion *can* fail before the task
 starts. Keep each task's own criteria narrow and cheap — the specific test or check
-that task's change is supposed to flip, not the whole suite. Re-running the entire
-test suite on every single task in a loop is both slow (multiplied by every task in
-the tasks document) and a weak signal (a broad suite failing doesn't say *what* broke).
+that task's change is supposed to flip. A narrow criterion says *what* the task did;
+a broad suite failing doesn't.
 
-For the suite-wide, no-regression concern, use a `type: guard` criterion — checked
-before and after, never counted as the thing this task proves — sparingly, on the
-tasks where it matters, or once at the workflow's close via a `kind: check` node
-(`builtin: baseline_compare`) shared by every task in the tasks document instead of repeated
-per task. `lint-fix.yaml` in the quickstart is this pattern in miniature: `lint`
-verifies the whole workspace once, not per file changed.
+The suite-wide, no-regression concern is the run's, not the planner's. When your
+config declares `baseline.suite` and the suite passed when the run measured it,
+every task of a loop is held to that suite as a `guard`: its pre-check, the checks
+its session runs through `yunta_check_task`, its close and its integration all run
+it, and `yunta_task` lists it among the task's guards with what it is there to show.
+A change that breaks what passed keeps the task that made it open, while its session
+can still answer for it — instead of surfacing after every task closed, at a
+`baseline_compare` node nobody who made the change is left to fix. Don't repeat the
+suite in a task's criteria; a task that declares it is judged by its own
+declaration. A suite that was already red when measured holds no task to it.
+
+The price is the suite's duration per check. Each task works in its own checkout,
+so a build tool that keeps its output inside the tree builds from scratch there
+once per task; pointing it at a shared directory (for Cargo, `CARGO_TARGET_DIR`)
+keeps later builds warm. A `baseline_compare` node at the workflow's close still
+earns its place: it covers what nodes after the loop change.
 
 A criterion runs under `sh` with the run's own `PATH`, not in the shell of the
 agent that wrote it — an agent's CLI can put tools on its own `PATH` (a bundled

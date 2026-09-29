@@ -220,7 +220,8 @@ mod tests {
     fn a_baseline_measured_red_says_no_comparison_can_find_a_regression() {
         assert_eq!(
             said_for(baseline(101)),
-            "run — baseline measured, already red (exit 101): no comparison can find a regression"
+            "run — baseline measured, already red (exit 101): no comparison can find a \
+             regression, and no task is held to it"
         );
     }
 

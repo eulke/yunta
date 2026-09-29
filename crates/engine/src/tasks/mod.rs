@@ -3,6 +3,7 @@
 //! hands over carries into the tree this run works in.
 
 mod crossing;
+mod judged;
 pub(crate) mod view;
 
 use std::collections::BTreeMap;
@@ -19,6 +20,7 @@ use crate::run_log::RunLog;
 use yunta_core::events::TaskEvent;
 
 pub(crate) use crossing::{carried_into, standing_of, Standing};
+pub use judged::judged_task;
 
 /// Whether this run shows `producer`'s tasks document to a person: a gate
 /// among the nodes the run's mode includes names it. The mode is the one

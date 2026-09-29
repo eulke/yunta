@@ -77,6 +77,7 @@ impl SessionTools {
                 .map(|criterion| Declared {
                     cmd: &criterion.cmd,
                     guard: criterion.r#type == Some(CriterionType::Guard),
+                    proves: criterion.proves.as_deref(),
                 })
                 .collect(),
             cycles: cycles_of(&events, &task.id),
@@ -158,11 +159,15 @@ struct TaskSheet<'a> {
     runs_under: Option<&'a ExecutionEnvironment>,
 }
 
-/// A criterion as the task declares it.
+/// A criterion the task is judged by: one its document declares, or the
+/// suite the run holds every task to — and what passing it shows, when
+/// the plan or the run says so.
 #[derive(Serialize)]
 struct Declared<'a> {
     cmd: &'a str,
     guard: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proves: Option<&'a str>,
 }
 
 /// A criterion and what one check of it answered.

@@ -156,6 +156,7 @@ pub use task_cycle::{
     CriterionRun, DispatchOutcome, Memo, ScopeGovernance, SessionObserver, SessionSetup, Surprise,
     TaskCycleError, TaskCycleReport, TaskOutcome,
 };
+pub use tasks::judged_task;
 pub use verification_effectiveness::{
     analyze as analyze_verification_effectiveness, AlwaysApprovedGate, AlwaysFirstTryTasks,
     NeverRedCriterion, NeverTriggeredReroute, VerificationFindings,
