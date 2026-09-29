@@ -1,10 +1,11 @@
 //! A document an escalation shows, as the person deciding reads it.
 //!
 //! What they decide on is what the run holds, so the words come from the
-//! document itself and the path under them is where its file sits.
-//! A tasks document is read the way a plan is reviewed — task by task,
-//! with what each may touch and what proves it done; its notes stay in
-//! the file, one open away.
+//! document itself and the path under them is where its file sits. A
+//! plan is read the way it is reviewed: what it changes and why, the
+//! shapes it creates, then task by task what each does, what it touches
+//! and what proves it done. A diagram has no room on a terminal, so it
+//! is named here and drawn in the whole plan, one open away.
 
 use yunta_core::events::ArtifactId;
 use yunta_core::{Task, TasksFile};
@@ -18,46 +19,104 @@ pub(crate) fn shown(document: &ShownDocument) -> Vec<String> {
         .as_ref()
         .map(|node| format!(" of `{node}`"))
         .unwrap_or_default();
-    let mut lines = match &document.content {
-        ShownContent::Tasks(file) => tasks(file, &of),
-        ShownContent::Text(text) => self::text(text, &document.shown.artifact, &of),
+    let (mut lines, whole) = match &document.content {
+        ShownContent::Tasks(file) => (plan(file, &of), "the whole plan"),
+        ShownContent::Text(text) => (
+            self::text(text, &document.shown.artifact, &of),
+            "the whole document",
+        ),
     };
-    lines.push(format!("the whole document: {}", document.path.display()));
+    lines.push(format!("{whole}: {}", document.path.display()));
     lines
 }
 
-fn tasks(file: &TasksFile, of: &str) -> Vec<String> {
+fn plan(file: &TasksFile, of: &str) -> Vec<String> {
     let mut lines = vec![format!(
-        "the tasks document{of} — {}",
+        "the plan{of} — {}",
         yunta_core::text::counted(file.tasks.len(), "task")
     )];
+    if let Some(summary) = said(&file.summary) {
+        lines.push(format!("  {summary}"));
+    }
+    if let Some(description) = said(&file.description) {
+        lines.push(String::new());
+        lines.extend(markdown(description, "  "));
+    }
+    if let Some(design) = said(&file.design) {
+        lines.push(String::new());
+        lines.push("  design".to_string());
+        lines.extend(markdown(design, "    "));
+    }
+    for (heading, items) in [("risks", &file.risks), ("out of scope", &file.out_of_scope)] {
+        if !items.is_empty() {
+            lines.push(String::new());
+            lines.push(format!("  {heading}"));
+            lines.extend(items.iter().map(|item| format!("    - {item}")));
+        }
+    }
+    lines.push(String::new());
     for task in &file.tasks {
         lines.extend(task_lines(task));
     }
     lines
 }
 
-/// One task: its id and title, then what it may touch, what proves it
-/// done and what it waits for, each on a line of its own under it.
+/// One task: its id and title, then what it does, what it may touch,
+/// what proves it done and what it waits for, each under it.
 fn task_lines(task: &Task) -> Vec<String> {
     let under = " ".repeat(task.id.as_str().chars().count() + 4);
     let mut lines = vec![format!("  {}  {}", task.id, task.title)];
+    if let Some(description) = said(&task.description) {
+        lines.extend(markdown(description, &under));
+    }
     let scope: Vec<&str> = task.scope.iter().map(|glob| glob.as_str()).collect();
     lines.push(format!("{under}scope: {}", scope.join(", ")));
-    let criteria: Vec<String> = task
-        .criteria
-        .iter()
-        .map(|criterion| match criterion.is_guard() {
-            true => format!("guard `{}`", criterion.cmd),
-            false => format!("`{}`", criterion.cmd),
-        })
-        .collect();
-    lines.push(format!("{under}criteria: {}", criteria.join("; ")));
+    for criterion in &task.criteria {
+        let lead = match criterion.is_guard() {
+            true => "keeps passing",
+            false => "done when",
+        };
+        lines.push(match said(&criterion.proves) {
+            Some(proves) => format!("{under}{lead}: {proves} — `{}`", criterion.cmd),
+            None => format!("{under}{lead}: `{}`", criterion.cmd),
+        });
+    }
     if !task.depends_on.is_empty() {
         let after: Vec<&str> = task.depends_on.iter().map(|id| id.as_str()).collect();
         lines.push(format!("{under}after: {}", after.join(", ")));
     }
     lines
+}
+
+/// Markdown as a terminal shows it: every line under `indent`, code
+/// blocks as written, and each `mermaid` block named rather than drawn.
+fn markdown(text: &str, indent: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut in_diagram = false;
+    for line in text.lines() {
+        let fence = line.trim_start();
+        if in_diagram {
+            in_diagram = !fence.starts_with("```");
+            continue;
+        }
+        if fence.starts_with("```mermaid") {
+            in_diagram = true;
+            lines.push(format!("{indent}(diagram: in the whole plan)"));
+            continue;
+        }
+        lines.push(match line.is_empty() {
+            true => String::new(),
+            false => format!("{indent}{line}"),
+        });
+    }
+    lines
+}
+
+/// Text that says something, trimmed.
+fn said(text: &Option<String>) -> Option<&str> {
+    text.as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
 }
 
 /// Any other document, whole: what a person approves is what they read.
@@ -91,9 +150,18 @@ mod tests {
         }
     }
 
+    fn tasks(yaml: &str) -> ShownDocument {
+        document(
+            ShownContent::Tasks(serde_norway::from_str(yaml).unwrap()),
+            ArtifactId::Interpreted {
+                kind: ArtifactKind::Tasks,
+            },
+        )
+    }
+
     #[test]
-    fn a_plan_is_shown_task_by_task_with_its_scope_and_what_proves_it_done() {
-        let file: TasksFile = serde_norway::from_str(
+    fn a_plan_with_nothing_for_a_person_is_shown_task_by_task() {
+        let drawn = shown(&tasks(
             r#"
 tasks:
   - id: T001
@@ -109,28 +177,84 @@ tasks:
     criteria: [{ cmd: "grep -c hello hello.txt" }]
     depends_on: [T001]
 "#,
-        )
-        .unwrap();
-        let drawn = shown(&document(
-            ShownContent::Tasks(file),
-            ArtifactId::Interpreted {
-                kind: ArtifactKind::Tasks,
-            },
         ));
         assert_eq!(
             drawn,
             vec![
-                "the tasks document of `plan` — 2 tasks",
+                "the plan of `plan` — 2 tasks",
+                "",
                 "  T001  Write the greeting",
                 "        scope: hello.txt",
-                "        criteria: `test -f hello.txt`; guard `true`",
+                "        done when: `test -f hello.txt`",
+                "        keeps passing: `true`",
                 "  T002  Say it twice",
                 "        scope: hello.txt, README.md",
-                "        criteria: `grep -c hello hello.txt`",
+                "        done when: `grep -c hello hello.txt`",
                 "        after: T001",
-                "the whole document: artifacts/plan/tasks.yaml",
+                "the whole plan: artifacts/plan/tasks.yaml",
             ],
             "the notes stay in the file"
+        );
+    }
+
+    #[test]
+    fn a_plan_says_what_it_changes_and_names_its_diagrams_rather_than_drawing_them() {
+        let drawn = shown(&tasks(
+            r#"
+summary: Greet in the user's language
+description: |
+  Greetings come from a table.
+
+  ```mermaid
+  graph LR
+    Table --> Greeter
+  ```
+
+  ```rust
+  greet("es")
+  ```
+design: |
+  ```rust
+  pub fn greet(lang: &str) -> String;
+  ```
+risks: [Snapshot tests change]
+tasks:
+  - id: T001
+    title: Add the table
+    description: Every language gets its greeting.
+    scope: [src/i18n.rs]
+    criteria:
+      - { cmd: "cargo test i18n", proves: "each language has its greeting" }
+"#,
+        ));
+        assert_eq!(
+            drawn,
+            vec![
+                "the plan of `plan` — 1 task",
+                "  Greet in the user's language",
+                "",
+                "  Greetings come from a table.",
+                "",
+                "  (diagram: in the whole plan)",
+                "",
+                "  ```rust",
+                "  greet(\"es\")",
+                "  ```",
+                "",
+                "  design",
+                "    ```rust",
+                "    pub fn greet(lang: &str) -> String;",
+                "    ```",
+                "",
+                "  risks",
+                "    - Snapshot tests change",
+                "",
+                "  T001  Add the table",
+                "        Every language gets its greeting.",
+                "        scope: src/i18n.rs",
+                "        done when: each language has its greeting — `cargo test i18n`",
+                "the whole plan: artifacts/plan/tasks.yaml",
+            ]
         );
     }
 

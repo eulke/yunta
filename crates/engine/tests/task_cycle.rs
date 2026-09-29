@@ -74,6 +74,7 @@ fn cmd(cmd: &str) -> Criterion {
     Criterion {
         cmd: cmd.to_string(),
         r#type: None,
+        proves: None,
     }
 }
 
@@ -81,6 +82,7 @@ fn guard(cmd: &str) -> Criterion {
     Criterion {
         cmd: cmd.to_string(),
         r#type: Some(yunta_core::events::CriterionType::Guard),
+        proves: None,
     }
 }
 
@@ -142,6 +144,7 @@ fn task(id: &str, scope: &[&str], criteria: Vec<Criterion>) -> Task {
         criteria,
         depends_on: vec![],
         notes: None,
+        description: None,
     }
 }
 

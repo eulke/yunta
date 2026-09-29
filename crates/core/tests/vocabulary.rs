@@ -189,6 +189,7 @@ fn all_rules() -> Vec<(DocumentKind, &'static Rule)> {
             yunta_core::shape::rules(kind)
                 .iter()
                 .chain(yunta_core::shape::run_rules(kind))
+                .chain(yunta_core::shape::review_rules(kind))
                 .map(move |rule| (DocumentKind::Artifact(kind), rule))
         })
         .chain(
@@ -249,6 +250,7 @@ fn the_contract_a_door_hands_out_carries_the_shape_and_every_rule() {
         for rule in yunta_core::shape::rules(kind)
             .iter()
             .chain(yunta_core::shape::run_rules(kind))
+            .chain(yunta_core::shape::review_rules(kind))
         {
             let demand = yunta_core::text::one_line(rule.demand);
             assert!(

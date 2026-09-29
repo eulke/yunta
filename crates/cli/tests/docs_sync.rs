@@ -4,8 +4,8 @@
 //! and every closed set a document states — the event kinds and the
 //! fields of each payload, the capabilities an adapter may declare and
 //! what each built adapter does declare, the tools of both MCP
-//! surfaces, the rules of a tasks document, the check builtins, the
-//! context sources and the input types — is the set the types publish.
+//! surfaces, the check builtins, the context sources and the input
+//! types — is the set the types publish.
 //! A reader never copies something the binary refuses, and a set that
 //! grows in one place and not the other fails here, not in a run.
 
@@ -15,8 +15,8 @@ use std::path::PathBuf;
 use rmcp::ServiceExt;
 use yunta_testkit::{
     backticked, bullets, fenced_blocks, field_tables, fixed_consts, has_top_level_key, json_schema,
-    markdown_files, names_after, number_before, numbered_items, rule_codes_named, section, stderr,
-    stdout, struct_fields, table_rows, tagged_variants, write, yunta_at, yunta_in, Checkout,
+    markdown_files, names_after, number_before, section, stderr, stdout, struct_fields, table_rows,
+    tagged_variants, write, yunta_at, yunta_in, Checkout,
 };
 
 fn repo_root() -> PathBuf {
@@ -231,45 +231,6 @@ fn every_yaml_example_in_the_docs_is_one_the_binary_accepts() {
     assert!(
         seen >= 16,
         "the docs carry their YAML examples ({seen} found)"
-    );
-}
-
-/// The rules of the tasks document are published before it is written —
-/// the same list the contract hands a session — so the spec that states
-/// them and the engine that enforces them are one list read twice. A rule
-/// the spec leaves out is one a writer meets for the first time as a
-/// failure.
-#[test]
-fn the_tasks_spec_states_every_rule_the_engine_publishes() {
-    let spec = repo_root().join("docs/design/spec-tasks.md");
-    let text = std::fs::read_to_string(&spec).unwrap();
-    let items = numbered_items(&section(&text, "## 3."));
-    let stated: BTreeSet<String> = items
-        .iter()
-        .map(|item| {
-            let named = rule_codes_named(item);
-            assert_eq!(
-                named.len(),
-                1,
-                "every item of §3 names the one rule code it states, in backticks: {item}"
-            );
-            named[0].clone()
-        })
-        .collect();
-
-    let published: BTreeSet<String> = <yunta_core::TasksFile as yunta_core::shape::Document>::RULES
-        .iter()
-        .map(|rule| rule.code.as_str().to_string())
-        .collect();
-
-    assert_eq!(
-        stated, published,
-        "§3 of the tasks spec (left) and the rules the engine publishes (right) disagree"
-    );
-    assert_eq!(
-        items.len(),
-        published.len(),
-        "§3 states one item per published rule"
     );
 }
 

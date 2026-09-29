@@ -23,11 +23,16 @@ sessions:
         tool: yunta_submit_tasks
         arguments:
           document:
+            summary: "Bootstrap the crate dark mode lives in"
+            description: "Starts the library crate, so the dark mode has somewhere to live."
             tasks:
               - id: T001
                 title: "Bootstrap the crate"
+                description: "Adds the manifest and an empty library."
                 scope: ["Cargo.toml", "src/**"]
                 criteria:
                   - cmd: "test -f Cargo.toml"
+                    proves: "the crate has a manifest"
                   - cmd: "test -f src/lib.rs"
+                    proves: "the crate has a library to build on"
     outcome: { type: completed, summary: "tasks document registered" }

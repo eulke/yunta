@@ -59,6 +59,11 @@ pub trait Document: DeserializeOwned + serde::Serialize + sealed::Sealed {
     /// the engine runs it — the rules no reading of the document can
     /// settle, because only that environment can answer them.
     const RUN_RULES: &'static [Rule] = &[];
+
+    /// What a person reviewing the document needs it to say, demanded
+    /// only when the run shows it to one: a gate that puts a plan in
+    /// front of a person puts its explanation there too.
+    const REVIEW_RULES: &'static [Rule] = &[];
 }
 
 mod sealed {
@@ -187,6 +192,16 @@ pub fn run_rules(kind: ArtifactKind) -> &'static [Rule] {
     }
 }
 
+/// The rules a kind is held to when a gate shows it to a person.
+pub fn review_rules(kind: ArtifactKind) -> &'static [Rule] {
+    match kind {
+        ArtifactKind::Tasks => TasksFile::REVIEW_RULES,
+        ArtifactKind::Findings => FindingsFile::REVIEW_RULES,
+        ArtifactKind::Questions => QuestionsFile::REVIEW_RULES,
+        ArtifactKind::Answers => crate::AnswersFile::REVIEW_RULES,
+    }
+}
+
 fn rendered<T: Document>() -> String {
     let mut text = T::EXAMPLE.trim_end().to_string();
     if T::RULES.is_empty() {
@@ -204,6 +219,15 @@ fn rendered<T: Document>() -> String {
              the document unless:\n",
         );
         for rule in T::RUN_RULES {
+            text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+        }
+    }
+    if !T::REVIEW_RULES.is_empty() {
+        text.push_str(
+            "#\n# When the workflow has a gate show the document to a person, the engine also \
+             refuses it unless:\n",
+        );
+        for rule in T::REVIEW_RULES {
             text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
         }
     }
@@ -291,6 +315,7 @@ mod tests {
                 rules(kind)
                     .iter()
                     .chain(run_rules(kind))
+                    .chain(review_rules(kind))
                     .map(|rule| rule.code)
             })
             .chain(crate::workflow::read::RULES.iter().map(|rule| rule.code))

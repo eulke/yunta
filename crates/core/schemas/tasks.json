@@ -1,9 +1,42 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "yunta tasks",
-  "description": "A tasks document — the sole top-level key is `tasks:`, with no\nheader metadata alongside it.",
+  "description": "A tasks document: the tasks the engine runs, and what a person who\nreviews the plan reads about it — what changes and why, the shapes it\ncreates or changes, and what it leaves out. Nothing about the brief,\nthe mode or the run: that context lives in the manifest and the log.\n\nOne document for both readers, so what a person approves is what the\nengine executes.",
   "type": "object",
   "properties": {
+    "description": {
+      "description": "What changes, why, and how the work is approached, in Markdown:\ncode blocks for an example or how the parts interact, `mermaid`\nblocks for diagrams.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "design": {
+      "description": "The shapes the plan creates or changes — types, interfaces,\nschemas, signatures, file formats — as Markdown code blocks, each\ndeclared once for every task that touches it.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "out_of_scope": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summary": {
+      "description": "What the plan changes, in one line.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "tasks": {
       "type": "array",
       "items": {
@@ -22,6 +55,13 @@
       "properties": {
         "cmd": {
           "type": "string"
+        },
+        "proves": {
+          "description": "What passing shows, in words a person reviewing the plan reads.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "type": {
           "anyOf": [
@@ -65,6 +105,13 @@
           "items": {
             "$ref": "#/$defs/TaskId"
           }
+        },
+        "description": {
+          "description": "What the task does and why, in Markdown, for a person reviewing\nthe plan. It names the shapes of the plan's `design` it touches\nrather than repeating them.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "id": {
           "$ref": "#/$defs/TaskId"

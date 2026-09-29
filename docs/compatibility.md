@@ -216,7 +216,8 @@ nothing about the failure asks for one.
 The rules a document can break, which is that closed set: `duplicate-id`,
 `empty-title`, `empty-scope`, `no-criteria`, `all-criteria-are-guards`,
 `unknown-dependency`, `dependency-cycle`, `overlapping-scope`,
-`criterion-cannot-run`, `criterion-already-passes`, `guard-already-red`, `empty-text`,
+`criterion-cannot-run`, `criterion-already-passes`, `guard-already-red`, `no-summary`,
+`no-description`, `unexplained-criterion`, `empty-text`,
 `empty-detail`, `unknown-id`, `withdrawn-id`, `empty-reason`, `missing-values`,
 `missing-answer`, `mismatched-answer` and `incoherent-mode`. Together with
 `parse` and the six an artifact fails under, they are every stable code this

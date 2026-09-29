@@ -101,6 +101,9 @@ pub struct RunToolsHost {
     pub(super) environment: Option<ExecutionEnvironment>,
     /// The run's own tree.
     pub(super) worktree: PathBuf,
+    /// The frozen workflow, for what a document handed over is held to
+    /// by the nodes around the one that hands it over.
+    pub(super) workflow: Workflow,
 }
 
 impl RunToolsHost {
@@ -152,6 +155,7 @@ impl RunToolsHost {
             subprocess_vars,
             environment,
             worktree,
+            workflow: workflow.clone(),
         }
     }
 

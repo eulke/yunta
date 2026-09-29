@@ -162,6 +162,28 @@ pub fn problems(heading: impl fmt::Display, items: &[impl fmt::Display]) -> Stri
     text
 }
 
+/// Escapes a Mermaid node label. Labels sit inside `["..."]` and Mermaid
+/// renders them as HTML, so every character HTML or the quoting reads
+/// specially becomes an entity. `&` is handled in the same single pass as
+/// the rest, so an entity this inserts is never re-escaped.
+///
+/// A label is one line by construction: the collapse is [`one_line`]'s,
+/// the rule every surface with room for one line reads.
+pub fn escape_mermaid(text: &str) -> String {
+    let text = one_line(text);
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::{aside, counted, detailed};

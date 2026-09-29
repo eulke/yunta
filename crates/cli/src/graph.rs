@@ -113,7 +113,7 @@ fn render_mermaid(workflow: &Workflow, labels: Option<&Labels>) -> String {
             format!(
                 "{indent}{}[\"{}\"]\n",
                 node.id,
-                escape_mermaid(&labelled(node, labels))
+                yunta_core::text::escape_mermaid(&labelled(node, labels))
             )
         };
         match children_of(node) {
@@ -123,7 +123,7 @@ fn render_mermaid(workflow: &Workflow, labels: Option<&Labels>) -> String {
                 out.push_str(&format!(
                     "  subgraph {}[\"{}\"]\n",
                     node.id,
-                    escape_mermaid(&labelled(node, labels))
+                    yunta_core::text::escape_mermaid(&labelled(node, labels))
                 ));
                 for child in children {
                     out.push_str(&declared(child, "    "));
@@ -218,29 +218,6 @@ fn render_dot(workflow: &Workflow, labels: Option<&Labels>) -> String {
     out
 }
 
-/// Escapes a Mermaid node label. Labels sit inside `["..."]` and Mermaid
-/// renders them as HTML, so every character HTML or the quoting reads
-/// specially becomes an entity. `&` is handled in the same single pass as
-/// the rest, so an entity this inserts is never re-escaped.
-///
-/// A label is one line by construction: the collapse belongs to every
-/// surface with room for one line, so it lives in `yunta_core::text`
-/// rather than being re-derived here and in `escape_dot`.
-fn escape_mermaid(text: &str) -> String {
-    let text = yunta_core::text::one_line(text);
-    let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '"' => out.push_str("&quot;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            other => out.push(other),
-        }
-    }
-    out
-}
-
 /// Escapes a DOT quoted-string label: backslash and double quote are the
 /// two characters DOT reads specially inside `"..."`.
 fn escape_dot(text: &str) -> String {
@@ -258,7 +235,8 @@ fn escape_dot(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{escape_dot, escape_mermaid};
+    use super::escape_dot;
+    use yunta_core::text::escape_mermaid;
 
     #[test]
     fn mermaid_escaping_covers_every_html_significant_character() {

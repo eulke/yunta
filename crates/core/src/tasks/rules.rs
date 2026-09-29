@@ -86,6 +86,74 @@ pub(super) const RUN_RULES: &[Rule] = &[
     },
 ];
 
+/// What a person reviewing the plan needs it to say, demanded when the
+/// workflow has a gate show it: the change in a line and in prose, and
+/// for each task and each criterion what it is there for. The shapes, the
+/// risks and what is left out are asked for by whoever writes the prompt
+/// — a plan that only touches documentation creates no shape.
+pub(super) const REVIEW_RULES: &[Rule] = &[
+    Rule {
+        code: RuleCode::NoSummary,
+        demand: "`summary` says what the plan changes, in one non-empty line",
+    },
+    Rule {
+        code: RuleCode::NoDescription,
+        demand: "the plan and every task carry a `description`: what changes and why, in \
+                 Markdown",
+    },
+    Rule {
+        code: RuleCode::UnexplainedCriterion,
+        demand: "every criterion says what passing it `proves`, in words",
+    },
+];
+
+/// Every way the plan leaves a person reviewing it without an
+/// explanation, collected rather than stopped at the first.
+pub(super) fn reviewed(tasks: &TasksFile) -> Vec<Diagnostic> {
+    let said = |text: &Option<String>| text.as_deref().is_some_and(|t| !t.trim().is_empty());
+    let mut broken = Vec::new();
+    let document = |code: RuleCode, detail: &str| {
+        Diagnostic::new(Subject::Document, Problem::rule(code, detail))
+    };
+    if !said(&tasks.summary) {
+        broken.push(document(
+            RuleCode::NoSummary,
+            "`summary` is missing; say what the plan changes, in one line",
+        ));
+    }
+    if !said(&tasks.description) {
+        broken.push(document(
+            RuleCode::NoDescription,
+            "`description` is missing; say what changes, why and how the work is approached",
+        ));
+    }
+    for (index, task) in tasks.tasks.iter().enumerate() {
+        if !said(&task.description) {
+            broken.push(broke(
+                index,
+                &task.id,
+                RuleCode::NoDescription,
+                "`description` is missing; say what the task does and why",
+            ));
+        }
+        for (at, criterion) in task.criteria.iter().enumerate() {
+            if !said(&criterion.proves) {
+                broken.push(Diagnostic::new(
+                    Subject::Criterion {
+                        task: Named::new(task.id.clone(), index),
+                        index: at,
+                    },
+                    Problem::rule(
+                        RuleCode::UnexplainedCriterion,
+                        format!("`{}` does not say what it `proves`", criterion.cmd),
+                    ),
+                ));
+            }
+        }
+    }
+    broken
+}
+
 fn broke(index: usize, id: &TaskId, code: RuleCode, detail: impl Into<String>) -> Diagnostic {
     Diagnostic::new(
         Subject::Task(Named::new(id.clone(), index)),

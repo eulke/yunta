@@ -2730,6 +2730,21 @@
           "const": "guard-already-red"
         },
         {
+          "description": "A plan a person reviews says nothing of what it changes in one line.",
+          "type": "string",
+          "const": "no-summary"
+        },
+        {
+          "description": "A plan, or one of its tasks, that a person reviews does not say\nwhat it does and why.",
+          "type": "string",
+          "const": "no-description"
+        },
+        {
+          "description": "A criterion of a plan a person reviews does not say what it proves.",
+          "type": "string",
+          "const": "unexplained-criterion"
+        },
+        {
           "description": "An update or a withdrawal names a finding this node never posted.",
           "type": "string",
           "const": "unknown-id"

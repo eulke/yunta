@@ -91,6 +91,13 @@ rule_codes! {
     CriterionAlreadyPasses => "criterion-already-passes",
     /// A guard that has to pass before the work already fails.
     GuardAlreadyRed => "guard-already-red",
+    /// A plan a person reviews says nothing of what it changes in one line.
+    NoSummary => "no-summary",
+    /// A plan, or one of its tasks, that a person reviews does not say
+    /// what it does and why.
+    NoDescription => "no-description",
+    /// A criterion of a plan a person reviews does not say what it proves.
+    UnexplainedCriterion => "unexplained-criterion",
     EmptyText => "empty-text",
     EmptyDetail => "empty-detail",
     /// An update or a withdrawal names a finding this node never posted.

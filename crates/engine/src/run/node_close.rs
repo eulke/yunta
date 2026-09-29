@@ -152,13 +152,17 @@ pub(super) async fn close_node(
     let (verified, standing) = match &acquired {
         Some(acquired) => (acquired.verified.as_slice(), Some(&acquired.standing)),
         None => {
-            own = match close_artifacts(node, ctx.run_dir, &ctx.load_events().await?, ceiling).await
-            {
+            let events = ctx.load_events().await?;
+            own = match close_artifacts(node, ctx.run_dir, &events, ceiling).await {
                 Ok(verified) => verified,
                 Err(failures) => {
                     return fail_with(ctx, node, Failure::artifacts(failures), false, tokens).await
                 }
             };
+            if let Some(failure) = unexplained_plan(ctx, node, &events, &own) {
+                return fail_with(ctx, node, Failure::artifacts(vec![failure]), false, tokens)
+                    .await;
+            }
             (own.as_slice(), None)
         }
     };
@@ -367,4 +371,34 @@ pub(super) async fn fail_with(
     .await?;
     write_progress(ctx).await?;
     Ok(NodeEnd::Failed)
+}
+
+/// A tasks document `node` closes with that a gate shows a person, and
+/// that does not say what it changes and why. The submission tool
+/// refuses one when it is handed over; this holds one that arrived as a
+/// file to the same rule.
+fn unexplained_plan(
+    ctx: &RunCtx<'_>,
+    node: &yunta_core::Node,
+    events: &[yunta_core::events::StoredEvent],
+    verified: &[crate::artifacts::VerifiedArtifact],
+) -> Option<yunta_core::diagnostic::ArtifactFailure> {
+    if !crate::tasks::plan_reviewed(&ctx.manifest.workflow, events, &node.id) {
+        return None;
+    }
+    verified.iter().find_map(|artifact| {
+        let crate::artifacts::ArtifactContent::Tasks(tasks) = &artifact.content else {
+            return None;
+        };
+        let broken = tasks.unexplained();
+        (!broken.is_empty()).then(|| {
+            yunta_core::diagnostic::ArtifactFailure::Content(yunta_core::diagnostic::Report::new(
+                yunta_core::diagnostic::DocumentRef::new(
+                    ArtifactKind::Tasks,
+                    artifact.path.display().to_string(),
+                ),
+                broken,
+            ))
+        })
+    })
 }

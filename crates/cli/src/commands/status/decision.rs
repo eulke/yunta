@@ -88,11 +88,7 @@ pub(crate) fn block(
     let shows: Vec<String> = escalation
         .shows()
         .iter()
-        .map(|shown| {
-            yunta_engine::view_path(shown.producer.as_ref(), &shown.artifact.view_name())
-                .display()
-                .to_string()
-        })
+        .map(|shown| yunta_engine::view_of(shown).display().to_string())
         .collect();
     out.push_str(&layout.facts("what it is about", &shows));
     if let Some(external_ref) = escalation.external_ref() {

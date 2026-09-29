@@ -24,7 +24,7 @@
 mod canonical;
 mod ingest;
 mod integrity;
-pub(crate) mod shown;
+pub mod shown;
 pub mod store;
 
 use std::path::Path;
@@ -147,7 +147,17 @@ pub(crate) async fn accept(
     store
         .project(producer, &name, &content_hash)
         .await
-        .map_err(|source| AcceptError::Project { name, source })?;
+        .map_err(|source| AcceptError::Project {
+            name: name.clone(),
+            source,
+        })?;
+    // A plan is also read by a person: its view for them sits beside it.
+    if let Some(plan) = plan_view(&artifact, bytes) {
+        store
+            .write_view(producer, crate::tasks::view::VIEW_NAME, plan.as_bytes())
+            .await
+            .map_err(|source| AcceptError::Project { name, source })?;
+    }
     Ok(ArtifactRef {
         producer: producer.cloned(),
         artifact,
@@ -155,6 +165,20 @@ pub(crate) async fn accept(
         origin: yunta_core::events::ArtifactOrigin::Recorded(origin),
         seq,
     })
+}
+
+/// The Markdown view of a tasks document, for a person reviewing the
+/// plan; `None` for any other artifact.
+fn plan_view(artifact: &ArtifactId, bytes: &[u8]) -> Option<String> {
+    let ArtifactId::Interpreted {
+        kind: yunta_core::ArtifactKind::Tasks,
+    } = artifact
+    else {
+        return None;
+    };
+    let file =
+        yunta_core::shape::read::<yunta_core::TasksFile>(bytes, artifact.view_name()).ok()?;
+    Some(crate::tasks::view::PlanView::of(&file).markdown())
 }
 
 /// What one run holds, as its own log states it: the artifacts it has

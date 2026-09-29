@@ -33,17 +33,21 @@ sessions:
         tool: yunta_submit_tasks
         arguments:
           document:
+            summary: "Make it"
+            description: "Writes the file the run is about."
             tasks:
-              - { id: T001, title: "Make it", scope: [made.txt], criteria: [{ cmd: "test -f made.txt" }] }
+              - { id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }
     outcome: { type: completed, summary: "planned" }
   - steps:
       - type: run_tool
         tool: yunta_submit_tasks
         arguments:
           document:
+            summary: "Make it"
+            description: "Writes the file the run is about."
             tasks:
-              - { id: T001, title: "Make it", scope: [made.txt], criteria: [{ cmd: "test -f made.txt" }] }
-              - { id: T002, title: "Say it", scope: [said.txt], criteria: [{ cmd: "test -f said.txt" }] }
+              - { id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }
+              - { id: T002, title: "Say it", description: "Writes said.txt.", scope: [said.txt], criteria: [{ cmd: "test -f said.txt", proves: "it was said" }] }
     outcome: { type: completed, summary: "planned again" }
 "#;
 
@@ -80,10 +84,11 @@ fn a_plan_is_reviewed_at_its_gate_and_a_correction_sends_it_back_with_the_words(
     let drawn = terminal.drawn();
     assert!(
         drawn.contains("what you are deciding on")
+            && drawn.contains("Writes the file the run is about.")
             && drawn.contains("T001  Make it")
-            && drawn.contains("criteria: `test -f made.txt`")
-            && drawn.contains("artifacts/plan/tasks.yaml"),
-        "the gate shows the plan it asks about:\n{drawn}"
+            && drawn.contains("done when: the file exists — `test -f made.txt`")
+            && drawn.contains("the whole plan: artifacts/plan/tasks.md"),
+        "the gate shows the plan it asks about, explained:\n{drawn}"
     );
 
     // `adjust`, the second option.

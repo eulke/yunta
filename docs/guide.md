@@ -302,9 +302,19 @@ nodes:
     shows: [{ node: plan, kind: tasks }]
 ```
 
-At the decision you read the plan task by task, with its scope and what proves
-each task done, and the path to the whole document. The log records the exact
-version you saw by its hash, so an approval is an approval of those bytes.
+At the decision you read the plan the way it is reviewed: what it changes and why,
+the shapes it creates, its risks, then task by task what each does, what it touches
+and what proves it done — and the path to `tasks.md`, the whole plan in Markdown
+with its diagrams and a graph of the order its tasks run in. The log records the
+exact version you saw by its hash, so an approval is an approval of those bytes.
+
+A plan a gate shows has to say those things. Next to `tasks:` it carries a
+`summary`, a Markdown `description` (code blocks and `mermaid` diagrams welcome), a
+`design` with the types, interfaces or schemas it creates or changes, and `risks`
+and `out_of_scope` when there are any; every task has its own `description` and
+every criterion says what it `proves`. The engine refuses a plan it will show
+without the summary, the descriptions and the `proves`, and tells the planner what
+is missing in the same answer.
 
 An option that sends the run back to a node with a session, like `adjust` above,
 asks what should change and doesn't take an empty answer: those words are what the

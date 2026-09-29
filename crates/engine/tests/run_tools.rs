@@ -507,6 +507,7 @@ fn greeting_task() -> yunta_core::Task {
 id: T001
 title: Write the greeting
 notes: the greeting lives in hello.txt
+description: Greets whoever opens the project.
 scope: [hello.txt]
 criteria:
   - cmd: test -f hello.txt
@@ -630,6 +631,7 @@ async fn a_task_session_reads_its_task_and_every_cycle_it_ran_from_the_run() {
             "id": "T001",
             "title": "Write the greeting",
             "notes": "the greeting lives in hello.txt",
+            "description": "Greets whoever opens the project.",
             "scope": ["hello.txt", "docs/**"],
             "criteria": [
                 {"cmd": "test -f hello.txt", "guard": false},
@@ -754,6 +756,7 @@ async fn a_check_says_which_criterion_could_not_run_and_where_it_was_looked_for(
     task.criteria = vec![yunta_core::Criterion {
         cmd: "yunta-no-such-tool --version".to_string(),
         r#type: None,
+        proves: None,
     }];
     let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
     let session = host

@@ -139,6 +139,17 @@ impl<'a> ObjectStore<'a> {
         hash: &ContentHash,
     ) -> Result<(), ObjectError> {
         let bytes = self.get(hash).await?;
+        self.write_view(node, name, &bytes).await
+    }
+
+    /// Writes `bytes` as `node`'s view under `name`: a projection of an
+    /// object, or a view derived from one.
+    pub async fn write_view(
+        &self,
+        node: Option<&NodeId>,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<(), ObjectError> {
         let path = self.run_dir.join(view_path(node, name));
         let io = |context: String| move |source| ObjectError::Io { context, source };
         if let Some(parent) = path.parent() {
@@ -146,7 +157,7 @@ impl<'a> ObjectStore<'a> {
                 .await
                 .map_err(io(format!("create `{}`", parent.display())))?;
         }
-        tokio::fs::write(&path, &bytes)
+        tokio::fs::write(&path, bytes)
             .await
             .map_err(io(format!("write `{}`", path.display())))
     }

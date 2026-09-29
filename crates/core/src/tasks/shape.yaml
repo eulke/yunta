@@ -1,25 +1,64 @@
 # A tasks document: one task per independently-verifiable unit of work.
 # Written strictly — any key not listed here fails the node.
+#
+# `summary`, `description`, each task's `description` and each criterion's
+# `proves` are for the person who reviews the plan. They are optional,
+# and required when the workflow has a gate show the plan to that person.
+
+summary: "Add a dark mode the user can switch on"   # one line: what changes
+description: |                          # Markdown: what changes, why, and how
+  Users working at night asked for a darker theme. The theme becomes a
+  setting the toggle writes and every screen reads:
+
+  ```mermaid
+  graph LR
+    Toggle --> Settings --> Screens
+  ```
+
+  A screen reads it once when it opens:
+
+  ```rust
+  let theme = settings.theme();
+  ```
+# optional. Markdown: the shapes the plan creates or changes, declared once
+design: |
+  ```rust
+  pub enum Theme { Light, Dark }
+
+  impl Settings {
+      pub fn theme(&self) -> Theme;
+  }
+  ```
+risks:                                  # optional
+  - "Screens with hard-coded colors keep them until they read the theme"
+out_of_scope:                           # optional
+  - "Following the operating system's theme"
 
 tasks:                                  # required, at least one
   - id: add-dark-mode                   # required, unique. A letter, then
                                         #   letters, digits, `_` or `-`.
     title: "Add the dark mode toggle"   # required, non-empty
+    description: "Adds `Theme` and the toggle that sets it in `Settings`."
+                                        # Markdown: what the task does and why
     scope: ["src/theme/**"]             # required, at least one glob: the
                                         #   only paths this task may touch
     criteria:                           # required, at least one
       - cmd: "cargo test -p ui dark_mode"   # required, non-empty. Must FAIL
                                             #   before the work and pass after.
+        proves: "the toggle switches the theme"   # in words
       - cmd: "cargo clippy -- -D warnings"
         type: guard                     # optional. A guard passes before AND
                                         #   after the work, rather than failing
                                         #   first.
+        proves: "the code still lints clean"
 
   - id: document-dark-mode
     title: "Document the toggle in the README"
+    description: "Tells users where the toggle is."
     scope: ["README.md"]
     depends_on: [add-dark-mode]         # optional, ids declared in this file
     notes: "Link the screenshot the first task adds."   # optional, one line of
                                         #   context for a runner with no history
     criteria:
       - cmd: "grep -q 'dark mode' README.md"
+        proves: "the README mentions the toggle"

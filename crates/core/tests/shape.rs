@@ -113,12 +113,12 @@ fn a_value_of_the_wrong_type_is_located_by_its_path() {
 #[test]
 fn a_key_the_type_does_not_declare_is_named() {
     let report = read::<TasksFile>(
-        b"tasks:\n  - id: t1\n    title: Work\n    description: extra\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
+        b"tasks:\n  - id: t1\n    title: Work\n    estimate: extra\n    scope: [\"src/**\"]\n    criteria:\n      - cmd: \"cargo test\"\n",
         PLAN,
     )
     .expect_err("a key nobody declared");
     let text = report.to_string();
-    assert!(text.contains("description"), "the key itself: {text}");
+    assert!(text.contains("estimate"), "the key itself: {text}");
 }
 
 #[test]

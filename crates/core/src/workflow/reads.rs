@@ -8,7 +8,7 @@
 //! named node declares what is asked of it. One list of them is what
 //! keeps a fourth place from reaching one rule and not the others.
 
-use super::{ArtifactRefId, ContextSpec, Node, NodeKind};
+use super::{ArtifactKind, ArtifactRefId, ContextSpec, Node, NodeKind};
 use crate::ids::NodeId;
 
 /// Where a node names an artifact.
@@ -100,4 +100,27 @@ pub fn read_sources(node: &Node) -> Vec<(&'static str, &NodeId)> {
         sources.extend(nodes.iter().flat_map(read_sources));
     }
     sources
+}
+
+/// Whether one of `nodes` is a gate that shows `producer`'s tasks
+/// document to a person: its `shows:` names that document of
+/// `producer`, or the run's tasks document whoever produced it.
+pub fn shown_by_a_gate<'a>(nodes: impl IntoIterator<Item = &'a Node>, producer: &NodeId) -> bool {
+    nodes.into_iter().any(|node| {
+        let NodeKind::Gate {
+            shows,
+            external: None,
+            ..
+        } = &node.kind
+        else {
+            return false;
+        };
+        shows.iter().any(|shown| {
+            shown.id
+                == ArtifactRefId::Kind {
+                    kind: ArtifactKind::Tasks,
+                }
+                && shown.node.as_ref().is_none_or(|named| named == producer)
+        })
+    })
 }

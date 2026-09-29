@@ -160,6 +160,7 @@ impl ToolsHost {
                     criteria: Vec::new(),
                     depends_on: Vec::new(),
                     notes: None,
+                    description: None,
                 },
                 Unit {
                     who: UnitId::Task(TaskId::from(id)),

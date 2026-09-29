@@ -40,6 +40,7 @@ fn task(id: &str, scope: &[&str], criteria: Vec<Criterion>, depends_on: &[&str])
         criteria,
         depends_on: depends_on.iter().map(|&d| d.into()).collect(),
         notes: None,
+        description: None,
     }
 }
 
@@ -47,6 +48,7 @@ fn cmd(cmd: &str) -> Criterion {
     Criterion {
         cmd: cmd.to_string(),
         r#type: None,
+        proves: None,
     }
 }
 
@@ -54,38 +56,35 @@ fn guard(cmd: &str) -> Criterion {
     Criterion {
         cmd: cmd.to_string(),
         r#type: Some(CriterionType::Guard),
+        proves: None,
     }
 }
 
 #[test]
 fn a_well_formed_tasks_document_has_no_errors() {
-    let tasks = TasksFile {
-        tasks: vec![
-            task(
-                "context-sources",
-                &["crates/engine/src/context/**"],
-                vec![cmd("cargo test -p yunta-engine context::")],
-                &[],
-            ),
-            task(
-                "context-assembly",
-                &["crates/engine/src/context/other/**"],
-                vec![cmd("cargo test -p yunta-engine --test context_stability")],
-                &["context-sources"],
-            ),
-        ],
-    };
+    let tasks = TasksFile::of(vec![
+        task(
+            "context-sources",
+            &["crates/engine/src/context/**"],
+            vec![cmd("cargo test -p yunta-engine context::")],
+            &[],
+        ),
+        task(
+            "context-assembly",
+            &["crates/engine/src/context/other/**"],
+            vec![cmd("cargo test -p yunta-engine --test context_stability")],
+            &["context-sources"],
+        ),
+    ]);
     assert_eq!(check(&tasks), Vec::new());
 }
 
 #[test]
 fn duplicate_id_is_reported() {
-    let tasks = TasksFile {
-        tasks: vec![
-            task("a", &["src/a/**"], vec![cmd("true")], &[]),
-            task("a", &["src/b/**"], vec![cmd("true")], &[]),
-        ],
-    };
+    let tasks = TasksFile::of(vec![
+        task("a", &["src/a/**"], vec![cmd("true")], &[]),
+        task("a", &["src/b/**"], vec![cmd("true")], &[]),
+    ]);
     let errors = check(&tasks);
     assert_eq!(codes(&errors), ["duplicate-id"]);
     assert!(rendered(&errors).contains("task `a`"));
@@ -93,9 +92,7 @@ fn duplicate_id_is_reported() {
 
 #[test]
 fn unknown_dependency_is_reported() {
-    let tasks = TasksFile {
-        tasks: vec![task("a", &["src/**"], vec![cmd("true")], &["ghost"])],
-    };
+    let tasks = TasksFile::of(vec![task("a", &["src/**"], vec![cmd("true")], &["ghost"])]);
     let errors = check(&tasks);
     assert_eq!(codes(&errors), ["unknown-dependency"]);
     assert!(rendered(&errors).contains("`ghost`"));
@@ -103,30 +100,24 @@ fn unknown_dependency_is_reported() {
 
 #[test]
 fn dependency_cycle_is_reported() {
-    let tasks = TasksFile {
-        tasks: vec![
-            task("a", &["src/a/**"], vec![cmd("true")], &["b"]),
-            task("b", &["src/b/**"], vec![cmd("true")], &["a"]),
-        ],
-    };
+    let tasks = TasksFile::of(vec![
+        task("a", &["src/a/**"], vec![cmd("true")], &["b"]),
+        task("b", &["src/b/**"], vec![cmd("true")], &["a"]),
+    ]);
     let errors = check(&tasks);
     assert!(codes(&errors).contains(&"dependency-cycle"));
 }
 
 #[test]
 fn empty_scope_is_reported() {
-    let tasks = TasksFile {
-        tasks: vec![task("a", &[], vec![cmd("true")], &[])],
-    };
+    let tasks = TasksFile::of(vec![task("a", &[], vec![cmd("true")], &[])]);
     let errors = check(&tasks);
     assert_eq!(codes(&errors), ["empty-scope"]);
 }
 
 #[test]
 fn empty_title_is_reported() {
-    let mut tasks = TasksFile {
-        tasks: vec![task("a", &["src/**"], vec![cmd("true")], &[])],
-    };
+    let mut tasks = TasksFile::of(vec![task("a", &["src/**"], vec![cmd("true")], &[])]);
     tasks.tasks[0].title = "   ".to_string();
     let errors = check(&tasks);
     assert_eq!(codes(&errors), ["empty-title"]);
@@ -134,96 +125,82 @@ fn empty_title_is_reported() {
 
 #[test]
 fn no_criteria_is_reported() {
-    let tasks = TasksFile {
-        tasks: vec![task("a", &["src/**"], vec![], &[])],
-    };
+    let tasks = TasksFile::of(vec![task("a", &["src/**"], vec![], &[])]);
     let errors = check(&tasks);
     assert_eq!(codes(&errors), ["no-criteria"]);
 }
 
 #[test]
 fn all_criteria_being_guards_is_reported() {
-    let tasks = TasksFile {
-        tasks: vec![task(
-            "a",
-            &["src/**"],
-            vec![guard("cargo clippy --workspace -- -D warnings")],
-            &[],
-        )],
-    };
+    let tasks = TasksFile::of(vec![task(
+        "a",
+        &["src/**"],
+        vec![guard("cargo clippy --workspace -- -D warnings")],
+        &[],
+    )]);
     let errors = check(&tasks);
     assert_eq!(codes(&errors), ["all-criteria-are-guards"]);
 }
 
 #[test]
 fn a_guard_alongside_a_real_criterion_is_fine() {
-    let tasks = TasksFile {
-        tasks: vec![task(
-            "a",
-            &["src/**"],
-            vec![
-                cmd("cargo test -p yunta"),
-                guard("cargo clippy --workspace -- -D warnings"),
-            ],
-            &[],
-        )],
-    };
+    let tasks = TasksFile::of(vec![task(
+        "a",
+        &["src/**"],
+        vec![
+            cmd("cargo test -p yunta"),
+            guard("cargo clippy --workspace -- -D warnings"),
+        ],
+        &[],
+    )]);
     assert_eq!(check(&tasks), Vec::new());
 }
 
 #[test]
 fn overlapping_scopes_without_a_dependency_are_reported() {
-    let tasks = TasksFile {
-        tasks: vec![
-            task("a", &["src/**"], vec![cmd("true")], &[]),
-            task("b", &["src/lib.rs"], vec![cmd("true")], &[]),
-        ],
-    };
+    let tasks = TasksFile::of(vec![
+        task("a", &["src/**"], vec![cmd("true")], &[]),
+        task("b", &["src/lib.rs"], vec![cmd("true")], &[]),
+    ]);
     let errors = check(&tasks);
     assert!(codes(&errors).contains(&"overlapping-scope"));
 }
 
 #[test]
 fn overlapping_scopes_with_a_dependency_between_them_are_fine() {
-    let tasks = TasksFile {
-        tasks: vec![
-            task("a", &["src/**"], vec![cmd("true")], &[]),
-            task("b", &["src/lib.rs"], vec![cmd("true")], &["a"]),
-        ],
-    };
+    let tasks = TasksFile::of(vec![
+        task("a", &["src/**"], vec![cmd("true")], &[]),
+        task("b", &["src/lib.rs"], vec![cmd("true")], &["a"]),
+    ]);
     assert_eq!(check(&tasks), Vec::new());
 }
 
 #[test]
 fn disjoint_scopes_never_get_flagged() {
-    let tasks = TasksFile {
-        tasks: vec![
-            task("a", &["crates/core/**"], vec![cmd("true")], &[]),
-            task("b", &["crates/cli/**"], vec![cmd("true")], &[]),
-        ],
-    };
+    let tasks = TasksFile::of(vec![
+        task("a", &["crates/core/**"], vec![cmd("true")], &[]),
+        task("b", &["crates/cli/**"], vec![cmd("true")], &[]),
+    ]);
     assert_eq!(check(&tasks), Vec::new());
 }
 
 #[test]
 fn every_violation_names_the_task_the_field_and_what_to_do() {
-    let tasks = TasksFile {
-        tasks: vec![
-            task("graph-cmd", &[], vec![cmd("true")], &[]),
-            task(
-                "parse-events",
-                &["src/**"],
-                vec![cmd("true")],
-                &["storage-init"],
-            ),
-            task(
-                "T004",
-                &["docs/**"],
-                vec![guard("cargo clippy --workspace -- -D warnings")],
-                &[],
-            ),
-        ],
-    };
+    let tasks = TasksFile::of(vec![
+        task("graph-cmd", &[], vec![cmd("true")], &[]),
+        task(
+            "parse-events",
+            &["src/**"],
+            vec![cmd("true")],
+            &["storage-init"],
+        ),
+        task(
+            "T004",
+            &["docs/**"],
+            vec![guard("cargo clippy --workspace -- -D warnings")],
+            &[],
+        ),
+    ]);
     let errors = check(&tasks);
     let text = rendered(&errors);
     assert!(
@@ -273,4 +250,66 @@ tasks:
     // Overlapping scope with its own dependency ancestor is fine; the
     // registration should be clean.
     assert_eq!(check(&tasks), Vec::new());
+}
+
+/// The codes a plan's missing explanation is reported under, in order.
+fn unexplained_codes(tasks: &TasksFile) -> Vec<String> {
+    tasks
+        .unexplained()
+        .iter()
+        .map(|diagnostic| match &diagnostic.problem {
+            yunta_core::diagnostic::Problem::Rule { code, .. } => code.to_string(),
+            other => panic!("a missing explanation is a broken rule, got {other:?}"),
+        })
+        .collect()
+}
+
+#[test]
+fn a_plan_a_person_reviews_names_every_piece_of_its_explanation_it_lacks() {
+    let tasks = TasksFile::of(vec![task(
+        "a",
+        &["src/a.rs"],
+        vec![cmd("test -f src/a.rs"), guard("true")],
+        &[],
+    )]);
+    assert_eq!(
+        unexplained_codes(&tasks),
+        [
+            "no-summary",
+            "no-description",
+            "no-description",
+            "unexplained-criterion",
+            "unexplained-criterion"
+        ],
+        "the plan's, the task's, and each criterion's"
+    );
+}
+
+#[test]
+fn a_plan_that_creates_no_shape_and_risks_nothing_is_still_explained() {
+    let tasks: TasksFile = serde_norway::from_str(
+        r#"
+summary: "Write the greeting"
+description: "The project greets whoever opens it."
+tasks:
+  - id: a
+    title: "Write it"
+    description: "Adds hello.txt."
+    scope: [hello.txt]
+    criteria: [{ cmd: "test -f hello.txt", proves: "the greeting exists" }]
+"#,
+    )
+    .unwrap();
+    assert_eq!(
+        unexplained_codes(&tasks),
+        Vec::<String>::new(),
+        "`design`, `risks` and `out_of_scope` are the prompt's to ask for"
+    );
+}
+
+#[test]
+fn the_published_example_is_a_plan_a_person_can_review() {
+    let example: TasksFile =
+        yunta_core::shape::read(TasksFile::EXAMPLE.as_bytes(), "example").unwrap();
+    assert_eq!(unexplained_codes(&example), Vec::<String>::new());
 }

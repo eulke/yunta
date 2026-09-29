@@ -26,6 +26,18 @@ impl From<ShownError> for crate::run::RunError {
     }
 }
 
+/// The file a person opens to read what an escalation shows: a plan's
+/// view for them, any other document's own.
+pub fn view_of(shown: &Shown) -> std::path::PathBuf {
+    let name = match &shown.artifact {
+        ArtifactId::Interpreted {
+            kind: ArtifactKind::Tasks,
+        } => crate::tasks::view::VIEW_NAME.to_string(),
+        other => other.view_name(),
+    };
+    view_path(shown.producer.as_ref(), &name)
+}
+
 /// The documents `shows` names, from the run rooted at `run_dir`: the
 /// exact bytes each hash names, a tasks document read into its tasks.
 pub(crate) async fn documents(
@@ -36,7 +48,7 @@ pub(crate) async fn documents(
     let mut documents = Vec::with_capacity(shows.len());
     for shown in shows {
         let bytes = store.get(&shown.content_hash).await?;
-        let path = view_path(shown.producer.as_ref(), &shown.artifact.view_name());
+        let path = view_of(shown);
         let content = match &shown.artifact {
             ArtifactId::Interpreted {
                 kind: ArtifactKind::Tasks,

@@ -64,6 +64,11 @@ impl SessionTools {
                 .as_deref()
                 .map(str::trim)
                 .filter(|n| !n.is_empty()),
+            description: task
+                .description
+                .as_deref()
+                .map(str::trim)
+                .filter(|d| !d.is_empty()),
             depends_on: &task.depends_on,
             scope: &access.scope,
             criteria: task
@@ -137,6 +142,10 @@ struct TaskSheet<'a> {
     title: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     notes: Option<&'a str>,
+    /// What the task does and why, as the person who approved the plan
+    /// read it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<&'a str>,
     #[serde(skip_serializing_if = "<[TaskId]>::is_empty")]
     depends_on: &'a [TaskId],
     /// What the diff is held to: declared plus granted.

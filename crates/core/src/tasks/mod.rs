@@ -12,12 +12,56 @@ use crate::events::{self, CriterionType};
 use crate::glob::ScopeGlob;
 use crate::TaskId;
 
-/// A tasks document — the sole top-level key is `tasks:`, with no
-/// header metadata alongside it.
+/// A tasks document: the tasks the engine runs, and what a person who
+/// reviews the plan reads about it — what changes and why, the shapes it
+/// creates or changes, and what it leaves out. Nothing about the brief,
+/// the mode or the run: that context lives in the manifest and the log.
+///
+/// One document for both readers, so what a person approves is what the
+/// engine executes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TasksFile {
+    /// What the plan changes, in one line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    /// What changes, why, and how the work is approached, in Markdown:
+    /// code blocks for an example or how the parts interact, `mermaid`
+    /// blocks for diagrams.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The shapes the plan creates or changes — types, interfaces,
+    /// schemas, signatures, file formats — as Markdown code blocks, each
+    /// declared once for every task that touches it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub risks: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub out_of_scope: Vec<String>,
     pub tasks: Vec<Task>,
+}
+
+impl TasksFile {
+    /// A document of `tasks` alone, with nothing for a person to read
+    /// beside them.
+    pub fn of(tasks: Vec<Task>) -> Self {
+        TasksFile {
+            summary: None,
+            description: None,
+            design: None,
+            risks: Vec::new(),
+            out_of_scope: Vec::new(),
+            tasks,
+        }
+    }
+
+    /// What a person reviewing the plan needs that the document does not
+    /// say: a summary, a description, and for every task its own and for
+    /// every criterion what it proves.
+    pub fn unexplained(&self) -> Vec<crate::diagnostic::Diagnostic> {
+        rules::reviewed(self)
+    }
 }
 
 /// One criterion as the tasks document declares it: a command, and whether it
@@ -31,6 +75,9 @@ pub struct Criterion {
     pub cmd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub r#type: Option<CriterionType>,
+    /// What passing shows, in words a person reviewing the plan reads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proves: Option<String>,
 }
 
 impl Criterion {
@@ -65,6 +112,11 @@ pub struct Task {
     pub depends_on: Vec<TaskId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// What the task does and why, in Markdown, for a person reviewing
+    /// the plan. It names the shapes of the plan's `design` it touches
+    /// rather than repeating them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 mod rules;
@@ -90,4 +142,6 @@ impl crate::shape::Document for TasksFile {
     const RULES: &'static [crate::diagnostic::Rule] = rules::RULES;
 
     const RUN_RULES: &'static [crate::diagnostic::Rule] = rules::RUN_RULES;
+
+    const REVIEW_RULES: &'static [crate::diagnostic::Rule] = rules::REVIEW_RULES;
 }

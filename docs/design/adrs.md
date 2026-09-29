@@ -201,3 +201,4 @@ lista.
 **D192 — A session that asked for scope continues after the answer, in the checkout it saw, on its own work.** `accepted` → [`adr/D192-a-session-that-asked-for-scope-continues-after-the-answer.md`](adr/D192-a-session-that-asked-for-scope-continues-after-the-answer.md)
 **D193 — What a run's commands print belongs to the run, never to the terminal.** `accepted` → [`adr/D193-what-a-run-s-commands-print-belongs-to-the-run.md`](adr/D193-what-a-run-s-commands-print-belongs-to-the-run.md)
 **D194 — A gate shows what it asks about, and a correction goes back to the session that made the work.** `accepted` → [`adr/D194-a-gate-shows-what-it-asks-about.md`](adr/D194-a-gate-shows-what-it-asks-about.md)
+**D195 — A plan a person reviews explains itself, in the same document the engine runs.** `accepted` → [`adr/D195-a-plan-a-person-reviews-explains-itself.md`](adr/D195-a-plan-a-person-reviews-explains-itself.md)

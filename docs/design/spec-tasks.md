@@ -6,7 +6,8 @@ al sistema, y una persona lo escribe a mano.
 
 ## 1. Estructura
 
-Un documento de tareas es un documento YAML con una única clave de nivel superior:
+Un documento de tareas es un documento YAML cuya única clave obligatoria de nivel
+superior es `tasks:`:
 
 ```yaml
 tasks:
@@ -21,9 +22,11 @@ tasks:
     notes: "Mermaid por default; aristas de re-ruta con estilo distinto."
 ```
 
-Sin metadatos de cabecera: nada de referencias al brief, al modo o al run. Cuanto más
-chico el schema, menos hay que validar — y todo ese contexto ya vive en el manifest y
-en el event log.
+Nada de referencias al brief, al modo o al run: todo ese contexto ya vive en el
+manifest y en el event log. Lo que sí puede ir junto a `tasks:` es lo que lee la
+persona que revisa el plan (§2.2): qué cambia y por qué, las formas que crea o
+modifica, sus riesgos y lo que deja afuera. Es el mismo documento que el engine
+ejecuta, así que lo que una persona aprueba es lo que corre (D195).
 
 ## 2. Campos
 
@@ -35,6 +38,7 @@ en el event log.
 | `criteria` | lista de objetos, ≥1 | sí | ver la tabla de `criteria[]` más abajo |
 | `depends_on` | lista de ids | no | default vacío |
 | `notes` | string | no | contexto mínimo para un runner sin historial |
+| `description` | Markdown | no; sí cuando un gate muestra el plan (§3.1) | qué hace la tarea y por qué, para quien revisa el plan; nombra las formas del `design` que toca en vez de repetirlas. `yunta_task` se la devuelve a la sesión que la implementa |
 
 ### 2.1 `criteria[]`
 
@@ -42,9 +46,27 @@ en el event log.
 |---|---|---|---|
 | `cmd` | string no vacío | sí | comando ejecutable; exit 0 = pasa |
 | `type` | enum `guard` | no | ausente = criterio normal (debe fallar en el pre-check); `guard` = línea de no-regresión (debe pasar antes y después) |
+| `proves` | string | no; sí cuando un gate muestra el plan (§3.1) | qué muestra que pase, en palabras de quien revisa el plan |
 
 Toda tarea necesita **al menos un criterio no-`guard`**: sin él no hay nada que pueda
 estar en rojo antes del trabajo, y el pre-check pierde sentido.
+
+### 2.2 Para quien revisa el plan
+
+| Campo | Tipo | Obligatorio | Notas |
+|---|---|---|---|
+| `summary` | string | no; sí cuando un gate muestra el plan (§3.1) | qué cambia el plan, en una línea |
+| `description` | Markdown | no; sí cuando un gate muestra el plan (§3.1) | qué cambia, por qué y cómo se encara. Admite bloques de código —un ejemplo, cómo interactúan las piezas— y bloques `mermaid` para diagramas |
+| `design` | Markdown | no | las formas que el plan crea o modifica —tipos, interfaces, schemas, firmas, formatos— como bloques de código, cada una declarada una sola vez para todas las tareas que la tocan |
+| `risks` | lista de strings | no | — |
+| `out_of_scope` | lista de strings | no | — |
+
+Al aceptar el documento, el engine escribe junto a su vista `tasks.yaml` una vista
+Markdown, `tasks.md`, derivada de los mismos bytes: el resumen, la descripción y el
+diseño tal cual, lo que el engine sabe del plan sin que se lo digan —cuántas tareas,
+en qué orden, qué tocan, qué guards las sostienen, y un diagrama de dependencias— y
+cada tarea con su descripción y una tabla de qué prueba cada criterio. Es lo que un
+gate que muestra el plan señala para leerlo entero.
 
 ## 3. Validación al registrar
 
@@ -77,6 +99,19 @@ por primera vez como un fallo (D143).
 Lo que el engine **no** valida acá: que los comandos existan o sean correctos — eso
 lo dice el pre-check en rojo al ejecutarlos, que es donde un criterio trivial o
 roto se delata.
+
+### 3.1 Cuando un gate muestra el plan
+
+Si un gate que el run ejecuta —uno que el modo del run incluye, se llame como se
+llame— muestra el documento (`shows:`), el engine también lo rechaza, al entregarlo
+y al cerrar el nodo, si no cumple:
+
+- `no-summary` — `summary` dice qué cambia el plan, en una línea no vacía.
+- `no-description` — el plan y cada tarea llevan su `description`.
+- `unexplained-criterion` — cada criterio dice qué `proves`.
+
+`design`, `risks` y `out_of_scope` no se exigen: un plan que solo toca documentación
+no crea formas, y uno puede no tener riesgos. Los pide el prompt de quien planifica.
 
 ## 4. Errores
 

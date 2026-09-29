@@ -3,6 +3,7 @@
 //! hands over carries into the tree this run works in.
 
 mod crossing;
+pub(crate) mod view;
 
 use std::collections::BTreeMap;
 
@@ -18,6 +19,27 @@ use crate::run_log::RunLog;
 use yunta_core::events::TaskEvent;
 
 pub(crate) use crossing::{carried_into, standing_of, Standing};
+
+/// Whether this run shows `producer`'s tasks document to a person: a gate
+/// among the nodes the run's mode includes names it. The mode is the one
+/// the log says the run was born in, whatever the workflow calls it; a
+/// workflow with no modes includes every node.
+///
+/// What makes the plan's explanation required: a person shown a plan
+/// reads what it changes and why, not only its commands.
+pub(crate) fn plan_reviewed(
+    workflow: &yunta_core::Workflow,
+    events: &[yunta_core::events::StoredEvent],
+    producer: &NodeId,
+) -> bool {
+    let mode = yunta_core::events::run_mode(events);
+    let included = crate::modes::mode_included_nodes(workflow, &mode);
+    let kept = workflow
+        .nodes
+        .iter()
+        .filter(|node| included.as_ref().is_none_or(|ids| ids.contains(&node.id)));
+    yunta_core::workflow::reads::shown_by_a_gate(kept, producer)
+}
 
 /// Where a tasks document came from, as far as its registration cares.
 #[derive(Clone, Copy)]

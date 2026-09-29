@@ -35,7 +35,12 @@ impl SessionTools {
         let current = crate::replay::derive(&events).tasks;
         let checkout = self.handover_checkout().await?;
         let supervision = self.host.supervision(&self.stop);
-        let mut found = Vec::new();
+        // A plan a gate shows a person says what it changes and why.
+        let mut found = match crate::tasks::plan_reviewed(&self.host.workflow, &events, &self.node)
+        {
+            true => tasks.unexplained(),
+            false => Vec::new(),
+        };
         for (index, task) in tasks.tasks.iter().enumerate() {
             if crate::tasks::stays_done(task, &prior, &current) {
                 continue;
