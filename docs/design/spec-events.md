@@ -12,8 +12,8 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 32 rows and **39 `kind` names**.
-It had 31 rows and 38 kinds before `run_tool_failed` was added. The table
+The current Run Contract event table has 33 rows and **40 `kind` names**.
+It had 32 rows and 39 kinds before `host_suspended` was added. The table
 defines the normative set; this document specifies each payload.
 
 ## 1. Envelope común
@@ -26,7 +26,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | One of the 39 names in this document, with a `_vN` suffix beyond v1. |
+| `kind` | string | One of the 40 names in this document, with a `_vN` suffix beyond v1. |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
 
@@ -114,7 +114,7 @@ atribuidos al adapter: `agent_session_opened` y
 Si esta lectura no es la intención original, es exactamente el tipo de cosa a
 corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
-## 5. Los 38 tipos de evento, campo por campo
+## 5. Los 40 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -568,6 +568,22 @@ while the append-only log retains every occurrence.
 | `cause` | `approval_blocked \| call_failed` | yes | A closed classification, never a CLI error message. |
 
 The payload contains no arguments, tool response, or free-form error text.
+
+### 5.25b `host_suspended` — engine
+
+The host the run works on was suspended — the machine slept — while the run was
+open. The engine notices it by comparing how far the wall clock moved with how far
+the time the host was awake moved between two readings: the process's monotonic
+clock does not advance while the host sleeps, so a wall clock that outran it by
+10 s or more says the host slept for the difference. No operating-system API is
+involved. The event's timestamp is when the engine noticed, at or just after the
+host woke, so the suspension spans the `slept_ms` before it. It is a fact about the
+machine, not something the run did: it does not wake the run, and every duration
+the run reports leaves the span out (D199).
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `slept_ms` | `u64` | yes | How long the host slept, in milliseconds. |
 
 ### 5.26 `run_paused` / `run_resumed` / `run_finished` — engine
 **Fuente:** razón / estado terminal, métricas

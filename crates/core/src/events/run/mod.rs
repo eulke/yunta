@@ -5,7 +5,9 @@ pub mod happening;
 pub mod kinds;
 pub mod ledger;
 pub mod payloads;
+pub mod suspensions;
 
 pub use kinds::RunEvent;
 pub use ledger::*;
 pub use payloads::*;
+pub use suspensions::{Suspension, Suspensions};

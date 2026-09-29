@@ -69,7 +69,7 @@ Reglas: todo se valida **al crear el run, antes del primer token**; los defaults
 # 3. Modelo de eventos
 The event log is append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`.
 Current state is derived by replaying that log; snapshots are only an optimization.
-The current table contains 39 event kinds in 32 rows; some rows group related variants:
+The current table contains 40 event kinds in 33 rows; some rows group related variants:
 | Evento | Emisor | Payload relevante |
 |---|---|---|
 | `run_created` | engine | manifest hash, inputs, modo, `promoted_from?` |
@@ -103,6 +103,7 @@ The current table contains 39 event kinds in 32 rows; some rows group related va
 | `capability_degraded` | engine | capacidad, adapter, política aplicada |
 | `write_refused` | adapter | sesión que la rechazó, y el path que la escritura nombraba (§6) |
 | `run_tool_failed` | adapter (recorded by engine) | session ID, known `yunta-run` tool, closed failure cause; no arguments, response, or raw error text |
+| `host_suspended` | engine | cuánto durmió el host (ms), notado al despertar; no despierta el run y las duraciones lo descuentan |
 | `run_paused` / `run_resumed` / `run_finished` | engine | razón / estado terminal, métricas |
 
 Dos decisiones incorporadas al modelo. Primera: `agent_session_opened` es obligatorio para los adapters y transporta el session_id — es lo que hace posible reanudar conversaciones (§8.1). Segunda: el uso de tokens viaja en eventos, así que los presupuestos (`limits.*`) se evalúan en el engine contra el log, nunca contra el autorreporte del agente.

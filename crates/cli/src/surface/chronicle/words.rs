@@ -52,6 +52,7 @@ fn run_words(happening: &run::happening::Happening) -> (Option<StateWord>, Strin
             ),
         },
         H::BaselineCaptured { origin, red } => return baseline_words(origin, *red),
+        H::HostSuspended { slept } => format!("host suspended for {}", format_duration(*slept)),
         H::Closed { terminal, .. } => view::closed_as(*terminal).to_string(),
         H::PromotionSignaled { to, reason, .. } => {
             detailed(format!("promotion to `{to}`"), &one_line(reason))

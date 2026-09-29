@@ -1709,6 +1709,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "host_suspended"
+            }
+          },
+          "$ref": "#/$defs/HostSuspendedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "run_paused"
             }
           },
@@ -2266,6 +2279,20 @@
       "enum": [
         "before",
         "after"
+      ]
+    },
+    "HostSuspendedPayload": {
+      "description": "The host the run works on was suspended — the machine slept — for\n`slept_ms`. The event's timestamp is when the engine noticed, at or\njust after the host woke, so the suspension spans the `slept_ms`\nbefore it.",
+      "type": "object",
+      "properties": {
+        "slept_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "slept_ms"
       ]
     },
     "InputName": {

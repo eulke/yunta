@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 
 use crate::events::meta::EventMeta;
 use crate::events::run::kinds::RunEvent;
+use crate::events::run::suspensions::{Suspension, Suspensions};
 use crate::events::{
     BaselineCapturedPayload, BaselineOrigin, EnvironmentDrift, Evidence, ExecutionEnvironment,
     TerminalState, TokenUsage,
@@ -57,6 +58,8 @@ pub struct RunLedger {
     /// The measurement this run holds: its own, or the one it was born
     /// holding. `None` for a lineage whose root declared no suite.
     baseline: Option<BaselineCapturedPayload>,
+    /// Every span the host was suspended while the run was open.
+    suspensions: Suspensions,
     /// Whether an invocation has woken this run. A birth writes any
     /// number of events — what the run is, what it holds, the
     /// measurement it was handed — and none of them is a wake.
@@ -141,6 +144,12 @@ impl RunLedger {
         self.promotion.as_ref()
     }
 
+    /// Every span the host was suspended while the run was open — what a
+    /// duration the run reports leaves out.
+    pub fn suspensions(&self) -> &Suspensions {
+        &self.suspensions
+    }
+
     /// Folds one of the run's own events.
     pub fn apply(&mut self, event: &RunEvent, meta: &EventMeta<'_>) {
         if self.born_at.is_none() {
@@ -176,6 +185,13 @@ impl RunLedger {
                 self.woken |= p.origin == BaselineOrigin::Measured;
                 self.baseline = Some(p.clone());
             }
+            // The machine slept: a fact about the host, not something an
+            // invocation did, so it neither wakes the run nor moves it
+            // between phases.
+            RunEvent::HostSuspended(p) => self.suspensions.push(Suspension {
+                woke_at: meta.at,
+                slept: p.duration(),
+            }),
             RunEvent::PromotionSignaled(p) => {
                 self.promotion = Some(Promotion {
                     to: p.suggested_mode.clone(),

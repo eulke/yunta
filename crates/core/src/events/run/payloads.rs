@@ -75,6 +75,29 @@ pub enum BaselineOrigin {
     Inherited { run: RunId },
 }
 
+/// The host the run works on was suspended — the machine slept — for
+/// `slept_ms`. The event's timestamp is when the engine noticed, at or
+/// just after the host woke, so the suspension spans the `slept_ms`
+/// before it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct HostSuspendedPayload {
+    pub slept_ms: u64,
+}
+
+impl HostSuspendedPayload {
+    /// A suspension that lasted `slept`.
+    pub fn slept(slept: std::time::Duration) -> Self {
+        HostSuspendedPayload {
+            slept_ms: u64::try_from(slept.as_millis()).unwrap_or(u64::MAX),
+        }
+    }
+
+    /// How long the host slept.
+    pub fn duration(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(self.slept_ms)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunCreatedPayload {
     pub manifest_hash: ContentHash,

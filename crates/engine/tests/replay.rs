@@ -531,3 +531,24 @@ fn establishing() -> Vec<yunta_core::events::EventPayload> {
         })
         .collect()
 }
+
+/// A suspension is a fact about the machine the run works on, not
+/// something an invocation did: a log that holds only a birth and a
+/// suspension wakes as a first wake, not as a resume.
+#[test]
+fn a_host_suspension_is_not_a_wake() {
+    let created = yunta_testkit_core::all_kinds()
+        .into_iter()
+        .find(|payload| matches!(payload, EventPayload::Run(RunEvent::Created(_))))
+        .expect("a birth among every kind");
+    let events = Log::for_run("run-1")
+        .event(created)
+        .after(3_600)
+        .event(EventPayload::Run(RunEvent::HostSuspended(
+            yunta_core::events::HostSuspendedPayload::slept(std::time::Duration::from_secs(3_600)),
+        )))
+        .build();
+    let state = derive(&events);
+    assert!(!state.woken(), "{state:#?}");
+    assert_eq!(state.run.suspensions().summary().map(|(n, _)| n), Some(1));
+}

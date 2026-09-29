@@ -30,6 +30,10 @@ pub enum Happening {
         origin: BaselineOrigin,
         red: Option<i32>,
     },
+    /// The host slept for `slept` while the run was open.
+    HostSuspended {
+        slept: std::time::Duration,
+    },
     Closed {
         terminal: TerminalState,
         tokens: TokenUsage,
@@ -61,6 +65,9 @@ impl From<&RunEvent> for Happening {
             RunEvent::BaselineCaptured(p) => Happening::BaselineCaptured {
                 origin: p.origin.clone(),
                 red: (!p.passed()).then_some(p.results.exit_code),
+            },
+            RunEvent::HostSuspended(p) => Happening::HostSuspended {
+                slept: p.duration(),
             },
             RunEvent::PromotionSignaled(p) => Happening::PromotionSignaled {
                 to: p.suggested_mode.clone(),

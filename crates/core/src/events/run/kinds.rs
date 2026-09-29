@@ -14,6 +14,9 @@ pub enum RunEvent {
     /// run opens on — measured by this run on its first wake, or held
     /// from birth because a run of the same lineage measured it.
     BaselineCaptured(BaselineCapturedPayload),
+    /// The host was suspended while the run was open: a fact about the
+    /// machine, not something the run did.
+    HostSuspended(HostSuspendedPayload),
 }
 
 impl RunEvent {
@@ -22,6 +25,7 @@ impl RunEvent {
         "run_created",
         "baseline_captured",
         "promotion_signaled",
+        "host_suspended",
         "run_paused",
         "run_resumed",
         "run_finished",
@@ -36,6 +40,7 @@ impl RunEvent {
             Self::Resumed(_) => "run_resumed",
             Self::Finished(_) => "run_finished",
             Self::BaselineCaptured(_) => "baseline_captured",
+            Self::HostSuspended(_) => "host_suspended",
         }
     }
 
@@ -54,6 +59,7 @@ impl RunEvent {
             Self::Resumed(_) => false,
             Self::Finished(_) => false,
             Self::BaselineCaptured(_) => false,
+            Self::HostSuspended(_) => false,
         }
     }
 

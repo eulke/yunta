@@ -296,6 +296,9 @@ pub fn all_kinds() -> Vec<EventPayload> {
             tool: yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
             cause: RunToolFailureCause::ApprovalBlocked,
         })),
+        EventPayload::Run(RunEvent::HostSuspended(HostSuspendedPayload {
+            slept_ms: 3_600_000,
+        })),
         EventPayload::Run(RunEvent::Paused(RunPausedPayload::recorded(
             "gate waiting".to_string(),
         ))),
