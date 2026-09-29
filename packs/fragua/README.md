@@ -48,10 +48,11 @@ something's missing.
   absent and the planner explores the code on its own, which costs more
   tokens and plans with less of your intent. The run starts from your last
   commit, so commit the file before `yunta run`.
-- **A Rust toolchain**: `lint` runs `cargo clippy -- -D warnings`. In another
-  ecosystem it fails after `implement`, the most expensive node, and uses
-  its one `fix-lint` round before asking you. Copy the workflow into
-  `.yunta/workflows/` and change `lint` to your own linter first.
+- **A Rust toolchain**: `lint` runs
+  `cargo clippy --all-targets -- -D warnings`, so tests are linted too. In
+  another ecosystem it fails after `implement`, the most expensive node,
+  and uses its one `fix-lint` round before asking you. Copy the workflow
+  into `.yunta/workflows/` and change `lint` to your own linter first.
 - **Rust sources**: `fix-lint` may edit any `*.rs` file, so a workspace
   with its code under `crates/*/src` works as well as a single crate. A
   task that needs files outside its scope asks a person
