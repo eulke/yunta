@@ -279,6 +279,42 @@ mode's point of view — it's included or excluded whole, never by naming one of
 children; naming a child directly is a `check` error, not a way to reach inside the
 group.
 
+## Reviewing what a gate approves
+
+A gate can put what it asks about in front of you. `shows:` names artifacts the
+way a `context:` source does, and the gate waits for them:
+
+```yaml
+name: reviewed-plan
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    prompt: "Break the work into tasks."
+    artifacts:
+      produces: [tasks]
+  - id: approve-plan
+    kind: gate
+    assignee: lead
+    options: [approve, adjust]
+    on: { adjust: plan }
+    shows: [{ node: plan, kind: tasks }]
+```
+
+At the decision you read the plan task by task, with its scope and what proves
+each task done, and the path to the whole document. The log records the exact
+version you saw by its hash, so an approval is an approval of those bytes.
+
+An option that sends the run back to a node with a session, like `adjust` above,
+asks what should change and doesn't take an empty answer: those words are what the
+planner picks its work back up with, in the same session, instead of planning again
+from the brief. From another process, say them with `yunta resolve-gate <run_id>
+adjust --text "…"`.
+
+To skip the review altogether, run a mode that leaves the gate out: fragua's
+`quick` goes from the plan straight to the work.
+
 ## Gates from the outside
 
 A paused run doesn't need anything watching it: `yunta status <run_id>` shows what

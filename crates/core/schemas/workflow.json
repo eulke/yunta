@@ -1170,6 +1170,13 @@
               "items": {
                 "$ref": "#/$defs/OptionId"
               }
+            },
+            "shows": {
+              "description": "The artifacts the person decides on, put in front of them\nwith the question — `[{ node: plan, kind: tasks }]` shows the\nplan an `approve-plan` gate approves. Read like a context\nartifact, so the gate waits for what it shows.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ArtifactContextRef"
+              }
             }
           },
           "required": [

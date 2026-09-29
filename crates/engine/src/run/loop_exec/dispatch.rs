@@ -64,7 +64,13 @@ async fn continuation(
         .await?;
         return Ok(None);
     };
-    Ok(Some((unit, Continuing { session, answer })))
+    Ok(Some((
+        unit,
+        Continuing {
+            session,
+            answer: crate::task_cycle::Answer::Scope(answer),
+        },
+    )))
 }
 
 /// Every path a prior `scope_expansion_granted` on the log authorized

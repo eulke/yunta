@@ -16,8 +16,34 @@
 use std::path::Path;
 
 use async_trait::async_trait;
-use yunta_core::events::{Channel, GateWaitingPayload, HumanChoice};
-use yunta_core::{Answer, QuestionsFile, Responder};
+use yunta_core::events::{Channel, GateWaitingPayload, HumanChoice, Shown};
+use yunta_core::{Answer, QuestionsFile, Responder, TasksFile};
+
+/// What a decision is asked with, beside the escalation the log records:
+/// the tree the run works in, and the documents the escalation shows,
+/// read from the run for the person to see. The escalation names them
+/// by hash; this is their content.
+pub struct Asking<'a> {
+    pub tree: &'a Path,
+    pub shown: &'a [ShownDocument],
+}
+
+/// One document an escalation shows, as the run holds it: what the log
+/// names, where its view sits, and what it says.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShownDocument {
+    pub shown: Shown,
+    pub path: std::path::PathBuf,
+    pub content: ShownContent,
+}
+
+/// A shown document's content: a tasks document read into its tasks,
+/// any other as its text.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ShownContent {
+    Tasks(TasksFile),
+    Text(String),
+}
 
 /// One surface's reply to a `kind: questions` artifact:
 /// the answers plus which channel produced them and who answered — the
@@ -47,17 +73,17 @@ pub trait HumanInteraction: Send + Sync {
     /// that answers off the menu is a bug, not a decision.
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice>;
 
-    /// [`resolve`](Self::resolve), told where the run works: the tree a
-    /// node's next attempt starts from, which is where a person changes
-    /// what a node failed on before choosing to run it again. It is the
-    /// asking's context, not the escalation's — the escalation is what
-    /// the log records and a parked run rebuilds, and a run's tree is
-    /// where this invocation found it. A surface with nowhere to show it
-    /// answers as `resolve` does.
+    /// [`resolve`](Self::resolve), with what the asking knows: the tree
+    /// a node's next attempt starts from, which is where a person changes
+    /// what a node failed on before choosing to run it again, and the
+    /// documents the escalation shows. Both are the asking's context, not
+    /// the escalation's — the escalation is what the log records and a
+    /// parked run rebuilds. A surface with nowhere to show them answers
+    /// as `resolve` does.
     async fn resolve_in(
         &self,
         escalation: &GateWaitingPayload,
-        _tree: &Path,
+        _asking: &Asking<'_>,
     ) -> Option<HumanChoice> {
         self.resolve(escalation).await
     }

@@ -5,7 +5,7 @@ use yunta_testkit::{Bench, ScriptedInteraction};
 
 mod common;
 use common::*;
-use yunta_core::events::{GateEvent, NodeEvent};
+use yunta_core::events::{GateEvent, NodeEvent, Refusal};
 
 /// The option a human chose, for a resolution that is a human's choice.
 fn chosen_option(resolution: &yunta_core::events::GateResolvedPayload) -> Option<&str> {
@@ -219,13 +219,14 @@ async fn a_surface_answer_off_the_menu_breaks_the_run_instead_of_deciding() {
         .await
         .expect_err("an off-menu answer is not a decision");
 
-    let RunError::OffMenuAnswer {
-        answer, offered, ..
+    let RunError::RefusedAnswer {
+        refused: Refusal::OffMenu { chosen, offered },
+        ..
     } = error
     else {
         panic!("expected the answer refused as off the menu, got {error:?}");
     };
-    assert_eq!(answer, "whatever");
+    assert_eq!(chosen, "whatever");
     assert_eq!(offered, "aprobar, ajustar, abort");
     let events = bench.events();
     assert!(

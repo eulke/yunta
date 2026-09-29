@@ -23,7 +23,7 @@ use crate::diagnostic::{
     Diagnostic, DocumentKind, DocumentRef, Named, Problem, Report, RuleCode, Subject,
 };
 use crate::glob::might_overlap;
-use crate::{ContextSpec, ModeInclude, Node, NodeId, NodeKind, Workflow};
+use crate::{ModeInclude, Node, NodeId, NodeKind, Workflow};
 
 /// Every rule a workflow is held to by the file alone, stated for
 /// whoever writes one — the same list [`read`] enforces, read the
@@ -170,16 +170,9 @@ fn references_reach(workflow: &Workflow, ids: &HashSet<&NodeId>) -> Vec<Diagnost
                 reaches("on", target);
             }
         }
-        for source in &node.context {
-            if let ContextSpec::Artifact { artifact } = source {
-                if let Some(producer) = &artifact.node {
-                    reaches("context.artifact.node", producer);
-                }
-            }
-        }
-        if let NodeKind::Workflow { mounts, .. } = &node.kind {
-            for mount in mounts {
-                reaches("mounts", &mount.artifact.node);
+        for read in super::reads::artifact_reads(node) {
+            if let Some(producer) = read.node {
+                reaches(read.site.field(), producer);
             }
         }
     }
@@ -306,7 +299,7 @@ fn modes_still_run(workflow: &Workflow) -> Vec<Diagnostic> {
                 }
             }
             // An unknown source is the unknown-reference rule's to name.
-            for (field, source) in read_sources(node) {
+            for (field, source) in super::reads::read_sources(node) {
                 if top_of.get(source).is_some_and(|top| {
                     !included.contains(*top) && !earlier_all && !earlier.contains(*top)
                 }) {
@@ -339,36 +332,6 @@ fn reroute_targets(node: &Node) -> Vec<(&'static str, &NodeId)> {
         targets.extend(on.values().map(|target| ("on", target)));
     }
     targets
-}
-
-/// The nodes a node reads from by name — a context artifact, a captured
-/// output, a mount — its `parallel` children's included, since a group
-/// is kept or left out whole. Each with the field it is named in.
-pub fn read_sources(node: &Node) -> Vec<(&'static str, &NodeId)> {
-    let mut sources = Vec::new();
-    for source in &node.context {
-        match source {
-            crate::ContextSpec::Artifact { artifact } => {
-                if let Some(named) = &artifact.node {
-                    sources.push(("context: artifact", named));
-                }
-            }
-            crate::ContextSpec::NodeOutput { node_output } => {
-                sources.push(("context: node-output", &node_output.node));
-            }
-            _ => {}
-        }
-    }
-    match &node.kind {
-        NodeKind::Workflow { mounts, .. } => {
-            sources.extend(mounts.iter().map(|mount| ("mounts", &mount.artifact.node)));
-        }
-        NodeKind::Parallel { nodes, .. } => {
-            sources.extend(nodes.iter().flat_map(read_sources));
-        }
-        _ => {}
-    }
-    sources
 }
 
 fn about(index: usize, id: &NodeId, code: RuleCode, detail: String) -> Diagnostic {
@@ -457,23 +420,15 @@ fn expand_implicit_dependencies_in(node: &mut Node) {
             expand_implicit_dependencies_in(child);
         }
     }
-    // A mount is a read of the referenced node's outcome, so
-    // it orders behind it exactly like a context artifact does — and
-    // it's this edge that guarantees the source node has already
-    // finished at the time the child is born and the copy happens.
-    let mut implied: Vec<NodeId> = Vec::new();
-    if let NodeKind::Workflow { mounts, .. } = &node.kind {
-        implied.extend(mounts.iter().map(|mount| mount.artifact.node.clone()));
-    }
-    for spec in &node.context {
-        if let crate::ContextSpec::Artifact { artifact } = spec {
-            // A node-less reference reads this run's own
-            // artifacts dir — no producer to order behind.
-            if let Some(referenced) = &artifact.node {
-                implied.push(referenced.clone());
-            }
-        }
-    }
+    // Every artifact a node names of another node orders it behind that
+    // node: a context source reads it, a mount copies it into a child
+    // born after it, a gate shows it to the person deciding. A node-less
+    // reference reads this run's own artifacts — no producer to order
+    // behind.
+    let implied: Vec<NodeId> = super::reads::artifact_reads(node)
+        .into_iter()
+        .filter_map(|read| read.node.cloned())
+        .collect();
     for referenced in implied {
         if !node.depends_on.contains(&referenced) {
             node.depends_on.push(referenced);

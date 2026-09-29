@@ -9,6 +9,7 @@
 
 use super::*;
 use yunta_core::events::ArtifactId;
+use yunta_core::workflow::reads::artifact_reads;
 use yunta_core::{ArtifactKind, ArtifactRefId, ContextSpec, ModeName, MountSpec};
 
 /// A read nothing in the run can answer: what it asks for, and who asks.
@@ -247,7 +248,7 @@ pub(crate) fn check_reads(workflow: &Workflow, birth: &Birth, start: Option<&Mod
             // A source read by name that the mode leaves out and no
             // earlier mode keeps is refused where the workflow is read.
             let Some(mode) = &mode else { continue };
-            for (field, source) in yunta_core::workflow::read::read_sources(node) {
+            for (field, source) in yunta_core::workflow::reads::read_sources(node) {
                 let kept = |nodes: &[&Node]| nodes.iter().any(|kept| kept.id == *source);
                 if kept(&variant.nodes) {
                     continue;
@@ -277,17 +278,11 @@ pub(crate) fn check_reads(workflow: &Workflow, birth: &Birth, start: Option<&Mod
 /// `(site, identity)` for every reference `node` makes to the run's
 /// artifact of an identity, whichever node produced it.
 fn run_references(node: &Node) -> Vec<(String, ArtifactId)> {
-    let mut references = Vec::new();
-    for source in &node.context {
-        if let ContextSpec::Artifact { artifact } = source {
-            if artifact.node.is_none() && literal_ref(&artifact.id) {
-                references.push((
-                    format!("the `artifact:` context source of node `{}`", node.id),
-                    ArtifactId::from(&artifact.id),
-                ));
-            }
-        }
-    }
+    let mut references: Vec<(String, ArtifactId)> = artifact_reads(node)
+        .into_iter()
+        .filter(|read| read.node.is_none() && literal_ref(read.id))
+        .map(|read| (read.site.of(&node.id), ArtifactId::from(read.id)))
+        .collect();
     if let NodeKind::Gate {
         external: Some(external),
         ..
@@ -373,28 +368,13 @@ pub(crate) fn check_named_artifact_sources(workflow: &Workflow, errors: &mut Vec
 /// `(site, node, identity)` for every reference `node` makes that names
 /// the node it reads from.
 fn named_references(node: &Node) -> Vec<(String, &NodeId, &ArtifactRefId)> {
-    let mut references = Vec::new();
-    for source in &node.context {
-        if let ContextSpec::Artifact { artifact } = source {
-            if let Some(named) = &artifact.node {
-                references.push((
-                    format!("the `artifact:` context source of node `{}`", node.id),
-                    named,
-                    &artifact.id,
-                ));
-            }
-        }
-    }
-    if let NodeKind::Workflow { mounts, .. } = &node.kind {
-        for mount in mounts {
-            references.push((
-                format!("a `mounts:` entry of node `{}`", node.id),
-                &mount.artifact.node,
-                &mount.artifact.id,
-            ));
-        }
-    }
-    references
+    artifact_reads(node)
+        .into_iter()
+        .filter_map(|read| {
+            read.node
+                .map(|named| (read.site.of(&node.id), named, read.id))
+        })
+        .collect()
 }
 
 /// A `node-output:` source reads what a `kind: bash` node captured, and
@@ -473,23 +453,8 @@ pub(crate) fn check_answer_sources(workflow: &Workflow, errors: &mut Vec<CheckEr
         }
     };
     for node in workflow.iter_nodes() {
-        for source in &node.context {
-            if let yunta_core::ContextSpec::Artifact { artifact } = source {
-                answers_of(
-                    format!("the `artifact:` context source of node `{}`", node.id),
-                    artifact.node.as_ref(),
-                    &artifact.id,
-                );
-            }
-        }
-        if let yunta_core::NodeKind::Workflow { mounts, .. } = &node.kind {
-            for mount in mounts {
-                answers_of(
-                    format!("a `mounts:` entry of node `{}`", node.id),
-                    Some(&mount.artifact.node),
-                    &mount.artifact.id,
-                );
-            }
+        for read in artifact_reads(node) {
+            answers_of(read.site.of(&node.id), read.node, read.id);
         }
     }
 }

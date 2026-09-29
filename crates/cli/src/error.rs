@@ -207,6 +207,7 @@ impl CliError {
                 CliError::NoMenu { run_id, refusal }
             }
             yunta_engine::ResolveGateError::UnknownOption { .. }
+            | yunta_engine::ResolveGateError::Unsaid { .. }
             | yunta_engine::ResolveGateError::Storage(_) => refusal.into(),
         }
     }

@@ -222,7 +222,25 @@ pub struct AttemptEnv<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Continuing {
     pub session: yunta_core::SessionId,
-    pub answer: yunta_core::events::ScopeAnswer,
+    pub answer: Answer,
+}
+
+/// What a person answered a session, the one thing that changed for it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Answer {
+    /// The answer to the scope it asked for.
+    Scope(yunta_core::events::ScopeAnswer),
+    /// A person's review of what it handed over.
+    Review(Review),
+}
+
+/// A person's review of what a node handed over: the gate that asked,
+/// the option that sent the run back to the node, and what they said.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Review {
+    pub gate: yunta_core::NodeId,
+    pub option: yunta_core::OptionId,
+    pub said: String,
 }
 
 /// Runs a task through the full cycle: pre-check once, then dispatch →
@@ -438,7 +456,7 @@ pub async fn run_task(
                 granted.extend(widened.iter().cloned());
                 continuing = record.session.clone().map(|session| Continuing {
                     session,
-                    answer: yunta_core::events::ScopeAnswer::Granted(widened),
+                    answer: Answer::Scope(yunta_core::events::ScopeAnswer::Granted(widened)),
                 });
                 attempts.push(record);
             }

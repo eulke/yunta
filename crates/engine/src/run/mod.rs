@@ -24,6 +24,7 @@ mod budget;
 pub(crate) mod capability;
 mod check_exec;
 mod context_resolve;
+mod continuation;
 mod create;
 mod ctx;
 mod distill;
@@ -32,6 +33,7 @@ mod exec;
 mod executor_exec;
 mod gate_exec;
 mod hooks_exec;
+mod internal_gate;
 mod loop_exec;
 mod node_artifacts;
 mod node_close;
@@ -136,16 +138,13 @@ pub enum RunError {
     #[error("cancelled by user")]
     Cancelled,
 
-    /// A `HumanInteraction` surface returned an option the escalation it
-    /// was shown never offered: a decision nobody was given, refused
+    /// A `HumanInteraction` surface returned an answer the escalation it
+    /// was shown does not accept — an option it never offered, or one
+    /// that asks for words given none: a decision nobody made, refused
     /// rather than recorded as the gate's outcome.
-    #[error(
-        "the human surface answered `{answer}`, which is not one of the options it was offered \
-         ({offered}), for: {summary}"
-    )]
-    OffMenuAnswer {
-        answer: yunta_core::OptionId,
-        offered: String,
+    #[error("the human surface's answer was refused: {refused}, for: {summary}")]
+    RefusedAnswer {
+        refused: yunta_core::events::Refusal,
         summary: String,
     },
 

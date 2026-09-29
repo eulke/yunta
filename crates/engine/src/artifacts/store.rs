@@ -162,7 +162,7 @@ impl<'a> ObjectStore<'a> {
 /// The one place the layout of `artifacts/` is written down: a
 /// producer's artifacts under its node, what the run acquired without a
 /// producer at the root.
-pub(crate) fn view_path(node: Option<&NodeId>, name: &str) -> PathBuf {
+pub fn view_path(node: Option<&NodeId>, name: &str) -> PathBuf {
     let mut path = PathBuf::from(ARTIFACTS_DIR);
     if let Some(node) = node {
         path.push(node.as_str());

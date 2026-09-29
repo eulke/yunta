@@ -78,6 +78,7 @@ fn an_escalation_whose_summary_repeats_a_fact_is_refused() {
                 id: "abort".into(),
                 label: "Abort the run".to_string(),
                 tradeoff: "Pauses here; nothing further executes".to_string(),
+                asks: None,
             },
             Vec::new(),
         ))

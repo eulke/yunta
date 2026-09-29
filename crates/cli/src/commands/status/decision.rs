@@ -85,6 +85,16 @@ pub(crate) fn block(
     let mut out = layout.heading(node);
     out.push_str(&layout.lead(escalation.summary()));
     out.push_str(&layout.facts("evidence", &evidence(escalation)));
+    let shows: Vec<String> = escalation
+        .shows()
+        .iter()
+        .map(|shown| {
+            yunta_engine::view_path(shown.producer.as_ref(), &shown.artifact.view_name())
+                .display()
+                .to_string()
+        })
+        .collect();
+    out.push_str(&layout.facts("what it is about", &shows));
     if let Some(external_ref) = escalation.external_ref() {
         out.push_str(&layout.field("published at", external_ref));
     }
@@ -164,7 +174,15 @@ impl Layout {
     /// makes the choice a decision rather than a guess.
     fn option(self, option: &GateOption) -> String {
         let headline = option_headline(option);
-        let tradeoff = option_tradeoff(option);
+        // What the option asks is said with the answer, which from here
+        // is the command's `--text`.
+        let tradeoff = match &option.asks {
+            Some(asks) => format!(
+                "{} — asks: {asks} (say it with --text)",
+                option_tradeoff(option)
+            ),
+            None => option_tradeoff(option),
+        };
         match self {
             Layout::Page => format!("{}{}", paragraph(&headline, 2), paragraph(&tradeoff, 3)),
             Layout::Trailer => format!(
@@ -289,11 +307,13 @@ mod tests {
                                max_reroutes (0); escalates again if `fix-lint` doesn't \
                                fix it"
                         .to_string(),
+                    asks: None,
                 },
                 vec![GateOption {
                     id: yunta_core::OptionId::from_static("abort"),
                     label: "Abort the run".to_string(),
                     tradeoff: "Pauses here; nothing further executes".to_string(),
+                    asks: None,
                 }],
             )),
         )
@@ -314,6 +334,7 @@ mod tests {
                     id: yunta_core::OptionId::from_static("approve"),
                     label: "approve".to_string(),
                     tradeoff: "resolves this gate; the flow continues".to_string(),
+                    asks: None,
                 },
                 Vec::new(),
             )),
@@ -405,6 +426,7 @@ mod tests {
                     id: yunta_core::OptionId::from_static("abort"),
                     label: "Abort the run".to_string(),
                     tradeoff: "Pauses here; nothing further executes".to_string(),
+                    asks: None,
                 },
                 Vec::new(),
             )),

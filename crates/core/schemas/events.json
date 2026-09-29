@@ -2021,6 +2021,13 @@
       "description": "One choice in a gate's escalation: `id` is what\n`GateResolvedPayload.chosen_option` names back, `label` is the\nhuman-facing text, `tradeoff` is mandatory — any option that expands\nscope of work must declare what it trades off, and no variant of\nthis type can omit it.",
       "type": "object",
       "properties": {
+        "asks": {
+          "description": "What choosing this option has to say along with it, when an\nanswer without words would change nothing — a correction sent\nback to the session that made the work is the words.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "$ref": "#/$defs/OptionId"
         },
@@ -2101,6 +2108,13 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/GateOption"
+          }
+        },
+        "shows": {
+          "description": "The artifacts the decision is about, as the person was shown\nthem. Empty for an escalation about something that happened.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Shown"
           }
         },
         "summary": {
@@ -3261,6 +3275,32 @@
       "description": "A session id: not empty and without control characters",
       "type": "string",
       "minLength": 1
+    },
+    "Shown": {
+      "description": "An artifact an escalation puts in front of the person deciding: the\nversion they saw, by its hash, so a decision on it is a decision on\nexactly those bytes.",
+      "type": "object",
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/ArtifactId"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/ContentHash"
+        },
+        "producer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "artifact",
+        "content_hash"
+      ]
     },
     "SubmissionOutcome": {
       "description": "Accepted, and the file the engine wrote from it; or refused, and\nevery problem the document has.",

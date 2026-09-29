@@ -8,15 +8,15 @@
 //! that could drift apart.
 
 use yunta_core::events::{
-    Escalation, EscalationError, EventDraft, EventPayload, Fact, Failure, GateOption,
-    GateResolvedPayload, GateWaitingPayload, HumanChoice, StoredEvent,
+    Escalation, EscalationError, EventDraft, EventPayload, Fact, Failure, GateResolvedPayload,
+    GateWaitingPayload, HumanChoice, Refusal, StoredEvent,
 };
-use yunta_core::{Manifest, ModeName, NodeId, NodeKind, NonEmpty, OptionId, RunId, Workflow};
+use yunta_core::{Manifest, ModeName, NodeId, NonEmpty, OptionId, RunId, Workflow};
 
 use super::schedule::{self, Decision};
 use super::{RunCtx, RunError};
 use crate::replay::RunState;
-use crate::reserved::{offers, ReservedOption};
+use crate::reserved::offers;
 use yunta_core::events::{GateEvent, RerouteCause, RunEvent};
 
 /// Whether an event is the run-level `run_paused` marker — the one predicate
@@ -117,48 +117,6 @@ pub(crate) fn build_failure_escalation(
     )
 }
 
-/// The escalation object for an unresolved internal gate (`kind: gate`,
-/// `external: None`): its declared options (default: a single
-/// `approve`), each with a tradeoff derived from its own `on:` mapping,
-/// plus the engine's own `abort` unless the author already claimed
-/// that id.
-pub(crate) fn build_internal_gate_escalation(
-    node: &NodeId,
-    assignee: &str,
-    message: Option<&str>,
-    options: &[OptionId],
-    on: &indexmap::IndexMap<OptionId, NodeId>,
-) -> Result<Escalation, EscalationError> {
-    let declared: Vec<OptionId> = if options.is_empty() {
-        vec![ReservedOption::Approve.id()]
-    } else {
-        options.to_vec()
-    };
-    let mut gate_options: Vec<GateOption> = declared
-        .iter()
-        .map(|id| offers::declared(id, on.get(id)))
-        .collect();
-    let engine_abort = !declared
-        .iter()
-        .any(|id| ReservedOption::of(id) == Some(ReservedOption::Abort));
-    if engine_abort {
-        gate_options.push(offers::abort());
-    }
-    // An author's own `message:` is the claim; the assignee is the
-    // record of who it is addressed to.
-    let (first, rest) = gate_options
-        .split_first()
-        .map(|(first, rest)| (first.clone(), rest.to_vec()))
-        .unwrap_or_else(|| (offers::abort(), Vec::new()));
-    Escalation::new(
-        message
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("gate `{node}` needs a decision")),
-        vec![Fact::labelled("assignee", assignee)].into(),
-        NonEmpty::from((first, rest)),
-    )
-}
-
 /// Reconstructs the escalation object a paused run is
 /// currently waiting on, purely from the manifest and its own log — no
 /// live process required. This is what lets `resolve_gate` (a `yunta
@@ -217,19 +175,9 @@ pub fn current_escalation(manifest: &Manifest, state: &RunState) -> Option<(Node
         }
         Decision::ResolveInternalGate { node } => {
             let node = super::find_node(&manifest.workflow, &node).ok()?;
-            let NodeKind::Gate {
-                assignee,
-                message,
-                options,
-                on,
-                external: None,
-            } = &node.kind
-            else {
-                return None;
-            };
-            let escalation =
-                build_internal_gate_escalation(&node.id, assignee, message.as_deref(), options, on)
-                    .ok()?;
+            let escalation = super::internal_gate::InternalGate::of(node)?
+                .escalation(&manifest.workflow, &state.artifacts)
+                .ok()?;
             Some((node.id.clone(), escalation))
         }
         _ => None,
@@ -286,12 +234,15 @@ pub async fn resolve_gate(
     else {
         return Err(ResolveGateError::NothingToResolve);
     };
-    if !escalation.offers(&choice.option) {
-        return Err(ResolveGateError::UnknownOption {
-            chosen: choice.option,
-            declared: escalation.menu(),
-        });
-    }
+    escalation
+        .accepts(&choice)
+        .map_err(|refused| match refused {
+            Refusal::OffMenu { chosen, offered } => ResolveGateError::UnknownOption {
+                chosen,
+                declared: offered,
+            },
+            Refusal::Unsaid { chosen, asks } => ResolveGateError::Unsaid { chosen, asks },
+        })?;
     let resolution = GateResolvedPayload::Chosen(choice);
     storage
         .append(
@@ -344,7 +295,7 @@ pub(crate) fn pre_seeded_resolution(
     escalation: &GateWaitingPayload,
 ) -> Option<HumanChoice> {
     match state.pre_seeded(node)? {
-        GateResolvedPayload::Chosen(choice) if escalation.offers(&choice.option) => {
+        GateResolvedPayload::Chosen(choice) if escalation.accepts(choice).is_ok() => {
             Some(choice.clone())
         }
         _ => None,
@@ -405,6 +356,10 @@ pub enum ResolveGateError {
     NothingToResolve,
     #[error("option `{chosen}` isn't valid here — declared options: {declared}")]
     UnknownOption { chosen: OptionId, declared: String },
+    /// The option sends the run back to a session, and the words it
+    /// asks for are the one thing that session would get.
+    #[error("option `{chosen}` asks \"{asks}\" — say it with the choice")]
+    Unsaid { chosen: OptionId, asks: String },
     #[error(transparent)]
     Storage(#[from] yunta_storage::StorageError),
 }

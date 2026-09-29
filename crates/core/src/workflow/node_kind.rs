@@ -125,6 +125,12 @@ pub enum NodeKind {
         /// the gate and the DAG continues.
         #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
         on: IndexMap<OptionId, NodeId>,
+        /// The artifacts the person decides on, put in front of them
+        /// with the question — `[{ node: plan, kind: tasks }]` shows the
+        /// plan an `approve-plan` gate approves. Read like a context
+        /// artifact, so the gate waits for what it shows.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        shows: Vec<super::ArtifactContextRef>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         external: Option<ExternalGate>,
     },
@@ -217,7 +223,7 @@ impl NodeKind {
             "parallel" => &["join", "coordination", "nodes"],
             "check" => &["builtin", "max_severity"],
             "executor" => &["executor", "with", "timeout_seconds"],
-            "gate" => &["assignee", "message", "options", "on", "external"],
+            "gate" => &["assignee", "message", "options", "on", "shows", "external"],
             "workflow" => &["use", "inputs", "isolation", "mounts"],
             _ => return None,
         })

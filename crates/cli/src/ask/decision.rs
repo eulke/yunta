@@ -12,6 +12,7 @@ use std::path::Path;
 
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::OptionId;
+use yunta_engine::ShownDocument;
 
 use super::field::ask_line;
 use super::menu::{choose, Choice};
@@ -24,27 +25,53 @@ use crate::render::{evidence, option_headline, option_tradeoff, INDENT};
 /// only answer available.
 const ASIDE: &str = "anything to add?";
 
-/// Puts `escalation` to the person and returns what they decided,
-/// saying where the run works when the caller knows.
+/// Puts `escalation` to the person, with the documents it shows, and
+/// returns what they decided, saying where the run works when the
+/// caller knows.
 pub(crate) fn decide(
     console: &Console,
     escalation: &GateWaitingPayload,
+    shown: &[ShownDocument],
     tree: Option<&Path>,
 ) -> Answered<HumanChoice> {
-    present(console, escalation, tree)?;
+    present(console, escalation, shown, tree)?;
     let option = choose(console, "choose", options(escalation))?;
     console.say(&format!("chose `{option}`"))?;
-    console.say(&format!(
-        "{ASIDE} (enter records the decision as it stands, {})",
-        console.escape().said()
-    ))?;
-    let aside = ask_line(console, ANSWER)?.value;
+    let asks = escalation
+        .options()
+        .iter()
+        .find(|offered| offered.id == option)
+        .and_then(|offered| offered.asks.as_deref());
+    let said = match asks {
+        Some(asks) => required(console, asks)?,
+        None => {
+            console.say(&format!(
+                "{ASIDE} (enter records the decision as it stands, {})",
+                console.escape().said()
+            ))?;
+            ask_line(console, ANSWER)?.value
+        }
+    };
     let by = attributed(console)?;
     Ok(HumanChoice {
         option,
         by,
-        free_text: (!aside.is_empty()).then_some(aside),
+        free_text: (!said.is_empty()).then_some(said),
     })
+}
+
+/// The words an option asks for, asked until they are given: the option
+/// sends them to whoever works next, and an empty answer would send
+/// nothing.
+fn required(console: &Console, asks: &str) -> Answered<String> {
+    console.say(&format!("{asks} ({})", console.escape().said()))?;
+    loop {
+        let said = ask_line(console, ANSWER)?.value;
+        if !said.trim().is_empty() {
+            return Ok(said);
+        }
+        console.say("this option needs an answer")?;
+    }
 }
 
 /// Draws what the decision is about.
@@ -64,11 +91,17 @@ pub(crate) fn decide(
 fn present(
     console: &Console,
     escalation: &GateWaitingPayload,
+    shown: &[ShownDocument],
     tree: Option<&Path>,
 ) -> std::io::Result<()> {
     console.say("")?;
     console.say("a decision is needed")?;
     console.block(escalation.summary(), INDENT)?;
+    for document in shown {
+        console.say("")?;
+        console.say("what you are deciding on")?;
+        console.block(&crate::render::shown::shown(document).join("\n"), INDENT)?;
+    }
     let attached = evidence(escalation);
     if !attached.is_empty() {
         console.say("")?;
@@ -113,6 +146,7 @@ mod tests {
                     id: "approve".into(),
                     label: "Add an in-memory session store".to_string(),
                     tradeoff: "Unblocks now; one more task in the document".to_string(),
+                    asks: None,
                 },
                 Vec::new(),
             )),

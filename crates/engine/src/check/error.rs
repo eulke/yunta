@@ -241,6 +241,12 @@ pub enum CheckError {
     #[error("node `{node}`: `kind: gate` with `external: {{kind: pull_request}}` needs `forge.github` configured")]
     ExternalGateWithoutForge { node: NodeId },
 
+    /// An external gate is decided on the forge, which shows its
+    /// `artifacts:`; nothing here would ever put a `shows:` in front of
+    /// anyone.
+    #[error("gate `{node}`: `shows:` is for a gate answered here; an external gate publishes its `artifacts:`")]
+    ShowsOnExternalGate { node: NodeId },
+
     /// A gate's resolution is a forge round-trip, one at a time — never
     /// scoped to a `parallel` group's shared worktree/join semantics
     /// (neither concept is defined for a gate).

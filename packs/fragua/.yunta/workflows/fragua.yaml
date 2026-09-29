@@ -68,6 +68,7 @@ nodes:
     message: "Plan registered. Approve?"
     options: [approve, adjust, abort]
     on: { adjust: plan }
+    shows: [{ node: plan, kind: tasks }]
 
   - id: implement
     kind: loop

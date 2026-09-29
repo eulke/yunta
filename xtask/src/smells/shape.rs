@@ -54,23 +54,22 @@ pub fn test_mod_mask(text: &str) -> Vec<bool> {
                 j += 1;
             }
             if is_mod && j < lines.len() && blanked[j].contains('{') {
+                // A module whose braces never balance — a `/*` inside a
+                // multi-line string opens a comment that never closes —
+                // runs to the end of the file.
                 let mut depth = 0i32;
+                let mut close = lines.len() - 1;
                 for (k, line) in blanked.iter().enumerate().skip(j) {
-                    for ch in line.chars() {
-                        if ch == '{' {
-                            depth += 1;
-                        } else if ch == '}' {
-                            depth -= 1;
-                        }
-                    }
-                    for flag in mask.iter_mut().take(k + 1).skip(i) {
-                        *flag = true;
-                    }
+                    depth += line.matches('{').count() as i32 - line.matches('}').count() as i32;
                     if depth == 0 {
-                        i = k + 1;
+                        close = k;
                         break;
                     }
                 }
+                for flag in mask.iter_mut().take(close + 1).skip(i) {
+                    *flag = true;
+                }
+                i = close + 1;
                 continue;
             }
         }
@@ -390,6 +389,15 @@ fn also_reads() {
 }
 ";
         assert_eq!(sync_fs_in_async(source), 1);
+    }
+
+    #[test]
+    fn a_test_module_whose_braces_never_balance_runs_to_the_end_of_the_file() {
+        let source = "fn prod() {}\n#[cfg(test)]\nmod tests {\n    fn t() {\n        docs/**\n}\n";
+        assert_eq!(
+            test_mod_mask(source),
+            vec![false, true, true, true, true, true]
+        );
     }
 
     #[test]

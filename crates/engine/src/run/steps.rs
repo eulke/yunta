@@ -427,34 +427,14 @@ pub(super) async fn poll_gate(
     gate_still_waiting(ctx, step).await
 }
 
-/// Resolves an internal gate (`external: None`) by putting its
-/// `message`/`options`/`on` to a human. `Some` while still waiting.
+/// Resolves an internal gate (`external: None`) by putting it to a
+/// person. `Some` while still waiting.
 pub(super) async fn resolve_internal_gate(
     ctx: &RunCtx<'_>,
     node_id: NodeId,
 ) -> Result<Option<RunReport>, RunError> {
     let node = find_node(&ctx.manifest.workflow, &node_id)?;
-    let yunta_core::NodeKind::Gate {
-        assignee,
-        message,
-        options,
-        on,
-        external: None,
-    } = &node.kind
-    else {
-        return Err(RunError::Broken {
-            diagnostic: format!(
-                "scheduler chose node `{}` as an internal gate, but it isn't one",
-                node.id
-            ),
-        });
-    };
-    gate_still_waiting(
-        ctx,
-        gate_exec::resolve_internal_gate(ctx, node, assignee, message.as_deref(), options, on)
-            .await?,
-    )
-    .await
+    gate_still_waiting(ctx, super::internal_gate::resolve(ctx, node).await?).await
 }
 
 /// Puts a `kind: questions` node's unanswered questions to a human. `Some`

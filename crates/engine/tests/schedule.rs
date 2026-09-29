@@ -198,6 +198,7 @@ fn chose(failure: &Failure, option: &str) -> Vec<(Option<&'static str>, EventPay
                 id: "retry".into(),
                 label: "Run `plan` again (attempt 2)".to_string(),
                 tradeoff: "a fresh attempt".to_string(),
+                asks: None,
             },
             Vec::new(),
         )),

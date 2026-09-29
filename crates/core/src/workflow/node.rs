@@ -410,6 +410,7 @@ nodes:
     message: m
     options: [approve]
     on: { approve: p }
+    shows: [{ node: p, kind: tasks }]
     external: { kind: pull_request, artifacts: [a], branch: b }
   - id: w
     kind: workflow

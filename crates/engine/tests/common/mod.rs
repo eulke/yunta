@@ -524,22 +524,34 @@ sessions:
 /// instead of hanging a test).
 pub struct SequencedInteraction {
     choices: std::sync::Mutex<std::collections::VecDeque<yunta_core::events::HumanChoice>>,
+    shown: std::sync::Mutex<Vec<Vec<yunta_engine::ShownDocument>>>,
 }
 
 impl SequencedInteraction {
     pub fn choosing(options: &[&str]) -> Self {
+        Self::answering(options.iter().map(|option| (*option, None)).collect())
+    }
+
+    /// Each option in order, with the words said along with it.
+    pub fn answering(answers: Vec<(&str, Option<&str>)>) -> Self {
         Self {
             choices: std::sync::Mutex::new(
-                options
-                    .iter()
-                    .map(|option| yunta_core::events::HumanChoice {
-                        option: (*option).into(),
+                answers
+                    .into_iter()
+                    .map(|(option, said)| yunta_core::events::HumanChoice {
+                        option: option.into(),
                         by: "lead".into(),
-                        free_text: None,
+                        free_text: said.map(str::to_string),
                     })
                     .collect(),
             ),
+            shown: std::sync::Mutex::new(Vec::new()),
         }
+    }
+
+    /// The documents each decision was asked with, oldest first.
+    pub fn shown(&self) -> Vec<Vec<yunta_engine::ShownDocument>> {
+        self.shown.lock().unwrap().clone()
     }
 }
 
@@ -550,6 +562,15 @@ impl yunta_engine::HumanInteraction for SequencedInteraction {
         _escalation: &yunta_core::events::GateWaitingPayload,
     ) -> Option<yunta_core::events::HumanChoice> {
         self.choices.lock().unwrap().pop_front()
+    }
+
+    async fn resolve_in(
+        &self,
+        escalation: &yunta_core::events::GateWaitingPayload,
+        asking: &yunta_engine::Asking<'_>,
+    ) -> Option<yunta_core::events::HumanChoice> {
+        self.shown.lock().unwrap().push(asking.shown.to_vec());
+        self.resolve(escalation).await
     }
 }
 

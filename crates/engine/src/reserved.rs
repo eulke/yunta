@@ -81,6 +81,7 @@ impl ReservedOption {
             id: self.id(),
             label: label.into(),
             tradeoff: tradeoff.into(),
+            asks: None,
         }
     }
 }
@@ -230,17 +231,32 @@ pub(crate) mod offers {
     }
 
     /// An author's own gate option, whose words come from the `on:`
-    /// mapping the workflow declared for it.
-    pub(crate) fn declared(id: &yunta_core::OptionId, target: Option<&NodeId>) -> GateOption {
+    /// mapping the workflow declared for it: the node it sends the run
+    /// back to, when it sends it back.
+    ///
+    /// One that sends the run back to a session asks what should change:
+    /// the person's words are what that session picks its work back up
+    /// with, and without them the lap would change nothing.
+    pub(crate) fn declared(
+        id: &yunta_core::OptionId,
+        target: Option<&yunta_core::Node>,
+    ) -> GateOption {
+        let continues = target.filter(|target| target.kind.opens_resumable_session());
         GateOption {
             id: id.clone(),
             label: id.to_string(),
-            tradeoff: match target {
-                Some(target) => {
-                    format!("re-routes to `{target}` and asks again once it completes")
-                }
-                None => "resolves this gate; the flow continues".to_string(),
+            tradeoff: match (target, continues) {
+                (Some(target), Some(_)) => format!(
+                    "sends what you say back to `{}`, and asks again once it completes",
+                    target.id
+                ),
+                (Some(target), None) => format!(
+                    "re-routes to `{}` and asks again once it completes",
+                    target.id
+                ),
+                (None, _) => "resolves this gate; the flow continues".to_string(),
             },
+            asks: continues.map(|_| "what should change?".to_string()),
         }
     }
 }
@@ -279,6 +295,9 @@ mod tests {
         let mode: ModeName = "standard".into();
         let next: ModeName = "ship".into();
         let declared_id = OptionId::from_static("ship-it");
+        let target = |yaml: &str| -> yunta_core::Node { serde_norway::from_str(yaml).unwrap() };
+        let bash = target("{ id: fix-lint, kind: bash, run: \"true\" }");
+        let prompt = target("{ id: plan, kind: prompt, prompt: \"plan it\" }");
         vec![
             offers::abort(),
             offers::retry(&node, 0),
@@ -294,7 +313,8 @@ mod tests {
             offers::grant("src/session/"),
             offers::grant_to_node(&node, "crates/cli/Cargo.toml", 2),
             offers::deny(),
-            offers::declared(&declared_id, Some(&node)),
+            offers::declared(&declared_id, Some(&bash)),
+            offers::declared(&declared_id, Some(&prompt)),
             offers::declared(&declared_id, None),
         ]
     }

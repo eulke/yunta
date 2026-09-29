@@ -235,29 +235,29 @@ impl<'a> RunCtx<'a> {
     }
 
     /// Puts `escalation` to the run's human surface, with the tree this
-    /// run works in, and returns its choice, verified against the menu
-    /// the surface was shown. `None`
-    /// keeps its meaning: no surface can answer right now. An answer off
-    /// the menu is refused as [`RunError::OffMenuAnswer`] before anything
-    /// is recorded.
+    /// run works in and the documents it shows, and returns its choice,
+    /// verified against the menu the surface was shown. `None` keeps its
+    /// meaning: no surface can answer right now. An answer the
+    /// escalation does not accept is refused as
+    /// [`RunError::RefusedAnswer`] before anything is recorded.
     pub(crate) async fn ask_human(
         &self,
         escalation: &GateWaitingPayload,
     ) -> Result<Option<HumanChoice>, RunError> {
-        let Some(choice) = self
-            .human_interaction
-            .resolve_in(escalation, self.worktree)
-            .await
-        else {
+        let shown = crate::artifacts::shown::documents(self.run_dir, escalation.shows()).await?;
+        let asking = crate::Asking {
+            tree: self.worktree,
+            shown: &shown,
+        };
+        let Some(choice) = self.human_interaction.resolve_in(escalation, &asking).await else {
             return Ok(None);
         };
-        if !escalation.offers(&choice.option) {
-            return Err(RunError::OffMenuAnswer {
-                answer: choice.option,
-                offered: escalation.menu(),
+        escalation
+            .accepts(&choice)
+            .map_err(|refused| RunError::RefusedAnswer {
+                refused,
                 summary: escalation.summary().to_string(),
-            });
-        }
+            })?;
         Ok(Some(choice))
     }
 

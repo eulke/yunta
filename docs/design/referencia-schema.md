@@ -165,7 +165,8 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     assignee: lead
     message: "Plan registrado. ¿Aprobás?"
     options: [aprobar, ajustar, abortar]
-    on: { ajustar: plan }
+    on: { ajustar: plan }             # pide qué cambiar y retoma la sesión de `plan` con eso (D194)
+    shows: [{ node: plan, kind: tasks }]   # el plan que se aprueba, atado a su hash en `gate_waiting`
 
   - id: implement
     kind: loop

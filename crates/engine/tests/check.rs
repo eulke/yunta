@@ -112,6 +112,7 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
             message: None,
             options: Vec::new(),
             on: Default::default(),
+            shows: Vec::new(),
             external: Some(yunta_core::ExternalGate {
                 kind: yunta_core::ForgeKind::PullRequest,
                 artifacts: Vec::new(),
@@ -2367,6 +2368,46 @@ nodes:
             [CheckError::Unanswerable(Unanswerable::ArtifactNotDeclared { site, node, .. })]
                 if node.as_str() == "a" && site.contains("mounts:")
         ),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn a_gate_that_shows_an_artifact_its_node_does_not_declare_is_refused() {
+    let yaml = r#"
+name: w
+nodes:
+  - { id: a, kind: prompt, runner: r, prompt: p }
+  - { id: approve, kind: gate, assignee: lead, shows: [{ node: a, kind: tasks }] }
+"#;
+    let errors = source_errors(yaml);
+    assert!(
+        matches!(
+            errors.as_slice(),
+            [CheckError::Unanswerable(Unanswerable::ArtifactNotDeclared { site, node, .. })]
+                if node.as_str() == "a" && site.contains("shows:")
+        ),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn an_external_gate_shows_nothing_here() {
+    let mut node = gate("review", &[]);
+    let NodeKind::Gate { shows, .. } = &mut node.kind else {
+        unreachable!()
+    };
+    shows.push(yunta_core::ArtifactContextRef {
+        node: None,
+        id: yunta_core::ArtifactRefId::Kind {
+            kind: yunta_core::ArtifactKind::Tasks,
+        },
+    });
+    let errors = check(&workflow(vec![node]), &config_with_forge());
+    assert!(
+        errors.contains(&CheckError::ShowsOnExternalGate {
+            node: "review".into()
+        }),
         "got: {errors:?}"
     );
 }

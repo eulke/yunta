@@ -146,6 +146,7 @@ nodes:
     message: "Plan registrado. Do you approve?"
     options: [aprobar, ajustar, abortar]
     on: { ajustar: plan }
+    shows: [{ node: plan, kind: tasks }]
 "#;
     let first: Workflow = serde_norway::from_str(yaml).unwrap();
     let NodeKind::Gate {
@@ -153,6 +154,7 @@ nodes:
         message,
         options,
         on,
+        shows,
         external,
     } = &first.nodes[1].kind
     else {
@@ -162,6 +164,15 @@ nodes:
     assert_eq!(message.as_deref(), Some("Plan registrado. Do you approve?"));
     assert_eq!(options, &["aprobar", "ajustar", "abortar"]);
     assert_eq!(on.get("ajustar").map(|t| t.as_str()), Some("plan"));
+    assert_eq!(
+        shows,
+        &[yunta_core::ArtifactContextRef {
+            node: Some("plan".into()),
+            id: yunta_core::ArtifactRefId::Kind {
+                kind: yunta_core::ArtifactKind::Tasks
+            },
+        }]
+    );
     assert!(external.is_none(), "an internal gate has no external block");
 
     let re_serialized = serde_norway::to_string(&first).unwrap();

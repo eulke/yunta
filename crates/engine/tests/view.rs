@@ -191,6 +191,7 @@ fn approve_option() -> GateOption {
         id: "approve".into(),
         label: "Approve".to_string(),
         tradeoff: "goes on".to_string(),
+        asks: None,
     }
 }
 

@@ -149,13 +149,62 @@ pub(crate) enum Asker {
     Node,
 }
 
+/// What a session is told when it is picked back up after a person
+/// answered it: the answer, and what to do with it.
+pub(crate) fn continuation_notice(
+    session: Option<&RunToolsSession>,
+    answer: &crate::task_cycle::Answer,
+    asker: Asker,
+) -> String {
+    match answer {
+        crate::task_cycle::Answer::Scope(scope) => scope_notice(session, scope, asker),
+        crate::task_cycle::Answer::Review(review) => format!(
+            "{} Revise it accordingly and hand it over again the way you did before.",
+            reviewed(review, "you")
+        ),
+    }
+}
+
+/// What a fresh session of a node is told when a person's review sent
+/// the run back to it and the session that did the work cannot be picked
+/// back up: the review, and where what the node handed over is, which it
+/// reads rather than being given a copy of.
+pub(crate) fn fresh_review_notice(
+    review: &crate::task_cycle::Review,
+    handed: &[std::path::PathBuf],
+) -> String {
+    let at: Vec<String> = handed
+        .iter()
+        .map(|path| format!("`{}`", path.display()))
+        .collect();
+    let at = match at.is_empty() {
+        true => String::new(),
+        false => format!(" What it handed over is at {}.", at.join(", ")),
+    };
+    format!(
+        "\n\nThis node already ran in this run. {}{at} Revise it accordingly and hand it \
+         over again.",
+        reviewed(review, "this node")
+    )
+}
+
+/// The review, in the person's words.
+fn reviewed(review: &crate::task_cycle::Review, whose: &str) -> String {
+    format!(
+        "A person reviewed what {whose} handed over at gate `{}` and chose `{}`: {}",
+        review.gate,
+        review.option,
+        review.said.trim()
+    )
+}
+
 /// What a session is told when it is picked back up after the answer to
 /// the scope it asked for: the answer, that its work is where it left
 /// it, and — when the run tools are mounted — which tool reads what it
 /// may now do. The scope itself is never copied here: the tools read it
 /// from the same log the fence and the close read, so the session and
 /// the engine cannot hold two versions of it.
-pub(crate) fn continuation_notice(
+fn scope_notice(
     session: Option<&RunToolsSession>,
     answer: &yunta_core::events::ScopeAnswer,
     asker: Asker,

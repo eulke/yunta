@@ -359,8 +359,9 @@ cuyo stream terminó sin decir nada; el adapter nunca inventa un terminal (D180)
 |---|---|---|---|
 | `summary` | string | solo en `gate_waiting` | objeto de escalación |
 | `evidence` | lista de `{label?, value}` | solo en `gate_waiting` | la adjunta el engine desde el log; nunca prosa generada por agente. Un hecho que se nombra solo (`exit 1`) no lleva `label`. Un log anterior a la estructura trae un string y se lee como el único hecho sin etiqueta que siempre fue |
-| `options` | lista de `{id, label, tradeoff}` | solo en `gate_waiting` | `tradeoff` es obligatorio por opción |
+| `options` | lista de `{id, label, tradeoff, asks?}` | solo en `gate_waiting` | `tradeoff` es obligatorio por opción; `asks` es la pregunta que una opción hace antes de contar como respuesta —la de un gate que devuelve el run a un nodo con sesión, `what should change?`— y una respuesta sin `free_text` a esa opción se rechaza |
 | `external_ref` | `Option<string>` | solo en `gate_waiting` | la referencia propia del forge para este gate: la URL del pull request (Contrato §5.6); ausente en la escalación interna, que no sale del run |
+| `shows` | lista de `{producer?, artifact, content_hash}` | solo en `gate_waiting` (puede ser vacía) | los artifacts que el gate puso delante de quien decide, con el hash exacto que vio: la decisión queda atada a esos bytes. Omitida si no muestra nada, y en logs anteriores al campo |
 | `chosen_option` | `Option<string>` | solo en `gate_resolved` | — |
 | `resolved_by` | `Option<string>` | solo en `gate_resolved` | usuario o identificador de quien resolvió |
 | `approved_sha` | `Option<CommitSha>` | solo en `gate_resolved` | el commit que cubre la aprobación del forge: contra él se compara la cabeza del pull request para decidir si la aprobación sigue en pie |

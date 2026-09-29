@@ -112,8 +112,8 @@ pub(crate) fn collect_push_to_base_warnings(
 
 /// A `kind: gate` with `external:` needs `forge.github` configured
 /// (`external.kind` is a closed enum with one variant today, so this is
-/// a total match), and an internal gate's `on:` maps only options it
-/// declares. That each `on:` target is a node the workflow declares is
+/// a total match) and shows nothing here, and an internal gate's `on:`
+/// maps only options it declares. That each `on:` target is a node the workflow declares is
 /// the reading door's, like every other reference.
 pub(crate) fn check_gate(
     node: &Node,
@@ -123,12 +123,18 @@ pub(crate) fn check_gate(
     let NodeKind::Gate {
         options,
         on,
+        shows,
         external,
         ..
     } = &node.kind
     else {
         return;
     };
+    if external.is_some() && !shows.is_empty() {
+        errors.push(CheckError::ShowsOnExternalGate {
+            node: node.id.clone(),
+        });
+    }
     if let Some(external) = external {
         match external.kind {
             yunta_core::ForgeKind::PullRequest => {

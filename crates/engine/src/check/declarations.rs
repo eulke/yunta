@@ -214,24 +214,19 @@ pub(crate) fn check_reserved_artifact_names(workflow: &Workflow, errors: &mut Ve
         }
     };
     for node in workflow.iter_nodes() {
-        for source in &node.context {
-            if let yunta_core::ContextSpec::Artifact { artifact } = source {
-                if let yunta_core::ArtifactRefId::Name { name } = &artifact.id {
-                    reserved(
-                        format!("the `artifact:` context source of node `{}`", node.id),
-                        name,
-                    );
-                }
+        for read in yunta_core::workflow::reads::artifact_reads(node) {
+            if let yunta_core::ArtifactRefId::Name { name } = read.id {
+                reserved(read.site.of(&node.id), name);
             }
         }
+        // What a mount is called in the child is a name as well.
         if let yunta_core::NodeKind::Workflow { mounts, .. } = &node.kind {
             for mount in mounts {
-                let site = format!("a `mounts:` entry of node `{}`", node.id);
-                if let yunta_core::ArtifactRefId::Name { name } = &mount.artifact.id {
-                    reserved(site.clone(), name);
-                }
                 if let Some(name) = &mount.artifact.rename {
-                    reserved(site, name);
+                    reserved(
+                        yunta_core::workflow::reads::ReadSite::Mount.of(&node.id),
+                        name,
+                    );
                 }
             }
         }

@@ -53,6 +53,7 @@ mod tests {
             id: yunta_core::OptionId::from_static("retry"),
             label: "Re-route to `fix-lint` once more".to_string(),
             tradeoff: "Uses one extra correction attempt".to_string(),
+            asks: None,
         };
         assert_eq!(
             option_headline(&option),

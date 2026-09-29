@@ -80,7 +80,7 @@ pub use answers::{
     answer_questions, AnswerQuestionsError, AnswersError, Recorded as AnswersRecorded,
     Reply as AnswersReply,
 };
-pub use artifacts::store::{ObjectError, ObjectStore};
+pub use artifacts::store::{view_path, ObjectError, ObjectStore};
 pub use artifacts::{
     close_artifacts, AcceptError, ArtifactContent, ArtifactFault, ArtifactIntegrity, StagedHash,
     VerifiedArtifact,
@@ -101,7 +101,9 @@ pub use history::{
     budget_p90_warning, prior_estimation, run_summary, Percentiles, PriorEstimation, RunSummary,
     MIN_SAMPLES_FOR_ESTIMATION,
 };
-pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
+pub use human_interaction::{
+    Asking, HumanInteraction, NoInteraction, QuestionsReply, ShownContent, ShownDocument,
+};
 pub use inputs::{resolve_inputs, InputsError, ResolvedInputs};
 pub use live::{
     last_event_age, live_total_tokens, open_sessions, recent_tool_calls, running_since,

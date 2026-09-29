@@ -19,6 +19,22 @@ pub struct GateOption {
     pub id: OptionId,
     pub label: String,
     pub tradeoff: String,
+    /// What choosing this option has to say along with it, when an
+    /// answer without words would change nothing — a correction sent
+    /// back to the session that made the work is the words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asks: Option<String>,
+}
+
+/// An artifact an escalation puts in front of the person deciding: the
+/// version they saw, by its hash, so a decision on it is a decision on
+/// exactly those bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Shown {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub producer: Option<crate::ids::NodeId>,
+    pub artifact: crate::events::ArtifactId,
+    pub content_hash: ContentHash,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -57,6 +73,21 @@ pub struct GateWaitingPayload {
     /// re-publishing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     external_ref: Option<String>,
+    /// The artifacts the decision is about, as the person was shown
+    /// them. Empty for an escalation about something that happened.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    shows: Vec<Shown>,
+}
+
+/// Why an answer does not count as a decision on an escalation.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum Refusal {
+    /// The option is not on the menu.
+    #[error("`{chosen}` is not one of the options offered ({offered})")]
+    OffMenu { chosen: OptionId, offered: String },
+    /// The option asks for words, and the answer has none.
+    #[error("`{chosen}` asks \"{asks}\", and the answer says nothing")]
+    Unsaid { chosen: OptionId, asks: String },
 }
 
 /// Why an escalation was refused before it reached anyone.
@@ -98,6 +129,7 @@ impl Escalation {
             evidence,
             options: options.into_vec(),
             external_ref: None,
+            shows: Vec::new(),
         }))
     }
 
@@ -123,7 +155,14 @@ impl Escalation {
             evidence,
             options: Vec::new(),
             external_ref: Some(external_ref.into()),
+            shows: Vec::new(),
         }))
+    }
+
+    /// The same escalation, putting `shows` in front of the person.
+    pub fn showing(mut self, shows: Vec<Shown>) -> Self {
+        self.0.shows = shows;
+        self
     }
 
     /// The payload, for the event that carries it.
@@ -178,10 +217,37 @@ impl GateWaitingPayload {
         self.external_ref.as_deref()
     }
 
-    /// Whether `option` is on this escalation's menu: the one test an
-    /// answer passes before it counts as a decision on it.
+    /// The artifacts the decision is about, as the person saw them.
+    pub fn shows(&self) -> &[Shown] {
+        &self.shows
+    }
+
+    /// Whether `option` is on this escalation's menu.
     pub fn offers(&self, option: &OptionId) -> bool {
         self.options.iter().any(|o| o.id == *option)
+    }
+
+    /// Whether `choice` counts as a decision on this escalation: an
+    /// option on its menu, with words when the option asks for them.
+    /// The one test every answer passes, whichever surface gave it.
+    pub fn accepts(&self, choice: &HumanChoice) -> Result<(), Refusal> {
+        let Some(option) = self.options.iter().find(|o| o.id == choice.option) else {
+            return Err(Refusal::OffMenu {
+                chosen: choice.option.clone(),
+                offered: self.menu(),
+            });
+        };
+        let said = choice
+            .free_text
+            .as_deref()
+            .is_some_and(|text| !text.trim().is_empty());
+        match &option.asks {
+            Some(asks) if !said => Err(Refusal::Unsaid {
+                chosen: choice.option.clone(),
+                asks: asks.clone(),
+            }),
+            _ => Ok(()),
+        }
     }
 
     /// The escalation on one line — its claim, then the facts behind

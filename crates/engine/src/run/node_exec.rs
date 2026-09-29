@@ -159,14 +159,14 @@ async fn node_unit(
     attempt: u32,
 ) -> Result<(crate::worktree::Unit, Option<crate::task_cycle::Continuing>), RunError> {
     let who = crate::worktree::UnitId::Node(node.id.clone());
-    let continuing = super::node_scope::continuation(ctx, node).await?;
+    let continuing = super::continuation::continuation(ctx, node).await?;
     if continuing.is_some() {
         let reopened =
             crate::worktree::reopen_unit(ctx.run_dir, who.clone(), None, ctx.root_supervision())
                 .await?;
         match reopened {
             Some(unit) => return Ok((unit, continuing)),
-            None => super::node_scope::not_resumed(ctx, node).await?,
+            None => super::continuation::not_resumed(ctx, node).await?,
         }
     }
     let base = crate::worktree::snapshot_commit(

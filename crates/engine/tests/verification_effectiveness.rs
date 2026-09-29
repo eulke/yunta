@@ -43,6 +43,7 @@ fn gate_node(id: &str) -> Node {
             message: None,
             options: Vec::new(),
             on: Default::default(),
+            shows: Vec::new(),
             external: Some(yunta_core::ExternalGate {
                 kind: yunta_core::ForgeKind::PullRequest,
                 artifacts: Vec::new(),

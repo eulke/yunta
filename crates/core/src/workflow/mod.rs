@@ -26,6 +26,7 @@ use crate::yaml::Value;
 use parse::{describe, keyed_entry, nested};
 
 pub mod read;
+pub mod reads;
 
 pub use artifacts::{
     ArtifactKind, ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, ReservedIdentity,

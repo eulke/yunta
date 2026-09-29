@@ -24,6 +24,7 @@
 mod canonical;
 mod ingest;
 mod integrity;
+pub(crate) mod shown;
 pub mod store;
 
 use std::path::Path;
