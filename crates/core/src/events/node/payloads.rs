@@ -254,6 +254,11 @@ pub struct NodeFailedPayload {
     /// the budget, so a failure that nothing will retry is never
     /// recorded as retryable.
     pub retryable: bool,
+    /// The run's tree as the failed attempt left it — a failure can move
+    /// the tree as much as a finish can. Absent in a log written before
+    /// it was recorded, which then says nothing about the tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<TreeId>,
 }
 
 impl NodeFailedPayload {
@@ -262,6 +267,15 @@ impl NodeFailedPayload {
             failure,
             tokens_used,
             retryable,
+            tree: None,
+        }
+    }
+
+    /// The same, naming the tree the failed attempt left the run at.
+    pub fn leaving(self, tree: TreeId) -> Self {
+        NodeFailedPayload {
+            tree: Some(tree),
+            ..self
         }
     }
 }

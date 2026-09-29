@@ -131,6 +131,13 @@ pub struct NodeRecord {
     /// The run's tree as the node's latest finish left it; `None` when
     /// it never finished, or its finish named no tree.
     pub left_tree: Option<TreeId>,
+    /// The run's tree as the node's latest failure left it; `None` when
+    /// it never failed, or its failure named no tree.
+    pub failed_tree: Option<TreeId>,
+    /// Whether another node moved the run's tree while this node's latest
+    /// attempt ran: whatever that attempt verified, it may have read the
+    /// tree half-changed. A new attempt starts without it.
+    pub tree_moved: bool,
     /// The tree the open attempt started from — what its diff is judged
     /// against. `None` for an attempt that recorded none, which is what
     /// a log written before the audit had a starting point carries, and
@@ -242,20 +249,49 @@ impl NodeLedger {
     }
 
     /// The newest tree the log records the run at, and where: every
-    /// node's latest start, and the latest finish of each node
-    /// `counts_finish` lets through. `None` when no event named a tree.
-    pub fn latest_tree(&self, counts_finish: impl Fn(&NodeId) -> bool) -> Option<(Seq, &TreeId)> {
+    /// node's latest start, and the latest finish and failure of each
+    /// node `counts_close` lets through. `None` when no event named a
+    /// tree.
+    pub fn latest_tree(&self, counts_close: impl Fn(&NodeId) -> bool) -> Option<(Seq, &TreeId)> {
         self.per_node
             .iter()
             .flat_map(|(id, record)| {
                 let started = record.last_started.zip(record.from_tree.as_ref());
+                let closes = counts_close(id);
                 let finished = record
                     .last_finished
                     .zip(record.left_tree.as_ref())
-                    .filter(|_| counts_finish(id));
-                started.into_iter().chain(finished)
+                    .filter(|_| closes);
+                let failed = record
+                    .last_failed
+                    .zip(record.failed_tree.as_ref())
+                    .filter(|_| closes);
+                started.into_iter().chain(finished).chain(failed)
             })
             .max_by_key(|(seq, _)| *seq)
+    }
+
+    /// Marks every attempt that ran beside `writer`'s — open while it
+    /// ran, or closed after it started — when `writer` closed leaving the
+    /// run's tree at `left`, different from the tree it started on. An
+    /// attempt that itself started on `left` already saw the change.
+    fn moved_beside(&mut self, writer: &NodeId, left: &TreeId) {
+        let Some(record) = self.per_node.get(writer) else {
+            return;
+        };
+        let (Some(from), Some(started)) = (record.from_tree.clone(), record.last_started) else {
+            return;
+        };
+        if &from == left {
+            return;
+        }
+        for (_, beside) in self.per_node.iter_mut().filter(|(id, _)| *id != writer) {
+            let overlapped = matches!(beside.state, Some(NodeState::Running { .. }))
+                || beside.last_terminal.is_some_and(|closed| closed > started);
+            if overlapped && beside.from_tree.as_ref() != Some(left) {
+                beside.tree_moved = true;
+            }
+        }
     }
 
     /// `node`'s derived state; `None` for a node with none yet.
@@ -362,6 +398,7 @@ impl NodeLedger {
                 record.state = Some(NodeState::Running { attempt: p.attempt });
                 record.open_since = Some((meta.seq, meta.at));
                 record.last_started = Some(meta.seq);
+                record.tree_moved = false;
                 record.tokens_in_flight = TokenUsage::default();
                 // A fresh attempt owes nothing for an earlier round's
                 // answer: whatever it produces closes it.
@@ -394,6 +431,7 @@ impl NodeLedger {
                 record.open_since = None;
                 record.last_terminal = Some(meta.seq);
                 record.last_failed = Some(meta.seq);
+                record.failed_tree = p.tree.clone();
                 record.sessions.clear();
                 record.calls.clear();
                 record.state = Some(NodeState::Failed {
@@ -422,5 +460,19 @@ impl NodeLedger {
             | NodeEvent::CriteriaChecked(_)
             | NodeEvent::ScopeChecked(_) => {}
         }
+        if let Some(left) = left_by_close(event) {
+            self.moved_beside(node, left);
+        }
+    }
+}
+
+/// The tree a node's close names: the one its finish or its failure
+/// left the run at. `None` for any other event, and for a close that
+/// named none.
+fn left_by_close(event: &NodeEvent) -> Option<&TreeId> {
+    match event {
+        NodeEvent::Finished(p) => p.tree.as_ref(),
+        NodeEvent::Failed(p) => p.tree.as_ref(),
+        _ => None,
     }
 }

@@ -16,12 +16,14 @@ use crate::replay::NodeState;
 /// for the run's tree — run again, alone, once nothing else is running.
 ///
 /// The run's tree is the newest one the log records: any node's start, or
-/// the finish of a node that is not itself such an invariant. An
-/// invariant's own finish is left out, so one that rewrites files never
+/// the close of a node that is not itself such an invariant. An
+/// invariant's own close is left out, so one that rewrites files never
 /// makes another stale and two never send each other round; what it
 /// rewrote is seen at the next node that touches the tree. A pass whose
 /// finish named no tree — a log written before finishes named one —
-/// is never taken for stale.
+/// is never taken for stale on that count. A pass taken while another
+/// node moved the tree under it speaks for no tree at all: the invariant
+/// may have read it half-changed, and it runs again alone.
 pub(super) fn reverify_step(board: &Board<'_>) -> Option<Decision> {
     let running = board
         .state
@@ -37,15 +39,18 @@ pub(super) fn reverify_step(board: &Board<'_>) -> Option<Decision> {
         .copied()
         .filter(|node| node.verifies_the_tree())
         .collect();
-    let (at, now) = board
+    let latest = board
         .state
         .nodes
-        .latest_tree(|id| !verifiers.iter().any(|node| &node.id == id))?;
+        .latest_tree(|id| !verifiers.iter().any(|node| &node.id == id));
     let stale = verifiers.into_iter().find(|node| {
         board.state.nodes.get(&node.id).is_some_and(|record| {
+            let changed_after = latest.is_some_and(|(at, now)| {
+                record.last_finished.is_some_and(|finished| finished < at)
+                    && record.left_tree.as_ref().is_some_and(|left| left != now)
+            });
             matches!(record.state, Some(NodeState::Finished { .. }))
-                && record.last_finished.is_some_and(|finished| finished < at)
-                && record.left_tree.as_ref().is_some_and(|left| left != now)
+                && (record.tree_moved || changed_after)
         })
     })?;
     Some(Decision::Execute(vec![(

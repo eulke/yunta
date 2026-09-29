@@ -1,12 +1,15 @@
 ---
 number: D198
 title: "An invariant's pass holds for the tree it left"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D200]
 ---
 
 # D198 — An invariant's pass holds for the tree it left
+
+*(Revised by D200: a pass taken while another node moved the tree under the
+invariant holds for no tree, and a failure names the tree it left too.)*
 
 ## Context
 

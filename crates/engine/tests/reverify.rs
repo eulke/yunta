@@ -261,3 +261,87 @@ nodes:
     ];
     assert_eq!(next(others, checked), Decision::Finish);
 }
+
+// --- a tree that moves while an invariant runs ------------------------------
+
+fn finish(left: &str) -> EventPayload {
+    EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::leaving(
+        "ok",
+        TokenUsage::default(),
+        tree(left),
+    )))
+}
+
+/// `lint` runs beside `fix`, which lands another tree before `lint`
+/// closes: whatever `lint` read, it may have read half-changed.
+#[test]
+fn an_invariant_that_ran_while_a_writer_finished_runs_again() {
+    let beside = vec![
+        ran("work", 1, T1, T1),
+        vec![
+            ("lint", started(1, T1)),
+            ("fix", started(1, T1)),
+            ("fix", finish(T2)),
+            ("lint", finish(T2)),
+        ],
+    ];
+    assert_eq!(next(CHECKED, beside), runs("lint", 2));
+}
+
+#[test]
+fn an_invariant_that_finished_before_an_overlapping_writer_runs_again() {
+    let beside = vec![
+        ran("work", 1, T1, T1),
+        vec![
+            ("lint", started(1, T1)),
+            ("fix", started(1, T1)),
+            ("lint", finish(T2)),
+            ("fix", finish(T2)),
+        ],
+    ];
+    assert_eq!(next(CHECKED, beside), runs("lint", 2));
+}
+
+#[test]
+fn an_invariant_beside_a_node_that_changed_nothing_is_not_run_again() {
+    let beside = vec![
+        ran("work", 1, T1, T1),
+        vec![
+            ("lint", started(1, T1)),
+            ("fix", started(1, T1)),
+            ("fix", finish(T1)),
+            ("lint", finish(T1)),
+        ],
+    ];
+    assert_eq!(next(CHECKED, beside), asks("ship"));
+}
+
+#[test]
+fn an_invariant_that_started_from_the_tree_the_writer_left_is_not_run_again() {
+    let beside = vec![
+        ran("work", 1, T1, T1),
+        vec![
+            ("fix", started(1, T1)),
+            ("lint", started(1, T2)),
+            ("fix", finish(T2)),
+            ("lint", finish(T2)),
+        ],
+    ];
+    assert_eq!(next(CHECKED, beside), asks("ship"));
+}
+
+/// Run again alone, the invariant marks nobody and nobody marks it.
+#[test]
+fn an_invariant_run_again_alone_is_not_sent_round() {
+    let beside = vec![
+        ran("work", 1, T1, T1),
+        vec![
+            ("lint", started(1, T1)),
+            ("fix", started(1, T1)),
+            ("fix", finish(T2)),
+            ("lint", finish(T2)),
+        ],
+        ran("lint", 2, T2, T2),
+    ];
+    assert_eq!(next(CHECKED, beside), asks("ship"));
+}

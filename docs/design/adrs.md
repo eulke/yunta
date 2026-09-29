@@ -204,5 +204,6 @@ lista.
 **D195 — A plan a person reviews explains itself, in the same document the engine runs.** `accepted` → [`adr/D195-a-plan-a-person-reviews-explains-itself.md`](adr/D195-a-plan-a-person-reviews-explains-itself.md)
 **D196 — Every task is held to the suite its lineage measured green.** `accepted` → [`adr/D196-every-task-is-held-to-the-suite-its-lineage-measured-green.md`](adr/D196-every-task-is-held-to-the-suite-its-lineage-measured-green.md)
 **D197 — A check retried on the tree it failed on is not run again.** `accepted` → [`adr/D197-a-check-retried-on-the-tree-it-failed-on-is-not-run-again.md`](adr/D197-a-check-retried-on-the-tree-it-failed-on-is-not-run-again.md)
-**D198 — An invariant's pass holds for the tree it left.** `accepted` → [`adr/D198-an-invariants-pass-holds-for-the-tree-it-left.md`](adr/D198-an-invariants-pass-holds-for-the-tree-it-left.md)
+**D198 — An invariant's pass holds for the tree it left.** `revised` *(Revisada por D200.)* → [`adr/D198-an-invariants-pass-holds-for-the-tree-it-left.md`](adr/D198-an-invariants-pass-holds-for-the-tree-it-left.md)
 **D199 — A run records the time its host was suspended, and its durations leave it out.** `accepted` → [`adr/D199-a-run-records-the-time-its-host-was-suspended.md`](adr/D199-a-run-records-the-time-its-host-was-suspended.md)
+**D200 — An invariant's pass does not hold for a tree that moved while it ran.** `accepted` → [`adr/D200-an-invariants-pass-does-not-hold-for-a-tree-that-moved-while-it-ran.md`](adr/D200-an-invariants-pass-does-not-hold-for-a-tree-that-moved-while-it-ran.md)

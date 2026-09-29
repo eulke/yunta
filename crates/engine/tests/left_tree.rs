@@ -97,3 +97,26 @@ nodes:
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(left(&bench, "approve"), vec![Some(tree_now(&bench).await)]);
 }
+
+/// A failure can move the tree as much as a finish can, so it names the
+/// tree it left too.
+#[tokio::test]
+async fn a_node_failure_names_the_tree_it_left_the_run_at() {
+    let bench = Bench::new();
+    let workflow = "name: fails\nnodes:\n  - { id: broke, kind: bash, run: \"echo half > half.txt; exit 1\" }\n";
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+
+    let failed: Vec<Option<TreeId>> = bench
+        .events()
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Node(NodeEvent::Failed(p))) => Some(p.tree.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(failed, vec![Some(tree_now(&bench).await)]);
+}

@@ -372,11 +372,12 @@ pub(super) async fn fail_with(
     retryable: bool,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
+    let tree = left_tree(ctx, node).await?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-            failure, retryable, tokens,
-        ))),
+        EventPayload::Node(NodeEvent::Failed(
+            NodeFailedPayload::new(failure, retryable, tokens).leaving(tree),
+        )),
     )
     .await?;
     write_progress(ctx).await?;

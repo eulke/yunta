@@ -91,3 +91,42 @@ async fn a_node_that_changes_nothing_leaves_every_invariant_standing() {
 
     assert_eq!(attempts(&bench, "check"), 1);
 }
+
+/// `check` and `writer` run side by side: they meet outside the tree,
+/// `writer` changes the tree and says so, and only then does `check`
+/// read it — so whatever order their closes land in, `check`'s pass was
+/// taken on a tree that moved while it ran.
+const SIDE_BY_SIDE: &str = r#"
+name: side-by-side
+nodes:
+  - id: check
+    kind: bash
+    invariant: true
+    run: "mkdir -p '{{run.dir}}/meet' && touch '{{run.dir}}/meet/check' && while [ ! -f '{{run.dir}}/meet/written' ]; do sleep 0.05; done; test ! -f broken.txt"
+  - id: writer
+    kind: bash
+    run: "mkdir -p '{{run.dir}}/meet' && touch '{{run.dir}}/meet/writer' && while [ ! -f '{{run.dir}}/meet/check' ]; do sleep 0.05; done; echo more > more.txt && touch '{{run.dir}}/meet/written'"
+  - id: after
+    kind: bash
+    depends_on: [check, writer]
+    run: "true"
+"#;
+
+#[tokio::test]
+async fn an_invariant_run_beside_a_writer_runs_again_alone() {
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_config(
+            SIDE_BY_SIDE,
+            "sessions: []\n",
+            "defaults:\n  max_parallel_nodes: 2\n",
+        )
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        attempts(&bench, "check"),
+        2,
+        "once beside the writer, once alone on the tree it left"
+    );
+}

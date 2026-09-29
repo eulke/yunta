@@ -2438,6 +2438,17 @@
         },
         "tokens_used": {
           "$ref": "#/$defs/TokenUsage"
+        },
+        "tree": {
+          "description": "The run's tree as the failed attempt left it — a failure can move\nthe tree as much as a finish can. Absent in a log written before\nit was recorded, which then says nothing about the tree.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TreeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "anyOf": [
@@ -2923,6 +2934,11 @@
           "description": "A `mode` leaves out a node the workflow cannot run without, or a\nnode a node it includes reroutes to.",
           "type": "string",
           "const": "incoherent-mode"
+        },
+        {
+          "description": "`invariant: true` on a child of a `parallel` group, where nothing\nhonors it: modes and re-verification read the top level.",
+          "type": "string",
+          "const": "invariant-in-parallel"
         }
       ]
     },
