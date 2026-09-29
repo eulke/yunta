@@ -161,6 +161,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 |---|---|---|---|
 | `attempt` | `u32` | sí | 1-indexado; sube con cada reintento |
 | `from_tree` | `TreeId` | no | el árbol del que parte este intento: contra él se mide su propio diff al cerrar |
+| `found` | sha de commit git | no; ausente cuando no se commiteó nada | el commit que el arranque hizo de lo que el árbol del run tenía sin commitear —lo que una persona editó con el run estacionado, lo que dejó un intento interrumpido—; ausente si no había nada, si el nodo trabaja en un checkout propio, si otro nodo trabajaba en el mismo árbol o si el run trabaja sin árbol propio (D201) |
 
 **De qué árbol parte.** `from_tree` es el id del objeto `tree` que el árbol de
 trabajo tenía cuando el intento arrancó, capturado con un índice privado para no
@@ -173,6 +174,13 @@ que impide el reverso: un archivo que ya estaba sucio y que este intento *tambi�
 tocó difiere del árbol de partida y sigue siendo suyo. Un evento escrito antes de
 que el arranque nombrara su árbol no lo lleva, y se lee contra la base del run,
 que es lo que ese log significaba (D182).
+
+**Lo que encontró.** Un nodo que trabaja en el árbol del run parte de una rama
+que tiene todo lo que el árbol tiene: lo que nadie commiteó se commitea antes del
+arranque, con el mensaje `found in the run's tree before node <id> started`, y
+—si el intento anterior de ese nodo nunca cerró— un cuerpo que dice que es lo que
+ese intento dejó. El commit, la captura y el `node_started` son un solo paso, así
+que `from_tree` es exactamente el árbol de `found` (D201).
 
 ### 5.5 `agent_session_opened` — adapter
 **Fuente:** session_id, agente, modelo, capacidades

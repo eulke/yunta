@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{EventPayload, Failure, HookPhase};
+use yunta_core::events::{Failure, HookPhase};
 use yunta_core::port::PermissionProfile;
 use yunta_core::{HookFailurePolicy, Node, NodeId, NodeKind};
 
@@ -20,7 +20,6 @@ use super::parallel_exec::execute_parallel;
 use super::prompt_exec::execute_prompt;
 use super::step::Step;
 use super::{RunCtx, RunError};
-use yunta_core::events::NodeEvent;
 use yunta_core::template::TemplateVar;
 
 /// How the node's execution ended, as recorded in the log by the caller.
@@ -66,44 +65,6 @@ pub(super) async fn cancelled_end(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeE
         false,
     )
     .await
-}
-
-/// Writes the one `node_started` this engine ever writes, with the tree
-/// the attempt begins from.
-///
-/// The starting point is recorded here and nowhere else, because a fact
-/// derived from the log has to be written at exactly one moment: the
-/// audit that reads it back at close is only as true as the single
-/// instant this call names. A node given a checkout of its own already
-/// has that instant — the one its unit was opened at; a node working in
-/// the run's tree captures what it finds there.
-pub(super) async fn emit_started(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    attempt: u32,
-) -> Result<(), RunError> {
-    let from = match ctx.unit {
-        Some(mine) => mine.unit.from.clone(),
-        None => {
-            crate::worktree::capture_tree(
-                ctx.worktree,
-                &crate::run_dir::index_for(
-                    ctx.run_dir,
-                    &crate::worktree::UnitId::Node(node.id.clone()),
-                ),
-                ctx.root_supervision(),
-            )
-            .await?
-        }
-    };
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Node(NodeEvent::Started(
-            yunta_core::events::NodeStartedPayload::attempt_from(attempt, from),
-        )),
-    )
-    .await?;
-    Ok(())
 }
 
 /// `cancel` only ever fires for a child of a `join: any` parallel group
@@ -196,7 +157,10 @@ async fn execute_in_its_tree(
     attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    emit_started(ctx, node, attempt).await?;
+    // Boxed: every attempt starts here, a child run's included, and the
+    // commit of what it finds would otherwise ride inline in every level
+    // of a composed run's recursion.
+    Box::pin(super::node_start::emit_started(ctx, node, attempt)).await?;
 
     // A node that continues no session opens on an empty directory of
     // its own, and `node_started` is the one point every one of its

@@ -39,6 +39,7 @@ mod node_artifacts;
 mod node_close;
 pub(crate) mod node_exec;
 mod node_scope;
+mod node_start;
 mod parallel_exec;
 mod promote;
 mod prompt_exec;

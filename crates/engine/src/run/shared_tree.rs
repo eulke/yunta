@@ -70,6 +70,61 @@ async fn commit_message(
     Ok(Some(message(&ctx.manifest.workflow, &state, node, closing)))
 }
 
+/// Commits what the run's tree holds that no node committed, as `node`
+/// starts working in it — a person's edits while the run was parked, or
+/// what an interrupted attempt left — and answers with the commit and the
+/// tree it holds. `None` when there is nothing to find, for a node that
+/// does not work in the run's tree (a checkout of its own opens on
+/// everything the tree holds, and its landing leaves the rest where it
+/// was), in a run that works in a person's own checkout, or while
+/// another node works in the same tree: what the tree holds then may be
+/// that node's, and its close commits it.
+///
+/// The caller holds the landing lock across this and the start it
+/// records, so no close commits in between.
+pub(super) async fn found(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+) -> Result<Option<(CommitSha, TreeId)>, RunError> {
+    if !commits_here(ctx) || !shares_the_tree(ctx, node) {
+        return Ok(None);
+    }
+    let Some(message) = found_message(ctx, node).await? else {
+        return Ok(None);
+    };
+    let index =
+        crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
+    Ok(Box::pin(crate::worktree::commit_tree(
+        ctx.worktree,
+        &index,
+        &message,
+        ctx.root_supervision(),
+    ))
+    .await?)
+}
+
+/// What a found commit says — and, when this node's previous attempt
+/// never closed, that what it holds is what that attempt left. `None`
+/// while another node works in the run's tree.
+async fn found_message(ctx: &RunCtx<'_>, node: &Node) -> Result<Option<String>, RunError> {
+    let state = ctx.run_view().await?.state;
+    if working_beside(&ctx.manifest.workflow, &state, &node.id) {
+        return Ok(None);
+    }
+    let subject = format!("found in the run's tree before node {} started", node.id);
+    let interrupted = state
+        .nodes
+        .get(&node.id)
+        .filter(|record| record.open_since.is_some())
+        .map(|record| record.attempts);
+    Ok(Some(match interrupted {
+        Some(attempt) => {
+            format!("{subject}\n\nHolds what attempt {attempt} left when it was interrupted.")
+        }
+        None => subject,
+    }))
+}
+
 /// Whether this run commits what its nodes leave in its tree: only a run
 /// with a worktree of its own.
 fn commits_here(ctx: &RunCtx<'_>) -> bool {

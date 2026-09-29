@@ -143,6 +143,12 @@ pub struct NodeStartedPayload {
     /// persisted field here gives a reader older than its writer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_tree: Option<TreeId>,
+    /// The commit made, as this attempt started, of what the run's tree
+    /// held that no node had committed — a person's edits while the run
+    /// was parked, or what an interrupted attempt left. Absent when there
+    /// was nothing to find.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub found: Option<CommitSha>,
 }
 
 impl NodeStartedPayload {
@@ -157,7 +163,14 @@ impl NodeStartedPayload {
         NodeStartedPayload {
             attempt: n,
             from_tree: Some(from),
+            found: None,
         }
+    }
+
+    /// The same, naming the commit made of what the attempt found in the
+    /// run's tree, when one was made.
+    pub fn found(self, found: Option<CommitSha>) -> Self {
+        NodeStartedPayload { found, ..self }
     }
 
     /// The same, for a start with no tree to name: a test that asserts
@@ -167,6 +180,7 @@ impl NodeStartedPayload {
         NodeStartedPayload {
             attempt: n,
             from_tree: None,
+            found: None,
         }
     }
 }

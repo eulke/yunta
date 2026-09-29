@@ -85,7 +85,9 @@ A node that declares no `scope:` works in the run's own tree, and what it leaves
 there is committed on the run's branch when it closes — finished or failed — so what a
 later node pushes is what the run did, and removing the run's worktree loses nothing.
 Two such nodes running at once are committed together by whichever closes last, and a
-`parallel` group commits what its children left when it closes. What git ignores is
+`parallel` group commits what its children left when it closes. What you edit in the
+run's tree while it is paused is committed when the next such node starts, as found
+there, so that node and everything after it builds on your edit. What git ignores is
 never committed; anything else a node writes is, so keep build output and secrets in
 `.gitignore`. A run with `isolation: none` works in your own checkout and commits
 nothing: what its nodes write stays uncommitted for you. The engine commits without

@@ -2647,6 +2647,17 @@
           "format": "uint32",
           "minimum": 0
         },
+        "found": {
+          "description": "The commit made, as this attempt started, of what the run's tree\nheld that no node had committed — a person's edits while the run\nwas parked, or what an interrupted attempt left. Absent when there\nwas nothing to find.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommitSha"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "from_tree": {
           "description": "The tree this attempt starts from — what its own diff is judged\nagainst when it closes, so a node answers for what it changed and\nnot for what the run's worktree already held.\n\nAbsent in a log written before the audit had a recorded starting\npoint, and read then as the run's own base: the tolerance every\npersisted field here gives a reader older than its writer.",
           "anyOf": [
