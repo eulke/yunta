@@ -59,7 +59,7 @@ fn main() -> ExitCode {
         Ok(Outcome::Reported) => ExitCode::FAILURE,
         Ok(Outcome::Code(code)) => ExitCode::from(code),
         Err(error) => {
-            eprintln!("error: {error}");
+            eprintln!("{}", error::error_line(error));
             ExitCode::FAILURE
         }
     }

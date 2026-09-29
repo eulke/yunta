@@ -18,6 +18,7 @@
 //! version of one.
 
 pub(crate) mod bars;
+pub(crate) mod color;
 pub(crate) mod escalation;
 pub(crate) mod glyphs;
 pub(crate) mod shown;
@@ -26,6 +27,7 @@ pub(crate) mod units;
 pub(crate) mod width;
 
 pub(crate) use bars::{bar, sparkline};
+pub(crate) use color::{ColorPolicy, ColorRole};
 pub(crate) use escalation::{evidence, option_headline, option_tradeoff};
 pub(crate) use glyphs::Glyphs;
 pub(crate) use state::{NodeDisplay, StateWord, STATE_WIDTH};

@@ -8,6 +8,7 @@
 
 use std::fmt::Display;
 
+use crate::render::{ColorPolicy, ColorRole};
 use crate::surface::TerminalEnv;
 use yunta_core::RunId;
 
@@ -218,24 +219,39 @@ impl CliError {
 /// The word is bold yellow on a terminal that draws color, so a warning
 /// said before a run starts is not lost among the lines around it.
 pub fn warn(message: impl Display) {
-    eprintln!("{}: {message}", warning_word(&TerminalEnv::from_process()));
+    eprintln!(
+        "{}",
+        warning_line(&TerminalEnv::from_process().color_policy(), message)
+    );
 }
 
-/// `warning`, painted when `env` draws color and plain everywhere else —
-/// a captured stream reads the same whoever captured it.
-fn warning_word(env: &TerminalEnv) -> &'static str {
-    if env.draws_color() {
-        "\x1b[1;33mwarning\x1b[0m"
-    } else {
-        "warning"
-    }
+/// The error line `main` writes once, painted for stderr when it is a
+/// terminal and otherwise plain.
+pub(crate) fn error_line(error: impl Display) -> String {
+    format!(
+        "{}: {error}",
+        TerminalEnv::from_process()
+            .color_policy()
+            .paint(ColorRole::Error, "error")
+    )
+}
+
+fn warning_line(policy: &ColorPolicy, message: impl Display) -> String {
+    format!("{}: {message}", policy.paint(ColorRole::Warning, "warning"))
+}
+
+fn info_line(policy: &ColorPolicy, message: impl Display) -> String {
+    policy.paint(ColorRole::Info, &message.to_string())
 }
 
 /// An informational block to stderr — verification findings and the
 /// like, printed beside a command's own output without claiming to be an
 /// error.
 pub fn note(message: impl Display) {
-    eprintln!("{message}");
+    eprintln!(
+        "{}",
+        info_line(&TerminalEnv::from_process().color_policy(), message)
+    );
 }
 
 #[cfg(test)]
@@ -251,21 +267,63 @@ mod tests {
     }
 
     #[test]
-    fn a_warning_is_painted_only_where_color_is_drawn() {
+    fn message_roles_are_colored_and_plain_text_survives() {
+        let policy = env(true, Some("xterm-256color"), None).color_policy();
         assert_eq!(
-            warning_word(&env(true, Some("xterm-256color"), None)),
-            "\x1b[1;33mwarning\x1b[0m"
-        );
-        assert_eq!(warning_word(&env(false, Some("xterm"), None)), "warning");
-        assert_eq!(warning_word(&env(true, Some("dumb"), None)), "warning");
-        assert_eq!(
-            warning_word(&env(true, Some("xterm"), Some("1"))),
-            "warning"
+            warning_line(&policy, "disk is nearly full"),
+            "\x1b[1;33mwarning\x1b[0m: disk is nearly full"
         );
         assert_eq!(
-            warning_word(&env(true, Some("xterm"), Some(""))),
-            "\x1b[1;33mwarning\x1b[0m",
-            "an empty NO_COLOR is unset, by the convention's own reading"
+            info_line(&policy, "verification passed"),
+            "\x1b[1;36mverification passed\x1b[0m"
+        );
+        assert_eq!(
+            format!(
+                "{}: {}",
+                policy.paint(ColorRole::Error, "error"),
+                "operation failed"
+            ),
+            "\x1b[1;31merror\x1b[0m: operation failed"
+        );
+
+        let plain = env(false, Some("xterm"), None).color_policy();
+        assert_eq!(
+            warning_line(&plain, "disk is nearly full"),
+            "warning: disk is nearly full"
+        );
+        assert_eq!(
+            info_line(&plain, "verification passed"),
+            "verification passed"
+        );
+        assert_eq!(
+            format!(
+                "{}: {}",
+                plain.paint(ColorRole::Error, "error"),
+                "operation failed"
+            ),
+            "error: operation failed"
+        );
+    }
+
+    #[test]
+    fn stderr_color_policy_observes_empty_no_color() {
+        assert_eq!(
+            warning_line(
+                &env(true, Some("xterm"), Some("")).color_policy(),
+                "message"
+            ),
+            "warning: message"
+        );
+        assert_eq!(
+            warning_line(&env(true, Some("dumb"), None).color_policy(), "message"),
+            "warning: message"
+        );
+        assert_eq!(
+            warning_line(
+                &env(true, Some("xterm"), Some("1")).color_policy(),
+                "message"
+            ),
+            "warning: message"
         );
     }
 }
