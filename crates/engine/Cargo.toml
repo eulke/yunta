@@ -34,7 +34,7 @@ tracing.workspace = true
 # audited, no-std implementation of the one primitive that fixes it —
 # not something to hand-roll (Apache-2.0, no dependencies of its own).
 subtle.workspace = true
-tokio = { workspace = true, features = ["process", "rt", "macros", "time"] }
+tokio = { workspace = true, features = ["process", "rt", "macros", "time", "sync"] }
 # Propagates cancellation to losing siblings in `join: any`.
 tokio-util.workspace = true
 # `mcp:` context source — an outbound streamable-HTTP MCP client, the

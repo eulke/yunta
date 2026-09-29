@@ -22,7 +22,7 @@ use crate::replay::RunView;
 use crate::run_log::RunLog;
 use crate::task_cycle::Memo;
 
-use super::{budget, RunError};
+use super::RunError;
 use yunta_core::events::FindingEvent;
 
 /// Everything node execution needs, borrowed once. Also owns the small
@@ -370,79 +370,6 @@ impl<'a> RunCtx<'a> {
             breach.detail(adapter),
         )
         .await
-    }
-
-    /// The [`Budget`] for one agent session: an equal
-    /// share of the remaining run cap
-    /// ([`budget::session_token_budget`]'s policy). Unlimited — exactly
-    /// the pre-limits behavior — when no cap is declared, or when a
-    /// human already answered `continue` this invocation (their lift
-    /// must not resurface as a zero-token session budget). `timeout`
-    /// stays `None`: `defaults.timeout_minutes` is resolved separately,
-    /// outside this function's scope.
-    pub(crate) async fn session_budget(&self) -> Result<yunta_core::port::Budget, RunError> {
-        // `defaults.timeout_minutes` applies on every path —
-        // the wall clock is orthogonal to the token cap and to a
-        // human's `continue`.
-        let timeout = self.manifest.config.resolved_session_timeout();
-        if self
-            .budget_lifted
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            return Ok(yunta_core::port::Budget {
-                timeout,
-                ..Default::default()
-            });
-        }
-        let Some(cap) = self
-            .manifest
-            .config
-            .limits
-            .as_ref()
-            .and_then(|limits| limits.max_tokens_per_run)
-        else {
-            return Ok(yunta_core::port::Budget {
-                timeout,
-                ..Default::default()
-            });
-        };
-        let state = self.run_view().await?.state;
-        // A run whose adapter reports no usage cannot count what it
-        // spends, so it does not hand sessions a cap it has no way to
-        // enforce. The `capability_degraded` on the log already said so.
-        if state
-            .degradations
-            .already_stated(yunta_core::Capability::UsageReporting)
-        {
-            return Ok(yunta_core::port::Budget {
-                timeout,
-                ..Default::default()
-            });
-        }
-        Ok(yunta_core::port::Budget {
-            max_tokens: Some(budget::session_token_budget(
-                cap,
-                state.total_tokens().total(),
-                self.nodes_still_owed(&state),
-            )),
-            timeout,
-            ..Default::default()
-        })
-    }
-
-    /// How many of this run's nodes are short of a terminal — what the
-    /// remaining cap is shared among.
-    fn nodes_still_owed(&self, state: &crate::replay::RunState) -> usize {
-        self.manifest
-            .workflow
-            .iter_nodes()
-            .filter(|node| {
-                !matches!(
-                    state.nodes.state(&node.id),
-                    Some(crate::replay::NodeState::Finished { .. })
-                )
-            })
-            .count()
     }
 
     /// The opaque `adapter_settings` the config declares for `adapter`

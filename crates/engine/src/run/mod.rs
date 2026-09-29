@@ -48,6 +48,7 @@ pub mod schedule;
 pub(crate) mod session_plan;
 mod step;
 mod steps;
+mod wake;
 mod workflow_exec;
 
 use std::collections::HashMap;
