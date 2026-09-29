@@ -86,7 +86,9 @@ whole tool set available; on `codex`, they are the `read-only`,
 reaches `claude-code` as `--max-turns`; `codex exec` has no turn cap, so there
 the engine's own timeout and token budget bound the session. The timeout
 counts time the host is awake: a machine that sleeps spends none of it, and
-the run's log records the suspension.
+the run's log records the suspension. After a suspension, no session opens
+until the host has been awake for two minutes, so a session is not lost to a
+laptop that wakes briefly and sleeps again.
 
 ## `mock`: not a test helper, a first-class adapter
 

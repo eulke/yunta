@@ -428,4 +428,11 @@ impl crate::task_cycle::SessionObserver for RunCtx<'_> {
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry> {
         self.process_registry.as_deref()
     }
+
+    async fn host_settled(
+        &self,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<bool, StorageError> {
+        self.awake.settled(&self.log(), cancel).await
+    }
 }

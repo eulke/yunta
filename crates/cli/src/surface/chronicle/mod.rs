@@ -210,8 +210,9 @@ mod tests {
         }))
     }
 
-    /// A person watching a run learns the machine slept, and that the
-    /// time is not counted as work, above the region that keeps moving.
+    /// A person watching a run learns the machine slept, that the time is
+    /// not counted as work, and why no session opens for a while, above
+    /// the region that keeps moving.
     #[test]
     fn a_host_suspension_stays_above_the_live_region_and_says_how_long() {
         let payload = EventPayload::Run(RunEvent::HostSuspended(
@@ -221,7 +222,8 @@ mod tests {
         ));
         assert_eq!(
             said_for(payload.clone()),
-            "run — host suspended for 38m00s — durations leave it out"
+            "run — host suspended for 38m00s — durations leave it out; new sessions wait \
+             until it has been awake 2m00s"
         );
         let events = vec![StoredEvent {
             seq: 1.into(),

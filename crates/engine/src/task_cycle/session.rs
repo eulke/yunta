@@ -187,6 +187,12 @@ pub trait SessionObserver: Sync {
         output: &crate::process::CommandOutput,
     ) -> std::io::Result<yunta_core::ContentHash>;
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry>;
+    /// Waits until the host the run works on has stayed awake a while
+    /// since it last slept — `false` when `cancel` fired first. An
+    /// observer that watches no host answers at once.
+    async fn host_settled(&self, _cancel: &CancellationToken) -> Result<bool, StorageError> {
+        Ok(true)
+    }
 }
 
 /// How [`dispatch_session`] failed: the adapter refused, or a session
@@ -262,6 +268,23 @@ pub(crate) async fn dispatch_session(
     audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
     opening: Opening<'_>,
 ) -> Result<Dispatched, DispatchError> {
+    // A host that just woke may sleep again within the minute, and a
+    // session opened then hangs until its timeout: none opens until the
+    // host has stayed awake.
+    if let Some((observer, _)) = audit {
+        if !observer
+            .host_settled(cancel)
+            .await
+            .map_err(DispatchError::Audit)?
+        {
+            return Ok(Dispatched {
+                outcome: DispatchOutcome::Cancelled,
+                tokens: TokenUsage::default(),
+                fence: None,
+                session: None,
+            });
+        }
+    }
     let budget = request.budget;
     let requested_agent = request.agent.clone();
     // Whether this session was handed a per-run tool server at all: a

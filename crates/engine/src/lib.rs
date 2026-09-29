@@ -167,6 +167,7 @@ pub use view::{
     chronicle, run_frame, ChildLink, Counter, Degradation, Happening, Moment, NodeFrame,
     NodeStanding, Reroute, RunFrame, RunPhase, RunningTask, WaitingOn,
 };
+pub use wakefulness::SETTLE_AFTER_SUSPENSION;
 pub use worktree::{
     capture_tree, cleanup_worktree, commit_tree, commit_work, hand_over_worktree, head_commit,
     head_tree, land, open_unit, prepare_worktree, rebase_onto, release_worktree, run_branch,

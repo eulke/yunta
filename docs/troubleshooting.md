@@ -249,6 +249,20 @@ refuses a second concurrent run against it. Commit or stash first, or switch
 to the default `isolation: worktree` if you don't specifically need to run
 in place.
 
+## A run looked stuck after the laptop slept
+
+```
+run — host suspended for 1h52m — durations leave it out; new sessions wait until it has been awake 2m00s
+```
+
+The run noticed the machine slept and recorded it. None of its durations count
+that time, and a session's timeout counts only the time the host is awake. When
+the host wakes, the run does not open a new session until the host has been
+awake for two minutes, because a laptop that wakes briefly for maintenance and
+then sleeps again would leave a session hanging. Commands and checks don't
+wait. If nothing moves after those two minutes, the run is waiting on something
+else: check `yunta status`.
+
 ## A run is stuck in `waiting`
 
 Not stuck — paused on a `gate`, waiting for a human decision, and it
