@@ -222,7 +222,8 @@ const INTERRUPT_GRACE_PERIOD: Duration = Duration::from_millis(200);
 ///
 /// The adapter passes `request.budget` along if its CLI supports it,
 /// but enforcement is the engine's job either way — this counts `Usage`
-/// and races the wall-clock deadline independent of that, and cuts the
+/// and races the timeout — time the host is awake — independent of
+/// that, and cuts the
 /// session with `interrupt` → grace → `kill` when either budget is
 /// exceeded.
 /// What one session left behind: how it ended, what it spent, and how

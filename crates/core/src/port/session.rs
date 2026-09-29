@@ -142,7 +142,7 @@ impl RunToolsEndpoint {
 
     /// How long one call to these tools may take before the CLI gives up
     /// on it: as long as the session itself may run, or an hour for a
-    /// session with no wall clock. A call can run a task's criteria,
+    /// session with no timeout. A call can run a task's criteria,
     /// which take as long as the build behind them, and a CLI's own
     /// default would cut the answer off before it arrives.
     pub fn call_timeout(budget: &Budget) -> Duration {

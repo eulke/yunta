@@ -152,9 +152,9 @@ impl RunCtx<'_> {
     /// stays `None`: `defaults.timeout_minutes` is resolved separately,
     /// outside this function's scope.
     pub(crate) async fn session_budget(&self) -> Result<yunta_core::port::Budget, RunError> {
-        // `defaults.timeout_minutes` applies on every path —
-        // the wall clock is orthogonal to the token cap and to a
-        // human's `continue`.
+        // `defaults.timeout_minutes` applies on every path — time the
+        // host is awake is orthogonal to the token cap and to a human's
+        // `continue`.
         let timeout = self.manifest.config.resolved_session_timeout();
         if self
             .budget_lifted

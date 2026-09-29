@@ -741,7 +741,7 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
 }
 
 #[tokio::test]
-async fn a_hung_session_is_cut_by_the_wall_clock_timeout() {
+async fn a_hung_session_is_cut_by_its_timeout() {
     let owner = Owner::new();
     let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));

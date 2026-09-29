@@ -309,7 +309,7 @@
           ]
         },
         "timeout_minutes": {
-          "description": "Per-session wall-clock budget (`Budget.timeout`), in minutes —\nthe granularity the reference schema uses for whole sessions.",
+          "description": "Per-session budget of time the host is awake (`Budget.timeout`),\nin minutes — the granularity the reference schema uses for whole\nsessions. A suspended host spends none of it, and the run's log\nrecords the suspension.",
           "type": [
             "integer",
             "null"

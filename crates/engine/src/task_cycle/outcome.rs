@@ -252,7 +252,7 @@ pub enum DispatchOutcome {
     /// cancellation means, because only it knows which token fired.
     Cancelled,
     /// The engine cut the session via `interrupt` → `kill`:
-    /// the token count from `Usage` events or the wall-clock timeout
+    /// the token count from `Usage` events or the timeout
     /// demanded it, independent of whether the adapter itself honored
     /// `SessionRequest.budget`.
     BudgetExceeded {

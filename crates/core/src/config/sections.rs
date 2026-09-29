@@ -184,8 +184,10 @@ pub struct DefaultsConfig {
     /// The runner a node without `runner:` resolves through.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<RunnerName>,
-    /// Per-session wall-clock budget (`Budget.timeout`), in minutes —
-    /// the granularity the reference schema uses for whole sessions.
+    /// Per-session budget of time the host is awake (`Budget.timeout`),
+    /// in minutes — the granularity the reference schema uses for whole
+    /// sessions. A suspended host spends none of it, and the run's log
+    /// records the suspension.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_minutes: Option<u64>,
     /// What a failed node without its own `on_failure:` re-route does

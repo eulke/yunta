@@ -233,7 +233,9 @@ telemetría, no evidencia.
   es un fallo del adapter.
 - **O4. Presupuesto colaborativo, enforcement del engine**: el adapter pasa los
   límites al CLI si el CLI los soporta; el engine corta por `interrupt → kill`
-  cuando el conteo de `Usage` o el timeout lo exigen, tenga o no ayuda del CLI.
+  cuando el conteo de `Usage` o el timeout lo exigen, tenga o no ayuda del CLI. El
+  timeout cuenta tiempo en que el host está despierto: una máquina suspendida no lo
+  gasta, y el log registra la suspensión.
 - **O5. El cerco se construye o se declara ausente**: el adapter instala tanto del
   cerco como su CLI permita antes de la primera escritura posible, calcula la
   cobertura de lo que construyó (nunca la declara) y la reporta en `SessionOpened`;

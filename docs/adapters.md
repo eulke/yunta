@@ -84,7 +84,9 @@ editing and nothing that reaches a shell or the network, and `full` leaves the
 whole tool set available; on `codex`, they are the `read-only`,
 `workspace-write` and `danger-full-access` sandbox modes. `budget.max_turns`
 reaches `claude-code` as `--max-turns`; `codex exec` has no turn cap, so there
-the engine's own timeout and token budget bound the session.
+the engine's own timeout and token budget bound the session. The timeout
+counts time the host is awake: a machine that sleeps spends none of it, and
+the run's log records the suspension.
 
 ## `mock`: not a test helper, a first-class adapter
 
