@@ -159,6 +159,11 @@ pub struct NodeRecord {
     /// attempt. A new start clears it; a terminal preserves it.
     pub last_tool_failure: Option<crate::events::RunToolFailedPayload>,
     pub last_event_at: Option<DateTime<Utc>>,
+    /// The attempt before the open one, when it failed: its number, the
+    /// tree it started from and what it failed with — what the open
+    /// attempt is measured against to tell whether anything changed
+    /// since. `None` when the open attempt follows no failure.
+    pub failed_before: Option<FailedAttempt>,
     /// The session of a previous attempt that no terminal ever closed —
     /// what a resume finds when a crash cut the attempt between its
     /// start and its verdict. `None` once a later attempt closes
@@ -168,6 +173,38 @@ pub struct NodeRecord {
     /// opened for a task — kept past the attempt's terminal: what a
     /// continuation after the answer to its scope request picks back up.
     pub last_session: Option<crate::ids::SessionId>,
+}
+
+/// A failed attempt as the next one remembers it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FailedAttempt {
+    pub attempt: u32,
+    pub from_tree: Option<TreeId>,
+    pub failure: Failure,
+}
+
+impl NodeRecord {
+    /// The attempt that just closed, when it failed — read before the
+    /// next start replaces what it recorded.
+    fn failed_attempt(&self) -> Option<FailedAttempt> {
+        let Some(NodeState::Failed { failure, .. }) = &self.state else {
+            return None;
+        };
+        Some(FailedAttempt {
+            attempt: self.attempts,
+            from_tree: self.from_tree.clone(),
+            failure: failure.clone(),
+        })
+    }
+
+    /// The failed attempt the open one repeats: the one before it failed,
+    /// and both started from the same recorded tree. `None` when either
+    /// named no tree, since then nothing says the tree stood still.
+    pub fn repeats(&self) -> Option<&FailedAttempt> {
+        self.failed_before
+            .as_ref()
+            .filter(|failed| failed.from_tree.is_some() && failed.from_tree == self.from_tree)
+    }
 }
 
 /// Every node's record, by id.
@@ -285,6 +322,7 @@ impl NodeLedger {
         record.last_event_at = Some(meta.at);
         match event {
             NodeEvent::Started(p) => {
+                record.failed_before = record.failed_attempt();
                 record.from_tree = p.from_tree.clone();
                 // A start while the previous attempt is still open means
                 // nothing closed it: whatever session it had is the

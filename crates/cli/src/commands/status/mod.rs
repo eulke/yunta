@@ -193,6 +193,9 @@ fn has_detail(failure: &Failure) -> bool {
         // does the key a config leaves unset.
         Failure::ScopeRequested { .. } | Failure::Unset { .. } => false,
         Failure::Message { outcome } => outcome.contains('\n'),
+        // Why it was not run again, then what the attempt that ran
+        // failed with: more than a line holds.
+        Failure::Unchanged { .. } => true,
     }
 }
 
@@ -224,7 +227,10 @@ fn print_detail(failure: &Failure) {
                 println!("{}{}", indent(3), path.display());
             }
         }
-        Failure::ScopeRequested { .. } | Failure::Unset { .. } | Failure::Message { .. } => {
+        Failure::ScopeRequested { .. }
+        | Failure::Unset { .. }
+        | Failure::Unchanged { .. }
+        | Failure::Message { .. } => {
             println!(
                 "{}",
                 yunta_core::text::indent(&failure.to_string(), &detail)

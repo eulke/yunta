@@ -679,6 +679,29 @@ fn a_node_failed_outside_its_scope_round_trips_naming_each_path() {
     assert_eq!(payload, parsed, "{json}");
 }
 
+/// A check refused on an unchanged tree carries the failure of the
+/// attempt that ran, and a refusal of a refusal still names that one.
+#[test]
+fn a_check_refused_on_an_unchanged_tree_round_trips_naming_the_attempt_that_ran() {
+    let refused = Failure::unchanged(1, Failure::message("regression: exit 101"));
+    let again = Failure::unchanged(2, refused.clone());
+    assert_eq!(again, refused, "the second refusal names attempt 1 too");
+
+    let payload = EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+        refused,
+        false,
+        TokenUsage::default(),
+    )));
+    let json: serde_json::Value = serde_json::to_value(&payload).unwrap();
+    assert_eq!(json["unchanged"]["since"], 1);
+    assert_eq!(
+        json["unchanged"]["failure"]["outcome"],
+        "regression: exit 101"
+    );
+    let parsed: EventPayload = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(payload, parsed, "{json}");
+}
+
 #[test]
 fn a_scope_violation_says_which_files_fell_outside() {
     let failure =

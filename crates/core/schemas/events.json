@@ -1803,6 +1803,101 @@
         "value"
       ]
     },
+    "Failure": {
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], one carrying `unchanged:` as\n[`Failure::Unchanged`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "anyOf": [
+        {
+          "description": "Declared artifacts that did not close, each saying what went\nwrong with it: the file, the content of the document, or the run\nthat owes the artifact and holds none of it.",
+          "type": "object",
+          "properties": {
+            "artifacts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ArtifactFailure"
+              }
+            }
+          },
+          "required": [
+            "artifacts"
+          ]
+        },
+        {
+          "description": "The session the node was working in ended without a terminal\nevent, and how its process went.",
+          "type": "object",
+          "properties": {
+            "died": {
+              "$ref": "#/$defs/SessionDeath"
+            }
+          },
+          "required": [
+            "died"
+          ]
+        },
+        {
+          "description": "The node's diff reached paths no glob of its scope allows. Named\none by one, because what a person does next — widen the scope,\nor change those files in the run's tree — is about exactly them.",
+          "type": "object",
+          "properties": {
+            "outside_scope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "outside_scope"
+          ]
+        },
+        {
+          "description": "The node's session asked for more scope than it has: its work is\nnot done until a person answers, and the answer is theirs.",
+          "type": "object",
+          "properties": {
+            "requested_scope": {
+              "$ref": "#/$defs/RequestedScope"
+            }
+          },
+          "required": [
+            "requested_scope"
+          ]
+        },
+        {
+          "description": "A config key the node cannot run without, left unset in the\nconfig the run froze when it was created — so no attempt of this\nrun can go differently.",
+          "type": "object",
+          "properties": {
+            "unset": {
+              "$ref": "#/$defs/ConfigKey"
+            }
+          },
+          "required": [
+            "unset"
+          ]
+        },
+        {
+          "description": "A check that judges the run's tree was asked to run again on the\nvery tree an earlier attempt failed on: it is refused before\nrunning, since the same command on the same tree answers the same.",
+          "type": "object",
+          "properties": {
+            "unchanged": {
+              "$ref": "#/$defs/Unchanged"
+            }
+          },
+          "required": [
+            "unchanged"
+          ]
+        },
+        {
+          "description": "A failure the engine states in one sentence.",
+          "type": "object",
+          "properties": {
+            "outcome": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "outcome"
+          ]
+        }
+      ]
+    },
     "FenceLevel": {
       "description": "What an adapter can build to keep a session's writes inside its\nfence. Three levels, because three is what the market has: nothing;\na judgement before each file-tool call; or a filesystem sandbox the\nprocess itself runs under.",
       "type": "string",
@@ -2307,7 +2402,7 @@
       ]
     },
     "NodeFailedPayload": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], one carrying `unchanged:` as\n[`Failure::Unchanged`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "type": "object",
       "properties": {
         "retryable": {
@@ -2383,6 +2478,18 @@
           },
           "required": [
             "unset"
+          ]
+        },
+        {
+          "description": "A check that judges the run's tree was asked to run again on the\nvery tree an earlier attempt failed on: it is refused before\nrunning, since the same command on the same tree answers the same.",
+          "type": "object",
+          "properties": {
+            "unchanged": {
+              "$ref": "#/$defs/Unchanged"
+            }
+          },
+          "required": [
+            "unchanged"
           ]
         },
         {
@@ -3532,6 +3639,24 @@
       "description": "A tree id: 7 to 64 lowercase hex digits: a git object id, abbreviated or full",
       "type": "string",
       "minLength": 1
+    },
+    "Unchanged": {
+      "description": "The attempt that last actually ran on the tree a refused attempt\nwould have run on, and what it failed with.",
+      "type": "object",
+      "properties": {
+        "failure": {
+          "$ref": "#/$defs/Failure"
+        },
+        "since": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "since",
+        "failure"
+      ]
     },
     "WriteRefusedPayload": {
       "description": "A write the fence refused before it happened.",

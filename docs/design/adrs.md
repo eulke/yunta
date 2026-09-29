@@ -203,3 +203,4 @@ lista.
 **D194 — A gate shows what it asks about, and a correction goes back to the session that made the work.** `accepted` → [`adr/D194-a-gate-shows-what-it-asks-about.md`](adr/D194-a-gate-shows-what-it-asks-about.md)
 **D195 — A plan a person reviews explains itself, in the same document the engine runs.** `accepted` → [`adr/D195-a-plan-a-person-reviews-explains-itself.md`](adr/D195-a-plan-a-person-reviews-explains-itself.md)
 **D196 — Every task is held to the suite its lineage measured green.** `accepted` → [`adr/D196-every-task-is-held-to-the-suite-its-lineage-measured-green.md`](adr/D196-every-task-is-held-to-the-suite-its-lineage-measured-green.md)
+**D197 — A check retried on the tree it failed on is not run again.** `accepted` → [`adr/D197-a-check-retried-on-the-tree-it-failed-on-is-not-run-again.md`](adr/D197-a-check-retried-on-the-tree-it-failed-on-is-not-run-again.md)

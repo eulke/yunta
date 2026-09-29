@@ -406,13 +406,15 @@ fn node_diagnostics(events: &[StoredEvent]) -> BTreeMap<String, Vec<ArtifactProb
                 }
                 // A failure stated in one sentence names no document,
                 // and neither does a session that died, anything about
-                // scope or an unset config key: the node's own entry
-                // carries each of them whole.
+                // scope, an unset config key or a check refused on a
+                // tree nothing changed: the node's own entry carries
+                // each of them whole.
                 Failure::Message { .. }
                 | Failure::SessionDied { .. }
                 | Failure::ScopeViolated { .. }
                 | Failure::ScopeRequested { .. }
-                | Failure::Unset { .. } => {
+                | Failure::Unset { .. }
+                | Failure::Unchanged { .. } => {
                     latest.remove(node_id.as_str());
                 }
             },

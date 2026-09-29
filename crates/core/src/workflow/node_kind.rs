@@ -321,6 +321,18 @@ pub enum CheckBuiltin {
     },
 }
 
+impl CheckBuiltin {
+    /// Whether the check's verdict is a function of the run's tree: it
+    /// runs a command there, as deterministic as a criterion, so the same
+    /// tree always answers the same. `findings_gate` reads the log.
+    pub fn judges_the_tree(&self) -> bool {
+        match self {
+            CheckBuiltin::BaselineCompare | CheckBuiltin::CoverageGate => true,
+            CheckBuiltin::FindingsGate { .. } => false,
+        }
+    }
+}
+
 /// `parallel.coordination` — see the field's own doc on
 /// [`NodeKind::Parallel`]. A closed enum, not a bool: a third
 /// coordination shape (if one ever earns an ADR) lands as a variant

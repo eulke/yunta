@@ -26,6 +26,9 @@ pub(super) async fn execute_check(
     builtin: &CheckBuiltin,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
+    if let Some(end) = refuse_unchanged(ctx, node, builtin).await? {
+        return Ok(end);
+    }
     match builtin {
         CheckBuiltin::BaselineCompare => execute_baseline_compare(ctx, node, cancel).await,
         CheckBuiltin::CoverageGate => execute_coverage_gate(ctx, node, cancel).await,
@@ -35,6 +38,41 @@ pub(super) async fn execute_check(
             execute_findings_gate(ctx, node, *max_severity).await
         }
     }
+}
+
+/// Refuses an attempt a person asked for that would run a check on the
+/// very tree its failed attempt ran on: a check that judges the tree
+/// answers the same on the same tree, so the attempt fails at once,
+/// naming the one that ran and what it failed with. The menu that
+/// follows still offers another attempt — the person may change the
+/// tree while it is open.
+async fn refuse_unchanged(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    builtin: &CheckBuiltin,
+) -> Result<Option<NodeEnd>, RunError> {
+    if !builtin.judges_the_tree() {
+        return Ok(None);
+    }
+    let state = ctx.run_view().await?.state;
+    let retried = state
+        .choice_after_failure(&node.id)
+        .is_some_and(|(_, choice)| {
+            crate::reserved::ReservedOption::of(&choice.option)
+                == Some(crate::reserved::ReservedOption::Retry)
+        });
+    let Some(failed) = state
+        .nodes
+        .get(&node.id)
+        .and_then(|record| record.repeats())
+        .filter(|_| retried)
+    else {
+        return Ok(None);
+    };
+    let failure = Failure::unchanged(failed.attempt, failed.failure.clone());
+    fail_with(ctx, node, failure, false, TokenUsage::default())
+        .await
+        .map(Some)
 }
 
 pub(super) struct CommandOutput {

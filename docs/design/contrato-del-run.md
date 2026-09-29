@@ -385,6 +385,8 @@ Los builtin son una **lista cerrada y corta**, porque un check builtin es por de
 - **`coverage_gate`** — `coverage.cmd` sobre el umbral declarado en config.
 - **`findings_gate`** — sin hallazgos por encima de una severidad dada (§4.1); acepta `max_severity`.
 
+Un check que corre un comando sobre el árbol —`baseline_compare`, `coverage_gate`— es tan determinista como un criterio: el mismo árbol responde lo mismo. Por eso un `retry` que una persona elige después de que falló, sobre el mismo árbol en que falló su intento —ninguna edición en medio, `from_tree` igual—, no lo corre: el intento falla al instante con la falla `unchanged`, que nombra el intento que sí corrió y con qué falló, y el menú vuelve a preguntar, todavía con `retry`, porque la persona puede cambiar el árbol mientras decide (D197). `findings_gate` lee el log, no el árbol, y un nodo `bash` depende además del entorno —la red, un servicio—: a ninguno de los dos le alcanza el árbol para saber que va a fallar igual.
+
 Cualquier otra verificación se expresa con un nodo `bash` (exit code) o un `executor`. No se agrega un builtin de presupuesto: los límites ya pausan el run por sí mismos (§8.3), y duplicarlo como check sería redundante.
 
 ## 7.2 Baseline y coverage

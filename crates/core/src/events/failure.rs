@@ -66,7 +66,8 @@ pub struct SessionDeath {
 /// [`Failure::SessionDied`], one carrying `outside_scope:` as
 /// [`Failure::ScopeViolated`], one carrying `requested_scope:` as
 /// [`Failure::ScopeRequested`], one carrying `unset:` as
-/// [`Failure::Unset`], and a log written before failures were
+/// [`Failure::Unset`], one carrying `unchanged:` as
+/// [`Failure::Unchanged`], and a log written before failures were
 /// data carries `outcome:` alone and reads back as
 /// [`Failure::Message`]. That tolerance is the rule for what is
 /// persisted and versioned, and it is why no reader needs to know which
@@ -92,8 +93,20 @@ pub enum Failure {
     /// config the run froze when it was created — so no attempt of this
     /// run can go differently.
     Unset { unset: crate::config::ConfigKey },
+    /// A check that judges the run's tree was asked to run again on the
+    /// very tree an earlier attempt failed on: it is refused before
+    /// running, since the same command on the same tree answers the same.
+    Unchanged { unchanged: Unchanged },
     /// A failure the engine states in one sentence.
     Message { outcome: String },
+}
+
+/// The attempt that last actually ran on the tree a refused attempt
+/// would have run on, and what it failed with.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Unchanged {
+    pub since: u32,
+    pub failure: Box<Failure>,
 }
 
 /// What a node's session asked to be allowed to write, and why, in its
@@ -138,6 +151,21 @@ impl Failure {
         Failure::Unset { unset: key }
     }
 
+    /// An attempt refused because nothing changed in the run's tree
+    /// since attempt `since` failed on it with `failure`. A refusal of a
+    /// refusal names the attempt that last ran, and what it failed with.
+    pub fn unchanged(since: u32, failure: Failure) -> Self {
+        match failure {
+            Failure::Unchanged { unchanged } => Failure::Unchanged { unchanged },
+            failure => Failure::Unchanged {
+                unchanged: Unchanged {
+                    since,
+                    failure: Box::new(failure),
+                },
+            },
+        }
+    }
+
     /// Whether another attempt of the node, in this same run, can end
     /// differently. Not when the cause is the config the run froze at
     /// birth: every attempt reads the same one, and the way out is a new
@@ -161,6 +189,7 @@ impl Failure {
     pub fn outside_scope(&self) -> &[PathBuf] {
         match self {
             Failure::ScopeViolated { outside_scope } => outside_scope,
+            Failure::Unchanged { unchanged } => unchanged.failure.outside_scope(),
             Failure::Artifacts { .. }
             | Failure::SessionDied { .. }
             | Failure::ScopeRequested { .. }
@@ -175,6 +204,7 @@ impl Failure {
         match self {
             Failure::ScopeViolated { outside_scope } => !outside_scope.is_empty(),
             Failure::ScopeRequested { requested_scope } => !requested_scope.paths.is_empty(),
+            Failure::Unchanged { unchanged } => unchanged.failure.wants_scope(),
             Failure::Artifacts { .. }
             | Failure::SessionDied { .. }
             | Failure::Unset { .. }
@@ -223,6 +253,7 @@ impl Failure {
     pub fn failures(&self) -> impl Iterator<Item = &ArtifactFailure> {
         match self {
             Failure::Artifacts { artifacts } => artifacts.iter(),
+            Failure::Unchanged { unchanged } => unchanged.failure.failures(),
             // A dead session names no artifact, and neither does a
             // scope or a sentence: the count of documents that did not
             // close is about documents this node declared.
@@ -243,6 +274,12 @@ impl fmt::Display for Failure {
         match self {
             Failure::Message { outcome } => f.write_str(outcome),
             Failure::Unset { unset } => write!(f, "{unset}"),
+            Failure::Unchanged { unchanged } => write!(
+                f,
+                "not run again: nothing in the run's tree changed since attempt {} failed on \
+                 it — change what it failed on there first. Attempt {} failed: {}",
+                unchanged.since, unchanged.since, unchanged.failure
+            ),
             Failure::SessionDied { died } => write!(f, "{died}"),
             Failure::ScopeViolated { outside_scope } => {
                 write!(
