@@ -176,7 +176,8 @@ fn mock_fixture<'a>(
 }
 
 /// Everything a run settles before it exists: the workflow resolved and
-/// checked, every adapter it names present and healthy, and the manifest
+/// checked, git able to commit its work, every adapter it names present
+/// and healthy, and the manifest
 /// frozen — so what this refuses costs nothing, and what it returns is
 /// the very run the caller is about to create.
 ///
@@ -193,6 +194,7 @@ pub(super) async fn runnable(
     mock_fixture: Option<&Path>,
 ) -> Result<(FrozenRun, Adapters), CliError> {
     let (workflow_path, workflow) = resolve_and_check(ctx, workflow_path)?;
+    super::committer::refuse_without_committer(ctx).await?;
     let adapters = match mock_fixture {
         Some(_) => HashMap::new(),
         None => runnable_adapters(ctx, &workflow, adapter).await?,

@@ -224,3 +224,19 @@ pub async fn success<S: AsRef<OsStr>>(
 ) -> Result<bool, GitError> {
     Ok(run(cwd, args, supervision).await?.status.success())
 }
+
+/// Who a commit made in `repo` is by — `Name <email>`, as git resolves
+/// its author and committer from config and environment — or git's own
+/// explanation of why it cannot name one, which is a repository no
+/// commit can be made in.
+pub async fn committer(repo: &Path, supervision: Supervision<'_>) -> Result<String, GitError> {
+    output(repo, &["var", "GIT_AUTHOR_IDENT"], supervision).await?;
+    let ident = output(repo, &["var", "GIT_COMMITTER_IDENT"], supervision).await?;
+    // `Name <email> <epoch> <zone>`: who, without when.
+    Ok(ident
+        .trim()
+        .rsplitn(3, ' ')
+        .last()
+        .unwrap_or_default()
+        .to_string())
+}

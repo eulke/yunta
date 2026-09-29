@@ -6,6 +6,8 @@
 //! demand and report every result instead of stopping at the first
 //! failure.
 //!
+//! Says who git commits a run's work as, or that it cannot name anyone.
+//!
 //! Also validates every installed pack's own `requires:` against this
 //! project's merged config: roles resolvable, `mcp_servers:` defined,
 //! and — the one part `yunta_engine::check_pack_requires` deliberately
@@ -25,6 +27,14 @@ pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let (healthy, all_probed) = probe_adapters(&ctx).await;
     let mut all_well = all_probed;
+
+    match super::committer::committer(&ctx).await {
+        Ok(who) => println!("git: commits as {who}"),
+        Err(why) => {
+            all_well = false;
+            println!("git: {why}");
+        }
+    }
 
     if !check_installed_pack_requires(&ctx.cwd, &ctx.project.config) {
         all_well = false;

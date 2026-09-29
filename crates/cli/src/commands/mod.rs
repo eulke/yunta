@@ -4,6 +4,7 @@
 pub(crate) mod advice;
 pub mod cancel;
 pub mod check;
+pub(crate) mod committer;
 pub mod doctor;
 pub(crate) mod drive;
 pub mod fence;

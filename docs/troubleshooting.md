@@ -225,6 +225,18 @@ looping forever — that's expected, not a hang. Widen what the correction
 node is allowed to see (`context:`) or change (`scope:`) before assuming the
 criterion itself is wrong.
 
+## `yunta run` refuses because git cannot name who commits
+
+```
+a run commits every node's work, and git cannot name who commits here: …
+```
+
+Every node's work becomes a commit on the run's branch, so a repository where
+git has no `user.name` and `user.email` — or is told not to guess them, with
+`user.useConfigOnly` — would fail the run at its first commit. Set both, globally
+or for this repository alone, and run again; `yunta doctor` says who git commits
+as.
+
 ## `isolation: none` refuses to start
 
 ```
