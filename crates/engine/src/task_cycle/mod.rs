@@ -37,7 +37,7 @@ use attempt::{run_one_attempt, AttemptParams, AttemptStep};
 pub(crate) use record::to_results;
 use record::Recorder;
 
-pub(crate) use criteria::{could_not_run, probe};
+pub(crate) use criteria::{could_not_run, pre_check_unless_cut, probe};
 pub use criteria::{post_check, pre_check, Memo, Memoized};
 pub(crate) use judge::{judge, Work};
 pub(crate) use session::dispatch_session;
@@ -321,15 +321,8 @@ pub async fn run_task(
     // the batch starting and this task's first check is exactly that
     // case: the task was cut, not judged.
     if supervision.cancel.is_cancelled() {
-        return Ok(TaskCycleReport {
-            task_id: task.id.clone(),
-            staged: last_staged.clone(),
-            pre_check: Vec::new(),
-            attempts: Vec::new(),
-            outcome: TaskOutcome::Interrupted,
-            needs_human_decision: false,
-            last_check: recorder.criteria(Phase::Pre, &[]).await?,
-        });
+        let last_check = recorder.criteria(Phase::Pre, &[]).await?;
+        return Ok(TaskCycleReport::cut(task.id.clone(), last_check));
     }
 
     let params = AttemptParams {
@@ -382,13 +375,17 @@ pub async fn run_task(
             carry::Carry::Unsettled { last_check } => (Vec::new(), last_check),
         },
         None => {
-            let pre_runs = pre_check(task, &unit.worktree, memo, history, supervision).await?;
+            let Some(pre_runs) =
+                pre_check_unless_cut(task, &unit.worktree, memo, history, supervision).await?
+            else {
+                let last_check = recorder.criteria(Phase::Pre, &[]).await?;
+                return Ok(TaskCycleReport::cut(task.id.clone(), last_check));
+            };
             let last_check = recorder.criteria(Phase::Pre, &pre_runs).await?;
-            // A token that fired during the pre-check stopped its
-            // commands before they answered: the task was cut, not found
-            // wanting. The pre-check validates the criteria before any
-            // work: a non-guard that already passes, or a guard already
-            // red, means the criteria are wrong, not the task.
+            // A token that fired during the pre-check stopped its commands
+            // before they answered: the task was cut, not found wanting.
+            // A non-guard that already passes, or a guard already red,
+            // means the criteria are wrong, not the task.
             let outcome = if supervision.cancel.is_cancelled() {
                 Some(TaskOutcome::Interrupted)
             } else {

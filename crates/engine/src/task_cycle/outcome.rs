@@ -325,3 +325,20 @@ pub struct TaskCycleReport {
     /// cycle run without an observer, which records nothing.
     pub last_check: Option<Seq>,
 }
+
+impl TaskCycleReport {
+    /// A cycle a cancellation cut before any criterion answered: nothing
+    /// was run and nothing found wanting. `last_check` is the empty
+    /// pre-check it recorded, which the status change closing it cites.
+    pub(super) fn cut(task_id: TaskId, last_check: Option<Seq>) -> Self {
+        TaskCycleReport {
+            task_id,
+            pre_check: Vec::new(),
+            attempts: Vec::new(),
+            outcome: TaskOutcome::Interrupted,
+            needs_human_decision: false,
+            staged: Vec::new(),
+            last_check,
+        }
+    }
+}

@@ -330,6 +330,23 @@ pub async fn pre_check(
     run_all_criteria(&task.id, &ordered, cwd, memo, supervision).await
 }
 
+/// [`pre_check`], unless a cancellation cut it while it still read the
+/// tree: then `None`. The token that fired stopped git itself, so its
+/// failure says nothing about the task, which was cut before any
+/// criterion ran.
+pub(crate) async fn pre_check_unless_cut(
+    task: &Task,
+    cwd: &Path,
+    memo: &Memo,
+    history: &TaskLedger,
+    supervision: Supervision<'_>,
+) -> Result<Option<Vec<CriterionRun>>, TaskCycleError> {
+    match pre_check(task, cwd, memo, history, supervision).await {
+        Err(_) if supervision.cancel.is_cancelled() => Ok(None),
+        ran => ran.map(Some),
+    }
+}
+
 /// Post-check: every criterion, guard or not, must now
 /// pass.
 pub async fn post_check(
