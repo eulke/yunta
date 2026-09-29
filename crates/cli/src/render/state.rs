@@ -8,6 +8,7 @@
 //! [`RunWord`] is the same thing for the run as a whole: what its
 //! derived phase is called, wherever a surface says it.
 
+use super::{ColorPolicy, ColorRole};
 use yunta_engine::{NodeStanding, NodeState, NodeWait, RunPhase};
 
 /// The cells the short word gets in a column of them. Four, the width of
@@ -69,6 +70,15 @@ impl StateWord {
             Self::Wait => "waiting",
             Self::Skip => "skipped",
             Self::Todo => "never ran",
+        }
+    }
+
+    /// The semantic color shared by every surface that shows this state.
+    pub(crate) fn color_role(self) -> ColorRole {
+        match self {
+            Self::Fail => ColorRole::Error,
+            Self::Wait | Self::Todo => ColorRole::Warning,
+            Self::Done | Self::Run | Self::Skip => ColorRole::Info,
         }
     }
 }
@@ -142,6 +152,11 @@ impl NodeDisplay {
             Some(detail) => format!("{} — {detail}", self.word.word()),
             None => self.word.word().to_string(),
         }
+    }
+
+    /// The state and its detail, styled as one semantic label.
+    pub(crate) fn colored_label(&self, policy: ColorPolicy) -> String {
+        policy.paint(self.word.color_role(), &self.label())
     }
 
     fn plain(word: StateWord) -> Self {
@@ -319,6 +334,15 @@ impl RunWord {
             RunWord::Cancelled => "cancelled",
             RunWord::Promoted => "promoted",
             RunWord::Broken => "broken",
+        }
+    }
+
+    /// The semantic color for a run's phase wherever it is reported.
+    pub(crate) fn color_role(self) -> ColorRole {
+        match self {
+            Self::Paused | Self::Promoted => ColorRole::Warning,
+            Self::Failed | Self::Cancelled | Self::Broken => ColorRole::Error,
+            Self::Created | Self::Running | Self::Finished => ColorRole::Info,
         }
     }
 

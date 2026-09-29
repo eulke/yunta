@@ -24,7 +24,7 @@ use crate::commands::advice;
 use crate::context::Context;
 use crate::error::note;
 use crate::error::{CliError, Outcome};
-use crate::render::{indent, NodeDisplay, CHILD_DEPTH, INDENT};
+use crate::render::{indent, ColorPolicy, ColorRole, NodeDisplay, CHILD_DEPTH, INDENT};
 
 pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -50,10 +50,15 @@ pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
         ));
     }
 
+    let colors = crate::commands::output_color_policy();
     let frame = progress::frame(run_id, &manifest, &events, now);
     let state = yunta_engine::derive(&events);
-    println!("run {run_id}: {}", progress::summary(&frame));
-    print_derived(&frame, &state);
+    println!(
+        "{}: {}",
+        report_heading(&colors, &format!("run {run_id}")),
+        progress::colored_summary(&frame, colors)
+    );
+    print_derived(&frame, &state, colors);
     let tree = ctx.project.run_tree(&manifest, run_id, &ctx.cwd);
     print_decision((run_id, &manifest, &tree), &events, &frame.phase);
     Ok(Outcome::Success)
@@ -67,9 +72,9 @@ pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
 /// group followed by its own children, the ones this mode leaves out
 /// among them and labelled `skipped`. One derivation for the whole
 /// page: the same list, in the same order, the live view draws.
-fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState) {
+fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState, colors: ColorPolicy) {
     if !frame.nodes.is_empty() {
-        println!("nodes:");
+        println!("{}", report_heading(&colors, "nodes:"));
         for node in &frame.nodes {
             // A group's children sit one step under it, exactly as the
             // live view and the chronicle place what belongs to a node.
@@ -80,7 +85,7 @@ fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState) {
             println!(
                 "{under}{}: {}",
                 node.id,
-                NodeDisplay::standing(&node.state).label()
+                NodeDisplay::standing(&node.state).colored_label(colors)
             );
             if let Some(failed) = state
                 .nodes
@@ -97,15 +102,19 @@ fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState) {
     }
 
     if !state.tasks.is_empty() {
-        println!("tasks:");
+        println!("{}", report_heading(&colors, "tasks:"));
         let mut tasks: Vec<_> = state.tasks.iter().collect();
         tasks.sort_by(|a, b| a.0.cmp(b.0));
         for (id, record) in tasks {
-            println!("{INDENT}{id}: {}", task_status_label(record.status));
+            let label = task_status_label(record.status);
+            println!(
+                "{INDENT}{id}: {}",
+                colors.paint(task_status_role(record.status), label)
+            );
         }
     }
 
-    print_failures(frame, state);
+    print_failures(frame, state, colors);
 
     println!(
         "tokens: {} in / {} out",
@@ -163,7 +172,7 @@ fn print_decision(
 /// person opens to find out what went wrong unable to say. A node that
 /// failed on two artifacts says which problem came from which, because
 /// the log records each document's problems with the document.
-fn print_failures(frame: &RunFrame, state: &yunta_engine::RunState) {
+fn print_failures(frame: &RunFrame, state: &yunta_engine::RunState, colors: ColorPolicy) {
     let failed: Vec<(&NodeId, &Failure)> = frame
         .nodes
         .iter()
@@ -176,7 +185,7 @@ fn print_failures(frame: &RunFrame, state: &yunta_engine::RunState) {
     if failed.is_empty() {
         return;
     }
-    println!("failures:");
+    println!("{}", colors.paint(ColorRole::Error, "failures:"));
     for (id, failure) in failed {
         println!("{INDENT}{id}:");
         print_detail(failure);
@@ -256,5 +265,41 @@ pub(crate) fn task_status_label(status: TaskStatus) -> &'static str {
         TaskStatus::Done => "done",
         TaskStatus::Blocked => "blocked",
         TaskStatus::Failed => "failed",
+    }
+}
+
+fn task_status_role(status: TaskStatus) -> ColorRole {
+    match status {
+        TaskStatus::Failed => ColorRole::Error,
+        TaskStatus::Blocked | TaskStatus::Pending => ColorRole::Warning,
+        TaskStatus::Ready | TaskStatus::Running | TaskStatus::Done => ColorRole::Info,
+    }
+}
+
+fn report_heading(colors: &ColorPolicy, heading: &str) -> String {
+    colors.paint(ColorRole::Info, heading)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::state::{RunWord, StateWord};
+
+    #[test]
+    fn command_reports_apply_semantic_colors_without_touching_json() {
+        let colors = ColorPolicy::for_stream(true, None);
+        assert_eq!(report_heading(&colors, "nodes:"), "\x1b[1;36mnodes:\x1b[0m");
+        assert_eq!(
+            colors.paint(StateWord::Wait.color_role(), StateWord::Wait.word()),
+            "\x1b[1;33mwaiting\x1b[0m"
+        );
+        assert_eq!(
+            colors.paint(RunWord::Failed.color_role(), RunWord::Failed.word()),
+            "\x1b[1;31mfailed\x1b[0m"
+        );
+
+        let json_status = serde_json::to_string(&StateWord::Wait).unwrap();
+        assert_eq!(json_status, "\"waiting\"");
+        assert!(!json_status.contains('\x1b'));
     }
 }

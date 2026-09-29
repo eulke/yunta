@@ -21,8 +21,8 @@ use yunta_engine::{
 use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
 use crate::render::{
-    bar, cell_width, format_duration, format_pct, sparkline, truncate, Glyphs, NodeDisplay, INDENT,
-    LABEL_WIDTH, LINE_WIDTH, STATE_WIDTH,
+    bar, cell_width, format_duration, format_pct, sparkline, truncate, ColorPolicy, ColorRole,
+    Glyphs, NodeDisplay, INDENT, LABEL_WIDTH, LINE_WIDTH, STATE_WIDTH,
 };
 
 pub async fn stats(
@@ -56,6 +56,7 @@ async fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
         let dto = RunStatsJson::from(run_id, mode.as_str(), &run_stats, pricing.as_ref());
         return crate::json::print_json(&dto);
     }
+    let colors = crate::commands::output_color_policy();
     print!(
         "{}",
         render_run_stats(
@@ -65,6 +66,7 @@ async fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
             &yunta_engine::derive(&events),
             pricing.as_ref(),
             Glyphs::from_env(),
+            colors,
         )
     );
     Ok(Outcome::Success)
@@ -92,12 +94,13 @@ async fn stats_workflow(workflow_name: &WorkflowName, json: bool) -> Result<Outc
         let dto = WorkflowHistoryJson::from(workflow_name, &history, findings.as_ref());
         return crate::json::print_json(&dto);
     }
+    let colors = crate::commands::output_color_policy();
     print!(
         "{}",
-        render_workflow_history(workflow_name, &history, Glyphs::from_env())
+        render_workflow_history(workflow_name, &history, Glyphs::from_env(), colors)
     );
     if let Some(findings) = &findings {
-        let text = render_verification_findings(findings);
+        let text = render_verification_findings_with_color(findings, colors);
         if !text.is_empty() {
             println!("\n{text}");
         }
@@ -215,8 +218,12 @@ fn render_run_stats(
     state: &yunta_engine::RunState,
     pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
     glyphs: Glyphs,
+    colors: ColorPolicy,
 ) -> String {
-    let mut out = format!("run {run_id} — mode {mode}\n");
+    let mut out = format!(
+        "{}\n",
+        colors.paint(ColorRole::Info, &format!("run {run_id} — mode {mode}"))
+    );
     if let Some(note) = super::unknown_kinds_note(&stats.unknown_kinds) {
         out.push_str(&format!("{note}\n"));
     }
@@ -236,8 +243,8 @@ fn render_run_stats(
         "{}\n",
         findings_line(&stats.findings, stats.findings_effective)
     ));
-    out.push_str(&render_nodes(stats, state, glyphs));
-    out.push_str(&render_runners(stats, glyphs));
+    out.push_str(&render_nodes(stats, state, glyphs, colors));
+    out.push_str(&render_runners(stats, glyphs, colors));
     out
 }
 
@@ -309,7 +316,12 @@ fn findings_line(activity: &yunta_engine::FindingActivity, effective: u64) -> St
 /// the same token count reads one way under a node that finished and
 /// another under one that failed, so the number never appears without
 /// it.
-fn render_nodes(stats: &RunStats, state: &yunta_engine::RunState, glyphs: Glyphs) -> String {
+fn render_nodes(
+    stats: &RunStats,
+    state: &yunta_engine::RunState,
+    glyphs: Glyphs,
+    colors: ColorPolicy,
+) -> String {
     if stats.nodes.is_empty() {
         return String::new();
     }
@@ -319,12 +331,12 @@ fn render_nodes(stats: &RunStats, state: &yunta_engine::RunState, glyphs: Glyphs
         .map(|n| n.tokens.total())
         .max()
         .unwrap_or(0);
-    let mut out = String::from("\nnodes:\n");
+    let mut out = format!("\n{}\n", colors.paint(ColorRole::Info, "nodes:"));
     for node in &stats.nodes {
         let display = NodeDisplay::of(state.nodes.state(&node.node_id));
         out.push_str(&format!(
             "{}\n",
-            node_line(node, max_tokens, &display, glyphs)
+            node_line(node, max_tokens, &display, glyphs, colors)
         ));
     }
     out
@@ -332,25 +344,31 @@ fn render_nodes(stats: &RunStats, state: &yunta_engine::RunState, glyphs: Glyphs
 
 /// The same tokens grouped by the runner that spent them: where the
 /// run's cost went, across however many nodes each runner was given.
-fn render_runners(stats: &RunStats, glyphs: Glyphs) -> String {
+fn render_runners(stats: &RunStats, glyphs: Glyphs, colors: ColorPolicy) -> String {
     let by_runner = stats.tokens_by_runner();
     if by_runner.is_empty() {
         return String::new();
     }
     let max_runner_tokens = by_runner.iter().map(|(_, t)| t.total()).max().unwrap_or(0);
-    let mut out = String::from("\nrunners:\n");
+    let mut out = format!("\n{}\n", colors.paint(ColorRole::Info, "runners:"));
     for (runner, tokens) in &by_runner {
         let total = tokens.total();
         out.push_str(&format!(
             "{INDENT}{} {}  {total:>8} tok\n",
             truncate(runner.as_str(), LABEL_WIDTH, glyphs),
-            bar(total, max_runner_tokens, glyphs),
+            bar(total, max_runner_tokens, glyphs, colors),
         ));
     }
     out
 }
 
-fn node_line(node: &NodeStat, max_tokens: u64, display: &NodeDisplay, glyphs: Glyphs) -> String {
+fn node_line(
+    node: &NodeStat,
+    max_tokens: u64,
+    display: &NodeDisplay,
+    glyphs: Glyphs,
+    colors: ColorPolicy,
+) -> String {
     let total = node.tokens.total();
     let blocked = node
         .blocked_fraction()
@@ -359,9 +377,12 @@ fn node_line(node: &NodeStat, max_tokens: u64, display: &NodeDisplay, glyphs: Gl
     format!(
         "{INDENT}{} {} {} {}  {total:>8} tok  {:>8}  blk:{blocked}",
         glyphs.state(display.word),
-        truncate(display.word.short(), STATE_WIDTH, glyphs),
+        colors.paint(
+            display.word.color_role(),
+            &truncate(display.word.short(), STATE_WIDTH, glyphs),
+        ),
         truncate(node.node_id.as_str(), LABEL_WIDTH, glyphs),
-        bar(total, max_tokens, glyphs),
+        bar(total, max_tokens, glyphs, colors),
         format_duration(node.wall_clock()),
     )
 }
@@ -371,16 +392,26 @@ fn render_workflow_history(
     workflow_name: &WorkflowName,
     history: &[RunSummary],
     glyphs: Glyphs,
+    colors: ColorPolicy,
 ) -> String {
     let mut out = format!(
-        "workflow `{workflow_name}` — {}\n",
-        yunta_core::text::counted(history.len(), "run")
+        "{}\n",
+        colors.paint(
+            ColorRole::Info,
+            &format!(
+                "workflow `{workflow_name}` — {}",
+                yunta_core::text::counted(history.len(), "run")
+            )
+        )
     );
 
-    out.push_str("\nCPTV over time:\n");
-    out.push_str(&format!("{}\n", cptv_line(history, glyphs)));
+    out.push_str(&format!(
+        "\n{}\n",
+        colors.paint(ColorRole::Info, "CPTV over time:")
+    ));
+    out.push_str(&format!("{}\n", cptv_line(history, glyphs, colors)));
 
-    out.push_str("\nmodes:\n");
+    out.push_str(&format!("\n{}\n", colors.paint(ColorRole::Info, "modes:")));
     for (mode, runs, median_cptv, median_tokens) in mode_table(history) {
         out.push_str(&format!(
             "{INDENT}{} {:>3} runs   median CPTV {}   median tokens {}\n",
@@ -415,7 +446,7 @@ fn render_workflow_history(
 /// The sparkline gets whatever [`LINE_WIDTH`] leaves after the indent and
 /// that note, so a workflow with hundreds of runs narrows its window
 /// instead of wrapping the line and breaking the block it sits in.
-fn cptv_line(history: &[RunSummary], glyphs: Glyphs) -> String {
+fn cptv_line(history: &[RunSummary], glyphs: Glyphs, colors: ColorPolicy) -> String {
     let latest = history
         .last()
         .and_then(|r| r.cptv)
@@ -424,7 +455,10 @@ fn cptv_line(history: &[RunSummary], glyphs: Glyphs) -> String {
     let note = format!("  (oldest -> newest, latest = {latest})");
     let cells = LINE_WIDTH.saturating_sub(cell_width(INDENT) + cell_width(&note));
     let series: Vec<f64> = history.iter().map(|r| r.cptv.unwrap_or(0.0)).collect();
-    format!("{INDENT}{}{note}", sparkline(&series, cells, glyphs))
+    format!(
+        "{INDENT}{}{note}",
+        sparkline(&series, cells, glyphs, colors)
+    )
 }
 
 /// Verification-effectiveness findings — advisory only, never a reason
@@ -436,6 +470,20 @@ fn cptv_line(history: &[RunSummary], glyphs: Glyphs) -> String {
 /// wording.
 pub(crate) fn render_verification_findings(
     findings: &yunta_engine::VerificationFindings,
+) -> String {
+    render_verification_findings_inner(findings, None)
+}
+
+fn render_verification_findings_with_color(
+    findings: &yunta_engine::VerificationFindings,
+    colors: ColorPolicy,
+) -> String {
+    render_verification_findings_inner(findings, Some(colors))
+}
+
+fn render_verification_findings_inner(
+    findings: &yunta_engine::VerificationFindings,
+    colors: Option<ColorPolicy>,
 ) -> String {
     if findings.is_empty() {
         return String::new();
@@ -482,7 +530,15 @@ pub(crate) fn render_verification_findings(
             yunta_core::text::counted(m.runs_observed, "run")
         ));
     }
-    out
+    let Some(colors) = colors else {
+        return out;
+    };
+    let mut colored = String::new();
+    for line in out.lines() {
+        colored.push_str(&colors.paint(ColorRole::Warning, line));
+        colored.push('\n');
+    }
+    colored
 }
 
 /// Median CPTV/tokens per mode — a plain historical comparison, not a
@@ -858,6 +914,7 @@ mod tests {
             &yunta_engine::derive(&[]),
             None,
             Glyphs::Ascii,
+            ColorPolicy::for_stream(false, None),
         );
         assert!(
             text.contains("documents: 3 accepted, 1 refused"),
@@ -876,7 +933,11 @@ mod tests {
     #[test]
     fn a_long_history_narrows_its_sparkline_instead_of_wrapping_the_line() {
         let history: Vec<RunSummary> = (1..=200).map(|n| summary(f64::from(n))).collect();
-        let line = cptv_line(&history, Glyphs::Ascii);
+        let line = cptv_line(
+            &history,
+            Glyphs::Ascii,
+            ColorPolicy::for_stream(false, None),
+        );
         let cells = cell_width(&line);
         assert!(cells <= LINE_WIDTH, "{cells} cells: {line}");
         assert!(
@@ -888,8 +949,60 @@ mod tests {
     #[test]
     fn a_history_that_fits_draws_every_run_and_marks_no_window() {
         let history: Vec<RunSummary> = (1..=3).map(|n| summary(f64::from(n))).collect();
-        let line = cptv_line(&history, Glyphs::Ascii);
+        let line = cptv_line(
+            &history,
+            Glyphs::Ascii,
+            ColorPolicy::for_stream(false, None),
+        );
         assert!(!line.contains(Glyphs::Ascii.ellipsis()), "{line}");
         assert!(line.contains("latest = 3.0"), "{line}");
+    }
+
+    #[test]
+    fn tables_and_bars_use_standard_color_roles() {
+        let colors = ColorPolicy::for_stream(true, None);
+        let node = NodeStat {
+            node_id: "step".into(),
+            runner: None,
+            tokens: yunta_core::events::TokenUsage {
+                input: 25,
+                output: 5,
+                cached: None,
+            },
+            attempts: 1,
+            active: Duration::ZERO,
+            open_attempt: None,
+            blocked: Duration::ZERO,
+        };
+        let stats = RunStats {
+            cptv: None,
+            rework_rate: None,
+            cache_rate: None,
+            total_tokens: Default::default(),
+            tasks_total: 0,
+            tasks_done: 0,
+            wall_clock: None,
+            asleep: Duration::ZERO,
+            nodes: vec![node.clone()],
+            unknown_kinds: Vec::new(),
+            artifact_submissions: Default::default(),
+            submissions_by_node: Default::default(),
+            findings: Default::default(),
+            findings_by_node: Default::default(),
+            findings_effective: 0,
+        };
+        let rendered = render_nodes(&stats, &yunta_engine::derive(&[]), Glyphs::Ascii, colors);
+        assert!(rendered.contains("\x1b[1;36mnodes:\x1b[0m"), "{rendered}");
+        assert!(rendered.contains("\x1b[1;33mtodo\x1b[0m"), "{rendered}");
+        assert!(
+            rendered.contains("\x1b[1;36m"),
+            "bars use the info palette: {rendered}"
+        );
+
+        let waiting = NodeDisplay::of(Some(&yunta_engine::NodeState::Waiting {
+            on: yunta_engine::NodeWait::Gate { external_ref: None },
+        }));
+        let line = node_line(&node, 30, &waiting, Glyphs::Ascii, colors);
+        assert!(line.contains("\x1b[1;33mwait\x1b[0m"), "{line}");
     }
 }

@@ -36,6 +36,23 @@ use yunta_core::{describe, AdapterId, AdapterSettings, ConfigLayer, Pid, RunId, 
 use yunta_engine::UnknownKindCount;
 
 use crate::error::{warn, CliError};
+use crate::render::{ColorPolicy, ColorRole};
+
+/// Color for text printed by commands to stdout. Captured output stays
+/// plain; a terminal that opts out with `NO_COLOR` or `TERM=dumb` does too.
+pub(crate) fn output_color_policy() -> ColorPolicy {
+    use std::io::IsTerminal;
+
+    let terminal =
+        std::io::stdout().is_terminal() && std::env::var("TERM").ok().as_deref() != Some("dumb");
+    let no_color = std::env::var_os("NO_COLOR").map(|value| value.to_string_lossy().into_owned());
+    ColorPolicy::for_stream(terminal, no_color.as_deref())
+}
+
+/// A completed command's feedback, in the palette's informational role.
+pub(crate) fn success_feedback(policy: ColorPolicy, text: &str) -> String {
+    policy.paint(ColorRole::Info, text)
+}
 
 /// A detached `yunta resume` that never started, and the run it was
 /// for. Recover by running that command yourself: the run is on disk

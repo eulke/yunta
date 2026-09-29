@@ -19,6 +19,7 @@ use yunta_core::{Manifest, RunId};
 use yunta_engine::{Counter, RunFrame, RunPhase};
 
 use crate::commands::advice;
+use crate::render::ColorPolicy;
 
 /// Frames a run for the surfaces that say where it stands in one line.
 ///
@@ -47,6 +48,16 @@ pub(crate) fn frame(
 /// nodes, over what this run's mode schedules) and task (ledger tasks
 /// done over registered) — each a counter with context.
 pub(crate) fn summary(frame: &RunFrame) -> String {
+    summary_with_color(frame, None)
+}
+
+/// The same summary, with only its derived phase word painted. Its
+/// counters and any diagnostic text remain readable and unchanged.
+pub(crate) fn colored_summary(frame: &RunFrame, policy: ColorPolicy) -> String {
+    summary_with_color(frame, Some(policy))
+}
+
+fn summary_with_color(frame: &RunFrame, policy: Option<ColorPolicy>) -> String {
     let mut summary = format!("{}/{} nodes", terminated(&frame.flow), frame.flow.total);
     if let Some(mode) = &frame.flow.skipped_by {
         summary.push_str(&format!(" · {} skipped (mode: {mode})", frame.flow.skipped));
@@ -57,11 +68,13 @@ pub(crate) fn summary(frame: &RunFrame) -> String {
     if let Some(tasks) = &frame.tasks {
         summary = format!("{}/{} tasks · {summary}", tasks.done, tasks.total);
     }
-    summary.push_str(&format!(
-        " · {} reroutes · {}",
-        frame.reroutes,
-        phase_label(&frame.phase)
-    ));
+    let word = crate::render::state::RunWord::of(&frame.phase);
+    let phase = phase_label(&frame.phase);
+    let phase = policy.map_or(phase.clone(), |policy| {
+        let role = word.color_role();
+        policy.paint(role, &phase)
+    });
+    summary.push_str(&format!(" · {} reroutes · {phase}", frame.reroutes));
     if let Some(note) = crate::commands::unknown_kinds_note(&frame.unknown_kinds) {
         summary.push_str(&format!(" · {note}"));
     }

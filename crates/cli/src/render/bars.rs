@@ -1,7 +1,7 @@
 //! A magnitude drawn as a shape: one value against a maximum, and a
 //! series against its own peak.
 
-use super::glyphs::Glyphs;
+use super::{glyphs::Glyphs, ColorPolicy, ColorRole};
 
 /// The cells a bar occupies, filled and empty together. Twenty gives
 /// each step five percent of the maximum, which is as fine as an eye
@@ -13,15 +13,21 @@ pub(crate) const BAR_WIDTH: usize = 20;
 ///
 /// A maximum of zero is a row with nothing to compare — the bar is drawn
 /// empty rather than full, because nothing measured is not everything.
-pub(crate) fn bar(value: u64, max: u64, glyphs: Glyphs) -> String {
+pub(crate) fn bar(value: u64, max: u64, glyphs: Glyphs, policy: ColorPolicy) -> String {
     if max == 0 {
         return repeat(glyphs.bar_empty(), BAR_WIDTH);
     }
-    let filled = (((value as f64 / max as f64) * BAR_WIDTH as f64).round() as usize).min(BAR_WIDTH);
+    let filled_cells =
+        (((value as f64 / max as f64) * BAR_WIDTH as f64).round() as usize).min(BAR_WIDTH);
+    let filled = repeat(glyphs.bar_filled(), filled_cells);
     format!(
         "{}{}",
-        repeat(glyphs.bar_filled(), filled),
-        repeat(glyphs.bar_empty(), BAR_WIDTH.saturating_sub(filled))
+        if filled.is_empty() {
+            String::new()
+        } else {
+            policy.paint(ColorRole::Info, &filled)
+        },
+        repeat(glyphs.bar_empty(), BAR_WIDTH.saturating_sub(filled_cells))
     )
 }
 
@@ -35,7 +41,12 @@ pub(crate) fn bar(value: u64, max: u64, glyphs: Glyphs) -> String {
 /// for the whole history. A window whose own peak is at or below zero is
 /// drawn in the empty step throughout: there is nothing to scale
 /// against, and a flat line of the lowest step would claim there is.
-pub(crate) fn sparkline(values: &[f64], cells: usize, glyphs: Glyphs) -> String {
+pub(crate) fn sparkline(
+    values: &[f64],
+    cells: usize,
+    glyphs: Glyphs,
+    policy: ColorPolicy,
+) -> String {
     if values.is_empty() || cells == 0 {
         return String::new();
     }
@@ -50,7 +61,7 @@ pub(crate) fn sparkline(values: &[f64], cells: usize, glyphs: Glyphs) -> String 
     let max = values.iter().cloned().fold(0.0_f64, f64::max);
     if max <= 0.0 {
         out.push_str(&repeat(glyphs.bar_empty(), values.len()));
-        return out;
+        return policy.paint(ColorRole::Info, &out);
     }
     let ramp = glyphs.ramp();
     let top = ramp.len().saturating_sub(1);
@@ -58,7 +69,7 @@ pub(crate) fn sparkline(values: &[f64], cells: usize, glyphs: Glyphs) -> String 
         let step = ((value / max) * top as f64).round() as usize;
         out.push(*ramp.get(step.min(top)).unwrap_or(&' '));
     }
-    out
+    policy.paint(ColorRole::Info, &out)
 }
 
 fn repeat(glyph: char, times: usize) -> String {
@@ -70,24 +81,28 @@ mod tests {
     use super::*;
     use crate::render::cell_width;
 
+    fn plain() -> ColorPolicy {
+        ColorPolicy::for_stream(false, None)
+    }
+
     #[test]
     fn a_bar_is_the_same_width_at_every_value() {
         for (value, max) in [(0, 0), (0, 10), (3, 10), (10, 10)] {
             for glyphs in [Glyphs::Unicode, Glyphs::Ascii] {
-                assert_eq!(cell_width(&bar(value, max, glyphs)), BAR_WIDTH);
+                assert_eq!(cell_width(&bar(value, max, glyphs, plain())), BAR_WIDTH);
             }
         }
     }
 
     #[test]
     fn a_bar_with_nothing_to_compare_against_is_empty_not_full() {
-        assert_eq!(bar(7, 0, Glyphs::Ascii), ".".repeat(BAR_WIDTH));
+        assert_eq!(bar(7, 0, Glyphs::Ascii, plain()), ".".repeat(BAR_WIDTH));
     }
 
     #[test]
     fn a_sparkline_keeps_the_newest_values_and_marks_the_window() {
         let values: Vec<f64> = (1..=40).map(f64::from).collect();
-        let line = sparkline(&values, 10, Glyphs::Ascii);
+        let line = sparkline(&values, 10, Glyphs::Ascii, plain());
         assert_eq!(cell_width(&line), 10);
         assert!(
             line.starts_with(Glyphs::Ascii.ellipsis()),
@@ -99,13 +114,25 @@ mod tests {
 
     #[test]
     fn a_sparkline_that_fits_carries_no_window_mark() {
-        let line = sparkline(&[1.0, 2.0, 4.0], 10, Glyphs::Ascii);
+        let line = sparkline(&[1.0, 2.0, 4.0], 10, Glyphs::Ascii, plain());
         assert_eq!(cell_width(&line), 3);
         assert!(line.ends_with('#'), "got: {line}");
     }
 
     #[test]
     fn a_series_with_no_peak_draws_the_empty_step() {
-        assert_eq!(sparkline(&[0.0, 0.0], 10, Glyphs::Ascii), "..");
+        assert_eq!(sparkline(&[0.0, 0.0], 10, Glyphs::Ascii, plain()), "..");
+    }
+
+    #[test]
+    fn bars_and_sparklines_color_the_measured_part_with_the_info_role() {
+        let terminal = ColorPolicy::for_stream(true, None);
+        assert_eq!(
+            bar(10, 10, Glyphs::Ascii, terminal),
+            format!("\x1b[1;36m{}\x1b[0m", "#".repeat(BAR_WIDTH))
+        );
+        let sparkline = sparkline(&[1.0, 2.0], 2, Glyphs::Ascii, terminal);
+        assert!(sparkline.starts_with("\x1b[1;36m"), "{sparkline:?}");
+        assert!(sparkline.ends_with("\x1b[0m"), "{sparkline:?}");
     }
 }

@@ -21,7 +21,10 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::project::Project;
 use crate::render::state::RunWord;
-use crate::render::{cell_width, format_duration, indent, truncate, Glyphs, INDENT, LINE_WIDTH};
+use crate::render::{
+    cell_width, format_duration, indent, truncate, ColorPolicy, ColorRole, Glyphs, INDENT,
+    LINE_WIDTH,
+};
 
 /// The cells a run id gets. A ULID is 26 characters, and the id is what
 /// a reader copies into the next command, so this column pads a shorter
@@ -99,6 +102,7 @@ struct RunRow {
     /// are ordered by.
     age: Duration,
     summary: String,
+    phase: RunWord,
 }
 
 /// A run the listing can name but not derive: its log or the manifest it
@@ -130,7 +134,15 @@ pub fn list_runs() -> Result<Outcome, CliError> {
             Err(problem) => unreadable.push(problem),
         }
     }
-    print!("{}", render_runs(rows, unreadable, Glyphs::from_env()));
+    print!(
+        "{}",
+        render_runs(
+            rows,
+            unreadable,
+            Glyphs::from_env(),
+            crate::commands::output_color_policy(),
+        )
+    );
     Ok(Outcome::Success)
 }
 
@@ -144,7 +156,12 @@ pub fn list_runs() -> Result<Outcome, CliError> {
 ///
 /// A run under `unreadable` has no state to have been in for any length
 /// of time, so that group is ordered by id alone.
-fn render_runs(mut rows: Vec<RunRow>, mut unreadable: Vec<Unreadable>, glyphs: Glyphs) -> String {
+fn render_runs(
+    mut rows: Vec<RunRow>,
+    mut unreadable: Vec<Unreadable>,
+    glyphs: Glyphs,
+    colors: ColorPolicy,
+) -> String {
     rows.sort_by(|a, b| b.age.cmp(&a.age).then_with(|| a.run_id.cmp(&b.run_id)));
     let mut out = String::new();
     for standing in Standing::ALL {
@@ -152,14 +169,26 @@ fn render_runs(mut rows: Vec<RunRow>, mut unreadable: Vec<Unreadable>, glyphs: G
         if group.is_empty() {
             continue;
         }
-        push_heading(&mut out, standing.heading(), group.len());
+        push_heading(
+            &mut out,
+            standing.heading(),
+            group.len(),
+            colors,
+            ColorRole::Info,
+        );
         for row in group {
-            out.push_str(&row.render(glyphs));
+            out.push_str(&row.render(glyphs, colors));
         }
     }
     if !unreadable.is_empty() {
         unreadable.sort_by(|a, b| a.run_id.cmp(&b.run_id));
-        push_heading(&mut out, "unreadable", unreadable.len());
+        push_heading(
+            &mut out,
+            "unreadable",
+            unreadable.len(),
+            colors,
+            ColorRole::Error,
+        );
         for run in &unreadable {
             out.push_str(&format!("{INDENT}{}: {}\n", run.run_id, run.problem));
         }
@@ -169,11 +198,17 @@ fn render_runs(mut rows: Vec<RunRow>, mut unreadable: Vec<Unreadable>, glyphs: G
 
 /// A group's heading, with the runs in it counted: a reader who only
 /// reads the headings still learns how much is waiting.
-fn push_heading(out: &mut String, heading: &str, runs: usize) {
+fn push_heading(
+    out: &mut String,
+    heading: &str,
+    runs: usize,
+    colors: ColorPolicy,
+    role: ColorRole,
+) {
     if !out.is_empty() {
         out.push('\n');
     }
-    out.push_str(&format!("{heading} ({runs})\n"));
+    out.push_str(&format!("{} ({runs})\n", colors.paint(role, heading)));
 }
 
 impl RunRow {
@@ -187,6 +222,7 @@ impl RunRow {
             mode: frame.mode.clone(),
             age,
             summary: progress::summary(frame),
+            phase: RunWord::of(&frame.phase),
         }
     }
 
@@ -195,11 +231,19 @@ impl RunRow {
     /// the run is doing and the mode it does it in; the line under it is
     /// the same summary `yunta status` prints, so the two surfaces say
     /// the same thing about the same run.
-    fn render(&self, glyphs: Glyphs) -> String {
+    fn render(&self, glyphs: Glyphs, colors: ColorPolicy) -> String {
         // The row hangs one step under the heading of its group, and
         // its summary one step further under the row, so the summary
         // reads as this run's line rather than the next run's.
         let margin = indent(2);
+        let summary = truncate(
+            &self.summary,
+            LINE_WIDTH.saturating_sub(cell_width(&margin)),
+            glyphs,
+        )
+        .trim_end()
+        .to_string();
+        let summary = color_phase(&summary, self.phase, colors);
         format!(
             "{INDENT}{:<ID_WIDTH$}  {}  {:>AGE_WIDTH$}\n{margin}{}\n",
             self.run_id.as_str(),
@@ -209,14 +253,22 @@ impl RunRow {
                 glyphs
             ),
             format_duration(self.age),
-            truncate(
-                &self.summary,
-                LINE_WIDTH.saturating_sub(cell_width(&margin)),
-                glyphs
-            )
-            .trim_end(),
+            summary,
         )
     }
+}
+
+fn color_phase(summary: &str, phase: RunWord, colors: ColorPolicy) -> String {
+    let word = phase.word();
+    let Some(start) = summary.rfind(word) else {
+        return summary.to_string();
+    };
+    format!(
+        "{}{}{}",
+        &summary[..start],
+        colors.paint(phase.color_role(), word),
+        &summary[start + word.len()..],
+    )
 }
 
 /// One run's row, or what stops it from having one.
@@ -293,6 +345,7 @@ mod tests {
             mode: ModeName::default(),
             age: Duration::from_secs(age_secs),
             summary: "1/2 nodes · 0 reroutes · running".to_string(),
+            phase: RunWord::Running,
         }
     }
 
@@ -349,6 +402,7 @@ mod tests {
             ],
             Vec::new(),
             Glyphs::Ascii,
+            ColorPolicy::for_stream(false, None),
         );
         assert_eq!(listed(&text), [OLDEST, NEWEST], "{text}");
     }
@@ -362,6 +416,7 @@ mod tests {
             ],
             Vec::new(),
             Glyphs::Ascii,
+            ColorPolicy::for_stream(false, None),
         );
         assert_eq!(listed(&text), [TIED_A, TIED_B], "{text}");
     }
@@ -376,6 +431,7 @@ mod tests {
             ],
             Vec::new(),
             Glyphs::Ascii,
+            ColorPolicy::for_stream(false, None),
         );
         assert_eq!(listed(&text), [OLDEST, TIED_A, NEWEST], "{text}");
         assert!(text.contains("needs you (1)"), "{text}");
@@ -392,8 +448,26 @@ mod tests {
                 Unreadable::new(&RunId::from_static(TIED_A), "gone".to_string()),
             ],
             Glyphs::Ascii,
+            ColorPolicy::for_stream(false, None),
         );
         assert_eq!(listed(&text), [OLDEST, TIED_A, NEWEST], "{text}");
         assert!(text.contains("unreadable (2)"), "{text}");
+    }
+
+    #[test]
+    fn list_tables_color_headings_and_waiting_states() {
+        let colors = ColorPolicy::for_stream(true, None);
+        let row = RunRow {
+            run_id: RunId::from_static(OLDEST),
+            standing: Standing::NeedsYou,
+            workflow: "review".into(),
+            mode: ModeName::default(),
+            age: Duration::from_secs(30),
+            summary: "0/1 nodes · 0 reroutes · paused — awaiting a person".to_string(),
+            phase: RunWord::Paused,
+        };
+        let text = render_runs(vec![row], Vec::new(), Glyphs::Ascii, colors);
+        assert!(text.contains("\x1b[1;36mneeds you\x1b[0m (1)"), "{text}");
+        assert!(text.contains("\x1b[1;33mpaused\x1b[0m"), "{text}");
     }
 }

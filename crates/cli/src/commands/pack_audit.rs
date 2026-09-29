@@ -16,6 +16,7 @@ use yunta_engine::{audit_pack, NodeAudit, PackAudit, WorkflowAudit};
 use super::test::{discover_case_paths, run_case};
 use crate::error::{CliError, Outcome};
 use crate::pack::{packs_root, read_manifest, vendor_dir};
+use crate::render::{ColorPolicy, ColorRole};
 use yunta_core::PackRef;
 
 pub async fn audit(pack: &PackRef) -> Result<Outcome, CliError> {
@@ -40,8 +41,15 @@ pub async fn audit(pack: &PackRef) -> Result<Outcome, CliError> {
 /// Prints the full inventory — called both by `audit` (on demand) and by
 /// `pack add` (automatically, before vendoring).
 pub fn print_report(report: &PackAudit) {
+    let colors = crate::commands::output_color_policy();
     let m = &report.manifest;
-    println!("pack: {}/{} @ {}", m.publisher, m.name, m.version);
+    println!(
+        "{}",
+        colors.paint(
+            ColorRole::Info,
+            &format!("pack: {}/{} @ {}", m.publisher, m.name, m.version)
+        )
+    );
     println!(
         "declares: permissions={:?} network={} executors={}",
         m.declares.permissions,
@@ -75,22 +83,28 @@ pub fn print_report(report: &PackAudit) {
     }
 
     for workflow in &report.workflows {
-        print_workflow(workflow);
+        print_workflow(workflow, colors);
     }
 }
 
-fn print_workflow(workflow: &WorkflowAudit) {
-    println!("\nworkflow: {}", workflow.declared_path);
+fn print_workflow(workflow: &WorkflowAudit, colors: ColorPolicy) {
+    println!(
+        "\n{}",
+        colors.paint(
+            ColorRole::Info,
+            &format!("workflow: {}", workflow.declared_path)
+        )
+    );
     if let Some(error) = &workflow.error {
-        println!("  ERROR: {error}");
+        println!("  {}: {error}", colors.paint(ColorRole::Error, "ERROR"));
         return;
     }
     for node in &workflow.nodes {
-        print_node(node);
+        print_node(node, colors);
     }
 }
 
-fn print_node(node: &NodeAudit) {
+fn print_node(node: &NodeAudit, colors: ColorPolicy) {
     println!("  node `{}` (kind: {})", node.id, node.kind);
     if let Some(command) = &node.command {
         println!("    command: {command}");
@@ -122,7 +136,11 @@ fn print_node(node: &NodeAudit) {
             println!("    prompt:");
             println!("{}", yunta_core::text::indent(text, "      "));
         }
-        Some(Err(error)) => println!("    prompt: UNREADABLE — {}", yunta_core::describe(error)),
+        Some(Err(error)) => println!(
+            "    prompt: {} — {}",
+            colors.paint(ColorRole::Error, "UNREADABLE"),
+            yunta_core::describe(error)
+        ),
     }
 }
 
@@ -200,12 +218,19 @@ pub async fn run_pack_tests(pack_dir: &Path, ctx: &crate::context::Context) -> P
 }
 
 pub fn print_test_summary(summary: &PackTestSummary) {
+    let colors = crate::commands::output_color_policy();
     if !summary.has_tests {
-        println!("\ntests: none shipped");
+        println!("\n{}", colors.paint(ColorRole::Info, "tests: none shipped"));
     } else if !summary.ran {
         println!(
-            "\ntests: {} shipped, not run (pass --run-tests)",
-            yunta_core::text::counted(summary.total, "case")
+            "\n{}",
+            colors.paint(
+                ColorRole::Info,
+                &format!(
+                    "tests: {} shipped, not run (pass --run-tests)",
+                    yunta_core::text::counted(summary.total, "case")
+                )
+            )
         );
     } else {
         // The heading counts cases and the lines under it count
@@ -213,9 +238,19 @@ pub fn print_test_summary(summary: &PackTestSummary) {
         // so each count stays with what it counts, and the block is
         // indented rather than given a second, different total.
         println!(
-            "\ntests: {}, {} failed",
-            yunta_core::text::counted(summary.total, "case"),
-            summary.failed
+            "\n{}",
+            colors.paint(
+                if summary.failed == 0 {
+                    ColorRole::Info
+                } else {
+                    ColorRole::Error
+                },
+                &format!(
+                    "tests: {}, {} failed",
+                    yunta_core::text::counted(summary.total, "case"),
+                    summary.failed
+                )
+            )
         );
         if !summary.failures.is_empty() {
             println!(

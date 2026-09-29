@@ -268,12 +268,15 @@ pub async fn add(
     }
 
     println!(
-        "installed {}/{} @ {} ({}) -> {}",
-        manifest.publisher,
-        manifest.name,
-        manifest.version,
-        commit.abbreviated(),
-        dest.display()
+        "{}",
+        success_line(&format!(
+            "installed {}/{} @ {} ({}) -> {}",
+            manifest.publisher,
+            manifest.name,
+            manifest.version,
+            commit.abbreviated(),
+            dest.display()
+        ))
     );
 
     // The pack's own cases run last, on the vendored copy, and only on
@@ -372,7 +375,13 @@ pub async fn update(
     );
     save_lock(&cwd, &lock)?;
 
-    println!("updated {pack} -> {new_ref} ({})", commit.abbreviated());
+    println!(
+        "{}",
+        success_line(&format!(
+            "updated {pack} -> {new_ref} ({})",
+            commit.abbreviated()
+        ))
+    );
     Ok(Outcome::Success)
 }
 
@@ -391,7 +400,7 @@ pub fn remove(pack: &PackRef) -> Result<Outcome, CliError> {
     }
     save_lock(&cwd, &lock)?;
 
-    println!("removed {pack}");
+    println!("{}", success_line(&format!("removed {pack}")));
     Ok(Outcome::Success)
 }
 
@@ -554,7 +563,7 @@ pub async fn new_pack(pack: &PackRef) -> Result<Outcome, CliError> {
     write(".yunta/workflows/example.yaml", &workflow_yaml)?;
     write(".yunta/tests/example.yaml", PACK_CASE_TEMPLATE)?;
     write(".yunta/tests/fixtures/example.yaml", PACK_FIXTURE_TEMPLATE)?;
-    println!("wrote {}", dir.display());
+    println!("{}", success_line(&format!("wrote {}", dir.display())));
 
     // Verify against the pack's own self-test config, then run its case.
     let config = ConfigLayer::merge_layers(
@@ -571,4 +580,31 @@ pub async fn new_pack(pack: &PackRef) -> Result<Outcome, CliError> {
         return Ok(Outcome::Reported);
     }
     super::test::test(Some(&dir)).await
+}
+
+fn success_line(text: &str) -> String {
+    crate::commands::success_feedback(crate::commands::output_color_policy(), text)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::render::ColorPolicy;
+
+    #[test]
+    fn success_messages_use_success_color_role() {
+        assert_eq!(
+            crate::commands::success_feedback(
+                ColorPolicy::for_stream(true, None),
+                "installed pack"
+            ),
+            "\x1b[1;36minstalled pack\x1b[0m"
+        );
+        assert_eq!(
+            crate::commands::success_feedback(
+                ColorPolicy::for_stream(false, None),
+                "installed pack"
+            ),
+            "installed pack"
+        );
+    }
 }
