@@ -29,6 +29,12 @@ use crate::process::{spawn_governed, CommandOutput, GovernedCommand, Outcome, Su
 pub struct Memo {
     config_hash: ContentHash,
     cache: Mutex<HashMap<ContentHash, Answer>>,
+    /// One slot per key a check is asking about: two checks of one
+    /// command on one tree at the same moment — the tasks of a batch,
+    /// each pre-checking the suite on the commit they all start from —
+    /// take turns, and the second reuses what the first answered instead
+    /// of running the command alongside it.
+    asking: Mutex<HashMap<ContentHash, std::sync::Arc<tokio::sync::Mutex<()>>>>,
 }
 
 /// What a command answered on one tree. A red answer keeps what the
@@ -47,11 +53,23 @@ impl Memo {
         Self {
             config_hash,
             cache: Mutex::new(HashMap::new()),
+            asking: Mutex::new(HashMap::new()),
         }
     }
 
     fn key(&self, cmd: &str, tree_hash: &ContentHash) -> ContentHash {
         yunta_core::sha256_hex(format!("{cmd}\x00{tree_hash}\x00{}", self.config_hash).as_bytes())
+    }
+
+    /// Takes the turn to ask about `cmd` on this tree: held while the
+    /// caller reads the cache and, on a miss, runs the command and
+    /// records what it answered.
+    async fn turn(&self, cmd: &str, tree_hash: &ContentHash) -> tokio::sync::OwnedMutexGuard<()> {
+        let slot = {
+            let mut asking = self.asking.lock().unwrap_or_else(|e| e.into_inner());
+            asking.entry(self.key(cmd, tree_hash)).or_default().clone()
+        };
+        slot.lock_owned().await
     }
 
     fn get(&self, cmd: &str, tree_hash: &ContentHash) -> Option<Answer> {
@@ -87,6 +105,7 @@ impl Memo {
         supervision: Supervision<'_>,
     ) -> Result<Memoized, TaskCycleError> {
         let tree_hash = tree_hash(cwd, supervision).await?;
+        let _turn = self.turn(cmd, &tree_hash).await;
         if let Some(answer) = self.get(cmd, &tree_hash) {
             return Ok(Memoized {
                 exit_code: answer.exit_code,
@@ -238,6 +257,7 @@ async fn run_all_criteria(
     let tree_hash = tree_hash(cwd, supervision).await?;
     let mut runs = Vec::with_capacity(criteria.len());
     for criterion in criteria {
+        let _turn = memo.turn(&criterion.cmd, &tree_hash).await;
         let (exit_code, reused, duration_ms, output) = match memo.get(&criterion.cmd, &tree_hash) {
             Some(answer) => (answer.exit_code, true, None, answer.output),
             None => {
