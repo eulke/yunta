@@ -89,7 +89,9 @@ with none and no `on_failure.goto` pointing at it runs as soon as the DAG lets i
 `<id>` instead of failing the run. Once `<id>`'s own subgraph completes, control
 returns and the original node runs again. `max_reroutes` bounds how many times this
 happens before the run pauses on a gate instead — a correction loop is not allowed to
-retry forever unattended.
+retry forever unattended. A failure the run's frozen config causes — a key it
+leaves unset — is never re-routed: the correction reads the same config, so the
+failure goes straight to the run's `defaults.on_failure`.
 
 ## Scope and permissions
 
@@ -208,7 +210,7 @@ A node that names a command the config does not declare cannot run, and no
 attempt of the run can change that — the run's config is frozen when it is
 created. `yunta check` refuses such a workflow before the first token, naming the
 node and the command, and a run that meets one anyway fails the node without
-offering a retry.
+offering a retry or spending its `on_failure` re-route.
 
 `yunta init` writes `commands:` for what it finds in the repository: the
 scripts a `package.json` declares for `lint`, `typecheck`, `test`, `format` and

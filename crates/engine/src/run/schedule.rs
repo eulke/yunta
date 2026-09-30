@@ -625,13 +625,21 @@ fn failure_step(board: &Board<'_>) -> Option<Decision> {
 /// the graph keeps running. Under `pause` a person decides, and a
 /// `retry` they chose after this failure runs the node again; a gate
 /// node keeps the plain pause, since its own flow is what re-asks it.
+///
+/// A failure no attempt of the run can change is left to the policy
+/// too: a correction reads the same frozen config the node failed on,
+/// so re-routing to it spends a node on an outcome already known.
 fn unrerouted(
     board: &Board<'_>,
     node: &Node,
     failure: &yunta_core::events::Failure,
     reroutes: u32,
 ) -> Option<Decision> {
-    if let Some(on_failure) = &node.on_failure {
+    let correctable = node
+        .on_failure
+        .as_ref()
+        .filter(|_| failure.retry_can_change());
+    if let Some(on_failure) = correctable {
         if reroutes < on_failure.max_reroutes {
             return Some(Decision::Reroute {
                 from: node.id.clone(),

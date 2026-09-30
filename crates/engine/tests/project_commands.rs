@@ -4,7 +4,7 @@
 
 use yunta_core::events::{EventPayload, Failure, NodeEvent, StoredEvent};
 use yunta_core::{CommandName, ConfigKey};
-use yunta_engine::{RunReport, RunTerminal};
+use yunta_engine::{current_escalation, RunReport, RunTerminal};
 use yunta_testkit::{Bench, MOCK_CONFIG};
 
 fn config(extra: &str) -> String {
@@ -94,6 +94,38 @@ async fn a_command_the_frozen_config_lacks_fails_unset_and_not_retryably() {
             false
         )]
     );
+}
+
+/// A correction cannot change the frozen config either: a node's
+/// `on_failure` spends no re-route on such a failure, and the person it
+/// goes to is offered no attempt that would meet it again.
+#[tokio::test]
+async fn no_reroute_is_spent_on_a_command_the_frozen_config_lacks() {
+    let bench = Bench::new();
+    let RunReport { terminal, state } = bench
+        .run_with_config(
+            "name: w\nnodes:\n  \
+             - { id: lint, kind: bash, run: { command: lint }, on_failure: { goto: fix, max_reroutes: 1 } }\n  \
+             - { id: fix, kind: bash, run: \"true\" }\n",
+            "sessions: []\n",
+            &config(""),
+        )
+        .await;
+
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+    assert!(
+        !state.nodes.has_state("fix"),
+        "{:?}",
+        state.nodes.state("fix")
+    );
+    let (node, escalation) =
+        current_escalation(&bench.manifest(), &state).expect("the failure is a pause with a menu");
+    assert_eq!(node.as_str(), "lint");
+    let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
+    assert_eq!(ids, ["abort"]);
 }
 
 #[tokio::test]
