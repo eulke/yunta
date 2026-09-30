@@ -1,7 +1,8 @@
 //! `yunta pack audit`: prints the full static inventory
 //! `yunta_engine::audit_pack` builds for an installed pack — every
 //! command, context source, per-node permission, required agent, `mcp`
-//! server, executor, and each workflow's full, untrimmed prompt — then
+//! server, executor, repository path a scope names, and each workflow's
+//! full, untrimmed prompt — then
 //! reports whether the pack ships tests of its own and whether they
 //! pass. Inventory, never verdict: nothing here flags content as
 //! suspicious, it only shows all of it. Runs on demand
@@ -112,6 +113,9 @@ fn print_node(node: &NodeAudit) {
     }
     if let Some(executor) = &node.executor {
         println!("    executor (code): {executor}");
+    }
+    if !node.paths.is_empty() {
+        println!("    names repository paths: {}", node.paths.join(", "));
     }
     for entry in &node.context {
         println!("    context: {entry}");

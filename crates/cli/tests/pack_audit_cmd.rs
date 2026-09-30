@@ -26,6 +26,7 @@ fn write_pack(dir: &Path) {
          \x20 - id: noop\n\
          \x20   kind: bash\n\
          \x20   run: \"true\"\n\
+         \x20   scope: [\"src/**\", \"**/*.rs\"]\n\
          \x20 - id: brief\n\
          \x20   kind: prompt\n\
          \x20   prompt: |\n\
@@ -97,6 +98,11 @@ fn audit_on_demand_reports_the_same_inventory_for_an_installed_pack() {
     let text = stdout(&out);
     assert!(
         text.lines().any(|l| l == "pack: acme/review-pack @ 1.0.0"),
+        "{text}"
+    );
+    assert!(
+        text.lines()
+            .any(|l| l == "    names repository paths: src/**, **/*.rs"),
         "{text}"
     );
     assert!(
