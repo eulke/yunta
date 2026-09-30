@@ -17,7 +17,7 @@ use super::Resolved;
 use super::EXTERNAL_CALL_TIMEOUT;
 use crate::run::node_exec::template_vars;
 use crate::run::{RunCtx, RunError};
-use yunta_core::events::{FindingEvent, NodeEvent};
+use yunta_core::events::{FindingEvent, NodeEvent, TaskEvent};
 
 /// What the session reads in place of an optional file that is not
 /// there: said, never left for the agent to guess at (D186).
@@ -208,30 +208,10 @@ pub(super) async fn resolve_run_events(
     // The same canonical JSONL the run's own `events.jsonl` export
     // writes — a session reads exactly what a forensic reader does,
     // stable across any `Debug` derive change on the event structs.
-    let filtered: Vec<StoredEvent> = match params.filter {
-        None => events,
-        Some(yunta_core::RunEventsFilter::Failed) => events
-            .into_iter()
-            .filter(|e| matches!(e.payload(), Some(EventPayload::Node(NodeEvent::Failed(_)))))
-            .collect(),
-        // History, not state: a session that mounts events wants what
-        // happened, and a finding that was rewritten or taken back is
-        // part of that. A session that wants the set standing now mounts
-        // the findings artifact.
-        Some(yunta_core::RunEventsFilter::Findings) => events
-            .into_iter()
-            .filter(|e| {
-                matches!(
-                    e.payload(),
-                    Some(
-                        EventPayload::Findings(FindingEvent::Posted(_))
-                            | EventPayload::Findings(FindingEvent::Updated(_))
-                            | EventPayload::Findings(FindingEvent::Withdrawn(_))
-                    )
-                )
-            })
-            .collect(),
-    };
+    let filtered: Vec<StoredEvent> = events
+        .into_iter()
+        .filter(|event| params.filter.is_none_or(|filter| kept(filter, event)))
+        .collect();
     let jsonl = crate::events_export::render_events_jsonl(&filtered).map_err(|source| {
         ContextResolveError::RunEventsRender {
             node: node.id.clone(),
@@ -240,6 +220,35 @@ pub(super) async fn resolve_run_events(
         }
     })?;
     Ok(jsonl.into_bytes())
+}
+
+/// Whether `filter` keeps `event`.
+fn kept(filter: yunta_core::RunEventsFilter, event: &StoredEvent) -> bool {
+    let payload = event.payload();
+    match filter {
+        yunta_core::RunEventsFilter::Failed => {
+            matches!(payload, Some(EventPayload::Node(NodeEvent::Failed(_))))
+        }
+        // History, not state: a session that mounts events wants what
+        // happened, and a finding that was rewritten or taken back is
+        // part of that. A session that wants the set standing now mounts
+        // the findings artifact.
+        yunta_core::RunEventsFilter::Findings => matches!(
+            payload,
+            Some(
+                EventPayload::Findings(FindingEvent::Posted(_))
+                    | EventPayload::Findings(FindingEvent::Updated(_))
+                    | EventPayload::Findings(FindingEvent::Withdrawn(_))
+            )
+        ),
+        yunta_core::RunEventsFilter::Deviations => matches!(
+            payload,
+            Some(
+                EventPayload::Tasks(TaskEvent::DeviationDeclared(_))
+                    | EventPayload::Tasks(TaskEvent::DeviationResolved(_))
+            )
+        ),
+    }
 }
 
 pub(super) async fn resolve_tasks(

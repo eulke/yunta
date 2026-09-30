@@ -251,12 +251,16 @@ pub struct RunEventsParams {
 /// The `run-events` filters the resolver knows. Absent (`None`) means
 /// the whole log; `Failed` narrows it to `node_failed` events, `Findings`
 /// to `finding_posted` events (what a corrective node reads to act on
-/// what an earlier node found).
+/// what an earlier node found), `Deviations` to the departures from the
+/// plan task sessions declared and the answers people gave them (what a
+/// node that holds the work to the plan reads to tell an accepted
+/// departure from one nobody declared).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RunEventsFilter {
     Failed,
     Findings,
+    Deviations,
 }
 
 impl RunEventsFilter {
@@ -265,6 +269,7 @@ impl RunEventsFilter {
         match self {
             RunEventsFilter::Failed => "failed",
             RunEventsFilter::Findings => "findings",
+            RunEventsFilter::Deviations => "deviations",
         }
     }
 }

@@ -237,7 +237,9 @@ failing), `command: "<cmd>"` (stdout), `artifact: {node,
 kind}` or `artifact: {node, name}` (another node's declared output, named the way
 that node declares it — this also creates the implicit dependency edge, no
 separate `depends_on` needed), `mcp: {server, query}`, `run-events: {filter}`
-(a read-only query into this run's own log), `tasks: {}` (the tasks document's current
+(a read-only query into this run's own log — the whole of it, or only its
+`failed` nodes, its `findings`, or its `deviations`: the departures from the
+plan task sessions declared and the answers they got), `tasks: {}` (the tasks document's current
 state), `knowledge: {layers: [...]}` (repo/user-scoped project knowledge — see
 [knowledge layers](#knowledge-layers) below), and `node-output: {node}` (a prior
 node's own captured output, e.g. what a `parallel` group's blackboard consolidated

@@ -193,3 +193,34 @@ async fn a_departure_from_what_the_plan_does_not_hold_is_refused_and_not_recorde
         "nothing the plan does not hold is recorded as a departure from it"
     );
 }
+
+#[tokio::test]
+async fn a_node_reading_the_departures_sees_each_one_and_its_answer_and_nothing_else() {
+    let workflow = format!(
+        "{WORKFLOW}  - id: conform
+    kind: prompt
+    runner: planner
+    depends_on: [implement]
+    prompt: \"Hold the work to the plan.\"
+    context:
+      - run-events: {{ filter: deviations }}
+"
+    );
+    let then = "  - match_prompt_contains: \"Hold the work to the plan.\"
+    outcome: { type: completed, summary: held }
+";
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(&workflow, &fixture(true, then), &answering("accept", None))
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    let read = bench.mock().requests_seen().last().cloned().unwrap().prompt;
+    assert!(read.contains("\"deviation_declared\""), "{read}");
+    assert!(read.contains("\"deviation_resolved\""), "{read}");
+    assert!(
+        read.contains("the second half needs the clock, which this task may not read"),
+        "{read}"
+    );
+    assert!(!read.contains("\"task_status_changed\""), "{read}");
+}
