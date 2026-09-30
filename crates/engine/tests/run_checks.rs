@@ -300,7 +300,7 @@ nodes:
     );
     assert_eq!(
         outcome_of(&events, "second"),
-        "no regression vs baseline (exit 0, reused: same tree since an earlier compare)"
+        "no regression vs baseline (exit 0, reused: the suite already ran on this same tree)"
     );
 
     let ran = tokio::fs::read_to_string(&suite_runs)

@@ -197,13 +197,14 @@ fn nothing_to_compare(captured: &yunta_core::events::BaselineCapturedPayload) ->
 }
 
 /// What a comparison that found no regression closes with: the suite's
-/// exit code, and where the answer came from when this invocation
-/// already had it.
+/// exit code, and whether this invocation already had the answer. The
+/// memo does not say who asked first — an earlier comparison or a task's
+/// guard on the tree the loop left — so neither is named.
 fn no_regression(ran: &crate::task_cycle::Memoized) -> String {
     match ran.reused {
         false => format!("no regression vs baseline (exit {})", ran.exit_code),
         true => format!(
-            "no regression vs baseline (exit {}, reused: same tree since an earlier compare)",
+            "no regression vs baseline (exit {}, reused: the suite already ran on this same tree)",
             ran.exit_code
         ),
     }

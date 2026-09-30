@@ -1339,7 +1339,7 @@ impl Memo {
 }
 pub struct Memoized { pub exit_code: i32, pub reused: bool }
 //   el lazo de criterios sigue con su huella compartida (L-110); check_exec::execute_baseline_compare compara `ctx.run_view().await?.state.run.baseline()` contra `ctx.memo.exit_code(..)` y cierra con
-//   "no regression vs baseline (exit 0)" o "no regression vs baseline (exit 0, reused: same tree since an earlier compare)"; coverage_gate sigue por `run_command`.
+//   "no regression vs baseline (exit 0)" o "no regression vs baseline (exit 0, reused: the suite already ran on this same tree)"; coverage_gate sigue por `run_command`.
 
 // engine/src/receipt/mod.rs:66-73 — `BaselineSummary { suite, hash, compared, regressions, origin: BaselineOrigin }`, aditivo, `Receipt::SCHEMA_VERSION` queda en 1;
 //   `baseline_summary` lee `state.run.baseline()` del estado que ya deriva; receipt/render.rs:74-83 imprime «(suite `{}`, hash `{}`, measured by run {})» cuando el origen es heredado.

@@ -281,3 +281,38 @@ async fn a_task_whose_base_an_unscoped_node_broke_is_blocked_before_any_session(
         "no session opened"
     );
 }
+
+/// A comparison after the loop asks the suite about the tree the last
+/// guard already checked: it reuses that answer, and says the suite
+/// already ran there instead of naming a comparison that never ran.
+#[tokio::test]
+async fn a_compare_after_the_loop_reuses_what_the_guard_answered_on_that_tree() {
+    let bench = Bench::new();
+    let workflow = format!(
+        "{}  - {{ id: tests, kind: check, builtin: baseline_compare, depends_on: [implement] }}\n",
+        workflow("[made.txt]", "")
+    );
+    let RunReport { terminal, .. } = bench
+        .run_with_config(&workflow, &session(false), &config())
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let outcome = bench
+        .events()
+        .iter()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::Node(NodeEvent::Finished(p)))
+                if event
+                    .node_id
+                    .as_ref()
+                    .is_some_and(|id| id.as_str() == "tests") =>
+            {
+                Some(p.outcome.clone())
+            }
+            _ => None,
+        });
+    assert_eq!(
+        outcome.as_deref(),
+        Some("no regression vs baseline (exit 0, reused: the suite already ran on this same tree)")
+    );
+}
