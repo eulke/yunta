@@ -214,6 +214,7 @@ impl ToolsHost {
             cancel: CancellationToken::new(),
             staged: Arc::new(OnceLock::from(Vec::new())),
             denied: Vec::new(),
+            checks: Default::default(),
         }
     }
 

@@ -22,7 +22,7 @@ use yunta_core::{ScopeGlob, TaskId};
 use super::catalog::RunTool;
 use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
-use crate::task_cycle::{could_not_run, judge, CriterionRun, Work};
+use crate::task_cycle::{could_not_run, judge, CriterionRun, Judgement, Work};
 
 impl SessionTools {
     pub(super) async fn task_status(&self) -> Result<String, RunToolError> {
@@ -103,6 +103,11 @@ impl SessionTools {
     /// from one that was never asked.
     pub(super) async fn check_task(&self) -> Result<String, RunToolError> {
         let access = self.task_access(RunTool::CheckTask)?;
+        let tree =
+            crate::task_cycle::content_of(&access.unit.worktree, self.host.supervision(&self.stop))
+                .await
+                .map_err(|source| RunToolError::Check { source })?;
+        let (_turn, stop) = access.checks.take(tree, &self.stop, &access.index).await;
         self.append(EventPayload::Tasks(TaskEvent::CheckStarted(
             TaskCheckStartedPayload {
                 task_id: access.task.id.clone(),
@@ -122,21 +127,21 @@ impl SessionTools {
                 staged: access.staged.get().map_or(&[], Vec::as_slice),
             },
             &self.host.memo,
-            self.host.supervision(&self.stop),
+            self.host.supervision(&stop),
         )
-        .await
-        .map_err(|source| RunToolError::Check { source })?;
-        self.append(EventPayload::Tasks(TaskEvent::CheckAnswered(
-            TaskCheckAnsweredPayload {
-                task_id: access.task.id.clone(),
-                closes: judgement.closes(),
-                results: crate::task_cycle::to_results(&judgement.criteria),
-                outside_scope: judgement.scope.violations.clone(),
-                denied: judgement.scope.denied.clone(),
-                duration_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-            },
-        )))
-        .await?;
+        .await;
+        access.checks.judged();
+        if stop.is_cancelled() && !self.stop.is_cancelled() {
+            return Err(RunToolError::Superseded);
+        }
+        let judgement = judgement.map_err(|source| RunToolError::Check { source })?;
+        self.append(answered(&access.task.id, &judgement, started.elapsed()))
+            .await?;
+        self.check_verdict(judgement)
+    }
+
+    /// What `yunta_check_task` answers for `judgement`.
+    fn check_verdict(&self, judgement: Judgement) -> Result<String, RunToolError> {
         let any_unrunnable = judgement
             .criteria
             .iter()
@@ -159,6 +164,18 @@ impl SessionTools {
             .as_deref()
             .ok_or(RunToolError::NotATaskSession { tool: tool.name() })
     }
+}
+
+/// The answer a check of `task` gave, as the log keeps it.
+fn answered(task: &TaskId, judgement: &Judgement, took: std::time::Duration) -> EventPayload {
+    EventPayload::Tasks(TaskEvent::CheckAnswered(TaskCheckAnsweredPayload {
+        task_id: task.clone(),
+        closes: judgement.closes(),
+        results: crate::task_cycle::to_results(&judgement.criteria),
+        outside_scope: judgement.scope.violations.clone(),
+        denied: judgement.scope.denied.clone(),
+        duration_ms: took.as_millis().min(u64::MAX as u128) as u64,
+    }))
 }
 
 /// One task, as `yunta_task` answers it.

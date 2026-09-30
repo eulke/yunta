@@ -239,6 +239,68 @@ pub struct TaskAccess {
     /// which no audit counts. Known once the session's request is built,
     /// which is before any call can arrive.
     pub staged: Arc<std::sync::OnceLock<Vec<PathBuf>>>,
+    /// The one check of this task that judges at a time.
+    pub checks: Arc<CheckTurn>,
+}
+
+/// The one check of a task that judges at a time, and the tree it is
+/// judging.
+///
+/// Checks of one task take turns because they stage through one private
+/// index. A check asked about a tree the task has moved on from stops
+/// the one still judging the tree it left — nobody is going to close
+/// that work any more — while one asked about the same tree waits its
+/// turn and takes the answers the first one kept.
+#[derive(Default)]
+pub struct CheckTurn {
+    turn: tokio::sync::Mutex<()>,
+    judging: std::sync::Mutex<Option<(yunta_core::TreeId, CancellationToken)>>,
+}
+
+impl CheckTurn {
+    /// Waits for the turn to judge `tree`, stopping the check in
+    /// progress when that one judges another tree. What it returns holds
+    /// the turn, and the token this check's commands answer to — a child
+    /// of `stop`.
+    ///
+    /// The turn is the only holder of the checks' `index`, so a lock
+    /// found beside it was left by a check stopped mid-way through
+    /// staging, and taking the turn clears it.
+    pub(crate) async fn take(
+        &self,
+        tree: yunta_core::TreeId,
+        stop: &CancellationToken,
+        index: &std::path::Path,
+    ) -> (tokio::sync::MutexGuard<'_, ()>, CancellationToken) {
+        if let Some((judged, stops)) = self.judging().as_ref() {
+            if *judged != tree {
+                stops.cancel();
+            }
+        }
+        let turn = self.turn.lock().await;
+        let mut lock = index.as_os_str().to_owned();
+        lock.push(".lock");
+        // One that will not go is met by the audit, which says so.
+        if let Err(e) = tokio::fs::remove_file(lock).await {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(error = %e, "failed to clear a stopped check's index lock");
+            }
+        }
+        let stops = stop.child_token();
+        *self.judging() = Some((tree, stops.clone()));
+        (turn, stops)
+    }
+
+    /// Says the check holding the turn is done judging.
+    pub(crate) fn judged(&self) {
+        *self.judging() = None;
+    }
+
+    fn judging(
+        &self,
+    ) -> std::sync::MutexGuard<'_, Option<(yunta_core::TreeId, CancellationToken)>> {
+        self.judging.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 /// What a node's own session's scope tools reach: the scope its close

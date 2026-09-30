@@ -262,6 +262,14 @@ impl Tree {
     }
 }
 
+/// What `cwd` holds, as the tree a criterion's answer is kept for.
+pub(crate) async fn content_of(
+    cwd: &Path,
+    supervision: Supervision<'_>,
+) -> Result<TreeId, TaskCycleError> {
+    Ok(Tree::of(cwd, false, supervision).await?.content)
+}
+
 /// Whether `cmd` runs `git`, which can answer from history as well as
 /// from the files a checkout holds.
 fn asks_git(cmd: &str) -> bool {

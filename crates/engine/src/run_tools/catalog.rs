@@ -162,7 +162,11 @@ fn check_task_tool() -> Tool {
          ends: run every criterion on the checkout as it stands and audit what changed \
          against the task's scope. `closes` is true when every criterion exits 0 and \
          nothing changed lies outside the scope — the task is then done if the tree does \
-         not change again. A scope expansion you asked for counts only once granted.",
+         not change again. A scope expansion you asked for counts only once granted. \
+         It answers when the criteria have, however long they take. Calling it again on \
+         an unchanged checkout waits for the check already running and reuses its \
+         answers; calling it after changing the checkout stops that check, whose tree \
+         nobody will close any more.",
         no_arguments(),
     )
 }

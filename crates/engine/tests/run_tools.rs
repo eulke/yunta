@@ -705,6 +705,11 @@ struct GreetingSession {
 
 impl GreetingSession {
     async fn open() -> Self {
+        Self::open_for(greeting_task()).await
+    }
+
+    /// A task session on `task` instead.
+    async fn open_for(task: yunta_core::Task) -> Self {
         let owner = yunta_testkit::Owner::new();
         let repo = tempfile::tempdir().unwrap();
         yunta_testkit::init_repo(repo.path());
@@ -718,7 +723,7 @@ impl GreetingSession {
             ..unit_at(repo.path().to_path_buf())
         };
         let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
-        let access = host.task_access(greeting_task(), unit);
+        let access = host.task_access(task, unit);
         let session = host.task_session("implement", access).await;
         let client = client_for(&session, None).await.unwrap();
         GreetingSession {
@@ -795,6 +800,46 @@ async fn every_check_leaves_its_question_and_its_answer_on_the_log() {
         ]
     );
     session.client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_check_of_a_tree_that_moved_on_stops_the_one_still_judging_the_old() {
+    // On the tree the session left first the criterion takes half a
+    // minute; once `moved.txt` is there it answers at once. The first
+    // check judges work nobody is going to close any more.
+    let world = tempfile::tempdir().unwrap();
+    let started = world.path().join("started");
+    let task: yunta_core::Task = serde_norway::from_str(&format!(
+        "id: T001\ntitle: Move on\nscope: [moved.txt]\ncriteria:\n  - cmd: \"if [ -f moved.txt ]; then true; else touch {}; sleep 30; fi\"\n",
+        started.display()
+    ))
+    .unwrap();
+    let session = GreetingSession::open_for(task).await;
+
+    let old = tokio::time::timeout(
+        yunta_testkit::WAIT_DEADLINE,
+        call(&session.client, "yunta_check_task", json!({})),
+    );
+    let new = async {
+        yunta_testkit::wait_until_async(
+            || async { tokio::fs::try_exists(&started).await.unwrap_or(false) },
+            || "the first check never started its criterion".to_string(),
+        )
+        .await;
+        tokio::fs::write(session.repo.path().join("moved.txt"), "moved")
+            .await
+            .unwrap();
+        session.check().await
+    };
+    let (old, new) = tokio::join!(old, new);
+
+    assert_eq!(new["closes"], json!(true), "got: {new}");
+    let (is_error, said) = old.expect("the first check ends as soon as the second starts");
+    assert!(is_error, "got: {said}");
+    assert!(
+        said.starts_with("this check stopped: the checkout changed"),
+        "got: {said}"
+    );
 }
 
 #[tokio::test]

@@ -151,6 +151,11 @@ pub(super) enum RunToolError {
         #[source]
         source: crate::task_cycle::TaskCycleError,
     },
+    #[error(
+        "this check stopped: the checkout changed, and the check asked after it judges what \
+         the checkout holds now — its answer is the one that counts"
+    )]
+    Superseded,
     #[error("the run's log cannot be reached")]
     Storage {
         #[source]

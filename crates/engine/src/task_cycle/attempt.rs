@@ -344,6 +344,7 @@ async fn open_and_dispatch(
         index: crate::run_dir::index_for(&setup.run_dir, &unit.who).with_extension("check"),
         cancel: supervision.cancel.clone(),
         staged: Default::default(),
+        checks: Default::default(),
     });
     // One door for every session: the per-attempt listener (mandatory
     // for a task session, which reads its task through it), the brief,
