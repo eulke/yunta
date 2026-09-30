@@ -285,6 +285,15 @@ arrives through `yunta_submit_spec` and is proven against the run the moment it
 does: every task it names is the plan's, and in a checkout of the run's tree with
 every one of its files written in, each test runs and fails — a test that already
 passes holds the work to nothing, and the session hears which in the same call.
+
+A loop holds each task to the spec the run holds. The task's files are written into
+the tree its work starts from and its tests join its criteria, so it closes only
+when they pass; the suite the run measured answers for that tree before the tests
+are in it. Its work may never change those files: its session's fence refuses the
+write, `yunta_task` lists them as denied, and a change the audit finds keeps the
+task open. A test the implementer believes is wrong is a departure from the plan —
+`yunta_declare_deviation` on that criterion — for a person to settle. The files
+reach the run's tree with the task's own commit.
 Nothing else to declare, and an opaque artifact mounts nothing because it has no
 shape to demand.
 

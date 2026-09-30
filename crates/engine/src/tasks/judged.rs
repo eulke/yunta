@@ -2,7 +2,7 @@
 //! the suite the run's lineage measured green before anything changed.
 
 use yunta_core::events::{BaselineCapturedPayload, CriterionType};
-use yunta_core::{Criterion, Task};
+use yunta_core::{Criterion, SpecFile, Task};
 
 /// What the lineage's suite shows when a task is held to it, in the words
 /// the session reading its task and a person reading a blocked task see.
@@ -40,4 +40,24 @@ pub fn judged_task(task: &Task, baseline: Option<&BaselineCapturedPayload>) -> T
         proves: Some(SUITE_PROVES.to_string()),
     });
     judged
+}
+
+/// `task` held to its spec as well: each test the run's spec gives it,
+/// among its criteria — none of them a guard, since its work is what
+/// makes them pass. A test that runs what one of its own criteria runs
+/// is that criterion already.
+pub fn specified(mut task: Task, spec: Option<&SpecFile>) -> Task {
+    let Some(spec) = spec.and_then(|spec| spec.of(&task.id)) else {
+        return task;
+    };
+    for test in spec.criteria() {
+        if !task
+            .criteria
+            .iter()
+            .any(|criterion| criterion.cmd.trim() == test.cmd.trim())
+        {
+            task.criteria.push(test);
+        }
+    }
+    task
 }

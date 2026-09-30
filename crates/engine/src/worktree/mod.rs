@@ -28,6 +28,7 @@
 mod branches;
 mod commit;
 mod integrity;
+mod overlay;
 mod unit;
 
 use std::path::{Path, PathBuf};
@@ -43,6 +44,7 @@ use crate::process::Supervision;
 pub use branches::{run_branch, unit_branch};
 pub use commit::{commit_tree, restore};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
+pub use overlay::{in_repo, tree_with, write_files};
 pub use unit::{
     carry_work, commit_work, land, open_unit, rebase_onto, reopen_unit, snapshot_commit, Carried,
     Rebase, Unit, UnitHome, UnitId,
@@ -447,25 +449,7 @@ pub async fn capture_tree(
     index: &Path,
     supervision: Supervision<'_>,
 ) -> Result<TreeId, WorktreeError> {
-    // Made absolute before anything touches it: this call creates the
-    // index's directory and the git child opens the file, and the two
-    // resolve a relative path against different directories — here the
-    // process's, there `cwd`. Absolute, they name the one file, and no
-    // index can land inside the tree it is measuring by accident.
-    let index = std::path::absolute(index).map_err(|source| WorktreeError::Io {
-        action: "resolve the private index path".to_string(),
-        path: index.to_path_buf(),
-        source,
-    })?;
-    if let Some(parent) = index.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|source| WorktreeError::Io {
-                action: "create the private index's directory".to_string(),
-                path: parent.to_path_buf(),
-                source,
-            })?;
-    }
+    let index = private_index(index).await?;
     // The index travels the way every other value this engine hands a
     // child does: through the supervision it is already governed by.
     let mut env: Vec<(String, String)> = supervision.env.to_vec();
@@ -483,6 +467,31 @@ pub async fn capture_tree(
             cwd: cwd.to_path_buf(),
             source,
         })
+}
+
+/// `index` made absolute, with its directory in place.
+///
+/// Absolute before anything touches it: this creates the index's
+/// directory and a git child opens the file, and the two resolve a
+/// relative path against different directories — here the process's,
+/// there the child's. Absolute, they name the one file, and no index can
+/// land inside the tree it is measuring by accident.
+async fn private_index(index: &Path) -> Result<PathBuf, WorktreeError> {
+    let index = std::path::absolute(index).map_err(|source| WorktreeError::Io {
+        action: "resolve the private index path".to_string(),
+        path: index.to_path_buf(),
+        source,
+    })?;
+    if let Some(parent) = index.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|source| WorktreeError::Io {
+                action: "create the private index's directory".to_string(),
+                path: parent.to_path_buf(),
+                source,
+            })?;
+    }
+    Ok(index)
 }
 
 /// The tree `repo`'s `HEAD` points at — the same question

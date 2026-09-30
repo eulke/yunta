@@ -306,9 +306,9 @@ impl fmt::Display for Refusal {
         if self.denied {
             return write!(
                 f,
-                "{REFUSAL_MARKER}{} is outside what any session of this project may write: the \
-                 project denies it to every run (permissions.paths.deny), and no request widens \
-                 that. Do not write here.",
+                "{REFUSAL_MARKER}{} is outside what this session may ever write: the project \
+                 denies it to every run (permissions.paths.deny), or it holds a test this \
+                 session's task is held to, and no request widens that. Do not write here.",
                 self.target.display()
             );
         }

@@ -17,6 +17,7 @@ mod judge;
 mod outcome;
 mod record;
 mod session;
+mod spec;
 mod stream;
 
 use std::path::PathBuf;
@@ -206,6 +207,23 @@ pub async fn run_task(
     cancel: &CancellationToken,
     setup: &SessionSetup,
 ) -> Result<TaskCycleReport, TaskCycleError> {
+    let mut report = cycle(task, instruction, env, governance, audit, cancel, setup).await?;
+    // The files its tests live in are in its unit's tree and are not its
+    // work, so integration leaves them out of its audit.
+    report.staged.extend(spec::paths(spec::files(setup, task)));
+    Ok(report)
+}
+
+/// The cycle [`run_task`] reports on.
+async fn cycle(
+    task: &Task,
+    instruction: &str,
+    env: AttemptEnv<'_>,
+    governance: ScopeGovernance<'_>,
+    audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
+    cancel: &CancellationToken,
+    setup: &SessionSetup,
+) -> Result<TaskCycleReport, TaskCycleError> {
     // What the adapter declares it stages, per attempt; nothing before
     // a session opens.
     let mut last_staged: Vec<PathBuf> = Vec::new();
@@ -262,6 +280,28 @@ pub async fn run_task(
         return Ok(TaskCycleReport::cut(task.id.clone(), last_check));
     }
 
+    let start = spec::Start {
+        task,
+        unit,
+        setup,
+        fresh: carry.is_none() && resume.is_none(),
+        carried: carry.is_some(),
+    };
+    let Some(laid) = spec::laid(start, memo, history, supervision).await? else {
+        let last_check = recorder.criteria(Phase::Pre, &[]).await?;
+        return Ok(TaskCycleReport::cut(task.id.clone(), last_check));
+    };
+    let spec::Laid {
+        unit: overlaid,
+        guarded,
+    } = laid;
+    let unit = &overlaid;
+    let denied = spec::denied(
+        permissions
+            .and_then(|permissions| permissions.paths.as_ref())
+            .map_or(&[], |paths| paths.deny.as_slice()),
+        spec::files(setup, task),
+    );
     let params = AttemptParams {
         task,
         instruction,
@@ -275,9 +315,7 @@ pub async fn run_task(
         max_expansion_files,
         grants,
         already_granted_paths,
-        denied: permissions
-            .and_then(|permissions| permissions.paths.as_ref())
-            .map_or(&[], |paths| paths.deny.as_slice()),
+        denied: &denied,
         resume: None,
         audit,
         cancel,
@@ -329,12 +367,19 @@ pub async fn run_task(
             carry::Carry::Unsettled { last_check } => (Vec::new(), last_check),
         },
         None => {
-            let Some(pre_runs) =
-                pre_check_unless_cut(task, &unit.worktree, memo, history, supervision).await?
+            let rest = match &guarded {
+                Some(_) => spec::only(task, false),
+                None => task.clone(),
+            };
+            let Some(mut pre_runs) =
+                pre_check_unless_cut(&rest, &unit.worktree, memo, history, supervision).await?
             else {
                 let last_check = recorder.criteria(Phase::Pre, &[]).await?;
                 return Ok(TaskCycleReport::cut(task.id.clone(), last_check));
             };
+            if let Some(guards) = guarded {
+                pre_runs.splice(0..0, guards);
+            }
             let last_check = recorder.criteria(Phase::Pre, &pre_runs).await?;
             // A token that fired during the pre-check stopped its commands
             // before they answered: the task was cut, not found wanting.

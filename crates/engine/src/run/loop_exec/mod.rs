@@ -325,14 +325,20 @@ async fn prepare_loop<'a>(
     registered_here(&held, &view.state)?;
     // Every task this loop runs is judged the way the run judges it, once,
     // here: its pre-check, its session's own checks, its close and its
-    // integration all read these criteria.
+    // integration all read these criteria — its own, the suite the run
+    // measured, and the tests the run's spec gives it.
     let baseline = view.state.run.baseline();
+    let spec = crate::artifacts::latest::<yunta_core::SpecFile>(ctx.run_dir, &view.events)
+        .await?
+        .map(|held| std::sync::Arc::new(held.document));
     let tasks = TasksFile {
         tasks: held
             .document
             .tasks
             .iter()
-            .map(|task| crate::tasks::judged_task(task, baseline))
+            .map(|task| {
+                crate::tasks::specified(crate::tasks::judged_task(task, baseline), spec.as_deref())
+            })
             .collect(),
         ..held.document
     };
@@ -340,6 +346,7 @@ async fn prepare_loop<'a>(
     // it names, and the tasks that own what it may not touch.
     let setup = crate::task_cycle::SessionSetup {
         plan: Some(std::sync::Arc::new(tasks.clone())),
+        spec,
         ..setup
     };
 

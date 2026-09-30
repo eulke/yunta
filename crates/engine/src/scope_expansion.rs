@@ -203,9 +203,10 @@ impl GrantLedger {
     }
 }
 
-/// A request that reaches what the project denies to every run, refused
-/// by rule before any mode is asked — no person and no rule widens a
-/// deny. The request back when it reaches none.
+/// A request that reaches what the task may never write — what the
+/// project denies to every run, or a file its tests live in — refused by
+/// rule before any mode is asked: no person and no rule widens a deny.
+/// The request back when it reaches none.
 pub(crate) fn refuse_what_is_denied(
     request: ScopeExpansionRequest,
     denied: &[ScopeGlob],
@@ -220,7 +221,8 @@ pub(crate) fn refuse_what_is_denied(
         return Err(request);
     }
     let reason = format!(
-        "it reaches {}, which the project denies to every run (permissions.paths.deny)",
+        "it reaches {}, which the task may never write: the project denies it to every run \
+         (permissions.paths.deny), or it holds a test the task is held to",
         reached.join(", ")
     );
     Ok(ScopeExpansionOutcome {

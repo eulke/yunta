@@ -17,13 +17,15 @@ use std::sync::Arc;
 
 use yunta_core::fence::{Advice, Fence};
 use yunta_core::port::{Adapter, Budget, PermissionProfile, SessionRequest};
-use yunta_core::ScopeGlob;
 use yunta_core::{Node, Task};
 
 use crate::run::node_exec::NodeEnd;
 use crate::run::runner_resolve::RunToolsSetupError;
-use crate::run_tools::{NodeScopeAccess, RunToolsSession, TaskAccess};
+use crate::run_tools::{RunToolsSession, TaskAccess};
 use crate::task_cycle::{SessionObserver, SessionSetup};
+use held_to::HeldTo;
+
+mod held_to;
 
 /// Everything a node resolves once for every session it opens: which
 /// skills mount, whether its sessions may hold the run's tools, the
@@ -57,6 +59,7 @@ pub(crate) async fn resolve_setup(
             .map(|(_, dir)| dir.to_path_buf())
             .collect(),
         plan: None,
+        spec: None,
         skills,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         env: SessionSetup::secrets_env(&ctx.manifest.config, ctx.secrets.as_deref()),
@@ -343,69 +346,11 @@ fn fence(
         setup.artifact_dir.as_deref(),
         advice,
     )
-    .denying(&setup.denied);
+    .denying(held_to.denied(&setup.denied));
     // A session that writes nothing keeps nothing writable.
     match plan.profile {
         yunta_core::port::PermissionProfile::ReadOnly => fence,
         _ => fence.sharing(&setup.shared_dirs),
-    }
-}
-
-/// What one session's work is held to: a loop's task, the node's own
-/// scope, or nothing a tool could judge it by. Its fence, its tools and
-/// what they leave out all read this one answer.
-enum HeldTo {
-    Task(Arc<TaskAccess>),
-    NodeScope(Arc<NodeScopeAccess>),
-    Nothing,
-}
-
-impl HeldTo {
-    fn of(setup: &SessionSetup, plan: &SessionPlan<'_>) -> Self {
-        match (&plan.task, &setup.node_scope) {
-            (Some(task), _) => HeldTo::Task(task.clone()),
-            (None, Some(access)) => HeldTo::NodeScope(access.clone()),
-            (None, None) => HeldTo::Nothing,
-        }
-    }
-
-    /// The globs the session may write under the worktree, when anything
-    /// holds it to some.
-    fn scope(&self) -> Option<&[ScopeGlob]> {
-        match self {
-            HeldTo::Task(task) => Some(&task.scope),
-            HeldTo::NodeScope(access) => Some(&access.scope),
-            HeldTo::Nothing => None,
-        }
-    }
-
-    /// Whether the session may ask for more: a task session always may,
-    /// and a node's own session when a person may widen its scope.
-    fn may_ask(&self) -> bool {
-        match self {
-            HeldTo::Task(_) => true,
-            HeldTo::NodeScope(access) => access.may_ask,
-            HeldTo::Nothing => false,
-        }
-    }
-
-    /// Where what the adapter stages for itself is recorded, for the
-    /// tools that audit this session's work to leave out.
-    fn staged(&self) -> Option<&std::sync::OnceLock<Vec<PathBuf>>> {
-        match self {
-            HeldTo::Task(task) => Some(&task.staged),
-            HeldTo::NodeScope(access) => Some(&access.staged),
-            HeldTo::Nothing => None,
-        }
-    }
-
-    /// The two halves a session's tools are opened with.
-    fn parts(&self) -> (Option<Arc<TaskAccess>>, Option<Arc<NodeScopeAccess>>) {
-        match self {
-            HeldTo::Task(task) => (Some(task.clone()), None),
-            HeldTo::NodeScope(access) => (None, Some(access.clone())),
-            HeldTo::Nothing => (None, None),
-        }
     }
 }
 

@@ -4,14 +4,17 @@
 //! Handed over, it is held to the plan the run holds and proven where
 //! its tests run: every task it names is the plan's, and with every one
 //! of its files written into the run's tree, each test runs and fails.
+//! In the loop, a task's tests are laid over the tree its work starts
+//! from, close it with its own criteria, and are the one thing its work
+//! may not change.
 
 mod common;
 
 use common::*;
-use yunta_core::events::{ArtifactEvent, EventPayload, SubmissionOutcome};
+use yunta_core::events::{ArtifactEvent, EventPayload, NodeEvent, SubmissionOutcome, TaskStatus};
 use yunta_core::ArtifactKind;
 use yunta_engine::{RunReport, RunTerminal};
-use yunta_testkit::Bench;
+use yunta_testkit::{Bench, MOCK_CONFIG};
 
 /// A plan of one task that writes `greeting.txt`.
 const PLAN: &str = "\
@@ -131,5 +134,130 @@ async fn a_spec_whose_test_already_passes_or_names_no_task_of_the_plan_is_refuse
             vec!["criterion-already-passes".to_string()],
             vec!["unknown-spec-task".to_string()],
         ]
+    );
+}
+
+/// The planner, the spec that holds `greet` to [`GREETS`], and the loop
+/// that builds it.
+fn specified_loop() -> String {
+    format!(
+        "{WORKFLOW}  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [spec]
+    until: all_tasks_complete
+    prompt: \"Implement your task.\"
+"
+    )
+}
+
+/// The planner and spec sessions, then the task session writing `effects`.
+fn building(effects: &str) -> String {
+    building_on(PLAN, effects)
+}
+
+/// [`building`], on `plan`.
+fn building_on(plan: &str, effects: &str) -> String {
+    let spec = spec_of("greet", GREETS, "sh tests/greet.sh");
+    plan_session(plan)
+        + &specifying(&[(&spec, true)])
+        + &format!(
+            "  - match_prompt_contains: \"Implement your task\"
+    effects:
+{effects}    outcome: {{ type: completed, summary: built }}
+"
+        )
+}
+
+#[tokio::test]
+async fn a_task_closes_on_the_tests_its_spec_gives_it_and_they_land_with_its_work() {
+    let bench = Bench::new();
+    let RunReport { terminal, state } = bench
+        .run(
+            &specified_loop(),
+            &building("      - { path: greeting.txt, content: Hello }\n"),
+        )
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(state.tasks.status("greet"), Some(TaskStatus::Done));
+    let pre: Vec<String> = bench
+        .events()
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Node(NodeEvent::CriteriaChecked(p)))
+                if p.phase == yunta_core::events::Phase::Pre =>
+            {
+                Some(p.results.iter().map(|r| r.cmd.clone()).collect::<Vec<_>>())
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert!(
+        pre.contains(&"sh tests/greet.sh".to_string()),
+        "the spec's test is among the task's criteria: {pre:?}"
+    );
+    let landed = tokio::fs::read_to_string(bench.worktree.join("tests/greet.sh"))
+        .await
+        .expect("the test file is in the run's tree");
+    assert_eq!(landed, GREETS);
+}
+
+#[tokio::test]
+async fn the_suite_answers_for_the_tree_before_the_tests_are_laid_over_it() {
+    // A suite that goes red while a test file is in the tree without the
+    // work that passes it: judged with the tests in, it would call the
+    // task's criteria wrong before any session opened.
+    let config = format!(
+        "{MOCK_CONFIG}baseline:\n  suite: \"test ! -e tests/greet.sh || test -f greeting.txt\"\n"
+    );
+    let bench = Bench::new();
+    let RunReport { terminal, state } = bench
+        .run_with_config(
+            &specified_loop(),
+            &building("      - { path: greeting.txt, content: Hello }\n"),
+            &config,
+        )
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(state.tasks.status("greet"), Some(TaskStatus::Done));
+}
+
+#[tokio::test]
+async fn a_session_that_rewrites_its_own_test_does_not_close_its_task() {
+    // Its scope reaches the tests' directory: nothing but the spec keeps
+    // the file out of its work.
+    let wide = PLAN.replace(
+        "scope: [\"greeting.txt\"]",
+        "scope: [\"greeting.txt\", \"tests/**\"]",
+    );
+    let bench = Bench::new();
+    let RunReport { state, .. } = bench
+        .run(
+            &specified_loop(),
+            &building_on(
+                &wide,
+                "      - { path: greeting.txt, content: Goodbye }
+      - { path: tests/greet.sh, content: \"exit 0\\n\" }
+",
+            ),
+        )
+        .await;
+
+    assert_eq!(state.tasks.status("greet"), Some(TaskStatus::Blocked));
+    let denied: Vec<std::path::PathBuf> = bench
+        .events()
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Node(NodeEvent::ScopeChecked(p))) => Some(p.denied.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert!(
+        denied.contains(&std::path::PathBuf::from("tests/greet.sh")),
+        "{denied:?}"
     );
 }

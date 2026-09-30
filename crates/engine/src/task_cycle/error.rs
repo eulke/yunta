@@ -42,6 +42,12 @@ pub enum TaskCycleError {
         #[source]
         source: Box<crate::worktree::WorktreeError>,
     },
+    #[error("failed to lay task `{task}`'s tests over the tree its work starts from")]
+    Spec {
+        task: TaskId,
+        #[source]
+        source: Box<crate::worktree::WorktreeError>,
+    },
     #[error("failed to evaluate task `{task}`'s scope expansion request: {source}")]
     ScopeExpansion {
         task: TaskId,

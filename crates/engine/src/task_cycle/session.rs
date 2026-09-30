@@ -33,6 +33,10 @@ pub struct SessionSetup {
     /// sessions reads its place in. `None` for a node that works no
     /// tasks.
     pub plan: Option<std::sync::Arc<yunta_core::TasksFile>>,
+    /// The tests the plan's tasks are held to, when the run holds a spec:
+    /// each task's files are laid over the tree its work starts from and
+    /// denied to that work.
+    pub spec: Option<std::sync::Arc<yunta_core::SpecFile>>,
     pub skills: Vec<PathBuf>,
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
     pub env: std::collections::HashMap<String, yunta_core::Secret<String>>,
@@ -141,6 +145,7 @@ impl SessionSetup {
             denied: Vec::new(),
             shared_dirs: Vec::new(),
             plan: None,
+            spec: None,
             skills: Vec::new(),
             adapter_settings: serde_json::Map::new(),
             env: std::collections::HashMap::new(),

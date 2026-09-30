@@ -132,7 +132,7 @@ async fn a_task_request_for_a_denied_path_is_refused_by_rule_without_asking() {
     assert!(
         reasons
             .iter()
-            .any(|reason| reason.contains("denies to every run")),
+            .any(|reason| reason.contains("the project denies it to every run")),
         "{reasons:?}"
     );
     assert!(!bench.events().iter().any(|event| matches!(

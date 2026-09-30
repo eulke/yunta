@@ -178,6 +178,10 @@ struct TaskSheet<'a> {
     invariants: &'a [String],
     /// What the diff is held to: declared plus granted.
     scope: &'a [ScopeGlob],
+    /// What the diff may never touch, whatever its scope: what the project
+    /// denies to every run, and the files the task's tests live in.
+    #[serde(skip_serializing_if = "<[ScopeGlob]>::is_empty")]
+    denied: &'a [ScopeGlob],
     criteria: Vec<Declared<'a>>,
     cycles: Vec<Cycle>,
     /// What the engine ran these checks with, told only when one of them
@@ -204,6 +208,7 @@ impl<'a> TaskSheet<'a> {
             uses: &task.uses,
             invariants: &task.invariants,
             scope: &access.scope,
+            denied: &access.denied,
             criteria: task
                 .criteria
                 .iter()
