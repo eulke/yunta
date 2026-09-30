@@ -184,6 +184,42 @@ mod tests {
     }
 
     #[test]
+    fn a_check_answer_says_how_long_it_took_and_what_stands_between_the_task_and_done() {
+        let answered = |closes: bool, exit_code: i32, outside: &[&str]| {
+            EventPayload::Tasks(yunta_core::events::TaskEvent::CheckAnswered(
+                yunta_core::events::TaskCheckAnsweredPayload {
+                    task_id: "T001".into(),
+                    closes,
+                    results: vec![CriterionResult {
+                        cmd: "cargo test".to_string(),
+                        exit_code,
+                        r#type: None,
+                        reused: false,
+                        duration_ms: Some(221_000),
+                        output: None,
+                        tail: Vec::new(),
+                    }],
+                    outside_scope: outside.iter().map(|path| path.into()).collect(),
+                    denied: Vec::new(),
+                    duration_ms: 222_400,
+                },
+            ))
+        };
+        assert_eq!(
+            said_for(answered(true, 0, &[])),
+            "run — T001 checked in 3m42s: it would close"
+        );
+        assert_eq!(
+            said_for(answered(false, 101, &[])),
+            "run — T001 checked in 3m42s: 1 of its criteria red"
+        );
+        assert_eq!(
+            said_for(answered(false, 0, &["notes.md"])),
+            "run — T001 checked in 3m42s: its work reaches paths it may not change"
+        );
+    }
+
+    #[test]
     fn a_reroute_with_no_cause_recorded_reads_as_the_target_alone() {
         assert_eq!(said_for(rerouted("")), "run — rerouted to `fix-lint`");
     }

@@ -2,22 +2,33 @@
 
 use super::payloads::*;
 
-/// The tasks document, as a run works it: a task registered, and a task — one variant per kind.
+/// The tasks document, as a run works it: a task registered, a task
+/// that moved, and a check a task session asked for — one variant per
+/// kind.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TaskEvent {
     Registered(TaskRegisteredPayload),
     StatusChanged(TaskStatusChangedPayload),
+    CheckStarted(TaskCheckStartedPayload),
+    CheckAnswered(TaskCheckAnsweredPayload),
 }
 
 impl TaskEvent {
     /// Every kind this domain declares, as persisted.
-    pub const KINDS: &'static [&'static str] = &["task_registered", "task_status_changed"];
+    pub const KINDS: &'static [&'static str] = &[
+        "task_registered",
+        "task_status_changed",
+        "task_check_started",
+        "task_check_answered",
+    ];
 
     /// The persisted `kind` string of this fact.
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Registered(_) => "task_registered",
             Self::StatusChanged(_) => "task_status_changed",
+            Self::CheckStarted(_) => "task_check_started",
+            Self::CheckAnswered(_) => "task_check_answered",
         }
     }
 
@@ -32,6 +43,10 @@ impl TaskEvent {
         match self {
             Self::Registered(_) => false,
             Self::StatusChanged(_) => false,
+            // A check judges work in progress; the attempt's close is
+            // what moves the task.
+            Self::CheckStarted(_) => true,
+            Self::CheckAnswered(_) => true,
         }
     }
 

@@ -108,6 +108,25 @@ pub fn all_kinds() -> Vec<EventPayload> {
             42.into(),
             "deadbeef".into(),
         ))),
+        EventPayload::Tasks(TaskEvent::CheckStarted(TaskCheckStartedPayload {
+            task_id: "graph-cmd".into(),
+        })),
+        EventPayload::Tasks(TaskEvent::CheckAnswered(TaskCheckAnsweredPayload {
+            task_id: "graph-cmd".into(),
+            closes: false,
+            results: vec![CriterionResult {
+                cmd: "cargo test -p yunta".to_string(),
+                exit_code: 1,
+                r#type: None,
+                reused: false,
+                duration_ms: Some(4_200),
+                output: None,
+                tail: vec!["test graph ... FAILED".to_string()],
+            }],
+            outside_scope: vec!["notes.md".into()],
+            denied: Vec::new(),
+            duration_ms: 4_310,
+        })),
         EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {
             task_id: Some("graph-cmd".into()),
             diff: vec!["crates/cli/src/graph.rs".into()],

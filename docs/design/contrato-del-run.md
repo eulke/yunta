@@ -69,7 +69,7 @@ Reglas: todo se valida **al crear el run, antes del primer token**; los defaults
 # 3. Modelo de eventos
 The event log is append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`.
 Current state is derived by replaying that log; snapshots are only an optimization.
-The current table contains 41 event kinds in 34 rows; some rows group related variants:
+The current table contains 43 event kinds in 35 rows; some rows group related variants:
 | Evento | Emisor | Payload relevante |
 |---|---|---|
 | `run_created` | engine | manifest hash, inputs, modo, `promoted_from?` |
@@ -83,6 +83,7 @@ The current table contains 41 event kinds in 34 rows; some rows group related va
 | `task_registered` | engine | task_id, criteria, scope, deps |
 | `criteria_checked` | engine | task_id, fase pre/post, exit code por criterio, ejecutado o reutilizado de caché (§5.4) |
 | `task_status_changed` | engine | task_id, estado nuevo, evento que lo justifica, commit donde aterrizó el trabajo (solo en un `done`) |
+| `task_check_started` / `task_check_answered` | engine | task_id; en la respuesta, si la tarea cerraría, el resultado de cada criterio, lo que el trabajo tocó fuera de su scope o negado, y cuánto tardó el juicio |
 | `scope_checked` | engine | task_id/node_id, diff observado, violaciones |
 | `scope_expansion_requested` | engine | task_id, paths, razón, criterio propuesto y su pre-check (§6.2) |
 | `scope_expansion_granted` / `scope_expansion_denied` | engine | task_id, decisor (regla o persona), modo, conteo del run |

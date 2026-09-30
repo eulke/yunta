@@ -12,7 +12,7 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 34 rows and **41 `kind` names**.
+The current Run Contract event table has 35 rows and **43 `kind` names**.
 It had 32 rows and 39 kinds before `host_suspended` was added. The table
 defines the normative set; this document specifies each payload.
 
@@ -26,7 +26,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | One of the 41 names in this document, with a `_vN` suffix beyond v1. |
+| `kind` | string | One of the 43 names in this document, with a `_vN` suffix beyond v1. |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
 
@@ -114,7 +114,7 @@ atribuidos al adapter: `agent_session_opened` y
 Si esta lectura no es la intención original, es exactamente el tipo de cosa a
 corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
-## 5. Los 41 tipos de evento, campo por campo
+## 5. Los 43 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -264,6 +264,23 @@ registra.
 | `commit` | `Option<CommitSha>` | no | dónde aterrizó el trabajo de la tarea, en un `done` y en ningún otro estado: el commit que el árbol del run llevaba tras integrarlo. Es lo que vuelve a un `done` respondible desde otro run — un árbol desciende de ese commit o no tiene el trabajo |
 | `left_work` | `Option<CommitSha>` | no | el commit con el trabajo que dejó el último intento de la tarea, commiteado en la rama de su unidad: en un `blocked`, trabajo desde el que una persona puede elegir continuar (`continue-work`); en el `pending` de esa reapertura, el trabajo desde el que continúa. Ausente cuando el intento no cambió nada, y en cualquier otra transición |
 | `resumes` | `Option<SessionId>` | no | en el `pending` que reabre una tarea después de la respuesta al scope que pidió su sesión: esa sesión, que el ciclo siguiente reanuda en la unidad que tiene su trabajo. Ausente en cualquier otra transición |
+
+### 5.11a `task_check_started` / `task_check_answered` — engine
+**Source:** a task session's `yunta_check_task` call and the judgement it answered
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `task_id` | string | yes, in both | the task of the session that asked |
+| `closes` | `bool` | only in `task_check_answered` | whether the task would have been done had the session ended then |
+| `results` | same list as `criteria_checked.results` | only in `task_check_answered` | one per criterion, the run's suite guard included; `reused=true` where the invocation's cache answered it |
+| `outside_scope` | list of paths | only in `task_check_answered`; empty — and omitted — when there are none | what the work changed outside the task's scope |
+| `denied` | list of paths | only in `task_check_answered`; empty — and omitted — when there are none | what it changed that the project denies to every run |
+| `duration_ms` | `u64` | only in `task_check_answered` | how long the whole judgement took, cache hits included |
+
+Both are audit: a check judges work in progress, and only the attempt's close
+moves the task. The question is written before the judgement runs, so a
+`task_check_started` with no answer after it is a check whose session ended
+first, or whose answer never reached it.
 
 ### 5.12 `scope_checked` — engine
 **Fuente:** task_id/node_id, diff observado, violaciones

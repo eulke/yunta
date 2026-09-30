@@ -15,7 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 use yunta_core::events::{
     CriterionResult, CriterionType, EventPayload, ExecutionEnvironment, NodeEvent, Phase,
-    StoredEvent, TaskEvent, TaskStatus,
+    StoredEvent, TaskCheckAnsweredPayload, TaskCheckStartedPayload, TaskEvent, TaskStatus,
 };
 use yunta_core::{ScopeGlob, TaskId};
 
@@ -97,8 +97,19 @@ impl SessionTools {
     }
 
     /// The judgement this session's attempt would get if it ended now.
+    ///
+    /// The log carries the question and its answer, so a check that is
+    /// still running, and one whose answer never came, can be told apart
+    /// from one that was never asked.
     pub(super) async fn check_task(&self) -> Result<String, RunToolError> {
         let access = self.task_access(RunTool::CheckTask)?;
+        self.append(EventPayload::Tasks(TaskEvent::CheckStarted(
+            TaskCheckStartedPayload {
+                task_id: access.task.id.clone(),
+            },
+        )))
+        .await?;
+        let started = std::time::Instant::now();
         let judgement = judge(
             &access.task,
             crate::scope::Ceiling {
@@ -115,6 +126,17 @@ impl SessionTools {
         )
         .await
         .map_err(|source| RunToolError::Check { source })?;
+        self.append(EventPayload::Tasks(TaskEvent::CheckAnswered(
+            TaskCheckAnsweredPayload {
+                task_id: access.task.id.clone(),
+                closes: judgement.closes(),
+                results: crate::task_cycle::to_results(&judgement.criteria),
+                outside_scope: judgement.scope.violations.clone(),
+                denied: judgement.scope.denied.clone(),
+                duration_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            },
+        )))
+        .await?;
         let any_unrunnable = judgement
             .criteria
             .iter()

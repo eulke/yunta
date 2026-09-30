@@ -694,33 +694,117 @@ async fn a_task_session_reads_which_guard_is_the_runs_suite() {
     client.cancel().await.unwrap();
 }
 
+/// A task session on the greeting task, working a fresh repository.
+struct GreetingSession {
+    _owner: yunta_testkit::Owner,
+    repo: tempfile::TempDir,
+    host: ToolsHost,
+    _session: RunToolsSession,
+    client: rmcp::service::RunningService<rmcp::RoleClient, ()>,
+}
+
+impl GreetingSession {
+    async fn open() -> Self {
+        let owner = yunta_testkit::Owner::new();
+        let repo = tempfile::tempdir().unwrap();
+        yunta_testkit::init_repo(repo.path());
+        let unit = yunta_engine::Unit {
+            from: yunta_engine::head_tree(repo.path(), owner.supervision())
+                .await
+                .unwrap(),
+            base: yunta_engine::head_commit(repo.path(), owner.supervision())
+                .await
+                .unwrap(),
+            ..unit_at(repo.path().to_path_buf())
+        };
+        let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+        let access = host.task_access(greeting_task(), unit);
+        let session = host.task_session("implement", access).await;
+        let client = client_for(&session, None).await.unwrap();
+        GreetingSession {
+            _owner: owner,
+            repo,
+            host,
+            _session: session,
+            client,
+        }
+    }
+
+    /// Strays outside the task's scope, with the criterion still red.
+    async fn stray(&self) {
+        tokio::fs::write(self.repo.path().join("notes.md"), "draft")
+            .await
+            .unwrap();
+    }
+
+    /// Does the task's work, and takes the stray file back.
+    async fn finish(&self) {
+        tokio::fs::remove_file(self.repo.path().join("notes.md"))
+            .await
+            .unwrap();
+        tokio::fs::write(self.repo.path().join("hello.txt"), "hello")
+            .await
+            .unwrap();
+    }
+
+    async fn check(&self) -> serde_json::Value {
+        let (is_error, text) = call(&self.client, "yunta_check_task", json!({})).await;
+        assert!(!is_error, "got: {text}");
+        serde_json::from_str(&text).unwrap()
+    }
+}
+
+/// What the log says of every check the session asked for, in order:
+/// `None` for a question, and for its answer whether it closes, each
+/// criterion's exit code and what lay outside the scope.
+type CheckOnLog = Option<(bool, Vec<i32>, Vec<std::path::PathBuf>)>;
+
+fn checks_on(host: &ToolsHost) -> Vec<CheckOnLog> {
+    host.events()
+        .into_iter()
+        .filter_map(|e| match e.payload() {
+            Some(EventPayload::Tasks(TaskEvent::CheckStarted(p))) => {
+                assert_eq!(p.task_id.as_str(), "T001");
+                Some(None)
+            }
+            Some(EventPayload::Tasks(TaskEvent::CheckAnswered(p))) => {
+                assert_eq!(p.task_id.as_str(), "T001");
+                let exits = p.results.iter().map(|r| r.exit_code).collect();
+                Some(Some((p.closes, exits, p.outside_scope.clone())))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn every_check_leaves_its_question_and_its_answer_on_the_log() {
+    let session = GreetingSession::open().await;
+    session.stray().await;
+    session.check().await;
+    session.finish().await;
+    session.check().await;
+
+    assert_eq!(
+        checks_on(&session.host),
+        vec![
+            None,
+            Some((false, vec![1, 0], vec!["notes.md".into()])),
+            None,
+            Some((true, vec![0, 0], vec![])),
+        ]
+    );
+    session.client.cancel().await.unwrap();
+}
+
 #[tokio::test]
 async fn a_check_judges_the_work_the_way_its_close_will() {
-    let owner = yunta_testkit::Owner::new();
-    let repo = tempfile::tempdir().unwrap();
-    yunta_testkit::init_repo(repo.path());
-    let unit = yunta_engine::Unit {
-        from: yunta_engine::head_tree(repo.path(), owner.supervision())
-            .await
-            .unwrap(),
-        base: yunta_engine::head_commit(repo.path(), owner.supervision())
-            .await
-            .unwrap(),
-        ..unit_at(repo.path().to_path_buf())
-    };
-    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
-    let access = host.task_access(greeting_task(), unit);
-    let session = host.task_session("implement", access).await;
-    let client = client_for(&session, None).await.unwrap();
+    let session = GreetingSession::open().await;
 
     // The criterion is still red, and the work strayed outside the scope.
-    tokio::fs::write(repo.path().join("notes.md"), "draft")
-        .await
-        .unwrap();
-    let (is_error, text) = call(&client, "yunta_check_task", json!({})).await;
-    assert!(!is_error, "got: {text}");
+    session.stray().await;
     assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+        session.check().await,
         json!({
             "closes": false,
             "criteria": [
@@ -732,18 +816,11 @@ async fn a_check_judges_the_work_the_way_its_close_will() {
     );
 
     // The work done, and nothing left outside: the close would take it.
-    tokio::fs::remove_file(repo.path().join("notes.md"))
-        .await
-        .unwrap();
-    tokio::fs::write(repo.path().join("hello.txt"), "hello")
-        .await
-        .unwrap();
-    let (is_error, text) = call(&client, "yunta_check_task", json!({})).await;
-    assert!(!is_error, "got: {text}");
-    let verdict: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(verdict["closes"], json!(true), "got: {text}");
+    session.finish().await;
+    let verdict = session.check().await;
+    assert_eq!(verdict["closes"], json!(true), "got: {verdict}");
     assert_eq!(verdict["outside_scope"], json!([]));
-    client.cancel().await.unwrap();
+    session.client.cancel().await.unwrap();
 }
 
 #[tokio::test]

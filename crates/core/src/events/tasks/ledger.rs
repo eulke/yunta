@@ -206,6 +206,9 @@ impl TaskLedger {
                 record.in_session = false;
                 Ok(())
             }
+            // A check judges work in progress; the attempt's close is
+            // what moves the task.
+            TaskEvent::CheckStarted(_) | TaskEvent::CheckAnswered(_) => Ok(()),
         }
     }
 

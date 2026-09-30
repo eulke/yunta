@@ -1,9 +1,12 @@
-//! The tasks document, as a run works it: a task registered, and a task
-//! that reached a new status.
+//! The tasks document, as a run works it: a task registered, a task
+//! that reached a new status, and a task session asking how its work
+//! would be judged.
+
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::events::node::payloads::Criterion;
+use crate::events::node::payloads::{Criterion, CriterionResult};
 use crate::glob::ScopeGlob;
 use crate::hash::CommitSha;
 use crate::ids::{Seq, SessionId, TaskId};
@@ -113,4 +116,30 @@ impl TaskStatusChangedPayload {
             resumes: None,
         }
     }
+}
+
+/// A task session asked the engine to judge its work as it stands — the
+/// judgement the attempt's close would make if the session ended now.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskCheckStartedPayload {
+    pub task_id: TaskId,
+}
+
+/// What that judgement answered the session, and how long it took.
+///
+/// A `task_check_started` with no answer after it is a check whose
+/// session ended first, or whose answer never reached it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskCheckAnsweredPayload {
+    pub task_id: TaskId,
+    /// Whether the task would have been done had the session ended then.
+    pub closes: bool,
+    pub results: Vec<CriterionResult>,
+    /// What the work changed outside the task's scope.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outside_scope: Vec<PathBuf>,
+    /// What it changed that the project denies to every run.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub denied: Vec<PathBuf>,
+    pub duration_ms: u64,
 }

@@ -1432,6 +1432,32 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "task_check_started"
+            }
+          },
+          "$ref": "#/$defs/TaskCheckStartedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "task_check_answered"
+            }
+          },
+          "$ref": "#/$defs/TaskCheckAnsweredPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "scope_checked"
             }
           },
@@ -3750,6 +3776,62 @@
             "refused"
           ]
         }
+      ]
+    },
+    "TaskCheckAnsweredPayload": {
+      "description": "What that judgement answered the session, and how long it took.\n\nA `task_check_started` with no answer after it is a check whose\nsession ended first, or whose answer never reached it.",
+      "type": "object",
+      "properties": {
+        "closes": {
+          "description": "Whether the task would have been done had the session ended then.",
+          "type": "boolean"
+        },
+        "denied": {
+          "description": "What it changed that the project denies to every run.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "duration_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "outside_scope": {
+          "description": "What the work changed outside the task's scope.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CriterionResult"
+          }
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id",
+        "closes",
+        "results",
+        "duration_ms"
+      ]
+    },
+    "TaskCheckStartedPayload": {
+      "description": "A task session asked the engine to judge its work as it stands — the\njudgement the attempt's close would make if the session ended now.",
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id"
       ]
     },
     "TaskId": {

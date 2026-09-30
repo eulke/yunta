@@ -208,6 +208,22 @@ fn task_words(happening: &tasks_happening::Happening) -> String {
     match happening {
         H::Registered { task } => format!("task {task} registered"),
         H::Moved { task, to } => format!("{task} is {}", status(*to)),
+        H::Checking { task } => format!("{task} asked for a check"),
+        H::Checked {
+            task,
+            closes,
+            red,
+            duration_ms,
+        } => {
+            let took = format_duration(std::time::Duration::from_millis(*duration_ms));
+            match (closes, red) {
+                (true, _) => format!("{task} checked in {took}: it would close"),
+                (false, 0) => {
+                    format!("{task} checked in {took}: its work reaches paths it may not change")
+                }
+                (false, red) => format!("{task} checked in {took}: {red} of its criteria red"),
+            }
+        }
     }
 }
 
