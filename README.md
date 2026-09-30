@@ -149,7 +149,8 @@ Two example packs ship in this repo's own [`packs/`](packs/) directory as
 installable, removable third-party packs — the engine grants them no special
 status: [`yunta/starter`](packs/starter) (two minimal workflows that teach the
 shape) and [`yunta/fragua`](packs/fragua) (the full reference pipeline — grill,
-a verified tasks document, lint→fix, a baseline check, multi-runner review, PR).
+a verified tasks document, lint→fix, a baseline check, multi-runner review, the
+work held to its plan, PR).
 
 ## Commands
 

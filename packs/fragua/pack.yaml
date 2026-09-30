@@ -4,7 +4,8 @@ version: 0.1.0
 description: >-
   The full reference pipeline: an ambiguity-resolving grill, a plan
   registered as a verified tasks document, implementation checked task by
-  task, a lint→fix cycle, a baseline check, a two-runner review, a PR —
+  task, a lint→fix cycle, a baseline check, a two-runner review, the work
+  held to the plan a person approved, a PR —
   open modes throughout, and the plan distilled to knowledge on finish.
   Installable and removable like any third-party pack; the engine
   never treats it specially.

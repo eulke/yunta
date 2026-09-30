@@ -5,6 +5,11 @@
 # server, which a pack's own mock self-test has no reason to stand up)
 # and `node_defaults.hooks` is dropped (an ecosystem-specific
 # convenience, not something a reference pack needs to demonstrate).
+# One addition: `conform` holds what the run built to the plan a person
+# approved before the pull request is asked for, in every mode — green
+# criteria say the work passes its tests, not that it is what the plan
+# says, and a departure nobody declared is what a person approving the
+# pull request would miss.
 #
 # A pack runs in repositories its author has never seen, so it names
 # capabilities and never a tool or a layout: `lint` runs whatever the
@@ -14,7 +19,7 @@
 # reads `docs/architecture.md` as optional, since the planner can explore
 # the code without it.
 name: fragua
-description: Full feature cycle — grill, verified tasks document, lint/fix, baseline, multi-runner review, PR
+description: Full feature cycle — grill, verified tasks document, lint/fix, baseline, multi-runner review, the work held to its plan, PR
 yunta_schema: ">=1 <2"
 inputs:
   idea:
@@ -23,8 +28,8 @@ inputs:
     description: "What to build — becomes the brief"
 
 modes:
-  quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, ship, pr] }
-  standard: { include: [grill, brief, plan, approve-plan, implement, lint, fix-lint, tests, review, fix-findings, ship, pr] }
+  quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, conform, ship, pr] }
+  standard: { include: [grill, brief, plan, approve-plan, implement, lint, fix-lint, tests, review, conform, fix-findings, ship, pr] }
   full:     { include: all }
 
 nodes:
@@ -116,10 +121,23 @@ nodes:
     artifacts:
       produces: [findings]
 
+  - id: conform
+    kind: prompt
+    runner: reviewer
+    permissions: read-only
+    depends_on: [tests]
+    context:
+      - artifact: { node: plan, kind: tasks }
+      - run-events: { filter: deviations }
+      - command: "git diff {{run.base}}"
+    prompt: { file: prompts/conform.md }
+    artifacts:
+      produces: [findings]
+
   - id: fix-findings
     kind: prompt
     runner: executor
-    depends_on: [review]
+    depends_on: [review, conform]
     context:
       - run-events: { filter: findings }
     prompt: "Fix blocking findings; document discarded ones with a reason."
@@ -128,7 +146,10 @@ nodes:
     kind: gate
     depends_on: [fix-findings]
     assignee: lead
-    message: "Create the PR?"
+    message: "The work, held to its plan. Create the PR?"
+    shows:
+      - { node: plan, kind: tasks }
+      - { node: conform, kind: findings }
 
   - id: pr
     kind: pull_request

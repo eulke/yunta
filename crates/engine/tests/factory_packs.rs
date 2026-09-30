@@ -23,10 +23,12 @@ const WORKFLOWS: &str = concat!(
 );
 
 /// One scripted session per node the "quick" mode actually spawns, in
-/// the order the DAG reaches them: grill, brief, plan, one implement
-/// task, then lint/tests/ship/pr run for real against the sandbox this
-/// test lays down (no mock involved — the project's lint command and git
-/// are the real things being exercised, exactly as in production). The
+/// the order the DAG reaches them: grill, brief, plan — explained, since
+/// `ship` shows it — one implement task, and `conform` finding the work
+/// holds to the plan; lint/tests/ship/pr run for real against the
+/// sandbox this test lays down (no mock involved — the project's lint
+/// command and git are the real things being exercised, exactly as in
+/// production). The
 /// two interpreted documents go over the run tools; `brief.md` is a
 /// session's own file, and lands in `brief`'s own directory — the
 /// absolute path that session is granted, the same way a real agent
@@ -52,12 +54,18 @@ sessions:
         tool: yunta_submit_tasks
         arguments:
           document:
+            summary: "Document the sandbox crate"
+            description: "Says what the crate is, at its top."
             tasks:
               - id: T001
                 title: "Document the sandbox crate"
+                description: "Adds the crate's doc comment."
                 scope: ["src/lib.rs"]
+                changes: [{ at: src/lib.rs, what: "the crate's doc comment" }]
+                outcome: "The crate's documentation says it is the sandbox"
                 criteria:
                   - cmd: "grep -q '//! sandbox' src/lib.rs"
+                    proves: "the crate says what it is"
     outcome: { type: completed, summary: "planned" }
   - effects:
       - path: "src/lib.rs"
@@ -68,6 +76,7 @@ sessions:
               "hello"
           }
     outcome: { type: completed, summary: "did T001" }
+  - outcome: { type: completed, summary: "the work holds to its plan" }
 "##;
 
 /// The project a fragua run works in: a sandbox with the file `plan`
@@ -87,10 +96,12 @@ fn sandbox(bench: &Bench) {
 }
 
 /// A quick-mode fragua run on a forge the test reads back, under a
-/// config that adds `extra` to the runners, suite and forge.
+/// config that adds `extra` to the runners — `conform`'s `reviewer`
+/// among them — suite and forge.
 async fn quick_run(extra: &str) -> (Bench, MockForgeState, RunReport) {
     let config = format!(
-        "{MOCK_CONFIG}project:\n  base_branch: {INITIAL_BRANCH}\nbaseline:\n  suite: \"true\"\n\
+        "{MOCK_CONFIG}  reviewer:\n    - {{ adapter: mock, model: mock-model }}\n\
+         project:\n  base_branch: {INITIAL_BRANCH}\nbaseline:\n  suite: \"true\"\n\
          forge:\n  github: {{ repo: acme/sandbox, token_env: SANDBOX_TOKEN }}\n{extra}"
     );
     let forge = MockForgeState::new();
@@ -119,7 +130,16 @@ async fn yunta_fragua_runs_end_to_end_in_quick_mode_with_mock() {
         quick_run("commands:\n  lint: \"grep -q '//! sandbox' src/lib.rs\"\n").await;
 
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
-    for node in ["grill", "plan", "implement", "lint", "tests", "ship", "pr"] {
+    for node in [
+        "grill",
+        "plan",
+        "implement",
+        "lint",
+        "tests",
+        "conform",
+        "ship",
+        "pr",
+    ] {
         assert!(
             finished(&state, node),
             "node `{node}` did not finish: {:?}",

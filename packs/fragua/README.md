@@ -2,7 +2,8 @@
 
 The full reference pipeline, end to end: an ambiguity-resolving grill, a
 plan registered as a verified tasks document, implementation checked task by
-task, a lint→fix cycle, a baseline check, a two-runner review, and a PR.
+task, a lint→fix cycle, a baseline check, a two-runner review, the work held
+to the plan a person approved, and a PR.
 Open modes throughout (`quick`/`standard`/`full`) and the plan distilled to
 knowledge on finish. Installable and removable like any third-party pack —
 the engine grants it no special status.
@@ -12,9 +13,19 @@ yunta pack add <source-of-this-pack>
 yunta run yunta/fragua --input idea="add dark mode to the settings page"
 ```
 
-`--mode quick` skips the two human gates and the multi-runner review for a
-fast pass; `standard` is the full human-in-the-loop cycle; `full` runs every
-node.
+`--mode quick` skips the plan's approval and the multi-runner review for a
+fast pass, and still holds the work to its plan before asking you to ship it;
+`standard` is the full human-in-the-loop cycle; `full` runs every node.
+
+## Held to its plan
+
+Green criteria say the work passes its tests, not that it is what the plan
+says. Before `ship` asks you, `conform` — a read-only `reviewer` — reads the
+plan, every departure from it a task's session declared with the answer it
+got, and the diff of everything the run changed, and posts a finding for each
+difference nobody accepted. `ship` shows you the plan, headed by the
+departures you accepted, and those findings; in `standard` and `full`,
+`fix-findings` works them first.
 
 ## Attaching the receipt
 

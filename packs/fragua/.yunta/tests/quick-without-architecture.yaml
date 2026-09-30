@@ -17,6 +17,7 @@ expect:
     lint: finished
     fix-lint: never ran
     tests: finished
+    conform: finished
     review: never ran
     pr: never ran
   tasks:

@@ -1,5 +1,6 @@
 # One script per session `quick` mode spawns, selected by prompt: the
-# planner's three sessions and the executor's one task. A mode that
+# planner's three sessions, the executor's one task, and `conform`
+# finding the work holds to its plan. A mode that
 # stops earlier opens fewer, and reads a fixture of its own — a fixture
 # describing a session nobody opened describes a run nobody made.
 #
@@ -55,3 +56,7 @@ sessions:
               true
           }
     outcome: { type: completed, summary: "crate bootstrapped" }
+  # Selected by a line only the run's diff holds: `conform` is shown what
+  # the run changed, not told about it.
+  - match_prompt_contains: "+pub fn dark_mode() -> bool"
+    outcome: { type: completed, summary: "the work holds to its plan" }
