@@ -2,7 +2,6 @@
 
 use super::*;
 use thiserror::Error;
-use yunta_core::OptionId;
 use yunta_core::{InputName, SchemaRange, ScopeGlob};
 
 /// What refuses a workflow: something its frozen inputs make certain to
@@ -315,10 +314,9 @@ pub enum CheckError {
     )]
     QuestionsInsideParallel { node: NodeId, group: NodeId },
 
-    /// `on:` may only map options the gate itself declares —
-    /// mapping an undeclared one is a choice no human can ever make.
-    #[error("gate `{node}`: `on.{option}` maps an option `options:` does not declare")]
-    GateOnUndeclaredOption { node: NodeId, option: OptionId },
+    /// An `on:` route no answer ever follows: a promise the gate cannot keep.
+    #[error("gate `{node}`: {route}")]
+    GateRouteNeverTaken { node: NodeId, route: UntakenRoute },
 
     /// A `kind: workflow` node never opens a session of its own —
     /// the child's nodes bind their own runners — so a runner binding

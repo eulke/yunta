@@ -94,7 +94,7 @@ pub use catalog::{
 pub use check::{
     check, check_context_files, check_mode_start, check_mounted, check_warnings,
     check_workflow_refs, programs_named, CheckError, CheckWarning, ContextFilesCheck,
-    MissingContextFile, RefsCheck, RunTreeOrigin, Unanswerable,
+    MissingContextFile, RefsCheck, RunTreeOrigin, Unanswerable, UntakenRoute,
 };
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;

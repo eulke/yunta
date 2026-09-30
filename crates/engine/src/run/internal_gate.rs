@@ -62,9 +62,11 @@ impl<'a> InternalGate<'a> {
 
     /// What the gate asks: its declared options (default: a single
     /// `approve`), each saying where it sends the run — and asking what
-    /// should change when it sends the run back to a session — plus the
-    /// engine's own `abort` unless the author already claimed that id,
-    /// and the documents it shows as the run holds them now.
+    /// should change when it sends the run back to a session — plus
+    /// `abort`, and the documents it shows as the run holds them now.
+    ///
+    /// `abort` is always the engine's: declaring it only places it on the
+    /// menu, and choosing it pauses the run wherever it sits.
     ///
     /// The one builder of it: a `resolve_gate` call from a process that
     /// never paused this run rebuilds the identical object from the log.
@@ -81,6 +83,9 @@ impl<'a> InternalGate<'a> {
         let mut gate_options: Vec<_> = declared
             .iter()
             .map(|id| {
+                if aborts(id) {
+                    return offers::abort();
+                }
                 let target = self.on.get(id).and_then(|target| {
                     workflow
                         .iter_nodes()
@@ -89,7 +94,7 @@ impl<'a> InternalGate<'a> {
                 offers::declared(id, target)
             })
             .collect();
-        if self.engine_abort() {
+        if !declared.iter().any(aborts) {
             gate_options.push(offers::abort());
         }
         let (first, rest) = gate_options
@@ -106,15 +111,6 @@ impl<'a> InternalGate<'a> {
             NonEmpty::from((first, rest)),
         )?
         .showing(self.shown(artifacts)?))
-    }
-
-    /// Whether `abort` is the engine's own option — the author did not
-    /// declare one of that id.
-    fn engine_abort(&self) -> bool {
-        !self
-            .options
-            .iter()
-            .any(|id| ReservedOption::of(id) == Some(ReservedOption::Abort))
     }
 
     /// Each document the gate shows, as the run holds it now.
@@ -143,14 +139,19 @@ impl<'a> InternalGate<'a> {
     }
 }
 
+/// Whether choosing `option` pauses the run.
+fn aborts(option: &OptionId) -> bool {
+    ReservedOption::of(option) == Some(ReservedOption::Abort)
+}
+
 /// Resolves an internal gate: puts its escalation to the person, or
 /// takes the decision `resolve_gate` seeded onto the log while the run
 /// was parked. An option mapped in `on` re-routes exactly like
 /// `on_failure.goto` — the gate fails retryable, control transfers, and
 /// once the target's subgraph completes the gate asks again; an
 /// unmapped option finishes the gate with that choice as its outcome;
-/// the engine-appended `abort` pauses the run. No surface → `Waiting`,
-/// with nothing recorded, so a resume re-asks.
+/// `abort` pauses the run. No surface → `Waiting`, with nothing
+/// recorded, so a resume re-asks.
 #[tracing::instrument(
     name = "resolve_internal_gate",
     skip_all,
@@ -183,8 +184,7 @@ pub(super) async fn resolve(ctx: &RunCtx<'_>, node: &Node) -> Result<GateStep, R
             }
         },
     };
-    let aborted =
-        gate.engine_abort() && ReservedOption::of(&choice.option) == Some(ReservedOption::Abort);
+    let aborted = aborts(&choice.option);
     if !aborted {
         emit_started(ctx, node).await?;
     }

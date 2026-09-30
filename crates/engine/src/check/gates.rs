@@ -2,7 +2,7 @@
 
 use super::*;
 use yunta_core::template::TemplateVar;
-use yunta_core::RunCommand;
+use yunta_core::{OptionId, RunCommand};
 
 /// Scans every literal `bash`/hook command for a `git push`
 /// aimed at the base branch — the `{{project.base_branch}}` template,
@@ -148,11 +148,43 @@ pub(crate) fn check_gate(
         }
     }
     for option in on.keys() {
-        if !options.iter().any(|declared| declared == option) {
-            errors.push(CheckError::GateOnUndeclaredOption {
-                node: node.id.clone(),
-                option: option.clone(),
-            });
+        let route = if !options.iter().any(|declared| declared == option) {
+            UntakenRoute::Undeclared(option.clone())
+        } else if crate::reserved::ReservedOption::of(option)
+            == Some(crate::reserved::ReservedOption::Abort)
+        {
+            UntakenRoute::Abort
+        } else {
+            continue;
+        };
+        errors.push(CheckError::GateRouteNeverTaken {
+            node: node.id.clone(),
+            route,
+        });
+    }
+}
+
+/// An internal gate's `on:` route that no answer ever follows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UntakenRoute {
+    /// `options:` does not declare this option, so no one can choose it.
+    Undeclared(OptionId),
+    /// `abort` pauses the run whatever `on:` says.
+    Abort,
+}
+
+impl std::fmt::Display for UntakenRoute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UntakenRoute::Undeclared(option) => write!(
+                f,
+                "`on.{option}` maps an option `options:` does not declare, so no one can \
+                 choose it"
+            ),
+            UntakenRoute::Abort => f.write_str(
+                "`on.abort` is never taken — choosing `abort` pauses the run; give the option \
+                 that sends the run back another id",
+            ),
         }
     }
 }

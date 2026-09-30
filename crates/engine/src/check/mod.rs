@@ -55,6 +55,7 @@ pub use context_files::{
     check_context_files, ContextFilesCheck, MissingContextFile, RunTreeOrigin,
 };
 pub use error::CheckError;
+pub use gates::UntakenRoute;
 pub use programs::programs_named;
 pub use refs::{check_workflow_refs, RefsCheck};
 pub use sources::Unanswerable;

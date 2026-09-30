@@ -147,6 +147,82 @@ async fn an_internal_gate_aborted_with_blank_free_text_cites_the_gate_alone() {
 }
 
 #[tokio::test]
+async fn a_gate_that_declares_abort_pauses_the_run_when_abort_is_chosen() {
+    // Declaring `abort` places it on the menu; it never makes it an
+    // option that lets the run go on past the gate.
+    let bench = Bench::new();
+    let interaction = ScriptedInteraction::new(yunta_core::events::HumanChoice {
+        option: "abort".into(),
+        by: "lead".into(),
+        free_text: Some("not this plan".to_string()),
+    });
+
+    let RunReport { terminal, state } = bench
+        .run_with_interaction(
+            r#"
+name: declared-abort
+nodes:
+  - id: plan
+    kind: bash
+    run: "true"
+  - id: approve
+    kind: gate
+    depends_on: [plan]
+    assignee: lead
+    options: [aprobar, abort, ajustar]
+    on: { ajustar: plan }
+  - id: ship
+    kind: bash
+    depends_on: [approve]
+    run: "touch shipped"
+"#,
+            "sessions: []\n",
+            &interaction,
+        )
+        .await;
+
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert_eq!(
+                reason,
+                "node `approve`'s gate was resolved to abort: not this plan"
+            );
+        }
+        other => panic!("expected Paused, got {other:?}"),
+    }
+    assert!(
+        state.nodes.state("ship").is_none(),
+        "the node after the gate never starts"
+    );
+    assert!(!bench.worktree.join("shipped").exists());
+    let events = bench.events();
+    let waiting = events
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(p))) => Some(p),
+            _ => None,
+        })
+        .expect("the question and its answer are on the log");
+    let offered: Vec<(&str, &str)> = waiting
+        .options()
+        .iter()
+        .map(|o| (o.id.as_str(), o.tradeoff.as_str()))
+        .collect();
+    assert_eq!(
+        offered,
+        vec![
+            ("aprobar", "resolves this gate; the flow continues"),
+            ("abort", "Pauses here; nothing further executes"),
+            (
+                "ajustar",
+                "re-routes to `plan` and asks again once it completes"
+            ),
+        ],
+        "abort sits where the author put it and says what it does"
+    );
+}
+
+#[tokio::test]
 async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before() {
     // Regression: `NoInteraction` (what every other test in this suite
     // already uses) must reproduce the same pause behavior byte for

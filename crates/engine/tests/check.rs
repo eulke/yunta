@@ -14,7 +14,7 @@ use yunta_core::{
     RunnerCandidate, Workflow,
 };
 use yunta_engine::{
-    check as check_against, check_warnings, CheckError, CheckWarning, Unanswerable,
+    check as check_against, check_warnings, CheckError, CheckWarning, Unanswerable, UntakenRoute,
 };
 
 /// The rules under test here are about the workflow, not about which
@@ -348,11 +348,41 @@ fn a_gate_on_mapping_an_undeclared_option_is_reported() {
     let errors = check(&wf, &ConfigLayer::default());
     assert_eq!(
         errors,
-        vec![CheckError::GateOnUndeclaredOption {
+        vec![CheckError::GateRouteNeverTaken {
             node: "approve".into(),
-            option: "ajustar".into(),
+            route: UntakenRoute::Undeclared("ajustar".into()),
         }]
     );
+}
+
+#[test]
+fn a_gate_that_routes_abort_somewhere_is_reported() {
+    let wf = workflow(vec![
+        bash("plan", "true", &[]),
+        internal_gate("approve", &["aprobar", "abort"], &[("abort", "plan")]),
+    ]);
+    let errors = check(&wf, &ConfigLayer::default());
+    assert_eq!(
+        errors,
+        vec![CheckError::GateRouteNeverTaken {
+            node: "approve".into(),
+            route: UntakenRoute::Abort,
+        }]
+    );
+    assert_eq!(
+        errors[0].to_string(),
+        "gate `approve`: `on.abort` is never taken — choosing `abort` pauses the run; give \
+         the option that sends the run back another id"
+    );
+}
+
+#[test]
+fn a_gate_that_declares_abort_without_a_route_is_accepted() {
+    let wf = workflow(vec![
+        bash("plan", "true", &[]),
+        internal_gate("approve", &["aprobar", "abort"], &[]),
+    ]);
+    assert_eq!(check(&wf, &ConfigLayer::default()), vec![]);
 }
 
 /// A node that asks ends when it asks: whatever depended on the answers

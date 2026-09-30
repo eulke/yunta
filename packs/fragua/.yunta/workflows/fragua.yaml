@@ -69,7 +69,7 @@ nodes:
     depends_on: [plan]
     assignee: lead
     message: "Plan registered. Approve?"
-    options: [approve, adjust, abort]
+    options: [approve, adjust]
     on: { adjust: plan }
     shows: [{ node: plan, kind: tasks }]
 
