@@ -20,7 +20,8 @@ use serde::Deserialize;
 use yunta_core::{CommitSha, GitHubRepo, Responder, Secret};
 
 use yunta_core::port::{
-    Forge, ForgeError, PolledGate, PublishRequest, PublishedGate, ReviewComment, ReviewOutcome,
+    Forge, ForgeError, ForgeProbe, PolledGate, PublishRequest, PullRequestRef, PullRequestRequest,
+    ReviewComment, ReviewOutcome,
 };
 
 const API_VERSION: &str = "2022-11-28";
@@ -99,7 +100,7 @@ impl GitHubForge {
         Self::configure(repo, token).build()
     }
 
-    fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+    pub(super) fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
         self.client
             .request(method, format!("{}{path}", self.base_url))
             .bearer_auth(self.token.expose())
@@ -109,7 +110,7 @@ impl GitHubForge {
     }
 
     /// `/repos/{owner}/{name}{rest}`.
-    fn repo_path(&self, rest: &str) -> String {
+    pub(super) fn repo_path(&self, rest: &str) -> String {
         format!("/repos/{}/{}{rest}", self.repo.owner(), self.repo.name())
     }
 
@@ -131,7 +132,7 @@ impl GitHubForge {
     }
 
     /// The answer's body as `T`.
-    async fn read<T: DeserializeOwned>(
+    pub(super) async fn read<T: DeserializeOwned>(
         &self,
         action: &'static str,
         request: reqwest::RequestBuilder,
@@ -273,11 +274,11 @@ impl GitHubForge {
     /// The open pull request on `branch` carrying this run's marker —
     /// the one a resumed gate keeps using. A PR someone closed or
     /// merged is never picked up again.
-    async fn find_open_pr(
+    pub(super) async fn find_open_pr(
         &self,
         branch: &str,
         run_id: &str,
-    ) -> Result<Option<PublishedGate>, ForgeError> {
+    ) -> Result<Option<PullRequestRef>, ForgeError> {
         #[derive(Deserialize)]
         struct PrSummary {
             number: u64,
@@ -305,7 +306,7 @@ impl GitHubForge {
                     .as_deref()
                     .is_some_and(|body| body.contains(&marker))
             })
-            .map(|pr| PublishedGate {
+            .map(|pr| PullRequestRef {
                 url: pr.html_url,
                 number: pr.number,
             }))
@@ -340,7 +341,7 @@ impl GitHubForge {
 }
 
 /// The line in a PR body that ties it to its run.
-fn run_marker(run_id: &str) -> String {
+pub(super) fn run_marker(run_id: &str) -> String {
     format!("run_id: `{run_id}`")
 }
 
@@ -403,7 +404,7 @@ fn header(headers: &HeaderMap, name: &str) -> Option<String> {
 
 #[async_trait::async_trait]
 impl Forge for GitHubForge {
-    async fn publish(&self, req: &PublishRequest) -> Result<PublishedGate, ForgeError> {
+    async fn publish(&self, req: &PublishRequest) -> Result<PullRequestRef, ForgeError> {
         if let Some(existing) = self.find_open_pr(&req.branch, &req.run_id).await? {
             return Ok(existing);
         }
@@ -420,32 +421,33 @@ impl Forge for GitHubForge {
             .await?;
         }
 
-        #[derive(Deserialize)]
-        struct CreatedPr {
-            number: u64,
-            html_url: String,
-        }
-        let request = self
-            .request(reqwest::Method::POST, &self.repo_path("/pulls"))
-            .json(&serde_json::json!({
-                "title": format!("yunta: {}", req.summary),
-                "head": req.branch,
-                "base": req.base_branch,
-                "body": format!(
-                    "{}\n\n---\n{}\n\n_Opened by Yunta — approve or request \
-                     changes like any other PR review._",
-                    req.summary,
-                    run_marker(&req.run_id)
-                ),
-            }));
-        let created: CreatedPr = self.read("open the pull request", request).await?;
-        Ok(PublishedGate {
-            url: created.html_url,
-            number: created.number,
-        })
+        let body = format!(
+            "{}\n\n---\n{}\n\n_Opened by Yunta — approve or request changes like any other \
+             PR review._",
+            req.summary,
+            run_marker(&req.run_id)
+        );
+        self.create_pr(
+            &format!("yunta: {}", req.summary),
+            &req.branch,
+            &req.base_branch,
+            &body,
+        )
+        .await
     }
 
-    async fn poll(&self, gate: &PublishedGate) -> Result<PolledGate, ForgeError> {
+    async fn open_pull_request(
+        &self,
+        req: &PullRequestRequest,
+    ) -> Result<PullRequestRef, ForgeError> {
+        self.open(req).await
+    }
+
+    async fn probe(&self) -> Result<ForgeProbe, ForgeError> {
+        self.repository().await
+    }
+
+    async fn poll(&self, gate: &PullRequestRef) -> Result<PolledGate, ForgeError> {
         #[derive(Deserialize)]
         struct PrDetail {
             state: String,

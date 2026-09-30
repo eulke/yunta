@@ -14,7 +14,7 @@ use yunta_core::fence::{Advice, Fence};
 use futures::StreamExt;
 use yunta_adapters::{MockAdapter, MockFixture, MockForge, MockForgeState, RunPaths};
 use yunta_core::port::{
-    Adapter, AgentEvent, Forge, ForgeError, ProbeReport, PublishRequest, PublishedGate,
+    Adapter, AgentEvent, Forge, ForgeError, ProbeReport, PublishRequest, PullRequestRef,
     ReviewOutcome, SessionRequest,
 };
 use yunta_core::{Capabilities, SessionId};
@@ -457,7 +457,7 @@ sessions:
 #[tokio::test]
 async fn polling_a_gate_the_forge_never_published_is_a_typed_error() {
     let forge = MockForge::new(MockForgeState::new());
-    let gate = PublishedGate {
+    let gate = PullRequestRef {
         url: "https://forge.example/pr/99".to_string(),
         number: 99,
     };

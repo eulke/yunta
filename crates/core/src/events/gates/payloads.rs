@@ -67,7 +67,7 @@ pub struct GateWaitingPayload {
     /// The forge's own handle for this gate — a PR URL,
     /// today — `None` for the internal escalation case (exhausted
     /// re-routes) this payload already covered before external
-    /// gates existed. Round-trips the forge's `PublishedGate` through
+    /// gates existed. Round-trips the forge's `PullRequestRef` through
     /// the log so a later `poll` (from a completely different process
     /// waking up to check on the gate) knows what to poll without
     /// re-publishing.

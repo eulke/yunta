@@ -2243,7 +2243,7 @@
           "$ref": "#/$defs/Evidence"
         },
         "external_ref": {
-          "description": "The forge's own handle for this gate — a PR URL,\ntoday — `None` for the internal escalation case (exhausted\nre-routes) this payload already covered before external\ngates existed. Round-trips the forge's `PublishedGate` through\nthe log so a later `poll` (from a completely different process\nwaking up to check on the gate) knows what to poll without\nre-publishing.",
+          "description": "The forge's own handle for this gate — a PR URL,\ntoday — `None` for the internal escalation case (exhausted\nre-routes) this payload already covered before external\ngates existed. Round-trips the forge's `PullRequestRef` through\nthe log so a later `poll` (from a completely different process\nwaking up to check on the gate) knows what to poll without\nre-publishing.",
           "type": [
             "string",
             "null"

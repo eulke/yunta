@@ -8,7 +8,8 @@
 //! forges.
 
 mod github;
+mod github_pulls;
 mod mock;
 
 pub use github::GitHubForge;
-pub use mock::{MockForge, MockForgeState};
+pub use mock::{MockForge, MockForgeState, MockPullRequest};

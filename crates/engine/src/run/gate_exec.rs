@@ -24,7 +24,7 @@ use yunta_core::events::{
     Escalation, EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity,
     GateResolvedPayload, NodeStartedPayload, PauseReason, TokenUsage,
 };
-use yunta_core::port::{Forge, PolledGate, PublishRequest, PublishedGate, ReviewOutcome};
+use yunta_core::port::{Forge, PolledGate, PublishRequest, PullRequestRef, ReviewOutcome};
 use yunta_core::{CommitSha, ExternalGate, FindingId, Node, NonEmpty, Responder};
 
 use super::node_close::{fail, finish_node};
@@ -155,7 +155,7 @@ pub(super) async fn poll_gate(
         .await;
     };
 
-    let published: PublishedGate = decode_ref(external_ref)?;
+    let published: PullRequestRef = decode_ref(external_ref)?;
     let polled = forge
         .poll(&published)
         .await
@@ -199,7 +199,7 @@ async fn resolve_from_poll(
     ctx: &RunCtx<'_>,
     node: &Node,
     polled: &PolledGate,
-    published: &PublishedGate,
+    published: &PullRequestRef,
 ) -> Result<GateStep, RunError> {
     match &polled.review {
         ReviewOutcome::Approved { by, reviewed_sha } if *reviewed_sha == polled.head_sha => {
@@ -324,7 +324,7 @@ pub(super) async fn recheck_approved_gates(
         let Some(external_ref) = state.gates.last_external_ref(&node.id) else {
             continue;
         };
-        let published: PublishedGate = decode_ref(external_ref)?;
+        let published: PullRequestRef = decode_ref(external_ref)?;
         let polled = forge
             .poll(&published)
             .await
@@ -361,11 +361,11 @@ pub(super) async fn emit_started(ctx: &RunCtx<'_>, node: &Node) -> Result<(), Ru
     Ok(())
 }
 
-fn encode_ref(published: &PublishedGate) -> String {
+fn encode_ref(published: &PullRequestRef) -> String {
     serde_json::to_string(published).unwrap_or_default()
 }
 
-fn decode_ref(external_ref: &str) -> Result<PublishedGate, RunError> {
+fn decode_ref(external_ref: &str) -> Result<PullRequestRef, RunError> {
     serde_json::from_str(external_ref).map_err(|e| RunError::Broken {
         diagnostic: format!("gate_waiting.external_ref `{external_ref}` isn't valid: {e}"),
     })

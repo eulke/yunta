@@ -29,7 +29,7 @@ mod session;
 
 pub use claude_code::{ClaudeCodeAdapter, ID as CLAUDE_CODE_ID};
 pub use codex::{CodexAdapter, ID as CODEX_ID};
-pub use forge::{GitHubForge, MockForge, MockForgeState};
+pub use forge::{GitHubForge, MockForge, MockForgeState, MockPullRequest};
 pub use mock::{
     FixtureError, MockAdapter, MockEffect, MockFixture, MockOutcome, MockStep, OnInterrupt,
     RunPaths, SessionScript, ID as MOCK_ID,

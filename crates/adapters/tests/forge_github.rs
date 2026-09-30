@@ -16,7 +16,10 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 use yunta_adapters::GitHubForge;
-use yunta_core::port::{Forge, ForgeError, PublishRequest, PublishedGate, ReviewOutcome};
+use yunta_core::port::{
+    Forge, ForgeError, ForgeProbe, PublishRequest, PullRequestRef, PullRequestRequest,
+    ReviewOutcome,
+};
 use yunta_core::{GitHubRepo, Secret};
 
 #[derive(Clone)]
@@ -29,10 +32,13 @@ struct StubPr {
     body: String,
     head_sha: String,
     merge_commit_sha: Option<String>,
+    title: String,
 }
 
 #[derive(Default)]
 struct StubState {
+    /// What `GET /repos/{owner}/{repo}` says the token may do there.
+    can_push: bool,
     prs: Vec<StubPr>,
     reviews: HashMap<u64, Vec<Value>>,
     comments: HashMap<u64, Vec<Value>>,
@@ -165,6 +171,7 @@ async fn create_pull(
             body: body["body"].as_str().unwrap_or_default().to_string(),
             head_sha: format!("{number:040x}"),
             merge_commit_sha: None,
+            title: body["title"].as_str().unwrap_or_default().to_string(),
         };
         s.prs.push(pr.clone());
         pr
@@ -269,9 +276,24 @@ async fn put_contents(
     Ok(Json(json!({ "content": { "path": path } })))
 }
 
+async fn get_repository(
+    State(stub): State<Stub>,
+    Path((_owner, _repo)): Path<(String, String)>,
+) -> Answer {
+    record(&stub, "GET", "/repository", &HashMap::new());
+    if let Some(refusal) = refused(&stub) {
+        return Err(refusal);
+    }
+    let can_push = stub.with(|s| s.can_push);
+    Ok(Json(
+        json!({ "permissions": { "push": can_push, "pull": true } }),
+    ))
+}
+
 /// Serves the stub on a loopback port and returns its address.
 async fn serve(stub: Stub) -> SocketAddr {
     let app = Router::new()
+        .route("/repos/{owner}/{repo}", get(get_repository))
         .route(
             "/repos/{owner}/{repo}/pulls",
             get(list_pulls).post(create_pull),
@@ -325,6 +347,7 @@ fn stub_pr(number: u64, branch: &str, run_id: &str, state: &'static str) -> Stub
         body: marker(run_id),
         head_sha: format!("{number:040x}"),
         merge_commit_sha: None,
+        title: String::new(),
     }
 }
 
@@ -413,7 +436,7 @@ async fn merged_pr_is_not_closed() {
     let forge = forge_at(serve(stub.clone()).await);
 
     let polled = forge
-        .poll(&PublishedGate {
+        .poll(&PullRequestRef {
             url: "https://github.example/pr/7".to_string(),
             number: 7,
         })
@@ -443,7 +466,7 @@ async fn reviews_are_paginated() {
     let forge = forge_at(serve(stub.clone()).await);
 
     let polled = forge
-        .poll(&PublishedGate {
+        .poll(&PullRequestRef {
             url: "https://github.example/pr/3".to_string(),
             number: 3,
         })
@@ -518,7 +541,7 @@ async fn an_unanswered_request_is_a_transport_error() {
         .unwrap();
 
     let error = forge
-        .poll(&PublishedGate {
+        .poll(&PullRequestRef {
             url: "https://github.example/pr/1".to_string(),
             number: 1,
         })
@@ -545,7 +568,7 @@ async fn a_review_without_a_commit_id_is_not_a_decision() {
     let forge = forge_at(serve(stub.clone()).await);
 
     let polled = forge
-        .poll(&PublishedGate {
+        .poll(&PullRequestRef {
             url: "https://github.example/pr/4".to_string(),
             number: 4,
         })
@@ -556,5 +579,98 @@ async fn a_review_without_a_commit_id_is_not_a_decision() {
         polled.review,
         ReviewOutcome::Pending,
         "an approval that names no commit covers no code, so the gate keeps waiting"
+    );
+}
+
+fn pull_request(head: &str, run_id: &str) -> PullRequestRequest {
+    PullRequestRequest {
+        head: head.to_string(),
+        base: "main".to_string(),
+        title: "add dark mode".to_string(),
+        body: "What the run changed.".to_string(),
+        run_id: run_id.to_string(),
+    }
+}
+
+#[tokio::test]
+async fn open_pull_request_reuses_the_open_pr_carrying_the_marker() {
+    let stub = Stub::default();
+    stub.with(|s| s.prs.push(stub_pr(4, "yunta/run/run-1", "run-1", "open")));
+    let forge = forge_at(serve(stub.clone()).await);
+
+    let opened = forge
+        .open_pull_request(&pull_request("yunta/run/run-1", "run-1"))
+        .await
+        .unwrap();
+
+    assert_eq!(opened.number, 4);
+    assert!(
+        !stub.requests().iter().any(|r| r.starts_with("POST /pulls")),
+        "{:?}",
+        stub.requests()
+    );
+}
+
+#[tokio::test]
+async fn open_pull_request_posts_title_body_and_marker() {
+    let stub = Stub::default();
+    let forge = forge_at(serve(stub.clone()).await);
+
+    let opened = forge
+        .open_pull_request(&pull_request("yunta/run/run-1", "run-1"))
+        .await
+        .unwrap();
+
+    let pr = stub.with(|s| s.prs[0].clone());
+    assert_eq!(opened.number, pr.number);
+    assert_eq!(pr.title, "add dark mode");
+    assert_eq!(pr.branch, "yunta/run/run-1");
+    assert_eq!(pr.body, "What the run changed.\n\n---\nrun_id: `run-1`");
+}
+
+#[tokio::test]
+async fn a_closed_pr_is_not_reused_when_opening_one() {
+    let stub = Stub::default();
+    stub.with(|s| s.prs.push(stub_pr(1, "yunta/run/run-1", "run-1", "closed")));
+    let forge = forge_at(serve(stub.clone()).await);
+
+    let opened = forge
+        .open_pull_request(&pull_request("yunta/run/run-1", "run-1"))
+        .await
+        .unwrap();
+
+    assert_eq!(opened.number, 2);
+}
+
+#[tokio::test]
+async fn the_probe_says_whether_the_token_can_push() {
+    let stub = Stub::default();
+    let forge = forge_at(serve(stub.clone()).await);
+    assert_eq!(
+        forge.probe().await.unwrap(),
+        ForgeProbe {
+            can_push: Some(false)
+        }
+    );
+    stub.with(|s| s.can_push = true);
+    assert_eq!(
+        forge.probe().await.unwrap(),
+        ForgeProbe {
+            can_push: Some(true)
+        }
+    );
+}
+
+#[tokio::test]
+async fn the_probe_reports_a_refused_token() {
+    let stub = Stub::default();
+    stub.with(|s| s.refusal = Some((401, "Bad credentials")));
+    let forge = forge_at(serve(stub.clone()).await);
+
+    let refused = forge.probe().await.unwrap_err();
+
+    assert!(
+        matches!(&refused, ForgeError::Http { status, .. } if *status == 401),
+        "{refused:?}"
     );
 }

@@ -81,12 +81,13 @@ pub struct PublishRequest {
     pub artifacts: Vec<(String, Vec<u8>)>,
 }
 
-/// A published PR's handle — small and forge-opaque on purpose, so it
-/// round-trips (as JSON, via `Serialize`/`Deserialize`) through
-/// `GateWaitingPayload.external_ref` without the engine needing to know
-/// anything forge-specific about its shape.
+/// A pull request's handle — a published gate's, or the one a
+/// `pull_request` node opened — small and forge-opaque on purpose, so it
+/// round-trips (as JSON, via `Serialize`/`Deserialize`) through the log
+/// without the engine needing to know anything forge-specific about its
+/// shape.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PublishedGate {
+pub struct PullRequestRef {
     pub url: String,
     pub number: u64,
 }
@@ -133,8 +134,39 @@ pub enum ReviewOutcome {
     },
 }
 
+/// What [`Forge::open_pull_request`] needs: the branch a run pushed, the
+/// branch it goes into, and what the pull request says.
+pub struct PullRequestRequest {
+    pub head: String,
+    pub base: String,
+    pub title: String,
+    pub body: String,
+    /// Written into the body as the run's marker, so a later call for the
+    /// same run and branch finds the pull request it opened instead of
+    /// opening a second one — idempotent across a node's reruns.
+    pub run_id: String,
+}
+
+/// What a forge says about the credentials a run would reach it with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForgeProbe {
+    /// Whether they may push to the repository; `None` when the forge
+    /// does not say.
+    pub can_push: Option<bool>,
+}
+
 #[async_trait]
 pub trait Forge: Send + Sync {
-    async fn publish(&self, req: &PublishRequest) -> Result<PublishedGate, ForgeError>;
-    async fn poll(&self, gate: &PublishedGate) -> Result<PolledGate, ForgeError>;
+    async fn publish(&self, req: &PublishRequest) -> Result<PullRequestRef, ForgeError>;
+    async fn poll(&self, gate: &PullRequestRef) -> Result<PolledGate, ForgeError>;
+    /// Opens a pull request of `head`, already pushed, into `base` — or
+    /// answers with the open one this run's marker names on that branch.
+    /// A closed or merged pull request is never reused.
+    async fn open_pull_request(
+        &self,
+        req: &PullRequestRequest,
+    ) -> Result<PullRequestRef, ForgeError>;
+    /// Whether the repository answers with these credentials, and what
+    /// they may do there.
+    async fn probe(&self) -> Result<ForgeProbe, ForgeError>;
 }

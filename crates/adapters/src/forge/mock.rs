@@ -20,7 +20,8 @@ use async_trait::async_trait;
 use yunta_core::{CommitSha, Responder};
 
 use yunta_core::port::{
-    Forge, ForgeError, PolledGate, PublishRequest, PublishedGate, ReviewComment, ReviewOutcome,
+    Forge, ForgeError, ForgeProbe, PolledGate, PublishRequest, PullRequestRef, PullRequestRequest,
+    ReviewComment, ReviewOutcome,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,10 +47,24 @@ struct MockPr {
     number: u64,
     run_id: String,
     branch: String,
+    base: String,
+    title: String,
+    body: String,
     url: String,
     head_sha: CommitSha,
     open: bool,
     review: Review,
+}
+
+/// A pull request the mock opened, as a test reads it back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MockPullRequest {
+    pub number: u64,
+    pub head: String,
+    pub base: String,
+    pub title: String,
+    pub body: String,
+    pub open: bool,
 }
 
 #[derive(Default)]
@@ -149,6 +164,24 @@ impl MockForgeState {
         sha
     }
 
+    /// Every pull request the forge holds, in the order it opened them.
+    pub fn pull_requests(&self) -> Vec<MockPullRequest> {
+        self.0
+            .lock()
+            .unwrap()
+            .prs
+            .iter()
+            .map(|pr| MockPullRequest {
+                number: pr.number,
+                head: pr.branch.clone(),
+                base: pr.base.clone(),
+                title: pr.title.clone(),
+                body: pr.body.clone(),
+                open: pr.open,
+            })
+            .collect()
+    }
+
     /// The run's newest PR.
     pub fn pr_number(&self, run_id: &str) -> Option<u64> {
         self.0
@@ -167,21 +200,27 @@ impl MockForge {
     pub fn new(state: MockForgeState) -> Self {
         Self { state }
     }
-}
 
-#[async_trait]
-impl Forge for MockForge {
-    async fn publish(&self, req: &PublishRequest) -> Result<PublishedGate, ForgeError> {
+    /// The open pull request `run_id` has on `head`, or a new one saying
+    /// `title` and `body` — the rule the GitHub forge follows too.
+    fn open_or_reuse(
+        &self,
+        run_id: &str,
+        head: &str,
+        base: &str,
+        title: &str,
+        body: &str,
+    ) -> PullRequestRef {
         let mut inner = self.state.0.lock().unwrap();
         let existing = inner
             .prs
             .iter()
-            .find(|pr| pr.open && pr.branch == req.branch && pr.run_id == req.run_id);
+            .find(|pr| pr.open && pr.branch == head && pr.run_id == run_id);
         if let Some(existing) = existing {
-            return Ok(PublishedGate {
+            return PullRequestRef {
                 url: existing.url.clone(),
                 number: existing.number,
-            });
+            };
         }
         inner.next_number += 1;
         let number = inner.next_number;
@@ -189,17 +228,46 @@ impl Forge for MockForge {
         let head_sha = inner.fresh_sha();
         inner.prs.push(MockPr {
             number,
-            run_id: req.run_id.clone(),
-            branch: req.branch.clone(),
+            run_id: run_id.to_string(),
+            branch: head.to_string(),
+            base: base.to_string(),
+            title: title.to_string(),
+            body: body.to_string(),
             url: url.clone(),
             head_sha,
             open: true,
             review: Review::Pending,
         });
-        Ok(PublishedGate { url, number })
+        PullRequestRef { url, number }
+    }
+}
+
+#[async_trait]
+impl Forge for MockForge {
+    async fn publish(&self, req: &PublishRequest) -> Result<PullRequestRef, ForgeError> {
+        Ok(self.open_or_reuse(
+            &req.run_id,
+            &req.branch,
+            &req.base_branch,
+            &req.summary,
+            &req.summary,
+        ))
     }
 
-    async fn poll(&self, gate: &PublishedGate) -> Result<PolledGate, ForgeError> {
+    async fn open_pull_request(
+        &self,
+        req: &PullRequestRequest,
+    ) -> Result<PullRequestRef, ForgeError> {
+        Ok(self.open_or_reuse(&req.run_id, &req.head, &req.base, &req.title, &req.body))
+    }
+
+    async fn probe(&self) -> Result<ForgeProbe, ForgeError> {
+        Ok(ForgeProbe {
+            can_push: Some(true),
+        })
+    }
+
+    async fn poll(&self, gate: &PullRequestRef) -> Result<PolledGate, ForgeError> {
         let inner = self.state.0.lock().unwrap();
         let pr = inner.prs.iter().find(|pr| pr.number == gate.number).ok_or(
             ForgeError::UnknownGate {
