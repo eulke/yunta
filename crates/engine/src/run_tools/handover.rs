@@ -10,12 +10,17 @@
 //! before it accepts the document: a refusal the writer fixes in the
 //! same session costs nothing, and the loop's own pre-check later reads
 //! the same answers from the cache.
+//!
+//! A spec is proven the same way, against the plan the run holds: every
+//! task it names is the plan's, and in a checkout of the run's tree with
+//! every one of its files written in, each test runs and fails — a test
+//! that passes before the work holds the work to nothing.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use yunta_core::diagnostic::{Diagnostic, Named, Problem, RuleCode, Subject};
 use yunta_core::events::ExecutionEnvironment;
-use yunta_core::{Task, TasksFile};
+use yunta_core::{SpecFile, Task, TasksFile};
 
 use super::session::{RunToolError, SessionTools};
 use crate::task_cycle::{probe, CriterionRun};
@@ -49,6 +54,53 @@ impl SessionTools {
                 .await
                 .map_err(|source| RunToolError::Check { source })?;
             found.extend(judged(index, task, &probes, self.host.environment.as_ref()));
+        }
+        Ok(found)
+    }
+
+    /// Every rule the spec breaks against the run's plan and where its
+    /// tests run. Empty when the spec can be accepted.
+    pub(super) async fn spec_handover(
+        &self,
+        spec: &SpecFile,
+    ) -> Result<Vec<Diagnostic>, RunToolError> {
+        let events = self.events().await?;
+        let plan = crate::artifacts::latest::<TasksFile>(&self.host.run_dir, &events)
+            .await
+            .map_err(|source| RunToolError::Plan { source })?
+            .map(|held| held.document);
+        let checkout = self.handover_checkout().await?;
+        write_test_files(&checkout, spec).await?;
+        let supervision = self.host.supervision(&self.stop);
+        let mut found = Vec::new();
+        for (index, one) in spec.specs.iter().enumerate() {
+            let subject = || Subject::Spec(Named::new(one.task.clone(), index));
+            let Some(task) = plan
+                .as_ref()
+                .and_then(|plan| plan.tasks.iter().find(|task| task.id == one.task))
+            else {
+                found.push(Diagnostic::new(
+                    subject(),
+                    Problem::rule(
+                        RuleCode::UnknownSpecTask,
+                        unplanned(&one.task, plan.as_ref()),
+                    ),
+                ));
+                continue;
+            };
+            let tested = Task {
+                criteria: one.criteria().collect(),
+                depends_on: Vec::new(),
+                ..task.clone()
+            };
+            let probes = probe(&tested, &checkout, &self.host.memo, supervision)
+                .await
+                .map_err(|source| RunToolError::Check { source })?;
+            found.extend(
+                judged(index, &tested, &probes, self.host.environment.as_ref())
+                    .into_iter()
+                    .map(|diagnostic| Diagnostic::new(subject(), diagnostic.problem)),
+            );
         }
         Ok(found)
     }
@@ -157,4 +209,34 @@ fn cannot_run(run: &CriterionRun, environment: Option<&ExecutionEnvironment>) ->
         detail.push_str(&format!(" — under {environment}"));
     }
     detail
+}
+
+/// Writes every file `spec` gives its tasks into `checkout`, where its
+/// tests run as they will once each task's work starts from them.
+async fn write_test_files(checkout: &Path, spec: &SpecFile) -> Result<(), RunToolError> {
+    for test_file in spec.specs.iter().flat_map(|one| &one.files) {
+        let path = checkout.join(&test_file.path);
+        let written = match path.parent() {
+            Some(parent) => tokio::fs::create_dir_all(parent).await,
+            None => Ok(()),
+        };
+        written
+            .and(tokio::fs::write(&path, &test_file.content).await)
+            .map_err(|source| RunToolError::Handover {
+                detail: format!("could not write `{}`: {source}", test_file.path),
+            })?;
+    }
+    Ok(())
+}
+
+/// Why a spec's task is not one the run's plan holds, naming the ones
+/// it does.
+fn unplanned(task: &yunta_core::TaskId, plan: Option<&TasksFile>) -> String {
+    match plan {
+        Some(plan) => format!(
+            "the run's plan declares no task `{task}`; its tasks are {}",
+            yunta_core::text::listed(plan.tasks.iter().map(|task| task.id.as_str()))
+        ),
+        None => "the run holds no plan for a spec to hold to".to_string(),
+    }
 }

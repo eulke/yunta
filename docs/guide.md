@@ -253,14 +253,14 @@ the MCP server, or re-read a file outside what was captured at the time.
 
 A node declares what it produces as a list of bare strings —
 `produces: [tasks, notes.md]`.
-`tasks`, `findings` and `questions` name the documents a node produces and the
-engine reads, validates and turns into events. `answers` names a fourth the
+`tasks`, `spec`, `findings` and `questions` name the documents a node produces
+and the engine reads, validates and turns into events. `answers` names a fifth the
 engine writes itself, when a person replies to a `questions` document; a node
 cannot declare it, and a node that follows the one that asked reads it with
 `context: [{ artifact: { node: <the node that asked>, kind: answers } }]`. Every
 other string is the name of a file the engine only carries: it records that the
 file exists and what it hashes to, and its structure is whatever the session
-decided. Those four names are therefore not available as file names, and
+decided. Those five names are therefore not available as file names, and
 `yunta check` says so when a reference spells one as a `name:`.
 
 A node produces at most one document of each kind, so the kind is the whole
@@ -277,6 +277,14 @@ context — annotated field by field, followed by the rules the document has to
 satisfy — and with a `yunta_submit_tasks` run tool whose one argument,
 `document`, is that same schema. A `questions` artifact arrives the same way,
 through `yunta_submit_questions`. No session writes an interpreted file itself.
+
+A `spec` is the tests a plan's tasks are held to, written before any task is
+built and by someone other than whoever builds it: per task, the files its tests
+live in, whole, and the commands that run them, each saying what it proves. It
+arrives through `yunta_submit_spec` and is proven against the run the moment it
+does: every task it names is the plan's, and in a checkout of the run's tree with
+every one of its files written in, each test runs and fails — a test that already
+passes holds the work to nothing, and the session hears which in the same call.
 Nothing else to declare, and an opaque artifact mounts nothing because it has no
 shape to demand.
 

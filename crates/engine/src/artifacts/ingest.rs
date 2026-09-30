@@ -7,12 +7,13 @@
 //! that node's own staging directory; a document the run already holds
 //! is answered by the log, never by a file. Opaque artifacts are
 //! verified by existence and content hash only, never by format.
-//! `tasks`, `findings` and `questions` are the interpreted kinds: each
-//! is read through the one door that names every problem at once
-//! ([`yunta_core::shape::read`], which runs the document's own rules),
-//! and the parsed result handed back to the caller — `TasksFile` for
-//! `task_registered`, `Finding`s for `finding_posted`, `Question`s so
-//! `node_exec.rs` can pause the run instead of finishing the node.
+//! `tasks`, `spec`, `findings` and `questions` are the interpreted
+//! kinds: each is read through the one door that names every problem at
+//! once ([`yunta_core::shape::read`], which runs the document's own
+//! rules), and the parsed result handed back to the caller — `TasksFile`
+//! for `task_registered`, a `SpecFile` for the loop that holds tasks to
+//! it, `Finding`s for `finding_posted`, `Question`s so `node_exec.rs`
+//! can pause the run instead of finishing the node.
 //!
 //! What the run then *stores* for a verified artifact is not read here:
 //! an interpreted document is re-rendered from what it parsed as, and
@@ -97,6 +98,7 @@ impl std::fmt::Display for StagedHash {
 pub enum ArtifactContent {
     Opaque,
     Tasks(TasksFile),
+    Spec(yunta_core::SpecFile),
     Findings(Vec<Finding>),
     Questions(Vec<Question>),
     Answers(Vec<yunta_core::Answer>),
@@ -110,6 +112,7 @@ impl ArtifactContent {
         match self {
             ArtifactContent::Opaque => None,
             ArtifactContent::Tasks(_) => Some(ArtifactKind::Tasks),
+            ArtifactContent::Spec(_) => Some(ArtifactKind::Spec),
             ArtifactContent::Findings(_) => Some(ArtifactKind::Findings),
             ArtifactContent::Questions(_) => Some(ArtifactKind::Questions),
             ArtifactContent::Answers(_) => Some(ArtifactKind::Answers),
@@ -310,6 +313,9 @@ pub(super) fn interpret(
     Ok(match kind {
         None => ArtifactContent::Opaque,
         Some(ArtifactKind::Tasks) => ArtifactContent::Tasks(read::<TasksFile>(bytes, path)?),
+        Some(ArtifactKind::Spec) => {
+            ArtifactContent::Spec(read::<yunta_core::SpecFile>(bytes, path)?)
+        }
         Some(ArtifactKind::Findings) => {
             let file = read::<FindingsFile>(bytes, path)?;
             ArtifactContent::Findings(file.findings.into_iter().map(Finding::from).collect())

@@ -15,7 +15,7 @@ use crate::yaml::{Mapping, Value};
 /// name.
 pub const ARTIFACTS_DIR: &str = "artifacts";
 
-/// `artifacts.produces`. Each entry is one bare string: `tasks`,
+/// `artifacts.produces`. Each entry is one bare string: `tasks`, `spec`,
 /// `findings` and `questions` name the documents the engine reads, and
 /// every other string is the name of a file it only carries.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -30,8 +30,8 @@ pub struct Artifacts {
 /// A node produces at most one document of each kind, so a kind
 /// identifies an interpreted artifact on its own and there is no file
 /// name to choose. An opaque artifact has nothing else to go by, so its
-/// name is what identifies it — which is why the three kind names are
-/// not available as file names.
+/// name is what identifies it — which is why the kind names are not
+/// available as file names.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum ArtifactSpec {
@@ -207,13 +207,15 @@ pub enum ArtifactKind {
     Findings,
     Questions,
     Answers,
+    Spec,
 }
 
 impl ArtifactKind {
     /// Every kind a door can be asked about, in the order a catalog
     /// lists them.
-    pub const ALL: [ArtifactKind; 4] = [
+    pub const ALL: [ArtifactKind; 5] = [
         ArtifactKind::Tasks,
+        ArtifactKind::Spec,
         ArtifactKind::Findings,
         ArtifactKind::Questions,
         ArtifactKind::Answers,
@@ -236,6 +238,7 @@ impl ArtifactKind {
             ArtifactKind::Findings => "findings artifact",
             ArtifactKind::Questions => "questions artifact",
             ArtifactKind::Answers => "answers artifact",
+            ArtifactKind::Spec => "spec document",
         }
     }
 
@@ -249,6 +252,7 @@ impl ArtifactKind {
             ArtifactKind::Findings => "findings",
             ArtifactKind::Questions => "questions",
             ArtifactKind::Answers => "answers",
+            ArtifactKind::Spec => "spec",
         }
     }
 
@@ -264,6 +268,7 @@ impl ArtifactKind {
     pub fn submit_tool(self) -> Option<&'static str> {
         match self {
             ArtifactKind::Tasks => Some("yunta_submit_tasks"),
+            ArtifactKind::Spec => Some("yunta_submit_spec"),
             ArtifactKind::Questions => Some("yunta_submit_questions"),
             ArtifactKind::Findings | ArtifactKind::Answers => None,
         }

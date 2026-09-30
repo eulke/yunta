@@ -8,24 +8,6 @@ use yunta_core::{ArtifactKind, TasksFile};
 use super::store::{view_path, ObjectStore};
 use crate::human_interaction::{ShownContent, ShownDocument};
 
-/// Why a shown document could not be read.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum ShownError {
-    #[error(transparent)]
-    Object(#[from] super::ObjectError),
-    #[error("{0}")]
-    Unreadable(#[from] yunta_core::diagnostic::Report),
-}
-
-impl From<ShownError> for crate::run::RunError {
-    fn from(error: ShownError) -> Self {
-        match error {
-            ShownError::Object(source) => Self::Object(source),
-            ShownError::Unreadable(report) => Self::UnreadableArtifact(report),
-        }
-    }
-}
-
 /// The file a person opens to read what an escalation shows: a plan's
 /// view for them, any other document's own.
 pub fn view_of(shown: &Shown) -> std::path::PathBuf {
@@ -46,7 +28,7 @@ pub(crate) async fn documents(
     run_dir: &Path,
     shows: &[Shown],
     tasks: &TaskLedger,
-) -> Result<Vec<ShownDocument>, ShownError> {
+) -> Result<Vec<ShownDocument>, super::HeldError> {
     let store = ObjectStore::at(run_dir);
     let mut documents = Vec::with_capacity(shows.len());
     for shown in shows {

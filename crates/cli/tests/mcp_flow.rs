@@ -639,7 +639,7 @@ async fn document_shape_advertises_every_kind_and_returns_the_shape() {
         .find(|t| t.name.as_ref() == "document_shape")
         .expect("document_shape is advertised");
     let advertised = serde_json::to_string(&shape_tool.input_schema).unwrap();
-    for kind in ["tasks", "findings", "questions"] {
+    for kind in ["tasks", "spec", "findings", "questions"] {
         assert!(
             advertised.contains(kind),
             "{kind} missing from {advertised}"

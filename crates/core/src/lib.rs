@@ -47,6 +47,7 @@ pub mod schema;
 mod schema_range;
 mod secret;
 pub mod shape;
+mod spec;
 mod tasks;
 pub mod template;
 pub mod text;
@@ -96,6 +97,7 @@ pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionsFile};
 pub use run_tool::RunTool;
 pub use schema_range::{SchemaRange, SchemaRangeError};
 pub use secret::Secret;
+pub use spec::{Spec, SpecFile, SpecTest, TestFile};
 pub use tasks::{Change, Criterion, Decision, Shape, Task, TasksFile};
 pub use workflow::{
     followers, left_out, node_commands, reroute_sources, ArtifactContextRef, ArtifactKind,

@@ -100,6 +100,12 @@ pub(crate) fn submit(
             let yaml = render(&tasks, &path)?;
             (ArtifactContent::Tasks(tasks), yaml)
         }
+        ArtifactKind::Spec => {
+            let spec: yunta_core::SpecFile =
+                yunta_core::shape::accept(document, &path).map_err(SubmitError::Refused)?;
+            let yaml = render(&spec, &path)?;
+            (ArtifactContent::Spec(spec), yaml)
+        }
         ArtifactKind::Questions => {
             let file: QuestionsFile =
                 yunta_core::shape::accept(document, &path).map_err(SubmitError::Refused)?;
@@ -252,6 +258,7 @@ pub(crate) fn canonical(artifact: &VerifiedArtifact) -> Result<Vec<u8>, SubmitEr
     Ok(match &artifact.content {
         ArtifactContent::Opaque => artifact.bytes.clone(),
         ArtifactContent::Tasks(tasks) => render(tasks, &path)?.into_bytes(),
+        ArtifactContent::Spec(spec) => render(spec, &path)?.into_bytes(),
         ArtifactContent::Findings(findings) => {
             render(&FindingsFile::from_findings(findings.clone()), &path)?.into_bytes()
         }

@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "yunta spec",
+  "description": "The document — sole top-level key `specs:`.",
+  "type": "object",
+  "properties": {
+    "specs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Spec"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "specs"
+  ],
+  "$defs": {
+    "Spec": {
+      "description": "What one task is held to: the files its tests live in, and the tests.",
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TestFile"
+          }
+        },
+        "task": {
+          "$ref": "#/$defs/TaskId"
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SpecTest"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "task",
+        "tests"
+      ]
+    },
+    "SpecTest": {
+      "description": "One test: the command that runs it, and what its passing proves.",
+      "type": "object",
+      "properties": {
+        "cmd": {
+          "type": "string"
+        },
+        "proves": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cmd",
+        "proves"
+      ]
+    },
+    "TaskId": {
+      "description": "A task id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "TestFile": {
+      "description": "A file a task's tests live in, whole.",
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "content"
+      ]
+    }
+  }
+}

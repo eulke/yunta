@@ -69,6 +69,7 @@ pub trait Document: DeserializeOwned + serde::Serialize + sealed::Sealed {
 mod sealed {
     pub trait Sealed {}
     impl Sealed for crate::TasksFile {}
+    impl Sealed for crate::SpecFile {}
     impl Sealed for crate::FindingsFile {}
     impl Sealed for crate::QuestionsFile {}
     impl Sealed for crate::AnswersFile {}
@@ -165,6 +166,7 @@ pub fn render<T: Document>(document: &T) -> Result<String, crate::yaml::YamlErro
 pub fn contract(kind: ArtifactKind) -> String {
     match kind {
         ArtifactKind::Tasks => rendered::<TasksFile>(),
+        ArtifactKind::Spec => rendered::<crate::SpecFile>(),
         ArtifactKind::Findings => rendered::<FindingsFile>(),
         ArtifactKind::Questions => rendered::<QuestionsFile>(),
         ArtifactKind::Answers => rendered::<crate::AnswersFile>(),
@@ -175,6 +177,7 @@ pub fn contract(kind: ArtifactKind) -> String {
 pub fn rules(kind: ArtifactKind) -> &'static [Rule] {
     match kind {
         ArtifactKind::Tasks => TasksFile::RULES,
+        ArtifactKind::Spec => crate::SpecFile::RULES,
         ArtifactKind::Findings => FindingsFile::RULES,
         ArtifactKind::Questions => QuestionsFile::RULES,
         ArtifactKind::Answers => crate::AnswersFile::RULES,
@@ -186,6 +189,7 @@ pub fn rules(kind: ArtifactKind) -> &'static [Rule] {
 pub fn run_rules(kind: ArtifactKind) -> &'static [Rule] {
     match kind {
         ArtifactKind::Tasks => TasksFile::RUN_RULES,
+        ArtifactKind::Spec => crate::SpecFile::RUN_RULES,
         ArtifactKind::Findings => FindingsFile::RUN_RULES,
         ArtifactKind::Questions => QuestionsFile::RUN_RULES,
         ArtifactKind::Answers => crate::AnswersFile::RUN_RULES,
@@ -196,6 +200,7 @@ pub fn run_rules(kind: ArtifactKind) -> &'static [Rule] {
 pub fn review_rules(kind: ArtifactKind) -> &'static [Rule] {
     match kind {
         ArtifactKind::Tasks => TasksFile::REVIEW_RULES,
+        ArtifactKind::Spec => crate::SpecFile::REVIEW_RULES,
         ArtifactKind::Findings => FindingsFile::REVIEW_RULES,
         ArtifactKind::Questions => QuestionsFile::REVIEW_RULES,
         ArtifactKind::Answers => crate::AnswersFile::REVIEW_RULES,
@@ -276,6 +281,12 @@ mod tests {
             "ProposedCriterionEntry",
         );
         example_writes_every_key::<QuestionsFile>(schemars::schema_for!(QuestionsFile), "Question");
+        for part in ["Spec", "TestFile", "SpecTest"] {
+            example_writes_every_key::<crate::SpecFile>(
+                schemars::schema_for!(crate::SpecFile),
+                part,
+            );
+        }
     }
 
     /// Every published example is a document its own kind accepts.
@@ -287,6 +298,8 @@ mod tests {
             .expect("the findings example");
         read::<QuestionsFile>(QuestionsFile::EXAMPLE.as_bytes(), "example")
             .expect("the questions example");
+        read::<crate::SpecFile>(crate::SpecFile::EXAMPLE.as_bytes(), "example")
+            .expect("the spec example");
     }
 
     /// Every rule a kind is held to is a rule its contract states, so a

@@ -124,11 +124,12 @@
         "tasks",
         "findings",
         "questions",
-        "answers"
+        "answers",
+        "spec"
       ]
     },
     "ArtifactSpec": {
-      "description": "One artifact named by a bare string: a node's `artifacts.produces`\nentry, or one of the artifacts an external gate publishes.\n\nA node produces at most one document of each kind, so a kind\nidentifies an interpreted artifact on its own and there is no file\nname to choose. An opaque artifact has nothing else to go by, so its\nname is what identifies it — which is why the three kind names are\nnot available as file names.",
+      "description": "One artifact named by a bare string: a node's `artifacts.produces`\nentry, or one of the artifacts an external gate publishes.\n\nA node produces at most one document of each kind, so a kind\nidentifies an interpreted artifact on its own and there is no file\nname to choose. An opaque artifact has nothing else to go by, so its\nname is what identifies it — which is why the kind names are not\navailable as file names.",
       "anyOf": [
         {
           "description": "A document the engine reads and validates, identified by its\nkind.",
@@ -141,7 +142,7 @@
       ]
     },
     "Artifacts": {
-      "description": "`artifacts.produces`. Each entry is one bare string: `tasks`,\n`findings` and `questions` name the documents the engine reads, and\nevery other string is the name of a file it only carries.",
+      "description": "`artifacts.produces`. Each entry is one bare string: `tasks`, `spec`,\n`findings` and `questions` name the documents the engine reads, and\nevery other string is the name of a file it only carries.",
       "type": "object",
       "properties": {
         "produces": {

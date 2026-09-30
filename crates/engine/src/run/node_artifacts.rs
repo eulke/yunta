@@ -280,6 +280,32 @@ pub(super) async fn record_artifacts(
     Ok(())
 }
 
+/// Registers a tasks document's tasks, each as fresh work or as work a
+/// source run finished and this run's tree already has.
+async fn register_tasks(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    tasks: &yunta_core::TasksFile,
+    standing: Option<&Standing>,
+) -> Result<(), RunError> {
+    // What of the source's finished work this run's own tree already
+    // has — asked of that tree, here, because the document is what names
+    // the tasks to ask about.
+    let carried = match standing {
+        Some(standing) => Some(
+            crate::tasks::carried_into(standing, tasks, ctx.worktree, ctx.root_supervision())
+                .await?,
+        ),
+        None => None,
+    };
+    let provenance = match &carried {
+        Some(carried) => Provenance::Inherited { carried },
+        None => Provenance::Fresh,
+    };
+    crate::tasks::register(&ctx.log(), Some(&node.id), tasks, provenance).await?;
+    Ok(())
+}
+
 /// What one artifact's content means to the run: a tasks document's
 /// tasks registered, a findings file's entries posted. An artifact the
 /// engine does not interpret states nothing beyond its acceptance.
@@ -290,28 +316,7 @@ async fn record_content(
     standing: Option<&Standing>,
 ) -> Result<(), RunError> {
     match content {
-        ArtifactContent::Tasks(tasks) => {
-            // What of the source's finished work this run's own tree
-            // already has — asked of that tree, here, because the
-            // document is what names the tasks to ask about.
-            let carried = match standing {
-                Some(standing) => Some(
-                    crate::tasks::carried_into(
-                        standing,
-                        tasks,
-                        ctx.worktree,
-                        ctx.root_supervision(),
-                    )
-                    .await?,
-                ),
-                None => None,
-            };
-            let provenance = match &carried {
-                Some(carried) => Provenance::Inherited { carried },
-                None => Provenance::Fresh,
-            };
-            crate::tasks::register(&ctx.log(), Some(&node.id), tasks, provenance).await?;
-        }
+        ArtifactContent::Tasks(tasks) => register_tasks(ctx, node, tasks, standing).await?,
         // A session node's findings are already on this log — they are
         // what the file was derived from. A `kind: workflow` node's were
         // posted in the child run, so this log learns them here, under
@@ -334,6 +339,7 @@ async fn record_content(
         // writes the acceptance and the `questions_answered` together —
         // so a close that meets them again has nothing to add.
         ArtifactContent::Findings(_)
+        | ArtifactContent::Spec(_)
         | ArtifactContent::Questions(_)
         | ArtifactContent::Answers(_)
         | ArtifactContent::Opaque => {}

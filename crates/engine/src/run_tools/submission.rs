@@ -139,18 +139,19 @@ impl SessionTools {
     }
 
     /// A readable document, held to what only running its commands can
-    /// settle: a tasks document's criteria, run where the engine runs
-    /// them. Refused with every rule they break, exactly as a document
-    /// that broke its shape is.
+    /// settle: a tasks document's criteria, or a spec's tests, run where
+    /// the engine runs them. Refused with every rule they break, exactly
+    /// as a document that broke its shape is.
     async fn proven(
         &self,
         kind: ArtifactKind,
         verified: VerifiedArtifact,
     ) -> Result<Result<VerifiedArtifact, crate::artifacts::SubmitError>, RunToolError> {
-        let crate::artifacts::ArtifactContent::Tasks(tasks) = &verified.content else {
-            return Ok(Ok(verified));
+        let broken = match &verified.content {
+            crate::artifacts::ArtifactContent::Tasks(tasks) => self.handover(tasks).await?,
+            crate::artifacts::ArtifactContent::Spec(spec) => self.spec_handover(spec).await?,
+            _ => return Ok(Ok(verified)),
         };
-        let broken = self.handover(tasks).await?;
         if broken.is_empty() {
             return Ok(Ok(verified));
         }

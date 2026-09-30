@@ -53,8 +53,8 @@ adapters. See [adapters](adapters.md) for configuring this and for what
 
 ## The engine tells agents what it expects
 
-Three artifact kinds are parsed and validated rather than just stored:
-`tasks`, `findings` and `questions`. They are strict — a key that is not
+Four artifact kinds are parsed and validated rather than just stored:
+`tasks`, `spec`, `findings` and `questions`. They are strict — a key that is not
 in the schema is refused — which only works because the schema is published to
 whoever has to write one, never assumed.
 
@@ -65,7 +65,7 @@ the same way it looks up anything else. Nobody has to relay a format by hand.
 
 A session hands a document over rather than writing a file. The engine gives it a
 tool per interpreted kind the node declares — `yunta_submit_tasks`,
-`yunta_submit_questions` — whose one argument is that published schema, so the
+`yunta_submit_spec`, `yunta_submit_questions` — whose one argument is that published schema, so the
 model fills in an object instead of transcribing a format. There is nothing else
 to name: a node produces at most one document of each kind, so the kind the node
 declared is the whole identity. Findings are finer-grained

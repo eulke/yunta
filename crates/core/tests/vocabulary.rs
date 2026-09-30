@@ -138,6 +138,7 @@ fn the_answer_types_a_diagnostic_lists_are_the_ones_the_parser_accepts() {
 fn the_schema_a_door_publishes_is_the_one_the_repository_checked() {
     for (kind, schema) in [
         (ArtifactKind::Tasks, yunta_core::schema::tasks()),
+        (ArtifactKind::Spec, yunta_core::schema::spec()),
         (ArtifactKind::Findings, yunta_core::schema::findings()),
         (ArtifactKind::Questions, yunta_core::schema::questions()),
     ] {
@@ -159,6 +160,7 @@ fn every_kind_publishes_a_shape_and_a_schema() {
 #[test]
 fn a_documents_kind_is_the_one_its_own_type_declares() {
     assert_eq!(<TasksFile as Document>::KIND, ArtifactKind::Tasks);
+    assert_eq!(<yunta_core::SpecFile as Document>::KIND, ArtifactKind::Spec);
     assert_eq!(<FindingsFile as Document>::KIND, ArtifactKind::Findings);
     assert_eq!(<QuestionsFile as Document>::KIND, ArtifactKind::Questions);
 }

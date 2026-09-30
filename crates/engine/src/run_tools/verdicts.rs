@@ -64,6 +64,12 @@ pub(super) fn read_as(verified: &crate::artifacts::VerifiedArtifact) -> String {
             "registered",
             tasks.tasks.iter().map(|t| t.id.to_string()),
         ),
+        ArtifactContent::Spec(spec) => counted_names(
+            spec.specs.len(),
+            "task",
+            "specified",
+            spec.specs.iter().map(|spec| spec.task.to_string()),
+        ),
         ArtifactContent::Findings(findings) => counted_names(
             findings.len(),
             "finding",

@@ -66,6 +66,8 @@ pub enum Subject {
     },
     Finding(Named<FindingId>),
     Question(Named<QuestionId>),
+    /// One task's spec, named by the task it holds.
+    Spec(Named<TaskId>),
     /// A node of a workflow, for a rule about the graph the file
     /// declares.
     Node(Named<NodeId>),
@@ -104,6 +106,7 @@ impl fmt::Display for Subject {
             }
             Subject::Finding(finding) => f.write_str(&finding.render("finding")),
             Subject::Question(question) => f.write_str(&question.render("question")),
+            Subject::Spec(spec) => f.write_str(&spec.render("spec of task")),
             Subject::Node(node) => f.write_str(&node.render("node")),
         }
     }

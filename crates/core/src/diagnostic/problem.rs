@@ -98,6 +98,18 @@ rule_codes! {
     ShapeUsedBeforeItsOwner => "shape-used-before-its-owner",
     /// A task says it changes a place its scope does not cover.
     ChangeOutsideScope => "change-outside-scope",
+    /// A second spec already names this task.
+    DuplicateSpec => "duplicate-spec",
+    /// A spec lists no test.
+    NoSpecTest => "no-spec-test",
+    /// A test does not say what passing it proves.
+    UnexplainedTest => "unexplained-test",
+    /// A test file's path leaves the repository, or reaches into `.git`.
+    TestFileEscapes => "test-file-escapes",
+    /// A second file of the document already has this path.
+    DuplicateTestFile => "duplicate-test-file",
+    /// A spec names a task the run's plan does not declare.
+    UnknownSpecTask => "unknown-spec-task",
     /// A criterion's command never answers where the engine runs
     /// criteria: it is not found, not executable, or never returns.
     CriterionCannotRun => "criterion-cannot-run",

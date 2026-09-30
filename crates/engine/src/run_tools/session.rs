@@ -159,6 +159,11 @@ pub(super) enum RunToolError {
     NotATaskSession { tool: &'static str },
     #[error("the criteria could not be run where the engine runs them: {detail}")]
     Handover { detail: String },
+    #[error("the run's plan could not be read")]
+    Plan {
+        #[source]
+        source: crate::artifacts::HeldError,
+    },
     #[error("the task's work could not be checked")]
     Check {
         #[source]

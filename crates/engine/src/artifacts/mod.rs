@@ -45,6 +45,55 @@ pub(crate) use ingest::{held_document, interpreted, verify_one};
 pub use integrity::{ArtifactFault, ArtifactIntegrity};
 pub use store::ObjectError;
 
+/// Why a document the run holds could not be read back: its bytes, or
+/// what they say.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum HeldError {
+    #[error(transparent)]
+    Object(#[from] ObjectError),
+    #[error("{0}")]
+    Unreadable(#[from] yunta_core::diagnostic::Report),
+}
+
+impl From<HeldError> for crate::run::RunError {
+    fn from(error: HeldError) -> Self {
+        match error {
+            HeldError::Object(source) => Self::Object(source),
+            HeldError::Unreadable(report) => Self::UnreadableArtifact(report),
+        }
+    }
+}
+
+/// A document the run holds, read into its type, and how a reader
+/// names it: where its view sits, which is the file a person opens.
+pub(crate) struct Held<T> {
+    pub document: T,
+    pub describe: String,
+}
+
+/// The document of `T`'s kind the run accepted last, whoever produced
+/// it, read out of the object store through the same door a close reads
+/// it through — so one that stopped being readable is reported as the
+/// document it is, with every problem named.
+///
+/// The log is the answer, so a reader long after its producer finds the
+/// document whatever became of the `artifacts/` view. `None` when the
+/// run holds none: no node produced one, no input named one, and nothing
+/// was handed over.
+pub(crate) async fn latest<T: yunta_core::shape::Document>(
+    run_dir: &Path,
+    events: &[StoredEvent],
+) -> Result<Option<Held<T>>, HeldError> {
+    let held = RunArtifacts::of(run_dir, events);
+    let Some(last) = held.ledger().of_kind(T::KIND).last().cloned() else {
+        return Ok(None);
+    };
+    let bytes = held.bytes(&last).await?;
+    let describe = describe(&last);
+    let document = yunta_core::shape::read::<T>(&bytes, describe.clone())?;
+    Ok(Some(Held { document, describe }))
+}
+
 /// Why an artifact the run acquired did not become a fact of the run.
 #[derive(Debug, thiserror::Error)]
 pub enum AcceptError {

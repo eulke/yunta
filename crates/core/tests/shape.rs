@@ -41,6 +41,7 @@ fn the_published_questions_shape_is_a_questions_file_this_parser_accepts() {
 #[test]
 fn every_published_shape_carries_its_own_top_level_key() {
     assert!(<TasksFile as Document>::EXAMPLE.contains("tasks:"));
+    assert!(<yunta_core::SpecFile as Document>::EXAMPLE.contains("specs:"));
     assert!(<FindingsFile as Document>::EXAMPLE.contains("findings:"));
     assert!(<QuestionsFile as Document>::EXAMPLE.contains("questions:"));
 }

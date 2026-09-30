@@ -191,7 +191,7 @@ The tasks document `tasks.yaml` was not accepted. Fix these and submit again:
   2. task `graph-cmd`: `depends_on` names `t9`, which no task in this file declares
 ```
 
-This is the engine answering `yunta_submit_tasks`, `yunta_submit_questions`,
+This is the engine answering `yunta_submit_tasks`, `yunta_submit_spec`, `yunta_submit_questions`,
 `yunta_post_finding`, `yunta_update_finding` or `yunta_withdraw_finding` inside the
 session, with the verdict the node's close reaches. It is not a failure: the
 session reads the numbered list, fixes exactly those problems, and calls the tool

@@ -317,7 +317,8 @@
         "tasks",
         "findings",
         "questions",
-        "answers"
+        "answers",
+        "spec"
       ]
     },
     "ArtifactOrigin": {
@@ -1240,6 +1241,20 @@
                 }
               },
               "$ref": "#/$defs/Named3",
+              "required": [
+                "of"
+              ]
+            },
+            {
+              "description": "One task's spec, named by the task it holds.",
+              "type": "object",
+              "properties": {
+                "of": {
+                  "type": "string",
+                  "const": "spec"
+                }
+              },
+              "$ref": "#/$defs/Named",
               "required": [
                 "of"
               ]
@@ -3280,6 +3295,36 @@
           "const": "change-outside-scope"
         },
         {
+          "description": "A second spec already names this task.",
+          "type": "string",
+          "const": "duplicate-spec"
+        },
+        {
+          "description": "A spec lists no test.",
+          "type": "string",
+          "const": "no-spec-test"
+        },
+        {
+          "description": "A test does not say what passing it proves.",
+          "type": "string",
+          "const": "unexplained-test"
+        },
+        {
+          "description": "A test file's path leaves the repository, or reaches into `.git`.",
+          "type": "string",
+          "const": "test-file-escapes"
+        },
+        {
+          "description": "A second file of the document already has this path.",
+          "type": "string",
+          "const": "duplicate-test-file"
+        },
+        {
+          "description": "A spec names a task the run's plan does not declare.",
+          "type": "string",
+          "const": "unknown-spec-task"
+        },
+        {
           "description": "A criterion's command never answers where the engine runs\ncriteria: it is not found, not executable, or never returns.",
           "type": "string",
           "const": "criterion-cannot-run"
@@ -3524,6 +3569,7 @@
         "yunta_update_finding",
         "yunta_withdraw_finding",
         "yunta_submit_tasks",
+        "yunta_submit_spec",
         "yunta_submit_questions",
         "yunta_task_status",
         "yunta_task",

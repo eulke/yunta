@@ -218,7 +218,8 @@ The rules a document can break, which is that closed set: `duplicate-id`,
 `unknown-dependency`, `dependency-cycle`, `overlapping-scope`, `duplicate-shape`,
 `duplicate-decision`, `unknown-shape-owner`, `shape-outside-owner-scope`,
 `unknown-shape`, `shape-used-before-its-owner`, `change-outside-scope`,
-`criterion-cannot-run`, `criterion-already-passes`, `guard-already-red`, `no-summary`,
+`duplicate-spec`, `no-spec-test`, `unexplained-test`, `test-file-escapes`,
+`duplicate-test-file`, `unknown-spec-task`, `criterion-cannot-run`, `criterion-already-passes`, `guard-already-red`, `no-summary`,
 `no-description`, `unexplained-criterion`, `no-outcome`, `no-changes`,
 `unexplained-decision`, `empty-text`,
 `empty-detail`, `unknown-id`, `withdrawn-id`, `empty-reason`, `missing-values`,
@@ -454,7 +455,7 @@ The `document_shape` tool refuses an unknown kind with the same sentence
 A run tool that refuses something a session offered opens with what was not accepted
 and which call to make again, then lists the problems numbered from 1, one per
 paragraph. The heading names the document by the noun of its kind — `tasks document`,
-`findings artifact`, `questions artifact`:
+`spec document`, `findings artifact`, `questions artifact`:
 
 ```
 The tasks document `tasks.yaml` was not accepted. Fix these and submit again:
@@ -496,9 +497,9 @@ empty: a blank line under the heading, an empty block that shows it is empty.
 ## The schemas as files
 
 `crates/core/schemas/` holds `workflow.json`, `config.json`, `pack.json`,
-`tasks.json`, `findings.json`, `questions.json`, `answers.json`,
+`tasks.json`, `spec.json`, `findings.json`, `questions.json`, `answers.json`,
 `withdrawal.json` and `events.json`: the JSON Schema (draft 2020-12) of a
-workflow file, a config layer, a pack manifest, the four artifacts the engine
+workflow file, a config layer, a pack manifest, the five artifacts the engine
 interprets, the withdrawal that retires a finding, and one event of the log —
 the shape of a line of `events.jsonl`. They are generated from the types that
 read those documents: `cargo xtask schema` writes them and CI fails when a

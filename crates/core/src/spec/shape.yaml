@@ -1,0 +1,26 @@
+# The tests a plan's tasks are held to, written before any task is built.
+# Each task gets the files its tests live in, whole, and the commands that
+# run them: the engine writes the files into the tree the task's work
+# starts from, denies that work any change to them, and adds the commands
+# to the task's criteria. Written strictly — any key not listed here fails
+# the node.
+
+specs:                                  # required
+  - task: add-dark-mode                 # required: a task of the run's plan,
+                                        #   given one spec
+    files:                              # the files its tests live in
+      - path: tests/theme.sh            # required: relative, inside the
+                                        #   repository and outside `.git`,
+                                        #   and named once in the document
+        content: |                      # required: the file, whole
+          #!/bin/sh
+          # A new user starts in light; the switch turns dark on.
+          ./app theme | grep -qx light &&
+            ./app theme --set dark &&
+            ./app theme | grep -qx dark
+    tests:                              # required, at least one
+      - cmd: "sh tests/theme.sh"        # required: fails before the work and
+                                        #   passes once it is done
+        proves: "a new user starts in light, and the switch turns dark on"
+                                        # required: in words a person
+                                        #   approving the plan reads
