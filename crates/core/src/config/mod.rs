@@ -19,10 +19,11 @@ mod permissions;
 mod sections;
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AdapterId, CommandName, McpServerName, RunnerName};
+use crate::ids::{AdapterId, CommandName, McpServerName, RunnerName, SharedDirVar};
 use crate::workflow::OnInterrupt;
 use env::expand_path;
 use merge::merge;
@@ -72,6 +73,12 @@ pub struct ConfigLayer {
     /// lint" and the project says which tool that is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commands: Option<BTreeMap<CommandName, String>>,
+    /// `shared_dirs:` — `{VARIABLE: directory}`, directories every
+    /// command and every session of a run shares: each is exported under
+    /// its variable and stays writable inside every session's sandbox,
+    /// so a build cache outlives the checkout each task works in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared_dirs: Option<BTreeMap<SharedDirVar, PathBuf>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<BaselineConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -108,6 +115,14 @@ impl ConfigLayer {
             .map_or(&[], |paths| paths.deny.as_slice())
     }
 
+    /// Every shared directory, and the variable it is exported under.
+    pub fn shared_dirs(&self) -> impl Iterator<Item = (&SharedDirVar, &std::path::Path)> {
+        self.shared_dirs
+            .iter()
+            .flatten()
+            .map(|(var, dir)| (var, dir.as_path()))
+    }
+
     /// The text of the project's command `name`, if it declares one.
     pub fn command(&self, name: &CommandName) -> Option<&str> {
         self.commands.as_ref()?.get(name).map(String::as_str)
@@ -115,9 +130,10 @@ impl ConfigLayer {
 
     /// Expands a leading `~` in every path this layer declares —
     /// `adapters.<id>.binary`, `storage.path`, `paths.runs`,
-    /// `paths.worktrees`, `skills.paths[]` — against `home`, so no
-    /// consumer ever sees a literal `~`. `home: None` makes any such path
-    /// an error naming the field.
+    /// `paths.worktrees`, `skills.paths[]`, `shared_dirs.<VAR>` — against
+    /// `home`, so no consumer ever sees a literal `~`. `home: None` makes
+    /// any such path an error naming the field, and a shared directory
+    /// left relative is one too.
     pub fn expand_home(
         &mut self,
         home: Option<&std::path::Path>,
@@ -135,6 +151,16 @@ impl ConfigLayer {
             .and_then(|storage| storage.path.as_mut())
         {
             expand_path(path, home, "storage.path")?;
+        }
+        for (var, dir) in self.shared_dirs.iter_mut().flatten() {
+            let field = format!("shared_dirs.{var}");
+            expand_path(dir, home, &field)?;
+            if dir.is_relative() {
+                return Err(HomeExpansionError::Relative {
+                    field,
+                    path: dir.display().to_string(),
+                });
+            }
         }
         if let Some(paths) = &mut self.paths {
             if let Some(runs) = &mut paths.runs {

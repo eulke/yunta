@@ -252,6 +252,7 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
             state: view.state,
         })));
     }
+    share_dirs(&ctx.manifest.config).await?;
     if view.state.woken() {
         // An invocation already worked on this run — this one is a
         // resume. A birth writes as many events as the run was born
@@ -351,6 +352,7 @@ fn build_ctx(
     // cycle and by every check a task session asks for through the host.
     let memo = std::sync::Arc::new(Memo::new(manifest.config_hash.clone()));
     let registry_for_host = registry.clone();
+    let subprocess_vars = subprocess_vars(ambient, &manifest.config);
     let ctx = RunCtx {
         fence_hook,
         run_id,
@@ -370,6 +372,7 @@ fn build_ctx(
         forge,
         depth,
         ambient,
+        subprocess_vars: subprocess_vars.clone().into(),
         secrets,
         redactor: redactor.clone(),
         observer,
@@ -395,15 +398,45 @@ fn build_ctx(
                 redactor,
                 memo,
                 process_registry: registry_for_host,
-                subprocess_vars: ambient
-                    .map(|ambient| ambient.subprocess_vars.clone())
-                    .unwrap_or_default(),
+                subprocess_vars,
                 environment: crate::process::execution_environment(ambient),
                 worktree: worktree.to_path_buf(),
             },
         )),
     };
     (ctx, root_cancel, registry_error)
+}
+
+/// Every variable layered onto a subprocess of the run: the ambient
+/// ones a caller injects, then each shared directory under its variable.
+fn subprocess_vars(
+    ambient: Option<&yunta_core::Env>,
+    config: &yunta_core::ConfigLayer,
+) -> Vec<(String, String)> {
+    let mut vars = ambient
+        .map(|ambient| ambient.subprocess_vars.clone())
+        .unwrap_or_default();
+    vars.extend(
+        config
+            .shared_dirs()
+            .map(|(var, dir)| (var.to_string(), dir.display().to_string())),
+    );
+    vars
+}
+
+/// Makes every shared directory exist before anything is asked to write
+/// in it: a session's sandbox keeps a directory writable, it does not
+/// create one.
+async fn share_dirs(config: &yunta_core::ConfigLayer) -> Result<(), RunError> {
+    for (_, dir) in config.shared_dirs() {
+        tokio::fs::create_dir_all(dir)
+            .await
+            .map_err(|source| RunError::Io {
+                context: format!("create the shared directory `{}`", dir.display()),
+                source,
+            })?;
+    }
+    Ok(())
 }
 
 pub(super) fn find_node<'a>(

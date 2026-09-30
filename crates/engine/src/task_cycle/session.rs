@@ -26,6 +26,9 @@ pub struct SessionSetup {
     /// What the project denies to every run: every session's fence
     /// refuses it, whatever its scope.
     pub denied: Vec<yunta_core::ScopeGlob>,
+    /// The directories every session of the run shares, which a session
+    /// that may write keeps writable beside its checkout.
+    pub shared_dirs: Vec<PathBuf>,
     pub skills: Vec<PathBuf>,
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
     pub env: std::collections::HashMap<String, yunta_core::Secret<String>>,
@@ -132,6 +135,7 @@ impl SessionSetup {
     ) -> Self {
         Self {
             denied: Vec::new(),
+            shared_dirs: Vec::new(),
             skills: Vec::new(),
             adapter_settings: serde_json::Map::new(),
             env: std::collections::HashMap::new(),
@@ -146,22 +150,25 @@ impl SessionSetup {
         }
     }
 
-    /// The env a session may see: the names the config declares, bound
-    /// to whatever `source` has for them. A name nothing binds simply
-    /// does not reach the session — a secret the run cannot produce is
+    /// The env a session may see: each shared directory under its
+    /// variable, and the secret names the config declares, bound to
+    /// whatever `source` has for them. A name nothing binds simply does
+    /// not reach the session — a secret the run cannot produce is
     /// absent, never empty.
     pub fn secrets_env(
         config: &yunta_core::ConfigLayer,
         source: Option<&dyn yunta_core::SecretSource>,
     ) -> std::collections::HashMap<String, yunta_core::Secret<String>> {
-        let Some(source) = source else {
-            return std::collections::HashMap::new();
-        };
-        config
-            .secrets
-            .iter()
-            .filter_map(|name| source.get(name).map(|value| (name.clone(), value)))
-            .collect()
+        let shared = config
+            .shared_dirs()
+            .map(|(var, dir)| (var.to_string(), dir.display().to_string().into()));
+        let secrets = source.into_iter().flat_map(|source| {
+            config
+                .secrets
+                .iter()
+                .filter_map(|name| source.get(name).map(|value| (name.clone(), value)))
+        });
+        shared.chain(secrets).collect()
     }
 }
 

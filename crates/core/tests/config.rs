@@ -778,6 +778,60 @@ fn another_users_home_is_refused_naming_the_field() {
     ));
 }
 
+// --- shared directories -------------------------------------------------------
+
+#[test]
+fn a_shared_directory_is_named_by_its_variable_and_expands_from_home() {
+    let mut layer: yunta_core::ConfigLayer = yunta_core::yaml::parse(
+        "shared_dirs:\n  CARGO_TARGET_DIR: ~/.cache/yunta/target\n  NPM_CONFIG_CACHE: /var/cache/npm\n",
+    )
+    .unwrap();
+    layer
+        .expand_home(Some(std::path::Path::new("/home/ana")))
+        .unwrap();
+    let shared: Vec<(&str, &std::path::Path)> = layer
+        .shared_dirs()
+        .map(|(var, dir)| (var.as_str(), dir))
+        .collect();
+    assert_eq!(
+        shared,
+        vec![
+            (
+                "CARGO_TARGET_DIR",
+                std::path::Path::new("/home/ana/.cache/yunta/target")
+            ),
+            ("NPM_CONFIG_CACHE", std::path::Path::new("/var/cache/npm")),
+        ]
+    );
+}
+
+#[test]
+fn a_shared_directory_left_relative_is_refused_naming_the_field() {
+    let mut layer: yunta_core::ConfigLayer =
+        yunta_core::yaml::parse("shared_dirs: { CARGO_TARGET_DIR: target }\n").unwrap();
+    let err = layer
+        .expand_home(Some(std::path::Path::new("/home/me")))
+        .unwrap_err();
+    assert!(matches!(
+        &err,
+        yunta_core::HomeExpansionError::Relative { field, .. }
+            if field == "shared_dirs.CARGO_TARGET_DIR"
+    ));
+}
+
+#[test]
+fn a_shared_directory_is_exported_only_under_a_variable_name_other_than_path() {
+    for bad in ["PATH", "cargo_target_dir", "1DIR", "TARGET-DIR", ""] {
+        let parsed = yunta_core::yaml::parse::<yunta_core::ConfigLayer>(&format!(
+            "shared_dirs: {{ \"{bad}\": /tmp/x }}\n"
+        ));
+        assert!(
+            parsed.is_err(),
+            "{bad:?} is not a shared directory variable"
+        );
+    }
+}
+
 #[test]
 fn a_github_repo_is_owner_slash_name() {
     let repo: GitHubRepo = "octo/widgets".parse().unwrap();

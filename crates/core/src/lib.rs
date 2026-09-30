@@ -81,8 +81,8 @@ pub use id_source::{IdSource, SystemIdSource};
 pub use ids::{
     is_path_segment, AdapterId, AgentName, CommandName, ExecutorName, FindingId, GitHubRepo,
     InputName, InvalidId, McpServerName, ModeName, ModelName, NodeId, OptionId, PackName, PackRef,
-    Pid, Publisher, QuestionId, Responder, RunId, RunnerName, Seq, SessionId, SkillName, TaskId,
-    WorkflowName,
+    Pid, Publisher, QuestionId, Responder, RunId, RunnerName, Seq, SessionId, SharedDirVar,
+    SkillName, TaskId, WorkflowName,
 };
 pub use inputs::{InputSpec, InputSpecError};
 pub use manifest::{content_hash, FrozenPaths, Manifest, PackProvenance, RelativeRootError};

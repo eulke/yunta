@@ -50,6 +50,12 @@ pub(crate) async fn resolve_setup(
     let node_scope = super::node_scope::session_access(ctx, node).await?;
     Ok(Ok(SessionSetup {
         denied: ctx.manifest.config.denied_paths().to_vec(),
+        shared_dirs: ctx
+            .manifest
+            .config
+            .shared_dirs()
+            .map(|(_, dir)| dir.to_path_buf())
+            .collect(),
         skills,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         env: SessionSetup::secrets_env(&ctx.manifest.config, ctx.secrets.as_deref()),
@@ -329,14 +335,19 @@ fn fence(
     } else {
         Advice::ReportFinding
     };
-    Fence::for_session(
+    let fence = Fence::for_session(
         plan.profile,
         held_to.scope(),
         &[],
         setup.artifact_dir.as_deref(),
         advice,
     )
-    .denying(&setup.denied)
+    .denying(&setup.denied);
+    // A session that writes nothing keeps nothing writable.
+    match plan.profile {
+        yunta_core::port::PermissionProfile::ReadOnly => fence,
+        _ => fence.sharing(&setup.shared_dirs),
+    }
 }
 
 /// What one session's work is held to: a loop's task, the node's own

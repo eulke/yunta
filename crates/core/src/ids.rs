@@ -54,6 +54,31 @@ const fn is_name(bytes: &[u8]) -> bool {
     true
 }
 
+const SHARED_DIR_VAR_RULE: &str =
+    "an uppercase letter or `_` followed by uppercase letters, digits or `_`, and not `PATH`";
+
+/// A variable a shared directory is exported under: shaped like an
+/// environment variable, and never `PATH`, which lists directories
+/// rather than naming one.
+const fn is_shared_dir_var(bytes: &[u8]) -> bool {
+    if let [b'P', b'A', b'T', b'H'] = bytes {
+        return false;
+    }
+    let Some((first, mut rest)) = bytes.split_first() else {
+        return false;
+    };
+    if !(first.is_ascii_uppercase() || *first == b'_') {
+        return false;
+    }
+    while let Some((byte, tail)) = rest.split_first() {
+        if !(byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_') {
+            return false;
+        }
+        rest = tail;
+    }
+    true
+}
+
 /// A node id is a name, or a name plus `@` and the runner's name for a
 /// fan-out sibling the manifest expands `runners:` into.
 const NODE_RULE: &str =
@@ -407,6 +432,13 @@ string_id!(
     /// A command the project declares under `commands:` and a workflow
     /// runs by name: `^[A-Za-z][A-Za-z0-9_-]*$`.
     CommandName, what = "command name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// The variable a directory under `shared_dirs:` is exported under,
+    /// to every command and session of a run:
+    /// `^[A-Z_][A-Z0-9_]*$`, and not `PATH`.
+    SharedDirVar, what = "shared directory variable", rule = SHARED_DIR_VAR_RULE, check = is_shared_dir_var
 );
 
 string_id!(

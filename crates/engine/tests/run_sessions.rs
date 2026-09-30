@@ -1552,3 +1552,89 @@ async fn a_session_that_finished_its_turn_is_never_asked_how_it_exited() {
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(!bench.mock().interrogated());
 }
+
+// --- what every session and command of a run shares ------------------------
+
+/// A config whose one shared directory sits in the bench's world, beside
+/// the checkout and never inside it.
+fn sharing(bench: &Bench) -> (String, std::path::PathBuf) {
+    let dir = bench
+        .worktree
+        .parent()
+        .expect("the worktree sits in the bench's world")
+        .join("shared-cache");
+    let config = format!(
+        "{}shared_dirs:\n  SHARED_CACHE: {}\n",
+        yunta_testkit::MOCK_CONFIG,
+        dir.display()
+    );
+    (config, dir)
+}
+
+#[tokio::test]
+async fn a_command_of_the_run_finds_the_shared_directory_under_its_variable() {
+    let bench = Bench::new();
+    let (config, dir) = sharing(&bench);
+    let workflow = r#"
+name: shares
+nodes:
+  - id: build
+    kind: bash
+    run: "test -d \"$SHARED_CACHE\" && echo built > \"$SHARED_CACHE/built\""
+"#;
+
+    let RunReport { terminal, .. } = bench
+        .run_with_config(workflow, "sessions: []", &config)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        tokio::fs::read_to_string(dir.join("built")).await.unwrap(),
+        "built\n"
+    );
+}
+
+#[tokio::test]
+async fn a_session_that_writes_keeps_the_shared_directory_writable_and_one_that_reads_does_not() {
+    let bench = Bench::new();
+    let (config, dir) = sharing(&bench);
+    let workflow = r#"
+name: shares-with-sessions
+nodes:
+  - id: write
+    kind: prompt
+    runner: executor
+    prompt: "Write."
+  - id: read
+    kind: prompt
+    runner: executor
+    permissions: read-only
+    depends_on: [write]
+    prompt: "Read."
+"#;
+    let fixture = "\
+sessions:
+  - match_prompt_contains: \"Write.\"
+    outcome: { type: completed, summary: wrote }
+  - match_prompt_contains: \"Read.\"
+    outcome: { type: completed, summary: read }
+";
+
+    let RunReport { terminal, .. } = bench.run_with_config(workflow, fixture, &config).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let requests = bench.mock().requests_seen();
+    let (write, read) = (&requests[0], &requests[1]);
+    for request in [write, read] {
+        assert_eq!(
+            request
+                .env
+                .get("SHARED_CACHE")
+                .map(|value| value.expose().as_str()),
+            Some(dir.display().to_string().as_str()),
+            "every session finds the directory under its variable"
+        );
+    }
+    assert!(write.fence.roots.contains(&dir), "{:?}", write.fence.roots);
+    assert!(!read.fence.roots.contains(&dir), "{:?}", read.fence.roots);
+}

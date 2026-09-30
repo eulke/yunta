@@ -557,9 +557,9 @@ declaration. A suite that was already red when measured holds no task to it.
 
 The price is the suite's duration per check. Each task works in its own checkout,
 so a build tool that keeps its output inside the tree builds from scratch there
-once per task; pointing it at a shared directory (for Cargo, `CARGO_TARGET_DIR`)
-keeps later builds warm. A `baseline_compare` node at the workflow's close still
-earns its place: it covers what nodes after the loop change.
+once per task; a shared directory (below) keeps later builds warm. A
+`baseline_compare` node at the workflow's close still earns its place: it covers
+what nodes after the loop change.
 
 A criterion runs under `sh` with the run's own `PATH`, not in the shell of the
 agent that wrote it — an agent's CLI can put tools on its own `PATH` (a bundled
@@ -585,24 +585,25 @@ Isolation-by-worktree (the engine's default) means every run — and, under
 `git worktree`. For compiled languages this makes tree preparation the dominant cost
 of wall-clock: a cold build in every worktree, every time.
 
-The fix is a cache shared across worktrees, not skipping isolation. `yunta init`
-detects the ecosystem and can propose a starting point; the general shape for any
-build tool with a configurable output/cache directory is a `hooks.before` step that
-points the worktree at a cache location outside it:
+The fix is a cache shared across worktrees, not skipping isolation. `shared_dirs:`
+names directories every command and every session of a run shares, each under the
+variable it is exported as:
 
 ```yaml
-node_defaults:
-  hooks:
-    before:
-      - run: "mkdir -p ~/.yunta/build-cache/{{project.name}}/target && ln -sfn ~/.yunta/build-cache/{{project.name}}/target target"
+shared_dirs:
+  CARGO_TARGET_DIR: ~/.cache/yunta/target/my-project
 ```
 
-The cache directory lives outside any single worktree (so it survives worktree
-cleanup) but stays scoped to the project (so two projects' builds never collide).
-The same shape works for a package manager's own cache (`node_modules`, Cargo's
-registry cache, pip's wheel cache) wherever the tool supports pointing at an external
-location — link it in a `before` hook, and every worktree that follows sees a warm
-cache instead of starting cold.
+Every command the run spawns — bash nodes, hooks, criteria, the suite — sees the
+variable, and so does every agent session. The engine creates the directory when the
+run wakes, and every session that may write keeps it writable inside its sandbox, so
+the build an agent runs and the one the engine checks it with land in the same
+cache. A read-only session is given nothing to write. The path is written in full or
+from `~`, never relative to a checkout, and the variable is never `PATH`.
+
+The same shape works for any tool that reads its output or cache directory from a
+variable, such as pip's `PIP_CACHE_DIR` or Go's `GOCACHE`. Keep the directory
+scoped to the project, so two projects' builds never collide.
 
 ## Packs
 

@@ -51,6 +51,9 @@ commands:
   lint: "cargo clippy --workspace -- -D warnings"
   fmt: "cargo fmt"
 
+shared_dirs:
+  CARGO_TARGET_DIR: ~/.cache/yunta/target/mi-proyecto
+
 baseline:
   suite: "make test"
 coverage:

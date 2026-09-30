@@ -81,8 +81,11 @@ pub(crate) struct RunCtx<'a> {
     pub run_tools_host: Arc<crate::run_tools::RunToolsHost>,
     /// The ambient environment this run executes in, injected by the
     /// caller: the user state root the user knowledge layer resolves
-    /// against, and the variables layered onto every subprocess.
+    /// against, and the variables a caller layers onto every subprocess.
     pub ambient: Option<&'a yunta_core::Env>,
+    /// Every variable layered onto a subprocess of this run: the
+    /// ambient ones, then each shared directory under its variable.
+    pub(crate) subprocess_vars: Arc<[(String, String)]>,
     /// Where a declared secret's value comes from. `None` reaches no
     /// secret at all, which is what a run declaring none needs.
     pub secrets: Option<std::sync::Arc<dyn yunta_core::SecretSource>>,
@@ -171,6 +174,7 @@ impl<'a> RunCtx<'a> {
             depth: self.depth,
             run_tools_host: self.run_tools_host.clone(),
             ambient: self.ambient,
+            subprocess_vars: self.subprocess_vars.clone(),
             secrets: self.secrets.clone(),
             redactor: self.redactor.clone(),
             observer: self.observer.clone(),
@@ -194,10 +198,7 @@ impl<'a> RunCtx<'a> {
         crate::process::Supervision {
             registry: self.process_registry.as_deref(),
             cancel,
-            env: self
-                .ambient
-                .map(|ambient| ambient.subprocess_vars.as_slice())
-                .unwrap_or(&[]),
+            env: &self.subprocess_vars,
             clock: self.clock.as_ref(),
         }
     }

@@ -175,6 +175,13 @@ impl Fence {
         }
     }
 
+    /// The same fence, keeping `dirs` writable beside the checkout as
+    /// well — the directories every session of a run shares.
+    pub fn sharing(mut self, dirs: &[PathBuf]) -> Self {
+        self.roots.extend(dirs.iter().cloned());
+        self
+    }
+
     /// The same fence, refusing `denied` whatever it otherwise admits.
     pub fn denying(self, denied: &[ScopeGlob]) -> Self {
         Fence {

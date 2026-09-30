@@ -40,6 +40,12 @@ pub(super) fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLaye
         // Per-command: a repo naming its own `lint` keeps the `test` a
         // user or org layer declared.
         commands: merge_maps(base.commands, more_specific.commands, |_base, more| more),
+        // Per-variable, same as `commands`.
+        shared_dirs: merge_maps(
+            base.shared_dirs,
+            more_specific.shared_dirs,
+            |_base, more| more,
+        ),
         // Whole-group replace, same as `baseline`/`coverage`: one forge
         // per repo in practice, nothing internal to merge field-by-field.
         forge: more_specific.forge.or(base.forge),

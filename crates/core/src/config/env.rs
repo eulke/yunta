@@ -88,6 +88,11 @@ pub enum HomeExpansionError {
         "`{field}` is `{path}` — only `~` and `~/...` expand; write another user's home in full"
     )]
     OtherUser { field: String, path: String },
+    #[error(
+        "`{field}` is `{path}` — a shared directory is shared by every checkout of a run, so \
+         it is written in full or from `~`, never relative to one of them"
+    )]
+    Relative { field: String, path: String },
 }
 
 #[cfg(test)]
