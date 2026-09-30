@@ -55,38 +55,7 @@ impl SessionTools {
     pub(super) async fn task(&self) -> Result<String, RunToolError> {
         let access = self.task_access(RunTool::Task)?;
         let events = self.events().await?;
-        let task = &access.task;
-        let sheet = TaskSheet {
-            id: &task.id,
-            title: &task.title,
-            notes: task
-                .notes
-                .as_deref()
-                .map(str::trim)
-                .filter(|n| !n.is_empty()),
-            description: task
-                .description
-                .as_deref()
-                .map(str::trim)
-                .filter(|d| !d.is_empty()),
-            depends_on: &task.depends_on,
-            scope: &access.scope,
-            criteria: task
-                .criteria
-                .iter()
-                .map(|criterion| Declared {
-                    cmd: &criterion.cmd,
-                    guard: criterion.r#type == Some(CriterionType::Guard),
-                    proves: criterion.proves.as_deref(),
-                })
-                .collect(),
-            cycles: cycles_of(&events, &task.id),
-            runs_under: None,
-            plan: access
-                .plan
-                .as_deref()
-                .map(|plan| PlanSheet::of(plan, &task.id)),
-        };
+        let sheet = TaskSheet::of(access, cycles_of(&events, &access.task.id));
         let any_unrunnable = sheet
             .cycles
             .iter()
@@ -195,6 +164,18 @@ struct TaskSheet<'a> {
     description: Option<&'a str>,
     #[serde(skip_serializing_if = "<[TaskId]>::is_empty")]
     depends_on: &'a [TaskId],
+    /// What the task changes, place by place, as the plan says.
+    #[serde(skip_serializing_if = "<[yunta_core::Change]>::is_empty")]
+    changes: &'a [yunta_core::Change],
+    /// What a person will see once the task is done.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome: Option<&'a str>,
+    /// The plan's shapes this task builds on without owning them.
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    uses: &'a [String],
+    /// What the code it touches already promises, which it keeps.
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    invariants: &'a [String],
     /// What the diff is held to: declared plus granted.
     scope: &'a [ScopeGlob],
     criteria: Vec<Declared<'a>>,
@@ -206,6 +187,47 @@ struct TaskSheet<'a> {
     /// The plan this task belongs to, when a loop is working one.
     #[serde(skip_serializing_if = "Option::is_none")]
     plan: Option<PlanSheet<'a>>,
+}
+
+impl<'a> TaskSheet<'a> {
+    /// The task `access` holds, and every cycle of it the log carries.
+    fn of(access: &'a TaskAccess, cycles: Vec<Cycle>) -> Self {
+        let task = &access.task;
+        TaskSheet {
+            id: &task.id,
+            title: &task.title,
+            notes: said(&task.notes),
+            description: said(&task.description),
+            depends_on: &task.depends_on,
+            changes: &task.changes,
+            outcome: said(&task.outcome),
+            uses: &task.uses,
+            invariants: &task.invariants,
+            scope: &access.scope,
+            criteria: task
+                .criteria
+                .iter()
+                .map(|criterion| Declared {
+                    cmd: &criterion.cmd,
+                    guard: criterion.r#type == Some(CriterionType::Guard),
+                    proves: criterion.proves.as_deref(),
+                })
+                .collect(),
+            cycles,
+            runs_under: None,
+            plan: access
+                .plan
+                .as_deref()
+                .map(|plan| PlanSheet::of(plan, &task.id)),
+        }
+    }
+}
+
+/// Text that says something, trimmed.
+fn said(text: &Option<String>) -> Option<&str> {
+    text.as_deref()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
 }
 
 /// The plan a task belongs to, as far as its session needs it: what the
@@ -220,6 +242,11 @@ struct PlanSheet<'a> {
     description: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     design: Option<&'a str>,
+    #[serde(skip_serializing_if = "<[yunta_core::Decision]>::is_empty")]
+    decisions: &'a [yunta_core::Decision],
+    /// Each shape, with the task that builds it and the file it lives in.
+    #[serde(skip_serializing_if = "<[yunta_core::Shape]>::is_empty")]
+    shapes: &'a [yunta_core::Shape],
     #[serde(skip_serializing_if = "<[String]>::is_empty")]
     risks: &'a [String],
     #[serde(skip_serializing_if = "<[String]>::is_empty")]
@@ -241,15 +268,12 @@ struct OtherTask<'a> {
 impl<'a> PlanSheet<'a> {
     /// `plan` as the session working `task` reads it.
     fn of(plan: &'a yunta_core::TasksFile, task: &TaskId) -> Self {
-        let said = |text: &'a Option<String>| {
-            text.as_deref()
-                .map(str::trim)
-                .filter(|text| !text.is_empty())
-        };
         PlanSheet {
             summary: said(&plan.summary),
             description: said(&plan.description),
             design: said(&plan.design),
+            decisions: &plan.decisions,
+            shapes: &plan.shapes,
             risks: &plan.risks,
             out_of_scope: &plan.out_of_scope,
             other_tasks: plan

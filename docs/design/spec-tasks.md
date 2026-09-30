@@ -38,7 +38,11 @@ ejecuta, así que lo que una persona aprueba es lo que corre (D195).
 | `criteria` | lista de objetos, ≥1 | sí | ver la tabla de `criteria[]` más abajo |
 | `depends_on` | lista de ids | no | default vacío |
 | `notes` | string | no | contexto mínimo para un runner sin historial |
-| `description` | Markdown | no; sí cuando un gate muestra el plan (§3.1) | qué hace la tarea y por qué, para quien revisa el plan; nombra las formas del `design` que toca en vez de repetirlas. `yunta_task` se la devuelve a la sesión que la implementa |
+| `description` | Markdown | no; sí cuando un gate muestra el plan (§3.1) | qué hace la tarea y por qué, para quien revisa el plan; nombra las `shapes` que toca en vez de repetirlas. `yunta_task` se la devuelve a la sesión que la implementa |
+| `changes` | lista de `{at, what}` | no; sí cuando un gate muestra el plan (§3.1) | cada lugar que la tarea cambia —un archivo, o un archivo y qué dentro de él (`src/theme.rs::Theme`)— y qué cambia ahí; cada uno dentro de su `scope` (`change-outside-scope`) |
+| `outcome` | string | no; sí cuando un gate muestra el plan (§3.1) | qué va a observar una persona cuando la tarea esté hecha |
+| `uses` | lista de nombres de `shapes` | no | las formas que la tarea usa sin construirlas; espera a la tarea dueña de cada una (`shape-used-before-its-owner`) |
+| `invariants` | lista de strings | no | lo que el código que toca ya promete y la tarea mantiene |
 
 ### 2.1 `criteria[]`
 
@@ -62,7 +66,9 @@ declaración.
 |---|---|---|---|
 | `summary` | string | no; sí cuando un gate muestra el plan (§3.1) | qué cambia el plan, en una línea |
 | `description` | Markdown | no; sí cuando un gate muestra el plan (§3.1) | qué cambia, por qué y cómo se encara. Admite bloques de código —un ejemplo, cómo interactúan las piezas— y bloques `mermaid` para diagramas |
-| `design` | Markdown | no | las formas que el plan crea o modifica —tipos, interfaces, schemas, firmas, formatos— como bloques de código, cada una declarada una sola vez para todas las tareas que la tocan |
+| `decisions` | lista de `{id, question, choice, alternatives?, why?}` | no; `why` sí cuando un gate muestra el plan (§3.1) | cada punto que el brief dejó abierto, cerrado acá y no por quien implementa: qué estaba abierto, qué se eligió, qué no, y por qué |
+| `shapes` | lista de `{name, owner, file, code}` | no | cada forma que el plan crea o modifica —tipo, interfaz, schema, firma, formato— declarada una sola vez, entera, en el archivo donde vive, por la única tarea que la construye; el `scope` de esa tarea cubre el archivo (`shape-outside-owner-scope`) |
+| `design` | Markdown | no | cómo encajan las partes, en prosa y ejemplos, alrededor de las `shapes` |
 | `risks` | lista de strings | no | — |
 | `out_of_scope` | lista de strings | no | — |
 
@@ -75,7 +81,7 @@ gate que muestra el plan señala para leerlo entero.
 
 ## 3. Validación al registrar
 
-Ocho reglas, cada una con su código estable: el mismo con el que el engine la
+Quince reglas, cada una con su código estable: el mismo con el que el engine la
 publica junto a la forma del documento, con el que la nombra el diagnóstico cuando
 se rompe y con el que un reporte la cuenta. El engine rechaza el documento
 completo — y falla el nodo que lo produjo — si alguna no se cumple:
@@ -94,11 +100,24 @@ completo — y falla el nodo que lo produjo — si alguna no se cumple:
 8. `overlapping-scope` — dos tareas sin dependencia entre sí declaran scopes
    disjuntos; un solapamiento impide correrlas en paralelo y vuelve ambiguo el
    diff, así que o se separan los scopes o se declara la dependencia.
+9. `duplicate-shape` — cada forma de `shapes` se declara una sola vez.
+10. `duplicate-decision` — cada decisión tiene un `id` propio.
+11. `unknown-shape-owner` — el `owner` de una forma es una tarea que este documento
+    declara.
+12. `shape-outside-owner-scope` — el `file` de una forma cae dentro del `scope` de
+    su dueña: la tarea que construye una forma puede escribir su archivo.
+13. `unknown-shape` — `uses` nombra solo formas que `shapes` declara.
+14. `shape-used-before-its-owner` — una tarea que usa una forma de otra tarea
+    espera a esa tarea, directamente o a través de otras.
+15. `change-outside-scope` — cada lugar que una tarea dice cambiar cae dentro de
+    su propio `scope`. Un plan que le pide a una tarea un cambio en un archivo que
+    solo otra puede escribir se rechaza al entregarse, no cuando la tarea ya
+    construyó otra cosa.
 
 Estas reglas corren como parte de la lectura del documento, no como un paso aparte
 que un llamador pueda saltear: quien obtiene un documento de tareas obtiene uno que las cumple.
 Y se publican antes de que el documento se escriba: la lista que las aplica es la
-misma que el contrato le entrega a la sesión, así que ninguna de las ocho llega
+misma que el contrato le entrega a la sesión, así que ninguna de las quince llega
 por primera vez como un fallo (D143).
 
 Lo que el engine **no** valida acá: que los comandos existan o sean correctos — eso
@@ -114,9 +133,13 @@ y al cerrar el nodo, si no cumple:
 - `no-summary` — `summary` dice qué cambia el plan, en una línea no vacía.
 - `no-description` — el plan y cada tarea llevan su `description`.
 - `unexplained-criterion` — cada criterio dice qué `proves`.
+- `no-outcome` — cada tarea dice qué se va a observar cuando esté hecha.
+- `no-changes` — cada tarea dice qué cambia, lugar por lugar.
+- `unexplained-decision` — cada decisión dice `why`.
 
-`design`, `risks` y `out_of_scope` no se exigen: un plan que solo toca documentación
-no crea formas, y uno puede no tener riesgos. Los pide el prompt de quien planifica.
+`decisions`, `shapes`, `design`, `risks` y `out_of_scope` no se exigen: un plan
+que solo toca documentación no crea formas ni tiene nada abierto, y uno puede no
+tener riesgos. Los pide el prompt de quien planifica.
 
 ## 4. Errores
 

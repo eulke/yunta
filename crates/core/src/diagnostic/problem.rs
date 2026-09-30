@@ -84,6 +84,20 @@ rule_codes! {
     DependencyCycle => "dependency-cycle",
     /// Two independent tasks reach for the same files.
     OverlappingScope => "overlapping-scope",
+    /// A second shape already carries this name.
+    DuplicateShape => "duplicate-shape",
+    /// A second decision already carries this id.
+    DuplicateDecision => "duplicate-decision",
+    /// A shape's `owner` names a task nobody declared.
+    UnknownShapeOwner => "unknown-shape-owner",
+    /// A shape lives in a file its owner's scope does not cover.
+    ShapeOutsideOwnerScope => "shape-outside-owner-scope",
+    /// A task `uses` a shape nobody declared.
+    UnknownShape => "unknown-shape",
+    /// A task uses a shape without waiting for the task that builds it.
+    ShapeUsedBeforeItsOwner => "shape-used-before-its-owner",
+    /// A task says it changes a place its scope does not cover.
+    ChangeOutsideScope => "change-outside-scope",
     /// A criterion's command never answers where the engine runs
     /// criteria: it is not found, not executable, or never returns.
     CriterionCannotRun => "criterion-cannot-run",
@@ -98,6 +112,14 @@ rule_codes! {
     NoDescription => "no-description",
     /// A criterion of a plan a person reviews does not say what it proves.
     UnexplainedCriterion => "unexplained-criterion",
+    /// A task of a plan a person reviews does not say what a person sees
+    /// once it is done.
+    NoOutcome => "no-outcome",
+    /// A task of a plan a person reviews does not say what it changes,
+    /// where.
+    NoChanges => "no-changes",
+    /// A decision of a plan a person reviews does not say why.
+    UnexplainedDecision => "unexplained-decision",
     EmptyText => "empty-text",
     EmptyDetail => "empty-detail",
     /// An update or a withdrawal names a finding this node never posted.

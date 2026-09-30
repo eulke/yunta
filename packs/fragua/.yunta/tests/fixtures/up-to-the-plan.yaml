@@ -30,6 +30,10 @@ sessions:
                 title: "Bootstrap the crate"
                 description: "Adds the manifest and an empty library."
                 scope: ["Cargo.toml", "src/**"]
+                changes:
+                  - { at: Cargo.toml, what: "the crate's manifest" }
+                  - { at: src/lib.rs, what: "an empty library" }
+                outcome: "The project builds as a library crate"
                 criteria:
                   - cmd: "test -f Cargo.toml"
                     proves: "the crate has a manifest"

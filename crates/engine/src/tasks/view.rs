@@ -76,8 +76,21 @@ impl<'a> PlanView<'a> {
         if let Some(description) = said(&file.description) {
             out.push_str(&format!("\n{description}\n"));
         }
+        out.push_str(&decisions(&file.decisions));
+        if said(&file.design).is_some() || !file.shapes.is_empty() {
+            out.push_str("\n## Design\n");
+        }
         if let Some(design) = said(&file.design) {
-            out.push_str(&format!("\n## Design\n\n{design}\n"));
+            out.push_str(&format!("\n{design}\n"));
+        }
+        for shape in &file.shapes {
+            out.push_str(&format!(
+                "\n### {} — built by {}, in `{}`\n\n```\n{}\n```\n",
+                shape.name,
+                shape.owner,
+                shape.file,
+                shape.code.trim_end()
+            ));
         }
         out.push_str(&self.at_a_glance());
         out.push_str(&listed("Risks", &file.risks));
@@ -162,12 +175,55 @@ fn step_of<'a>(
     at
 }
 
-/// One task: what it does and why, what it touches, what proves it done,
-/// and what it waits for.
+/// Every decision: what was open, what the plan chose and why, and what
+/// it did not choose.
+fn decisions(decisions: &[yunta_core::Decision]) -> String {
+    if decisions.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\n## Decisions\n\n");
+    for decision in decisions {
+        out.push_str(&format!("- **{}** {}", decision.question, decision.choice));
+        if let Some(why) = said(&decision.why) {
+            out.push_str(&format!(" — because {why}"));
+        }
+        if !decision.alternatives.is_empty() {
+            out.push_str(&format!(
+                " (rather than {})",
+                decision.alternatives.join("; ")
+            ));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// One task: what it does and why, what a person sees once it is done,
+/// what it changes and touches, what proves it done, and what it waits
+/// for.
 fn task_section(task: &Task) -> String {
     let mut out = format!("\n### {} — {}\n", task.id, task.title);
     if let Some(description) = said(&task.description) {
         out.push_str(&format!("\n{description}\n"));
+    }
+    if let Some(outcome) = said(&task.outcome) {
+        out.push_str(&format!("\n**You will see:** {outcome}\n"));
+    }
+    if !task.changes.is_empty() {
+        out.push_str("\n**Changes:**\n\n");
+        for change in &task.changes {
+            out.push_str(&format!("- `{}` — {}\n", change.at, change.what));
+        }
+    }
+    if !task.uses.is_empty() {
+        let uses: Vec<&str> = task.uses.iter().map(String::as_str).collect();
+        out.push_str(&format!("\n**Uses:** {}\n", code_list(&uses)));
+    }
+    if !task.invariants.is_empty() {
+        out.push_str("\n**Keeps:**\n\n");
+        for invariant in &task.invariants {
+            out.push_str(&format!("- {invariant}\n"));
+        }
     }
     let scope: Vec<&str> = task.scope.iter().map(|glob| glob.as_str()).collect();
     out.push_str(&format!("\n**Touches:** {}\n", code_list(&scope)));
@@ -222,4 +278,31 @@ fn code_list(items: &[&str]) -> String {
 /// end the cell escaped.
 fn cell(text: &str) -> String {
     yunta_core::text::one_line(text).replace('|', "\\|")
+}
+
+#[cfg(test)]
+mod tests {
+    use yunta_core::shape::Document;
+    use yunta_core::TasksFile;
+
+    use super::PlanView;
+
+    #[test]
+    fn the_whole_plan_says_its_decisions_its_shapes_and_what_each_task_changes() {
+        let example: TasksFile =
+            yunta_core::shape::read(TasksFile::EXAMPLE.as_bytes(), "example").unwrap();
+        let view = PlanView::of(&example).markdown();
+        for said in [
+            "## Decisions",
+            "- **Which theme does a new user start with?** Light — because Nothing changes",
+            "### Theme — built by add-dark-mode, in `src/theme/mod.rs`",
+            "**You will see:** The settings screen has a dark mode switch",
+            "- `src/theme/mod.rs::Theme` — the enum, and the setting that holds it",
+            "**Uses:** `Theme`",
+            "**Keeps:**",
+        ] {
+            assert!(view.contains(said), "`{said}` is missing from:\n{view}");
+        }
+        assert!(view.find("## Decisions") < view.find("## Design"));
+    }
 }

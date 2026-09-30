@@ -162,6 +162,10 @@ impl ToolsHost {
                     depends_on: Vec::new(),
                     notes: None,
                     description: None,
+                    changes: Vec::new(),
+                    outcome: None,
+                    uses: Vec::new(),
+                    invariants: Vec::new(),
                 },
                 Unit {
                     who: UnitId::Task(TaskId::from(id)),

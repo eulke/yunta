@@ -41,6 +41,10 @@ fn task(id: &str, scope: &[&str], criteria: Vec<Criterion>, depends_on: &[&str])
         depends_on: depends_on.iter().map(|&d| d.into()).collect(),
         notes: None,
         description: None,
+        changes: Vec::new(),
+        outcome: None,
+        uses: Vec::new(),
+        invariants: Vec::new(),
     }
 }
 
@@ -278,6 +282,8 @@ fn a_plan_a_person_reviews_names_every_piece_of_its_explanation_it_lacks() {
             "no-summary",
             "no-description",
             "no-description",
+            "no-outcome",
+            "no-changes",
             "unexplained-criterion",
             "unexplained-criterion"
         ],
@@ -296,6 +302,8 @@ tasks:
     title: "Write it"
     description: "Adds hello.txt."
     scope: [hello.txt]
+    changes: [{ at: hello.txt, what: "the greeting" }]
+    outcome: "Opening the project greets you"
     criteria: [{ cmd: "test -f hello.txt", proves: "the greeting exists" }]
 "#,
     )
@@ -303,7 +311,8 @@ tasks:
     assert_eq!(
         unexplained_codes(&tasks),
         Vec::<String>::new(),
-        "`design`, `risks` and `out_of_scope` are the prompt's to ask for"
+        "`design`, `decisions`, `shapes`, `risks` and `out_of_scope` are the prompt's to \
+         ask for"
     );
 }
 
@@ -312,4 +321,116 @@ fn the_published_example_is_a_plan_a_person_can_review() {
     let example: TasksFile =
         yunta_core::shape::read(TasksFile::EXAMPLE.as_bytes(), "example").unwrap();
     assert_eq!(unexplained_codes(&example), Vec::<String>::new());
+}
+
+// --- shapes, decisions and changes ------------------------------------------
+
+/// The codes `yaml` breaks, as `check` reports them.
+fn broken_codes(yaml: &str) -> Vec<String> {
+    let tasks: TasksFile = serde_norway::from_str(yaml).unwrap();
+    check(&tasks)
+        .iter()
+        .map(|diagnostic| match &diagnostic.problem {
+            yunta_core::diagnostic::Problem::Rule { code, .. } => code.to_string(),
+            other => panic!("a broken rule, got {other:?}"),
+        })
+        .collect()
+}
+
+/// A palette one task builds and another uses, the way the plan the
+/// rules exist for declared it.
+const PALETTE: &str = r#"
+shapes:
+  - name: ColorRole
+    owner: color-policy
+    file: crates/cli/src/render/color.rs
+    code: "pub enum ColorRole { Error, Warning, Success, Info }"
+tasks:
+  - id: color-policy
+    title: Add the palette
+    scope: [crates/cli/src/render/color.rs]
+    criteria: [{ cmd: "test -f crates/cli/src/render/color.rs" }]
+  - id: color-command-output
+    title: Color the reports
+    scope: ["crates/cli/src/commands/**"]
+    depends_on: [color-policy]
+    uses: [ColorRole]
+    criteria: [{ cmd: "test -f crates/cli/src/commands/colored" }]
+"#;
+
+#[test]
+fn a_shape_its_owner_builds_and_another_task_waits_for_breaks_nothing() {
+    assert_eq!(broken_codes(PALETTE), Vec::<String>::new());
+}
+
+#[test]
+fn a_change_in_a_file_the_task_may_not_touch_is_refused() {
+    // The report task needed a role the palette lacked, in a file only
+    // the palette's task may write: declared, it is refused at once.
+    let yaml = format!(
+        "{PALETTE}    changes:\n      - {{ at: \"crates/cli/src/render/color.rs::ColorRole\", what: \"add Success\" }}\n"
+    );
+    assert_eq!(broken_codes(&yaml), ["change-outside-scope"]);
+}
+
+#[test]
+fn a_task_that_uses_a_shape_without_waiting_for_its_owner_is_refused() {
+    let yaml = PALETTE.replace("    depends_on: [color-policy]\n", "");
+    assert!(
+        broken_codes(&yaml).contains(&"shape-used-before-its-owner".to_string()),
+        "{:?}",
+        broken_codes(&yaml)
+    );
+}
+
+#[test]
+fn a_shape_whose_owner_may_not_write_its_file_is_refused() {
+    let yaml = PALETTE.replace(
+        "file: crates/cli/src/render/color.rs",
+        "file: crates/cli/src/render/theme.rs",
+    );
+    assert_eq!(broken_codes(&yaml), ["shape-outside-owner-scope"]);
+}
+
+#[test]
+fn a_shape_owned_or_used_by_nobody_declared_is_refused() {
+    let unowned = PALETTE.replace("owner: color-policy", "owner: palette");
+    assert!(broken_codes(&unowned).contains(&"unknown-shape-owner".to_string()));
+    let unknown = PALETTE.replace("uses: [ColorRole]", "uses: [ColourRole]");
+    assert_eq!(broken_codes(&unknown), ["unknown-shape"]);
+}
+
+#[test]
+fn a_shape_or_a_decision_declared_twice_is_refused() {
+    let twice = PALETTE.replace(
+        "tasks:\n",
+        "  - name: ColorRole\n    owner: color-policy\n    file: crates/cli/src/render/color.rs\n    code: x\ntasks:\n",
+    );
+    assert_eq!(broken_codes(&twice), ["duplicate-shape"]);
+    let decided = format!(
+        "decisions:\n  - {{ id: palette, question: q, choice: a, why: w }}\n  - {{ id: palette, question: q, choice: b, why: w }}\n{PALETTE}"
+    );
+    assert_eq!(broken_codes(&decided), ["duplicate-decision"]);
+}
+
+#[test]
+fn a_decision_a_person_reviews_says_why() {
+    let tasks: TasksFile = serde_norway::from_str(
+        r#"
+summary: s
+description: d
+decisions:
+  - { id: palette, question: "Which colors?", choice: "The terminal's 16" }
+tasks:
+  - id: a
+    title: t
+    description: d
+    scope: [a.txt]
+    changes: [{ at: a.txt, what: w }]
+    outcome: o
+    criteria: [{ cmd: "test -f a.txt", proves: p }]
+"#,
+    )
+    .unwrap();
+    assert_eq!(unexplained_codes(&tasks), ["unexplained-decision"]);
 }

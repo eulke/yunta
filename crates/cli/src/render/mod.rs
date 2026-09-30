@@ -21,6 +21,7 @@ pub(crate) mod bars;
 pub(crate) mod escalation;
 pub(crate) mod glyphs;
 pub(crate) mod markdown;
+mod plan;
 pub(crate) mod shown;
 pub(crate) mod state;
 pub(crate) mod units;

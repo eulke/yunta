@@ -11,19 +11,10 @@
 //! drawn there.
 
 use yunta_core::events::ArtifactId;
-use yunta_core::{ScopeGlob, Task, TasksFile};
-use yunta_engine::{PlanView, ShownContent, ShownDocument};
+use yunta_engine::{ShownContent, ShownDocument};
 
-use crate::render::markdown::{hanging, markdown};
-use crate::render::{cell_width, INDENT};
-
-/// Where a section's body sits: one step under its heading, which is one
-/// step under the document's own.
-const BODY: &str = "    ";
-
-/// The column a task's facts are labelled in, wide enough for the
-/// longest label.
-const LABEL: usize = "keeps passing".len() + 1;
+use crate::render::markdown::markdown;
+use crate::render::INDENT;
 
 /// The lines `document` takes at `width` cells: a heading, what it says,
 /// and where its file is.
@@ -35,7 +26,7 @@ pub(crate) fn shown(document: &ShownDocument, width: usize) -> Vec<String> {
         .map(|node| format!(" of `{node}`"))
         .unwrap_or_default();
     let (mut lines, whole) = match &document.content {
-        ShownContent::Tasks(file) => (plan(file, &of, width), "the whole plan"),
+        ShownContent::Tasks(file) => (super::plan::plan(file, &of, width), "the whole plan"),
         ShownContent::Text(text) => (
             self::text(text, &document.shown.artifact, &of, width),
             "the whole document",
@@ -44,153 +35,6 @@ pub(crate) fn shown(document: &ShownDocument, width: usize) -> Vec<String> {
     lines.push(String::new());
     lines.push(format!("{whole}: {}", document.path.display()));
     lines
-}
-
-fn plan(file: &TasksFile, of: &str, width: usize) -> Vec<String> {
-    let view = PlanView::of(file);
-    let steps = view.steps();
-    let tasks = yunta_core::text::counted(file.tasks.len(), "task");
-    let mut lines = vec![match steps.len() {
-        0 | 1 => format!("the plan{of} — {tasks}"),
-        n => format!("the plan{of} — {tasks} in {n} steps"),
-    }];
-    if let Some(summary) = said(&file.summary) {
-        lines.extend(hanging(INDENT, "", summary, width));
-    }
-    if let Some(description) = said(&file.description) {
-        lines.push(String::new());
-        lines.extend(markdown(description, INDENT, width));
-    }
-    if let Some(design) = said(&file.design) {
-        heading(&mut lines, "design");
-        lines.extend(markdown(design, BODY, width));
-    }
-    for (name, items) in [("risks", &file.risks), ("out of scope", &file.out_of_scope)] {
-        if !items.is_empty() {
-            heading(&mut lines, name);
-            for item in items {
-                lines.extend(hanging(BODY, "- ", item, width));
-            }
-        }
-    }
-    if steps.len() > 1 {
-        heading(&mut lines, "order");
-        for (at, step) in steps.iter().enumerate() {
-            let ids: Vec<&str> = step.iter().map(|task| task.id.as_str()).collect();
-            lines.extend(hanging(
-                BODY,
-                &format!("{}  ", at + 1),
-                &ids.join(" · "),
-                width,
-            ));
-        }
-    }
-    for task in &file.tasks {
-        lines.push(String::new());
-        lines.extend(card(task, width));
-    }
-    lines
-}
-
-/// One task: its id and title, what it does, and beside each label what
-/// it touches, what proves it done, what it keeps passing and what it
-/// waits for.
-fn card(task: &Task, width: usize) -> Vec<String> {
-    let mut lines = hanging(INDENT, &format!("{} — ", task.id), &task.title, width);
-    if let Some(description) = said(&task.description) {
-        lines.extend(markdown(description, BODY, width));
-    }
-    // One line when the globs fit on it, and a directory's to a line
-    // when they do not, so no group is cut in two.
-    let groups = grouped(&task.scope);
-    let together = groups.join(", ");
-    let room = width.saturating_sub(cell_width(BODY) + LABEL);
-    let touches = match cell_width(&together) <= room {
-        true => vec![together],
-        false => groups,
-    };
-    lines.extend(labelled("touches", &touches, Mark::None, width));
-    let proves = |guard: bool| -> Vec<String> {
-        task.criteria
-            .iter()
-            .filter(|criterion| criterion.is_guard() == guard)
-            .map(|criterion| match said(&criterion.proves) {
-                Some(proves) => proves.to_string(),
-                None => format!("`{}`", criterion.cmd),
-            })
-            .collect()
-    };
-    lines.extend(labelled("done when", &proves(false), Mark::Several, width));
-    lines.extend(labelled(
-        "keeps passing",
-        &proves(true),
-        Mark::Several,
-        width,
-    ));
-    if !task.depends_on.is_empty() {
-        let after: Vec<&str> = task.depends_on.iter().map(|id| id.as_str()).collect();
-        lines.extend(labelled("after", &[after.join(", ")], Mark::None, width));
-    }
-    lines
-}
-
-/// Whether the items beside a label are marked as one of several.
-#[derive(Clone, Copy)]
-enum Mark {
-    /// When there are several: each is a claim of its own.
-    Several,
-    /// Never: the items are one list, broken across lines.
-    None,
-}
-
-/// `items` under `label`: the label once, in its column, and each item
-/// on its own line beside it.
-fn labelled(label: &str, items: &[String], mark: Mark, width: usize) -> Vec<String> {
-    let mark = match mark {
-        Mark::Several if items.len() > 1 => "- ",
-        _ => "",
-    };
-    let mut lines = Vec::new();
-    for (at, item) in items.iter().enumerate() {
-        let name = if at == 0 { label } else { "" };
-        lines.extend(hanging(BODY, &format!("{name:<LABEL$}{mark}"), item, width));
-    }
-    lines
-}
-
-/// `scope` as a reader scans it: globs that share a directory under that
-/// directory once, in the order the task names them.
-fn grouped(scope: &[ScopeGlob]) -> Vec<String> {
-    let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
-    for glob in scope {
-        let glob = glob.as_str();
-        let (dir, name) = glob.rsplit_once('/').unwrap_or(("", glob));
-        match groups.iter_mut().find(|(seen, _)| *seen == dir) {
-            Some((_, names)) => names.push(name),
-            None => groups.push((dir, vec![name])),
-        }
-    }
-    groups
-        .into_iter()
-        .map(|(dir, names)| match (dir, names.as_slice()) {
-            ("", _) => names.join(", "),
-            (_, [one]) => format!("{dir}/{one}"),
-            _ => format!("{dir}/{{{}}}", names.join(", ")),
-        })
-        .collect()
-}
-
-/// A heading of the plan's, a line after what came before it.
-fn heading(lines: &mut Vec<String>, name: &str) {
-    lines.push(String::new());
-    lines.push(format!("{INDENT}{name}"));
-}
-
-/// Text that says something, trimmed.
-fn said(text: &Option<String>) -> Option<&str> {
-    text.as_deref()
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
 }
 
 /// Any other document, whole: what a person approves is what they read.
@@ -206,8 +50,10 @@ fn text(text: &str, artifact: &ArtifactId, of: &str, width: usize) -> Vec<String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::cell_width;
     use yunta_core::events::Shown;
-    use yunta_core::ArtifactKind;
+    use yunta_core::shape::Document;
+    use yunta_core::{ArtifactKind, TasksFile};
 
     fn document(content: ShownContent, artifact: ArtifactId) -> ShownDocument {
         ShownDocument {
@@ -381,24 +227,32 @@ tasks:
     }
 
     #[test]
-    fn a_task_s_scope_is_grouped_by_the_directory_its_globs_share() {
-        let scope: Vec<ScopeGlob> = [
-            "crates/cli/src/render/color.rs",
-            "crates/cli/src/render/mod.rs",
-            "crates/cli/src/error.rs",
-            "Cargo.toml",
-        ]
-        .into_iter()
-        .map(ScopeGlob::from)
-        .collect();
-        assert_eq!(
-            grouped(&scope),
-            vec![
-                "crates/cli/src/render/{color.rs, mod.rs}",
-                "crates/cli/src/error.rs",
-                "Cargo.toml",
-            ]
+    fn a_plan_puts_its_decisions_and_shapes_before_its_tasks_and_says_what_each_task_changes() {
+        let example: TasksFile =
+            yunta_core::shape::read(TasksFile::EXAMPLE.as_bytes(), "example").unwrap();
+        let drawn = shown(
+            &document(
+                ShownContent::Tasks(example),
+                ArtifactId::Interpreted {
+                    kind: ArtifactKind::Tasks,
+                },
+            ),
+            78,
         );
+        let at = |text: &str| {
+            drawn
+                .iter()
+                .position(|line| line.contains(text))
+                .unwrap_or_else(|| panic!("`{text}` is not drawn: {drawn:#?}"))
+        };
+        assert!(at("  decisions") < at("  design") && at("  design") < at("add-dark-mode — "));
+        at("- Which theme does a new user start with? — Light");
+        at("because Nothing changes for anyone who never opens the setting");
+        at("Theme — built by add-dark-mode, in src/theme/mod.rs");
+        at("pub enum Theme { Light, Dark }");
+        at("you will see  The settings screen has a dark mode switch");
+        at("changes       - src/theme/mod.rs::Theme: the enum, and the setting that");
+        at("uses          Theme");
     }
 
     #[test]

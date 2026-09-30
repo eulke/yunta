@@ -33,6 +33,10 @@ fn task_with(criteria: Vec<Criterion>) -> Task {
         depends_on: Vec::new(),
         notes: None,
         description: None,
+        changes: Vec::new(),
+        outcome: None,
+        uses: Vec::new(),
+        invariants: Vec::new(),
     }
 }
 

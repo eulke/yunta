@@ -215,9 +215,12 @@ nothing about the failure asks for one.
 
 The rules a document can break, which is that closed set: `duplicate-id`,
 `empty-title`, `empty-scope`, `no-criteria`, `all-criteria-are-guards`,
-`unknown-dependency`, `dependency-cycle`, `overlapping-scope`,
+`unknown-dependency`, `dependency-cycle`, `overlapping-scope`, `duplicate-shape`,
+`duplicate-decision`, `unknown-shape-owner`, `shape-outside-owner-scope`,
+`unknown-shape`, `shape-used-before-its-owner`, `change-outside-scope`,
 `criterion-cannot-run`, `criterion-already-passes`, `guard-already-red`, `no-summary`,
-`no-description`, `unexplained-criterion`, `empty-text`,
+`no-description`, `unexplained-criterion`, `no-outcome`, `no-changes`,
+`unexplained-decision`, `empty-text`,
 `empty-detail`, `unknown-id`, `withdrawn-id`, `empty-reason`, `missing-values`,
 `missing-answer`, `mismatched-answer`, `incoherent-mode`,
 `invariant-in-parallel` and `incoherent-optional`. Together with

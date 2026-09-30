@@ -3107,6 +3107,41 @@
           "const": "overlapping-scope"
         },
         {
+          "description": "A second shape already carries this name.",
+          "type": "string",
+          "const": "duplicate-shape"
+        },
+        {
+          "description": "A second decision already carries this id.",
+          "type": "string",
+          "const": "duplicate-decision"
+        },
+        {
+          "description": "A shape's `owner` names a task nobody declared.",
+          "type": "string",
+          "const": "unknown-shape-owner"
+        },
+        {
+          "description": "A shape lives in a file its owner's scope does not cover.",
+          "type": "string",
+          "const": "shape-outside-owner-scope"
+        },
+        {
+          "description": "A task `uses` a shape nobody declared.",
+          "type": "string",
+          "const": "unknown-shape"
+        },
+        {
+          "description": "A task uses a shape without waiting for the task that builds it.",
+          "type": "string",
+          "const": "shape-used-before-its-owner"
+        },
+        {
+          "description": "A task says it changes a place its scope does not cover.",
+          "type": "string",
+          "const": "change-outside-scope"
+        },
+        {
           "description": "A criterion's command never answers where the engine runs\ncriteria: it is not found, not executable, or never returns.",
           "type": "string",
           "const": "criterion-cannot-run"
@@ -3135,6 +3170,21 @@
           "description": "A criterion of a plan a person reviews does not say what it proves.",
           "type": "string",
           "const": "unexplained-criterion"
+        },
+        {
+          "description": "A task of a plan a person reviews does not say what will be seen\nonce it is done.",
+          "type": "string",
+          "const": "no-outcome"
+        },
+        {
+          "description": "A task of a plan a person reviews does not say what it changes,\nwhere.",
+          "type": "string",
+          "const": "no-changes"
+        },
+        {
+          "description": "A decision of a plan a person reviews does not say why.",
+          "type": "string",
+          "const": "unexplained-decision"
         },
         {
           "description": "An update or a withdrawal names a finding this node never posted.",

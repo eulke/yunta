@@ -619,6 +619,8 @@ design: |
   ```rust
   enum ColorRole { Error, Warning, Success, Info }
   ```
+shapes:
+  - { name: ColorRole, owner: T002, file: src/color.rs, code: "enum ColorRole { Error, Warning, Success, Info }" }
 risks: [Low contrast on some themes]
 out_of_scope: [Truecolor]
 tasks:
@@ -654,6 +656,9 @@ async fn a_task_session_reads_the_plan_its_task_belongs_to() {
             "summary": "Color the CLI's messages",
             "description": "One palette, used by every surface.",
             "design": "```rust\nenum ColorRole { Error, Warning, Success, Info }\n```",
+            "shapes": [
+                {"name": "ColorRole", "owner": "T002", "file": "src/color.rs", "code": "enum ColorRole { Error, Warning, Success, Info }"},
+            ],
             "risks": ["Low contrast on some themes"],
             "out_of_scope": ["Truecolor"],
             "other_tasks": [

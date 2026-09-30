@@ -20,6 +20,10 @@ fn guarded(id: &str, cmd: &str) -> Task {
         depends_on: Vec::new(),
         notes: None,
         description: None,
+        changes: Vec::new(),
+        outcome: None,
+        uses: Vec::new(),
+        invariants: Vec::new(),
     }
 }
 

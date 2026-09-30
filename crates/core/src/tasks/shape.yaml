@@ -1,9 +1,10 @@
 # A tasks document: one task per independently-verifiable unit of work.
 # Written strictly — any key not listed here fails the node.
 #
-# `summary`, `description`, each task's `description` and each criterion's
-# `proves` are for the person who reviews the plan. They are optional,
-# and required when the workflow has a gate show the plan to that person.
+# `summary`, `description`, `why` of each decision, and each task's
+# `description`, `changes` and `outcome`, and each criterion's `proves`,
+# are for the person who reviews the plan. They are optional, and required
+# when the workflow has a gate show the plan to that person.
 
 summary: "Add a dark mode the user can switch on"   # one line: what changes
 description: |                          # Markdown: what changes, why, and how
@@ -14,21 +15,29 @@ description: |                          # Markdown: what changes, why, and how
   graph LR
     Toggle --> Settings --> Screens
   ```
-
-  A screen reads it once when it opens:
+# optional. Markdown: how the parts fit together, around the shapes below
+design: |
+  A screen reads the theme once, when it opens:
 
   ```rust
   let theme = settings.theme();
   ```
-# optional. Markdown: the shapes the plan creates or changes, declared once
-design: |
-  ```rust
-  pub enum Theme { Light, Dark }
+decisions:                              # optional: every point left open, closed
+  - id: default-theme                   #   here rather than by whoever builds it
+    question: "Which theme does a new user start with?"
+    choice: "Light"
+    alternatives: ["Dark", "Whatever the operating system uses"]
+    why: "Nothing changes for anyone who never opens the setting"
+shapes:                                 # optional: each shape the plan creates or
+  - name: Theme                         #   changes, declared once, in its file,
+    owner: add-dark-mode                #   by the one task that builds it; its
+    file: "src/theme/mod.rs"            #   owner's scope covers the file
+    code: |
+      pub enum Theme { Light, Dark }
 
-  impl Settings {
-      pub fn theme(&self) -> Theme;
-  }
-  ```
+      impl Settings {
+          pub fn theme(&self) -> Theme;
+      }
 risks:                                  # optional
   - "Screens with hard-coded colors keep them until they read the theme"
 out_of_scope:                           # optional
@@ -42,11 +51,19 @@ tasks:                                  # required, at least one
                                         # Markdown: what the task does and why
     scope: ["src/theme/**"]             # required, at least one glob: the
                                         #   only paths this task may touch
+    changes:                            # every place the task changes, inside
+      - at: "src/theme/mod.rs::Theme"   #   its scope: a file, or a file and
+        what: "the enum, and the setting that holds it"   # what in it
+      - at: "src/theme/toggle.rs"
+        what: "the toggle writes the setting"
+    outcome: "The settings screen has a dark mode switch, and turning it on darkens every screen"
+    invariants:                         # optional: what the code it touches
+      - "A screen never reads settings while it draws"   # already promises
     criteria:                           # required, at least one
-      - cmd: "cargo test -p ui dark_mode"   # required, non-empty. Must FAIL
-                                            #   before the work and pass after.
+      - cmd: "make test T=dark_mode"    # required, non-empty. Must FAIL
+                                        #   before the work and pass after.
         proves: "the toggle switches the theme"   # in words
-      - cmd: "cargo clippy -- -D warnings"
+      - cmd: "make lint"
         type: guard                     # optional. A guard passes before AND
                                         #   after the work, rather than failing
                                         #   first.
@@ -57,6 +74,12 @@ tasks:                                  # required, at least one
     description: "Tells users where the toggle is."
     scope: ["README.md"]
     depends_on: [add-dark-mode]         # optional, ids declared in this file
+    uses: [Theme]                       # optional: shapes another task owns;
+                                        #   the task waits for their owner
+    changes:
+      - at: "README.md"
+        what: "a section on the toggle"
+    outcome: "The README says where the toggle is and what it changes"
     notes: "Link the screenshot the first task adds."   # optional, one line of
                                         #   context for a runner with no history
     criteria:

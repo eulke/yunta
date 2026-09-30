@@ -96,7 +96,7 @@ pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionsFile};
 pub use run_tool::RunTool;
 pub use schema_range::{SchemaRange, SchemaRangeError};
 pub use secret::Secret;
-pub use tasks::{Criterion, Task, TasksFile};
+pub use tasks::{Change, Criterion, Decision, Shape, Task, TasksFile};
 pub use workflow::{
     followers, left_out, node_commands, reroute_sources, ArtifactContextRef, ArtifactKind,
     ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, Because, CheckBuiltin, CleanupTarget,

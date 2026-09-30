@@ -145,6 +145,10 @@ fn task(id: &str, scope: &[&str], criteria: Vec<Criterion>) -> Task {
         depends_on: vec![],
         notes: None,
         description: None,
+        changes: Vec::new(),
+        outcome: None,
+        uses: Vec::new(),
+        invariants: Vec::new(),
     }
 }
 

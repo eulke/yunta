@@ -4,6 +4,13 @@
   "description": "A tasks document: the tasks the engine runs, and what a person who\nreviews the plan reads about it — what changes and why, the shapes it\ncreates or changes, and what it leaves out. Nothing about the brief,\nthe mode or the run: that context lives in the manifest and the log.\n\nOne document for both readers, so what a person approves is what the\nengine executes.",
   "type": "object",
   "properties": {
+    "decisions": {
+      "description": "The choices a person could make differently: every point the\nbrief left open, closed here rather than by whoever implements it.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Decision"
+      }
+    },
     "description": {
       "description": "What changes, why, and how the work is approached, in Markdown:\ncode blocks for an example or how the parts interact, `mermaid`\nblocks for diagrams.",
       "type": [
@@ -12,7 +19,7 @@
       ]
     },
     "design": {
-      "description": "The shapes the plan creates or changes — types, interfaces,\nschemas, signatures, file formats — as Markdown code blocks, each\ndeclared once for every task that touches it.",
+      "description": "How the parts the plan touches fit together, in Markdown — the\nprose around its `shapes`, which declare the shapes themselves.",
       "type": [
         "string",
         "null"
@@ -28,6 +35,13 @@
       "type": "array",
       "items": {
         "type": "string"
+      }
+    },
+    "shapes": {
+      "description": "The shapes the plan creates or changes — types, interfaces,\nschemas, signatures, file formats — each declared once, in the\nfile it lives in, by the one task that builds it.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Shape"
       }
     },
     "summary": {
@@ -49,6 +63,25 @@
     "tasks"
   ],
   "$defs": {
+    "Change": {
+      "description": "One place a task changes, and what changes there.",
+      "type": "object",
+      "properties": {
+        "at": {
+          "description": "A file, or a file and what in it: `src/theme.rs::Theme`.",
+          "type": "string"
+        },
+        "what": {
+          "description": "What changes there, in words.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "what"
+      ]
+    },
     "Criterion": {
       "description": "One criterion as the tasks document declares it: a command, and whether it\nis a `guard` (passes before and after the work) or an ordinary\ncriterion (red before, green after). The event log freezes it as\n[`events::Criterion`], which reads what a later writer adds; this\ntype refuses it, because an agent wrote it.",
       "type": "object",
@@ -85,15 +118,89 @@
         "guard"
       ]
     },
+    "Decision": {
+      "description": "A choice the plan makes that a person could make differently.",
+      "type": "object",
+      "properties": {
+        "alternatives": {
+          "description": "What it did not choose, one to a line.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "choice": {
+          "description": "What the plan chose.",
+          "type": "string"
+        },
+        "id": {
+          "description": "How a person, and the plan's tasks, refer to it.",
+          "type": "string"
+        },
+        "question": {
+          "description": "What was open.",
+          "type": "string"
+        },
+        "why": {
+          "description": "Why this, and not those.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "question",
+        "choice"
+      ]
+    },
     "ScopeGlob": {
       "description": "a scope glob: a path pattern where `*` stays within one directory and `**` recurses",
       "type": "string",
       "minLength": 1
     },
+    "Shape": {
+      "description": "A shape the plan creates or changes, declared once where it lives and\nowned by the task that builds it: every other task that builds on it\nwaits for that one, and none but it may change the file.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "The shape itself, as the code it is.",
+          "type": "string"
+        },
+        "file": {
+          "description": "The file it lives in, which its owner's scope covers.",
+          "type": "string"
+        },
+        "name": {
+          "description": "What the plan's tasks call it.",
+          "type": "string"
+        },
+        "owner": {
+          "description": "The task that builds it.",
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "owner",
+        "file",
+        "code"
+      ]
+    },
     "Task": {
       "description": "One task. `id` is a `TaskId`, so an ill-formed one is a problem of\nreading the document: the report names the path that carries it\n(`tasks[0].id`) and what an id is, never a raw serde error. The rules\nthat only hold across the whole document, uniqueness among them, run\nonce it parses.",
       "type": "object",
       "properties": {
+        "changes": {
+          "description": "What the task changes, place by place — each inside its scope.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Change"
+          }
+        },
         "criteria": {
           "type": "array",
           "items": {
@@ -107,7 +214,7 @@
           }
         },
         "description": {
-          "description": "What the task does and why, in Markdown, for a person reviewing\nthe plan. It names the shapes of the plan's `design` it touches\nrather than repeating them.",
+          "description": "What the task does and why, in Markdown, for a person reviewing\nthe plan. It names the plan's shapes it touches rather than\nrepeating them.",
           "type": [
             "string",
             "null"
@@ -116,7 +223,21 @@
         "id": {
           "$ref": "#/$defs/TaskId"
         },
+        "invariants": {
+          "description": "What the code the task touches already promises, which the task\nkeeps.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "notes": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "description": "What a person will observe once the task is done.",
           "type": [
             "string",
             "null"
@@ -130,6 +251,13 @@
         },
         "title": {
           "type": "string"
+        },
+        "uses": {
+          "description": "The plan's shapes, by name, that the task builds on without\nowning them.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false,

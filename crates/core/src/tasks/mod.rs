@@ -30,16 +30,75 @@ pub struct TasksFile {
     /// blocks for diagrams.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// The shapes the plan creates or changes — types, interfaces,
-    /// schemas, signatures, file formats — as Markdown code blocks, each
-    /// declared once for every task that touches it.
+    /// How the parts the plan touches fit together, in Markdown — the
+    /// prose around its `shapes`, which declare the shapes themselves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub design: Option<String>,
+    /// The choices a person could make differently: every point the
+    /// brief left open, closed here rather than by whoever implements it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decisions: Vec<Decision>,
+    /// The shapes the plan creates or changes — types, interfaces,
+    /// schemas, signatures, file formats — each declared once, in the
+    /// file it lives in, by the one task that builds it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shapes: Vec<Shape>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub risks: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_scope: Vec<String>,
     pub tasks: Vec<Task>,
+}
+
+/// A choice the plan makes that a person could make differently.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Decision {
+    /// How a person, and the plan's tasks, refer to it.
+    pub id: String,
+    /// What was open.
+    pub question: String,
+    /// What the plan chose.
+    pub choice: String,
+    /// What it did not choose, one to a line.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alternatives: Vec<String>,
+    /// Why this, and not those.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// A shape the plan creates or changes, declared once where it lives and
+/// owned by the task that builds it: every other task that builds on it
+/// waits for that one, and none but it may change the file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Shape {
+    /// What the plan's tasks call it.
+    pub name: String,
+    /// The task that builds it.
+    pub owner: TaskId,
+    /// The file it lives in, which its owner's scope covers.
+    pub file: String,
+    /// The shape itself, as the code it is.
+    pub code: String,
+}
+
+/// One place a task changes, and what changes there.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Change {
+    /// A file, or a file and what in it: `src/theme.rs::Theme`.
+    pub at: String,
+    /// What changes there, in words.
+    pub what: String,
+}
+
+impl Change {
+    /// The file the change is in.
+    pub fn file(&self) -> &str {
+        self.at.split("::").next().unwrap_or(&self.at)
+    }
 }
 
 impl TasksFile {
@@ -50,6 +109,8 @@ impl TasksFile {
             summary: None,
             description: None,
             design: None,
+            decisions: Vec::new(),
+            shapes: Vec::new(),
             risks: Vec::new(),
             out_of_scope: Vec::new(),
             tasks,
@@ -57,8 +118,10 @@ impl TasksFile {
     }
 
     /// What a person reviewing the plan needs that the document does not
-    /// say: a summary, a description, and for every task its own and for
-    /// every criterion what it proves.
+    /// say: a summary, a description, why each decision chose what it
+    /// did, and for every task its own description, what it changes and
+    /// what a person sees once it is done, and for every criterion what
+    /// it proves.
     pub fn unexplained(&self) -> Vec<crate::diagnostic::Diagnostic> {
         rules::reviewed(self)
     }
@@ -113,12 +176,27 @@ pub struct Task {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     /// What the task does and why, in Markdown, for a person reviewing
-    /// the plan. It names the shapes of the plan's `design` it touches
-    /// rather than repeating them.
+    /// the plan. It names the plan's shapes it touches rather than
+    /// repeating them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// What the task changes, place by place — each inside its scope.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changes: Vec<Change>,
+    /// What a person will observe once the task is done.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    /// The plan's shapes, by name, that the task builds on without
+    /// owning them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub uses: Vec<String>,
+    /// What the code the task touches already promises, which the task
+    /// keeps.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub invariants: Vec<String>,
 }
 
+mod owned;
 mod rules;
 
 /// The shape this document publishes, as the YAML it is.

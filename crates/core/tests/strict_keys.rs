@@ -174,7 +174,7 @@ fn a_tasks_document_refuses_unknown_keys_on_tasks_and_criteria() {
     );
     assert_eq!(
         text,
-        "`tasks[0].titel`: tasks[0]: unknown field `titel`, expected one of `id`, `title`, `scope`, `criteria`, `depends_on`, `notes`, `description` at line 3 column 5"
+        "`tasks[0].titel`: tasks[0]: unknown field `titel`, expected one of `id`, `title`, `scope`, `criteria`, `depends_on`, `notes`, `description`, `changes`, `outcome`, `uses`, `invariants` at line 3 column 5"
     );
     let text = err::<TasksFile>("tasks:\n  - id: t\n    title: x\n    scope: [a]\n    criteria: [{ cmd: true, typ: guard }]\n");
     assert_eq!(
@@ -193,7 +193,7 @@ fn a_task_that_asks_to_be_reviewed_by_hand_is_refused_with_the_key_it_wrote() {
     );
     assert_eq!(
         text,
-        "`tasks[0].manual_review`: tasks[0]: unknown field `manual_review`, expected one of `id`, `title`, `scope`, `criteria`, `depends_on`, `notes`, `description` at line 6 column 5"
+        "`tasks[0].manual_review`: tasks[0]: unknown field `manual_review`, expected one of `id`, `title`, `scope`, `criteria`, `depends_on`, `notes`, `description`, `changes`, `outcome`, `uses`, `invariants` at line 6 column 5"
     );
 }
 

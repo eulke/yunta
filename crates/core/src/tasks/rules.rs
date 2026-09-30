@@ -61,6 +61,35 @@ pub(super) const RULES: &[Rule] = &[
         demand: "two tasks with no dependency between them declare no overlapping scope, so \
                  either give them disjoint scopes or declare the dependency",
     },
+    Rule {
+        code: RuleCode::DuplicateShape,
+        demand: "each shape's `name` is declared once",
+    },
+    Rule {
+        code: RuleCode::DuplicateDecision,
+        demand: "each decision's `id` is declared once",
+    },
+    Rule {
+        code: RuleCode::UnknownShapeOwner,
+        demand: "a shape's `owner` names a task this file declares",
+    },
+    Rule {
+        code: RuleCode::ShapeOutsideOwnerScope,
+        demand: "a shape's `file` lies inside its owner's `scope`",
+    },
+    Rule {
+        code: RuleCode::UnknownShape,
+        demand: "`uses` names only shapes `shapes` declares",
+    },
+    Rule {
+        code: RuleCode::ShapeUsedBeforeItsOwner,
+        demand: "a task that `uses` a shape another task owns waits for that task, directly \
+                 or through others",
+    },
+    Rule {
+        code: RuleCode::ChangeOutsideScope,
+        demand: "every place a task `changes` lies inside its own `scope`",
+    },
 ];
 
 /// What the engine demands of a task's criteria where it runs them,
@@ -105,16 +134,27 @@ pub(super) const REVIEW_RULES: &[Rule] = &[
         code: RuleCode::UnexplainedCriterion,
         demand: "every criterion says what passing it `proves`, in words",
     },
+    Rule {
+        code: RuleCode::NoOutcome,
+        demand: "every task says what a person will observe once it is done, in `outcome`",
+    },
+    Rule {
+        code: RuleCode::NoChanges,
+        demand: "every task says what it `changes`, place by place",
+    },
+    Rule {
+        code: RuleCode::UnexplainedDecision,
+        demand: "every decision says `why` it chose what it chose",
+    },
 ];
 
 /// Every way the plan leaves a person reviewing it without an
 /// explanation, collected rather than stopped at the first.
 pub(super) fn reviewed(tasks: &TasksFile) -> Vec<Diagnostic> {
-    let said = |text: &Option<String>| text.as_deref().is_some_and(|t| !t.trim().is_empty());
-    let mut broken = Vec::new();
     let document = |code: RuleCode, detail: &str| {
         Diagnostic::new(Subject::Document, Problem::rule(code, detail))
     };
+    let mut broken = Vec::new();
     if !said(&tasks.summary) {
         broken.push(document(
             RuleCode::NoSummary,
@@ -127,31 +167,67 @@ pub(super) fn reviewed(tasks: &TasksFile) -> Vec<Diagnostic> {
             "`description` is missing; say what changes, why and how the work is approached",
         ));
     }
-    for (index, task) in tasks.tasks.iter().enumerate() {
-        if !said(&task.description) {
-            broken.push(broke(
-                index,
-                &task.id,
-                RuleCode::NoDescription,
-                "`description` is missing; say what the task does and why",
+    for decision in &tasks.decisions {
+        if !said(&decision.why) {
+            broken.push(document(
+                RuleCode::UnexplainedDecision,
+                &format!(
+                    "decision `{}` does not say `why` it chose `{}`",
+                    decision.id, decision.choice
+                ),
             ));
         }
-        for (at, criterion) in task.criteria.iter().enumerate() {
-            if !said(&criterion.proves) {
-                broken.push(Diagnostic::new(
-                    Subject::Criterion {
-                        task: Named::new(task.id.clone(), index),
-                        index: at,
-                    },
-                    Problem::rule(
-                        RuleCode::UnexplainedCriterion,
-                        format!("`{}` does not say what it `proves`", criterion.cmd),
-                    ),
-                ));
-            }
+    }
+    for (index, task) in tasks.tasks.iter().enumerate() {
+        broken.extend(task_reviewed(index, task));
+    }
+    broken
+}
+
+/// Every way one task leaves a person reviewing the plan without an
+/// explanation.
+fn task_reviewed(index: usize, task: &Task) -> Vec<Diagnostic> {
+    let mut broken = Vec::new();
+    let missing = [
+        (
+            !said(&task.description),
+            RuleCode::NoDescription,
+            "`description` is missing; say what the task does and why",
+        ),
+        (
+            !said(&task.outcome),
+            RuleCode::NoOutcome,
+            "`outcome` is missing; say what a person will observe once the task is done",
+        ),
+        (
+            task.changes.is_empty(),
+            RuleCode::NoChanges,
+            "`changes` is empty; say what the task changes, place by place",
+        ),
+    ];
+    for (_, code, detail) in missing.into_iter().filter(|(lacks, _, _)| *lacks) {
+        broken.push(broke(index, &task.id, code, detail));
+    }
+    for (at, criterion) in task.criteria.iter().enumerate() {
+        if !said(&criterion.proves) {
+            broken.push(Diagnostic::new(
+                Subject::Criterion {
+                    task: Named::new(task.id.clone(), index),
+                    index: at,
+                },
+                Problem::rule(
+                    RuleCode::UnexplainedCriterion,
+                    format!("`{}` does not say what it `proves`", criterion.cmd),
+                ),
+            ));
         }
     }
     broken
+}
+
+/// Whether `text` says something.
+fn said(text: &Option<String>) -> bool {
+    text.as_deref().is_some_and(|t| !t.trim().is_empty())
 }
 
 fn broke(index: usize, id: &TaskId, code: RuleCode, detail: impl Into<String>) -> Diagnostic {
@@ -171,6 +247,7 @@ pub(super) fn check(tasks: &TasksFile) -> Vec<Diagnostic> {
     }
     broken.extend(cycle(tasks));
     broken.extend(overlapping_scopes(&tasks.tasks));
+    broken.extend(super::owned::check(tasks));
     broken
 }
 
