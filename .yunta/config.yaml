@@ -40,6 +40,13 @@ baseline:
 commands:
   lint: "cargo clippy --workspace --all-targets -- -D warnings"
 
+# The suite listens on loopback, which codex's `workspace-write` sandbox
+# refuses; this opens the network to those sessions.
+adapters:
+  codex:
+    adapter_settings:
+      network_access: true
+
 # Where a `pull_request` node (fragua's `pr`) opens its pull request.
 forge:
   github:

@@ -735,29 +735,88 @@ async fn the_sandbox_setting_governs_the_edit_profile_only() {
         (PermissionProfile::Edit, "danger-full-access"),
         (PermissionProfile::Full, "danger-full-access"),
     ] {
-        let dir = tempfile::tempdir().unwrap();
-        let args_file = dir.path().join("args.txt");
-        let lines = write_lines(dir.path(), "lines.jsonl", &[]);
-        let mut req = request(dir.path().to_path_buf());
-        req.permissions = profile;
-        req.env.insert(
-            "CODEX_STUB_ARGS_FILE".to_string(),
-            args_file.display().to_string().into(),
-        );
-        req.env.insert(
-            "CODEX_STUB_LINES_FILE".to_string(),
-            lines.display().to_string().into(),
-        );
-        let session = adapter.spawn(req).await.unwrap();
-        let _ = drain(session).await;
-        let args: Vec<String> = std::fs::read_to_string(&args_file)
-            .unwrap()
-            .lines()
-            .map(str::to_string)
-            .collect();
+        let args = argv_under(&adapter, profile).await;
         let pos = args.iter().position(|a| a == "--sandbox").unwrap();
         assert_eq!(args[pos + 1], expected, "{profile:?}");
     }
+}
+
+/// The argv `adapter` launches the CLI with for a session under
+/// `profile`.
+async fn argv_under(adapter: &CodexAdapter, profile: PermissionProfile) -> Vec<String> {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+    let lines = write_lines(dir.path(), "lines.jsonl", &[]);
+    let mut req = request(dir.path().to_path_buf());
+    req.permissions = profile;
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let session = adapter.spawn(req).await.unwrap();
+    let _ = drain(session).await;
+    std::fs::read_to_string(&args_file)
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+#[tokio::test]
+async fn network_access_opens_the_network_only_where_workspace_write_closed_it() {
+    const OPENS: &str = "sandbox_workspace_write.network_access=true";
+    for (settings, profile, opened) in [
+        (serde_json::json!({}), PermissionProfile::Edit, false),
+        (
+            serde_json::json!({ "network_access": true }),
+            PermissionProfile::Edit,
+            true,
+        ),
+        (
+            serde_json::json!({ "network_access": true }),
+            PermissionProfile::ReadOnly,
+            false,
+        ),
+        (
+            serde_json::json!({ "network_access": true }),
+            PermissionProfile::Full,
+            false,
+        ),
+        (
+            serde_json::json!({ "network_access": true, "sandbox": "danger-full-access" }),
+            PermissionProfile::Edit,
+            false,
+        ),
+    ] {
+        let serde_json::Value::Object(extra) = settings.clone() else {
+            unreachable!()
+        };
+        let adapter = CodexAdapter::new(&AdapterSettings {
+            adapter_settings: Some(extra),
+            binary: Some(stub_path()),
+        });
+        let args = argv_under(&adapter, profile).await;
+        assert_eq!(
+            args.iter().any(|arg| arg == OPENS),
+            opened,
+            "{settings} under {profile:?}: {args:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_network_access_that_is_not_a_boolean_is_reported_by_probe() {
+    let mut extra = serde_json::Map::new();
+    extra.insert("network_access".to_string(), serde_json::Value::from("yes"));
+    let adapter = CodexAdapter::new(&AdapterSettings {
+        adapter_settings: Some(extra),
+        binary: Some(stub_path()),
+    });
+    assert!(adapter.probe().await.is_err());
 }
 
 #[tokio::test]

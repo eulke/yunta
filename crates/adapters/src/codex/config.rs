@@ -27,6 +27,14 @@ impl ConfigOverride {
         }
     }
 
+    /// A TOML boolean.
+    pub(super) fn bool(key: impl Into<String>, value: bool) -> Self {
+        Self {
+            key: key.into(),
+            value: Value::Boolean(value),
+        }
+    }
+
     /// A TOML float.
     pub(super) fn float(key: impl Into<String>, value: f64) -> Self {
         Self {

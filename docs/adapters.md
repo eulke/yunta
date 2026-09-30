@@ -76,7 +76,18 @@ never settings. Each adapter reads its own, and `yunta doctor` (and every
 `run`, before opening a session) refuses a key it does not read, naming the
 keys it does. `codex` reads `sandbox`: the `codex exec --sandbox` mode the
 `edit` profile runs under (`workspace-write` by default; `read-only` narrows
-it, `danger-full-access` widens it). `claude-code` reads none.
+it, `danger-full-access` widens it). It also reads `network_access`: the
+`workspace-write` sandbox keeps every socket off, loopback included, so a
+test suite that listens on `127.0.0.1` fails inside a session; `true` opens
+the network to those sessions. The CLI has no loopback-only switch, so it
+opens all of it. `claude-code` reads none.
+
+```yaml
+adapters:
+  codex:
+    adapter_settings:
+      network_access: true
+```
 
 The three permission profiles map onto each CLI's own mechanism. On
 `claude-code`, `read-only` allows the non-mutating tools, `edit` allows file

@@ -77,19 +77,19 @@ impl CodexAdapter {
             args.push(model.to_string());
         }
         // `launch` refused already for settings that do not read, so
-        // the fallback here is a node whose settings named no sandbox.
-        let edit_sandbox = self
-            .settings
-            .as_ref()
-            .ok()
-            .and_then(|settings| settings.sandbox)
-            .unwrap_or_default();
+        // the fallback here is a node whose settings named nothing.
+        let settings = self.settings.as_ref().cloned().unwrap_or_default();
+        let edit_sandbox = settings.sandbox.unwrap_or_default();
         args.extend(fence::sandbox_args(
             &req.fence,
             req.permissions,
             edit_sandbox,
         )?);
-        args.extend(config_overrides(req));
+        // Only `workspace-write` reads the switch: `read-only` has no
+        // network to open and `danger-full-access` never closed it.
+        let opens_network = settings.network_access
+            && fence::mode(req.permissions, edit_sandbox) == settings::Sandbox::WorkspaceWrite;
+        args.extend(config_overrides(req, opens_network));
         // `exec`'s own options are declared on the parent command and
         // are not `global`, so clap reads one that follows `resume` as
         // an unexpected argument and the invocation dies before a
@@ -155,7 +155,7 @@ impl CodexAdapter {
 /// reaches the run's own tools: both are settings of the CLI's config
 /// file, which `-c` overrides for this invocation alone rather than
 /// writing to the user's own `~/.codex/config.toml`.
-fn config_overrides(req: &SessionRequest) -> Vec<String> {
+fn config_overrides(req: &SessionRequest, opens_network: bool) -> Vec<String> {
     let mut args = Vec::new();
     // `workspace-write` confines writes to the workspace, and the
     // fence's roots are what sits outside it and stays writable — the
@@ -165,6 +165,13 @@ fn config_overrides(req: &SessionRequest) -> Vec<String> {
     if !roots.is_empty() {
         args.extend(
             ConfigOverride::list("sandbox_workspace_write.writable_roots", roots).into_args(),
+        );
+    }
+    // The same sandbox keeps every socket off, loopback included, so a
+    // command the session runs cannot even listen on 127.0.0.1.
+    if opens_network {
+        args.extend(
+            ConfigOverride::bool("sandbox_workspace_write.network_access", true).into_args(),
         );
     }
     if let Some(endpoint) = &req.run_tools_endpoint {
@@ -249,9 +256,12 @@ impl Adapter for CodexAdapter {
             // off the CLI's own source rather than confirmed live —
             // see this module's doc comment.
             run_tools: true,
-            // `codex exec` isolates no network — declaring the capability
-            // would claim a sandbox that isn't built, so `network: false`
-            // degrades to declarative-only here.
+            // The `read-only` and `workspace-write` sandboxes keep a
+            // session off the network unless `network_access` opens it,
+            // but `danger-full-access` — every `full` session — leaves it
+            // open. The capability is one answer for all of them, so it
+            // is never claimed, and `network: false` degrades to
+            // declarative-only here even where the sandbox closes it.
             network_isolation: false,
         }
     }

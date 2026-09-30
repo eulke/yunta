@@ -2,8 +2,10 @@
 //! adapter reads. `sandbox` is the `codex exec --sandbox` mode the
 //! `Edit` profile runs under — `workspace-write` unless a team narrows
 //! it to `read-only` or widens it to `danger-full-access`; `ReadOnly`
-//! and `Full` map to their own modes regardless. Any other key is an
-//! unknown setting, reported by `probe()`.
+//! and `Full` map to their own modes regardless. `network_access` opens
+//! the network — loopback included — to a session the `workspace-write`
+//! sandbox would otherwise keep off it; the CLI has no narrower switch.
+//! Any other key is an unknown setting, reported by `probe()`.
 
 use serde::Deserialize;
 use yunta_core::{AdapterSettings, Result};
@@ -15,6 +17,8 @@ use crate::session::typed_settings;
 pub(super) struct CodexSettings {
     #[serde(default)]
     pub sandbox: Option<Sandbox>,
+    #[serde(default)]
+    pub network_access: bool,
 }
 
 /// `codex exec --sandbox` modes, as the CLI spells them.
@@ -38,7 +42,7 @@ impl Sandbox {
 }
 
 impl CodexSettings {
-    pub(super) const KNOWN: &'static [&'static str] = &["sandbox"];
+    pub(super) const KNOWN: &'static [&'static str] = &["sandbox", "network_access"];
 
     pub(super) fn read(settings: &AdapterSettings) -> Result<Self> {
         typed_settings(&super::ID, settings.adapter_settings.as_ref(), Self::KNOWN)

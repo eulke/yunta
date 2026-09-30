@@ -32,12 +32,19 @@ pub(super) fn sandbox_args(
     if profile == PermissionProfile::ReadOnly && !fence.roots.is_empty() {
         return Err(Unbuildable::SealedRoots(fence.roots.clone()));
     }
-    let mode = match profile {
+    Ok(vec![
+        "--sandbox".to_string(),
+        mode(profile, edit_sandbox).as_flag().to_string(),
+    ])
+}
+
+/// The sandbox mode a session under `profile` runs in.
+pub(super) fn mode(profile: PermissionProfile, edit_sandbox: Sandbox) -> Sandbox {
+    match profile {
         PermissionProfile::ReadOnly => Sandbox::ReadOnly,
         PermissionProfile::Edit => edit_sandbox,
         PermissionProfile::Full => Sandbox::DangerFullAccess,
-    };
-    Ok(vec!["--sandbox".to_string(), mode.as_flag().to_string()])
+    }
 }
 
 /// The directories the sandbox keeps writable beside the workspace.
