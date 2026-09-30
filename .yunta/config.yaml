@@ -34,3 +34,14 @@ defaults:
 baseline:
   suite: "cargo test --workspace"
 
+
+# What this project runs for each capability a workflow names
+# (`run: { command: lint }`): fragua's `lint` runs this one.
+commands:
+  lint: "cargo clippy --workspace --all-targets -- -D warnings"
+
+# Where a `pull_request` node (fragua's `pr`) opens its pull request.
+forge:
+  github:
+    repo: eulke/yunta
+    token_env: GITHUB_TOKEN
