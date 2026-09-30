@@ -20,7 +20,6 @@ requires:
     - name: mechanical
     - name: reviewer
     - name: reviewer-alt
-  programs: [git, gh, cargo]
 contents:
   workflows:
     - .yunta/workflows/fragua.yaml

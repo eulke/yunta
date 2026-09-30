@@ -1,15 +1,19 @@
 //! `yunta/fragua` runs its full reference pipeline end to end with the
 //! `mock` adapter, `pr` included. The pack's own `.yunta/tests/` cases
-//! stop at the first gate: a case has no human to answer a gate and no
-//! `gh` to call. This test drives `mode: quick` directly through the
-//! engine, approving `ship` the way an operator's own automation would
-//! and stubbing `gh` so the `pr` node's real command has something to
-//! call.
+//! stop at the first gate: a case has no human to answer a gate. This
+//! test drives `mode: quick` directly through the engine, approving
+//! `ship` the way an operator's own automation would, and opens the pull
+//! request on a stand-in forge after pushing to a real remote.
 
 use std::path::Path;
+use std::sync::Arc;
 
-use yunta_engine::{run_branch, NodeState, RunReport, RunTerminal};
-use yunta_testkit::{git, write, ApproveEverything, Bench, INITIAL_BRANCH, MOCK_CONFIG};
+use yunta_adapters::{MockForge, MockForgeState};
+use yunta_core::events::run_left_out;
+use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_testkit::{
+    bare_origin, git, write, ApproveEverything, Bench, INITIAL_BRANCH, MOCK_CONFIG,
+};
 
 /// The pack directory the workflow, its `prompt: { file: … }` and its
 /// provenance are read from.
@@ -20,9 +24,9 @@ const WORKFLOWS: &str = concat!(
 
 /// One scripted session per node the "quick" mode actually spawns, in
 /// the order the DAG reaches them: grill, brief, plan, one implement
-/// task, then lint/tests/ship/pr run for real against the sandbox crate
-/// this test lays down (no mock involved — cargo and git are the real
-/// things being exercised, exactly as they would be in production). The
+/// task, then lint/tests/ship/pr run for real against the sandbox this
+/// test lays down (no mock involved — the project's lint command and git
+/// are the real things being exercised, exactly as in production). The
 /// two interpreted documents go over the run tools; `brief.md` is a
 /// session's own file, and lands in `brief`'s own directory — the
 /// absolute path that session is granted, the same way a real agent
@@ -66,75 +70,58 @@ sessions:
     outcome: { type: completed, summary: "did T001" }
 "##;
 
-#[tokio::test]
-async fn yunta_fragua_runs_end_to_end_in_quick_mode_with_mock() {
-    // `gh` isn't installed in this environment (or anywhere CI runs) —
-    // stub it so the `pr` node's real bash command has something to
-    // call, and inject the stub's directory onto the run's subprocess
-    // `PATH` so every governed child finds it without this test mutating
-    // its own process environment.
-    let stub_dir = tempfile::tempdir().unwrap();
-    let gh_stub = stub_dir.path().join("gh");
-    write(&gh_stub, "#!/bin/sh\necho \"pr created (stub): $*\"\n");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&gh_stub, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    let inherited_path = std::env::var("PATH").unwrap_or_default();
-
-    let config = format!(
-        "{MOCK_CONFIG}project:\n  base_branch: {INITIAL_BRANCH}\nbaseline:\n  suite: \"true\"\n"
-    );
-    let bench = Bench::with_run_id("run-fragua")
-        .in_mode("quick")
-        .with_inputs(&[("idea", "add dark mode")])
-        .with_workflow_dir(WORKFLOWS)
-        .with_subprocess_vars(vec![(
-            "PATH".to_string(),
-            format!("{}:{}", stub_dir.path().display(), inherited_path),
-        )]);
-
-    write(
-        &bench.worktree.join("Cargo.toml"),
-        "[package]\nname = \"sandbox\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-    );
+/// The project a fragua run works in: a sandbox with the file `plan`
+/// reads, committed, and a bare `origin` to push the run's branch to.
+fn sandbox(bench: &Bench) {
     write(
         &bench.worktree.join("src/lib.rs"),
         "pub fn hello() -> &'static str {\n    \"hello\"\n}\n",
     );
     write(
         &bench.worktree.join("docs/architecture.md"),
-        "# Architecture\n\nA sandbox crate for the fragua reference pipeline's own test.\n",
+        "# Architecture\n\nA sandbox for the fragua reference pipeline's own test.\n",
     );
     git(&bench.worktree, &["add", "."]);
-    git(&bench.worktree, &["commit", "-q", "-m", "sandbox crate"]);
+    git(&bench.worktree, &["commit", "-q", "-m", "sandbox"]);
+    bare_origin(&bench.worktree);
+}
 
-    // `pr`'s own `git push -u origin {{run.branch}}` needs a real remote
-    // and a local branch of exactly that name — both of which an
-    // `isolation: worktree` run gets from `prepare_worktree` before any
-    // node executes. A bench executes against the checkout it is handed,
-    // so the remote and the branch are laid down here.
-    let origin = tempfile::tempdir().unwrap();
-    git(origin.path(), &["init", "-q", "--bare"]);
-    git(
-        &bench.worktree,
-        &["remote", "add", "origin", origin.path().to_str().unwrap()],
+/// A quick-mode fragua run on a forge the test reads back, under a
+/// config that adds `extra` to the runners, suite and forge.
+async fn quick_run(extra: &str) -> (Bench, MockForgeState, RunReport) {
+    let config = format!(
+        "{MOCK_CONFIG}project:\n  base_branch: {INITIAL_BRANCH}\nbaseline:\n  suite: \"true\"\n\
+         forge:\n  github: {{ repo: acme/sandbox, token_env: SANDBOX_TOKEN }}\n{extra}"
     );
-    git(
-        &bench.worktree,
-        &["checkout", "-q", "-b", &run_branch(&bench.run_id)],
-    );
-
+    let forge = MockForgeState::new();
+    let bench = Bench::with_run_id("run-fragua")
+        .in_mode("quick")
+        .with_inputs(&[("idea", "add dark mode")])
+        .with_workflow_dir(WORKFLOWS)
+        .with_forge(Arc::new(MockForge::new(forge.clone())));
+    sandbox(&bench);
     let workflow = std::fs::read_to_string(Path::new(WORKFLOWS).join("fragua.yaml")).unwrap();
-    let RunReport { terminal, state } = bench
+    let report = bench
         .run_full(&workflow, FIXTURE, &config, &ApproveEverything::new("test"))
         .await;
+    (bench, forge, report)
+}
+
+fn finished(state: &yunta_engine::RunState, node: &str) -> bool {
+    matches!(state.nodes.state(node), Some(NodeState::Finished { .. }))
+}
+
+#[tokio::test]
+async fn yunta_fragua_runs_end_to_end_in_quick_mode_with_mock() {
+    // The project's lint reads what the implement task wrote, so a pass
+    // says it ran in the run's own tree after it.
+    let (bench, forge, RunReport { terminal, state }) =
+        quick_run("commands:\n  lint: \"grep -q '//! sandbox' src/lib.rs\"\n").await;
 
     assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
     for node in ["grill", "plan", "implement", "lint", "tests", "ship", "pr"] {
         assert!(
-            matches!(state.nodes.state(node), Some(NodeState::Finished { .. })),
+            finished(&state, node),
             "node `{node}` did not finish: {:?}",
             state.nodes.state(node)
         );
@@ -146,4 +133,34 @@ async fn yunta_fragua_runs_end_to_end_in_quick_mode_with_mock() {
         "fix-lint ran despite lint passing on the first try: {:?}",
         state.nodes.state("fix-lint")
     );
+    let prs = forge.pull_requests();
+    assert_eq!(prs.len(), 1, "{prs:?}");
+    assert_eq!(
+        (
+            prs[0].title.as_str(),
+            prs[0].head.as_str(),
+            prs[0].base.as_str()
+        ),
+        (
+            "add dark mode",
+            format!("yunta/run/{}", bench.run_id).as_str(),
+            INITIAL_BRANCH
+        )
+    );
+}
+
+#[tokio::test]
+async fn yunta_fragua_leaves_lint_out_where_the_project_declares_none() {
+    let (bench, forge, RunReport { terminal, state }) = quick_run("").await;
+
+    assert_eq!(terminal, RunTerminal::Finished, "state: {state:?}");
+    let left: Vec<String> = run_left_out(&bench.events())
+        .iter()
+        .map(|left| left.node.to_string())
+        .collect();
+    assert_eq!(left, ["lint", "fix-lint"]);
+    for node in ["implement", "tests", "ship", "pr"] {
+        assert!(finished(&state, node), "node `{node}` did not finish");
+    }
+    assert_eq!(forge.pull_requests().len(), 1);
 }

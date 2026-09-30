@@ -21,7 +21,7 @@ node.
 `yunta receipt <run_id>` can only run once a run is finished — never
 from inside the run that produced it, since the run can't be "finished"
 while one of its own nodes is still executing the receipt command. That's
-why the `pr` node above doesn't try to attach one itself. The recommended
+why the `pr` node doesn't try to attach one itself. The recommended
 pattern is a follow-up step, run by whatever drives this pack in CI:
 
 ```bash
@@ -37,25 +37,33 @@ impose — configure it in your own forge, not in this pack.
 ## Installing
 
 Your own `runners:` needs `planner`, `executor`, `mechanical`, `reviewer`
-and `reviewer-alt` resolvable, and `baseline.suite` configured for the
-`tests` node's `baseline_compare` check — `yunta doctor` says so if
-something's missing.
+and `reviewer-alt` resolvable. `yunta init` writes most of the rest from
+what it detects in your repository, and `yunta pack add` lists whatever is
+still missing, with what it detected for it — `yunta doctor` says the same
+later.
 
-## What this pack assumes about your repository
+## What this pack asks of your project
 
+The pack names capabilities; your config says how your project does each.
+
+- **`commands.lint`** (optional): `lint` runs the command your project
+  declares for it — `commands: { lint: "pnpm lint" }`, or
+  `"cargo clippy --all-targets -- -D warnings"` — and a failing lint goes to
+  `fix-lint` once before asking you. A project that declares no `lint` runs
+  without both; `yunta status` says why they are not in the run.
+- **`baseline.suite`**: the suite `tests` compares against, measured before
+  the run's first node.
+- **`forge.github`**: `pr` pushes the run's branch to `origin` and opens a
+  pull request of it into your base branch, reading the token from the
+  variable `token_env` names. A run is refused while the config declares no
+  forge.
 - **`docs/architecture.md`** (optional, recommended): `plan` reads it as
   context when it is there. Without it the session is told the file is
   absent and the planner explores the code on its own, which costs more
   tokens and plans with less of your intent. The run starts from your last
   commit, so commit the file before `yunta run`.
-- **A Rust toolchain**: `lint` runs
-  `cargo clippy --all-targets -- -D warnings`, so tests are linted too. In
-  another ecosystem it fails after `implement`, the most expensive node,
-  and uses its one `fix-lint` round before asking you. Copy the workflow
-  into `.yunta/workflows/` and change `lint` to your own linter first.
-- **Rust sources**: `fix-lint` may edit any `*.rs` file, so a workspace
-  with its code under `crates/*/src` works as well as a single crate. A
-  task that needs files outside its scope asks a person
-  (`scope_expansion.mode: ask`); the loop's `within: ["src/**"]` only
-  bounds what `mode: rules` would grant without asking.
-- **`baseline.suite`** in your config, for the `tests` node.
+
+Nothing in the pack names a path of your repository: `fix-lint` may edit
+what the run itself changed (`scope: run`), and a task that needs files
+outside its scope asks a person (`scope_expansion.mode: ask`). Paths no
+node may ever touch are yours to declare, under `permissions.paths.deny`.

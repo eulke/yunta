@@ -183,7 +183,6 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     concurrency: 2                  # tareas simultáneas con scopes disjuntos (§5.5); default 1
     scope_expansion:                # §6.2 — default deny si se omite
       mode: ask
-      within: ["src/**"]
       max_per_run: 3
     prompt: |
       Leé tu tarea del documento de tareas. Implementala dentro de su scope.
@@ -191,8 +190,9 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
   - id: lint
     kind: bash
     invariant: true
+    optional: true                  # sin `commands.lint` el run corre sin este nodo (D204)
     depends_on: [implement]
-    run: "cargo clippy --all-targets -- -D warnings"
+    run: { command: lint }
     on_failure: { goto: fix-lint, max_reroutes: 1 }
 
   - id: fix-lint
@@ -200,7 +200,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     runner: mechanical
     context: [{ node-output: { node: lint } }]
     prompt: "Corregí exclusivamente los errores del reporte."
-    scope: ["src/**"]
+    scope: run                     # lo que el run cambió hasta acá (D205)
 
   - id: tests
     kind: check
@@ -232,11 +232,9 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
     message: "¿Creo el PR?"
 
   - id: pr
-    kind: bash
+    kind: pull_request     # push de la rama del run + PR por el forge (D207)
     depends_on: [ship]
-    run: |
-      git push -u origin {{run.branch}}
-      gh pr create --fill --base {{project.base_branch}}
+    title: "{{inputs.idea}}"
 
 on_finish:
   - cleanup: worktree

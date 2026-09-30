@@ -100,7 +100,8 @@ fn check_project() -> Checkout {
              \x20 mechanical: [{ adapter: mock, model: m }]\n\
              \x20 reviewer: [{ adapter: mock, model: m }]\n\
              \x20 reviewer-alt: [{ adapter: mock, model: m }]\nbaseline: { suite: \"true\" }\n\
-             commands: { lint: \"true\", fmt: \"true\" }\n",
+             commands: { lint: \"true\", fmt: \"true\" }\n\
+             forge: { github: { repo: acme/web, token_env: GITHUB_TOKEN } }\n",
         )
         .file(".yunta/workflows/build-feature.yaml", &build_feature.text)
         .file(

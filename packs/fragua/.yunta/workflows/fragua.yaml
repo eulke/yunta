@@ -5,11 +5,14 @@
 # server, which a pack's own mock self-test has no reason to stand up)
 # and `node_defaults.hooks` is dropped (an ecosystem-specific
 # convenience, not something a reference pack needs to demonstrate).
-# Two deliberate changes, both because a pack runs in repositories its
-# author has never seen: `plan` reads `docs/architecture.md` as optional,
-# since the planner can explore the code without it; and `fix-lint` may
-# edit any Rust source, since a workspace keeps its code under
-# `crates/*/src`, not `src/`.
+#
+# A pack runs in repositories its author has never seen, so it names
+# capabilities and never a tool or a layout: `lint` runs whatever the
+# project declares as its `lint` command, and a project that declares
+# none runs without it; `fix-lint` may edit what the run itself changed;
+# `pr` opens its pull request through the project's forge; and `plan`
+# reads `docs/architecture.md` as optional, since the planner can explore
+# the code without it.
 name: fragua
 description: Full feature cycle — grill, verified tasks document, lint/fix, baseline, multi-runner review, PR
 yunta_schema: ">=1 <2"
@@ -79,7 +82,6 @@ nodes:
     concurrency: 2
     scope_expansion:
       mode: ask
-      within: ["src/**"]
       max_per_run: 3
     prompt: |
       Read your task from the tasks document. Implement it inside its own scope.
@@ -87,8 +89,9 @@ nodes:
   - id: lint
     kind: bash
     invariant: true
+    optional: true
     depends_on: [implement]
-    run: "cargo clippy --all-targets -- -D warnings"
+    run: { command: lint }
     on_failure: { goto: fix-lint, max_reroutes: 1 }
 
   - id: fix-lint
@@ -96,7 +99,7 @@ nodes:
     runner: mechanical
     context: [{ node-output: { node: lint } }]
     prompt: "Fix exclusively the errors in the report."
-    scope: ["**/*.rs"]
+    scope: run
 
   - id: tests
     kind: check
@@ -128,11 +131,9 @@ nodes:
     message: "Create the PR?"
 
   - id: pr
-    kind: bash
+    kind: pull_request
     depends_on: [ship]
-    run: |
-      git push -u origin {{run.branch}}
-      gh pr create --fill --base {{project.base_branch}}
+    title: "{{inputs.idea}}"
 
 on_finish:
   - cleanup: worktree

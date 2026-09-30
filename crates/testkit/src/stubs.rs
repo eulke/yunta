@@ -4,9 +4,7 @@
 //! for: a `git` that is still running when the test asserts about it, a
 //! session that dies the way a crash kills one. It is the real program
 //! everywhere else, so what a test asserts is about the engine's
-//! governance and not about what git happens to do. Or it stands in for
-//! a program whose answer is not what the test is about: a `cargo` whose
-//! lint a workflow runs, in a test about the workflow.
+//! governance and not about what git happens to do.
 
 use std::path::{Path, PathBuf};
 
@@ -32,14 +30,6 @@ pub fn git(dir: &Path) -> Vec<(String, String)> {
         ("PATH".to_string(), first_on_path(&bin)),
         (GIT_REAL.to_string(), real_git().display().to_string()),
     ]
-}
-
-/// Writes the `cargo` stub into `dir/bin` and answers with the `PATH` a
-/// run must carry for it to be the `cargo` its subprocesses find. It
-/// answers every command with success and does nothing else.
-pub fn cargo_that_passes(dir: &Path) -> Vec<(String, String)> {
-    let bin = install(dir, "cargo", include_str!("../stubs/cargo_stub.sh"));
-    vec![("PATH".to_string(), first_on_path(&bin))]
 }
 
 /// Writes `script` as the executable `dir/bin/<name>`, and answers with
