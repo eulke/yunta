@@ -367,6 +367,21 @@ impl<'a> Board<'a> {
         matches!(self.state.nodes.state(id), Some(NodeState::Finished { .. }))
     }
 
+    /// Whether `id` waits for `on`, directly or through others.
+    fn depends_on(&self, id: &NodeId, on: &NodeId) -> bool {
+        let mut seen: HashSet<&NodeId> = HashSet::new();
+        let mut stack: Vec<&NodeId> = self.deps_of(id).iter().collect();
+        while let Some(dep) = stack.pop() {
+            if dep == on {
+                return true;
+            }
+            if seen.insert(dep) {
+                stack.extend(self.deps_of(dep));
+            }
+        }
+        false
+    }
+
     fn deps_satisfied(&self, node: &Node) -> bool {
         self.deps_of(&node.id).iter().all(|dep| self.finished(dep))
     }
@@ -689,10 +704,22 @@ fn after_reroute(
     reroute_seq: yunta_core::Seq,
 ) -> Option<Decision> {
     let corrective = board.state.nodes.get(to).cloned().unwrap_or_default();
-    if corrective
-        .last_finished
-        .is_some_and(|seq| seq > reroute_seq)
-    {
+    if let Some(corrected) = corrective.last_finished.filter(|seq| *seq > reroute_seq) {
+        // What lies between the correction and the failed node read what
+        // the correction replaced: it runs again, in the graph's order,
+        // before the failed node does — a gate never asks about a plan
+        // alongside what was made from the one it sent back.
+        match stale_between(board, to, &node.id, corrected) {
+            Some(Stale::Rerun(id)) => {
+                return Some(Decision::Execute(vec![(
+                    id.clone(),
+                    board.next_attempt(&id),
+                )]))
+            }
+            // Its own failure is its own to resolve, on its turn.
+            Some(Stale::Failed) => return None,
+            None => {}
+        }
         // The destination completed — the failed node returns to ready
         // and re-runs. A gate never goes through `Execute`: it re-asks
         // (internal) or re-polls/republishes (external).
@@ -712,6 +739,59 @@ fn after_reroute(
         to.clone(),
         board.next_attempt(to),
     )]))
+}
+
+/// A node between a correction and the node that failed, still holding
+/// what it made before the correction.
+enum Stale {
+    /// The first, in the graph's order: it runs again.
+    Rerun(NodeId),
+    /// The first failed when it ran again after the correction.
+    Failed,
+}
+
+/// The first node downstream of `to` and upstream of `failed` that last
+/// finished before `to` did at `corrected` — declaration order, and only
+/// one whose own inputs between the two are fresh, so they run again in
+/// the order the graph gives them.
+fn stale_between(
+    board: &Board<'_>,
+    to: &NodeId,
+    failed: &NodeId,
+    corrected: yunta_core::Seq,
+) -> Option<Stale> {
+    let between: Vec<&NodeId> = board
+        .nodes
+        .iter()
+        .map(|node| &node.id)
+        .filter(|id| *id != to && *id != failed)
+        .filter(|id| board.depends_on(id, to) && board.depends_on(failed, id))
+        .collect();
+    let stale = |id: &NodeId| {
+        board
+            .state
+            .nodes
+            .get(id)
+            .and_then(|record| record.last_finished)
+            .is_none_or(|seq| seq < corrected)
+    };
+    let next = between.iter().copied().find(|id| {
+        stale(id)
+            && board
+                .deps_of(id)
+                .iter()
+                .all(|dep| !between.contains(&dep) || !stale(dep))
+    })?;
+    let failed_again = board
+        .state
+        .nodes
+        .get(next)
+        .and_then(|record| record.last_failed)
+        .is_some_and(|seq| seq > corrected);
+    Some(match failed_again {
+        true => Stale::Failed,
+        false => Stale::Rerun(next.clone()),
+    })
 }
 
 /// What is ready now, and what it means when nothing is: every node

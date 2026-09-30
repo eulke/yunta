@@ -288,3 +288,49 @@ async fn a_gate_that_shows_a_spec_shows_its_tests() {
     };
     assert_eq!(file.specs[0].tests[0].proves, "the greeting says hello");
 }
+
+#[tokio::test]
+async fn a_plan_sent_back_from_its_gate_is_specified_again_before_the_gate_asks_again() {
+    let workflow = format!(
+        "{WORKFLOW}  - id: approve
+    kind: gate
+    depends_on: [spec]
+    assignee: lead
+    message: \"Approve the plan and its tests?\"
+    options: [approve, adjust]
+    on: {{ adjust: plan }}
+    shows: [{{ node: spec, kind: spec }}]
+"
+    );
+    let spec = spec_of("greet", GREETS, "sh tests/greet.sh");
+    let fixture = plan_session(PLAN)
+        + &specifying(&[(&spec, true)])
+        + &tasks_session(PLAN, "replanned")
+        + &specifying(&[(&spec, true)]);
+    let interaction = SequencedInteraction::answering(vec![
+        ("adjust", Some("greet the reader by name")),
+        ("approve", None),
+    ]);
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(&workflow, &fixture, &interaction)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    let specified = bench
+        .events()
+        .iter()
+        .filter(|event| {
+            matches!(
+                event.payload(),
+                Some(EventPayload::Artifacts(ArtifactEvent::Submitted(p)))
+                    if p.artifact_kind == ArtifactKind::Spec
+            )
+        })
+        .count();
+    assert_eq!(
+        specified, 2,
+        "the second plan is specified before it is asked about"
+    );
+    assert_eq!(interaction.shown().len(), 2);
+}

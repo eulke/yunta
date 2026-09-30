@@ -411,6 +411,42 @@ async fn an_internal_gate_option_mapped_in_on_reroutes_and_asks_again() {
 }
 
 #[tokio::test]
+async fn what_lies_between_a_gate_and_the_node_it_sends_back_to_is_made_again_first() {
+    // `outline` reads what `plan` made: after `ajustar`, the gate asks
+    // about the second plan only once `outline` has been made from it.
+    let workflow = r#"
+name: outlined
+nodes:
+  - id: plan
+    kind: bash
+    run: "echo run >> plan-runs.txt"
+  - id: outline
+    kind: bash
+    depends_on: [plan]
+    run: "wc -l < plan-runs.txt >> outlines.txt"
+  - id: approve
+    kind: gate
+    depends_on: [outline]
+    assignee: lead
+    message: "Approve the plan?"
+    options: [aprobar, ajustar]
+    on: { ajustar: plan }
+"#;
+    let bench = Bench::new();
+    let interaction = SequencedInteraction::choosing(&["ajustar", "aprobar"]);
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(workflow, "sessions: []\n", &interaction)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    let outlines = tokio::fs::read_to_string(bench.worktree.join("outlines.txt"))
+        .await
+        .unwrap();
+    let outlined: Vec<&str> = outlines.lines().map(str::trim).collect();
+    assert_eq!(outlined, ["1", "2"], "each plan outlined once, in order");
+}
+
+#[tokio::test]
 async fn gate_reroute_records_its_origin_without_fake_counters() {
     // A gate's `on:` choice is a routing decision, not a bounded retry —
     // its `node_rerouted` says so (`origin: gate_choice`) and carries no
