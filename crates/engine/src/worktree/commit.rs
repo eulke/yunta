@@ -1,7 +1,8 @@
 //! Committing the run's own tree: what a node left in it, or what a node
 //! found in it when it started, as a commit on the run's branch.
 
-use std::path::Path;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 use yunta_core::{CommitSha, InvalidId, TreeId};
 
@@ -66,4 +67,43 @@ pub async fn commit_tree(
     .await?;
     run_git(repo, &["reset", "-q"], supervision).await?;
     Ok(Some((commit, tree)))
+}
+
+/// Puts `paths` in `repo` back as its `HEAD` holds them: a path `HEAD`
+/// has is checked out from it, and one it does not have is removed.
+/// What a run refuses to commit goes back to where the branch had it,
+/// so nothing later commits it by accident.
+pub async fn restore(
+    repo: &Path,
+    paths: &[PathBuf],
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let mut listing: Vec<OsString> = ["ls-tree", "-r", "-z", "--name-only", "HEAD", "--"]
+        .map(OsString::from)
+        .to_vec();
+    listing.extend(paths.iter().map(|path| path.as_os_str().to_owned()));
+    let bytes = crate::git::output_bytes(repo, &listing, supervision).await?;
+    let tracked = crate::scope::nul_separated_paths(&bytes);
+    if !tracked.is_empty() {
+        let mut checkout: Vec<OsString> = ["checkout", "HEAD", "--"].map(OsString::from).to_vec();
+        checkout.extend(tracked.iter().map(|path| path.as_os_str().to_owned()));
+        crate::git::output(repo, &checkout, supervision).await?;
+    }
+    for path in paths.iter().filter(|path| !tracked.contains(path)) {
+        match tokio::fs::remove_file(repo.join(path)).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(WorktreeError::Io {
+                    action: "remove a path the run refused to commit".to_string(),
+                    path: repo.join(path),
+                    source,
+                })
+            }
+        }
+    }
+    Ok(())
 }

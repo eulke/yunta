@@ -244,11 +244,17 @@ pub(super) async fn finish_node(
     outcome: impl Into<String>,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
-    let (commit, tree) = Box::pin(closed(ctx, node, super::shared_tree::Closing::Finished)).await?;
+    let closed = Box::pin(closed(ctx, node, super::shared_tree::Closing::Finished)).await?;
+    // Work that reached what the project denies is not work that
+    // finished: it fails, and nothing denied was committed.
+    if !closed.refused.is_empty() {
+        let failure = Failure::paths_denied(closed.refused.clone());
+        return emit_failed(ctx, node, failure, false, tokens, closed).await;
+    }
     ctx.emit(
         Some(&node.id),
         EventPayload::Node(NodeEvent::Finished(
-            NodeFinishedPayload::leaving(outcome, tokens, tree).committed(commit),
+            NodeFinishedPayload::leaving(outcome, tokens, closed.tree).committed(closed.commit),
         )),
     )
     .await?;
@@ -267,11 +273,24 @@ async fn closed(
     ctx: &RunCtx<'_>,
     node: &Node,
     closing: super::shared_tree::Closing,
-) -> Result<(Option<yunta_core::CommitSha>, yunta_core::TreeId), RunError> {
-    match super::shared_tree::at_close(ctx, node, closing).await? {
-        Some((commit, tree)) => Ok((Some(commit), tree)),
-        None => Ok((None, left_tree(ctx, node).await?)),
-    }
+) -> Result<Closed, RunError> {
+    let at_close = super::shared_tree::at_close(ctx, node, closing).await?;
+    let (commit, tree) = match at_close.committed {
+        Some((commit, tree)) => (Some(commit), tree),
+        None => (None, left_tree(ctx, node).await?),
+    };
+    Ok(Closed {
+        commit,
+        tree,
+        refused: at_close.refused,
+    })
+}
+
+/// What a node's close leaves on the run, as its terminal event names it.
+struct Closed {
+    commit: Option<yunta_core::CommitSha>,
+    tree: yunta_core::TreeId,
+    refused: Vec<PathBuf>,
 }
 
 /// The run's tree as `node` leaves it, after whatever the node landed
@@ -396,13 +415,25 @@ pub(super) async fn fail_with(
     retryable: bool,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
-    let (commit, tree) = Box::pin(closed(ctx, node, super::shared_tree::Closing::Failed)).await?;
+    let closed = Box::pin(closed(ctx, node, super::shared_tree::Closing::Failed)).await?;
+    emit_failed(ctx, node, failure, retryable, tokens, closed).await
+}
+
+async fn emit_failed(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    failure: Failure,
+    retryable: bool,
+    tokens: TokenUsage,
+    closed: Closed,
+) -> Result<NodeEnd, RunError> {
     ctx.emit(
         Some(&node.id),
         EventPayload::Node(NodeEvent::Failed(
             NodeFailedPayload::new(failure, retryable, tokens)
-                .leaving(tree)
-                .committed(commit),
+                .leaving(closed.tree)
+                .committed(closed.commit)
+                .refusing(closed.refused),
         )),
     )
     .await?;

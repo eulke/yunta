@@ -41,7 +41,7 @@ use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
 
 use crate::process::Supervision;
 pub use branches::{run_branch, unit_branch};
-pub use commit::commit_tree;
+pub use commit::{commit_tree, restore};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
 pub use unit::{
     carry_work, commit_work, land, open_unit, rebase_onto, reopen_unit, snapshot_commit, Carried,

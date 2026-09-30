@@ -2521,6 +2521,13 @@
             }
           ]
         },
+        "refused": {
+          "description": "What the failed attempt left in the run's tree that the project\ndenies to every run, put back as the branch had it rather than\ncommitted. Absent when there was none.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "retryable": {
           "description": "Whether this node will be attempted again. Set by whoever owns\nthe budget, so a failure that nothing will retry is never\nrecorded as retryable.",
           "type": "boolean"

@@ -309,6 +309,11 @@ pub struct NodeFailedPayload {
     /// corrective node starts from it and nothing is blamed on another.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<CommitSha>,
+    /// What the failed attempt left in the run's tree that the project
+    /// denies to every run, put back as the branch had it rather than
+    /// committed. Absent when there was none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refused: Vec<PathBuf>,
 }
 
 impl NodeFailedPayload {
@@ -319,12 +324,18 @@ impl NodeFailedPayload {
             retryable,
             tree: None,
             commit: None,
+            refused: Vec::new(),
         }
     }
 
     /// The same, naming the commit its close made, when it made one.
     pub fn committed(self, commit: Option<CommitSha>) -> Self {
         NodeFailedPayload { commit, ..self }
+    }
+
+    /// The same, naming what its close refused to commit.
+    pub fn refusing(self, refused: Vec<PathBuf>) -> Self {
+        NodeFailedPayload { refused, ..self }
     }
 
     /// The same, naming the tree the failed attempt left the run at.

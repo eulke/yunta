@@ -8,6 +8,8 @@
 //! loses nothing. The run's tree and its `HEAD` are then the same
 //! content, less what git ignores.
 
+use std::path::{Path, PathBuf};
+
 use yunta_core::{CommitSha, Isolation, Node, NodeId, NodeKind, TreeId};
 
 use super::{RunCtx, RunError};
@@ -21,38 +23,91 @@ pub(super) enum Closing {
     Failed,
 }
 
+/// What a close did to the run's tree: the commit it made and the tree
+/// that commit holds, when it made one, and the paths it refused.
+#[derive(Default)]
+pub(super) struct AtClose {
+    pub(super) committed: Option<(CommitSha, TreeId)>,
+    /// What the work left that the project denies to every run: never
+    /// committed, and in a run with a worktree of its own put back as the
+    /// branch had it.
+    pub(super) refused: Vec<PathBuf>,
+}
+
 /// Commits what `node` left in the run's tree as it closes, and answers
-/// with the commit and the tree it holds — `None` when there is nothing
-/// to commit here.
+/// with the commit and the tree it holds, and what it refused.
 ///
 /// Nothing is committed for a node with a checkout of its own (it lands
 /// its work), for a gate (it writes nothing), in a run that works in a
 /// person's own checkout (their branch is left as it was found), or while
 /// another node is still working in the same tree: the tree holds both
 /// nodes' work at once, so it is committed by whichever of them closes
-/// last, naming the others.
+/// last, naming the others. The close that commits answers for the whole
+/// commit: what it would add that the project denies is refused and put
+/// back first.
 pub(super) async fn at_close(
     ctx: &RunCtx<'_>,
     node: &Node,
     closing: Closing,
-) -> Result<Option<(CommitSha, TreeId)>, RunError> {
-    if !commits_here(ctx) || !shares_the_tree(ctx, node) {
-        return Ok(None);
+) -> Result<AtClose, RunError> {
+    if !shares_the_tree(ctx, node) {
+        return Ok(AtClose::default());
+    }
+    if !commits_here(ctx) {
+        return Box::pin(refused_in_place(ctx, node)).await;
     }
     let _landing = ctx.landing.lock().await;
     let Some(message) = commit_message(ctx, node, closing).await? else {
-        return Ok(None);
+        return Ok(AtClose::default());
     };
     let index =
         crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
     // Boxed: a close runs at the bottom of every composed run's stack.
-    Ok(Box::pin(crate::worktree::commit_tree(
+    let refused = Box::pin(refuse_denied(ctx, &index)).await?;
+    let committed = Box::pin(crate::worktree::commit_tree(
         ctx.worktree,
         &index,
         &message,
         ctx.root_supervision(),
     ))
-    .await?)
+    .await?;
+    Ok(AtClose { committed, refused })
+}
+
+/// What the run's tree would commit that the project denies to every
+/// run, put back as `HEAD` has it.
+async fn refuse_denied(ctx: &RunCtx<'_>, index: &Path) -> Result<Vec<PathBuf>, RunError> {
+    let deny = ctx.manifest.config.denied_paths();
+    if deny.is_empty() {
+        return Ok(Vec::new());
+    }
+    let supervision = ctx.root_supervision();
+    let tree = crate::worktree::capture_tree(ctx.worktree, index, supervision).await?;
+    let head = crate::worktree::head_commit(ctx.worktree, supervision).await?;
+    let added = crate::scope::changed_between(ctx.worktree, &head, &tree, supervision).await?;
+    let refused = crate::scope::denied(&added, deny, &[])?;
+    crate::worktree::restore(ctx.worktree, &refused, supervision).await?;
+    Ok(refused)
+}
+
+/// In a person's own checkout nothing is committed or put back: what
+/// `node` wrote there that the project denies is only refused, for the
+/// node to fail with.
+async fn refused_in_place(ctx: &RunCtx<'_>, node: &Node) -> Result<AtClose, RunError> {
+    let deny = ctx.manifest.config.denied_paths();
+    let state = ctx.run_view().await?.state;
+    let from = state.nodes.from_tree(&node.id).cloned();
+    let (false, Some(from)) = (deny.is_empty(), from) else {
+        return Ok(AtClose::default());
+    };
+    let index =
+        crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
+    let diff =
+        crate::scope::changed_since(ctx.worktree, &from, &index, ctx.root_supervision()).await?;
+    Ok(AtClose {
+        committed: None,
+        refused: crate::scope::denied(&diff, deny, &[])?,
+    })
 }
 
 /// What `node`'s commit says, read off the run's state — or `None` while
