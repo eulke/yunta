@@ -63,7 +63,8 @@ pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<O
     for warning in &refs.warnings {
         warn(warning);
     }
-    let (unprovided, missing_programs) = super::environment(&cwd, &workflow, &config, &origin);
+    let (unprovided, missing_programs) =
+        super::refusals::environment(&cwd, &workflow, &config, &origin);
     for warning in &missing_programs {
         warn(warning);
     }

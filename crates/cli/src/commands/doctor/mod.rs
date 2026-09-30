@@ -124,7 +124,7 @@ fn check_installed_pack_requires(cwd: &std::path::Path, config: &yunta_core::Con
             let missing_commands: Vec<&String> = gap
                 .required_commands
                 .iter()
-                .filter(|cmd| !super::command_on_path(cmd))
+                .filter(|cmd| !super::refusals::command_on_path(cmd))
                 .collect();
             if gap.is_satisfied() && missing_commands.is_empty() {
                 continue;

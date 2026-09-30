@@ -350,7 +350,7 @@ async fn estimate(
 fn resolve_and_check(ctx: &Context, workflow_path: &Path) -> Result<(PathBuf, Workflow), CliError> {
     let resolved = super::resolve_workflow_ref(&ctx.cwd, workflow_path)?;
     let workflow = crate::load_workflow(&resolved)?;
-    super::check_or_refuse(&ctx.cwd, &workflow, &ctx.project.config, &resolved)?;
+    super::refusals::check_or_refuse(&ctx.cwd, &workflow, &ctx.project.config, &resolved)?;
     Ok((resolved, workflow))
 }
 

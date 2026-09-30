@@ -83,7 +83,7 @@ impl Presentation {
 /// `yunta resume` both take once the run they drive is open.
 pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
     let shown = Presentation::of(env.quiet);
-    let forge = super::real_forge(&env.manifest.config);
+    let forge = super::forge::forge_for(&env.manifest.config, &yunta_core::ProcessSecrets);
     let watching = watch(&env, &shown).await?;
     let root_cancel = watching.cancel.clone();
     let report = match execute(Executing {

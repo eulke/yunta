@@ -13,6 +13,7 @@ mod context;
 mod hooks;
 mod node;
 mod node_kind;
+mod node_policy;
 mod parse;
 
 use std::collections::BTreeMap;
@@ -37,11 +38,12 @@ pub use context::{
     NodeOutputParams, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams,
 };
 pub use hooks::{HookFailurePolicy, HookStep, Hooks, OnFailure};
-pub use node::{LoopUntil, Node, NodeDefaults, NodePermissions, OnInterrupt};
+pub use node::{Node, NodeDefaults};
 pub use node_kind::{
     CheckBuiltin, Coordination, ExternalGate, ForgeKind, JoinPolicy, MountArtifact, MountSpec,
     NodeKind, PromptSource,
 };
+pub use node_policy::{LoopUntil, NodePermissions, OnInterrupt};
 
 /// A workflow definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
