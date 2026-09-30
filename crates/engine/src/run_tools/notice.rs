@@ -47,11 +47,20 @@ pub(crate) fn task_notice(
     task: Option<&super::host::TaskAccess>,
 ) -> Option<String> {
     session?;
-    task?;
+    let task = task?;
+    let plan = match task.plan {
+        Some(_) => {
+            " It also carries the plan the task belongs to: the design the task names, and \
+             the other tasks, which own what your scope leaves out. Build the design as the \
+             plan declares it; where your task cannot, ask for the scope it needs rather \
+             than building something else."
+        }
+        None => "",
+    };
     Some(format!(
         "\n\nRead this task's scope, criteria and notes with `{read}` before you change \
          anything — the tasks document is not in your checkout, and the same call shows \
-         what earlier attempts left red. When your session ends the engine runs every \
+         what earlier attempts left red.{plan} When your session ends the engine runs every \
          criterion and rejects any change outside the scope; `{check}` judges your work \
          exactly that way, so call it before you finish.",
         read = super::catalog::RunTool::Task.name(),

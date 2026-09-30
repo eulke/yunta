@@ -241,6 +241,8 @@ pub struct TaskAccess {
     pub staged: Arc<std::sync::OnceLock<Vec<PathBuf>>>,
     /// The one check of this task that judges at a time.
     pub checks: Arc<CheckTurn>,
+    /// The plan the task belongs to, when a loop is working one.
+    pub plan: Option<Arc<yunta_core::TasksFile>>,
 }
 
 /// The one check of a task that judges at a time, and the tree it is

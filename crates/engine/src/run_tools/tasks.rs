@@ -82,6 +82,10 @@ impl SessionTools {
                 .collect(),
             cycles: cycles_of(&events, &task.id),
             runs_under: None,
+            plan: access
+                .plan
+                .as_deref()
+                .map(|plan| PlanSheet::of(plan, &task.id)),
         };
         let any_unrunnable = sheet
             .cycles
@@ -199,6 +203,68 @@ struct TaskSheet<'a> {
     /// could not run: the shell and the `PATH` its command was looked up in.
     #[serde(skip_serializing_if = "Option::is_none")]
     runs_under: Option<&'a ExecutionEnvironment>,
+    /// The plan this task belongs to, when a loop is working one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    plan: Option<PlanSheet<'a>>,
+}
+
+/// The plan a task belongs to, as far as its session needs it: what the
+/// plan changes and why, the shapes it creates — which a task names
+/// rather than restates — what it risks and leaves out, and the other
+/// tasks, which own what this one's scope leaves out.
+#[derive(Serialize)]
+struct PlanSheet<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    design: Option<&'a str>,
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    risks: &'a [String],
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    out_of_scope: &'a [String],
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    other_tasks: Vec<OtherTask<'a>>,
+}
+
+/// Another task of the plan: what it is, and what it owns.
+#[derive(Serialize)]
+struct OtherTask<'a> {
+    id: &'a TaskId,
+    title: &'a str,
+    scope: &'a [ScopeGlob],
+    #[serde(skip_serializing_if = "<[TaskId]>::is_empty")]
+    depends_on: &'a [TaskId],
+}
+
+impl<'a> PlanSheet<'a> {
+    /// `plan` as the session working `task` reads it.
+    fn of(plan: &'a yunta_core::TasksFile, task: &TaskId) -> Self {
+        let said = |text: &'a Option<String>| {
+            text.as_deref()
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+        };
+        PlanSheet {
+            summary: said(&plan.summary),
+            description: said(&plan.description),
+            design: said(&plan.design),
+            risks: &plan.risks,
+            out_of_scope: &plan.out_of_scope,
+            other_tasks: plan
+                .tasks
+                .iter()
+                .filter(|other| other.id != *task)
+                .map(|other| OtherTask {
+                    id: &other.id,
+                    title: &other.title,
+                    scope: &other.scope,
+                    depends_on: &other.depends_on,
+                })
+                .collect(),
+        }
+    }
 }
 
 /// A criterion the task is judged by: one its document declares, or the

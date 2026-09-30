@@ -149,7 +149,10 @@ fn task_tool() -> Tool {
          measured its suite green before changing anything, that suite is among the guards: \
          a change that breaks what passed keeps the task open. `cycles` lists what the engine found each \
          time the task ran, the current cycle last: its pre-check, then each attempt's \
-         criteria and the paths it changed outside the scope. The tasks document is not \
+         criteria and the paths it changed outside the scope. `plan` is the plan the task \
+         belongs to: its summary, description and `design` — the shapes it creates, which \
+         your task names rather than restates — its risks, what it leaves out, and \
+         `other_tasks`, which own what your scope leaves out. The tasks document is not \
          in your checkout; this is where it is read.",
         no_arguments(),
     )

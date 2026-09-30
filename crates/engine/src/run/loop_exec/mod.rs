@@ -322,6 +322,12 @@ async fn prepare_loop<'a>(
             .collect(),
         ..held.document
     };
+    // Every task session reads the plan its task belongs to: the design
+    // it names, and the tasks that own what it may not touch.
+    let setup = crate::task_cycle::SessionSetup {
+        plan: Some(std::sync::Arc::new(tasks.clone())),
+        ..setup
+    };
 
     // Absent means the engine's own default, 1 — sequential, deliberately
     // not config-overridable: token spend multiplies with it, so it's

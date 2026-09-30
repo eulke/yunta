@@ -1197,6 +1197,10 @@ async fn a_task_session_reads_its_task_through_its_tools_and_its_check_is_the_cl
         "the brief says where the task is read and how the work is judged: {brief}"
     );
     assert!(
+        brief.contains("It also carries the plan the task belongs to"),
+        "and that the plan is read there too: {brief}"
+    );
+    assert!(
         !brief.contains("the parser lives in src/lex.rs") && !brief.contains("test -f a1.txt"),
         "the brief carries no copy of the task's contract: {brief}"
     );

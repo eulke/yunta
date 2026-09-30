@@ -215,6 +215,7 @@ impl ToolsHost {
             staged: Arc::new(OnceLock::from(Vec::new())),
             denied: Vec::new(),
             checks: Default::default(),
+            plan: None,
         }
     }
 

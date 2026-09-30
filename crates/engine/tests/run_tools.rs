@@ -608,6 +608,62 @@ fn two_cycles_of_one_attempt_each(host: &ToolsHost) {
     );
 }
 
+/// A plan whose design declares a type one task creates and another
+/// uses, and whose tasks split the files between them.
+fn colored_plan() -> yunta_core::TasksFile {
+    serde_norway::from_str(
+        r#"
+summary: Color the CLI's messages
+description: One palette, used by every surface.
+design: |
+  ```rust
+  enum ColorRole { Error, Warning, Success, Info }
+  ```
+risks: [Low contrast on some themes]
+out_of_scope: [Truecolor]
+tasks:
+  - id: T001
+    title: Write the greeting
+    scope: [hello.txt]
+    criteria: [{ cmd: test -f hello.txt }]
+  - id: T002
+    title: Add the palette
+    scope: [src/color.rs]
+    criteria: [{ cmd: test -f src/color.rs }]
+    depends_on: [T001]
+"#,
+    )
+    .unwrap()
+}
+
+#[tokio::test]
+async fn a_task_session_reads_the_plan_its_task_belongs_to() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let mut access = host.task_access(greeting_task(), unit_at(host.attempt_dir()));
+    access.plan = Some(Arc::new(colored_plan()));
+    let session = host.task_session("implement", access).await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let (is_error, text) = call(&client, "yunta_task", json!({})).await;
+
+    assert!(!is_error, "got: {text}");
+    let sheet: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        sheet["plan"],
+        json!({
+            "summary": "Color the CLI's messages",
+            "description": "One palette, used by every surface.",
+            "design": "```rust\nenum ColorRole { Error, Warning, Success, Info }\n```",
+            "risks": ["Low contrast on some themes"],
+            "out_of_scope": ["Truecolor"],
+            "other_tasks": [
+                {"id": "T002", "title": "Add the palette", "scope": ["src/color.rs"], "depends_on": ["T001"]},
+            ],
+        }),
+        "the design the task names, and who owns what its scope leaves out"
+    );
+}
+
 #[tokio::test]
 async fn a_task_session_reads_its_task_and_every_cycle_it_ran_from_the_run() {
     let host = ToolsHost::over(BLACKBOARD_WORKFLOW);

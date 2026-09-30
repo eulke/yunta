@@ -345,6 +345,7 @@ async fn open_and_dispatch(
         cancel: supervision.cancel.clone(),
         staged: Default::default(),
         checks: Default::default(),
+        plan: setup.plan.clone(),
     });
     // One door for every session: the per-attempt listener (mandatory
     // for a task session, which reads its task through it), the brief,

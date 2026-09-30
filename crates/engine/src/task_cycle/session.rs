@@ -29,6 +29,10 @@ pub struct SessionSetup {
     /// The directories every session of the run shares, which a session
     /// that may write keeps writable beside its checkout.
     pub shared_dirs: Vec<PathBuf>,
+    /// The plan a loop's tasks come from, which each of its task
+    /// sessions reads its place in. `None` for a node that works no
+    /// tasks.
+    pub plan: Option<std::sync::Arc<yunta_core::TasksFile>>,
     pub skills: Vec<PathBuf>,
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
     pub env: std::collections::HashMap<String, yunta_core::Secret<String>>,
@@ -136,6 +140,7 @@ impl SessionSetup {
         Self {
             denied: Vec::new(),
             shared_dirs: Vec::new(),
+            plan: None,
             skills: Vec::new(),
             adapter_settings: serde_json::Map::new(),
             env: std::collections::HashMap::new(),
