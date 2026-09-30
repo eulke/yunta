@@ -85,9 +85,10 @@ fn a_plan_is_reviewed_at_its_gate_and_a_correction_sends_it_back_with_the_words(
     assert!(
         drawn.contains("what you are deciding on")
             && drawn.contains("Writes the file the run is about.")
-            && drawn.contains("T001  Make it")
-            && drawn.contains("done when: the file exists — `test -f made.txt`")
-            && drawn.contains("the whole plan: artifacts/plan/tasks.md"),
+            && drawn.contains("T001 — Make it")
+            && drawn.contains("done when     the file exists")
+            && !drawn.contains("test -f made.txt")
+            && drawn.contains("/artifacts/plan/tasks.md"),
         "the gate shows the plan it asks about, explained:\n{drawn}"
     );
 
@@ -106,7 +107,7 @@ fn a_plan_is_reviewed_at_its_gate_and_a_correction_sends_it_back_with_the_words(
 
     // The planner goes again and the gate asks about the second plan.
     terminal.wait_for(
-        "T002  Say it",
+        "T002 — Say it",
         "the gate never showed the plan the correction made",
     );
     // `approve`, the first option, with nothing to add.

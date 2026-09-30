@@ -88,6 +88,13 @@ pub(crate) fn wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
+/// `line` in pieces that each occupy `width` display cells or fewer, cut
+/// between clusters and nowhere else — for text whose spacing is its
+/// meaning, like a line of code, which [`wrap`] would re-flow.
+pub(crate) fn cut(line: &str, width: usize) -> Vec<String> {
+    pieces(line, width.max(1))
+}
+
 /// `word` in the fewest pieces that each fit `width`: itself when it
 /// already does, and cuts between clusters when it does not.
 fn pieces(word: &str, width: usize) -> Vec<String> {

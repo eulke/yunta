@@ -20,6 +20,7 @@
 pub(crate) mod bars;
 pub(crate) mod escalation;
 pub(crate) mod glyphs;
+pub(crate) mod markdown;
 pub(crate) mod shown;
 pub(crate) mod state;
 pub(crate) mod units;
@@ -31,5 +32,6 @@ pub(crate) use glyphs::Glyphs;
 pub(crate) use state::{NodeDisplay, StateWord, STATE_WIDTH};
 pub(crate) use units::{format_duration, format_pct};
 pub(crate) use width::{
-    cell_width, indent, truncate, wrap, CHILD_DEPTH, INDENT, INDENT_WIDTH, LABEL_WIDTH, LINE_WIDTH,
+    cell_width, cut, indent, truncate, wrap, CHILD_DEPTH, INDENT, INDENT_WIDTH, LABEL_WIDTH,
+    LINE_WIDTH,
 };

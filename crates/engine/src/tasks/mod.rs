@@ -21,6 +21,7 @@ use yunta_core::events::TaskEvent;
 
 pub(crate) use crossing::{carried_into, standing_of, Standing};
 pub use judged::judged_task;
+pub use view::PlanView;
 
 /// Whether this run shows `producer`'s tasks document to a person: a gate
 /// among the nodes the run includes names it. The mode is the one

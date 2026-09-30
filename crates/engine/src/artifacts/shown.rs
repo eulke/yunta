@@ -48,7 +48,9 @@ pub(crate) async fn documents(
     let mut documents = Vec::with_capacity(shows.len());
     for shown in shows {
         let bytes = store.get(&shown.content_hash).await?;
-        let path = view_of(shown);
+        // Where the person deciding opens it: in full, since they read it
+        // from wherever they stand and not from the run's directory.
+        let path = run_dir.join(view_of(shown));
         let content = match &shown.artifact {
             ArtifactId::Interpreted {
                 kind: ArtifactKind::Tasks,

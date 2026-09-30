@@ -16,8 +16,10 @@ use yunta_core::{Task, TaskId, TasksFile};
 pub(crate) const VIEW_NAME: &str = "tasks.md";
 
 /// The plan, read for a person: its tasks by the step they run in, what
-/// they touch together, and the guards they hold.
-pub(crate) struct PlanView<'a> {
+/// they touch together, and the guards they hold. One reading, drawn as
+/// Markdown beside the document and on the terminal a decision is made
+/// at, so the two never say different things about the same plan.
+pub struct PlanView<'a> {
     file: &'a TasksFile,
     /// The tasks of each step, in document order: the first step waits
     /// on nothing, and each later one on a task of the step before it.
@@ -27,7 +29,7 @@ pub(crate) struct PlanView<'a> {
 }
 
 impl<'a> PlanView<'a> {
-    pub(crate) fn of(file: &'a TasksFile) -> Self {
+    pub fn of(file: &'a TasksFile) -> Self {
         let mut steps: Vec<Vec<&Task>> = Vec::new();
         let mut depth: HashMap<&TaskId, usize> = HashMap::new();
         for task in &file.tasks {
@@ -59,6 +61,12 @@ impl<'a> PlanView<'a> {
             touched,
             guards,
         }
+    }
+
+    /// The tasks of each step, in document order: the first step waits
+    /// on nothing, and each later one on a task of the step before it.
+    pub fn steps(&self) -> &[Vec<&'a Task>] {
+        &self.steps
     }
 
     /// The whole plan as one Markdown document.
