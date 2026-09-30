@@ -210,6 +210,21 @@ created. `yunta check` refuses such a workflow before the first token, naming th
 node and the command, and a run that meets one anyway fails the node without
 offering a retry.
 
+`yunta init` writes `commands:` for what it finds in the repository: the
+scripts a `package.json` declares for `lint`, `typecheck`, `test`, `format` and
+`build`, run by the package manager its lockfile names (`pnpm lint`,
+`npm run lint`, `npm test`); the usual tools of a Rust, Go or Python project
+otherwise. It also writes the suite a run measures (`baseline.suite`) and, when
+`origin` is on GitHub, a `forge:` for it. Detection only proposes: nothing reads
+a detected value but the config a person commits. Where a workflow names a
+command the config lacks and the repository answers for it, `yunta check`,
+`yunta doctor` and `yunta pack add` say what to declare:
+
+```text
+node `lint`: the project declares no command `lint` — a run is refused until it does
+  detected here: declare `commands: { lint: "pnpm lint" }`
+```
+
 ## Context
 
 `context:` on a `prompt` or `loop` node assembles what that session sees, beyond the

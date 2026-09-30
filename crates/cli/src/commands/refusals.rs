@@ -45,10 +45,12 @@ pub(crate) fn check_or_refuse(
     if errors.is_empty() {
         return Ok(());
     }
-    Err(CliError::msg(yunta_core::text::problems(
-        "the workflow fails `yunta check`",
-        &errors,
-    )))
+    let mut said = yunta_core::text::problems("the workflow fails `yunta check`", &errors);
+    let detected = crate::detect::Detected::in_files(cwd);
+    for line in crate::detect::suggestions(&errors, &detected) {
+        said.push_str(&format!("\n  {line}"));
+    }
+    Err(CliError::msg(said))
 }
 
 /// What the machine a run would use has to provide for `workflow`: what

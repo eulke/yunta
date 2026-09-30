@@ -275,6 +275,7 @@ pub async fn add(
         commit.abbreviated(),
         dest.display()
     );
+    super::pack_needs::report(&ctx, &dest, &manifest).await;
 
     // The pack's own cases run last, on the vendored copy, and only on
     // request — after the confirmation, never as part of deciding it.

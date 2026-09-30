@@ -276,3 +276,52 @@ fn new_writes_only_a_parseable_skeleton() {
             .unwrap_or_else(|e| panic!("shape {shape} wrote an unparseable workflow: {e}\n{yaml}"));
     }
 }
+
+#[test]
+fn init_writes_the_commands_and_suite_a_pnpm_project_declares() {
+    let (_root, repo, home) = setup();
+    std::fs::write(
+        repo.join("package.json"),
+        r#"{ "scripts": { "lint": "eslint .", "check-types": "tsc", "test": "vitest run" } }"#,
+    )
+    .unwrap();
+    std::fs::write(repo.join("pnpm-lock.yaml"), "lockfileVersion: '9.0'\n").unwrap();
+
+    let result = yunta_in!(&repo, &home, &["init"]);
+    assert!(result.status.success(), "stderr: {}", stderr(&result));
+
+    let config = std::fs::read_to_string(repo.join(".yunta/config.yaml")).unwrap();
+    let parsed: serde_norway::Value = serde_norway::from_str(&config).unwrap();
+    assert_eq!(parsed["commands"]["lint"], "pnpm lint", "{config}");
+    assert_eq!(
+        parsed["commands"]["typecheck"], "pnpm check-types",
+        "{config}"
+    );
+    assert_eq!(parsed["commands"]["test"], "pnpm test", "{config}");
+    assert_eq!(parsed["baseline"]["suite"], "pnpm test", "{config}");
+    assert!(
+        parsed.get("forge").is_none(),
+        "no origin, no forge: {config}"
+    );
+}
+
+#[test]
+fn init_writes_the_github_forge_origin_points_at() {
+    let (_root, repo, home) = setup();
+    yunta_testkit::git(
+        &repo,
+        &["remote", "add", "origin", "git@github.com:acme/web.git"],
+    );
+
+    let result = yunta_in!(&repo, &home, &["init"]);
+    assert!(result.status.success(), "stderr: {}", stderr(&result));
+
+    let config = std::fs::read_to_string(repo.join(".yunta/config.yaml")).unwrap();
+    let parsed: serde_norway::Value = serde_norway::from_str(&config).unwrap();
+    assert_eq!(parsed["forge"]["github"]["repo"], "acme/web", "{config}");
+    assert_eq!(
+        parsed["forge"]["github"]["token_env"], "GITHUB_TOKEN",
+        "{config}"
+    );
+    assert!(parsed.get("commands").is_none(), "{config}");
+}

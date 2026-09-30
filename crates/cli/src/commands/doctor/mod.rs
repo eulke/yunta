@@ -165,6 +165,7 @@ fn check_installed_pack_requires(cwd: &std::path::Path, config: &yunta_core::Con
 async fn check_installed_pack_workflows(ctx: &Context) -> bool {
     let config = &ctx.project.config;
     let isolation = config.resolved_isolation();
+    let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision()).await;
     let mut all_present = true;
     for publisher in yunta_engine::installed_publishers(&ctx.cwd) {
         for (pack_dir, manifest) in
@@ -191,10 +192,12 @@ async fn check_installed_pack_workflows(ctx: &Context) -> bool {
                         .errors,
                     );
                 let found = super::context_files_at_head(ctx, &workflow, isolation).await;
-                let said = refused
-                    .chain(found.errors)
-                    .map(|error| error.to_string())
-                    .chain(found.warnings.iter().map(ToString::to_string));
+                let errors: Vec<yunta_engine::CheckError> = refused.chain(found.errors).collect();
+                let said = errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .chain(found.warnings.iter().map(ToString::to_string))
+                    .chain(crate::detect::suggestions(&errors, &detected));
                 for line in said {
                     all_present = false;
                     println!("pack {}: {line}", manifest.reference());

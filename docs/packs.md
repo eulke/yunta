@@ -108,6 +108,13 @@ Nothing here blocks `pack add` or `check` — a pack can be installed and
 configured for later, same as an adapter that isn't set up yet doesn't stop
 `yunta init`.
 
+What a pack's workflows ask the project's config for — a command by name, a
+forge, a suite — is said once the pack lands: `pack add` lists every key a node
+needs and the config leaves unset, whether a run is refused for it or leaves an
+`optional: true` node out, and what this repository was detected to answer for
+it. It refuses nothing for it; `yunta check` and `yunta doctor` say the same
+later.
+
 Starting a run from a pack's own workflow freezes exactly which pack version
 produced it — publisher, name, the pack's own semver, and the exact commit
 `yunta.lock` recorded, all in the run's manifest from the moment it's

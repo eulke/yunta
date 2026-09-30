@@ -21,69 +21,6 @@ use crate::surface::Diagnostics;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
 
-struct Ecosystem {
-    name: &'static str,
-    test_cmd: &'static str,
-    /// A tip printed to the terminal, never written to config — no key
-    /// for this exists anywhere in the reference schema; this is a
-    /// deliberate scoping decision, not an oversight.
-    cache_tip: &'static str,
-}
-
-/// First match wins, in the order listed — a repo with both `Cargo.toml`
-/// and `package.json` (a Rust project with a small JS tool inside) is
-/// still primarily a Rust project for this purpose.
-fn detect_ecosystem(repo: &Path) -> Option<Ecosystem> {
-    let candidates = [
-        (
-            "Cargo.toml",
-            Ecosystem {
-                name: "rust",
-                test_cmd: "cargo test",
-                cache_tip: "share a build cache across worktrees: export \
-                            CARGO_TARGET_DIR=$HOME/.cache/yunta-cargo-target \
-                            before running yunta — otherwise every \
-                            worktree rebuilds the whole dependency tree.",
-            },
-        ),
-        (
-            "package.json",
-            Ecosystem {
-                name: "node",
-                test_cmd: "npm test",
-                cache_tip: "share a package cache across worktrees: point \
-                            npm's cache at a shared directory (`npm config \
-                            set cache <shared-dir>`) or use a package manager \
-                            with content-addressed storage.",
-            },
-        ),
-        (
-            "go.mod",
-            Ecosystem {
-                name: "go",
-                test_cmd: "go test ./...",
-                cache_tip: "Go's own build/module caches (GOCACHE/GOMODCACHE) \
-                            are already shared machine-wide by default — \
-                            nothing extra to configure for worktrees.",
-            },
-        ),
-        (
-            "pyproject.toml",
-            Ecosystem {
-                name: "python",
-                test_cmd: "pytest",
-                cache_tip: "share a virtualenv or package cache across \
-                            worktrees (e.g. a shared `uv`/`pip` cache dir) to \
-                            avoid reinstalling dependencies per worktree.",
-            },
-        ),
-    ];
-    candidates
-        .into_iter()
-        .find(|(marker, _)| repo.join(marker).is_file())
-        .map(|(_, ecosystem)| ecosystem)
-}
-
 async fn detect_base_branch(repo: &Path, supervision: Supervision<'_>) -> String {
     // Both probes are best-effort: a git that can't answer (no remote
     // HEAD, detached head, no repo) falls through to the next, then to
@@ -146,7 +83,12 @@ async fn probe_known_adapters() -> Vec<ProbedAdapter> {
     probed
 }
 
-fn render_config_yaml(project_name: &str, base_branch: &str, probed: &[ProbedAdapter]) -> String {
+fn render_config_yaml(
+    project_name: &str,
+    base_branch: &str,
+    probed: &[ProbedAdapter],
+    detected: &crate::detect::Detected,
+) -> String {
     let mut out = String::new();
     out.push_str("# Written by `yunta init` — team-shared, commit this file.\n");
     out.push_str("# Personal overrides belong in ~/.yunta/config.yaml (the user\n");
@@ -155,6 +97,7 @@ fn render_config_yaml(project_name: &str, base_branch: &str, probed: &[ProbedAda
     out.push_str(&format!("  name: {project_name}\n"));
     out.push_str(&format!("  base_branch: {base_branch}\n"));
     out.push_str("  branch_prefix: yunta/\n\n");
+    out.push_str(&render_detected(detected));
 
     out.push_str("# `runners:` names roles your workflows' `runner:` fields reference,\n");
     out.push_str("# each with one or more adapter candidates (first capable one wins).\n");
@@ -185,6 +128,38 @@ fn render_config_yaml(project_name: &str, base_branch: &str, probed: &[ProbedAda
         ));
     }
     out
+}
+
+/// What `init` found in the repository, as config: the commands a
+/// workflow asks for by name, the suite a run measures when it reads the
+/// measurement, and the forge `origin` is on.
+fn render_detected(detected: &crate::detect::Detected) -> String {
+    let mut out = String::new();
+    if !detected.commands.is_empty() {
+        out.push_str("# What this project runs for each capability a workflow names\n");
+        out.push_str("# (`run: { command: lint }`), as `yunta init` detected it.\n");
+        out.push_str("commands:\n");
+        for (name, text) in &detected.commands {
+            out.push_str(&format!("  {name}: {}\n", yaml_string(text)));
+        }
+        out.push('\n');
+    }
+    if let Some(suite) = &detected.suite {
+        out.push_str("# Measured before a run's first node when the run reads it.\n");
+        out.push_str(&format!("baseline:\n  suite: {}\n\n", yaml_string(suite)));
+    }
+    if let Some(repo) = &detected.forge {
+        out.push_str("# Where a `pull_request` node opens its pull request.\n");
+        out.push_str(&format!(
+            "forge:\n  github:\n    repo: {repo}\n    token_env: GITHUB_TOKEN\n\n"
+        ));
+    }
+    out
+}
+
+/// `text` as a double-quoted YAML scalar.
+fn yaml_string(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 const GITIGNORE_MARKER: &str = "# added by `yunta init`";
@@ -328,7 +303,7 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "workflow-project".to_string());
     let default_branch = detect_base_branch(&repo, supervision).await;
-    let ecosystem = detect_ecosystem(&repo);
+    let detected = crate::detect::Detected::in_repo(&repo, supervision).await;
 
     let (project_name, base_branch) = match &console {
         Some(console) => {
@@ -352,7 +327,7 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         std::fs::create_dir_all(parent)
             .map_err(|source| CliError::io("create", parent.display(), source))?;
     }
-    let config_yaml = render_config_yaml(&project_name, &base_branch, &probed);
+    let config_yaml = render_config_yaml(&project_name, &base_branch, &probed, &detected);
     // Never write a config this binary can't read back: parse the
     // generated text into a real `ConfigLayer` first, so a broken template
     // fails here instead of leaving an unreadable file — the more so under
@@ -386,15 +361,24 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         println!("  skipped {path}");
     }
 
-    match &ecosystem {
-        Some(eco) => println!(
-            "\ndetected ecosystem: {} (suggested test command: `{}`)\ntip: {}",
-            eco.name, eco.test_cmd, eco.cache_tip
+    match &detected.ecosystem {
+        Some(ecosystem) => println!(
+            "\ndetected ecosystem: {} — wrote {}{}\ntip: {}",
+            ecosystem.name,
+            yunta_core::text::counted(detected.commands.len(), "project command"),
+            match detected.suite {
+                Some(_) => " and the suite a run measures",
+                None => "",
+            },
+            ecosystem.cache_tip
         ),
         None => println!(
             "\nno known ecosystem detected (looked for Cargo.toml, package.json, \
-             go.mod, pyproject.toml) — fill in a test command by hand"
+             go.mod, pyproject.toml) — declare `commands:` and `baseline.suite` by hand"
         ),
+    }
+    if let Some(repo) = &detected.forge {
+        println!("forge: github {repo}, from `origin` — its token is read from `GITHUB_TOKEN`");
     }
 
     for adapter in &probed {

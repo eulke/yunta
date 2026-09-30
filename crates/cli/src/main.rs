@@ -21,6 +21,7 @@ mod ask;
 mod cli;
 mod commands;
 mod context;
+mod detect;
 mod error;
 mod graph;
 mod human_interaction;

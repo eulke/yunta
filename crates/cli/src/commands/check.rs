@@ -94,6 +94,10 @@ pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<O
         Ok(Outcome::Success)
     } else {
         note(problems(workflow_path.display(), &errors));
+        let detected = crate::detect::Detected::in_repo(&cwd, ctx.supervision()).await;
+        for line in crate::detect::suggestions(&errors, &detected) {
+            note(format!("  {line}"));
+        }
         Ok(Outcome::Reported)
     }
 }

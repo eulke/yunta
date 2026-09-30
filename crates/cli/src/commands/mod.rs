@@ -16,6 +16,7 @@ pub mod mcp;
 pub mod new;
 pub mod pack;
 pub mod pack_audit;
+pub(crate) mod pack_needs;
 pub(crate) mod promote;
 pub mod receipt;
 pub(crate) mod refusals;

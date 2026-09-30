@@ -32,6 +32,12 @@ names the node and the exact problem:
   freezes its config, so it would stop there every time: declare the key
   (`baseline.suite`, `coverage`, `skills.executors`, `defaults.runner`)
   and check again.
+- **``node `x`: it runs the project's command `lint`, and the config declares
+  none``** — the node runs a
+  project command by name (`run: { command: lint }`) and `commands:` does
+  not name it. Declare what this project runs for it; when the repository
+  answers for it, the next line says what was detected there
+  (`detected here: declare `commands: { lint: "pnpm lint" }``).
 - **`loop "x" works through the run's tasks document, and nothing ... gives it
   one`** / **`... reads the ... of node "y", which does not declare it`** /
   **`... reads the run's ..., and nothing can hold one`** — a read nothing in

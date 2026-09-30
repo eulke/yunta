@@ -47,8 +47,8 @@ failure re-route, and verification that means something.
 yunta init
 ```
 
-This detects your language and test command, finds your base branch, and writes
-`.yunta/config.yaml`. It never overwrites an existing one without `--force`.
+This detects your language, the commands it runs for lint, tests and the rest, the
+forge your `origin` is on, and your base branch, and writes `.yunta/config.yaml`. It never overwrites an existing one without `--force`.
 
 **2. Write the workflow.** Create `.yunta/workflows/lint-fix.yaml`:
 
@@ -155,7 +155,7 @@ a verified tasks document, lint→fix, a baseline check, multi-runner review, PR
 
 | Command | Does |
 |---|---|
-| `yunta init` | Detects language, test command, base branch and available adapters; writes `.yunta/config.yaml`. |
+| `yunta init` | Detects language, the project's commands and suite, the forge `origin` is on, base branch and available adapters; writes `.yunta/config.yaml`. |
 | `yunta new <name> [--shape one-node\|lint-fix\|tasks]` | Writes a commented workflow skeleton to `.yunta/workflows/<name>.yaml` and checks it. |
 | `yunta schema [<kind>] [--json]` | The shape of a document Yunta reads and validates — `tasks`, `findings`, `questions`, `answers` — as an annotated example to copy, or as JSON Schema for an editor. With no arguments, lists the kinds. Nothing has to be set up first: this is how anyone who has to produce one of these documents, agent or person, learns the shape instead of guessing it. |
 | `yunta check <workflow>` | Validates a workflow statically: cycles, unreachable re-routes, undefined runners, template variables, permission ceilings — no session opened. |
