@@ -673,7 +673,7 @@ async fn a_criterion_is_reused_when_the_tree_and_config_havent_changed_since_the
     // The execution marker lives outside the repo — a criterion is
     // deterministic/read-only by definition, so this only exists
     // to observe whether the command actually ran without itself
-    // dirtying the tree tree_hash is computed over (that would
+    // dirtying the tree the memo is keyed by (that would
     // self-invalidate the very cache entry it just wrote).
     let marker = root.path().join("executions.txt");
 
@@ -725,7 +725,7 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
         .await
         .unwrap();
     // Dirty the repo's own tree — the next check must see a different
-    // tree_hash (the marker file lives outside it and doesn't count).
+    // content (the marker file lives outside it and doesn't count).
     std::fs::write(repo.join("new-file.txt"), "changed").unwrap();
 
     let second = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
@@ -738,6 +738,87 @@ async fn a_criterion_re_executes_once_the_tree_changes() {
 
     let executions = std::fs::read_to_string(&marker).unwrap();
     assert_eq!(executions.lines().count(), 2);
+}
+
+#[tokio::test]
+async fn a_criterion_is_reused_once_the_same_content_is_committed() {
+    // What a criterion answers turns on what the tree holds. A close
+    // that commits the work, and an integration that replays it onto an
+    // unchanged base, hold what the session's last check already ran on.
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    let marker = root.path().join("executions.txt");
+    let t = task(
+        "memo-commit",
+        &["output.txt"],
+        vec![guard(&format!("echo ran >> {} && true", marker.display()))],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    tokio::fs::write(repo.join("output.txt"), "made")
+        .await
+        .unwrap();
+    yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
+    yunta_testkit::git(&repo, &["add", "-A"]);
+    yunta_testkit::git(&repo, &["commit", "-q", "-m", "the work"]);
+    let committed = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
+
+    assert!(committed[0].reused, "the same content, now committed");
+    assert_eq!(
+        tokio::fs::read_to_string(&marker)
+            .await
+            .unwrap()
+            .lines()
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn a_criterion_that_asks_git_runs_again_once_head_moves() {
+    // A command that reads git can answer differently on the same
+    // content under another commit, so where it stands is part of what
+    // its answer is kept for.
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    let marker = root.path().join("heads.txt");
+    let t = task(
+        "memo-git",
+        &["output.txt"],
+        vec![guard(&format!(
+            "git rev-parse HEAD >> {}",
+            marker.display()
+        ))],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
+    yunta_testkit::git(&repo, &["commit", "-q", "--allow-empty", "-m", "moved"]);
+    let moved = yunta_engine::pre_check(&t, &repo, &memo, &unpriced(), owner.supervision())
+        .await
+        .unwrap();
+
+    assert!(!moved[0].reused, "same content, another commit");
+    assert_eq!(
+        tokio::fs::read_to_string(&marker)
+            .await
+            .unwrap()
+            .lines()
+            .count(),
+        2
+    );
 }
 
 #[tokio::test]

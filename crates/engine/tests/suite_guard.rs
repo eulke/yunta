@@ -316,3 +316,37 @@ async fn a_compare_after_the_loop_reuses_what_the_guard_answered_on_that_tree() 
         Some("no regression vs baseline (exit 0, reused: the suite already ran on this same tree)")
     );
 }
+
+/// The measurement is the suite's answer on the tree the run opens on,
+/// and the task starts from that same tree.
+#[tokio::test]
+async fn the_first_pre_check_takes_the_suite_s_answer_from_the_measurement() {
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_config(&workflow("[made.txt]", ""), &session(false), &config())
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let pre = suite_checks(&bench, Phase::Pre);
+    assert_eq!(pre.len(), 1, "{pre:#?}");
+    assert!(pre[0].reused, "the measurement already answered: {pre:#?}");
+}
+
+/// A task integrated onto a base no other task moved holds exactly what
+/// its close judged, so its integration does not run the suite again.
+#[tokio::test]
+async fn an_integration_that_changes_nothing_reuses_what_the_close_answered() {
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_config(&workflow("[made.txt]", ""), &session(false), &config())
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let post = suite_checks(&bench, Phase::Post);
+    let reused: Vec<bool> = post.iter().map(|check| check.reused).collect();
+    assert_eq!(
+        reused,
+        vec![false, true],
+        "the close runs the suite on the work, the integration reuses it"
+    );
+}

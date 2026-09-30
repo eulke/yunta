@@ -95,11 +95,27 @@ pub fn inherited(from: &RunId, from_state: &RunState) -> Option<BirthBaseline> {
 /// loop's next turn sees the token fired and pauses the run. The next
 /// invocation finds no measurement on the log and measures then.
 pub(super) async fn measure(ctx: &RunCtx<'_>, suite: String) -> Result<(), RunError> {
+    // Read before the suite runs: what it measured is the tree as it
+    // found it, whatever the run leaves behind in it. Only a shortcut
+    // hangs on it — without it the first check runs the suite itself —
+    // so a tree that could not be read, a cancelled one among them,
+    // costs that and nothing else.
+    let measured_on = ctx
+        .memo
+        .key_on(&suite, ctx.worktree, ctx.root_supervision())
+        .await
+        .ok();
     let output =
         match super::check_exec::run_command(ctx.root_supervision(), ctx.worktree, &suite).await? {
             super::check_exec::CommandRun::Done(output) => output,
             super::check_exec::CommandRun::Cancelled => return Ok(()),
         };
+    // Every task is held to the suite as a guard, and the first of them
+    // starts from the tree just measured: a green measurement is its
+    // answer there, so the suite is not run twice on one tree.
+    if let Some(key) = measured_on.filter(|_| output.exit_code == 0) {
+        ctx.memo.passed(key);
+    }
 
     keep_capture(ctx.run_dir, output.stdout.as_bytes()).await?;
     ctx.emit(

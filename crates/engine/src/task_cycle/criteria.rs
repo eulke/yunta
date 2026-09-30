@@ -8,7 +8,7 @@ use std::sync::Mutex;
 
 use yunta_core::events::{CriterionType, TaskLedger};
 use yunta_core::Criterion;
-use yunta_core::{ContentHash, Task, TaskId};
+use yunta_core::{ContentHash, Task, TaskId, TreeId};
 
 use super::{CriterionRun, TaskCycleError};
 use crate::process::{spawn_governed, CommandOutput, GovernedCommand, Outcome, Supervision};
@@ -22,10 +22,14 @@ use crate::process::{spawn_governed, CommandOutput, GovernedCommand, Outcome, Su
 /// across invocations onto a tree no event in between speaks for (which
 /// would risk under-verifying).
 ///
-/// The key is `sha256(cmd \0 tree_hash \0 config_hash)`: the command as
-/// written, a fingerprint of the tree it would run against, and the hash
-/// of the resolved config it runs under — the three things its exit code
-/// can turn on, since a criterion declares no `env:` of its own.
+/// The key is `sha256(cmd \0 content \0 head \0 config_hash)`: the
+/// command as written, the git tree of what the checkout holds, and the
+/// hash of the resolved config it runs under — the things its exit code
+/// can turn on, since a criterion declares no `env:` of its own. `head`
+/// is the commit the checkout stands on, and counts only for a command
+/// that runs `git`: that one can read history, where any other reads
+/// files, so the same content committed, or replayed onto a base that
+/// did not move, keeps its answer.
 pub struct Memo {
     config_hash: ContentHash,
     cache: Mutex<HashMap<ContentHash, Answer>>,
@@ -57,41 +61,78 @@ impl Memo {
         }
     }
 
-    fn key(&self, cmd: &str, tree_hash: &ContentHash) -> ContentHash {
-        yunta_core::sha256_hex(format!("{cmd}\x00{tree_hash}\x00{}", self.config_hash).as_bytes())
+    fn key(&self, cmd: &str, tree: &Tree) -> ContentHash {
+        let head = if asks_git(cmd) {
+            tree.head.as_deref().unwrap_or_default()
+        } else {
+            ""
+        };
+        yunta_core::sha256_hex(
+            format!(
+                "{cmd}\x00{}\x00{head}\x00{}",
+                tree.content, self.config_hash
+            )
+            .as_bytes(),
+        )
     }
 
-    /// Takes the turn to ask about `cmd` on this tree: held while the
-    /// caller reads the cache and, on a miss, runs the command and
-    /// records what it answered.
-    async fn turn(&self, cmd: &str, tree_hash: &ContentHash) -> tokio::sync::OwnedMutexGuard<()> {
+    /// Takes the turn to ask about `key`: held while the caller reads
+    /// the cache and, on a miss, runs the command and records what it
+    /// answered.
+    async fn turn(&self, key: &ContentHash) -> tokio::sync::OwnedMutexGuard<()> {
         let slot = {
             let mut asking = self.asking.lock().unwrap_or_else(|e| e.into_inner());
-            asking.entry(self.key(cmd, tree_hash)).or_default().clone()
+            asking.entry(key.clone()).or_default().clone()
         };
         slot.lock_owned().await
     }
 
-    fn get(&self, cmd: &str, tree_hash: &ContentHash) -> Option<Answer> {
+    fn get(&self, key: &ContentHash) -> Option<Answer> {
         let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        cache.get(&self.key(cmd, tree_hash)).cloned()
+        cache.get(key).cloned()
     }
 
-    /// Remembers what `cmd` answered on this tree — unless it could not
-    /// run at all. A command that was not found says nothing about the
-    /// tree, and the next check on the same tree must run it again: the
-    /// program may be on the `PATH` by then.
-    fn put(&self, cmd: &str, tree_hash: &ContentHash, exit_code: i32, output: &CommandOutput) {
+    /// Remembers what a command answered under `key` — unless it could
+    /// not run at all. A command that was not found says nothing about
+    /// the tree, and the next check on the same tree must run it again:
+    /// the program may be on the `PATH` by then.
+    fn put(&self, key: ContentHash, exit_code: i32, output: &CommandOutput) {
         if could_not_run(exit_code).is_some() {
             return;
         }
-        let key = self.key(cmd, tree_hash);
         let answer = Answer {
             exit_code,
             output: (exit_code != 0).then(|| output.clone()),
         };
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.insert(key, answer);
+    }
+
+    /// What `cmd`'s answer on `cwd` is kept under, read as `cwd` stands
+    /// now — for a caller that runs the command some other way and
+    /// hands the answer to [`Memo::passed`].
+    pub(crate) async fn key_on(
+        &self,
+        cmd: &str,
+        cwd: &Path,
+        supervision: Supervision<'_>,
+    ) -> Result<ContentHash, TaskCycleError> {
+        let tree = Tree::of(cwd, asks_git(cmd), supervision).await?;
+        Ok(self.key(cmd, &tree))
+    }
+
+    /// Remembers that a command passed under `key`, measured by a
+    /// caller rather than a check: the suite a run measures before its
+    /// first node, which every task is then held to.
+    pub(crate) fn passed(&self, key: ContentHash) {
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache.insert(
+            key,
+            Answer {
+                exit_code: 0,
+                output: None,
+            },
+        );
     }
 
     /// The exit code of `cmd` on `cwd` as this invocation already knows
@@ -104,9 +145,9 @@ impl Memo {
         cwd: &Path,
         supervision: Supervision<'_>,
     ) -> Result<Memoized, TaskCycleError> {
-        let tree_hash = tree_hash(cwd, supervision).await?;
-        let _turn = self.turn(cmd, &tree_hash).await;
-        if let Some(answer) = self.get(cmd, &tree_hash) {
+        let key = self.key_on(cmd, cwd, supervision).await?;
+        let _turn = self.turn(&key).await;
+        if let Some(answer) = self.get(&key) {
             return Ok(Memoized {
                 exit_code: answer.exit_code,
                 reused: true,
@@ -123,7 +164,7 @@ impl Memo {
             })?;
         let output = CommandOutput::of(&outcome);
         let exit_code = exit_code_of(outcome);
-        self.put(cmd, &tree_hash, exit_code, &output);
+        self.put(key, exit_code, &output);
         Ok(Memoized {
             exit_code,
             reused: false,
@@ -170,46 +211,63 @@ pub struct Memoized {
     pub output: Option<CommandOutput>,
 }
 
-/// A fingerprint of `cwd`'s current content: the commit it's on,
-/// its full diff against that commit (tracked changes), and every
-/// untracked file's own content hash — conservative on purpose. Missing
-/// an untracked file's content from the fingerprint would let two
-/// genuinely different trees hash the same and wrongly reuse a stale
-/// result; a bare filename list (from `git status`) isn't enough since a
-/// file can change content without its name changing.
-async fn tree_hash(
-    cwd: &Path,
-    supervision: Supervision<'_>,
-) -> Result<ContentHash, TaskCycleError> {
-    let run_git = |args: &'static [&'static str]| async move {
-        crate::git::output(cwd, args, supervision)
+/// What a criterion's answer on a checkout turns on: the git tree of
+/// everything the checkout holds, and — read only when a command that
+/// runs `git` asks — the commit it stands on.
+struct Tree {
+    content: TreeId,
+    head: Option<String>,
+}
+
+impl Tree {
+    /// `cwd` as it stands now. The content is every file a checkout
+    /// shows — untracked ones included, ignored ones not — staged
+    /// through an index of this call's own, which starts as a copy of
+    /// the checkout's so only what changed is hashed again, and which
+    /// no other capture of the same checkout shares.
+    async fn of(
+        cwd: &Path,
+        with_head: bool,
+        supervision: Supervision<'_>,
+    ) -> Result<Self, TaskCycleError> {
+        let git = |args: &'static [&'static str]| async move {
+            crate::git::output(cwd, args, supervision)
+                .await
+                .map_err(|e| {
+                    let detail = e.detail();
+                    TaskCycleError::TreeHash {
+                        args: e.args,
+                        cwd: e.cwd,
+                        detail,
+                    }
+                })
+        };
+        let own = git(&["rev-parse", "--path-format=absolute", "--git-path", "index"]).await?;
+        let staging = tempfile::tempdir().map_err(TaskCycleError::TreeIndex)?;
+        let index = staging.path().join("index");
+        if let Err(source) = tokio::fs::copy(own.trim(), &index).await {
+            // A checkout with no index yet stages from nothing.
+            if source.kind() != std::io::ErrorKind::NotFound {
+                return Err(TaskCycleError::TreeIndex(source));
+            }
+        }
+        let content = crate::worktree::capture_tree(cwd, &index, supervision)
             .await
-            .map_err(|e| {
-                let detail = e.detail();
-                TaskCycleError::TreeHash {
-                    args: e.args,
-                    cwd: e.cwd,
-                    detail,
-                }
-            })
-    };
-
-    let head = run_git(&["rev-parse", "HEAD"]).await?;
-    let diff = run_git(&["diff", "HEAD"]).await?;
-    let untracked = run_git(&["ls-files", "--others", "--exclude-standard"]).await?;
-
-    let mut untracked_fingerprint = String::new();
-    for path in untracked.lines() {
-        let bytes = tokio::fs::read(cwd.join(path)).await.unwrap_or_default();
-        untracked_fingerprint.push_str(path);
-        untracked_fingerprint.push(':');
-        untracked_fingerprint.push_str(yunta_core::sha256_hex(&bytes).as_str());
-        untracked_fingerprint.push('\n');
+            .map_err(|source| TaskCycleError::TreeContent(Box::new(source)))?;
+        let head = match with_head {
+            true => Some(git(&["rev-parse", "HEAD"]).await?.trim().to_string()),
+            false => None,
+        };
+        Ok(Tree { content, head })
     }
+}
 
-    Ok(yunta_core::sha256_hex(
-        format!("{head}\n{diff}\n{untracked_fingerprint}").as_bytes(),
-    ))
+/// Whether `cmd` runs `git`, which can answer from history as well as
+/// from the files a checkout holds.
+fn asks_git(cmd: &str) -> bool {
+    crate::check::leading_programs(cmd)
+        .iter()
+        .any(|program| program == "git")
 }
 
 /// Runs one criterion command, measuring its wall-clock cost —
@@ -242,11 +300,11 @@ async fn run_criterion(
     Ok((exit_code, duration_ms, output))
 }
 
-/// Tree hash computed once per call and shared across every criterion in
-/// it — criteria are read-only, so the tree can't change between
-/// them, and one `git` round-trip beats N. `criteria` arrives already in
-/// the order the caller wants executed (declared, or the learned
-/// order) — this function only runs and records.
+/// The tree read once per call and shared across every criterion in it
+/// — criteria are read-only, so the tree can't change between them, and
+/// one capture beats N. `criteria` arrives already in the order the
+/// caller wants executed (declared, or the learned order) — this
+/// function only runs and records.
 async fn run_all_criteria(
     task_id: &TaskId,
     criteria: &[Criterion],
@@ -254,16 +312,18 @@ async fn run_all_criteria(
     memo: &Memo,
     supervision: Supervision<'_>,
 ) -> Result<Vec<CriterionRun>, TaskCycleError> {
-    let tree_hash = tree_hash(cwd, supervision).await?;
+    let with_head = criteria.iter().any(|criterion| asks_git(&criterion.cmd));
+    let tree = Tree::of(cwd, with_head, supervision).await?;
     let mut runs = Vec::with_capacity(criteria.len());
     for criterion in criteria {
-        let _turn = memo.turn(&criterion.cmd, &tree_hash).await;
-        let (exit_code, reused, duration_ms, output) = match memo.get(&criterion.cmd, &tree_hash) {
+        let key = memo.key(&criterion.cmd, &tree);
+        let _turn = memo.turn(&key).await;
+        let (exit_code, reused, duration_ms, output) = match memo.get(&key) {
             Some(answer) => (answer.exit_code, true, None, answer.output),
             None => {
                 let (exit_code, duration_ms, output) =
                     run_criterion(task_id, cwd, &criterion.cmd, supervision).await?;
-                memo.put(&criterion.cmd, &tree_hash, exit_code, &output);
+                memo.put(key, exit_code, &output);
                 (exit_code, false, Some(duration_ms), Some(output))
             }
         };

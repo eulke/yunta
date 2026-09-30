@@ -260,12 +260,9 @@ async fn a_resumed_run_measures_nothing_again() {
     );
 }
 
-/// The suite a comparison runs is the invocation's to reuse: two
-/// comparisons with nothing between them ask once, and the second says
-/// where its answer came from.
-#[tokio::test]
-async fn two_baseline_compares_on_one_tree_run_the_suite_once_and_the_second_says_so() {
-    let bench = Bench::new();
+/// A run whose suite appends a line to a file outside the tree, so a
+/// test can count how many times it ran.
+fn counting_suite(bench: &Bench) -> (String, std::path::PathBuf) {
     let suite_runs = bench
         .worktree
         .parent()
@@ -275,13 +272,27 @@ async fn two_baseline_compares_on_one_tree_run_the_suite_once_and_the_second_say
         "{MOCK_CONFIG}baseline:\n  suite: \"echo . >> {}\"\n",
         suite_runs.display()
     );
+    (config, suite_runs)
+}
+
+/// The suite a comparison runs is the invocation's to reuse: two
+/// comparisons with nothing between them ask once, and the second says
+/// where its answer came from.
+#[tokio::test]
+async fn two_baseline_compares_on_one_tree_run_the_suite_once_and_the_second_says_so() {
+    let bench = Bench::new();
+    let (config, suite_runs) = counting_suite(&bench);
 
     let workflow = r#"
 name: compared-twice
 nodes:
+  - id: change
+    kind: bash
+    run: "echo changed > changed.txt"
   - id: first
     kind: check
     builtin: baseline_compare
+    depends_on: [change]
   - id: second
     kind: check
     builtin: baseline_compare
@@ -311,6 +322,35 @@ nodes:
         2,
         "the measurement on the first wake, and one comparison the two nodes share"
     );
+}
+
+/// The measurement is the suite's answer on the tree the run opens on:
+/// a comparison asked while nothing changed it runs no suite of its own.
+#[tokio::test]
+async fn a_compare_on_the_tree_the_run_measured_takes_the_measurement_s_answer() {
+    let bench = Bench::new();
+    let (config, suite_runs) = counting_suite(&bench);
+    let workflow = r#"
+name: compared-at-once
+nodes:
+  - id: compare
+    kind: check
+    builtin: baseline_compare
+"#;
+
+    let RunReport { terminal, .. } = bench
+        .run_with_config(workflow, "sessions: []", &config)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    assert_eq!(
+        outcome_of(&bench.events(), "compare"),
+        "no regression vs baseline (exit 0, reused: the suite already ran on this same tree)"
+    );
+    let ran = tokio::fs::read_to_string(&suite_runs)
+        .await
+        .expect("the suite ran");
+    assert_eq!(ran.lines().count(), 1, "the measurement alone");
 }
 
 /// A suite that fails on the tree the run opens on gives a comparison

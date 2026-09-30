@@ -11,6 +11,7 @@
 mod attempt;
 mod carry;
 mod criteria;
+mod error;
 mod judge;
 mod outcome;
 mod record;
@@ -20,19 +21,16 @@ mod stream;
 use std::path::PathBuf;
 use yunta_core::ScopeGlob;
 
-use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{Phase, TaskLedger};
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
-use yunta_core::{AdapterError, Task, TaskId};
-use yunta_storage::StorageError;
+use yunta_core::Task;
 
 pub use outcome::{
     surprises, AttemptRecord, BlockedCause, DispatchOutcome, Surprise, TaskCycleReport, TaskOutcome,
 };
 
 use crate::process::Supervision;
-use crate::scope::ScopeCheckError;
 use attempt::{run_one_attempt, AttemptParams, AttemptStep};
 pub(crate) use record::to_results;
 use record::Recorder;
@@ -44,71 +42,7 @@ pub(crate) use session::dispatch_session;
 pub use session::{DispatchError, RunToolsNeed, SessionObserver, SessionSetup};
 pub(crate) use session::{Dispatched, Opening, Resume};
 
-#[derive(Debug, Error)]
-pub enum TaskCycleError {
-    #[error("failed to run criterion `{cmd}` for task `{task}`")]
-    Criterion {
-        task: TaskId,
-        cmd: String,
-        #[source]
-        source: crate::process::SpawnError,
-    },
-    #[error("adapter failed to spawn a session for task `{task}`")]
-    Spawn {
-        task: TaskId,
-        #[source]
-        source: AdapterError,
-    },
-    #[error("failed to append a session audit event for task `{task}`")]
-    Audit {
-        task: TaskId,
-        #[source]
-        source: StorageError,
-    },
-    #[error("task `{task}`'s session could not hold the run tools its node needs")]
-    RunTools {
-        task: TaskId,
-        #[source]
-        source: crate::run::runner_resolve::RunToolsSetupError,
-    },
-    #[error(transparent)]
-    ScopeCheck(#[from] ScopeCheckError),
-    #[error("failed to put the work task `{task}` left back into its checkout")]
-    Carry {
-        task: TaskId,
-        #[source]
-        source: Box<crate::worktree::WorktreeError>,
-    },
-    #[error("failed to evaluate task `{task}`'s scope expansion request: {source}")]
-    ScopeExpansion {
-        task: TaskId,
-        #[source]
-        source: crate::scope_expansion::ScopeExpansionError,
-    },
-    /// A memoized command a caller ran that belongs to no task — a
-    /// `baseline_compare` asking the same suite the criteria ask.
-    #[error("failed to keep what task `{task}`'s criteria printed")]
-    KeepOutput {
-        task: TaskId,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to run `{cmd}`")]
-    MemoizedCommand {
-        cmd: String,
-        #[source]
-        source: crate::process::SpawnError,
-    },
-    #[error(
-        "failed to compute the working tree's hash for memoization: {}",
-        crate::git::failed(.args, .cwd, .detail)
-    )]
-    TreeHash {
-        args: String,
-        cwd: std::path::PathBuf,
-        detail: String,
-    },
-}
+pub use error::TaskCycleError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CriterionRun {

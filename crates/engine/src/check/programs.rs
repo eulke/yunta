@@ -46,7 +46,7 @@ pub fn programs_named(workflow: &Workflow, config: &ConfigLayer) -> Vec<(NodeId,
 /// The first word of every simple command in `script`: split on lines
 /// (a trailing `\` joins two), `;`, `&` and `|`, skipping the body of a
 /// heredoc.
-fn leading_programs(script: &str) -> Vec<String> {
+pub(crate) fn leading_programs(script: &str) -> Vec<String> {
     let mut programs = Vec::new();
     let mut heredoc: Option<String> = None;
     let joined = script.replace("\\\n", " ");

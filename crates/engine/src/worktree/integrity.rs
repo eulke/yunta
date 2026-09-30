@@ -19,7 +19,7 @@
 //!
 //! **Identity** — the worktree is at the path the manifest froze, and git
 //! knows it as a working tree. Everything downstream (the scope diff, the
-//! criteria's tree hash, each task's own checkout) runs git *in* that
+//! tree the criteria are memoized by, each task's own checkout) runs git *in* that
 //! directory, so a directory that is not one turns every later step into
 //! the same failure with a worse message. The question is only whether
 //! git works there: which linked worktree it is, and where it sits inside
