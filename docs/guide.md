@@ -61,6 +61,23 @@ are valid there. A mistyped key never silently becomes a default.
   <name>`, `inputs: {...}`). `isolation: worktree` (default) gives it its own tree;
   `isolation: none` shares the tree the node works in, for tightly related phases,
   and siblings doing that must declare disjoint `scope`.
+- **`pull_request`** — pushes the run's own branch and opens a pull request of it into
+  `project.base_branch` (or the branch the run started from), through the forge the
+  project configures: `title:` and an optional `body:`, both templates. Running again
+  pushes the same branch and finds the pull request it opened, so a rerun never opens
+  a second one. It needs `forge.github` in the config — `yunta check` refuses it
+  otherwise, unless the node is [optional](#optional-nodes) — and a run with a
+  worktree of its own, since `isolation: none` gives the run no branch. `yunta run`
+  refuses to start when the variable holding the forge's token is not set, and
+  `yunta doctor` says whether the token reaches the repository and may push there.
+
+```yaml
+forge:
+  github:
+    repo: acme/web
+    token_env: GITHUB_TOKEN
+    remote: origin              # where the run's branch is pushed; `origin` when absent
+```
 
 ## `depends_on` and re-routing
 

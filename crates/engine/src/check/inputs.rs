@@ -71,26 +71,7 @@ pub(crate) fn check_input_references_in_nodes(
     errors: &mut Vec<CheckError>,
 ) {
     for node in nodes {
-        match &node.kind {
-            NodeKind::Prompt {
-                prompt: yunta_core::PromptSource::Inline(text),
-            } => check_template_text(&node.id, text, workflow, errors),
-            NodeKind::Bash { run } => {
-                if let Some(script) = run.script() {
-                    check_template_text(&node.id, script, workflow, errors);
-                }
-            }
-            NodeKind::Loop {
-                prompt: yunta_core::PromptSource::Inline(text),
-                ..
-            } => check_template_text(&node.id, text, workflow, errors),
-            NodeKind::Parallel {
-                nodes: children, ..
-            } => {
-                check_input_references_in_nodes(children, workflow, errors);
-            }
-            _ => {}
-        }
+        check_kind_templates(node, workflow, errors);
 
         if let Some(hooks) = &node.hooks {
             for script in hooks
@@ -144,5 +125,33 @@ pub(crate) fn check_template_text(
                 });
             }
         }
+    }
+}
+
+/// The templates `node`'s kind renders: an inline prompt, a script, a pull
+/// request's title and body — a `parallel` group's through its children.
+fn check_kind_templates(node: &Node, workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    match &node.kind {
+        NodeKind::Prompt {
+            prompt: yunta_core::PromptSource::Inline(text),
+        }
+        | NodeKind::Loop {
+            prompt: yunta_core::PromptSource::Inline(text),
+            ..
+        } => check_template_text(&node.id, text, workflow, errors),
+        NodeKind::Bash { run } => {
+            if let Some(script) = run.script() {
+                check_template_text(&node.id, script, workflow, errors);
+            }
+        }
+        NodeKind::Parallel {
+            nodes: children, ..
+        } => check_input_references_in_nodes(children, workflow, errors),
+        NodeKind::PullRequest { title, body } => {
+            for text in std::iter::once(title).chain(body) {
+                check_template_text(&node.id, text, workflow, errors);
+            }
+        }
+        _ => {}
     }
 }

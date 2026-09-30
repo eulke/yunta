@@ -161,8 +161,8 @@ impl TaskLedger {
                     }
                 }
             }
-            // What a node resolved, started, assembled, hooked, closed
-            // or re-routed prices no command.
+            // What a node resolved, started, assembled, hooked, closed,
+            // re-routed or opened prices no command.
             NodeEvent::RunnerResolved(_)
             | NodeEvent::Started(_)
             | NodeEvent::ContextAssembled(_)
@@ -170,7 +170,8 @@ impl TaskLedger {
             | NodeEvent::Finished(_)
             | NodeEvent::Failed(_)
             | NodeEvent::HookExecuted(_)
-            | NodeEvent::Rerouted(_) => {}
+            | NodeEvent::Rerouted(_)
+            | NodeEvent::PullRequestOpened(_) => {}
         }
     }
 

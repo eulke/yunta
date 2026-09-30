@@ -31,6 +31,12 @@ pub enum ConfigKey {
     /// `run: { command: <name> }` runs what the project declares under
     /// `commands:` for that name.
     Command { command: CommandName },
+    /// `kind: pull_request` opens its pull request through the forge
+    /// under `forge:`.
+    Forge,
+    /// `kind: pull_request` pushes the run's own branch, which only a run
+    /// with a worktree of its own has.
+    RunBranch,
 }
 
 impl ConfigKey {
@@ -53,6 +59,10 @@ impl ConfigKey {
                 if node.runner.is_none() && node.runners.is_empty() =>
             {
                 needed.push(ConfigKey::Runner);
+            }
+            NodeKind::PullRequest { .. } => {
+                needed.push(ConfigKey::Forge);
+                needed.push(ConfigKey::RunBranch);
             }
             _ => {}
         }
@@ -78,6 +88,11 @@ impl ConfigKey {
                 .as_ref()
                 .is_some_and(|defaults| defaults.runner.is_some()),
             ConfigKey::Command { command } => config.command(command).is_some(),
+            ConfigKey::Forge => config
+                .forge
+                .as_ref()
+                .is_some_and(|forge| forge.github.is_some()),
+            ConfigKey::RunBranch => config.resolved_isolation() == super::Isolation::Worktree,
         }
     }
 
@@ -90,6 +105,8 @@ impl ConfigKey {
             ConfigKey::Executor { executor } => format!("no executor `{executor}`"),
             ConfigKey::Runner => "no `defaults.runner`".to_string(),
             ConfigKey::Command { command } => format!("no command `{command}`"),
+            ConfigKey::Forge => "no `forge`".to_string(),
+            ConfigKey::RunBranch => "no run branch (`defaults.isolation: none`)".to_string(),
         }
     }
 
@@ -134,6 +151,15 @@ impl fmt::Display for ConfigKey {
                 f,
                 "it runs the project's command `{command}`, and the config declares none — \
                  declare what this project runs for it under `commands.{command}`"
+            ),
+            ConfigKey::Forge => f.write_str(
+                "it opens a pull request through the project's forge, and the config declares \
+                 no `forge` — declare `forge.github` with the repository and the variable its \
+                 token is in",
+            ),
+            ConfigKey::RunBranch => f.write_str(
+                "it pushes the run's own branch, and a run under `defaults.isolation: none` \
+                 works in a person's checkout and has none — run with `isolation: worktree`",
             ),
         }
     }

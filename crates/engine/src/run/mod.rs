@@ -43,6 +43,7 @@ mod node_start;
 mod parallel_exec;
 mod promote;
 mod prompt_exec;
+mod pull_request_exec;
 mod questions_exec;
 pub(crate) mod runner_resolve;
 pub mod schedule;

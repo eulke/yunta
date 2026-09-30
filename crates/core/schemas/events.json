@@ -768,6 +768,32 @@
             "key",
             "command"
           ]
+        },
+        {
+          "description": "`kind: pull_request` opens its pull request through the forge\nunder `forge:`.",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "const": "forge"
+            }
+          },
+          "required": [
+            "key"
+          ]
+        },
+        {
+          "description": "`kind: pull_request` pushes the run's own branch, which only a run\nwith a worktree of its own has.",
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string",
+              "const": "run_branch"
+            }
+          },
+          "required": [
+            "key"
+          ]
         }
       ]
     },
@@ -1501,6 +1527,19 @@
             }
           },
           "$ref": "#/$defs/NodeReroutedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "pull_request_opened"
+            }
+          },
+          "$ref": "#/$defs/PullRequestOpenedPayload",
           "required": [
             "kind"
           ]
@@ -2855,6 +2894,34 @@
       },
       "required": [
         "exit_code"
+      ]
+    },
+    "PullRequestOpenedPayload": {
+      "description": "A pull request a `pull_request` node opened — or found open, carrying\nthis run's marker, when it ran again — on the project's forge.",
+      "type": "object",
+      "properties": {
+        "base": {
+          "description": "The branch it goes into.",
+          "type": "string"
+        },
+        "head": {
+          "description": "The branch the run pushed, which the pull request carries.",
+          "type": "string"
+        },
+        "number": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "number",
+        "head",
+        "base"
       ]
     },
     "QuestionId": {

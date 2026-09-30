@@ -58,6 +58,17 @@ pub struct GitHubForgeConfig {
     /// The environment variable holding the token; its value never
     /// enters the config.
     pub token_env: String,
+    /// The git remote a run pushes its branch to for a pull request;
+    /// `origin` when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+}
+
+impl GitHubForgeConfig {
+    /// The git remote a run pushes to.
+    pub fn remote(&self) -> &str {
+        self.remote.as_deref().unwrap_or("origin")
+    }
 }
 
 /// Adapter-specific settings: a portable binary override plus the
@@ -86,9 +97,8 @@ pub struct StorageConfig {
 }
 
 /// `project:` — backs the `{{project.*}}` template namespace, the
-/// reference config's own three fields. Currently read-only data for
-/// templates, nothing here drives behavior yet (`base_branch` isn't
-/// consulted by any re-route/PR logic).
+/// reference config's own three fields. `base_branch` is also the branch
+/// a `pull_request` node opens its pull request into.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectConfig {

@@ -55,7 +55,17 @@ fn the_workflow_schema_describes_nodes_by_kind_and_inputs_by_type() {
     // its `kind` discriminant.
     assert_eq!(
         one_of_kinds(&json["$defs"]["Node"]),
-        ["prompt", "bash", "loop", "parallel", "check", "executor", "gate", "workflow"]
+        [
+            "prompt",
+            "bash",
+            "loop",
+            "parallel",
+            "check",
+            "executor",
+            "gate",
+            "workflow",
+            "pull_request"
+        ]
     );
     // The one loop-until condition, as an exhaustive enum.
     assert_eq!(

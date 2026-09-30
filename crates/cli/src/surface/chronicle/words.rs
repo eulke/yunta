@@ -130,6 +130,7 @@ fn node_words(happening: &node::happening::Happening) -> (Option<StateWord>, Str
                 yunta_core::text::counted(*violations, "path")
             ),
         ),
+        H::PullRequestOpened { url, number } => (None, format!("pull request #{number} — {url}")),
     }
 }
 

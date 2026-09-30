@@ -515,6 +515,7 @@ nodes:
   - { id: lint, kind: executor, executor: linter }
   - { id: approve, kind: gate, assignee: lead }
   - { id: sub, kind: workflow, use: child }
+  - { id: pr, kind: pull_request, title: "open it" }
 "#,
     );
     let events = log(vec![(0, None, created("standard"))]);
@@ -527,7 +528,16 @@ nodes:
     assert_eq!(
         kinds,
         vec![
-            "prompt", "bash", "loop", "parallel", "bash", "check", "executor", "gate", "workflow",
+            "prompt",
+            "bash",
+            "loop",
+            "parallel",
+            "bash",
+            "check",
+            "executor",
+            "gate",
+            "workflow",
+            "pull_request",
         ],
         "declaration order, each `parallel` group followed by its children"
     );

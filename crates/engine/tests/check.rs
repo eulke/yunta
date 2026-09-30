@@ -145,6 +145,7 @@ fn config_with_forge() -> ConfigLayer {
             github: Some(yunta_core::GitHubForgeConfig {
                 repo: "acme/demo".parse().unwrap(),
                 token_env: "GITHUB_TOKEN".to_string(),
+                remote: None,
             }),
         }),
         ..Default::default()

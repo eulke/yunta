@@ -73,3 +73,19 @@ pub fn read(path: &Path) -> String {
     std::fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("read `{}`: {error}", path.display()))
 }
+
+/// A bare repository beside `checkout`, added to it as `origin`: the
+/// remote a run pushes its branch to in a test, which a test then reads
+/// back with [`git_output`].
+pub fn bare_origin(checkout: &Path) -> std::path::PathBuf {
+    let beside = checkout
+        .parent()
+        .expect("a checkout sits in a directory of its own");
+    git(beside, &["init", "-q", "--bare", "origin.git"]);
+    let remote = beside.join("origin.git");
+    git(
+        checkout,
+        &["remote", "add", "origin", &remote.display().to_string()],
+    );
+    remote
+}

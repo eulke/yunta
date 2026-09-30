@@ -172,12 +172,30 @@ pub enum NodeKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         mounts: Vec<MountSpec>,
     },
+    /// Pushes the run's own branch and opens a pull request of it into
+    /// the project's base branch, through the forge the project
+    /// configures — the same one on a rerun, found by the run's marker.
+    PullRequest {
+        /// The pull request's title, template-rendered.
+        title: String,
+        /// Its body, template-rendered; the run's marker follows it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
 }
 
 impl NodeKind {
     /// Every `kind:` a node can declare, as written in YAML.
     pub const KINDS: &'static [&'static str] = &[
-        "prompt", "bash", "loop", "parallel", "check", "executor", "gate", "workflow",
+        "prompt",
+        "bash",
+        "loop",
+        "parallel",
+        "check",
+        "executor",
+        "gate",
+        "workflow",
+        "pull_request",
     ];
 
     /// Whether a node of this kind runs one session of its own, which an
@@ -208,6 +226,7 @@ impl NodeKind {
             NodeKind::Executor { .. } => "executor",
             NodeKind::Gate { .. } => "gate",
             NodeKind::Workflow { .. } => "workflow",
+            NodeKind::PullRequest { .. } => "pull_request",
         }
     }
 
@@ -225,6 +244,7 @@ impl NodeKind {
             "executor" => &["executor", "with", "timeout_seconds"],
             "gate" => &["assignee", "message", "options", "on", "shows", "external"],
             "workflow" => &["use", "inputs", "isolation", "mounts"],
+            "pull_request" => &["title", "body"],
             _ => return None,
         })
     }

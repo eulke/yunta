@@ -363,6 +363,7 @@ nodes:
     inputs: { a: b }
     isolation: none
     mounts: [{ artifact: { node: p, name: n, as: m } }]
+  - { id: r, kind: pull_request, title: t, body: b }
 "#;
 
     #[test]

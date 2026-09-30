@@ -1220,6 +1220,31 @@
             "kind",
             "use"
           ]
+        },
+        {
+          "description": "Pushes the run's own branch and opens a pull request of it into\nthe project's base branch, through the forge the project\nconfigures — the same one on a rerun, found by the run's marker.",
+          "type": "object",
+          "properties": {
+            "body": {
+              "description": "Its body, template-rendered; the run's marker follows it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "const": "pull_request"
+            },
+            "title": {
+              "description": "The pull request's title, template-rendered.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "title"
+          ]
         }
       ],
       "required": [

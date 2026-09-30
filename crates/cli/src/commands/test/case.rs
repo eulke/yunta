@@ -171,6 +171,10 @@ pub(crate) async fn run_case(
 
     let mock = load_mock_fixture(&fixture_path, &prepared.run_dir, &prepared.worktree)?;
     let adapters = mock_adapters(&ctx.project.config, Arc::clone(&mock));
+    let forge = stand_in_forge(&manifest.config);
+    let forge = forge
+        .as_ref()
+        .map(|forge| forge as &dyn yunta_core::port::Forge);
     let report = crate::commands::drive::execute(crate::commands::drive::Executing {
         run_id: &prepared.run_id,
         manifest: &manifest,
@@ -183,7 +187,7 @@ pub(crate) async fn run_case(
         // A test case's every session comes from a scripted fixture — a
         // gate here has no human to ask, same as it has no LLM to call.
         human_interaction: &yunta_engine::NoInteraction,
-        forge: None,
+        forge,
         cancel: ctx.cancellation(),
         adapter_override: None,
         // A case's verdict is its report, compared against `expect:` —
@@ -202,6 +206,7 @@ pub(crate) async fn run_case(
         &prepared,
         &manifest,
         &adapters,
+        forge,
         case.decisions,
         report,
     )
@@ -270,6 +275,7 @@ async fn answered(
     prepared: &crate::commands::drive::Prepared,
     manifest: &yunta_core::Manifest,
     adapters: &Adapters,
+    forge: Option<&dyn yunta_core::port::Forge>,
     mut decisions: BTreeMap<NodeId, OptionId>,
     mut report: yunta_engine::RunReport,
 ) -> Result<yunta_engine::RunReport, CliError> {
@@ -305,7 +311,7 @@ async fn answered(
             clock: Arc::new(ctx.clock),
             ids: &ctx.ids,
             human_interaction: &yunta_engine::NoInteraction,
-            forge: None,
+            forge,
             cancel: ctx.cancellation(),
             adapter_override: None,
             observer: None,
@@ -315,6 +321,18 @@ async fn answered(
         .await?;
     }
     Ok(report)
+}
+
+/// The forge a case's run reaches: a mock standing in for the one the
+/// config declares, the way the mock adapter stands in for every
+/// runner — a case never reaches a real forge. `None` when the config
+/// declares none.
+fn stand_in_forge(config: &yunta_core::ConfigLayer) -> Option<yunta_adapters::MockForge> {
+    config
+        .forge
+        .as_ref()
+        .and_then(|forge| forge.github.as_ref())
+        .map(|_| yunta_adapters::MockForge::new(yunta_adapters::MockForgeState::new()))
 }
 
 #[cfg(test)]

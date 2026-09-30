@@ -197,7 +197,14 @@ pub(super) async fn runnable(
     super::committer::refuse_without_committer(ctx).await?;
     let adapters = match mock_fixture {
         Some(_) => HashMap::new(),
-        None => runnable_adapters(ctx, &workflow, adapter).await?,
+        None => {
+            super::forge::refuse_unreachable_forge(
+                &ctx.project.config,
+                &workflow,
+                &yunta_core::ProcessSecrets,
+            )?;
+            runnable_adapters(ctx, &workflow, adapter).await?
+        }
     };
     let frozen = build_frozen_manifest(ctx, &workflow, &workflow_path, raw_inputs).await?;
     Ok((frozen, adapters))

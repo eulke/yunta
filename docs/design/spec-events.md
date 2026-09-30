@@ -12,7 +12,7 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 33 rows and **40 `kind` names**.
+The current Run Contract event table has 34 rows and **41 `kind` names**.
 It had 32 rows and 39 kinds before `host_suspended` was added. The table
 defines the normative set; this document specifies each payload.
 
@@ -26,7 +26,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | One of the 40 names in this document, with a `_vN` suffix beyond v1. |
+| `kind` | string | One of the 41 names in this document, with a `_vN` suffix beyond v1. |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
 
@@ -114,7 +114,7 @@ atribuidos al adapter: `agent_session_opened` y
 Si esta lectura no es la intención original, es exactamente el tipo de cosa a
 corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
-## 5. Los 40 tipos de evento, campo por campo
+## 5. Los 41 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -373,6 +373,21 @@ cuyo stream terminó sin decir nada; el adapter nunca inventa un terminal (D180)
 | `origin` | enum `on_failure \| gate_choice` | sí | qué mecanismo reruteó; un log viejo sin el campo lo lee como `on_failure` |
 | `attempt` | `Option<u32>` | solo en `on_failure` | N de `max_reroutes` (M); ausente en una elección de gate, que no es un reintento |
 | `max_reroutes` | `Option<u32>` | solo en `on_failure` | — |
+
+### 5.17a `pull_request_opened` — engine
+**Fuente:** url y número del pull request, rama del run, rama base
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `url` | string | sí | dónde lo lee una persona |
+| `number` | `u64` | sí | el número que el forge le dio |
+| `head` | string | sí | la rama del run que el nodo empujó |
+| `base` | string | sí | la rama a la que va: `project.base_branch`, o la rama de la que partió el run |
+
+Se escribe apenas el forge responde, antes del cierre del nodo: un pull request
+es un efecto afuera que existe aunque el nodo después falle. Un nodo que corre de
+nuevo encuentra por la marca del run el pull request que ya abrió y registra el
+mismo número (D207).
 
 ### 5.18 `gate_waiting` / `gate_resolved` — engine/adapter
 **Fuente:** opciones, elección, quién, feedback

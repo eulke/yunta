@@ -14,6 +14,7 @@ pub enum NodeEvent {
     Failed(NodeFailedPayload),
     HookExecuted(HookExecutedPayload),
     Rerouted(NodeReroutedPayload),
+    PullRequestOpened(PullRequestOpenedPayload),
 }
 
 impl NodeEvent {
@@ -28,6 +29,7 @@ impl NodeEvent {
         "node_failed",
         "hook_executed",
         "node_rerouted",
+        "pull_request_opened",
     ];
 
     /// The persisted `kind` string of this fact.
@@ -42,6 +44,7 @@ impl NodeEvent {
             Self::Failed(_) => "node_failed",
             Self::HookExecuted(_) => "hook_executed",
             Self::Rerouted(_) => "node_rerouted",
+            Self::PullRequestOpened(_) => "pull_request_opened",
         }
     }
 
@@ -66,6 +69,7 @@ impl NodeEvent {
             Self::Failed(_) => false,
             Self::HookExecuted(_) => true,
             Self::Rerouted(_) => false,
+            Self::PullRequestOpened(_) => true,
         }
     }
 

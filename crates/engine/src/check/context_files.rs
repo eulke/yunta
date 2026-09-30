@@ -184,7 +184,9 @@ fn may_write(node: &Node, path: &str, defaults: Option<&yunta_core::Hooks>) -> b
         NodeKind::Prompt { .. } | NodeKind::Loop { .. } => {
             node.permissions != Some(yunta_core::NodePermissions::ReadOnly)
         }
-        NodeKind::Gate { .. } => false,
+        // A pull request carries the run's branch; it writes nothing into
+        // the tree.
+        NodeKind::Gate { .. } | NodeKind::PullRequest { .. } => false,
         NodeKind::Parallel { nodes, .. } => {
             nodes.iter().any(|child| may_write(child, path, defaults))
         }

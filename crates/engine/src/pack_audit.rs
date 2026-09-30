@@ -171,7 +171,8 @@ fn audit_node(node: &Node, workflow_dir: &Path, node_defaults_hooks: Option<&Hoo
         NodeKind::Parallel { .. }
         | NodeKind::Check(_)
         | NodeKind::Gate { .. }
-        | NodeKind::Workflow { .. } => (None, None, None),
+        | NodeKind::Workflow { .. }
+        | NodeKind::PullRequest { .. } => (None, None, None),
     };
 
     NodeAudit {

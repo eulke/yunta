@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use yunta_adapters::GitHubForge;
 use yunta_core::port::Forge;
-use yunta_core::{describe, ConfigLayer, SecretSource};
+use yunta_core::{describe, ConfigLayer, NodeKind, SecretSource, Workflow};
 
-use crate::error::warn;
+use crate::error::{warn, CliError};
 
 /// The forge a real invocation can offer — `None` when either
 /// `forge.github` isn't configured, or the named `token_env` isn't
@@ -31,6 +31,93 @@ pub(crate) fn forge_for(
                 describe(&e)
             ));
             None
+        }
+    }
+}
+
+/// Refuses a run that would open a pull request through a forge this
+/// machine cannot reach: the config declares one, and the variable its
+/// token is in is not set here. The node would fail when the run reaches
+/// it, after every node before it spent; a `pull_request` node the run
+/// leaves out asks nothing.
+pub(crate) fn refuse_unreachable_forge(
+    config: &ConfigLayer,
+    workflow: &Workflow,
+    secrets: &dyn SecretSource,
+) -> Result<(), CliError> {
+    let Some(github) = config
+        .forge
+        .as_ref()
+        .and_then(|forge| forge.github.as_ref())
+    else {
+        return Ok(());
+    };
+    let left_out: Vec<yunta_core::NodeId> = yunta_core::left_out(workflow, config)
+        .into_iter()
+        .map(|left| left.node)
+        .collect();
+    let opens = workflow.iter_nodes_with_group().any(|(node, group)| {
+        matches!(node.kind, NodeKind::PullRequest { .. })
+            && !left_out.contains(group.map_or(&node.id, |group| &group.id))
+    });
+    if !opens || secrets.get(&github.token_env).is_some() {
+        return Ok(());
+    }
+    Err(CliError::msg(format!(
+        "this workflow opens a pull request through `forge.github` ({}), and `{}`, the \
+         variable its token is in, is not set here — set it, then run again",
+        github.repo, github.token_env
+    )))
+}
+
+/// What `doctor` says about the forge the config declares — nothing
+/// when it declares none: whether its token is set here, whether the
+/// repository answers it and lets it push, and whether the remote a run
+/// pushes to is that repository. `false` when any of it would stop a
+/// `pull_request` node.
+pub(crate) async fn report_forge(ctx: &crate::context::Context) -> bool {
+    let config = &ctx.project.config;
+    let Some(github) = config
+        .forge
+        .as_ref()
+        .and_then(|forge| forge.github.as_ref())
+    else {
+        return true;
+    };
+    let named = format!("forge: github {}", github.repo);
+    let Some(forge) = forge_for(config, &yunta_core::ProcessSecrets) else {
+        println!(
+            "{named} — `{}`, the variable its token is in, is not set",
+            github.token_env
+        );
+        return false;
+    };
+    let healthy = match forge.probe().await {
+        Ok(yunta_core::port::ForgeProbe {
+            can_push: Some(false),
+        }) => {
+            println!("{named} — reachable, and its token cannot push there");
+            false
+        }
+        Ok(_) => {
+            println!("{named} — reachable");
+            true
+        }
+        Err(error) => {
+            println!("{named} — {}", describe(&error));
+            false
+        }
+    };
+    let remote = github.remote();
+    match yunta_engine::git::remote_url(&ctx.cwd, remote, ctx.supervision()).await {
+        Some(url) if url.contains(&github.repo.to_string()) => healthy,
+        Some(url) => {
+            println!("  remote `{remote}` is {url}, not {}", github.repo);
+            false
+        }
+        None => {
+            println!("  no remote `{remote}` to push a run's branch to");
+            false
         }
     }
 }

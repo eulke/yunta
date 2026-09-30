@@ -35,6 +35,7 @@ pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
             println!("git: {why}");
         }
     }
+    all_well &= super::forge::report_forge(&ctx).await;
 
     if !check_installed_pack_requires(&ctx.cwd, &ctx.project.config) {
         all_well = false;

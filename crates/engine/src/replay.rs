@@ -286,7 +286,8 @@ impl RunState {
             | NodeEvent::HookExecuted(_)
             | NodeEvent::ContextAssembled(_)
             | NodeEvent::CriteriaChecked(_)
-            | NodeEvent::ScopeChecked(_) => {}
+            | NodeEvent::ScopeChecked(_)
+            | NodeEvent::PullRequestOpened(_) => {}
         }
         Ok(())
     }

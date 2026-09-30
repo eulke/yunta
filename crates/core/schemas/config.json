@@ -383,6 +383,13 @@
     "GitHubForgeConfig": {
       "type": "object",
       "properties": {
+        "remote": {
+          "description": "The git remote a run pushes its branch to for a pull request;\n`origin` when absent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "repo": {
           "$ref": "#/$defs/GitHubRepo"
         },
@@ -674,7 +681,7 @@
       ]
     },
     "ProjectConfig": {
-      "description": "`project:` — backs the `{{project.*}}` template namespace, the\nreference config's own three fields. Currently read-only data for\ntemplates, nothing here drives behavior yet (`base_branch` isn't\nconsulted by any re-route/PR logic).",
+      "description": "`project:` — backs the `{{project.*}}` template namespace, the\nreference config's own three fields. `base_branch` is also the branch\na `pull_request` node opens its pull request into.",
       "type": "object",
       "properties": {
         "base_branch": {

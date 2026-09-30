@@ -44,6 +44,11 @@ pub enum Happening {
     ScopeChecked {
         violations: usize,
     },
+    /// The pull request the node opened, or found open for this run.
+    PullRequestOpened {
+        url: String,
+        number: u64,
+    },
 }
 
 /// A criterion that did not pass, as a person watching reads it: the
@@ -136,6 +141,16 @@ impl Happening {
             NodeEvent::ScopeChecked(p) => Happening::ScopeChecked {
                 violations: p.violations.len(),
             },
+            NodeEvent::PullRequestOpened(p) => Happening::opened(p),
+        }
+    }
+}
+
+impl Happening {
+    fn opened(p: &super::payloads::PullRequestOpenedPayload) -> Self {
+        Happening::PullRequestOpened {
+            url: p.url.clone(),
+            number: p.number,
         }
     }
 }
@@ -160,7 +175,8 @@ fn said(event: &NodeEvent) -> NodeState {
         | NodeEvent::HookExecuted(_)
         | NodeEvent::ContextAssembled(_)
         | NodeEvent::CriteriaChecked(_)
-        | NodeEvent::ScopeChecked(_) => NodeState::Running { attempt: 1 },
+        | NodeEvent::ScopeChecked(_)
+        | NodeEvent::PullRequestOpened(_) => NodeState::Running { attempt: 1 },
     }
 }
 

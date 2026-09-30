@@ -39,6 +39,7 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
         | EventPayload::Node(NodeEvent::Failed(_))
         | EventPayload::Node(NodeEvent::HookExecuted(_))
         | EventPayload::Node(NodeEvent::Rerouted(_))
+        | EventPayload::Node(NodeEvent::PullRequestOpened(_))
         | EventPayload::Gates(GateEvent::Waiting(_))
         | EventPayload::Gates(GateEvent::Resolved(_))
         | EventPayload::Gates(GateEvent::QuestionsAsked(_))
@@ -193,12 +194,12 @@ fn every_domain_declares_the_kinds_the_wire_carries() {
 }
 
 #[test]
-fn there_are_exactly_40_kinds_with_distinct_names() {
+fn there_are_exactly_41_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 40);
+    assert_eq!(kinds.len(), 41);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 40, "expected 40 distinct kind names");
+    assert_eq!(names.len(), 41, "expected 41 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -251,6 +252,7 @@ fn kind_names_match_the_spec_exactly() {
         "node_failed",
         "hook_executed",
         "node_rerouted",
+        "pull_request_opened",
         "gate_waiting",
         "gate_resolved",
         "questions_asked",

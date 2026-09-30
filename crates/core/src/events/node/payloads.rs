@@ -432,3 +432,15 @@ pub enum RerouteOrigin {
     OnFailure,
     GateChoice,
 }
+
+/// A pull request a `pull_request` node opened — or found open, carrying
+/// this run's marker, when it ran again — on the project's forge.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullRequestOpenedPayload {
+    pub url: String,
+    pub number: u64,
+    /// The branch the run pushed, which the pull request carries.
+    pub head: String,
+    /// The branch it goes into.
+    pub base: String,
+}

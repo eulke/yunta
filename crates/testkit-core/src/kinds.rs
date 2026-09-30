@@ -162,6 +162,14 @@ pub fn all_kinds() -> Vec<EventPayload> {
             Some(1),
             Some(2),
         ))),
+        EventPayload::Node(NodeEvent::PullRequestOpened(
+            yunta_core::events::PullRequestOpenedPayload {
+                url: "https://github.example/pr/7".to_string(),
+                number: 7,
+                head: "yunta/run/01".to_string(),
+                base: "main".to_string(),
+            },
+        )),
         EventPayload::Gates(GateEvent::Waiting(
             Escalation::published_to(
                 "Ready to open the PR?",

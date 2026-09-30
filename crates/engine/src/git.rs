@@ -240,3 +240,26 @@ pub async fn committer(repo: &Path, supervision: Supervision<'_>) -> Result<Stri
         .unwrap_or_default()
         .to_string())
 }
+
+/// Pushes what `repo` has checked out to `branch` on `remote`, and sets
+/// it as the checkout's upstream. Never forced: a remote branch that
+/// moved elsewhere refuses the push, and a push of what the remote
+/// already holds changes nothing.
+pub async fn push_branch(
+    repo: &Path,
+    remote: &str,
+    branch: &str,
+    supervision: Supervision<'_>,
+) -> Result<(), GitError> {
+    let refspec = format!("HEAD:refs/heads/{branch}");
+    output(repo, &["push", "-q", "-u", remote, &refspec], supervision).await?;
+    Ok(())
+}
+
+/// The URL `remote` names in `repo`, or `None` when it names none.
+pub async fn remote_url(repo: &Path, remote: &str, supervision: Supervision<'_>) -> Option<String> {
+    output(repo, &["remote", "get-url", remote], supervision)
+        .await
+        .ok()
+        .map(|url| url.trim().to_string())
+}

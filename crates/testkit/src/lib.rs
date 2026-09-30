@@ -48,7 +48,7 @@ pub use frames::{child_link, moment, node_frame, run_frame};
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use observer::{Frame, RecordingObserver};
 pub use owner::Owner;
-pub use repo::{git, git_output, init_repo, read, write, INITIAL_BRANCH};
+pub use repo::{bare_origin, git, git_output, init_repo, read, write, INITIAL_BRANCH};
 pub use stack::on_a_deep_stack;
 pub use tasks::tasks_document;
 pub use terminal::{runs_root, Terminal};

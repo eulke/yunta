@@ -467,7 +467,8 @@ impl NodeLedger {
             NodeEvent::HookExecuted(_)
             | NodeEvent::ContextAssembled(_)
             | NodeEvent::CriteriaChecked(_)
-            | NodeEvent::ScopeChecked(_) => {}
+            | NodeEvent::ScopeChecked(_)
+            | NodeEvent::PullRequestOpened(_) => {}
         }
         if let Some(left) = left_by_close(event) {
             self.moved_beside(node, left);

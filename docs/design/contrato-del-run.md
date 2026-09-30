@@ -69,7 +69,7 @@ Reglas: todo se valida **al crear el run, antes del primer token**; los defaults
 # 3. Modelo de eventos
 The event log is append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`.
 Current state is derived by replaying that log; snapshots are only an optimization.
-The current table contains 40 event kinds in 33 rows; some rows group related variants:
+The current table contains 41 event kinds in 34 rows; some rows group related variants:
 | Evento | Emisor | Payload relevante |
 |---|---|---|
 | `run_created` | engine | manifest hash, inputs, modo, `promoted_from?` |
@@ -89,6 +89,7 @@ The current table contains 40 event kinds in 33 rows; some rows group related va
 | `node_finished` / `node_failed` | engine | resultado, tokens, ¿reintentable? |
 | `hook_executed` | engine | node_id, fase before/after, comando, exit code |
 | `node_rerouted` | engine | nodo fallido, destino, causa, reintento N de M |
+| `pull_request_opened` | engine | url y número del pull request que un nodo `pull_request` abrió —o encontró abierto para este run—, rama del run, rama base |
 | `gate_waiting` / `gate_resolved` | engine/adapter | opciones, elección, quién, feedback |
 | `questions_asked` / `questions_answered` | engine | node_id; hash e ids del documento `questions` y tokens de la sesión que preguntó / hash del artifact de respuestas, canal (tty\\|mcp), respondiente si se conoce |
 | `loop_iteration` | engine | iteración N, evaluación de `until` |
@@ -240,6 +241,8 @@ Al llegar al gate, el engine **publica**: cada entrada de `artifacts:` nombra un
 La resolución es **pull, no push**: no hay webhooks ni daemon: el engine consulta el estado del PR cuando alguien lo despierta (`resume`, `status`, o un job programado del CI). Así el modelo "sin infraestructura" queda intacto. Mapeo: aprobado → el gate continúa; cambios pedidos → los comentarios entran como `finding_posted` y el gate ofrece la re-ruta declarada; PR cerrado sin mergear → abort; PR mergeado → el gate continúa como aprobado por quien mergeó, con el SHA del merge como evidencia. Los comentarios se montan como contexto del nodo correctivo, igual que `node-output`: quien corrige lee lo que la persona escribió, sin transcripciones intermedias.
 La evidencia sigue siendo mecánica: `gate_resolved` registra la respuesta de la API — usuario, timestamp y **SHA aprobado** — no la afirmación de nadie; si el PR cambió después de la aprobación, el engine lo detecta por SHA y el gate vuelve a esperar. Sin credenciales de forja o sin conectividad, el gate degrada a consola con aviso explícito, nunca cuelga ni asume; `yunta check` valida que todo gate `external` tenga forja configurada. Un artifact que el run no tiene falla el nodo nombrándolo, en vez de publicar una revisión incompleta.
 Límite honesto: esto desbloquea runs desde cualquier lado, pero no los **avanza** — ejecutar el siguiente nodo sigue siendo de quien tiene el estado local. "Cualquiera del equipo corre cualquier run desde cualquier máquina" requiere estado compartido, y eso pertenece al proyecto de servidor de equipo, fuera de Yunta.
+**Un nodo `pull_request` abre el pull request del run sin atarse a una CLI.** `kind: pull_request` (`title`, `body?`, templates) empuja la rama del propio run al remote del forge (`forge.github.remote`, `origin` si falta) y abre un pull request de ella hacia `project.base_branch` —o la rama de la que partió el run— por el puerto de forge, con la marca del run en el cuerpo: correr de nuevo empuja la misma rama y encuentra ese pull request en vez de abrir otro. Registra `pull_request_opened` apenas el forge responde. Necesita `forge.github` (`check` lo rechaza si falta, salvo que el nodo sea `optional`) y un run con worktree propio (`isolation: none` no tiene rama); `yunta run` se niega a empezar si la variable del token no está puesta, y `yunta doctor` dice si el token llega al repositorio y puede empujar. La red la usa el engine, no el pack: un pack que declara `network: false` sigue diciendo la verdad sobre sus propios comandos (D207).
+
 ## 5.7 Re-plan: qué sobrevive a un documento de tareas nuevo
 Un nodo de planificación puede volver a ejecutarse — porque una tarea rebotó por criterio trivial (§5.2 paso 2), porque un gate eligió ajustar, o por una re-ruta — y producir un documento de tareas distinto del que ya generó tareas, algunas de ellas `done` con su trabajo commiteado.
 Regla: **una tarea conserva su estado ****`done`**** solo si su identidad verificable no cambió** — mismo `id`, mismos `criteria` y mismo `scope`. Cualquier diferencia la devuelve a `pending`. El criterio no es la prolijidad del planificador con los identificadores: `done` significa "sus criterios pasaron", así que si los criterios cambiaron, el `done` anterior no dice nada sobre la tarea nueva. Conservar por `id` a secas sería peligroso — un planificador puede reusar `T003` para algo completamente distinto y el engine lo daría por hecho — y descartar todo sería tirar trabajo ya verificado.
