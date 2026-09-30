@@ -58,7 +58,7 @@ pub async fn open_session_listener(
     let tools = SessionTools::new(access, (task, node_scope), cwd, shutdown.clone());
     let service = StreamableHttpService::new(
         move || Ok(tools.clone()),
-        Arc::new(LocalSessionManager::default()),
+        Arc::new(transport_sessions()),
         StreamableHttpServerConfig::default().with_cancellation_token(shutdown.child_token()),
     );
     let router = behind_bearer(axum::Router::new().nest_service("/mcp", service), &token);
@@ -77,6 +77,21 @@ pub async fn open_session_listener(
         shutdown,
         server,
     })
+}
+
+/// The transport sessions one listener keeps, none of which is ever
+/// closed for being quiet.
+///
+/// A transport session only hears something when a message passes
+/// through it, and a tool that runs a task's criteria sends nothing
+/// until it answers. Closed after a quiet spell, the session would drop
+/// that answer while the client went on waiting for it. What the idle
+/// limit is otherwise for — a session nobody will speak to again — the
+/// listener already ends: it dies with the session attempt it serves.
+fn transport_sessions() -> LocalSessionManager {
+    let mut sessions = LocalSessionManager::default();
+    sessions.session_config.keep_alive = None;
+    sessions
 }
 
 /// The credential one session attempt is reachable by.
@@ -131,6 +146,136 @@ fn presents_the_credential(presented: &[u8], expected: &yunta_core::Secret<Strin
     use subtle::ConstantTimeEq;
     let expected = expected.expose().as_bytes();
     presented.len() == expected.len() && bool::from(presented.ct_eq(expected))
+}
+
+#[cfg(test)]
+mod quiet_session_tests {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use rmcp::model::{
+        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ServerCapabilities,
+        ServerInfo,
+    };
+    use rmcp::service::{RequestContext, RunningService};
+    use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
+    use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+    use rmcp::transport::streamable_http_server::{
+        StreamableHttpServerConfig, StreamableHttpService,
+    };
+    use rmcp::transport::StreamableHttpClientTransport;
+    use rmcp::{ErrorData, RoleClient, RoleServer, ServerHandler, ServiceExt};
+    use tokio::sync::Notify;
+
+    /// A tool that sends nothing until the test lets it answer — the
+    /// shape of a check running a suite.
+    #[derive(Clone, Default)]
+    struct Held {
+        entered: Arc<AtomicBool>,
+        release: Arc<Notify>,
+    }
+
+    impl ServerHandler for Held {
+        fn get_info(&self) -> ServerInfo {
+            ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        }
+
+        async fn call_tool(
+            &self,
+            _request: CallToolRequestParams,
+            _context: RequestContext<RoleServer>,
+        ) -> Result<CallToolResponse, ErrorData> {
+            self.entered.store(true, Ordering::SeqCst);
+            self.release.notified().await;
+            Ok(CallToolResult::success(vec![ContentBlock::text("done")]).into())
+        }
+    }
+
+    /// A client connected to a server whose transport sessions are
+    /// `sessions`, and whose one tool is `held`.
+    async fn serve(
+        sessions: Arc<LocalSessionManager>,
+        held: Held,
+    ) -> RunningService<RoleClient, ()> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!(
+            "http://127.0.0.1:{}/mcp",
+            listener.local_addr().unwrap().port()
+        );
+        let service = StreamableHttpService::new(
+            move || Ok(held.clone()),
+            sessions,
+            StreamableHttpServerConfig::default(),
+        );
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, axum::Router::new().nest_service("/mcp", service)).await;
+        });
+        let transport = StreamableHttpClientTransport::with_client(
+            reqwest::Client::default(),
+            StreamableHttpClientTransportConfig::with_uri(url),
+        );
+        ().serve(transport).await.unwrap()
+    }
+
+    /// Starts one call on `client`, and returns once `held` is running it.
+    async fn call_held(
+        client: Arc<RunningService<RoleClient, ()>>,
+        held: &Held,
+    ) -> tokio::task::JoinHandle<bool> {
+        let call = tokio::spawn(async move {
+            client
+                .call_tool(CallToolRequestParams::new("held".to_string()))
+                .await
+                .is_ok()
+        });
+        let entered = held.entered.clone();
+        yunta_testkit::wait_until_async(
+            || {
+                let entered = entered.clone();
+                async move { entered.load(Ordering::SeqCst) }
+            },
+            || "the call never reached the tool".to_string(),
+        )
+        .await;
+        call
+    }
+
+    #[tokio::test]
+    async fn a_session_closed_for_being_quiet_drops_the_answer_of_a_call_still_running() {
+        let mut closes_when_quiet = LocalSessionManager::default();
+        closes_when_quiet.session_config.keep_alive = Some(Duration::from_millis(200));
+        let sessions = Arc::new(closes_when_quiet);
+        let held = Held::default();
+        let client = Arc::new(serve(sessions.clone(), held.clone()).await);
+        let call = call_held(client, &held).await;
+
+        yunta_testkit::wait_until_async(
+            || {
+                let sessions = sessions.clone();
+                async move { sessions.sessions.read().await.is_empty() }
+            },
+            || "the quiet session was never closed".to_string(),
+        )
+        .await;
+        held.release.notify_one();
+
+        let answered = tokio::time::timeout(Duration::from_secs(2), call).await;
+        assert!(
+            !matches!(answered, Ok(Ok(true))),
+            "the tool answered after its session closed, and the answer went nowhere"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_listener_s_sessions_are_never_closed_for_being_quiet() {
+        assert_eq!(super::transport_sessions().session_config.keep_alive, None);
+        let held = Held::default();
+        let client = Arc::new(serve(Arc::new(super::transport_sessions()), held.clone()).await);
+        let call = call_held(client, &held).await;
+        held.release.notify_one();
+        assert!(call.await.unwrap(), "a held call answers once it is let go");
+    }
 }
 
 #[cfg(test)]
