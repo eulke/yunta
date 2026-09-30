@@ -46,6 +46,12 @@ pub(crate) async fn documents(
                 ShownContent::Tasks { plan, departed }
             }
             ArtifactId::Interpreted {
+                kind: ArtifactKind::Spec,
+            } => ShownContent::Spec(yunta_core::shape::read::<yunta_core::SpecFile>(
+                &bytes,
+                path.display().to_string(),
+            )?),
+            ArtifactId::Interpreted {
                 kind: ArtifactKind::Findings,
             } => ShownContent::Findings(yunta_core::shape::read::<yunta_core::FindingsFile>(
                 &bytes,

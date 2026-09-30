@@ -8,7 +8,8 @@
 //! what each does, what it touches and what proves it done — in words;
 //! the commands that prove it stay in the whole plan, one open away. A
 //! diagram has no room on a terminal either, so it is named here and
-//! drawn there. What a review found is read the most severe first.
+//! drawn there. A spec is read task by task, with its tests' files
+//! whole; what a review found, the most severe first.
 
 use yunta_core::events::ArtifactId;
 use yunta_engine::{ShownContent, ShownDocument};
@@ -30,6 +31,7 @@ pub(crate) fn shown(document: &ShownDocument, width: usize) -> Vec<String> {
             super::plan::plan(plan, departed, &of, width),
             "the whole plan",
         ),
+        ShownContent::Spec(file) => (super::spec::spec(file, &of, width), "the whole document"),
         ShownContent::Findings(file) => (
             super::findings::findings(file, &of, width),
             "the whole document",
@@ -345,6 +347,44 @@ findings:
                 "    Between the words.",
                 "",
                 "the whole document: /runs/r/artifacts/plan/tasks.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_spec_is_read_task_by_task_with_its_tests_files_whole() {
+        let spec: yunta_core::SpecFile = serde_norway::from_str(
+            r#"
+specs:
+  - task: greet
+    files:
+      - path: tests/greet.sh
+        content: "test \"$(cat greeting.txt)\" = Hello\n"
+    tests:
+      - cmd: sh tests/greet.sh
+        proves: the greeting says hello
+"#,
+        )
+        .unwrap();
+        let drawn = shown(
+            &document(
+                ShownContent::Spec(spec),
+                ArtifactId::Interpreted {
+                    kind: ArtifactKind::Spec,
+                },
+            ),
+            60,
+        );
+        assert_eq!(
+            drawn[..drawn.len() - 2],
+            [
+                "the spec of `plan` — 1 test for 1 task",
+                "",
+                "  greet",
+                "    proves the greeting says hello",
+                "",
+                "    tests/greet.sh",
+                "      test \"$(cat greeting.txt)\" = Hello",
             ]
         );
     }

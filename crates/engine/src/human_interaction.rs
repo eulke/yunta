@@ -38,7 +38,8 @@ pub struct ShownDocument {
 }
 
 /// A shown document's content: a tasks document read into its tasks, a
-/// findings document into its findings, any other as its text.
+/// spec into its specs, a findings document into its findings, any other
+/// as its text.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ShownContent {
     /// A plan, with every departure from it a person accepted while its
@@ -47,6 +48,8 @@ pub enum ShownContent {
         plan: TasksFile,
         departed: Vec<yunta_core::events::AcceptedDeparture>,
     },
+    /// The tests a plan's tasks are held to, read into its specs.
+    Spec(yunta_core::SpecFile),
     /// What a review found, read into its findings.
     Findings(yunta_core::FindingsFile),
     Text(String),

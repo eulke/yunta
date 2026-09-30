@@ -24,6 +24,7 @@ pub(crate) mod glyphs;
 pub(crate) mod markdown;
 mod plan;
 pub(crate) mod shown;
+mod spec;
 pub(crate) mod state;
 pub(crate) mod units;
 pub(crate) mod width;

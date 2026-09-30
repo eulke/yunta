@@ -261,3 +261,30 @@ async fn a_session_that_rewrites_its_own_test_does_not_close_its_task() {
         "{denied:?}"
     );
 }
+
+#[tokio::test]
+async fn a_gate_that_shows_a_spec_shows_its_tests() {
+    let workflow = format!(
+        "{WORKFLOW}  - id: approve
+    kind: gate
+    depends_on: [spec]
+    assignee: lead
+    message: \"Approve the tests?\"
+    shows: [{{ node: spec, kind: spec }}]
+"
+    );
+    let spec = spec_of("greet", GREETS, "sh tests/greet.sh");
+    let fixture = plan_session(PLAN) + &specifying(&[(&spec, true)]);
+    let interaction = SequencedInteraction::choosing(&["approve"]);
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(&workflow, &fixture, &interaction)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    let shown = interaction.shown();
+    let yunta_engine::ShownContent::Spec(file) = &shown[0][0].content else {
+        panic!("a spec is shown as its tests: {shown:?}");
+    };
+    assert_eq!(file.specs[0].tests[0].proves, "the greeting says hello");
+}
