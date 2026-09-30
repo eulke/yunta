@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use yunta_core::events::{ArtifactId, Shown};
+use yunta_core::events::{AcceptedDeparture, ArtifactId, Shown, TaskLedger};
 use yunta_core::{ArtifactKind, TasksFile};
 
 use super::store::{view_path, ObjectStore};
@@ -39,10 +39,12 @@ pub fn view_of(shown: &Shown) -> std::path::PathBuf {
 }
 
 /// The documents `shows` names, from the run rooted at `run_dir`: the
-/// exact bytes each hash names, a tasks document read into its tasks.
+/// exact bytes each hash names, a tasks document read into its tasks and
+/// shown with the departures from it `tasks` records as accepted.
 pub(crate) async fn documents(
     run_dir: &Path,
     shows: &[Shown],
+    tasks: &TaskLedger,
 ) -> Result<Vec<ShownDocument>, ShownError> {
     let store = ObjectStore::at(run_dir);
     let mut documents = Vec::with_capacity(shows.len());
@@ -54,10 +56,12 @@ pub(crate) async fn documents(
         let content = match &shown.artifact {
             ArtifactId::Interpreted {
                 kind: ArtifactKind::Tasks,
-            } => ShownContent::Tasks(yunta_core::shape::read::<TasksFile>(
-                &bytes,
-                path.display().to_string(),
-            )?),
+            } => {
+                let plan =
+                    yunta_core::shape::read::<TasksFile>(&bytes, path.display().to_string())?;
+                let departed = departed(&plan, tasks);
+                ShownContent::Tasks { plan, departed }
+            }
             _ => ShownContent::Text(String::from_utf8_lossy(&bytes).into_owned()),
         };
         documents.push(ShownDocument {
@@ -67,4 +71,14 @@ pub(crate) async fn documents(
         });
     }
     Ok(documents)
+}
+
+/// Every departure from `plan` a person accepted, task by task in the
+/// plan's order, each task's in the order its sessions declared them.
+fn departed(plan: &TasksFile, tasks: &TaskLedger) -> Vec<AcceptedDeparture> {
+    plan.tasks
+        .iter()
+        .filter_map(|task| tasks.get(&task.id))
+        .flat_map(|record| record.departures_accepted.iter().cloned())
+        .collect()
 }

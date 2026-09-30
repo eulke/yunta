@@ -255,7 +255,14 @@ impl<'a> RunCtx<'a> {
         &self,
         escalation: &GateWaitingPayload,
     ) -> Result<Option<HumanChoice>, RunError> {
-        let shown = crate::artifacts::shown::documents(self.run_dir, escalation.shows()).await?;
+        // A plan is shown with what a person accepted departing from it,
+        // which only the log's tasks hold.
+        let tasks = match escalation.shows().is_empty() {
+            true => Default::default(),
+            false => self.run_view().await?.state.tasks,
+        };
+        let shown =
+            crate::artifacts::shown::documents(self.run_dir, escalation.shows(), &tasks).await?;
         let asking = crate::Asking {
             tree: self.worktree,
             shown: &shown,

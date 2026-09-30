@@ -1,10 +1,12 @@
 //! A plan, as the person deciding on it reads it on a terminal: what it
-//! changes and why, the choices it makes, the shapes it creates, what it
-//! risks and leaves out, the order its tasks run in, then task by task
-//! what each does and what a person sees once it is done, what it changes
-//! and touches, and what proves it done — in words; the commands stay in
-//! the whole plan.
+//! changes, where its work was accepted as departing from it, why it
+//! changes what it does, the choices it makes, the shapes it creates,
+//! what it risks and leaves out, the order its tasks run in, then task by
+//! task what each does and what a person sees once it is done, what it
+//! changes and touches, and what proves it done — in words; the commands
+//! stay in the whole plan.
 
+use yunta_core::events::AcceptedDeparture;
 use yunta_core::{ScopeGlob, Task, TasksFile};
 use yunta_engine::PlanView;
 
@@ -19,7 +21,12 @@ const BODY: &str = "    ";
 /// longest label.
 const LABEL: usize = "keeps passing".len() + 1;
 
-pub(super) fn plan(file: &TasksFile, of: &str, width: usize) -> Vec<String> {
+pub(super) fn plan(
+    file: &TasksFile,
+    departed: &[AcceptedDeparture],
+    of: &str,
+    width: usize,
+) -> Vec<String> {
     let view = PlanView::of(file);
     let steps = view.steps();
     let tasks = yunta_core::text::counted(file.tasks.len(), "task");
@@ -29,6 +36,12 @@ pub(super) fn plan(file: &TasksFile, of: &str, width: usize) -> Vec<String> {
     }];
     if let Some(summary) = said(&file.summary) {
         lines.extend(hanging(INDENT, "", summary, width));
+    }
+    if !departed.is_empty() {
+        heading(&mut lines, "accepted departures from this plan");
+        for departure in departed {
+            lines.extend(departure_card(departure, width));
+        }
     }
     if let Some(description) = said(&file.description) {
         lines.push(String::new());
@@ -109,6 +122,31 @@ fn decided(decision: &yunta_core::Decision, width: usize) -> Vec<String> {
             &decision.alternatives.join("; "),
             width,
         ));
+    }
+    lines
+}
+
+/// One departure a person accepted: the task and what of the plan it
+/// departs from, then in the session's words what the plan says, what
+/// was built instead and why, and what the person said accepting it.
+fn departure_card(departure: &AcceptedDeparture, width: usize) -> Vec<String> {
+    let declared = &departure.declared;
+    let mut lines = hanging(
+        BODY,
+        "- ",
+        &format!("{} departs from {}", declared.task_id, declared.from),
+        width,
+    );
+    let under = format!("{BODY}  ");
+    for (label, text) in [
+        ("the plan says", Some(declared.planned.as_str())),
+        ("built instead", Some(declared.instead.as_str())),
+        ("because", Some(declared.why.as_str())),
+        ("accepted with", said(&departure.said)),
+    ] {
+        if let Some(text) = text {
+            lines.extend(hanging(&under, &format!("{label:<LABEL$}"), text, width));
+        }
     }
     lines
 }

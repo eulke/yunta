@@ -462,6 +462,10 @@ the shapes it creates, its risks, then task by task what each does, what it touc
 and what proves it done — and the path to `tasks.md`, the whole plan in Markdown
 with its diagrams and a graph of the order its tasks run in. The log records the
 exact version you saw by its hash, so an approval is an approval of those bytes.
+A gate after the work that shows the same plan — before a pull request, say —
+reads first every departure from it a person accepted while its tasks were built:
+what the plan said, what was built instead and why, and what they said accepting
+it.
 
 A plan a gate shows has to say those things. Next to `tasks:` it carries a
 `summary`, a Markdown `description` (code blocks and `mermaid` diagrams welcome), a

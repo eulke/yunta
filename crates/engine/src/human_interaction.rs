@@ -41,7 +41,12 @@ pub struct ShownDocument {
 /// any other as its text.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ShownContent {
-    Tasks(TasksFile),
+    /// A plan, with every departure from it a person accepted while its
+    /// tasks were built — where the work stops being what the plan says.
+    Tasks {
+        plan: TasksFile,
+        departed: Vec<yunta_core::events::AcceptedDeparture>,
+    },
     Text(String),
 }
 

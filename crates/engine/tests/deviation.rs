@@ -23,6 +23,24 @@ tasks:
       - cmd: \"test -f greeting.txt\"
 ";
 
+/// [`PLAN`] as a person reviewing it reads it: saying what it changes,
+/// how, and what proves it.
+const REVIEWED_PLAN: &str = "\
+summary: \"Greet\"
+description: \"Writes the greeting.\"
+shapes:
+  - { name: Greeting, owner: greet, file: greeting.txt, code: \"Hello, and good night\" }
+tasks:
+  - id: greet
+    title: \"Write the greeting\"
+    description: \"Writes greeting.txt.\"
+    scope: [\"greeting.txt\"]
+    changes: [{ at: greeting.txt, what: \"the greeting\" }]
+    outcome: \"greeting.txt says good night\"
+    criteria:
+      - { cmd: \"test -f greeting.txt\", proves: \"the greeting exists\" }
+";
+
 /// The task session: writes the file — the criterion passes — and
 /// declares that what it wrote departs from the plan's `Greeting`.
 fn departs(from: &str) -> String {
@@ -44,7 +62,11 @@ fn departs(from: &str) -> String {
 }
 
 fn fixture(resumable: bool, then: &str) -> String {
-    plan_session(PLAN).replace(
+    fixture_of(PLAN, resumable, then)
+}
+
+fn fixture_of(plan: &str, resumable: bool, then: &str) -> String {
+    plan_session(plan).replace(
         "capabilities: { run_tools: true }",
         &format!("capabilities: {{ run_tools: true, resume_session: {resumable} }}"),
     ) + &departs("{ shape: Greeting }")
@@ -284,4 +306,46 @@ async fn a_departure_declared_beside_a_scope_request_is_still_owed_once_the_scop
         other => panic!("expected the run to pause owing the departure, got {other:?}"),
     }
     assert_eq!(state.tasks.status("greet"), Some(TaskStatus::Blocked));
+}
+
+#[tokio::test]
+async fn a_plan_shown_after_its_work_carries_the_departures_a_person_accepted() {
+    let workflow = format!(
+        "{WORKFLOW}  - id: ship
+    kind: gate
+    depends_on: [implement]
+    assignee: lead
+    message: \"Ship it?\"
+    shows: [{{ node: plan, kind: tasks }}]
+"
+    );
+    let interaction = SequencedInteraction::answering(vec![
+        ("accept", Some("the clock can wait")),
+        ("approve", None),
+    ]);
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(
+            &workflow,
+            &fixture_of(REVIEWED_PLAN, true, ""),
+            &interaction,
+        )
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    let shown = interaction.shown();
+    let at_ship = shown.last().expect("the gate was asked");
+    let yunta_engine::ShownContent::Tasks { departed, .. } = &at_ship[0].content else {
+        panic!("the plan is shown as its tasks: {at_ship:?}");
+    };
+    let [departure] = departed.as_slice() else {
+        panic!("the one departure accepted: {departed:?}");
+    };
+    assert_eq!(departure.declared.task_id.as_str(), "greet");
+    assert_eq!(
+        departure.declared.from,
+        DepartsFrom::Shape("Greeting".to_string())
+    );
+    assert_eq!(departure.declared.instead, "Hello");
+    assert_eq!(departure.said.as_deref(), Some("the clock can wait"));
 }

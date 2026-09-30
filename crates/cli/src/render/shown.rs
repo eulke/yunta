@@ -26,7 +26,10 @@ pub(crate) fn shown(document: &ShownDocument, width: usize) -> Vec<String> {
         .map(|node| format!(" of `{node}`"))
         .unwrap_or_default();
     let (mut lines, whole) = match &document.content {
-        ShownContent::Tasks(file) => (super::plan::plan(file, &of, width), "the whole plan"),
+        ShownContent::Tasks { plan, departed } => (
+            super::plan::plan(plan, departed, &of, width),
+            "the whole plan",
+        ),
         ShownContent::Text(text) => (
             self::text(text, &document.shown.artifact, &of, width),
             "the whole document",
@@ -51,7 +54,7 @@ fn text(text: &str, artifact: &ArtifactId, of: &str, width: usize) -> Vec<String
 mod tests {
     use super::*;
     use crate::render::cell_width;
-    use yunta_core::events::Shown;
+    use yunta_core::events::{AcceptedDeparture, DepartsFrom, DeviationDeclaredPayload, Shown};
     use yunta_core::shape::Document;
     use yunta_core::{ArtifactKind, TasksFile};
 
@@ -68,8 +71,12 @@ mod tests {
     }
 
     fn tasks(yaml: &str) -> ShownDocument {
+        plan(serde_norway::from_str(yaml).unwrap(), Vec::new())
+    }
+
+    fn plan(plan: TasksFile, departed: Vec<AcceptedDeparture>) -> ShownDocument {
         document(
-            ShownContent::Tasks(serde_norway::from_str(yaml).unwrap()),
+            ShownContent::Tasks { plan, departed },
             ArtifactId::Interpreted {
                 kind: ArtifactKind::Tasks,
             },
@@ -230,15 +237,7 @@ tasks:
     fn a_plan_puts_its_decisions_and_shapes_before_its_tasks_and_says_what_each_task_changes() {
         let example: TasksFile =
             yunta_core::shape::read(TasksFile::EXAMPLE.as_bytes(), "example").unwrap();
-        let drawn = shown(
-            &document(
-                ShownContent::Tasks(example),
-                ArtifactId::Interpreted {
-                    kind: ArtifactKind::Tasks,
-                },
-            ),
-            78,
-        );
+        let drawn = shown(&plan(example, Vec::new()), 78);
         let at = |text: &str| {
             drawn
                 .iter()
@@ -253,6 +252,51 @@ tasks:
         at("you will see  The settings screen has a dark mode switch");
         at("changes       - src/theme/mod.rs::Theme: the enum, and the setting that");
         at("uses          Theme");
+    }
+
+    #[test]
+    fn a_departure_a_person_accepted_is_read_before_the_plan_it_departs_from() {
+        let example: TasksFile =
+            yunta_core::shape::read(TasksFile::EXAMPLE.as_bytes(), "example").unwrap();
+        let departed = vec![AcceptedDeparture {
+            declared: DeviationDeclaredPayload {
+                task_id: "add-dark-mode".into(),
+                from: DepartsFrom::Shape("Theme".to_string()),
+                planned: "pub enum Theme { Light, Dark }".to_string(),
+                instead: "pub enum Theme { Light, Dark, System }, since the platform \
+                          already says which one the person prefers"
+                    .to_string(),
+                why: "a user who set their system to dark would open the app in light".to_string(),
+            },
+            said: Some("fine, keep System".to_string()),
+        }];
+        let drawn = shown(&plan(example, departed), 60);
+        let at = |text: &str| {
+            drawn
+                .iter()
+                .position(|line| line.contains(text))
+                .unwrap_or_else(|| panic!("`{text}` is not drawn: {drawn:#?}"))
+        };
+        assert!(at("  accepted departures from this plan") < at("  decisions"));
+        let card = at("- add-dark-mode departs from shape `Theme`");
+        assert_eq!(
+            drawn[card..=card + 8],
+            [
+                "    - add-dark-mode departs from shape `Theme`",
+                "      the plan says pub enum Theme { Light, Dark }",
+                "      built instead pub enum Theme { Light, Dark, System },",
+                "                    since the platform already says which",
+                "                    one the person prefers",
+                "      because       a user who set their system to dark",
+                "                    would open the app in light",
+                "      accepted with fine, keep System",
+                "",
+            ]
+        );
+        assert!(
+            drawn.iter().all(|line| cell_width(line) <= 60),
+            "{drawn:#?}"
+        );
     }
 
     #[test]

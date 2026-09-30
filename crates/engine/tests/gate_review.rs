@@ -125,11 +125,19 @@ async fn the_gate_shows_the_plan_it_asks_about_as_the_run_holds_it() {
         "the decision is recorded against the bytes it was about"
     );
     let shown = interaction.shown();
-    let ShownContent::Tasks(TasksFile { tasks, .. }) = &shown[0][0].content else {
+    let ShownContent::Tasks {
+        plan: TasksFile { tasks, .. },
+        departed,
+    } = &shown[0][0].content
+    else {
         panic!("a tasks document is shown as its tasks: {shown:?}");
     };
     let ids: Vec<&str> = tasks.iter().map(|task| task.id.as_str()).collect();
     assert_eq!(ids, ["T001"]);
+    assert!(
+        departed.is_empty(),
+        "nothing was built yet to depart from it"
+    );
     assert!(
         shown[0][0].path.ends_with("artifacts/plan/tasks.md"),
         "a plan points to the view written for the person reviewing it"
