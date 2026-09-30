@@ -19,6 +19,7 @@
 
 pub(crate) mod bars;
 pub(crate) mod escalation;
+mod findings;
 pub(crate) mod glyphs;
 pub(crate) mod markdown;
 mod plan;

@@ -8,7 +8,7 @@
 //! what each does, what it touches and what proves it done — in words;
 //! the commands that prove it stay in the whole plan, one open away. A
 //! diagram has no room on a terminal either, so it is named here and
-//! drawn there.
+//! drawn there. What a review found is read the most severe first.
 
 use yunta_core::events::ArtifactId;
 use yunta_engine::{ShownContent, ShownDocument};
@@ -29,6 +29,10 @@ pub(crate) fn shown(document: &ShownDocument, width: usize) -> Vec<String> {
         ShownContent::Tasks { plan, departed } => (
             super::plan::plan(plan, departed, &of, width),
             "the whole plan",
+        ),
+        ShownContent::Findings(file) => (
+            super::findings::findings(file, &of, width),
+            "the whole document",
         ),
         ShownContent::Text(text) => (
             self::text(text, &document.shown.artifact, &of, width),
@@ -296,6 +300,52 @@ tasks:
         assert!(
             drawn.iter().all(|line| cell_width(line) <= 60),
             "{drawn:#?}"
+        );
+    }
+
+    #[test]
+    fn a_review_is_read_the_most_severe_finding_first() {
+        let found: yunta_core::FindingsFile = serde_norway::from_str(
+            r#"
+findings:
+  - id: stray-space
+    severity: minor
+    title: "A stray space"
+    location: "greeting.txt:1"
+    detail: "Between the words."
+  - id: halfway
+    severity: blocking
+    title: "The greeting stops halfway"
+    location: "greeting.txt"
+    detail: "It says hello and never good night, which the plan's `Greeting` shape promises."
+"#,
+        )
+        .unwrap();
+        let drawn = shown(
+            &document(
+                ShownContent::Findings(found),
+                ArtifactId::Interpreted {
+                    kind: ArtifactKind::Findings,
+                },
+            ),
+            50,
+        );
+        assert_eq!(
+            drawn,
+            vec![
+                "the findings of `plan` — 1 blocking, 1 minor",
+                "",
+                "  blocking — The greeting stops halfway",
+                "    halfway, at greeting.txt",
+                "    It says hello and never good night, which the",
+                "    plan's `Greeting` shape promises.",
+                "",
+                "  minor — A stray space",
+                "    stray-space, at greeting.txt:1",
+                "    Between the words.",
+                "",
+                "the whole document: /runs/r/artifacts/plan/tasks.md",
+            ]
         );
     }
 

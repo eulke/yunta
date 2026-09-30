@@ -465,7 +465,8 @@ exact version you saw by its hash, so an approval is an approval of those bytes.
 A gate after the work that shows the same plan — before a pull request, say —
 reads first every departure from it a person accepted while its tasks were built:
 what the plan said, what was built instead and why, and what they said accepting
-it.
+it. A gate that shows a `findings` document reads it the most severe finding
+first, each with where it is and what goes wrong.
 
 A plan a gate shows has to say those things. Next to `tasks:` it carries a
 `summary`, a Markdown `description` (code blocks and `mermaid` diagrams welcome), a

@@ -8,8 +8,11 @@ use crate::findings::Location;
 use crate::ids::FindingId;
 
 /// `severity`: `blocking | major | minor | note` — confirmed against the
-/// `kind: findings` schema, not inferred.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+/// `kind: findings` schema, not inferred. Ordered the way the ladder
+/// reads, the most severe first.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingSeverity {
     Blocking,

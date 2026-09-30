@@ -359,7 +359,7 @@
       ]
     },
     "FindingSeverity": {
-      "description": "`severity`: `blocking | major | minor | note` — confirmed against the\n`kind: findings` schema, not inferred.",
+      "description": "`severity`: `blocking | major | minor | note` — confirmed against the\n`kind: findings` schema, not inferred. Ordered the way the ladder\nreads, the most severe first.",
       "type": "string",
       "enum": [
         "blocking",

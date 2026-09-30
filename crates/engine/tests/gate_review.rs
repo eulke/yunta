@@ -470,3 +470,27 @@ async fn the_plan_is_also_written_for_the_person_who_reviews_it() {
     let view = String::from_utf8(bench.projection(Some("plan"), "tasks.md").unwrap()).unwrap();
     assert_eq!(view, EXPLAINED_VIEW);
 }
+
+#[tokio::test]
+async fn a_gate_that_shows_a_review_shows_its_findings() {
+    let workflow = REVIEWED_PLAN.replace("tasks", "findings");
+    let fixture = review_session(&[(
+        "halfway",
+        "blocking",
+        "It stops halfway",
+        "a.txt",
+        "No end.",
+    )]);
+    let interaction = SequencedInteraction::choosing(&["approve"]);
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(&workflow, &fixture, &interaction)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    let shown = interaction.shown();
+    let ShownContent::Findings(file) = &shown[0][0].content else {
+        panic!("a findings document is shown as its findings: {shown:?}");
+    };
+    assert_eq!(file.findings[0].title, "It stops halfway");
+}

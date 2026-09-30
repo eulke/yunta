@@ -40,7 +40,8 @@ pub fn view_of(shown: &Shown) -> std::path::PathBuf {
 
 /// The documents `shows` names, from the run rooted at `run_dir`: the
 /// exact bytes each hash names, a tasks document read into its tasks and
-/// shown with the departures from it `tasks` records as accepted.
+/// shown with the departures from it `tasks` records as accepted, a
+/// findings document into its findings.
 pub(crate) async fn documents(
     run_dir: &Path,
     shows: &[Shown],
@@ -62,6 +63,12 @@ pub(crate) async fn documents(
                 let departed = departed(&plan, tasks);
                 ShownContent::Tasks { plan, departed }
             }
+            ArtifactId::Interpreted {
+                kind: ArtifactKind::Findings,
+            } => ShownContent::Findings(yunta_core::shape::read::<yunta_core::FindingsFile>(
+                &bytes,
+                path.display().to_string(),
+            )?),
             _ => ShownContent::Text(String::from_utf8_lossy(&bytes).into_owned()),
         };
         documents.push(ShownDocument {
