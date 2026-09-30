@@ -229,6 +229,30 @@ async fn a_missing_file_retried_after_it_is_put_in_place_finishes() {
 }
 
 #[tokio::test]
+async fn a_command_measured_against_the_run_s_base_sees_everything_the_run_changed() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: ctx-run-base
+nodes:
+  - id: write
+    kind: bash
+    run: "printf a > written-by-the-run.txt"
+  - id: read
+    kind: prompt
+    runner: executor
+    depends_on: [write]
+    prompt: "Say what changed."
+    context:
+      - command: "git diff --name-only {{run.base}}"
+"#;
+    let fixture = "sessions:\n  - match_prompt_contains: \"written-by-the-run.txt\"\n    outcome: { type: completed, summary: read }\n";
+
+    let RunReport { terminal, .. } = bench.run(workflow, fixture).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+}
+
+#[tokio::test]
 async fn a_run_events_source_resolves_filtered_failures_and_is_replayable() {
     let bench = Bench::new();
     let workflow = r#"

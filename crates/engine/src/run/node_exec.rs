@@ -338,6 +338,7 @@ pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<TemplateV
             TemplateVar::RunBranch,
             crate::worktree::run_branch(ctx.run_id),
         ),
+        (TemplateVar::RunBase, ctx.manifest.base_commit.to_string()),
         (
             TemplateVar::Staging,
             crate::run_dir::staging_root(ctx.run_dir)

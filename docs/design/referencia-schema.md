@@ -341,7 +341,9 @@ que siempre está al día.
 - **Variables de template**: lo que un nodo puede escribir entre `{{ }}` en su
   prompt, su `run:`, sus hooks y sus patrones de `context:`. El conjunto es cerrado
   (`TemplateVar`): `{{run.dir}}`, `{{run.worktree}}`, `{{run.branch}}`,
-  `{{run.staging}}` (la raíz bajo la que cuelga el staging de cada nodo),
+  `{{run.base}}` (el commit del que partió el run: `git diff {{run.base}}` es todo
+  lo que el run cambió), `{{run.staging}}` (la raíz bajo la que cuelga el staging
+  de cada nodo),
   `{{node.artifacts}}` (el directorio propio del nodo, donde escribe lo que
   declara), `{{node.id}}`, `{{runner.name}}` cuando el nodo declara un runner,
   `{{project.name}}`/`{{project.base_branch}}`/`{{project.branch_prefix}}` según lo

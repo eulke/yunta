@@ -31,6 +31,9 @@ pub enum TemplateVar {
     Worktree,
     /// The branch a run pushes to, derived from the run id.
     RunBranch,
+    /// The commit the run started from: what everything the run changed
+    /// is measured against.
+    RunBase,
     /// The root every node's staging sits under.
     Staging,
     /// This node's own staging directory — where it writes what it
@@ -55,10 +58,11 @@ pub enum TemplateVar {
 impl TemplateVar {
     /// Every variable that names no payload, which is every one a
     /// document can list without knowing a workflow.
-    pub const FIXED: [TemplateVar; 10] = [
+    pub const FIXED: [TemplateVar; 11] = [
         TemplateVar::RunDir,
         TemplateVar::Worktree,
         TemplateVar::RunBranch,
+        TemplateVar::RunBase,
         TemplateVar::Staging,
         TemplateVar::NodeArtifacts,
         TemplateVar::NodeId,
@@ -87,6 +91,7 @@ impl fmt::Display for TemplateVar {
             TemplateVar::RunDir => f.write_str("run.dir"),
             TemplateVar::Worktree => f.write_str("run.worktree"),
             TemplateVar::RunBranch => f.write_str("run.branch"),
+            TemplateVar::RunBase => f.write_str("run.base"),
             TemplateVar::Staging => f.write_str("run.staging"),
             TemplateVar::NodeArtifacts => f.write_str("node.artifacts"),
             TemplateVar::NodeId => f.write_str("node.id"),
