@@ -11,9 +11,10 @@ use yunta_core::events::{
 use yunta_core::{CommitSha, Node, ScopeGlob, Seq, Task};
 
 use crate::scope::audit;
-use crate::task_cycle::{post_check, to_results, Memo, TaskCycleReport, TaskOutcome};
+use crate::task_cycle::{post_check, to_results, BlockedCause, Memo, TaskCycleReport, TaskOutcome};
 use crate::worktree::{commit_work, land, rebase_onto, Rebase, Unit};
 
+use super::depart::PendingDeparture;
 use super::escalate::{emit_scope_expansion_events, PendingEscalation};
 use super::{BatchIntegration, LoopState};
 use crate::run::{RunCtx, RunError};
@@ -37,6 +38,7 @@ pub(super) async fn integrate_batch(
     expansions_granted_this_run: &mut u32,
 ) -> Result<BatchIntegration, RunError> {
     let mut pending_escalations: Vec<PendingEscalation> = Vec::new();
+    let mut departures: Vec<PendingDeparture> = Vec::new();
     for dispatch in dispatches {
         let (task, unit, mut report) = dispatch?;
         let needs_human_decision = report.needs_human_decision;
@@ -153,13 +155,21 @@ pub(super) async fn integrate_batch(
             TaskOutcome::Interrupted => None,
         };
         let was_blocked = blocked_cause.is_some();
-        if let Some(cause) = blocked_cause {
+        match blocked_cause {
+            // Departures are put to a person once the batch is on the log.
+            Some(BlockedCause::DeviationOwed { deviations }) => {
+                departures.push(PendingDeparture {
+                    task_id: task.id.clone(),
+                    deviations,
+                });
+            }
             // An escalation-blocked task is the escalation flow's to report
             // (resolved by the caller, or the pause diagnostic) — its interim
             // Blocked never feeds the generic tail.
-            if !needs_human_decision {
+            Some(cause) if !needs_human_decision => {
                 state.blocked.push((task.id.clone(), cause));
             }
+            _ => {}
         }
         if needs_human_decision {
             if let Some((attempt_no, outcome)) = escalated {
@@ -172,7 +182,10 @@ pub(super) async fn integrate_batch(
             }
         }
     }
-    Ok(BatchIntegration::Done(pending_escalations))
+    Ok(BatchIntegration::Done {
+        escalations: pending_escalations,
+        departures,
+    })
 }
 
 /// What a blocked task's last attempt left in its unit, committed on the

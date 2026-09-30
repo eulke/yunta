@@ -12,6 +12,7 @@ mod attempt;
 mod carry;
 mod criteria;
 mod error;
+mod expansion;
 mod judge;
 mod outcome;
 mod record;
@@ -166,6 +167,8 @@ pub enum Answer {
     Scope(yunta_core::events::ScopeAnswer),
     /// A person's review of what it handed over.
     Review(Review),
+    /// A person's answer to the departure from the plan it declared.
+    Deviation(yunta_core::events::DeviationResolvedPayload),
 }
 
 /// A person's review of what a node handed over: the gate that asked,
@@ -288,8 +291,22 @@ pub async fn run_task(
     // opens only when the work does not close the task. A cycle resuming
     // the session that left the work finds it already in its unit, and
     // judges it where it is.
+    // A departure a person sent back is the one resume the work cannot
+    // settle: what the session left is what they did not accept, however
+    // its criteria read, so the session goes on.
+    let sent_back = matches!(
+        resume,
+        Some(Continuing {
+            answer: Answer::Deviation(yunta_core::events::DeviationResolvedPayload {
+                accepted: false,
+                ..
+            }),
+            ..
+        })
+    );
     let carried = match (carry, &resume) {
         (Some(left), _) => Some(carry::continue_from(&params, recorder, left).await?),
+        (None, Some(_)) if sent_back => Some(carry::Carry::Unsettled { last_check: None }),
         (None, Some(_)) => Some(carry::judge_in_place(&params, recorder).await?),
         (None, None) => None,
     };

@@ -69,7 +69,7 @@ Reglas: todo se valida **al crear el run, antes del primer token**; los defaults
 # 3. Modelo de eventos
 The event log is append-only: `(run_id, seq, timestamp, node_id?, kind, payload_json, schema_version)`.
 Current state is derived by replaying that log; snapshots are only an optimization.
-The current table contains 43 event kinds in 35 rows; some rows group related variants:
+The current table contains 45 event kinds in 36 rows; some rows group related variants:
 | Evento | Emisor | Payload relevante |
 |---|---|---|
 | `run_created` | engine | manifest hash, inputs, modo, `promoted_from?` |
@@ -84,6 +84,7 @@ The current table contains 43 event kinds in 35 rows; some rows group related va
 | `criteria_checked` | engine | task_id, fase pre/post, exit code por criterio, ejecutado o reutilizado de caché (§5.4) |
 | `task_status_changed` | engine | task_id, estado nuevo, evento que lo justifica, commit donde aterrizó el trabajo (solo en un `done`) |
 | `task_check_started` / `task_check_answered` | engine | task_id; en la respuesta, si la tarea cerraría, el resultado de cada criterio, lo que el trabajo tocó fuera de su scope o negado, y cuánto tardó el juicio |
+| `deviation_declared` / `deviation_resolved` | engine | task_id; en la declaración, de qué elemento del plan se aparta (forma, decisión, cambio, criterio u outcome), qué decía el plan, qué hace en cambio y por qué; en la respuesta, si una persona lo aceptó y qué dijo |
 | `scope_checked` | engine | task_id/node_id, diff observado, violaciones |
 | `scope_expansion_requested` | engine | task_id, paths, razón, criterio propuesto y su pre-check (§6.2) |
 | `scope_expansion_granted` / `scope_expansion_denied` | engine | task_id, decisor (regla o persona), modo, conteo del run |
@@ -347,6 +348,7 @@ La comunicación entre nodos es siempre mediada por el engine (§12, D26): nunca
 - **`yunta_update_finding`** — reemplaza entero, por id, un hallazgo que este nodo reportó; mismos campos y misma validación que el posteo. Solo el nodo que lo reportó lo alcanza, y un id retirado no se actualiza.
 - **`yunta_withdraw_finding`** — retira un hallazgo de este nodo con un `reason` no vacío. Queda fuera de todo conteo, archivo y vista; el log conserva el hallazgo y el motivo. El retiro es final: un hallazgo que vuelve es un id nuevo.
 - **`yunta_check_artifact`** — el veredicto del cierre, pedido mientras la sesión todavía puede actuar (D146): confirma un archivo que la sesión escribió y lee lo que el engine escribió de un documento entregado.
+- **`yunta_declare_deviation`** — declara que el trabajo de una tarea se aparta del plan: de qué elemento (una forma o decisión del plan, un cambio o criterio de la tarea, o su outcome, que el plan tiene que tener), qué decía el plan, qué hace en cambio y por qué. Se monta en una sesión de tarea. Queda en el log al instante (`deviation_declared`), y la tarea no cierra sobre él, digan lo que digan sus criterios: una persona lo acepta —la tarea sigue desde su trabajo y cierra sin otra sesión si ya pasa— o lo devuelve con qué hacer, y la sesión que se apartó retoma el trabajo con esas palabras, sin que un trabajo en verde lo dé por cerrado.
 - **`yunta_request_scope_expansion`** — emite la solicitud de §6.2. Se monta en una sesión de tarea, y en la sesión propia de un nodo que declara `scope:` cuando una persona puede ampliarlo en este run: ahí lo decide una persona desde el menú de la falla que el pedido produce.
 - **`yunta_check_scope`** — la auditoría de scope que hará el cierre del nodo, pedida mientras la sesión todavía puede actuar: el scope efectivo (declarado más concedido) y cada path cambiado fuera de él, con la misma función. Solo en la sesión propia de un nodo que declara `scope:` y no es `read-only`.
 - **`yunta_task_status`** — consulta de solo lectura del estado de las tareas, equivalente a la fuente de contexto `tasks` pero invocable en caliente.

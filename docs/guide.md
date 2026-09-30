@@ -519,10 +519,12 @@ Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:
 - **Per-run tools**: a loopback HTTP MCP endpoint opened for the duration of a single
   agent session that declared `run_tools` capability — `yunta_post_finding`,
   `yunta_update_finding`, `yunta_withdraw_finding`, `yunta_check_artifact` and
-  `yunta_task_status` for every such session; `yunta_task`, `yunta_check_task`
-  and `yunta_request_scope_expansion` for a loop's task sessions, which read their
-  task and judge their work through them (a loop therefore needs a runner that can
-  hold these tools); `yunta_check_scope` and `yunta_request_scope_expansion` for
+  `yunta_task_status` for every such session; `yunta_task`, `yunta_check_task`,
+  `yunta_request_scope_expansion` and `yunta_declare_deviation` for a loop's task
+  sessions, which read their task and the plan it belongs to, judge their work, and
+  say where it departs from the plan through them — a departure keeps the task open
+  until a person accepts it or sends it back (a loop therefore needs a runner that
+  can hold these tools); `yunta_check_scope` and `yunta_request_scope_expansion` for
   the session of a node that declares `scope:`, which audits its work against that
   scope and asks a person to widen it rather than writing outside it;
   a `yunta_submit_<kind>` tool for each submittable kind the node declares under

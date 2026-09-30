@@ -52,8 +52,9 @@ pub(crate) fn task_notice(
         Some(_) => {
             " It also carries the plan the task belongs to: the design the task names, and \
              the other tasks, which own what your scope leaves out. Build the design as the \
-             plan declares it; where your task cannot, ask for the scope it needs rather \
-             than building something else."
+             plan declares it; where your task cannot, ask for the scope it needs, or declare \
+             the departure with `yunta_declare_deviation` — never build something else and \
+             say nothing."
         }
         None => "",
     };
@@ -170,6 +171,28 @@ pub(crate) fn continuation_notice(
         crate::task_cycle::Answer::Review(review) => format!(
             "{} Revise it accordingly and hand it over again the way you did before.",
             reviewed(review, "you")
+        ),
+        crate::task_cycle::Answer::Deviation(answer) => departure_notice(answer),
+    }
+}
+
+/// What a session that departed from the plan is told when a person
+/// answered: what they decided, in their words, and what to do now.
+fn departure_notice(answer: &yunta_core::events::DeviationResolvedPayload) -> String {
+    let said = answer
+        .said
+        .as_deref()
+        .map(|said| format!(": {}", said.trim()))
+        .unwrap_or_default();
+    match answer.accepted {
+        true => format!(
+            "A person accepted the departure from the plan you declared{said}. Finish the \
+             task on the work as it stands."
+        ),
+        false => format!(
+            "A person sent back the departure from the plan you declared{said}. Do what they \
+             say — or, where they say nothing more, build what the plan declares; declare a \
+             departure again only for what still cannot be built as they ask."
         ),
     }
 }

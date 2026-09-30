@@ -143,3 +143,54 @@ pub struct TaskCheckAnsweredPayload {
     pub denied: Vec<PathBuf>,
     pub duration_ms: u64,
 }
+
+/// What of the plan a task session departs from: one of the plan's
+/// shapes or decisions by name, one of its own changes by where it is,
+/// one of its criteria by its command, or what it said a person would
+/// see once it was done.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum DepartsFrom {
+    Shape(String),
+    Decision(String),
+    Change(String),
+    Criterion(String),
+    Outcome,
+}
+
+impl std::fmt::Display for DepartsFrom {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DepartsFrom::Shape(name) => write!(f, "shape `{name}`"),
+            DepartsFrom::Decision(id) => write!(f, "decision `{id}`"),
+            DepartsFrom::Change(at) => write!(f, "the change at `{at}`"),
+            DepartsFrom::Criterion(cmd) => write!(f, "the criterion `{cmd}`"),
+            DepartsFrom::Outcome => f.write_str("the task's outcome"),
+        }
+    }
+}
+
+/// A task session declared that its work departs from the plan: what
+/// the plan said, what the session did or needs instead, and why. The
+/// task does not close on it until a person answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeviationDeclaredPayload {
+    pub task_id: TaskId,
+    pub from: DepartsFrom,
+    /// What the plan says, in the session's words.
+    pub planned: String,
+    /// What the work does or needs instead.
+    pub instead: String,
+    pub why: String,
+}
+
+/// A person's answer to what a task's session departed from the plan
+/// on: accepted as it stands, or sent back with what they said.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeviationResolvedPayload {
+    pub task_id: TaskId,
+    pub accepted: bool,
+    /// What the person said, when they said anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub said: Option<String>,
+}

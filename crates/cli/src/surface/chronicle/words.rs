@@ -224,6 +224,11 @@ fn task_words(happening: &tasks_happening::Happening) -> String {
                 (false, red) => format!("{task} checked in {took}: {red} of its criteria red"),
             }
         }
+        H::Departed { task, from } => format!("{task} departs from the plan: {from}"),
+        H::Answered { task, accepted } => match accepted {
+            true => format!("{task}'s departure from the plan was accepted"),
+            false => format!("{task}'s departure from the plan was sent back"),
+        },
     }
 }
 

@@ -12,7 +12,7 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 35 rows and **43 `kind` names**.
+The current Run Contract event table has 36 rows and **45 `kind` names**.
 It had 32 rows and 39 kinds before `host_suspended` was added. The table
 defines the normative set; this document specifies each payload.
 
@@ -26,7 +26,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | One of the 43 names in this document, with a `_vN` suffix beyond v1. |
+| `kind` | string | One of the 45 names in this document, with a `_vN` suffix beyond v1. |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
 
@@ -114,7 +114,7 @@ atribuidos al adapter: `agent_session_opened` y
 Si esta lectura no es la intención original, es exactamente el tipo de cosa a
 corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
-## 5. Los 43 tipos de evento, campo por campo
+## 5. Los 45 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -281,6 +281,26 @@ Both are audit: a check judges work in progress, and only the attempt's close
 moves the task. The question is written before the judgement runs, so a
 `task_check_started` with no answer after it is a check whose session ended
 first, or whose answer never reached it.
+
+### 5.11b `deviation_declared` / `deviation_resolved` — engine
+**Source:** a task session's `yunta_declare_deviation` call, and a person's answer to it
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `task_id` | string | yes, in both | the task whose session departs |
+| `from` | `{shape}` \| `{decision}` \| `{change}` \| `{criterion}` \| `outcome` | only in `deviation_declared` | what of the plan the work departs from: a shape or decision by name, one of the task's changes by where it is, one of its criteria by its command, or its outcome |
+| `planned` | string | only in `deviation_declared` | what the plan says |
+| `instead` | string | only in `deviation_declared` | what the work does or needs instead |
+| `why` | string | only in `deviation_declared` | — |
+| `accepted` | `bool` | only in `deviation_resolved` | true: the task closes as it stands if its criteria pass; false: its session picks the work back up with what the person said |
+| `said` | string | no, in `deviation_resolved` | what the person said |
+
+The session's own words are kept here in full: unlike its messages, a
+departure is something it states to the run on purpose. A task whose attempt
+declared one does not close, whatever its criteria say, until a person
+answers. `deviation_declared` is audit — the attempt that declared it holds it
+in hand; `deviation_resolved` moves the task's record, which the task's next
+cycle reads and clears.
 
 ### 5.12 `scope_checked` — engine
 **Fuente:** task_id/node_id, diff observado, violaciones

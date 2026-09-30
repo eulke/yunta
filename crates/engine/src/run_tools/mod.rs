@@ -43,6 +43,7 @@
 
 mod blackboard;
 pub mod catalog;
+mod deviation;
 mod findings;
 mod handover;
 mod host;

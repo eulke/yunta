@@ -7,6 +7,7 @@
 //! 1` (the default) walks the exact same path with a batch of one —
 //! there is no special case for it.
 
+mod depart;
 mod dispatch;
 mod escalate;
 mod integrate;
@@ -27,6 +28,7 @@ use super::prompt_exec::prompt_text;
 use super::runner_resolve::{report_declarative_network, resolve_node_runner};
 use super::step::Step;
 use super::{RunCtx, RunError};
+use depart::resolve_departures;
 use dispatch::{dispatch_task_in_isolation, BatchDispatchEnv};
 use escalate::{resolve_escalations, PendingEscalation};
 use integrate::integrate_batch;
@@ -179,7 +181,7 @@ pub(super) async fn execute_loop(
         // happened atomically in the batch's `GrantLedger`; this count only
         // feeds the event payload.
         let mut expansions_granted_this_run = granted_count(&view.events);
-        let pending = match integrate_batch(
+        let (pending, departures) = match integrate_batch(
             ctx,
             node,
             dispatches,
@@ -191,7 +193,10 @@ pub(super) async fn execute_loop(
         .await?
         {
             BatchIntegration::Cancelled(end) => return Ok(end),
-            BatchIntegration::Done(pending) => pending,
+            BatchIntegration::Done {
+                escalations,
+                departures,
+            } => (escalations, departures),
         };
 
         if !pending.is_empty() {
@@ -209,6 +214,11 @@ pub(super) async fn execute_loop(
             }
             // Everything resolved — the next iteration re-dispatches the (now
             // Pending again) tasks with the decisions on the log.
+        }
+        if !departures.is_empty() {
+            if let Some(end) = resolve_departures(ctx, node, departures, state.tokens).await? {
+                return Ok(end);
+            }
         }
     }
 }
@@ -258,10 +268,14 @@ impl LoopState {
 }
 
 /// What integrating one batch produced: a cancellation that ends the node,
-/// or the escalations owed a human once the batch is on the log.
+/// or what is owed a person once the batch is on the log — the scope
+/// requests escalated, and the departures from the plan declared.
 enum BatchIntegration {
     Cancelled(NodeEnd),
-    Done(Vec<PendingEscalation>),
+    Done {
+        escalations: Vec<PendingEscalation>,
+        departures: Vec<depart::PendingDeparture>,
+    },
 }
 
 /// Resolves everything a loop needs once, before any task runs: the rendered

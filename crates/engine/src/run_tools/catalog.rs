@@ -27,6 +27,7 @@ impl RunToolCatalog for RunTool {
         match self {
             RunTool::Task | RunTool::CheckTask => session.task.is_some(),
             RunTool::CheckScope => session.node_scope.is_some(),
+            RunTool::DeclareDeviation => session.task.is_some(),
             RunTool::RequestScopeExpansion => {
                 session.task.is_some()
                     || session
@@ -51,6 +52,7 @@ impl RunToolCatalog for RunTool {
             RunTool::GetBlackboard => blackboard_tool(),
             RunTool::CheckScope => check_scope_tool(),
             RunTool::RequestScopeExpansion => scope_expansion_tool(),
+            RunTool::DeclareDeviation => deviation_tool(),
             RunTool::PostFinding => post_finding_tool(),
             RunTool::UpdateFinding => update_finding_tool(),
             RunTool::WithdrawFinding => withdraw_finding_tool(),
@@ -183,6 +185,36 @@ fn check_scope_tool() -> Tool {
          changed outside it. A path outside fails the node; if your fix needs one, ask \
          with yunta_request_scope_expansion instead of writing it.",
         no_arguments(),
+    )
+}
+
+fn deviation_tool() -> Tool {
+    let named = |key: &str| {
+        json!({"type": "object", "properties": {key: {"type": "string"}}, "required": [key],
+               "additionalProperties": false})
+    };
+    Tool::new(
+        RunTool::DeclareDeviation.name(),
+        "Declare that your work departs from the plan: what of it (`from`: one of the plan's \
+         shapes or decisions by name, one of your task's `changes` by where it is, one of its \
+         criteria by its command, or `\"outcome\"`), what the plan says (`planned`), what \
+         your work does or needs instead (`instead`), and `why`. Call it whenever you cannot \
+         build what the plan declares within your scope — never build something else and say \
+         nothing. Your task does not close on a departure: when your session ends a person \
+         accepts it, or sends it back with what to do instead.",
+        object(json!({
+            "type": "object",
+            "properties": {
+                "from": {"oneOf": [
+                    named("shape"), named("decision"), named("change"), named("criterion"),
+                    {"const": "outcome"},
+                ]},
+                "planned": {"type": "string"},
+                "instead": {"type": "string"},
+                "why": {"type": "string"},
+            },
+            "required": ["from", "planned", "instead", "why"],
+        })),
     )
 }
 

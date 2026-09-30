@@ -132,7 +132,7 @@ impl SessionTools {
     }
 
     /// The task this session works, or why `tool` has nothing to answer.
-    fn task_access(&self, tool: RunTool) -> Result<&TaskAccess, RunToolError> {
+    pub(super) fn task_access(&self, tool: RunTool) -> Result<&TaskAccess, RunToolError> {
         self.task
             .as_deref()
             .ok_or(RunToolError::NotATaskSession { tool: tool.name() })

@@ -33,6 +33,8 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
         | EventPayload::Tasks(TaskEvent::StatusChanged(_))
         | EventPayload::Tasks(TaskEvent::CheckStarted(_))
         | EventPayload::Tasks(TaskEvent::CheckAnswered(_))
+        | EventPayload::Tasks(TaskEvent::DeviationDeclared(_))
+        | EventPayload::Tasks(TaskEvent::DeviationResolved(_))
         | EventPayload::Node(NodeEvent::ScopeChecked(_))
         | EventPayload::Scope(ScopeEvent::Requested(_))
         | EventPayload::Scope(ScopeEvent::Granted(_))
@@ -196,12 +198,12 @@ fn every_domain_declares_the_kinds_the_wire_carries() {
 }
 
 #[test]
-fn there_are_exactly_43_kinds_with_distinct_names() {
+fn there_are_exactly_45_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 43);
+    assert_eq!(kinds.len(), 45);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 43, "expected 43 distinct kind names");
+    assert_eq!(names.len(), 45, "expected 45 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -248,6 +250,8 @@ fn kind_names_match_the_spec_exactly() {
         "task_status_changed",
         "task_check_started",
         "task_check_answered",
+        "deviation_declared",
+        "deviation_resolved",
         "scope_checked",
         "scope_expansion_requested",
         "scope_expansion_granted",

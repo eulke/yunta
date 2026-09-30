@@ -115,6 +115,19 @@ pub(super) enum RunToolError {
         source: serde_json::Error,
     },
     #[error(
+        "invalid departure — requires `from` (one of `{{\"shape\": name}}`, \
+         `{{\"decision\": id}}`, `{{\"change\": at}}`, `{{\"criterion\": cmd}}` or \
+         `\"outcome\"`), `planned`, `instead` and `why`: {source}"
+    )]
+    InvalidDeparture {
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("a departure says what it is — `{field}` is empty")]
+    EmptyDeparture { field: &'static str },
+    #[error("the plan holds no {from} — it holds {known}")]
+    NotInThePlan { from: String, known: String },
+    #[error(
         "this session's node is not in a `coordination: blackboard` group — the blackboard is \
          never mounted outside one"
     )]
@@ -255,6 +268,7 @@ impl ServerHandler for SessionTools {
             Some(RunTool::CheckTask) => self.check_task().await,
             Some(RunTool::CheckScope) => self.check_scope().await,
             Some(RunTool::RequestScopeExpansion) => self.request_scope_expansion(args).await,
+            Some(RunTool::DeclareDeviation) => self.declare_deviation(args).await,
             Some(RunTool::Submit(kind)) => self.submit(kind, args).await,
             None => Err(RunToolError::UnknownTool {
                 name: request.name.to_string(),

@@ -127,6 +127,18 @@ pub fn all_kinds() -> Vec<EventPayload> {
             denied: Vec::new(),
             duration_ms: 4_310,
         })),
+        EventPayload::Tasks(TaskEvent::DeviationDeclared(DeviationDeclaredPayload {
+            task_id: "graph-cmd".into(),
+            from: DepartsFrom::Shape("GraphFormat".to_string()),
+            planned: "a `Dot` variant".to_string(),
+            instead: "only `Mermaid`".to_string(),
+            why: "the scope leaves the renderer out".to_string(),
+        })),
+        EventPayload::Tasks(TaskEvent::DeviationResolved(DeviationResolvedPayload {
+            task_id: "graph-cmd".into(),
+            accepted: false,
+            said: Some("add `Dot` too".to_string()),
+        })),
         EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {
             task_id: Some("graph-cmd".into()),
             diff: vec!["crates/cli/src/graph.rs".into()],

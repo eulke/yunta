@@ -13,6 +13,7 @@ pub enum RunTool {
     GetBlackboard,
     CheckScope,
     RequestScopeExpansion,
+    DeclareDeviation,
     PostFinding,
     UpdateFinding,
     WithdrawFinding,
@@ -66,6 +67,7 @@ impl RunTool {
             Self::CheckTask,
             Self::CheckScope,
             Self::RequestScopeExpansion,
+            Self::DeclareDeviation,
             Self::GetBlackboard,
         ]);
         all
@@ -80,6 +82,7 @@ impl RunTool {
             Self::GetBlackboard => "yunta_get_blackboard",
             Self::CheckScope => "yunta_check_scope",
             Self::RequestScopeExpansion => "yunta_request_scope_expansion",
+            Self::DeclareDeviation => "yunta_declare_deviation",
             Self::PostFinding => ArtifactKind::POST_FINDING_TOOL,
             Self::UpdateFinding => ArtifactKind::UPDATE_FINDING_TOOL,
             Self::WithdrawFinding => ArtifactKind::WITHDRAW_FINDING_TOOL,

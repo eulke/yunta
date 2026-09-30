@@ -3,14 +3,16 @@
 use super::payloads::*;
 
 /// The tasks document, as a run works it: a task registered, a task
-/// that moved, and a check a task session asked for — one variant per
-/// kind.
+/// that moved, a check a task session asked for, and a departure from
+/// the plan it declared and a person answered — one variant per kind.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TaskEvent {
     Registered(TaskRegisteredPayload),
     StatusChanged(TaskStatusChangedPayload),
     CheckStarted(TaskCheckStartedPayload),
     CheckAnswered(TaskCheckAnsweredPayload),
+    DeviationDeclared(DeviationDeclaredPayload),
+    DeviationResolved(DeviationResolvedPayload),
 }
 
 impl TaskEvent {
@@ -20,6 +22,8 @@ impl TaskEvent {
         "task_status_changed",
         "task_check_started",
         "task_check_answered",
+        "deviation_declared",
+        "deviation_resolved",
     ];
 
     /// The persisted `kind` string of this fact.
@@ -29,6 +33,8 @@ impl TaskEvent {
             Self::StatusChanged(_) => "task_status_changed",
             Self::CheckStarted(_) => "task_check_started",
             Self::CheckAnswered(_) => "task_check_answered",
+            Self::DeviationDeclared(_) => "deviation_declared",
+            Self::DeviationResolved(_) => "deviation_resolved",
         }
     }
 
@@ -47,6 +53,10 @@ impl TaskEvent {
             // what moves the task.
             Self::CheckStarted(_) => true,
             Self::CheckAnswered(_) => true,
+            // What was declared blocks the attempt that declared it, which
+            // holds it in hand; the answer is what the next cycle reads.
+            Self::DeviationDeclared(_) => true,
+            Self::DeviationResolved(_) => false,
         }
     }
 

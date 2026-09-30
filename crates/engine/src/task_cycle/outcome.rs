@@ -135,10 +135,32 @@ pub enum BlockedCause {
     /// so the task cannot be verified at all. `rule` is the refusal the
     /// permission check wrote, naming the pattern and the field.
     CommandDenied { rule: String },
+    /// The session declared that its work departs from the plan, and a
+    /// person answers each departure before the task closes.
+    DeviationOwed {
+        deviations: yunta_core::NonEmpty<yunta_core::events::DeviationDeclaredPayload>,
+    },
     /// The session an attempt worked in ended without a terminal event.
     /// It left no work behind and said why, and another attempt would
     /// open the same session against the same configuration.
     SessionDied(SessionDeath),
+}
+
+/// One line per departure, each in the session's own words.
+fn departed(
+    deviations: &yunta_core::NonEmpty<yunta_core::events::DeviationDeclaredPayload>,
+) -> String {
+    deviations
+        .as_slice()
+        .iter()
+        .map(|d| {
+            format!(
+                "its session departs from the plan: {}: {} — {}",
+                d.from, d.instead, d.why
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 impl std::fmt::Display for BlockedCause {
@@ -158,6 +180,7 @@ impl std::fmt::Display for BlockedCause {
             BlockedCause::ScopeDecisionOwed => {
                 write!(f, "a scope expansion request needs a human decision")
             }
+            BlockedCause::DeviationOwed { deviations } => write!(f, "{}", departed(deviations)),
             BlockedCause::NonRetryable => write!(
                 f,
                 "the session reported a non-retryable failure and the criteria are still red"

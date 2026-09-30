@@ -36,11 +36,20 @@ async fn continuation(
     let Some(record) = state.tasks.get(&task.id) else {
         return Ok(None);
     };
-    let (Some(session), Some((_, work)), Some(answer)) = (
-        record.resumes.clone(),
-        record.left_work.as_ref(),
-        state.grants.answer_for(&task.id).cloned(),
-    ) else {
+    // What the session is picked back up on: the answer to the departure
+    // it declared when the task's reopening followed one, and otherwise
+    // the answer to the scope it asked for.
+    let answer = match &record.deviation_answer {
+        Some(departure) => Some(crate::task_cycle::Answer::Deviation(departure.clone())),
+        None => state
+            .grants
+            .answer_for(&task.id)
+            .cloned()
+            .map(crate::task_cycle::Answer::Scope),
+    };
+    let (Some(session), Some((_, work)), Some(answer)) =
+        (record.resumes.clone(), record.left_work.as_ref(), answer)
+    else {
         return Ok(None);
     };
     let reopened = reopen_unit(
@@ -64,13 +73,7 @@ async fn continuation(
         .await?;
         return Ok(None);
     };
-    Ok(Some((
-        unit,
-        Continuing {
-            session,
-            answer: crate::task_cycle::Answer::Scope(answer),
-        },
-    )))
+    Ok(Some((unit, Continuing { session, answer })))
 }
 
 /// Every path a prior `scope_expansion_granted` on the log authorized

@@ -1,6 +1,6 @@
 //! What a task event says happened, read as a person reads it.
 
-use crate::events::{TaskEvent, TaskStatus};
+use crate::events::{DepartsFrom, TaskEvent, TaskStatus};
 use crate::TaskId;
 
 /// One thing that happened to a task.
@@ -25,6 +25,16 @@ pub enum Happening {
         red: usize,
         duration_ms: u64,
     },
+    /// Its session departed from the plan.
+    Departed {
+        task: TaskId,
+        from: DepartsFrom,
+    },
+    /// A person answered that departure.
+    Answered {
+        task: TaskId,
+        accepted: bool,
+    },
 }
 
 impl From<&TaskEvent> for Happening {
@@ -45,6 +55,14 @@ impl From<&TaskEvent> for Happening {
                 closes: p.closes,
                 red: p.results.iter().filter(|r| r.exit_code != 0).count(),
                 duration_ms: p.duration_ms,
+            },
+            TaskEvent::DeviationDeclared(p) => Happening::Departed {
+                task: p.task_id.clone(),
+                from: p.from.clone(),
+            },
+            TaskEvent::DeviationResolved(p) => Happening::Answered {
+                task: p.task_id.clone(),
+                accepted: p.accepted,
             },
         }
     }

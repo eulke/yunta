@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{Phase, SessionDeath};
+use yunta_core::events::{DeviationDeclaredPayload, Phase, SessionDeath};
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
-use yunta_core::Task;
+use yunta_core::{NonEmpty, Task};
 
 use super::criteria::Memo;
 use super::judge::{judge, Judgement, Work};
@@ -82,6 +82,7 @@ pub(super) async fn run_one_attempt(
             fence: covered,
             session,
         },
+        declared,
     ) = open_and_dispatch(params).await?;
     let &AttemptParams {
         task,
@@ -132,7 +133,7 @@ pub(super) async fn run_one_attempt(
         ));
     }
 
-    let expansion_outcome = evaluate_scope_expansion(params).await?;
+    let expansion_outcome = super::expansion::evaluate_scope_expansion(params).await?;
     let granted_paths: &[ScopeGlob] = expansion_outcome
         .as_ref()
         .filter(|outcome| outcome.decision == crate::scope_expansion::Decision::Granted)
@@ -212,6 +213,22 @@ pub(super) async fn run_one_attempt(
         recorded,
     };
 
+    // A departure from the plan its session declared keeps the task open
+    // whatever its criteria say: a person answers it first. A scope
+    // request owed an answer goes first, since that answer resumes the
+    // same session on the same work.
+    if let Some(deviations) = NonEmpty::new(declared).filter(|_| !escalated) {
+        return Ok((
+            last_staged,
+            AttemptStep::Stop {
+                record,
+                outcome: TaskOutcome::Blocked {
+                    cause: super::BlockedCause::DeviationOwed { deviations },
+                },
+                needs_human_decision: true,
+            },
+        ));
+    }
     if succeeded {
         return Ok((
             last_staged,
@@ -309,7 +326,14 @@ pub(super) async fn run_one_attempt(
 /// tokens it spent.
 async fn open_and_dispatch(
     params: &AttemptParams<'_>,
-) -> Result<(Vec<PathBuf>, super::Dispatched), TaskCycleError> {
+) -> Result<
+    (
+        Vec<PathBuf>,
+        super::Dispatched,
+        Vec<DeviationDeclaredPayload>,
+    ),
+    TaskCycleError,
+> {
     let &AttemptParams {
         task,
         instruction,
@@ -327,6 +351,10 @@ async fn open_and_dispatch(
         ..
     } = params;
     let cwd = unit.worktree.as_path();
+    // Kept apart from the session's tools, which the session outlives
+    // here: what it declared is what this attempt's close answers for.
+    let deviations: std::sync::Arc<std::sync::Mutex<Vec<DeviationDeclaredPayload>>> =
+        Default::default();
     // What this session's tools read and judge: the task the cycle
     // holds, the scope it is held to — declared plus everything granted
     // before this attempt — and the unit it works in. A check
@@ -346,6 +374,7 @@ async fn open_and_dispatch(
         staged: Default::default(),
         checks: Default::default(),
         plan: setup.plan.clone(),
+        deviations: deviations.clone(),
     });
     // One door for every session: the per-attempt listener (mandatory
     // for a task session, which reads its task through it), the brief,
@@ -412,64 +441,6 @@ async fn open_and_dispatch(
                 source,
             },
         })?;
-    Ok((last_staged, dispatched))
-}
-
-/// Reads the agent's own scope-expansion request from this attempt's
-/// worktree (a fresh session per attempt leaves it there, not on the log)
-/// and evaluates it against the node's declared mode, `within` set and cap.
-/// `None` when the attempt left no request — the ordinary case.
-async fn evaluate_scope_expansion(
-    params: &AttemptParams<'_>,
-) -> Result<Option<crate::scope_expansion::ScopeExpansionOutcome>, TaskCycleError> {
-    let &AttemptParams {
-        task,
-        unit,
-        scope_expansion,
-        max_expansion_files,
-        grants,
-        supervision,
-        ..
-    } = params;
-    let cwd = unit.worktree.as_path();
-    let Some(expansion_request) =
-        crate::scope_expansion::load_request(cwd)
-            .await
-            .map_err(|source| TaskCycleError::ScopeExpansion {
-                task: task.id.clone(),
-                source,
-            })?
-    else {
-        return Ok(None);
-    };
-    let expansion_request =
-        match crate::scope_expansion::refuse_what_is_denied(expansion_request, params.denied) {
-            Ok(refused) => return Ok(Some(refused)),
-            Err(request) => request,
-        };
-    let mode = scope_expansion.map(|se| se.mode).unwrap_or_default();
-    let within = scope_expansion
-        .map(|se| se.within.as_slice())
-        .unwrap_or(&[]);
-    let max_per_run = scope_expansion.and_then(|se| se.max_per_run);
-    let (precheck_exit, decision) = crate::scope_expansion::evaluate(
-        mode,
-        within,
-        max_per_run,
-        max_expansion_files,
-        grants,
-        &expansion_request,
-        cwd,
-        supervision,
-    )
-    .await
-    .map_err(|source| TaskCycleError::ScopeExpansion {
-        task: task.id.clone(),
-        source,
-    })?;
-    Ok(Some(crate::scope_expansion::ScopeExpansionOutcome {
-        request: expansion_request,
-        precheck_exit,
-        decision,
-    }))
+    let declared = std::mem::take(&mut *deviations.lock().unwrap_or_else(|e| e.into_inner()));
+    Ok((last_staged, dispatched, declared))
 }

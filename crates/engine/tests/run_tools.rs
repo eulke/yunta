@@ -1635,11 +1635,11 @@ fn the_catalog_and_the_dispatch_name_the_same_tools() {
     }
     assert_eq!(yunta_engine::RunTool::parse("yunta_nonesuch"), None);
 
-    // And the set is exactly the submittable kinds plus the ten fixed
+    // And the set is exactly the submittable kinds plus the eleven fixed
     // tools, so a kind that gains a submission tool gains its tool here.
     let submissions = yunta_core::ArtifactKind::ALL
         .into_iter()
         .filter(|kind| kind.submit_tool().is_some())
         .count();
-    assert_eq!(yunta_engine::RunTool::all().len(), 10 + submissions);
+    assert_eq!(yunta_engine::RunTool::all().len(), 11 + submissions);
 }

@@ -1051,6 +1051,118 @@
         }
       ]
     },
+    "DepartsFrom": {
+      "description": "What of the plan a task session departs from: one of the plan's\nshapes or decisions by name, one of its own changes by where it is,\none of its criteria by its command, or what it said a person would\nsee once it was done.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "outcome"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "shape": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "shape"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "decision": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "decision"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "change": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "change"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "criterion": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "criterion"
+          ]
+        }
+      ]
+    },
+    "DeviationDeclaredPayload": {
+      "description": "A task session declared that its work departs from the plan: what\nthe plan said, what the session did or needs instead, and why. The\ntask does not close on it until a person answers.",
+      "type": "object",
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/DepartsFrom"
+        },
+        "instead": {
+          "description": "What the work does or needs instead.",
+          "type": "string"
+        },
+        "planned": {
+          "description": "What the plan says, in the session's words.",
+          "type": "string"
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        },
+        "why": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id",
+        "from",
+        "planned",
+        "instead",
+        "why"
+      ]
+    },
+    "DeviationResolvedPayload": {
+      "description": "A person's answer to what a task's session departed from the plan\non: accepted as it stands, or sent back with what they said.",
+      "type": "object",
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "said": {
+          "description": "What the person said, when they said anything.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id",
+        "accepted"
+      ]
+    },
     "Diagnostic": {
       "description": "One thing that is wrong with a document.",
       "type": "object",
@@ -1449,6 +1561,32 @@
             }
           },
           "$ref": "#/$defs/TaskCheckAnsweredPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "deviation_declared"
+            }
+          },
+          "$ref": "#/$defs/DeviationDeclaredPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "deviation_resolved"
+            }
+          },
+          "$ref": "#/$defs/DeviationResolvedPayload",
           "required": [
             "kind"
           ]
@@ -3172,7 +3310,7 @@
           "const": "unexplained-criterion"
         },
         {
-          "description": "A task of a plan a person reviews does not say what will be seen\nonce it is done.",
+          "description": "A task of a plan a person reviews does not say what a person sees\nonce it is done.",
           "type": "string",
           "const": "no-outcome"
         },
@@ -3392,6 +3530,7 @@
         "yunta_check_task",
         "yunta_check_scope",
         "yunta_request_scope_expansion",
+        "yunta_declare_deviation",
         "yunta_get_blackboard"
       ]
     },

@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use crate::events::meta::EventMeta;
 use crate::events::node::kinds::NodeEvent;
 use crate::events::tasks::kinds::TaskEvent;
+use crate::events::DeviationResolvedPayload;
 use crate::events::TaskStatus;
 use crate::hash::CommitSha;
 use crate::ids::{NodeId, Seq, SessionId, TaskId};
@@ -46,6 +47,9 @@ pub struct TaskRecord {
     pub resumes: Option<SessionId>,
     /// The last session that worked this task.
     pub last_session: Option<SessionId>,
+    /// A person's answer to the departure from the plan its last session
+    /// declared, until the task's next cycle starts with it.
+    pub deviation_answer: Option<DeviationResolvedPayload>,
     /// Whether a session opened for the task since its last status
     /// change. A `running` task without one is having its criteria
     /// checked, or the work it was reopened on judged, before any agent
@@ -193,6 +197,7 @@ impl TaskLedger {
                 record.owner = record.owner.take().or_else(|| meta.node.cloned());
                 if matches!(p.new_status, TaskStatus::Running) {
                     record.attempts += 1;
+                    record.deviation_answer = None;
                 }
                 record.status = p.new_status;
                 if let Some(commit) = &p.commit {
@@ -206,9 +211,18 @@ impl TaskLedger {
                 record.in_session = false;
                 Ok(())
             }
-            // A check judges work in progress; the attempt's close is
-            // what moves the task.
-            TaskEvent::CheckStarted(_) | TaskEvent::CheckAnswered(_) => Ok(()),
+            // A check judges work in progress, and a departure blocks the
+            // attempt that declared it; the attempt's close moves the task.
+            TaskEvent::CheckStarted(_)
+            | TaskEvent::CheckAnswered(_)
+            | TaskEvent::DeviationDeclared(_) => Ok(()),
+            TaskEvent::DeviationResolved(p) => {
+                let Some(record) = self.per_task.get_mut(&p.task_id) else {
+                    return Err(UnknownTask(p.task_id.clone()));
+                };
+                record.deviation_answer = Some(p.clone());
+                Ok(())
+            }
         }
     }
 
@@ -242,6 +256,7 @@ impl Default for TaskRecord {
             left_work: None,
             resumes: None,
             last_session: None,
+            deviation_answer: None,
             in_session: false,
         }
     }
