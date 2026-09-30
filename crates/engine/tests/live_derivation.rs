@@ -34,7 +34,7 @@ fn node(id: &str) -> Node {
         id: id.into(),
         kind: NodeKind::Bash { run: "true".into() },
         depends_on: Vec::new(),
-        scope: Vec::new(),
+        scope: yunta_core::NodeScope::Unscoped,
         runner: Some("implementer".into()),
         artifacts: None,
         hooks: None,

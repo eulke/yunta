@@ -162,7 +162,8 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 |---|---|---|---|
 | `attempt` | `u32` | sí | 1-indexado; sube con cada reintento |
 | `from_tree` | `TreeId` | no | el árbol del que parte este intento: contra él se mide su propio diff al cerrar |
-| `found` | sha de commit git | no; ausente cuando no se commiteó nada | el commit que el arranque hizo de lo que el árbol del run tenía sin commitear —lo que una persona editó con el run estacionado, lo que dejó un intento interrumpido—; ausente si no había nada, si el nodo trabaja en un checkout propio, si otro nodo trabajaba en el mismo árbol o si el run trabaja sin árbol propio (D201) |
+| `found` | sha de commit git | no; ausente cuando no se commiteó nada | el commit que el arranque hizo de lo que el árbol del run tenía sin commitear —lo que una persona editó con el run estacionado, lo que dejó un intento interrumpido—; ausente si no había nada, si el nodo trabaja en un checkout que abrió su grupo, si otro nodo trabajaba en el mismo árbol o si el run trabaja sin árbol propio. Un nodo con checkout propio también lo commitea: su checkout se abrió sobre eso, y la rama donde aterriza su trabajo tiene que tenerlo (D201) |
+| `run_scope` | lista de globs exactos | no; solo en un nodo con `scope: run` | lo que el run había cambiado desde su base cuando arrancó este intento —el diff entre `base_commit` y `from_tree`—: los paths que el intento puede cambiar, fijados acá para que su cierre audite contra lo que se le dio y no contra lo que el run cambie después (D205) |
 
 **De qué árbol parte.** `from_tree` es el id del objeto `tree` que el árbol de
 trabajo tenía cuando el intento arrancó, capturado con un índice privado para no

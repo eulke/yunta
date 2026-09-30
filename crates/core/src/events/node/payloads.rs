@@ -149,6 +149,12 @@ pub struct NodeStartedPayload {
     /// was nothing to find.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub found: Option<CommitSha>,
+    /// For a node scoped to the run (`scope: run`), what the run had
+    /// changed since its base when this attempt started — the paths the
+    /// attempt may change, fixed here so its close audits against what
+    /// it was given. Absent for every other node.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_scope: Option<Vec<crate::ScopeGlob>>,
 }
 
 impl NodeStartedPayload {
@@ -164,6 +170,7 @@ impl NodeStartedPayload {
             attempt: n,
             from_tree: Some(from),
             found: None,
+            run_scope: None,
         }
     }
 
@@ -171,6 +178,12 @@ impl NodeStartedPayload {
     /// run's tree, when one was made.
     pub fn found(self, found: Option<CommitSha>) -> Self {
         NodeStartedPayload { found, ..self }
+    }
+
+    /// The same, for a node scoped to the run, with what the run had
+    /// changed when the attempt started.
+    pub fn run_scope(self, run_scope: Option<Vec<crate::ScopeGlob>>) -> Self {
+        NodeStartedPayload { run_scope, ..self }
     }
 
     /// The same, for a start with no tree to name: a test that asserts
@@ -181,6 +194,7 @@ impl NodeStartedPayload {
             attempt: n,
             from_tree: None,
             found: None,
+            run_scope: None,
         }
     }
 }

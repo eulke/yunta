@@ -96,7 +96,7 @@ pub(super) async fn execute_node(
     // whole `RunCtx` across the await below, and node execution nests —
     // a group inside a workflow inside a group — so an inlined future
     // would carry every level's frame at once.
-    if crate::audited_scope(node).is_none() {
+    if !crate::audits(node) {
         return Box::pin(execute_in_its_tree(ctx, node, attempt, cancel)).await;
     }
     let (unit, continuing) = node_unit(ctx, node, attempt).await?;

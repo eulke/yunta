@@ -143,6 +143,8 @@ pub struct NodeRecord {
     /// a log written before the audit had a starting point carries, and
     /// what a reader takes as the run's own base.
     pub from_tree: Option<TreeId>,
+    /// What the open attempt of a node scoped to the run may change.
+    pub run_scope: Option<Vec<crate::ScopeGlob>>,
     pub last_terminal: Option<Seq>,
     pub last_failed: Option<Seq>,
     pub last_finished: Option<Seq>,
@@ -246,6 +248,12 @@ impl NodeLedger {
         Q: Ord + ?Sized,
     {
         self.per_node.get(node).and_then(|r| r.from_tree.as_ref())
+    }
+
+    /// What `node`'s open attempt, scoped to the run, may change, as its
+    /// `node_started` recorded it.
+    pub fn run_scope(&self, node: &NodeId) -> Option<&[crate::ScopeGlob]> {
+        self.per_node.get(node).and_then(|r| r.run_scope.as_deref())
     }
 
     /// The newest tree the log records the run at, and where: every
@@ -383,6 +391,7 @@ impl NodeLedger {
             NodeEvent::Started(p) => {
                 record.failed_before = record.failed_attempt();
                 record.from_tree = p.from_tree.clone();
+                record.run_scope = p.run_scope.clone();
                 // A start while the previous attempt is still open means
                 // nothing closed it: whatever session it had is the
                 // orphan a resume has to deal with.

@@ -2731,6 +2731,16 @@
               "type": "null"
             }
           ]
+        },
+        "run_scope": {
+          "description": "For a node scoped to the run (`scope: run`), what the run had\nchanged since its base when this attempt started — the paths the\nattempt may change, fixed here so its close audits against what\nit was given. Absent for every other node.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ScopeGlob"
+          }
         }
       },
       "required": [

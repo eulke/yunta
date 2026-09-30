@@ -122,6 +122,9 @@ pub(crate) struct RunCtx<'a> {
 pub(crate) struct NodeUnit<'a> {
     pub(crate) unit: &'a crate::worktree::Unit,
     pub(crate) into: &'a Path,
+    /// Whether `into` is the run's own tree rather than a checkout a
+    /// group opened.
+    pub(crate) into_the_runs_tree: bool,
     /// The session this node's attempt picks back up in the unit, with
     /// the answer it is told; `None` for an attempt that opens fresh.
     pub(crate) continues: Option<&'a crate::task_cycle::Continuing>,
@@ -176,6 +179,7 @@ impl<'a> RunCtx<'a> {
             unit: Some(NodeUnit {
                 unit,
                 into: self.worktree,
+                into_the_runs_tree: self.unit.is_none(),
                 continues,
             }),
         }

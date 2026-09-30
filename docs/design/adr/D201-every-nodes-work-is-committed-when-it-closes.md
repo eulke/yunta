@@ -42,12 +42,14 @@ commits". Three things followed.
 5. **`node_finished` and `node_failed` name the commit they made**, when they made
    one.
 6. **What the tree holds that no node committed is committed as found when a
-   node that works in it starts** — a person's edits while the run was parked,
-   what an interrupted attempt left. `node_started` names that commit, and the
-   attempt starts from a branch that holds it. Nothing is found while another
-   node works in the tree, since what it holds may be that node's; a gate finds
-   nothing, and a node with a checkout of its own opens it on everything the tree
-   holds.
+   node starts from it** — a person's edits while the run was parked, what an
+   interrupted attempt left. `node_started` names that commit, and the attempt
+   starts from a branch that holds it. That includes a node given a checkout of
+   its own: the checkout opens on everything the tree holds, and the branch its
+   work lands on must hold the same, or an edit to what a person left conflicts
+   with a branch that never had it. Nothing is found while another node works
+   in the tree, since what it holds may be that node's; a gate finds nothing, and
+   neither does a node working in a checkout its group opened.
 
 The run's `HEAD` and its tree are then the same content, less what git ignores:
 a task, the criteria cache, the handover probe, a successor run and the pull

@@ -211,3 +211,4 @@ lista.
 **D202 — A session opens only once its host has been awake for two minutes.** `accepted` → [`adr/D202-a-session-opens-only-once-its-host-has-been-awake-for-two-minutes.md`](adr/D202-a-session-opens-only-once-its-host-has-been-awake-for-two-minutes.md)
 **D203 — A workflow runs a project's commands by name.** `accepted` → [`adr/D203-a-workflow-runs-a-projects-commands-by-name.md`](adr/D203-a-workflow-runs-a-projects-commands-by-name.md)
 **D204 — An optional node the project cannot run is left out.** `accepted` → [`adr/D204-an-optional-node-the-project-cannot-run-is-left-out.md`](adr/D204-an-optional-node-the-project-cannot-run-is-left-out.md)
+**D205 — A node's scope may be what the run changed.** `accepted` → [`adr/D205-a-nodes-scope-may-be-what-the-run-changed.md`](adr/D205-a-nodes-scope-may-be-what-the-run-changed.md)

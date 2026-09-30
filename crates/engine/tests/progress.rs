@@ -16,7 +16,7 @@ fn node(id: &str, description: Option<&str>) -> Node {
         id: id.into(),
         kind: NodeKind::Bash { run: "true".into() },
         depends_on: Vec::new(),
-        scope: Vec::new(),
+        scope: yunta_core::NodeScope::Unscoped,
         runner: None,
         artifacts: None,
         hooks: None,

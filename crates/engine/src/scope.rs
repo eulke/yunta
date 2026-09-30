@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 
 use crate::process::Supervision;
 use yunta_core::fence::Coverage;
-use yunta_core::{Location, RelativePath, ScopeGlob, TreeId};
+use yunta_core::{Location, NodeScope, RelativePath, ScopeGlob, TreeId};
+
+use crate::replay::RunState;
 
 use thiserror::Error;
 
@@ -148,8 +150,8 @@ pub(crate) fn nul_separated_paths(bytes: &[u8]) -> Vec<PathBuf> {
         .collect()
 }
 
-/// The scope a node's own worktree diff is audited against, or `None`
-/// when the node constrains nothing and no audit is owed.
+/// Whether a node's own worktree diff is audited: it declares a scope,
+/// or it is `read-only`.
 ///
 /// A node that declares `scope:` is audited against it. A node declared
 /// `read-only` is audited against nothing at all — the word says the
@@ -159,34 +161,51 @@ pub(crate) fn nul_separated_paths(bytes: &[u8]) -> Vec<PathBuf> {
 /// what makes that exemption true rather than assumed: whatever the
 /// session's tools happened to permit, a read-only node that wrote the
 /// project fails for it.
-pub fn audited_scope(node: &yunta_core::Node) -> Option<&[ScopeGlob]> {
-    if node.permissions == Some(yunta_core::NodePermissions::ReadOnly) {
-        return Some(&[]);
-    }
-    (!node.scope.is_empty()).then_some(node.scope.as_slice())
+pub fn audits(node: &yunta_core::Node) -> bool {
+    node.permissions == Some(yunta_core::NodePermissions::ReadOnly) || node.scope.is_declared()
 }
 
-/// What a node's work is held to on this run: [`audited_scope`], plus
-/// every path a person granted the node on the run's log after it
-/// failed on its scope. `None` exactly when no audit is owed.
+/// What a node's work is held to on this run: the globs it declares —
+/// or, scoped to the run, what the run had changed when its attempt
+/// started, as `node_started` recorded it — plus every path a person
+/// granted the node on the run's log after it failed on its scope.
+/// `None` exactly when no audit is owed.
 ///
 /// A read-only node is held to its word alone: nothing ever offers it a
 /// grant, and one on the log would still widen nothing.
-pub fn effective_scope(
-    node: &yunta_core::Node,
-    grants: &yunta_core::events::GrantLedger,
-) -> Option<Vec<ScopeGlob>> {
-    let declared = audited_scope(node)?;
+pub fn effective_scope(node: &yunta_core::Node, state: &RunState) -> Option<Vec<ScopeGlob>> {
     if node.permissions == Some(yunta_core::NodePermissions::ReadOnly) {
         return Some(Vec::new());
     }
+    let declared: &[ScopeGlob] = match &node.scope {
+        NodeScope::Unscoped => return None,
+        NodeScope::Globs(globs) => globs,
+        NodeScope::Run => state.nodes.run_scope(&node.id).unwrap_or_default(),
+    };
     Some(
         declared
             .iter()
-            .chain(grants.paths_for_node(&node.id))
+            .chain(state.grants.paths_for_node(&node.id))
             .cloned()
             .collect(),
     )
+}
+
+/// The paths that differ between commit `from` and tree `to`: what a run
+/// changed between its base and the tree an attempt starts from.
+pub async fn changed_between(
+    cwd: &Path,
+    from: &yunta_core::CommitSha,
+    to: &TreeId,
+    supervision: Supervision<'_>,
+) -> Result<Vec<PathBuf>, ScopeCheckError> {
+    let bytes = git_bytes(
+        cwd,
+        &["diff", "--name-only", "-z", from.as_str(), to.as_str()],
+        supervision,
+    )
+    .await?;
+    Ok(nul_separated_paths(&bytes))
 }
 
 /// A write that reached the diff despite an exact fence.

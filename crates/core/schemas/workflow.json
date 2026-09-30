@@ -928,10 +928,7 @@
           }
         },
         "scope": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/ScopeGlob"
-          }
+          "$ref": "#/$defs/NodeScope"
         },
         "skills": {
           "description": "`skills: [names]` — instructions and capabilities\nthe adapter mounts by its native mechanism: *how* to work, where\n`context:` injects *what* to work on. Resolved against\n`skills.paths` (repo first); an adapter with no native mechanism\ndegrades with `capability_degraded`, never a fatal error.",
@@ -1277,6 +1274,21 @@
         "read-only",
         "edit",
         "full"
+      ]
+    },
+    "NodeScope": {
+      "description": "The globs the node may change, or `run`: the paths the run changed since its base",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "string",
+          "const": "run"
+        }
       ]
     },
     "OnFailure": {

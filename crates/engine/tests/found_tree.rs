@@ -91,9 +91,10 @@ async fn an_interrupted_attempts_leftovers_are_found_when_it_restarts() {
 }
 
 /// A node with a checkout of its own opens it on everything the run's
-/// tree holds; nothing is committed as found for it.
+/// tree holds, and that is committed as found too: the branch its work
+/// lands on then holds what the checkout started from.
 #[tokio::test]
-async fn a_node_with_a_checkout_of_its_own_commits_nothing_found() {
+async fn a_node_with_a_checkout_of_its_own_commits_what_it_finds() {
     let bench = Bench::new();
     write(&bench.worktree.join("left.txt"), "left before the run");
     let workflow = r#"
@@ -107,7 +108,34 @@ nodes:
     let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
 
     assert_eq!(terminal, RunTerminal::Finished);
-    assert_eq!(found(&bench.events(), "edit"), vec![None]);
+    assert!(matches!(found(&bench.events(), "edit")[..], [Some(_)]));
+    let files = git_output(&bench.worktree, &["ls-tree", "-r", "--name-only", "HEAD"]);
+    assert!(
+        files.contains("left.txt") && files.contains("out.txt"),
+        "{files}"
+    );
+}
+
+/// The failure this exists for: a scoped node that edits a file a person
+/// left in the run's tree while it was parked lands its edit, instead of
+/// conflicting with a branch that never held the file.
+#[tokio::test]
+async fn a_scoped_node_lands_an_edit_to_what_a_person_left() {
+    let bench = parked(
+        "name: finishes-a-draft\nnodes:\n  - { id: finish, kind: bash, scope: [\"draft.txt\"], run: \"test -f draft.txt && echo finished >> draft.txt\" }\n",
+        "sessions: []\n",
+    )
+    .await;
+    write(&bench.worktree.join("draft.txt"), "a person's draft\n");
+
+    answer_parked(&bench, "retry").await.unwrap();
+    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []\n").await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        git_output(&bench.worktree, &["show", "HEAD:draft.txt"]),
+        "a person's draft\nfinished"
+    );
 }
 
 /// A child starts while its group is running: what the tree holds then

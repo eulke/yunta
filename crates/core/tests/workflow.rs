@@ -49,7 +49,10 @@ fn parses_the_reference_schema_excerpt_without_loss() {
     assert_eq!(on_failure.max_reroutes, 2);
 
     let fix_lint = &workflow.nodes[2];
-    assert_eq!(fix_lint.scope, vec![yunta_core::ScopeGlob::from("src/**")]);
+    assert_eq!(
+        fix_lint.scope.globs(),
+        [yunta_core::ScopeGlob::from("src/**")]
+    );
     let hooks = fix_lint.hooks.as_ref().unwrap();
     assert_eq!(hooks.after[0].run.script(), Some("cargo fmt"));
     assert!(hooks.before.is_empty());

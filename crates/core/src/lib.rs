@@ -101,9 +101,9 @@ pub use workflow::{
     ContextFile, ContextSpec, Coordination, DistillArtifact, ExternalGate, ForgeKind,
     HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeLayer, KnowledgeParams, LeftOut,
     LoopUntil, McpQueryParams, ModeInclude, ModeSpec, MountArtifact, MountSpec, Node, NodeDefaults,
-    NodeIter, NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnFinishStep, OnInterrupt,
-    PromptSource, ReservedIdentity, Resolved, RunCommand, RunEventsFilter, RunEventsParams,
-    ScopeExpansion, TasksParams, UnknownArtifactKind, Workflow, ARTIFACTS_DIR,
+    NodeIter, NodeKind, NodeOutputParams, NodePermissions, NodeScope, OnFailure, OnFinishStep,
+    OnInterrupt, PromptSource, ReservedIdentity, Resolved, RunCommand, RunEventsFilter,
+    RunEventsParams, ScopeExpansion, TasksParams, UnknownArtifactKind, Workflow, ARTIFACTS_DIR,
 };
 
 /// The schema major this binary speaks — what a

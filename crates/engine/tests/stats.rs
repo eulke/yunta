@@ -22,7 +22,7 @@ fn node(id: &str, depends_on: &[&str]) -> Node {
         id: id.into(),
         kind: NodeKind::Bash { run: "true".into() },
         depends_on: depends_on.iter().map(|d| (*d).into()).collect(),
-        scope: Vec::new(),
+        scope: yunta_core::NodeScope::Unscoped,
         runner: Some("implementer".into()),
         artifacts: None,
         hooks: None,

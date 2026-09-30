@@ -94,7 +94,7 @@ async fn state_run_wide_absences(
 /// Whether this node's sessions carry edit constraints: its own declared
 /// scope, or — for a loop — the scope every task it runs declares.
 fn declares_edit_scope(node: &Node) -> bool {
-    !node.scope.is_empty() || matches!(node.kind, yunta_core::NodeKind::Loop { .. })
+    node.scope.is_declared() || matches!(node.kind, yunta_core::NodeKind::Loop { .. })
 }
 
 /// The skill directories this node's sessions mount. Names are resolved

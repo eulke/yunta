@@ -71,22 +71,33 @@ async fn commit_message(
 }
 
 /// Commits what the run's tree holds that no node committed, as `node`
-/// starts working in it — a person's edits while the run was parked, or
-/// what an interrupted attempt left — and answers with the commit and the
-/// tree it holds. `None` when there is nothing to find, for a node that
-/// does not work in the run's tree (a checkout of its own opens on
-/// everything the tree holds, and its landing leaves the rest where it
-/// was), in a run that works in a person's own checkout, or while
-/// another node works in the same tree: what the tree holds then may be
-/// that node's, and its close commits it.
+/// starts from it — a person's edits while the run was parked, or what
+/// an interrupted attempt left — and answers with the commit and the
+/// tree it holds.
 ///
-/// The caller holds the landing lock across this and the start it
+/// A node that works in the run's tree starts from a branch that holds
+/// it. A node given a checkout of its own was opened on everything the
+/// tree holds; committing it here too keeps the branch its work lands
+/// on holding the same content as the checkout it started from, so an
+/// edit to what a person left lands rather than conflicting with a
+/// branch that never had it.
+///
+/// `None` when there is nothing to find, for a gate, for a node that
+/// works in a checkout its group opened, in a run that works in a
+/// person's own checkout, or while another node works in the run's tree:
+/// what the tree holds then may be that node's, and its close commits
+/// it. The caller holds the landing lock across this and the start it
 /// records, so no close commits in between.
 pub(super) async fn found(
     ctx: &RunCtx<'_>,
     node: &Node,
 ) -> Result<Option<(CommitSha, TreeId)>, RunError> {
-    if !commits_here(ctx) || !shares_the_tree(ctx, node) {
+    let tree = match ctx.unit {
+        None => ctx.worktree,
+        Some(mine) if mine.into_the_runs_tree && owns(&mine, node) => mine.into,
+        Some(_) => return Ok(None),
+    };
+    if !commits_here(ctx) || is_gate(node) {
         return Ok(None);
     }
     let Some(message) = found_message(ctx, node).await? else {
@@ -95,12 +106,17 @@ pub(super) async fn found(
     let index =
         crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
     Ok(Box::pin(crate::worktree::commit_tree(
-        ctx.worktree,
+        tree,
         &index,
         &message,
         ctx.root_supervision(),
     ))
     .await?)
+}
+
+/// Whether `mine` is `node`'s own checkout, not one its group opened.
+fn owns(mine: &super::ctx::NodeUnit<'_>, node: &Node) -> bool {
+    mine.unit.who == crate::worktree::UnitId::Node(node.id.clone())
 }
 
 /// What a found commit says — and, when this node's previous attempt
@@ -146,7 +162,7 @@ fn is_gate(node: &Node) -> bool {
 fn tree_sharers(workflow: &yunta_core::Workflow) -> impl Iterator<Item = &Node> {
     workflow
         .iter_nodes()
-        .filter(|node| crate::scope::audited_scope(node).is_none() && !is_gate(node))
+        .filter(|node| !crate::scope::audits(node) && !is_gate(node))
 }
 
 /// Whether a node other than `node` is still working in the run's tree.

@@ -30,11 +30,12 @@ pub(super) async fn session_access(
     ctx: &RunCtx<'_>,
     node: &Node,
 ) -> Result<Option<Arc<NodeScopeAccess>>, RunError> {
-    if node.scope.is_empty() || node.permissions == Some(yunta_core::NodePermissions::ReadOnly) {
+    if !node.scope.is_declared() || node.permissions == Some(yunta_core::NodePermissions::ReadOnly)
+    {
         return Ok(None);
     }
-    let grants = ctx.run_view().await?.state.grants;
-    Ok(crate::effective_scope(node, &grants).map(|scope| {
+    let state = ctx.run_view().await?.state;
+    Ok(crate::effective_scope(node, &state).map(|scope| {
         Arc::new(NodeScopeAccess {
             scope,
             index: crate::run_dir::index_for(ctx.run_dir, &UnitId::Node(node.id.clone()))
@@ -110,7 +111,7 @@ async fn audited_diff(
     // crash between the start and this close must not change what the
     // node answers for.
     let view = ctx.run_view().await?;
-    let Some(scope) = crate::effective_scope(node, &view.state.grants) else {
+    let Some(scope) = crate::effective_scope(node, &view.state) else {
         return Ok(None);
     };
     let Some(from) = view.state.nodes.from_tree(&node.id).cloned() else {
@@ -155,7 +156,7 @@ pub(super) async fn scope_request(
     node: &Node,
     tokens: TokenUsage,
 ) -> Result<Option<NodeEnd>, RunError> {
-    if crate::audited_scope(node).is_none() {
+    if !crate::audits(node) {
         return Ok(None);
     }
     let request = match crate::scope_expansion::load_request(ctx.worktree).await {

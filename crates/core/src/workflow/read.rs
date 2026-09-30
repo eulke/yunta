@@ -231,8 +231,8 @@ fn parallel_scopes(nodes: &[Node]) -> Vec<Diagnostic> {
         };
         for (i, a) in children.iter().enumerate() {
             for b in children.iter().skip(i + 1) {
-                for glob_a in &a.scope {
-                    for glob_b in &b.scope {
+                for glob_a in &a.scope.overlap_globs() {
+                    for glob_b in &b.scope.overlap_globs() {
                         if might_overlap(glob_a, glob_b) {
                             broken.push(about(
                                 index,

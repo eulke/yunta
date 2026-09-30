@@ -115,8 +115,8 @@ pub(crate) fn check_fanout_scopes(
         if !(writes(a) && writes(b)) {
             continue;
         }
-        for glob_a in &a.scope {
-            for glob_b in &b.scope {
+        for glob_a in &a.scope.overlap_globs() {
+            for glob_b in &b.scope.overlap_globs() {
                 if might_overlap(glob_a, glob_b) {
                     errors.push(CheckError::OverlappingFanOutScope {
                         a: a.id.clone(),
@@ -145,7 +145,7 @@ pub(crate) fn collect_fanout_warnings(
     let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
     let eligible: Vec<bool> = nodes
         .iter()
-        .map(|node| writes(node) && node.scope.is_empty())
+        .map(|node| writes(node) && !node.scope.is_declared())
         .collect();
     for (i, j) in independent_top_level_pairs(workflow) {
         let both_eligible =
@@ -197,7 +197,7 @@ pub(crate) fn collect_fanout_warnings(
 /// so `check`'s error and `check_warnings`' warning can never disagree
 /// about what overlaps.
 pub(crate) struct GroupScope<'a> {
-    overlaps: Vec<(&'a Node, &'a Node, &'a ScopeGlob, &'a ScopeGlob)>,
+    overlaps: Vec<(&'a Node, &'a Node, ScopeGlob, ScopeGlob)>,
 }
 
 pub(crate) fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
@@ -207,10 +207,10 @@ pub(crate) fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
             let (Some(a), Some(b)) = (children.get(i), children.get(j)) else {
                 continue;
             };
-            for glob_a in &a.scope {
-                for glob_b in &b.scope {
-                    if might_overlap(glob_a, glob_b) {
-                        overlaps.push((a, b, glob_a, glob_b));
+            for glob_a in a.scope.overlap_globs() {
+                for glob_b in b.scope.overlap_globs() {
+                    if might_overlap(&glob_a, &glob_b) {
+                        overlaps.push((a, b, glob_a.clone(), glob_b));
                     }
                 }
             }
@@ -263,7 +263,7 @@ pub(crate) fn collect_parallel_warnings(nodes: &[Node], warnings: &mut Vec<Check
                 .collect();
             if writers.len() >= 2 {
                 let group = evaluate_group_scope(children);
-                let all_writers_declared = writers.iter().all(|child| !child.scope.is_empty());
+                let all_writers_declared = writers.iter().all(|child| child.scope.is_declared());
                 if group.overlaps.is_empty() && !all_writers_declared {
                     warnings.push(CheckWarning::UndeclaredParallelScope {
                         group: node.id.clone(),

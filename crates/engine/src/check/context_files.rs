@@ -202,12 +202,14 @@ fn hooks_of<'a>(
 }
 
 /// A scope audits the run's tree, so a path outside it — an absolute one
-/// — is one any writer might reach.
+/// — is one any writer might reach. A node scoped to the run may write
+/// whatever the run changed, which no file can know before it runs.
 fn within_scope(node: &Node, path: &str) -> bool {
-    if node.scope.is_empty() || Path::new(path).is_absolute() {
+    let globs = node.scope.globs();
+    if globs.is_empty() || Path::new(path).is_absolute() {
         return true;
     }
-    yunta_core::scope_globset(&node.scope).map_or(true, |set| set.is_match(path))
+    yunta_core::scope_globset(globs).map_or(true, |set| set.is_match(path))
 }
 
 /// `(node, path)` for every literal, required `files:` entry of `node`

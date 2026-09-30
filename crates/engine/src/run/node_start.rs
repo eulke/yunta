@@ -2,7 +2,7 @@
 //! begins from.
 
 use yunta_core::events::{EventPayload, NodeEvent, NodeStartedPayload};
-use yunta_core::{CommitSha, Node, TreeId};
+use yunta_core::{CommitSha, Node, NodeScope, ScopeGlob, TreeId};
 
 use super::{RunCtx, RunError};
 
@@ -14,7 +14,8 @@ use super::{RunCtx, RunError};
 /// audit that reads it back at close is only as true as the single
 /// instant this call names. A node given a checkout of its own already
 /// has that instant — the one its unit was opened at; a node working in
-/// the run's tree starts from what it finds there.
+/// the run's tree starts from what it finds there. A node scoped to the
+/// run is given, at the same instant, what the run had changed.
 pub(super) async fn emit_started(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -25,9 +26,42 @@ pub(super) async fn emit_started(
         // the run's tree in between.
         let _landing = ctx.landing.lock().await;
         let (found, from) = Box::pin(in_the_runs_tree(ctx, node)).await?;
-        return started(ctx, node, attempt, from, found).await;
+        return started(ctx, node, attempt, from, found, None).await;
     };
-    started(ctx, node, attempt, mine.unit.from.clone(), None).await
+    let _landing = ctx.landing.lock().await;
+    let found = Box::pin(super::shared_tree::found(ctx, node)).await?;
+    let from = mine.unit.from.clone();
+    let run_scope = match node.scope {
+        NodeScope::Run => Some(changed_by_the_run(ctx, &from).await?),
+        NodeScope::Unscoped | NodeScope::Globs(_) => None,
+    };
+    started(
+        ctx,
+        node,
+        attempt,
+        from,
+        found.map(|(commit, _)| commit),
+        run_scope,
+    )
+    .await
+}
+
+/// What the run had changed since its base, as the tree `from` an
+/// attempt starts from holds it: the paths a node scoped to the run may
+/// change, each as the glob that selects exactly it.
+async fn changed_by_the_run(ctx: &RunCtx<'_>, from: &TreeId) -> Result<Vec<ScopeGlob>, RunError> {
+    let paths = crate::scope::changed_between(
+        ctx.worktree,
+        &ctx.manifest.base_commit,
+        from,
+        ctx.root_supervision(),
+    )
+    .await?;
+    // Escaping a path always yields a glob that parses.
+    Ok(paths
+        .iter()
+        .filter_map(|path| ScopeGlob::exact(path).ok())
+        .collect())
 }
 
 /// What a node working in the run's tree starts from. What the tree
@@ -53,11 +87,14 @@ async fn started(
     attempt: u32,
     from: TreeId,
     found: Option<CommitSha>,
+    run_scope: Option<Vec<ScopeGlob>>,
 ) -> Result<(), RunError> {
     ctx.emit(
         Some(&node.id),
         EventPayload::Node(NodeEvent::Started(
-            NodeStartedPayload::attempt_from(attempt, from).found(found),
+            NodeStartedPayload::attempt_from(attempt, from)
+                .found(found)
+                .run_scope(run_scope),
         )),
     )
     .await?;

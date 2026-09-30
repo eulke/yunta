@@ -5,8 +5,9 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::parse::{describe, list};
-use super::{Artifacts, ContextSpec, Hooks, NodeKind, NodePermissions, OnFailure, OnInterrupt};
-use crate::glob::ScopeGlob;
+use super::{
+    Artifacts, ContextSpec, Hooks, NodeKind, NodePermissions, NodeScope, OnFailure, OnInterrupt,
+};
 use crate::ids::{AgentName, NodeId, RunnerName, SkillName};
 use crate::yaml::{self, Mapping, Value};
 
@@ -36,8 +37,8 @@ pub struct Node {
     pub kind: NodeKind,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<NodeId>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub scope: Vec<ScopeGlob>,
+    #[serde(default, skip_serializing_if = "NodeScope::is_unscoped")]
+    pub scope: NodeScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<RunnerName>,
     /// `runners: [name, name]` — static fan-out: the manifest expands
@@ -198,7 +199,7 @@ struct NodeFields {
     #[serde(default)]
     depends_on: Vec<NodeId>,
     #[serde(default)]
-    scope: Vec<ScopeGlob>,
+    scope: NodeScope,
     #[serde(default)]
     runner: Option<RunnerName>,
     #[serde(default)]

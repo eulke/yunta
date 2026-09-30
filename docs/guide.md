@@ -83,13 +83,22 @@ its way past. That diff is the *only* thing enforcing scope: no adapter today bl
 an out-of-scope write while it happens, so an agent can write outside `scope` and the
 node fails afterward for it.
 
+`scope: run` declares a node's reach without naming a path: it may change what the
+run has changed since its base, as that stands when the node starts. It is the scope
+for a node that corrects the run's own work — the fix a failing lint re-routes to —
+in a repository whose layout the workflow never saw, which is why a pack reaches for
+it. The engine resolves the paths when the attempt starts and records them on its
+`node_started`, so its close is audited against what it was given. A write elsewhere
+fails the node like any scope violation, and a person may grant it. A node scoped to
+a run that has changed nothing may change nothing.
+
 A node that declares no `scope:` works in the run's own tree, and what it leaves
 there is committed on the run's branch when it closes — finished or failed — so what a
 later node pushes is what the run did, and removing the run's worktree loses nothing.
 Two such nodes running at once are committed together by whichever closes last, and a
 `parallel` group commits what its children left when it closes. What you edit in the
-run's tree while it is paused is committed when the next such node starts, as found
-there, so that node and everything after it builds on your edit. What git ignores is
+run's tree while it is paused is committed when the next node starts, as found there,
+so that node and everything after it builds on your edit. What git ignores is
 never committed; anything else a node writes is, so keep build output and secrets in
 `.gitignore`. A run with `isolation: none` works in your own checkout and commits
 nothing: what its nodes write stays uncommitted for you. The engine commits without

@@ -34,7 +34,7 @@ pub(crate) fn check_workflow_nodes(
                     });
                 }
             }
-            if *isolation == yunta_core::Isolation::None && node.scope.is_empty() {
+            if *isolation == yunta_core::Isolation::None && !node.scope.is_declared() {
                 if let Some(group) = group {
                     errors.push(CheckError::InheritChildWithoutScope {
                         group: group.id.clone(),
