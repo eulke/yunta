@@ -265,6 +265,9 @@ fn counter(counter: &Counter) -> String {
     if let Some(mode) = &counter.skipped_by {
         text.push_str(&format!(" · {} skipped by `{mode}`", counter.skipped));
     }
+    if counter.left_out > 0 {
+        text.push_str(&format!(" · {} left out", counter.left_out));
+    }
     text
 }
 

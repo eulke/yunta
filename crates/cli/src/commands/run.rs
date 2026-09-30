@@ -278,7 +278,8 @@ async fn context_files(
     mode: Option<&ModeName>,
 ) -> Result<Vec<String>, CliError> {
     let mode = resolve_mode(manifest, mode);
-    let included = yunta_engine::mode_included_nodes(&manifest.workflow, &mode);
+    let left_out = yunta_core::left_out(&manifest.workflow, &manifest.config);
+    let included = yunta_engine::included_nodes(&manifest.workflow, &mode, &left_out);
     let found = super::context_files(
         ctx,
         &manifest.workflow,

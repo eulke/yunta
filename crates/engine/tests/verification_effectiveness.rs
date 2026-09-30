@@ -30,6 +30,7 @@ fn node(id: &str, on_failure: Option<OnFailure>) -> Node {
         skills: Vec::new(),
         runners: Vec::new(),
         agent: None,
+        optional: false,
     }
 }
 
@@ -63,6 +64,7 @@ fn gate_node(id: &str) -> Node {
         skills: Vec::new(),
         runners: Vec::new(),
         agent: None,
+        optional: false,
     }
 }
 
@@ -383,6 +385,7 @@ fn run_created_in_mode(mode: &str) -> Vec<StoredEvent> {
                 base_branch: "main".to_string(),
                 base_commit: "deadbeef".into(),
                 environment: None,
+                left_out: Vec::new(),
             },
         )))
         .build()

@@ -54,6 +54,12 @@ pub const RULES: &[crate::diagnostic::Rule] = &[
         demand: "`invariant: true` is declared on a top-level node, never on a child of a \
                  `parallel` group",
     },
+    crate::diagnostic::Rule {
+        code: RuleCode::IncoherentOptional,
+        demand: "`optional: true` is declared on a top-level node, and no node a run keeps \
+                 re-routes to an optional node or reads from one — but the node only an \
+                 optional one leads to, which goes with it",
+    },
 ];
 
 /// The workflow `bytes` declare, or every problem the file has.
@@ -118,6 +124,7 @@ fn check(workflow: &Workflow) -> Vec<Diagnostic> {
     broken.extend(references_reach(workflow, &declared.ids));
     broken.extend(parallel_scopes(&workflow.nodes));
     broken.extend(invariants_on_top(workflow));
+    broken.extend(super::optional::may_go(workflow));
     broken.extend(modes_still_run(workflow));
     broken
 }
@@ -365,7 +372,7 @@ fn reroute_targets(node: &Node) -> Vec<(&'static str, &NodeId)> {
     targets
 }
 
-fn about(index: usize, id: &NodeId, code: RuleCode, detail: String) -> Diagnostic {
+pub(super) fn about(index: usize, id: &NodeId, code: RuleCode, detail: String) -> Diagnostic {
     Diagnostic::new(
         Subject::Node(Named::new(id.clone(), index)),
         Problem::rule(code, detail),

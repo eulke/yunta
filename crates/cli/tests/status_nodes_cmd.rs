@@ -330,3 +330,29 @@ fn the_chronicle_and_status_say_a_node_that_asked_with_the_same_bytes() {
         "and the page says it the same way afterwards: {moments}"
     );
 }
+
+/// A node the run left out says what the project lacks, and the summary
+/// counts it apart from the work the run does.
+#[test]
+fn status_says_why_a_node_is_not_in_this_run() {
+    let project = Checkout::new()
+        .working_in_place()
+        .workflow(
+            "wf",
+            "name: linted\nnodes:\n  - { id: build, kind: bash, run: \"true\" }\n  - { id: lint, kind: bash, run: { command: lint }, optional: true, depends_on: [build] }\n",
+        )
+        .committed();
+    let run = project.run(
+        std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
+        &["run", "wf.yaml"],
+    );
+    assert!(run.status.success(), "{}", stderr(&run));
+
+    let said = status(&project, &run_id_from(&run), &[]);
+
+    assert!(
+        said.contains("not in this run: the project declares no command `lint`"),
+        "{said}"
+    );
+    assert!(said.contains("1/1 nodes · 1 left out"), "{said}");
+}

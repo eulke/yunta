@@ -2322,6 +2322,47 @@
       "type": "string",
       "minLength": 1
     },
+    "LeftOut": {
+      "description": "A top-level node a run leaves out, and why.",
+      "type": "object",
+      "properties": {
+        "node": {
+          "$ref": "#/$defs/NodeId"
+        }
+      },
+      "anyOf": [
+        {
+          "description": "It is optional and needs these keys, which the config leaves\nunset — never empty.",
+          "type": "object",
+          "properties": {
+            "lacks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ConfigKey"
+              }
+            }
+          },
+          "required": [
+            "lacks"
+          ]
+        },
+        {
+          "description": "Nothing but `through`, itself left out, leads to it.",
+          "type": "object",
+          "properties": {
+            "through": {
+              "$ref": "#/$defs/NodeId"
+            }
+          },
+          "required": [
+            "through"
+          ]
+        }
+      ],
+      "required": [
+        "node"
+      ]
+    },
     "Location": {
       "description": "where a finding is: a path relative to the work, with its lines when they are known (`src/lib.rs`, `src/lib.rs:10`, `src/lib.rs:10-14`), or one relative to the run's own directory under the `run:` prefix (`run:objects`). Never absolute",
       "type": "string",
@@ -2994,6 +3035,11 @@
           "description": "`invariant: true` on a child of a `parallel` group, where nothing\nhonors it: modes and re-verification read the top level.",
           "type": "string",
           "const": "invariant-in-parallel"
+        },
+        {
+          "description": "`optional: true` where leaving the node out would leave the run\nwithout something it cannot do without: on a child of a\n`parallel` group, or on a node a required one re-routes to or\nreads from.",
+          "type": "string",
+          "const": "incoherent-optional"
         }
       ]
     },
@@ -3007,7 +3053,7 @@
           "$ref": "#/$defs/CommitSha"
         },
         "environment": {
-          "description": "What the run's commands ran with when it was born. Absent from a\nlog written before it was recorded.",
+          "description": "What the run's commands ran with when it was born. Absent from a\nlog written before it was recorded. Boxed: every stored event is\nas large as the largest payload, and this one is read once.",
           "anyOf": [
             {
               "$ref": "#/$defs/ExecutionEnvironment"
@@ -3020,6 +3066,13 @@
         "inputs": {
           "type": "object",
           "additionalProperties": true
+        },
+        "left_out": {
+          "description": "The optional nodes this run leaves out because its config lacks\nwhat they need, and the nodes only they lead to. Decided once,\nhere, so replay never re-reads a config to know its own graph.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LeftOut"
+          }
         },
         "manifest_hash": {
           "$ref": "#/$defs/ContentHash"

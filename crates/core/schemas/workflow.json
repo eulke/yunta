@@ -895,6 +895,10 @@
             }
           ]
         },
+        "optional": {
+          "description": "`optional: true` — the project may not provide what this node\nneeds (a command it names, a forge); where it does not, the run\nleaves the node out as a mode would, instead of being refused.",
+          "type": "boolean"
+        },
         "permissions": {
           "description": "The node's rung on the permissions ladder: the\nsession profile requested from the adapter for `prompt`/`loop`\nnodes. Absent means the engine's existing default (`edit`). Not\nto be confused with the config-level `permissions:` group — this\nscalar narrows what one node's agent session may do; that group\ngoverns which *commands* run at all.",
           "anyOf": [

@@ -92,6 +92,9 @@ pub struct RunningTask {
 pub enum NodeStanding {
     /// The run's mode leaves this node out: it never runs in this run.
     Skipped,
+    /// The run left this optional node out, for the reason it records:
+    /// the project lacks what it needs, or only such a node leads to it.
+    LeftOut(yunta_core::Because),
     /// Included, and the log has not started it.
     ToGo,
     /// What replay derives from the log, with the node's outcome, its
@@ -109,6 +112,8 @@ pub enum NodeStanding {
 pub(super) struct Reading<'a> {
     pub(super) stats: HashMap<&'a NodeId, &'a NodeStat>,
     pub(super) included: Included,
+    /// What the run's birth left out, as `run_created` recorded it.
+    pub(super) left_out: Vec<yunta_core::LeftOut>,
     pub(super) state: &'a RunState,
     pub(super) now: DateTime<Utc>,
 }
@@ -152,7 +157,8 @@ impl Reading<'_> {
     }
 
     /// Where the node stands: the mode decides first — an excluded node
-    /// never runs, whatever a log says — and replay decides the rest.
+    /// never runs, whatever a log says — then what the run left out at
+    /// birth, and replay decides the rest.
     ///
     /// A `parallel` group's children stand with their group: `modes:`
     /// names top-level nodes, and a group the mode schedules runs every
@@ -165,6 +171,9 @@ impl Reading<'_> {
             .is_some_and(|ids| !ids.contains(top_level))
         {
             return NodeStanding::Skipped;
+        }
+        if let Some(left) = self.left_out.iter().find(|left| left.node == *top_level) {
+            return NodeStanding::LeftOut(left.because.clone());
         }
         match self.state.nodes.state(&node.id) {
             Some(derived) => NodeStanding::Reached(derived.clone()),

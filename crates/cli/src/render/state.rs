@@ -124,6 +124,10 @@ impl NodeDisplay {
     pub(crate) fn standing(standing: &NodeStanding) -> Self {
         match standing {
             NodeStanding::Skipped => Self::skipped(),
+            NodeStanding::LeftOut(because) => Self {
+                word: StateWord::Skip,
+                modifier: detail(&format!("not in this run: {because}")),
+            },
             NodeStanding::ToGo => Self::of(None),
             NodeStanding::Reached(state) => Self::of(Some(state)),
         }

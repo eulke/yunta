@@ -24,6 +24,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
             base_branch: "main".to_string(),
             base_commit: "deadbeef".into(),
             environment: None,
+            left_out: Vec::new(),
         })),
         EventPayload::Node(NodeEvent::RunnerResolved(RunnerResolvedPayload {
             runner: "executor".into(),

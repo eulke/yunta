@@ -13,7 +13,16 @@ pub(crate) fn check_unset_keys(
     config: &ConfigLayer,
     errors: &mut Vec<CheckError>,
 ) {
-    for node in workflow.iter_nodes() {
+    // A node the run would leave out needs nothing: the project not
+    // providing it is what leaves it out.
+    let left_out: Vec<NodeId> = yunta_core::left_out(workflow, config)
+        .into_iter()
+        .map(|left| left.node)
+        .collect();
+    for (node, group) in workflow.iter_nodes_with_group() {
+        if left_out.contains(group.map_or(&node.id, |group| &group.id)) {
+            continue;
+        }
         for key in ConfigKey::unset(node, config) {
             errors.push(CheckError::Unset {
                 node: node.id.clone(),

@@ -265,6 +265,15 @@ pub fn check_warnings(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckWar
     collect_parallel_warnings(&workflow.nodes, &mut warnings);
     collect_fanout_warnings(workflow, config, &mut warnings);
     collect_push_to_base_warnings(workflow, config, &mut warnings);
+    warnings.extend(
+        workflow
+            .nodes
+            .iter()
+            .filter(|node| node.optional && needs_nothing(node))
+            .map(|node| CheckWarning::OptionalNeedsNothing {
+                node: node.id.clone(),
+            }),
+    );
     // A node's `network: false` that its resolved adapter cannot enforce is
     // reported at run time, before the session, as `capability_degraded`
     // (D119) — the record that survives on the log. D119's matching
@@ -272,4 +281,14 @@ pub fn check_warnings(workflow: &Workflow, config: &ConfigLayer) -> Vec<CheckWar
     // isolation") waits for capability-aware `check`: this entry takes no
     // adapter registry, so it cannot yet tell which candidates enforce it.
     warnings
+}
+
+/// Whether `node` — its `parallel` children included — needs no key the
+/// config could leave unset.
+fn needs_nothing(node: &Node) -> bool {
+    yunta_core::ConfigKey::needed_by(node).is_empty()
+        && match &node.kind {
+            NodeKind::Parallel { nodes, .. } => nodes.iter().all(needs_nothing),
+            _ => true,
+        }
 }

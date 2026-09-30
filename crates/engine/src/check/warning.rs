@@ -66,6 +66,14 @@ pub enum CheckWarning {
         mode: yunta_core::ModeName,
     },
 
+    /// `optional: true` on a node that needs nothing from the project:
+    /// no config could leave it out, so the word promises nothing.
+    #[error(
+        "node `{node}` is declared `optional` and needs nothing the project declares — no \
+         command, forge or other key — so no run leaves it out; drop `optional`"
+    )]
+    OptionalNeedsNothing { node: NodeId },
+
     /// A literal command starts a program this machine does not have on
     /// `PATH`. A warning: a node that runs earlier may install it, and a
     /// shell script read without a shell is read by heuristic.

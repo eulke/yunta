@@ -73,6 +73,7 @@ fn created() -> EventPayload {
         base_branch: "main".to_string(),
         base_commit: CommitSha::from("abc1234"),
         environment: None,
+        left_out: Vec::new(),
     }))
 }
 

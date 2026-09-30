@@ -96,6 +96,7 @@ fn next(yaml: &str, attempts: Vec<Vec<(&'static str, EventPayload)>>) -> Decisio
         base_branch: "main".to_string(),
         base_commit: CommitSha::from("abc1234"),
         environment: None,
+        left_out: Vec::new(),
     }));
     let events: Vec<StoredEvent> = std::iter::once((None, created))
         .chain(

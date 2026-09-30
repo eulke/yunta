@@ -25,7 +25,9 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 
-use yunta_core::events::{run_mode, FindingSeverity, StoredEvent, TaskStatus, TokenUsage};
+use yunta_core::events::{
+    run_left_out, run_mode, FindingSeverity, StoredEvent, TaskStatus, TokenUsage,
+};
 use yunta_core::{ModeName, NodeId, RunId, Workflow, WorkflowName};
 
 use crate::history::PriorEstimation;
@@ -60,6 +62,8 @@ pub use yunta_core::events::{ChildLink, Degradation, Reroute};
 /// `skipped` sits outside that sum, because a node the run's mode leaves
 /// out is not work this run will do; `skipped_by` names the mode that
 /// left it out, so a narrowed denominator is never a silent one.
+/// `left_out` sits outside it too: an optional node the project cannot
+/// run is not work this run will do either.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Counter {
     pub done: usize,
@@ -78,6 +82,9 @@ pub struct Counter {
     pub skipped: usize,
     /// The mode that skipped them; `None` when nothing is skipped.
     pub skipped_by: Option<ModeName>,
+    /// Optional nodes the run leaves out because the project lacks what
+    /// they need, with the nodes only they lead to.
+    pub left_out: usize,
 }
 
 /// A run as it stands at one instant: every field a pure function of
@@ -163,6 +170,7 @@ pub fn run_frame(
             .map(|stat| (&stat.node_id, stat))
             .collect(),
         included: mode_included_nodes(workflow, &mode),
+        left_out: run_left_out(events),
         state: &state,
         now,
     };
@@ -205,6 +213,10 @@ fn flow_counter(nodes: &[NodeFrame], mode: &ModeName) -> Counter {
         match &node.state {
             NodeStanding::Skipped => {
                 counter.skipped += 1;
+                continue;
+            }
+            NodeStanding::LeftOut(_) => {
+                counter.left_out += 1;
                 continue;
             }
             NodeStanding::ToGo => counter.to_go += 1,

@@ -48,6 +48,7 @@ fn node(id: &str) -> Node {
         skills: Vec::new(),
         runners: Vec::new(),
         agent: None,
+        optional: false,
     }
 }
 

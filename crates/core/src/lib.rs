@@ -96,14 +96,14 @@ pub use schema_range::{SchemaRange, SchemaRangeError};
 pub use secret::Secret;
 pub use tasks::{Criterion, Task, TasksFile};
 pub use workflow::{
-    node_commands, ArtifactContextRef, ArtifactKind, ArtifactName, ArtifactRefId, ArtifactSpec,
-    Artifacts, CheckBuiltin, CleanupTarget, ContextFile, ContextSpec, Coordination,
-    DistillArtifact, ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy,
-    KnowledgeLayer, KnowledgeParams, LoopUntil, McpQueryParams, ModeInclude, ModeSpec,
-    MountArtifact, MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams,
-    NodePermissions, OnFailure, OnFinishStep, OnInterrupt, PromptSource, ReservedIdentity,
-    Resolved, RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams,
-    UnknownArtifactKind, Workflow, ARTIFACTS_DIR,
+    followers, left_out, node_commands, reroute_sources, ArtifactContextRef, ArtifactKind,
+    ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, Because, CheckBuiltin, CleanupTarget,
+    ContextFile, ContextSpec, Coordination, DistillArtifact, ExternalGate, ForgeKind,
+    HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeLayer, KnowledgeParams, LeftOut,
+    LoopUntil, McpQueryParams, ModeInclude, ModeSpec, MountArtifact, MountSpec, Node, NodeDefaults,
+    NodeIter, NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnFinishStep, OnInterrupt,
+    PromptSource, ReservedIdentity, Resolved, RunCommand, RunEventsFilter, RunEventsParams,
+    ScopeExpansion, TasksParams, UnknownArtifactKind, Workflow, ARTIFACTS_DIR,
 };
 
 /// The schema major this binary speaks — what a

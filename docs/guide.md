@@ -338,6 +338,41 @@ mode's point of view — it's included or excluded whole, never by naming one of
 children; naming a child directly is a `check` error, not a way to reach inside the
 group.
 
+### Optional nodes
+
+`optional: true` on a top-level node says the run can do without it when the project
+lacks what it needs — a [project command](#project-commands) the config does not
+declare, or a forge. Such a node is left out of the run the way a mode leaves a node
+out: it never runs, and what waits on it waits on what it waited on. A node that only
+the optional one leads to — the re-route that fixes what a failing lint reports — goes
+with it. Where the project does declare what the node needs, it runs like any other.
+
+```yaml
+name: linted
+nodes:
+  - { id: build, kind: bash, run: "true" }
+  - id: lint
+    kind: bash
+    run: { command: lint }
+    optional: true
+    invariant: true
+    depends_on: [build]
+    on_failure: { goto: fix-lint, max_reroutes: 1 }
+  - id: fix-lint
+    kind: prompt
+    runner: mechanical
+    prompt: "Fix exclusively the errors in the report."
+    context: [{ node-output: { node: lint } }]
+```
+
+The run decides this once, when it is created, and records it: `yunta status` shows
+the node as `skipped — not in this run: the project declares no command `lint``, and
+counts it apart from the work (`· 1 left out`). A node that is not optional and needs
+something the project lacks is refused before the run instead. An `invariant` may be
+optional: no mode drops it, but a project may have nothing to run for it. `yunta
+check` refuses `optional` on a child of a `parallel` group, and on a node another
+node the run keeps re-routes to or reads from.
+
 ## Reviewing what a gate approves
 
 A gate can put what it asks about in front of you. `shows:` names artifacts the

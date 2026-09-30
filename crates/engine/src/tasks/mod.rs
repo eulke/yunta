@@ -23,7 +23,7 @@ pub(crate) use crossing::{carried_into, standing_of, Standing};
 pub use judged::judged_task;
 
 /// Whether this run shows `producer`'s tasks document to a person: a gate
-/// among the nodes the run's mode includes names it. The mode is the one
+/// among the nodes the run includes names it. The mode is the one
 /// the log says the run was born in, whatever the workflow calls it; a
 /// workflow with no modes includes every node.
 ///
@@ -35,7 +35,8 @@ pub(crate) fn plan_reviewed(
     producer: &NodeId,
 ) -> bool {
     let mode = yunta_core::events::run_mode(events);
-    let included = crate::modes::mode_included_nodes(workflow, &mode);
+    let left_out = yunta_core::events::run_left_out(events);
+    let included = crate::modes::included_nodes(workflow, &mode, &left_out);
     let kept = workflow
         .nodes
         .iter()

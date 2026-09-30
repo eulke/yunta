@@ -134,6 +134,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `yunta_schema` [inferido] | string (semver-range) | no | declarado o inferido del binario — congelado junto al resto |
 | `base_branch` / `base_commit` [inferido] | string | sí | necesarios para el worktree y forman parte del manifest congelado |
 | `environment` | `{shell, path}` | no | con qué corren los comandos del run —criterios, nodos `bash`, hooks—: el `sh` encontrado en ese `PATH` y el `PATH` en orden; ausente en logs anteriores |
+| `left_out` | lista de `{node, lacks: [ConfigKey]}` \| `{node, through}` | sí; vacía —y omitida del log— cuando no queda nada fuera | los nodos `optional: true` que el run deja fuera porque su config congelada no declara lo que necesitan (`lacks`, las mismas claves que `node_failed.unset`), y los nodos a los que solo lleva uno de ellos (`through`). Se decide una vez, al nacer el run: el replay nunca vuelve a leer una config para saber su propio grafo (D204) |
 
 ### 5.2 `runner_resolved` — engine
 **Fuente:** rol, candidato elegido, candidatos descartados y causa

@@ -110,9 +110,15 @@ pub struct RunCreatedPayload {
     pub base_branch: String,
     pub base_commit: CommitSha,
     /// What the run's commands ran with when it was born. Absent from a
-    /// log written before it was recorded.
+    /// log written before it was recorded. Boxed: every stored event is
+    /// as large as the largest payload, and this one is read once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub environment: Option<ExecutionEnvironment>,
+    pub environment: Option<Box<ExecutionEnvironment>>,
+    /// The optional nodes this run leaves out because its config lacks
+    /// what they need, and the nodes only they lead to. Decided once,
+    /// here, so replay never re-reads a config to know its own graph.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub left_out: Vec<crate::LeftOut>,
 }
 
 /// What the engine hands every command it runs — criteria, `bash` nodes,

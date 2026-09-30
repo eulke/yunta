@@ -245,7 +245,11 @@ pub async fn create_run(
             ),
             base_branch: manifest.base_branch.clone(),
             base_commit: manifest.base_commit.clone(),
-            environment,
+            environment: environment.map(Box::new),
+            // Decided here, from the config the run froze, and read back
+            // off the log by every wake: a run's graph never depends on
+            // a config read after its birth.
+            left_out: yunta_core::left_out(&manifest.workflow, &manifest.config),
         })),
     )
     .await?;

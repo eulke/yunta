@@ -51,6 +51,9 @@ pub(crate) fn summary(frame: &RunFrame) -> String {
     if let Some(mode) = &frame.flow.skipped_by {
         summary.push_str(&format!(" · {} skipped (mode: {mode})", frame.flow.skipped));
     }
+    if frame.flow.left_out > 0 {
+        summary.push_str(&format!(" · {} left out", frame.flow.left_out));
+    }
     if frame.flow.waiting > 0 {
         summary.push_str(&format!(" · {} waiting", frame.flow.waiting));
     }

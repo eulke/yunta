@@ -36,6 +36,7 @@ fn node(id: &str, depends_on: &[&str]) -> Node {
         skills: Vec::new(),
         runners: Vec::new(),
         agent: None,
+        optional: false,
     }
 }
 
@@ -83,6 +84,7 @@ fn fixture_events() -> Vec<StoredEvent> {
             base_branch: "main".to_string(),
             base_commit: "deadbeef".into(),
             environment: None,
+            left_out: Vec::new(),
         })))
         .node(
             "a",
@@ -235,6 +237,7 @@ fn cache_rate_is_none_without_input() {
             base_branch: "main".to_string(),
             base_commit: "deadbeef".into(),
             environment: None,
+            left_out: Vec::new(),
         })))
         .node(
             "a",

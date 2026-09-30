@@ -30,6 +30,7 @@ fn node(id: &str, description: Option<&str>) -> Node {
         skills: Vec::new(),
         runners: Vec::new(),
         agent: None,
+        optional: false,
     }
 }
 

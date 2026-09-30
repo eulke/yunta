@@ -352,6 +352,15 @@ pub fn run_mode(events: &[StoredEvent]) -> ModeName {
     }
 }
 
+/// The nodes a run's `run_created` left out — none for a log that has no
+/// such event, or one written before anything was left out.
+pub fn run_left_out(events: &[StoredEvent]) -> Vec<crate::LeftOut> {
+    match events.first().and_then(StoredEvent::payload) {
+        Some(EventPayload::Run(RunEvent::Created(p))) => p.left_out.clone(),
+        _ => Vec::new(),
+    }
+}
+
 /// Every kind this binary knows, in the order the wire writes them.
 ///
 /// Derived from [`wire::EventPayloadWire`]'s own variants, so the list a

@@ -110,6 +110,11 @@ pub struct Node {
     /// mode narrows deliberation, never verification.
     #[serde(default)]
     pub invariant: bool,
+    /// `optional: true` — the project may not provide what this node
+    /// needs (a command it names, a forge); where it does not, the run
+    /// leaves the node out as a mode would, instead of being refused.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub optional: bool,
 }
 
 impl Node {
@@ -165,6 +170,7 @@ const NODE_KEYS: &[&str] = &[
     "context",
     "skills",
     "invariant",
+    "optional",
 ];
 
 /// Keys an author reaches for that no node accepts, each with the key
@@ -219,6 +225,8 @@ struct NodeFields {
     skills: Vec<SkillName>,
     #[serde(default)]
     invariant: bool,
+    #[serde(default)]
+    optional: bool,
 }
 
 impl<'de> Deserialize<'de> for Node {
@@ -309,6 +317,7 @@ impl<'de> Deserialize<'de> for Node {
             context: fields.context,
             skills: fields.skills,
             invariant: fields.invariant,
+            optional: fields.optional,
         })
     }
 }
@@ -407,6 +416,7 @@ network: true
 context: [{ command: x }]
 skills: [s]
 invariant: true
+optional: true
 "#,
         )
         .unwrap();

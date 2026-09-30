@@ -46,6 +46,7 @@ pub struct Promotion {
 pub struct RunLedger {
     phase: RunPhaseRaw,
     mode: ModeName,
+    left_out: Vec<crate::LeftOut>,
     born_at: Option<DateTime<Utc>>,
     closed: Option<(TerminalState, Seq)>,
     paused: Option<(String, Seq)>,
@@ -107,6 +108,11 @@ impl RunLedger {
         &self.mode
     }
 
+    /// The nodes `run_created` left out of this run.
+    pub fn left_out(&self) -> &[crate::LeftOut] {
+        &self.left_out
+    }
+
     /// When the run's first event was written; `None` for a log with
     /// none.
     pub fn born_at(&self) -> Option<DateTime<Utc>> {
@@ -159,7 +165,8 @@ impl RunLedger {
             RunEvent::Created(p) => {
                 self.phase = RunPhaseRaw::Open;
                 self.mode = p.mode.clone();
-                self.born_in = p.environment.clone();
+                self.left_out = p.left_out.clone();
+                self.born_in = p.environment.as_deref().cloned();
             }
             RunEvent::Paused(p) => {
                 self.woken = true;

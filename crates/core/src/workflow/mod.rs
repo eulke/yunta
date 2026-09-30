@@ -15,6 +15,7 @@ mod hooks;
 mod node;
 mod node_kind;
 mod node_policy;
+mod optional;
 mod parse;
 
 use std::collections::BTreeMap;
@@ -46,6 +47,7 @@ pub use node_kind::{
     NodeKind, PromptSource,
 };
 pub use node_policy::{LoopUntil, NodePermissions, OnInterrupt};
+pub use optional::{followers, left_out, reroute_sources, Because, LeftOut};
 
 /// A workflow definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -81,6 +81,18 @@ impl ConfigKey {
         }
     }
 
+    /// What a project lacks when it leaves this key unset, as the end of
+    /// "the project declares …".
+    pub fn undeclared(&self) -> String {
+        match self {
+            ConfigKey::BaselineSuite => "no `baseline.suite`".to_string(),
+            ConfigKey::Coverage => "no `coverage`".to_string(),
+            ConfigKey::Executor { executor } => format!("no executor `{executor}`"),
+            ConfigKey::Runner => "no `defaults.runner`".to_string(),
+            ConfigKey::Command { command } => format!("no command `{command}`"),
+        }
+    }
+
     /// Every key `node` needs that `config` leaves unset.
     pub fn unset(node: &Node, config: &ConfigLayer) -> Vec<ConfigKey> {
         ConfigKey::needed_by(node)

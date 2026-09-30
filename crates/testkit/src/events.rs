@@ -135,6 +135,7 @@ impl<'a> SourceLog<'a> {
             base_branch: "main".to_string(),
             base_commit: yunta_core::sha256_hex(b"base").as_str().into(),
             environment: None,
+            left_out: Vec::new(),
         })));
         log
     }

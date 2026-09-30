@@ -94,6 +94,7 @@ impl ToolsHost {
                 base_branch: "main".to_string(),
                 base_commit: "deadbeef".into(),
                 environment: None,
+                left_out: Vec::new(),
             })),
         );
         hosted

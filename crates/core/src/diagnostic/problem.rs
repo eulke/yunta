@@ -119,6 +119,11 @@ rule_codes! {
     /// `invariant: true` on a child of a `parallel` group, where nothing
     /// honors it: modes and re-verification read the top level.
     InvariantInParallel => "invariant-in-parallel",
+    /// `optional: true` where leaving the node out would leave the run
+    /// without something it cannot do without: on a child of a
+    /// `parallel` group, or on a node a required one re-routes to or
+    /// reads from.
+    IncoherentOptional => "incoherent-optional",
 }
 
 impl std::fmt::Display for RuleCode {

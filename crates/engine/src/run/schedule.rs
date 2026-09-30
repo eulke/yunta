@@ -268,8 +268,8 @@ pub struct Policy {
     pub on_interrupt: OnInterrupt,
     /// What a failed node with no `on_failure` of its own does to the run.
     pub on_failure: DefaultOnFailure,
-    /// The nodes this run's mode includes; `None` when it declares no
-    /// modes and every node is in.
+    /// The nodes this run schedules — its mode's, less what it left out
+    /// for lack of config; `None` when nothing narrows the graph.
     pub mode_nodes: Option<HashSet<NodeId>>,
     /// The suite this run's lineage measures, from `baseline.suite`;
     /// `None` when the config names none and nothing is measured.
@@ -281,16 +281,21 @@ pub struct Policy {
 }
 
 impl Policy {
-    /// The knobs `manifest` froze, for the mode this invocation runs.
-    /// Built once when the run wakes: a mode's node set is a pure
-    /// function of the workflow and the mode name, and re-deriving it
-    /// per decision would be the same answer at scheduler cost.
-    pub fn of(manifest: &yunta_core::Manifest, mode_name: &ModeName) -> Self {
+    /// The knobs `manifest` froze, for the mode this invocation runs and
+    /// the nodes its birth left out. Built once when the run wakes: the
+    /// node set is a pure function of the workflow, the mode and what the
+    /// log recorded, and re-deriving it per decision would be the same
+    /// answer at scheduler cost.
+    pub fn of(
+        manifest: &yunta_core::Manifest,
+        mode_name: &ModeName,
+        left_out: &[yunta_core::LeftOut],
+    ) -> Self {
         Policy {
             max_parallel_nodes: manifest.max_parallel_nodes,
             on_interrupt: manifest.config.resolved_on_interrupt(),
             on_failure: manifest.config.resolved_on_failure(),
-            mode_nodes: crate::modes::mode_included_nodes(&manifest.workflow, mode_name),
+            mode_nodes: crate::modes::included_nodes(&manifest.workflow, mode_name, left_out),
             baseline_suite: manifest
                 .config
                 .baseline

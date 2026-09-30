@@ -288,7 +288,7 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     // "resolved once, reused forever" discipline runner resolution
     // already follows.
     let mode_name = yunta_core::events::run_mode(&view.events);
-    let policy = schedule::Policy::of(ctx.manifest, &mode_name);
+    let policy = schedule::Policy::of(ctx.manifest, &mode_name, view.state.run.left_out());
     Ok(Startup::Ready(Box::new(Ready {
         ctx,
         root_cancel,
