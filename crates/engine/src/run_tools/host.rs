@@ -243,9 +243,6 @@ pub struct TaskAccess {
     pub checks: Arc<CheckTurn>,
     /// The plan the task belongs to, when a loop is working one.
     pub plan: Option<Arc<yunta_core::TasksFile>>,
-    /// Every departure from the plan this attempt's session declared,
-    /// which its close answers for.
-    pub deviations: Arc<std::sync::Mutex<Vec<yunta_core::events::DeviationDeclaredPayload>>>,
 }
 
 /// The one check of a task that judges at a time, and the tree it is

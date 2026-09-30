@@ -224,3 +224,64 @@ async fn a_node_reading_the_departures_sees_each_one_and_its_answer_and_nothing_
     );
     assert!(!read.contains("\"task_status_changed\""), "{read}");
 }
+
+/// A person who grants whatever scope a task asks for, and is away for
+/// anything else.
+struct GrantsScopeOnly;
+
+#[async_trait::async_trait]
+impl yunta_engine::HumanInteraction for GrantsScopeOnly {
+    async fn resolve(
+        &self,
+        escalation: &yunta_core::events::GateWaitingPayload,
+    ) -> Option<yunta_core::events::HumanChoice> {
+        escalation
+            .options()
+            .iter()
+            .any(|option| option.id.as_str() == "grant")
+            .then(|| yunta_core::events::HumanChoice {
+                option: "grant".into(),
+                by: "lead".into(),
+                free_text: None,
+            })
+    }
+}
+
+#[tokio::test]
+async fn a_departure_declared_beside_a_scope_request_is_still_owed_once_the_scope_is_granted() {
+    let workflow = WORKFLOW.replace(
+        "    until: all_tasks_complete\n",
+        "    until: all_tasks_complete\n    scope_expansion: { mode: ask }\n",
+    );
+    let asks = format!(
+        "      - {{ path: extra.txt, content: \"x\" }}
+      - {{ path: {:?}, content: {:?} }}
+",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+        "paths:\n  - extra.txt\nreason: \"the greeting needs a second file\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n",
+    );
+    let fixture = plan_session(PLAN)
+        + &departs("{ shape: Greeting }").replace(
+            "      - { path: greeting.txt, content: \"Hello\" }\n",
+            &format!("      - {{ path: greeting.txt, content: \"Hello\" }}\n{asks}"),
+        )
+        + "  - match_prompt_contains: \"`greet`\"
+    effects:
+      - { path: greeting.txt, content: \"Hello\" }
+      - { path: extra.txt, content: \"x\" }
+    outcome: { type: completed, summary: wrote-hello-again }
+";
+    let bench = Bench::new();
+    let RunReport { terminal, state } = bench
+        .run_with_interaction(&workflow, &fixture, &GrantsScopeOnly)
+        .await;
+
+    match terminal {
+        RunTerminal::Paused { reason } => assert!(
+            reason.contains("a departure from the plan needs a person's answer"),
+            "{reason}"
+        ),
+        other => panic!("expected the run to pause owing the departure, got {other:?}"),
+    }
+    assert_eq!(state.tasks.status("greet"), Some(TaskStatus::Blocked));
+}

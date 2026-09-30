@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use yunta_core::ScopeGlob;
 
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{DeviationDeclaredPayload, Phase, SessionDeath};
+use yunta_core::events::{Phase, SessionDeath};
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
-use yunta_core::{NonEmpty, Task};
+use yunta_core::Task;
 
 use super::criteria::Memo;
 use super::judge::{judge, Judgement, Work};
@@ -82,7 +82,6 @@ pub(super) async fn run_one_attempt(
             fence: covered,
             session,
         },
-        declared,
     ) = open_and_dispatch(params).await?;
     let &AttemptParams {
         task,
@@ -213,22 +212,6 @@ pub(super) async fn run_one_attempt(
         recorded,
     };
 
-    // A departure from the plan its session declared keeps the task open
-    // whatever its criteria say: a person answers it first. A scope
-    // request owed an answer goes first, since that answer resumes the
-    // same session on the same work.
-    if let Some(deviations) = NonEmpty::new(declared).filter(|_| !escalated) {
-        return Ok((
-            last_staged,
-            AttemptStep::Stop {
-                record,
-                outcome: TaskOutcome::Blocked {
-                    cause: super::BlockedCause::DeviationOwed { deviations },
-                },
-                needs_human_decision: true,
-            },
-        ));
-    }
     if succeeded {
         return Ok((
             last_staged,
@@ -326,14 +309,7 @@ pub(super) async fn run_one_attempt(
 /// tokens it spent.
 async fn open_and_dispatch(
     params: &AttemptParams<'_>,
-) -> Result<
-    (
-        Vec<PathBuf>,
-        super::Dispatched,
-        Vec<DeviationDeclaredPayload>,
-    ),
-    TaskCycleError,
-> {
+) -> Result<(Vec<PathBuf>, super::Dispatched), TaskCycleError> {
     let &AttemptParams {
         task,
         instruction,
@@ -351,10 +327,6 @@ async fn open_and_dispatch(
         ..
     } = params;
     let cwd = unit.worktree.as_path();
-    // Kept apart from the session's tools, which the session outlives
-    // here: what it declared is what this attempt's close answers for.
-    let deviations: std::sync::Arc<std::sync::Mutex<Vec<DeviationDeclaredPayload>>> =
-        Default::default();
     // What this session's tools read and judge: the task the cycle
     // holds, the scope it is held to — declared plus everything granted
     // before this attempt — and the unit it works in. A check
@@ -374,7 +346,6 @@ async fn open_and_dispatch(
         staged: Default::default(),
         checks: Default::default(),
         plan: setup.plan.clone(),
-        deviations: deviations.clone(),
     });
     // One door for every session: the per-attempt listener (mandatory
     // for a task session, which reads its task through it), the brief,
@@ -441,6 +412,5 @@ async fn open_and_dispatch(
                 source,
             },
         })?;
-    let declared = std::mem::take(&mut *deviations.lock().unwrap_or_else(|e| e.into_inner()));
-    Ok((last_staged, dispatched, declared))
+    Ok((last_staged, dispatched))
 }

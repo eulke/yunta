@@ -10,7 +10,8 @@
 
 use yunta_core::events::{
     DeviationDeclaredPayload, DeviationResolvedPayload, Escalation, EventPayload, Fact, GateEvent,
-    GateOption, GateResolvedPayload, TaskEvent, TaskStatus, TaskStatusChangedPayload, TokenUsage,
+    GateOption, GateResolvedPayload, TaskEvent, TaskLedger, TaskStatus, TaskStatusChangedPayload,
+    TokenUsage,
 };
 use yunta_core::{Node, NonEmpty, OptionId, TaskId};
 
@@ -18,6 +19,7 @@ use crate::reserved::offers;
 use crate::run::node_close::fail_with_tokens;
 use crate::run::node_exec::NodeEnd;
 use crate::run::{RunCtx, RunError};
+use crate::task_cycle::{BlockedCause, TaskCycleReport, TaskOutcome};
 
 /// The option that accepts a departure.
 const ACCEPT: &str = "accept";
@@ -28,6 +30,32 @@ const SEND_BACK: &str = "send-back";
 pub(super) struct PendingDeparture {
     pub(super) task_id: TaskId,
     pub(super) deviations: NonEmpty<DeviationDeclaredPayload>,
+}
+
+/// What blocks `report`'s task when it owes a person an answer about a
+/// departure from the plan: whatever its sessions' work came to, done or
+/// not, the task closes on nothing until the answer exists. Never a cycle
+/// that did not judge that work, nor a task a scope answer it is owed
+/// reopens — that task's next close asks.
+pub(super) fn owed_first(tasks: &TaskLedger, report: &TaskCycleReport) -> Option<BlockedCause> {
+    let asks = match &report.outcome {
+        TaskOutcome::Done => true,
+        TaskOutcome::Blocked { cause } => {
+            !report.needs_human_decision
+                && matches!(
+                    cause,
+                    BlockedCause::Unmet { .. }
+                        | BlockedCause::NonRetryable
+                        | BlockedCause::Unrunnable { .. }
+                        | BlockedCause::SessionDied(_)
+                )
+        }
+        TaskOutcome::Interrupted => false,
+    };
+    let owed = tasks.get(&report.task_id)?.departures_owed.clone();
+    NonEmpty::new(owed)
+        .filter(|_| asks)
+        .map(|deviations| BlockedCause::DeviationOwed { deviations })
 }
 
 /// Puts each task's departures to a person and reopens the task on the

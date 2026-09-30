@@ -12,8 +12,8 @@ use std::collections::BTreeMap;
 use crate::events::meta::EventMeta;
 use crate::events::node::kinds::NodeEvent;
 use crate::events::tasks::kinds::TaskEvent;
-use crate::events::DeviationResolvedPayload;
 use crate::events::TaskStatus;
+use crate::events::{DeviationDeclaredPayload, DeviationResolvedPayload};
 use crate::hash::CommitSha;
 use crate::ids::{NodeId, Seq, SessionId, TaskId};
 
@@ -50,11 +50,27 @@ pub struct TaskRecord {
     /// A person's answer to the departure from the plan its last session
     /// declared, until the task's next cycle starts with it.
     pub deviation_answer: Option<DeviationResolvedPayload>,
+    /// The departures from the plan its sessions declared that no person
+    /// has answered. A task that owes one does not close, whatever its
+    /// criteria say.
+    pub departures_owed: Vec<DeviationDeclaredPayload>,
+    /// The departures from the plan a person accepted for it, in the
+    /// order they were declared: where the work it did stops being the
+    /// plan's.
+    pub departures_accepted: Vec<AcceptedDeparture>,
     /// Whether a session opened for the task since its last status
     /// change. A `running` task without one is having its criteria
     /// checked, or the work it was reopened on judged, before any agent
     /// works it.
     pub in_session: bool,
+}
+
+/// A departure from the plan a person accepted, and what they said
+/// when they did.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AcceptedDeparture {
+    pub declared: DeviationDeclaredPayload,
+    pub said: Option<String>,
 }
 
 /// Every task's record, by id, and what the criteria they were checked
@@ -211,16 +227,21 @@ impl TaskLedger {
                 record.in_session = false;
                 Ok(())
             }
-            // A check judges work in progress, and a departure blocks the
-            // attempt that declared it; the attempt's close moves the task.
-            TaskEvent::CheckStarted(_)
-            | TaskEvent::CheckAnswered(_)
-            | TaskEvent::DeviationDeclared(_) => Ok(()),
+            // A check judges work in progress; the attempt's close moves
+            // the task.
+            TaskEvent::CheckStarted(_) | TaskEvent::CheckAnswered(_) => Ok(()),
+            TaskEvent::DeviationDeclared(p) => {
+                let Some(record) = self.per_task.get_mut(&p.task_id) else {
+                    return Err(UnknownTask(p.task_id.clone()));
+                };
+                record.departures_owed.push(p.clone());
+                Ok(())
+            }
             TaskEvent::DeviationResolved(p) => {
                 let Some(record) = self.per_task.get_mut(&p.task_id) else {
                     return Err(UnknownTask(p.task_id.clone()));
                 };
-                record.deviation_answer = Some(p.clone());
+                record.answered(p);
                 Ok(())
             }
         }
@@ -245,6 +266,22 @@ impl TaskLedger {
     }
 }
 
+impl TaskRecord {
+    /// One answer settles every departure the task owed when it was
+    /// asked.
+    fn answered(&mut self, answer: &DeviationResolvedPayload) {
+        let answered = std::mem::take(&mut self.departures_owed);
+        if answer.accepted {
+            self.departures_accepted
+                .extend(answered.into_iter().map(|declared| AcceptedDeparture {
+                    declared,
+                    said: answer.said.clone(),
+                }));
+        }
+        self.deviation_answer = Some(answer.clone());
+    }
+}
+
 impl Default for TaskRecord {
     fn default() -> Self {
         TaskRecord {
@@ -257,6 +294,8 @@ impl Default for TaskRecord {
             resumes: None,
             last_session: None,
             deviation_answer: None,
+            departures_owed: Vec::new(),
+            departures_accepted: Vec::new(),
             in_session: false,
         }
     }

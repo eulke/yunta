@@ -220,7 +220,6 @@ impl ToolsHost {
             denied: Vec::new(),
             checks: Default::default(),
             plan: None,
-            deviations: Default::default(),
         }
     }
 

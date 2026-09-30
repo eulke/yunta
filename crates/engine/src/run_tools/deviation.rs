@@ -52,15 +52,8 @@ impl SessionTools {
             instead: departure.instead,
             why: departure.why,
         };
-        self.append(EventPayload::Tasks(TaskEvent::DeviationDeclared(
-            declared.clone(),
-        )))
-        .await?;
-        access
-            .deviations
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(declared);
+        self.append(EventPayload::Tasks(TaskEvent::DeviationDeclared(declared)))
+            .await?;
         Ok(
             "departure recorded — your task does not close on it: when this session ends a \
              person accepts it or sends it back with what to do instead. Finish the rest of \

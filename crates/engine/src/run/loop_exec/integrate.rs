@@ -39,8 +39,14 @@ pub(super) async fn integrate_batch(
 ) -> Result<BatchIntegration, RunError> {
     let mut pending_escalations: Vec<PendingEscalation> = Vec::new();
     let mut departures: Vec<PendingDeparture> = Vec::new();
+    // What each task owes a person about departures from the plan: every
+    // one its sessions declared is on the log by the time they ended.
+    let owed = ctx.run_view().await?.state.tasks;
     for dispatch in dispatches {
         let (task, unit, mut report) = dispatch?;
+        if let Some(cause) = super::depart::owed_first(&owed, &report) {
+            report.outcome = TaskOutcome::Blocked { cause };
+        }
         let needs_human_decision = report.needs_human_decision;
         // The escalated request itself (paths, reason, criterion + its
         // pre-check exit), captured off the attempt that raised it — what the
@@ -154,7 +160,11 @@ pub(super) async fn integrate_batch(
             // Handled by the early return above.
             TaskOutcome::Interrupted => None,
         };
-        let was_blocked = blocked_cause.is_some();
+        // A task a departure blocks is reopened by its answer, never by
+        // the answer to a scope request its done work also made.
+        let was_blocked = blocked_cause
+            .as_ref()
+            .is_some_and(|cause| !matches!(cause, BlockedCause::DeviationOwed { .. }));
         match blocked_cause {
             // Departures are put to a person once the batch is on the log.
             Some(BlockedCause::DeviationOwed { deviations }) => {

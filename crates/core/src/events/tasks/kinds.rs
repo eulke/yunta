@@ -53,9 +53,9 @@ impl TaskEvent {
             // what moves the task.
             Self::CheckStarted(_) => true,
             Self::CheckAnswered(_) => true,
-            // What was declared blocks the attempt that declared it, which
-            // holds it in hand; the answer is what the next cycle reads.
-            Self::DeviationDeclared(_) => true,
+            // What was declared is what the task owes a person until the
+            // answer settles it.
+            Self::DeviationDeclared(_) => false,
             Self::DeviationResolved(_) => false,
         }
     }

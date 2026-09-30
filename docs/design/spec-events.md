@@ -296,11 +296,13 @@ first, or whose answer never reached it.
 | `said` | string | no, in `deviation_resolved` | what the person said |
 
 The session's own words are kept here in full: unlike its messages, a
-departure is something it states to the run on purpose. A task whose attempt
-declared one does not close, whatever its criteria say, until a person
-answers. `deviation_declared` is audit — the attempt that declared it holds it
-in hand; `deviation_resolved` moves the task's record, which the task's next
-cycle reads and clears.
+departure is something it states to the run on purpose. Neither is audit:
+`deviation_declared` adds to what the task owes a person, and a task that owes
+one does not close, whatever its criteria say — not even after a scope request
+its session made in the same attempt is answered. `deviation_resolved` settles
+everything the task owed when it was asked: accepted, those departures become
+part of what the plan is shown with from then on; sent back, they are gone, and
+the task's next cycle reads the answer.
 
 ### 5.12 `scope_checked` — engine
 **Fuente:** task_id/node_id, diff observado, violaciones
