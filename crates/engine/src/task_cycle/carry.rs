@@ -100,7 +100,10 @@ async fn judged(params: &AttemptParams<'_>) -> Result<Judgement, TaskCycleError>
         .collect();
     judge(
         task,
-        &scope,
+        crate::scope::Ceiling {
+            scope: &scope,
+            deny: params.denied,
+        },
         Work {
             unit,
             index: &crate::run_dir::index_for(&setup.run_dir, &unit.who),

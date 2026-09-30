@@ -67,7 +67,8 @@ pub struct SessionDeath {
 /// [`Failure::ScopeViolated`], one carrying `requested_scope:` as
 /// [`Failure::ScopeRequested`], one carrying `unset:` as
 /// [`Failure::Unset`], one carrying `unchanged:` as
-/// [`Failure::Unchanged`], and a log written before failures were
+/// [`Failure::Unchanged`], one carrying `denied_paths:` as
+/// [`Failure::PathsDenied`], and a log written before failures were
 /// data carries `outcome:` alone and reads back as
 /// [`Failure::Message`]. That tolerance is the rule for what is
 /// persisted and versioned, and it is why no reader needs to know which
@@ -97,6 +98,11 @@ pub enum Failure {
     /// very tree an earlier attempt failed on: it is refused before
     /// running, since the same command on the same tree answers the same.
     Unchanged { unchanged: Unchanged },
+    /// The work reached paths the project denies to every run
+    /// (`permissions.paths.deny`). No grant widens a deny, so a person
+    /// is never offered one: the work goes, or the project changes its
+    /// config.
+    PathsDenied { denied_paths: Vec<PathBuf> },
     /// A failure the engine states in one sentence.
     Message { outcome: String },
 }
@@ -174,6 +180,13 @@ impl Failure {
         !matches!(self, Failure::Unset { .. })
     }
 
+    /// Work that reached `paths`, which the project denies to every run.
+    pub fn paths_denied(paths: Vec<PathBuf>) -> Self {
+        Failure::PathsDenied {
+            denied_paths: paths,
+        }
+    }
+
     /// A session that asked to be allowed `paths`, for `reason`.
     pub fn scope_requested(paths: Vec<ScopeGlob>, reason: impl Into<String>) -> Self {
         Failure::ScopeRequested {
@@ -194,6 +207,7 @@ impl Failure {
             | Failure::SessionDied { .. }
             | Failure::ScopeRequested { .. }
             | Failure::Unset { .. }
+            | Failure::PathsDenied { .. }
             | Failure::Message { .. } => &[],
         }
     }
@@ -208,6 +222,7 @@ impl Failure {
             Failure::Artifacts { .. }
             | Failure::SessionDied { .. }
             | Failure::Unset { .. }
+            | Failure::PathsDenied { .. }
             | Failure::Message { .. } => false,
         }
     }
@@ -261,6 +276,7 @@ impl Failure {
             | Failure::ScopeViolated { .. }
             | Failure::ScopeRequested { .. }
             | Failure::Unset { .. }
+            | Failure::PathsDenied { .. }
             | Failure::Message { .. } => [].iter(),
         }
     }
@@ -295,6 +311,16 @@ impl fmt::Display for Failure {
                 }
                 Ok(())
             }
+            Failure::PathsDenied { denied_paths } => write!(
+                f,
+                "wrote what the project denies to every run (`permissions.paths.deny`) — {}; no \
+                 grant widens it: undo those changes, or change the project's config",
+                denied_paths
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Failure::ScopeRequested { requested_scope } => write!(
                 f,
                 "asked for scope beyond its own — {}: {}",

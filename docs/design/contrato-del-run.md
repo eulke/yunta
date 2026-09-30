@@ -297,7 +297,11 @@ permissions:
     publishers: { allow: [acme, internal] }         # vacío = todos
   network:
     default: true                                   # false = sin red salvo declaración explícita
+  paths:
+    deny: [".github/**"]                            # ningún nodo ni tarea de ningún run los escribe
 ```
+
+`permissions.paths.deny` es lo que ningún run escribe, declare lo que declare un workflow o un pack: la unión de las negaciones de todas las capas, vacía por defecto. Se sostiene donde el trabajo entra al run: el cerco de cada sesión lo rechaza donde el adapter cerca con exactitud; un nodo con checkout propio que escribió un path negado falla sin aterrizar, con una falla (`denied_paths`) cuyo menú no ofrece `grant`; una tarea que lo escribió no se integra; una ampliación que lo alcanza se deniega por regla sin preguntar a nadie, y el pedido de un nodo por él nunca llega a una persona. Un pack no lo nombra nunca: es política del proyecto, y ningún workflow falla por su ausencia (D206).
 Enforcement en dos momentos: `yunta check` atrapa lo estático (el comando escrito en el YAML, el pack que excede su techo), y el engine valida **en runtime** cada comando de hook/criterio/bash/executor contra el modelo justo antes de ejecutarlo — un template puede construir en runtime lo que el YAML no mostraba. Violación en runtime = nodo `failed` citando la regla, con evento.
 Límite honesto, normativo: esto es **gobernanza, no sandbox**. Un agente con permisos de escritura puede rodear un patrón textual escribiendo un script y ejecutándolo. El modelo detiene el accidente y el pack descuidado, y deja rastro auditable del intento deliberado; el aislamiento real (container, VM) pertenece al entorno de ejecución, no a Yunta. Prometer más sería seguridad aparente — peor que ninguna.
 

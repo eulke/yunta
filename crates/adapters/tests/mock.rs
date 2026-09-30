@@ -143,6 +143,7 @@ outcome: { type: completed, summary: "done" }
         allowed: Some(vec!["src/**".into()]),
         roots: Vec::new(),
         advice: Advice::ReportFinding,
+        denied: Vec::new(),
     };
     let session = fixture.spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -180,6 +181,7 @@ outcome: { type: completed, summary: "done" }
         allowed: Some(vec!["src/**".into()]),
         roots: Vec::new(),
         advice: Advice::ReportFinding,
+        denied: Vec::new(),
     };
     let session = fixture.spawn(req).await.unwrap();
     let _ = drain(session).await;

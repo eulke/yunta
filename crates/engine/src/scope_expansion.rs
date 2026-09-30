@@ -203,6 +203,33 @@ impl GrantLedger {
     }
 }
 
+/// A request that reaches what the project denies to every run, refused
+/// by rule before any mode is asked — no person and no rule widens a
+/// deny. The request back when it reaches none.
+pub(crate) fn refuse_what_is_denied(
+    request: ScopeExpansionRequest,
+    denied: &[ScopeGlob],
+) -> Result<ScopeExpansionOutcome, ScopeExpansionRequest> {
+    let reached: Vec<String> = request
+        .paths
+        .iter()
+        .filter(|glob| yunta_core::reaches_any(glob, denied))
+        .map(|glob| format!("`{glob}`"))
+        .collect();
+    if reached.is_empty() {
+        return Err(request);
+    }
+    let reason = format!(
+        "it reaches {}, which the project denies to every run (permissions.paths.deny)",
+        reached.join(", ")
+    );
+    Ok(ScopeExpansionOutcome {
+        request,
+        precheck_exit: None,
+        decision: Decision::Denied(reason),
+    })
+}
+
 /// Decides one request: the proposed criterion's own pre-check
 /// runs first, in every mode — a criterion that already passes is
 /// trivial and rejected without consulting anyone, the same "pre-check

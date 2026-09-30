@@ -570,6 +570,19 @@
       },
       "additionalProperties": false
     },
+    "PathPermissions": {
+      "description": "`permissions.paths` — what no node and no task of any run may write:\nthe project's CI, the configuration of its own checks, whatever the\nteam decides no agent touches. A ceiling like the rest: every layer's\ndenies stand, and none is ever granted back.",
+      "type": "object",
+      "properties": {
+        "deny": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeGlob"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "PathsConfig": {
       "description": "`paths:` — where run/worktree state lives. `YUNTA_HOME` is\nan environment override applied when resolving the merged config, not\na field of it.",
       "type": "object",
@@ -617,6 +630,16 @@
           "anyOf": [
             {
               "$ref": "#/$defs/PackPermissions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "paths": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PathPermissions"
             },
             {
               "type": "null"
@@ -746,6 +769,11 @@
       "required": [
         "max_mode"
       ]
+    },
+    "ScopeGlob": {
+      "description": "a scope glob: a path pattern where `*` stays within one directory and `**` recurses",
+      "type": "string",
+      "minLength": 1
     },
     "SkillName": {
       "description": "A skill name: a letter followed by letters, digits, `_` or `-`",

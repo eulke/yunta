@@ -28,6 +28,19 @@ pub struct PermissionsConfig {
     pub network: Option<NetworkPermissions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope_expansion: Option<ScopeExpansionPermissions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paths: Option<PathPermissions>,
+}
+
+/// `permissions.paths` — what no node and no task of any run may write:
+/// the project's CI, the configuration of its own checks, whatever the
+/// team decides no agent touches. A ceiling like the rest: every layer's
+/// denies stand, and none is ever granted back.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PathPermissions {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny: Vec<crate::ScopeGlob>,
 }
 
 /// `permissions.scope_expansion`: the layered ceiling
@@ -206,6 +219,20 @@ pub(super) fn merge_permissions(
         (c, l) => c.or(l),
     };
 
+    // Union, like `commands.deny`: a lower layer only ever adds a path.
+    let paths = match (ceiling.paths, lower.paths) {
+        (Some(c), Some(l)) => {
+            let mut deny = c.deny;
+            for glob in l.deny {
+                if !deny.contains(&glob) {
+                    deny.push(glob);
+                }
+            }
+            Some(PathPermissions { deny })
+        }
+        (c, l) => c.or(l),
+    };
+
     let network = match (ceiling.network, lower.network) {
         (Some(c), Some(l)) => Some(NetworkPermissions {
             // `false` is the narrower value — a ceiling that turned the
@@ -220,6 +247,7 @@ pub(super) fn merge_permissions(
         packs,
         network,
         scope_expansion,
+        paths,
     })
 }
 

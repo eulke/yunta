@@ -46,6 +46,7 @@ fn policy() -> SchedulingPolicy {
         mode_nodes: None,
         baseline_suite: None,
         grants_scope: true,
+        denied: Vec::new(),
     }
 }
 
@@ -355,6 +356,29 @@ fn a_scope_failure_offers_a_grant_only_where_a_person_may_widen_it() {
         ..policy()
     };
     assert!(!offers(grantable("fix", outside(), &denying)));
+}
+
+/// A grant that would widen a node over what the project denies to every
+/// run is never on its menu, whatever else the failure is about.
+#[test]
+fn grant_is_not_offered_for_a_denied_path() {
+    let offers = |decision: Decision| match decision {
+        Decision::EscalateFailure { grantable, .. } => grantable,
+        other => panic!("a failed node is a decision, got {other:?}"),
+    };
+    let denying_ci = SchedulingPolicy {
+        denied: vec![".github/**".into()],
+        ..policy()
+    };
+    let into_ci = Failure::scope_violated(vec![".github/ci.yml".into()]);
+
+    assert!(offers(grantable("fix", into_ci.clone(), &policy())));
+    assert!(!offers(grantable("fix", into_ci, &denying_ci)));
+    assert!(offers(grantable(
+        "fix",
+        Failure::scope_violated(vec!["Cargo.toml".into()]),
+        &denying_ci
+    )));
 }
 
 /// The suite a run owes is a decision of the scheduler, like every other

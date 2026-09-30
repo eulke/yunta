@@ -185,6 +185,12 @@ pub fn listed_globs(globs: &[ScopeGlob]) -> String {
         .join(", ")
 }
 
+/// Whether `glob` might match a path one of `denied` matches — how a
+/// request or a grant is refused before anything is written.
+pub fn reaches_any(glob: &ScopeGlob, denied: &[ScopeGlob]) -> bool {
+    denied.iter().any(|deny| might_overlap(glob, deny))
+}
+
 /// Whether two globs might select the same file.
 ///
 /// A deliberately conservative approximation, not full glob algebra:

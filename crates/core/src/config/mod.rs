@@ -99,6 +99,15 @@ pub struct ConfigLayer {
 }
 
 impl ConfigLayer {
+    /// The paths no run may write, as `permissions.paths.deny` declares
+    /// them across every layer.
+    pub fn denied_paths(&self) -> &[crate::ScopeGlob] {
+        self.permissions
+            .as_ref()
+            .and_then(|permissions| permissions.paths.as_ref())
+            .map_or(&[], |paths| paths.deny.as_slice())
+    }
+
     /// The text of the project's command `name`, if it declares one.
     pub fn command(&self, name: &CommandName) -> Option<&str> {
         self.commands.as_ref()?.get(name).map(String::as_str)

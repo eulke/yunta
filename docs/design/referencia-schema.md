@@ -79,6 +79,8 @@ paths:                              # dónde vive el estado (§2.2); `YUNTA_HOME
 permissions:                        # techo; las capas inferiores solo estrechan (§6.1)
   commands:
     deny: ["curl * | *", "sudo *"]
+  paths:
+    deny: [".github/**"]            # ningún run los escribe, sea cual sea el scope
   packs:
     executors: prompt               # allow | prompt | deny
     publishers: { allow: [acme] }

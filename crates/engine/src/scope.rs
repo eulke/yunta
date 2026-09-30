@@ -46,12 +46,31 @@ pub enum ScopeCheckError {
 }
 
 /// What a unit of work changed between the tree it started from and the
-/// tree it left, and which of those paths fall outside every declared
-/// glob.
+/// tree it left, and which of those paths it may not have changed.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ScopeCheckResult {
     pub diff: Vec<PathBuf>,
+    /// Every path of the diff the work may not have changed: outside its
+    /// scope, or denied to every run.
     pub violations: Vec<PathBuf>,
+    /// The violations the project denies to every run
+    /// (`permissions.paths.deny`), which no grant widens.
+    pub denied: Vec<PathBuf>,
+}
+
+/// What a unit of work is held to: the scope it may change, and what the
+/// project denies to every run whatever that scope allows.
+#[derive(Debug, Clone, Copy)]
+pub struct Ceiling<'a> {
+    pub scope: &'a [ScopeGlob],
+    pub deny: &'a [ScopeGlob],
+}
+
+impl<'a> Ceiling<'a> {
+    /// `scope`, with nothing denied beyond it.
+    pub fn scope(scope: &'a [ScopeGlob]) -> Self {
+        Ceiling { scope, deny: &[] }
+    }
 }
 
 /// What changed in `cwd` since `from`: the paths a unit of work is
@@ -108,13 +127,43 @@ pub async fn audit(
     cwd: &Path,
     from: &TreeId,
     index: &Path,
-    scope: &[ScopeGlob],
+    ceiling: Ceiling<'_>,
     staged: &[PathBuf],
     supervision: Supervision<'_>,
 ) -> Result<ScopeCheckResult, ScopeCheckError> {
     let diff = changed_since(cwd, from, index, supervision).await?;
-    let violations = violations(&diff, scope, staged)?;
-    Ok(ScopeCheckResult { diff, violations })
+    let denied = denied(&diff, ceiling.deny, staged)?;
+    let mut violations = violations(&diff, ceiling.scope, staged)?;
+    for path in &denied {
+        if !violations.contains(path) {
+            violations.push(path.clone());
+        }
+    }
+    Ok(ScopeCheckResult {
+        diff,
+        violations,
+        denied,
+    })
+}
+
+/// The paths of `diff` the project denies to every run, less what the
+/// adapter staged for its own mechanics.
+pub fn denied(
+    diff: &[PathBuf],
+    deny: &[ScopeGlob],
+    staged: &[PathBuf],
+) -> Result<Vec<PathBuf>, ScopeCheckError> {
+    if deny.is_empty() {
+        return Ok(Vec::new());
+    }
+    let set =
+        yunta_core::scope_globset(deny).map_err(|source| ScopeCheckError::GlobSet { source })?;
+    Ok(diff
+        .iter()
+        .filter(|path| !staged.iter().any(|mount| path.starts_with(mount)))
+        .filter(|path| set.is_match(path))
+        .cloned()
+        .collect())
 }
 
 async fn git_bytes(

@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{ScopeGlob, Task};
+use yunta_core::Task;
 
 use super::criteria::{post_check, Memo};
 use super::{CriterionRun, TaskCycleError};
@@ -49,11 +49,12 @@ pub(crate) struct Work<'a> {
 }
 
 /// Judges `task`'s work: its criteria on `work`'s tree, then that tree's
-/// diff against `scope` — the scope it declared plus what was granted,
-/// never a request still waiting on a decision.
+/// diff against `ceiling` — the scope it declared plus what was granted,
+/// never a request still waiting on a decision, and what the project
+/// denies to every run.
 pub(crate) async fn judge(
     task: &Task,
-    scope: &[ScopeGlob],
+    ceiling: crate::scope::Ceiling<'_>,
     work: Work<'_>,
     memo: &Memo,
     supervision: Supervision<'_>,
@@ -64,7 +65,7 @@ pub(crate) async fn judge(
         cwd,
         &work.unit.from,
         work.index,
-        scope,
+        ceiling,
         work.staged,
         supervision,
     )

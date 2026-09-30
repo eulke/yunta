@@ -35,7 +35,10 @@ impl SessionTools {
             &self.cwd,
             &from,
             &access.index,
-            &access.scope,
+            crate::scope::Ceiling {
+                scope: &access.scope,
+                deny: &access.denied,
+            },
             access.staged.get().map_or(&[], Vec::as_slice),
             self.host.supervision(&self.stop),
         )

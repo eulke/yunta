@@ -73,7 +73,9 @@ pub use findings::{
     FindingEntry, FindingsFile, InvalidLocation, LineRange, Location, ProposedCriterionEntry,
     RelativePath, Withdrawal,
 };
-pub use glob::{listed_globs, might_overlap, scope_globset, InvalidScopeGlob, ScopeGlob};
+pub use glob::{
+    listed_globs, might_overlap, reaches_any, scope_globset, InvalidScopeGlob, ScopeGlob,
+};
 pub use hash::{sha256_hex, CommitSha, ContentHash, TreeId};
 pub use id_source::{IdSource, SystemIdSource};
 pub use ids::{

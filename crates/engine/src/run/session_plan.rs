@@ -49,6 +49,7 @@ pub(crate) async fn resolve_setup(
     state_run_wide_absences(ctx, node, adapter.as_ref()).await?;
     let node_scope = super::node_scope::session_access(ctx, node).await?;
     Ok(Ok(SessionSetup {
+        denied: ctx.manifest.config.denied_paths().to_vec(),
         skills,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         env: SessionSetup::secrets_env(&ctx.manifest.config, ctx.secrets.as_deref()),
@@ -335,6 +336,7 @@ fn fence(
         setup.artifact_dir.as_deref(),
         advice,
     )
+    .denying(&setup.denied)
 }
 
 /// What one session's work is held to: a loop's task, the node's own

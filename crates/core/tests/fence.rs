@@ -16,6 +16,7 @@ fn fence(allowed: &[&str], roots: &[&str]) -> Fence {
         allowed: Some(allowed.iter().map(|g| ScopeGlob::from(*g)).collect()),
         roots: roots.iter().map(PathBuf::from).collect(),
         advice: Advice::ReportFinding,
+        denied: Vec::new(),
     }
 }
 
@@ -127,6 +128,7 @@ fn a_refusal_message_round_trips_its_target_and_says_its_advice() {
             allowed: Some(vec![ScopeGlob::from("src/**")]),
             roots: Vec::new(),
             advice,
+            denied: Vec::new(),
         };
         let Verdict::Refused(refusal) = fence.judge(&worktree(), Path::new("docs/readme.md"))
         else {
@@ -197,4 +199,49 @@ fn a_fence_hook_names_the_subcommand_and_the_adapter() {
             "claude-code".to_string()
         ]
     );
+}
+
+/// What the project denies to every run is refused whatever the scope
+/// admits, and the refusal says no request widens it.
+#[test]
+fn a_denied_path_is_refused_where_the_scope_allows_it() {
+    let fence = fence(&["**"], &[]).denying(&[ScopeGlob::from(".github/**")]);
+
+    let Verdict::Refused(refusal) = fence.judge(&worktree(), Path::new(".github/ci.yml")) else {
+        panic!("a denied path is refused");
+    };
+    assert!(refusal.denied);
+    let said = refusal.to_string();
+    assert!(said.contains("no request widens"), "{said}");
+    assert_eq!(
+        refused_target(&said),
+        Some(worktree().join(".github/ci.yml"))
+    );
+    assert_eq!(
+        fence.judge(&worktree(), Path::new("src/lib.rs")),
+        Verdict::Allowed
+    );
+}
+
+#[test]
+fn an_unscoped_fence_still_refuses_denied_paths() {
+    let fence = Fence::everything(Vec::new(), Advice::ReportFinding)
+        .denying(&[ScopeGlob::from(".github/**")]);
+    assert!(matches!(
+        fence.judge(&worktree(), Path::new(".github/ci.yml")),
+        Verdict::Refused(_)
+    ));
+    assert_eq!(
+        fence.judge(&worktree(), Path::new("README.md")),
+        Verdict::Allowed
+    );
+}
+
+#[test]
+fn denied_globs_survive_the_env() {
+    let fence = Fence::everything(Vec::new(), Advice::ReportFinding)
+        .denying(&[ScopeGlob::from(".github/**")]);
+    let (_, value) = fence.to_env(&worktree());
+    let (read, _) = Fence::from_env(&value).expect("the fence reads back");
+    assert_eq!(read, fence);
 }

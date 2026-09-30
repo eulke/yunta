@@ -101,7 +101,10 @@ impl SessionTools {
         let access = self.task_access(RunTool::CheckTask)?;
         let judgement = judge(
             &access.task,
-            &access.scope,
+            crate::scope::Ceiling {
+                scope: &access.scope,
+                deny: &access.denied,
+            },
             Work {
                 unit: &access.unit,
                 index: &access.index,

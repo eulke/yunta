@@ -112,6 +112,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
             task_id: Some("graph-cmd".into()),
             diff: vec!["crates/cli/src/graph.rs".into()],
             violations: vec![],
+            denied: Vec::new(),
         })),
         EventPayload::Scope(ScopeEvent::Requested(ScopeExpansionRequestedPayload {
             task_id: Some("graph-cmd".into()),

@@ -113,6 +113,22 @@ it) works the other way from every other config key: layers only ever *narrow*, 
 re-widen, what's above them. A repo can't un-deny a command pattern its org layer
 denied.
 
+`permissions.paths.deny` names what no run may write, whatever a workflow or a pack
+declares — the project's CI, the configuration of its own checks:
+
+```yaml
+permissions:
+  paths:
+    deny: [".github/**", "eslint.config.*"]
+```
+
+Every layer's denies stand together. A session's write fence refuses those paths
+where its adapter enforces one; a node with a checkout of its own that wrote one
+fails without landing, and a task that wrote one is not integrated. A failure over a
+denied path never offers `grant`, a scope-expansion request for one is refused
+without asking anyone, and a node's request for one is never put to a person. The
+list is empty unless the project writes one, so no workflow fails for lacking it.
+
 ## Config layers and state
 
 Yunta merges its configuration from three layers, key by key, most specific

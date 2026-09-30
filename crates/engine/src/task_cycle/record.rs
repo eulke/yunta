@@ -65,6 +65,7 @@ impl Recorder<'_> {
                 task_id: Some(self.task.clone()),
                 diff: scope.diff.clone(),
                 violations: scope.violations.clone(),
+                denied: scope.denied.clone(),
             },
         )))
         .await

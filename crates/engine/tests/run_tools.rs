@@ -603,6 +603,7 @@ fn two_cycles_of_one_attempt_each(host: &ToolsHost) {
             task_id: Some(TaskId::from("T001")),
             diff: vec!["notes.md".into()],
             violations: vec!["notes.md".into()],
+            denied: Vec::new(),
         })),
     );
 }

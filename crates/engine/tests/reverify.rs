@@ -39,6 +39,7 @@ fn policy() -> SchedulingPolicy {
         mode_nodes: None,
         baseline_suite: None,
         grants_scope: true,
+        denied: Vec::new(),
     }
 }
 

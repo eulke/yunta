@@ -196,6 +196,7 @@ fn has_detail(failure: &Failure) -> bool {
         // One path fits in the node's own line; a list reads better a
         // path to a line.
         Failure::ScopeViolated { outside_scope } => outside_scope.len() > 1,
+        Failure::PathsDenied { denied_paths } => denied_paths.len() > 1,
         // What was asked for and why fit in the node's own line, and so
         // does the key a config leaves unset.
         Failure::ScopeRequested { .. } | Failure::Unset { .. } => false,
@@ -231,6 +232,12 @@ fn print_detail(failure: &Failure) {
         Failure::ScopeViolated { outside_scope } => {
             println!("{detail}outside the declared globs:");
             for path in outside_scope {
+                println!("{}{}", indent(3), path.display());
+            }
+        }
+        Failure::PathsDenied { denied_paths } => {
+            println!("{detail}denied to every run by the project (permissions.paths.deny):");
+            for path in denied_paths {
                 println!("{}{}", indent(3), path.display());
             }
         }

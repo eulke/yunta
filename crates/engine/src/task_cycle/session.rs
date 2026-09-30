@@ -23,6 +23,9 @@ use super::DispatchOutcome;
 /// (values never touch the log, nothing undeclared leaks).
 #[derive(Clone)]
 pub struct SessionSetup {
+    /// What the project denies to every run: every session's fence
+    /// refuses it, whatever its scope.
+    pub denied: Vec<yunta_core::ScopeGlob>,
     pub skills: Vec<PathBuf>,
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
     pub env: std::collections::HashMap<String, yunta_core::Secret<String>>,
@@ -115,7 +118,8 @@ impl RunToolsNeed {
 impl SessionSetup {
     /// A setup that carries nothing but the run it belongs to, the node
     /// its sessions are of and the runner they run on: no skills, no
-    /// settings, no secrets, no per-run tools and no declared files.
+    /// settings, no secrets, no per-run tools, no declared files and no
+    /// denied paths.
     ///
     /// The run directory is not among what a bare setup leaves out: a
     /// session writes its working files under it, and a path that names
@@ -127,6 +131,7 @@ impl SessionSetup {
         chosen: yunta_core::RunnerCandidate,
     ) -> Self {
         Self {
+            denied: Vec::new(),
             skills: Vec::new(),
             adapter_settings: serde_json::Map::new(),
             env: std::collections::HashMap::new(),

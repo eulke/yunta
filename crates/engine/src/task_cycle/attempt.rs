@@ -34,6 +34,9 @@ pub(super) struct AttemptParams<'a> {
     /// Every path granted before this attempt: on the log when the cycle
     /// began, and what the engine granted in the cycle's earlier attempts.
     pub(super) already_granted_paths: &'a [ScopeGlob],
+    /// What the project denies to every run: never written, never
+    /// granted.
+    pub(super) denied: &'a [ScopeGlob],
     /// The session this attempt picks back up, and the answer it is told,
     /// instead of opening a fresh one.
     pub(super) resume: Option<&'a super::Continuing>,
@@ -148,7 +151,10 @@ pub(super) async fn run_one_attempt(
     // paths.
     let judgement = judge(
         task,
-        &effective_scope,
+        crate::scope::Ceiling {
+            scope: &effective_scope,
+            deny: params.denied,
+        },
         Work {
             unit,
             index: &crate::run_dir::index_for(&params.setup.run_dir, &unit.who),
@@ -333,6 +339,7 @@ async fn open_and_dispatch(
             .chain(already_granted_paths)
             .cloned()
             .collect(),
+        denied: params.denied.to_vec(),
         unit: unit.clone(),
         index: crate::run_dir::index_for(&setup.run_dir, &unit.who).with_extension("check"),
         cancel: supervision.cancel.clone(),
@@ -433,6 +440,11 @@ async fn evaluate_scope_expansion(
     else {
         return Ok(None);
     };
+    let expansion_request =
+        match crate::scope_expansion::refuse_what_is_denied(expansion_request, params.denied) {
+            Ok(refused) => return Ok(Some(refused)),
+            Err(request) => request,
+        };
     let mode = scope_expansion.map(|se| se.mode).unwrap_or_default();
     let within = scope_expansion
         .map(|se| se.within.as_slice())

@@ -412,6 +412,7 @@ fn node_diagnostics(events: &[StoredEvent]) -> BTreeMap<String, Vec<ArtifactProb
                 Failure::Message { .. }
                 | Failure::SessionDied { .. }
                 | Failure::ScopeViolated { .. }
+                | Failure::PathsDenied { .. }
                 | Failure::ScopeRequested { .. }
                 | Failure::Unset { .. }
                 | Failure::Unchanged { .. } => {

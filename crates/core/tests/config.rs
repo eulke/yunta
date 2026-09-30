@@ -810,3 +810,25 @@ fn telemetry_is_not_a_config_key() {
         .unwrap_err();
     assert!(err.to_string().contains("telemetry"), "{err}");
 }
+
+/// What a lower layer denies is added to what the org denies; nothing a
+/// layer declares takes a deny away.
+#[test]
+fn paths_deny_is_a_union_across_layers() {
+    let org: ConfigLayer =
+        yunta_core::yaml::parse("permissions:\n  paths:\n    deny: [\".github/**\"]\n").unwrap();
+    let repo: ConfigLayer =
+        yunta_core::yaml::parse("permissions:\n  paths:\n    deny: [\"eslint.config.*\"]\n")
+            .unwrap();
+
+    let merged = ConfigLayer::merge_layers([org, repo]);
+
+    assert_eq!(
+        merged.denied_paths(),
+        [
+            yunta_core::ScopeGlob::from(".github/**"),
+            yunta_core::ScopeGlob::from("eslint.config.*")
+        ]
+    );
+    assert!(ConfigLayer::default().denied_paths().is_empty());
+}

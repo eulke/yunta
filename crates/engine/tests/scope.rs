@@ -37,7 +37,15 @@ async fn from_here(
             })?;
     let scratch = tempfile::tempdir().expect("a scratch outside the checkout");
     let index = scratch.path().join("index");
-    audit(dir, &from, &index, scope, staged, owner.supervision()).await
+    audit(
+        dir,
+        &from,
+        &index,
+        yunta_engine::Ceiling::scope(scope),
+        staged,
+        owner.supervision(),
+    )
+    .await
 }
 
 fn setup_repo(dir: &std::path::Path) {

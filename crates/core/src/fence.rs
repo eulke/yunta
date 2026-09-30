@@ -49,6 +49,10 @@ pub struct Fence {
     pub allowed: Option<Vec<ScopeGlob>>,
     pub roots: Vec<PathBuf>,
     pub advice: Advice,
+    /// What the project denies to every run under the worktree, refused
+    /// whatever `allowed` admits.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub denied: Vec<ScopeGlob>,
 }
 
 /// What a refusal tells the model to do instead. A session that mounted
@@ -80,6 +84,9 @@ pub struct Refusal {
     pub allowed: Option<Vec<ScopeGlob>>,
     pub roots: Vec<PathBuf>,
     pub advice: Advice,
+    /// Whether the path is one the project denies to every run, which no
+    /// request widens.
+    pub denied: bool,
 }
 
 /// How much of a session the fence actually covered, derived from what
@@ -130,6 +137,7 @@ impl Fence {
             allowed: None,
             roots,
             advice,
+            denied: Vec::new(),
         }
     }
 
@@ -140,6 +148,7 @@ impl Fence {
             allowed: Some(Vec::new()),
             roots,
             advice,
+            denied: Vec::new(),
         }
     }
 
@@ -161,7 +170,16 @@ impl Fence {
                 allowed: Some(scope.iter().chain(granted).cloned().collect()),
                 roots,
                 advice,
+                denied: Vec::new(),
             },
+        }
+    }
+
+    /// The same fence, refusing `denied` whatever it otherwise admits.
+    pub fn denying(self, denied: &[ScopeGlob]) -> Self {
+        Fence {
+            denied: denied.to_vec(),
+            ..self
         }
     }
 
@@ -174,18 +192,22 @@ impl Fence {
             return Verdict::Allowed;
         }
         let inside = target.strip_prefix(worktree).ok();
-        let allowed = match inside {
-            // The run's own register is never a task's work. `.git`
-            // bare is the file a `git worktree` leaves behind.
-            Some(relative) if is_git(relative) => false,
-            Some(_) if self.allowed.is_none() => true,
-            Some(relative) => self
-                .allowed
-                .as_deref()
-                .and_then(|globs| scope_globset(globs).ok())
-                .is_some_and(|set| set.is_match(relative)),
-            None => false,
-        };
+        let denied = inside.is_some_and(|relative| {
+            scope_globset(&self.denied).is_ok_and(|set| set.is_match(relative))
+        });
+        let allowed = !denied
+            && match inside {
+                // The run's own register is never a task's work. `.git`
+                // bare is the file a `git worktree` leaves behind.
+                Some(relative) if is_git(relative) => false,
+                Some(_) if self.allowed.is_none() => true,
+                Some(relative) => self
+                    .allowed
+                    .as_deref()
+                    .and_then(|globs| scope_globset(globs).ok())
+                    .is_some_and(|set| set.is_match(relative)),
+                None => false,
+            };
         if allowed {
             Verdict::Allowed
         } else {
@@ -195,6 +217,7 @@ impl Fence {
                 allowed: self.allowed.clone(),
                 roots: self.roots.clone(),
                 advice: self.advice,
+                denied,
             })
         }
     }
@@ -273,6 +296,15 @@ impl fmt::Display for Refusal {
     /// write, and by [`refused_target`] reading it back out of a CLI's
     /// stream.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.denied {
+            return write!(
+                f,
+                "{REFUSAL_MARKER}{} is outside what any session of this project may write: the \
+                 project denies it to every run (permissions.paths.deny), and no request widens \
+                 that. Do not write here.",
+                self.target.display()
+            );
+        }
         writeln!(
             f,
             "{REFUSAL_MARKER}{} is outside this session's scope.",

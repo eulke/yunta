@@ -338,6 +338,9 @@ pub async fn run_task(
         max_expansion_files,
         grants,
         already_granted_paths,
+        denied: permissions
+            .and_then(|permissions| permissions.paths.as_ref())
+            .map_or(&[], |paths| paths.deny.as_slice()),
         resume: None,
         audit,
         cancel,

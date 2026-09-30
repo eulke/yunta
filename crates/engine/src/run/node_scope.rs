@@ -41,6 +41,7 @@ pub(super) async fn session_access(
             index: crate::run_dir::index_for(ctx.run_dir, &UnitId::Node(node.id.clone()))
                 .with_extension("check"),
             may_ask: super::schedule::person_may_grant_scope(&ctx.manifest.config),
+            denied: ctx.manifest.config.denied_paths().to_vec(),
             staged: Default::default(),
         })
     }))
@@ -69,13 +70,23 @@ pub(super) async fn grant_chosen_scope(ctx: &RunCtx<'_>, node: &Node) -> Result<
     let Some(NodeState::Failed { failure, .. }) = state.nodes.state(&node.id) else {
         return Ok(());
     };
-    let paths = failure.scope_wanted().map_err(|error| RunError::Broken {
+    let wanted = failure.scope_wanted().map_err(|error| RunError::Broken {
         diagnostic: format!(
             "node `{}`'s grant: {}",
             node.id,
             yunta_core::describe(&error)
         ),
     })?;
+    // The menu never offers a grant that reaches a denied path; a choice
+    // recorded anyway widens nothing the project denies.
+    let denied = ctx.manifest.config.denied_paths();
+    let paths: Vec<yunta_core::ScopeGlob> = wanted
+        .into_iter()
+        .filter(|glob| !yunta_core::reaches_any(glob, denied))
+        .collect();
+    if paths.is_empty() {
+        return Ok(());
+    }
     ctx.emit(
         Some(&node.id),
         EventPayload::Scope(ScopeEvent::Granted(ScopeExpansionGrantedPayload {
@@ -120,11 +131,15 @@ async fn audited_diff(
         // meant, so the audit it asks for is the one it always got.
         return Ok(None);
     };
+    let ceiling = crate::scope::Ceiling {
+        scope: &scope,
+        deny: ctx.manifest.config.denied_paths(),
+    };
     let result = audit(
         ctx.worktree,
         &from,
         &crate::run_dir::index_for(ctx.run_dir, &UnitId::Node(node.id.clone())),
-        &scope,
+        ceiling,
         staged,
         ctx.root_supervision(),
     )
@@ -136,6 +151,7 @@ async fn audited_diff(
                 task_id: None,
                 diff: result.diff.clone(),
                 violations: result.violations.clone(),
+                denied: result.denied.clone(),
             },
         )),
     )
@@ -181,13 +197,21 @@ pub(super) async fn scope_request(
     .await?;
     let grantable = node.permissions != Some(yunta_core::NodePermissions::ReadOnly)
         && super::schedule::person_may_grant_scope(&ctx.manifest.config);
-    if !grantable {
+    // What the project denies to every run is never put to a person: the
+    // node answers for what it asked beside it, if anything.
+    let denied = ctx.manifest.config.denied_paths();
+    let paths: Vec<yunta_core::ScopeGlob> = request
+        .paths
+        .into_iter()
+        .filter(|glob| !yunta_core::reaches_any(glob, denied))
+        .collect();
+    if !grantable || paths.is_empty() {
         return Ok(None);
     }
     fail_with(
         ctx,
         node,
-        Failure::scope_requested(request.paths, request.reason),
+        Failure::scope_requested(paths, request.reason),
         false,
         tokens,
     )
@@ -211,6 +235,12 @@ pub(super) async fn scope_violation(
     let Some(result) = audited_diff(ctx, node, staged).await? else {
         return Ok(None);
     };
+    // What the project denies to every run is not the node's scope to
+    // widen: the failure offers no grant, and the work never lands.
+    if !result.denied.is_empty() {
+        let failure = Failure::paths_denied(result.denied);
+        return Ok(Some(fail_with(ctx, node, failure, false, tokens).await?));
+    }
     if result.violations.is_empty() {
         return Ok(None);
     }

@@ -272,7 +272,8 @@ registra.
 |---|---|---|---|
 | `task_id` | `Option<string>` | no | presente si el chequeo es de una tarea dentro de un `loop`; ausente para un chequeo de nodo suelto — el nodo en ambos casos es el `node_id` del envelope |
 | `diff` | lista de paths | sí | de `git diff` contra el scope declarado |
-| `violations` | lista de paths | sí (vacía si limpio) | paths fuera de todo glob declarado |
+| `violations` | lista de paths | sí (vacía si limpio) | paths que el trabajo no podía cambiar: fuera de todo glob declarado, o negados a todo run |
+| `denied` | lista de paths | sí; vacía —y omitida del log— si no hay ninguno | los de `violations` que el proyecto niega a todo run (`permissions.paths.deny`), cualquiera sea el scope: ningún grant los ensancha (D206) |
 
 ### 5.13 `scope_expansion_requested` — engine
 **Fuente:** task_id, paths, razón, criterio propuesto y su pre-check
@@ -304,13 +305,13 @@ registra.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `outcome` [inferido] | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter | solo en `node_finished` | el outcome del agente es telemetría, esto es el veredicto |
-| `outcome` / `artifacts` / `died` / `outside_scope` / `requested_scope` / `unset` / `unchanged` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló | solo en `node_failed` | por qué falló, como dato: uno de los siete, plano sobre el payload; ver abajo |
+| `outcome` / `artifacts` / `died` / `outside_scope` / `requested_scope` / `unset` / `unchanged` / `denied_paths` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló \| paths que el trabajo escribió y el proyecto niega a todo run | solo en `node_failed` | por qué falló, como dato: uno de los ocho, plano sobre el payload; ver abajo |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage` |
 | `commit` | sha de commit git | no; en `node_finished` y `node_failed`, y ausente cuando el cierre no commiteó nada | el commit que el cierre hizo de lo que el nodo dejó en el árbol del run: ausente si nada cambió, si el nodo aterrizó desde un checkout propio, si otro nodo seguía trabajando en el mismo árbol o si el run trabaja sin árbol propio (D201) |
 | `tree` | id de árbol git | no; en `node_finished` y `node_failed`, y ausente en un log escrito antes del campo | el árbol del run tal como el nodo lo dejó, después de lo que aterrizó ahí —un nodo con checkout propio nombra el árbol del run en que aterrizó, no su checkout—; un gate nombra el que vio quien decidió. Es contra lo que se mide si el pase de un invariante sigue hablando del árbol del run (Contrato §11.3) |
 | `retryable` | `bool` | solo en `node_failed` | guía la política de reintento; lo fija quien gobierna el presupuesto, de modo que un intento terminal nunca se registra como reintentable |
 
-**La falla es dato, no prosa.** La falla toma una de siete formas, planas sobre el
+**La falla es dato, no prosa.** La falla toma una de ocho formas, planas sobre el
 payload: `outcome: <frase>`, una falla que el engine enuncia en una oración,
 `artifacts: [...]`, un elemento por artifact declarado que no cerró, `died:
 {adapter, exit?}`, una sesión que terminó sin evento terminal, `outside_scope:
@@ -325,7 +326,9 @@ sobre el mismo árbol en que falló su intento `since`: no se corre, porque el m
 comando sobre el mismo árbol responde lo mismo, y `failure` es la falla de ese
 intento —una negativa sobre otra negativa sigue nombrando el intento que corrió—. Su
 menú sigue ofreciendo `retry`: la persona puede cambiar el árbol mientras decide
-(D197). Cada elemento de `artifacts`
+(D197), o `denied_paths: [...]`, cada path que el trabajo escribió y el proyecto niega
+a todo run (`permissions.paths.deny`): su menú nunca ofrece `grant`, porque ningún
+grant ensancha lo negado (D206). Cada elemento de `artifacts`
 es una de cuatro: el archivo — `path` y uno de `artifact-missing`, `artifact-empty`,
 `artifact-oversized` (con bytes y techo) o `artifact-unreadable` —, un documento que
 nadie entregó (`artifact-undelivered`): el `node` que lo declaró y el `artifact`

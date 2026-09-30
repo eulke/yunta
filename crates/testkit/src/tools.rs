@@ -198,6 +198,7 @@ impl ToolsHost {
             index: self.run_dir.join("node-check-index"),
             may_ask,
             staged: Arc::new(OnceLock::from(Vec::new())),
+            denied: Vec::new(),
         };
         self.open(node, (None, Some(access)), cwd, Vec::new()).await
     }
@@ -212,6 +213,7 @@ impl ToolsHost {
             index: self.run_dir.join("check-index"),
             cancel: CancellationToken::new(),
             staged: Arc::new(OnceLock::from(Vec::new())),
+            denied: Vec::new(),
         }
     }
 

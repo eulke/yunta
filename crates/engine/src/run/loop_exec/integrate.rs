@@ -300,7 +300,10 @@ async fn integrate_task(
         task_worktree,
         &onto,
         &crate::run_dir::index_for(ctx.run_dir, &unit.who),
-        &effective_scope(ctx, task).await?,
+        crate::scope::Ceiling {
+            scope: &effective_scope(ctx, task).await?,
+            deny: ctx.manifest.config.denied_paths(),
+        },
         staged,
         supervision,
     )
@@ -311,6 +314,7 @@ async fn integrate_task(
             task_id: Some(task.id.clone()),
             diff: scope.diff.clone(),
             violations: scope.violations.clone(),
+            denied: scope.denied.clone(),
         })),
     )
     .await?;

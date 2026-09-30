@@ -278,6 +278,8 @@ pub struct Policy {
     /// failure it had on that scope: `false` only under a permission
     /// ceiling of `scope_expansion.max_mode: deny`.
     pub grants_scope: bool,
+    /// What the project denies to every run: never offered as a grant.
+    pub denied: Vec<yunta_core::ScopeGlob>,
 }
 
 impl Policy {
@@ -302,6 +304,7 @@ impl Policy {
                 .as_ref()
                 .map(|baseline| baseline.suite.clone()),
             grants_scope: person_may_grant_scope(&manifest.config),
+            denied: manifest.config.denied_paths().to_vec(),
         }
     }
 }
@@ -392,12 +395,18 @@ impl<'a> Board<'a> {
 
     /// Whether a person may widen `node`'s scope by what `failure`
     /// needs: the failure is about scope, the node is not read-only —
-    /// its word is the whole of its ceiling — and the run's permission
-    /// ceiling lets a person grant.
+    /// its word is the whole of its ceiling — the run's permission
+    /// ceiling lets a person grant, and nothing it would grant is a path
+    /// the project denies.
     fn grantable(&self, node: &Node, failure: &Failure) -> bool {
         self.policy.grants_scope
             && node.permissions != Some(yunta_core::NodePermissions::ReadOnly)
             && failure.wants_scope()
+            && failure.scope_wanted().is_ok_and(|wanted| {
+                !wanted
+                    .iter()
+                    .any(|glob| yunta_core::reaches_any(glob, &self.policy.denied))
+            })
     }
 
     /// How a ready or re-opened gate is driven: poll the handle it was

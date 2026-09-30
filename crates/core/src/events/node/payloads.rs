@@ -231,6 +231,11 @@ pub struct ScopeCheckedPayload {
     pub task_id: Option<TaskId>,
     pub diff: Vec<PathBuf>,
     pub violations: Vec<PathBuf>,
+    /// The paths of the diff the project denies to every run, whatever
+    /// the scope allows. Absent when there are none, and in a log written
+    /// before the project could deny any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub denied: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

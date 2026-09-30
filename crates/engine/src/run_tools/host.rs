@@ -224,6 +224,9 @@ pub struct TaskAccess {
     /// What a scope audit holds the diff to: the scope the task declared
     /// plus every path the log granted it when this cycle began.
     pub scope: Vec<ScopeGlob>,
+    /// What the project denies to every run, which the check reports
+    /// whatever the scope allows.
+    pub denied: Vec<ScopeGlob>,
     /// The checkout the session works in and the tree it started from.
     pub unit: Unit,
     /// Where a check keeps its private index — apart from the close's
@@ -252,6 +255,9 @@ pub struct NodeScopeAccess {
     /// Whether the session may ask for more: whether a person may grant
     /// this node anything on this run.
     pub may_ask: bool,
+    /// What the project denies to every run, which the check reports
+    /// whatever the scope allows.
+    pub denied: Vec<ScopeGlob>,
     /// What the adapter stages in the checkout for its own mechanics,
     /// which no audit counts. Known once the session's request is built,
     /// which is before any call can arrive.

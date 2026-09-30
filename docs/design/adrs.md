@@ -212,3 +212,4 @@ lista.
 **D203 — A workflow runs a project's commands by name.** `accepted` → [`adr/D203-a-workflow-runs-a-projects-commands-by-name.md`](adr/D203-a-workflow-runs-a-projects-commands-by-name.md)
 **D204 — An optional node the project cannot run is left out.** `accepted` → [`adr/D204-an-optional-node-the-project-cannot-run-is-left-out.md`](adr/D204-an-optional-node-the-project-cannot-run-is-left-out.md)
 **D205 — A node's scope may be what the run changed.** `accepted` → [`adr/D205-a-nodes-scope-may-be-what-the-run-changed.md`](adr/D205-a-nodes-scope-may-be-what-the-run-changed.md)
+**D206 — A project's denied paths are never written by a run.** `accepted` → [`adr/D206-a-projects-denied-paths-are-never-written-by-a-run.md`](adr/D206-a-projects-denied-paths-are-never-written-by-a-run.md)

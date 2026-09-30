@@ -145,8 +145,8 @@ pub use run_tools::{
 };
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
 pub use scope::{
-    audit, audits, changed_between, changed_since, effective_scope, fence_breach, violations,
-    Breach, ScopeCheckError, ScopeCheckResult,
+    audit, audits, changed_between, changed_since, denied, effective_scope, fence_breach,
+    violations, Breach, Ceiling, ScopeCheckError, ScopeCheckResult,
 };
 pub use stats::{
     compute_run_stats, compute_run_stats_at, median, FindingActivity, NodeStat, RunStats,
