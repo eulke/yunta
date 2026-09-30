@@ -52,8 +52,13 @@ pub(crate) fn check_input_specs(
 pub(crate) fn check_input_references(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     if let Some(defaults) = &workflow.node_defaults {
         if let Some(hooks) = &defaults.hooks {
-            for step in hooks.before.iter().chain(&hooks.after) {
-                check_template_text(&NODE_DEFAULTS, &step.run, workflow, errors);
+            for script in hooks
+                .before
+                .iter()
+                .chain(&hooks.after)
+                .filter_map(|step| step.run.script())
+            {
+                check_template_text(&NODE_DEFAULTS, script, workflow, errors);
             }
         }
     }
@@ -70,7 +75,11 @@ pub(crate) fn check_input_references_in_nodes(
             NodeKind::Prompt {
                 prompt: yunta_core::PromptSource::Inline(text),
             } => check_template_text(&node.id, text, workflow, errors),
-            NodeKind::Bash { run } => check_template_text(&node.id, run, workflow, errors),
+            NodeKind::Bash { run } => {
+                if let Some(script) = run.script() {
+                    check_template_text(&node.id, script, workflow, errors);
+                }
+            }
             NodeKind::Loop {
                 prompt: yunta_core::PromptSource::Inline(text),
                 ..
@@ -84,8 +93,13 @@ pub(crate) fn check_input_references_in_nodes(
         }
 
         if let Some(hooks) = &node.hooks {
-            for step in hooks.before.iter().chain(&hooks.after) {
-                check_template_text(&node.id, &step.run, workflow, errors);
+            for script in hooks
+                .before
+                .iter()
+                .chain(&hooks.after)
+                .filter_map(|step| step.run.script())
+            {
+                check_template_text(&node.id, script, workflow, errors);
             }
         }
 

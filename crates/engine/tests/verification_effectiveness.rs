@@ -14,9 +14,7 @@ use yunta_testkit_core::Log;
 fn node(id: &str, on_failure: Option<OnFailure>) -> Node {
     Node {
         id: id.into(),
-        kind: NodeKind::Bash {
-            run: "true".to_string(),
-        },
+        kind: NodeKind::Bash { run: "true".into() },
         depends_on: Vec::new(),
         scope: Vec::new(),
         runner: None,

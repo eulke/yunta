@@ -404,6 +404,12 @@ impl Default for ModeName {
 }
 
 string_id!(
+    /// A command the project declares under `commands:` and a workflow
+    /// runs by name: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    CommandName, what = "command name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
     /// An executor's name — a `skills.executors` entry a `kind: executor`
     /// node refers to: `^[A-Za-z][A-Za-z0-9_-]*$`.
     ExecutorName, what = "executor name", rule = NAME_RULE, check = is_name

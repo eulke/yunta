@@ -20,7 +20,9 @@ a typo, or a key that belongs to another kind — is refused by `yunta check` an
 every command that reads the file, with the key, where it sits and the keys that
 are valid there. A mistyped key never silently becomes a default.
 
-- **`bash`** — `run: "<command>"`. Exit code is the verdict; no session, no agent.
+- **`bash`** — `run: "<command>"`, or `run: { command: <name> }` to run one of the
+  project's own commands (see [Project commands](#project-commands)). Exit code is
+  the verdict; no session, no agent.
 - **`prompt`** — `prompt: "<text>"` (or `prompt: { file: path/to/prompt.md }` for
   longer ones). Opens one agent session. `runner:` picks which role from `runners:`
   in config resolves it; `permissions: read-only|edit|full` caps what that session's
@@ -131,6 +133,40 @@ Two environment variables move all of this:
 - **`YUNTA_ORG_CONFIG`** overrides where the org layer is read from, for a
   machine that keeps its shared baseline somewhere other than
   `/etc/yunta/config.yaml`.
+
+## Project commands
+
+A workflow says *what* it needs run; the project says *how*. `commands:` in the
+config names what this project runs for each capability:
+
+```yaml
+commands:
+  lint: "pnpm lint"
+  typecheck: "pnpm typecheck"
+```
+
+and a `bash` node or a hook step runs one by name:
+
+```yaml
+name: checked
+nodes:
+  - id: lint
+    kind: bash
+    run: { command: lint }
+```
+
+The name is the workflow's and the text the project's, so a workflow — a pack's
+above all — never has to know which tool a repository lints with. A project's
+command runs exactly as the project wrote it: no `{{...}}` template is rendered
+into it, and `permissions.commands` governs it like any other command.
+`commands:` merges key by key across config layers, so a repo can name its own
+`lint` and keep the `test` its user or org layer declares.
+
+A node that names a command the config does not declare cannot run, and no
+attempt of the run can change that — the run's config is frozen when it is
+created. `yunta check` refuses such a workflow before the first token, naming the
+node and the command, and a run that meets one anyway fails the node without
+offering a retry.
 
 ## Context
 
@@ -265,7 +301,8 @@ with an empty `~/.yunta/knowledge/`.
 
 `hooks: { before: [...], after: [...] }` on a node (or `node_defaults.hooks` for the
 whole workflow) runs shell steps immediately before or after the node's own work,
-each as `{ run: "<cmd>", timeout_seconds?, on_failure: fail|warn }`. A failed
+each as `{ run: "<cmd>", timeout_seconds?, on_failure: fail|warn }` — `run` takes a
+project command by name here too. A failed
 `before` hook stops the node before any session opens; `after` hooks run before
 verification, so their own edits are subject to the node's `scope` like anything
 else. Hooks never re-route — that's `on_failure.goto`'s job, not a hook's.

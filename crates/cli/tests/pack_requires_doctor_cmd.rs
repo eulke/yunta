@@ -16,7 +16,7 @@ fn write_pack_with_requires(dir: &Path) {
          requires:\n  \
            runners: [{ name: reviewer }]\n  \
            mcp_servers: [internal-docs]\n  \
-           commands: [this-binary-almost-certainly-does-not-exist-anywhere]\n\
+           programs: [this-binary-almost-certainly-does-not-exist-anywhere]\n\
          declares:\n  permissions: read-only\n  network: false\n  executors: []\n\
          contents:\n  workflows: [workflows/review.yaml]\n",
     )
@@ -72,8 +72,8 @@ fn doctor_flags_a_pack_whose_requires_the_local_config_cannot_satisfy() {
     );
     assert!(
         text.lines().any(|l| l
-            == "  command `this-binary-almost-certainly-does-not-exist-anywhere` — not found on PATH"),
-        "the missing command is named: {text}"
+            == "  program `this-binary-almost-certainly-does-not-exist-anywhere` — not found on PATH"),
+        "the missing program is named: {text}"
     );
 }
 
@@ -321,7 +321,7 @@ fn check_and_run_refuse_a_pack_workflow_whose_requires_are_unmet() {
     for named in [
         "pack `acme/review-pack` requires runner `reviewer`",
         "pack `acme/review-pack` requires MCP server `internal-docs`",
-        "pack `acme/review-pack` requires command \
+        "pack `acme/review-pack` requires program \
          `this-binary-almost-certainly-does-not-exist-anywhere`",
     ] {
         assert!(said.contains(named), "`{named}` in: {said}");
@@ -330,7 +330,7 @@ fn check_and_run_refuse_a_pack_workflow_whose_requires_are_unmet() {
     let run_out = yunta_in!(&repo, &home, &["run", "acme/review"]);
     assert!(!run_out.status.success(), "{}", stdout(&run_out));
     assert!(
-        stderr(&run_out).contains("requires command"),
+        stderr(&run_out).contains("requires program"),
         "{}",
         stderr(&run_out)
     );

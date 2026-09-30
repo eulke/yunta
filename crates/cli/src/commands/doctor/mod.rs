@@ -12,7 +12,7 @@
 //! project's merged config: roles resolvable, `mcp_servers:` defined,
 //! and — the one part `yunta_engine::check_pack_requires` deliberately
 //! leaves to this command, since it needs real filesystem access —
-//! `requires.commands` present on `PATH`.
+//! `requires.programs` present on `PATH`.
 
 mod session;
 
@@ -105,7 +105,7 @@ async fn probe_adapters(ctx: &Context) -> (BTreeSet<AdapterId>, bool) {
 
 /// Checks every installed pack's own `requires:` against this
 /// project's merged config — roles resolvable, `mcp_servers:` defined,
-/// and `requires.commands` present on `PATH`. Returns `false` (and
+/// and `requires.programs` present on `PATH`. Returns `false` (and
 /// prints an actionable line per gap) when any pack has something
 /// unmet; a project with no packs installed prints nothing and returns
 /// `true`.
@@ -121,12 +121,12 @@ fn check_installed_pack_requires(cwd: &std::path::Path, config: &yunta_core::Con
         }
         for (_, manifest) in packs.installed {
             let gap = yunta_engine::check_pack_requires(&manifest, config);
-            let missing_commands: Vec<&String> = gap
-                .required_commands
+            let missing_programs: Vec<&String> = gap
+                .required_programs
                 .iter()
-                .filter(|cmd| !super::refusals::command_on_path(cmd))
+                .filter(|program| !super::refusals::command_on_path(program))
                 .collect();
-            if gap.is_satisfied() && missing_commands.is_empty() {
+            if gap.is_satisfied() && missing_programs.is_empty() {
                 continue;
             }
             all_satisfied = false;
@@ -144,8 +144,8 @@ fn check_installed_pack_requires(cwd: &std::path::Path, config: &yunta_core::Con
                     "  mcp_server `{server}` — not defined under `mcp_servers:`; add it there"
                 );
             }
-            for command in missing_commands {
-                println!("  command `{command}` — not found on PATH");
+            for program in missing_programs {
+                println!("  program `{program}` — not found on PATH");
             }
         }
     }

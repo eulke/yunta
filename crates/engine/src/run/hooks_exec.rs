@@ -2,7 +2,7 @@
 //! own list merged over `node_defaults`, and how a hook failure lands.
 
 use yunta_core::events::{EventPayload, HookExecutedPayload, HookPhase};
-use yunta_core::{HookStep, Hooks, Node};
+use yunta_core::{ConfigKey, HookStep, Hooks, Node, Resolved};
 
 use crate::process::{spawn_governed, CommandOutput, GovernedCommand, Outcome};
 use yunta_core::template::render_template;
@@ -19,8 +19,12 @@ use yunta_core::events::NodeEvent;
 /// by declaring itself warn-only.
 pub(super) enum HookRun {
     Passed,
-    Failed { said: String },
+    Failed {
+        said: String,
+    },
     Violation(String),
+    /// It names a command the run's frozen config does not declare.
+    Unset(ConfigKey),
 }
 
 impl HookRun {
@@ -43,7 +47,22 @@ pub(super) async fn run_hook(
     phase: HookPhase,
     step: &HookStep,
 ) -> Result<HookRun, RunError> {
-    let rendered = match render_template(&step.run, &template_vars(ctx, node)) {
+    let script = match step.run.resolve(&ctx.manifest.config) {
+        Ok(Resolved::Script(script)) => script,
+        Ok(Resolved::Project { text, .. }) => text,
+        Err(command) => {
+            return Ok(HookRun::Unset(ConfigKey::Command {
+                command: command.clone(),
+            }))
+        }
+    };
+    // A project's command runs as the project wrote it; only a script is
+    // the workflow's to template.
+    let rendered = match step.run.project() {
+        Some(_) => Ok(script.to_string()),
+        None => render_template(script, &template_vars(ctx, node)),
+    };
+    let rendered = match rendered {
         Ok(rendered) => rendered,
         Err(_) => {
             // An unrenderable hook is a failed hook — the
@@ -53,7 +72,7 @@ pub(super) async fn run_hook(
                 Some(&node.id),
                 EventPayload::Node(NodeEvent::HookExecuted(HookExecutedPayload {
                     phase,
-                    command: step.run.clone(),
+                    command: script.to_string(),
                     exit_code: -1,
                     output: None,
                     tail: Vec::new(),

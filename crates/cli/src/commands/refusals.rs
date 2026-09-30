@@ -79,7 +79,7 @@ pub(crate) fn environment(
             .unwrap_or_default(),
         yunta_engine::WorkflowOrigin::Repo => Vec::new(),
     };
-    let missing_programs = yunta_engine::programs_named(workflow)
+    let missing_programs = yunta_engine::programs_named(workflow, config)
         .into_iter()
         .filter(|(_, program)| !command_on_path(program))
         .map(|(node, program)| yunta_engine::CheckWarning::ProgramNotOnPath { node, program })

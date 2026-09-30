@@ -277,7 +277,7 @@ declares:
         .to_string();
     assert_eq!(
         error,
-        "`requires.roles`: requires: unknown field `roles`, expected one of `runners`, `mcp_servers`, `commands` at line 5 column 3"
+        "`requires.roles`: requires: unknown field `roles`, expected one of `runners`, `mcp_servers`, `programs` at line 5 column 3"
     );
 }
 

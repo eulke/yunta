@@ -32,7 +32,7 @@ fn the_reference_pack_parses_and_round_trips() {
     assert_eq!(pack.requires.runners[1].name, "mechanical");
     assert_eq!(pack.requires.runners[1].permissions, None);
     assert_eq!(pack.requires.mcp_servers, vec!["internal-docs"]);
-    assert_eq!(pack.requires.commands, vec!["gh", "cargo"]);
+    assert_eq!(pack.requires.programs, vec!["gh", "cargo"]);
 
     assert_eq!(pack.declares.permissions, NodePermissions::ReadOnly);
     assert!(!pack.declares.network);
@@ -84,7 +84,7 @@ declares:
         .expect("declares is the only hard requirement beyond identity");
     assert!(pack.requires.runners.is_empty());
     assert!(pack.requires.mcp_servers.is_empty());
-    assert!(pack.requires.commands.is_empty());
+    assert!(pack.requires.programs.is_empty());
     assert!(pack.contents.workflows.is_empty());
 }
 

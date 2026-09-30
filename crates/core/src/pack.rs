@@ -72,9 +72,12 @@ pub struct PackRequires {
     /// Names the installer must define under its own `mcp_servers:`.
     #[serde(default)]
     pub mcp_servers: Vec<McpServerName>,
-    /// Binaries the pack's `bash` nodes assume are on `PATH`.
+    /// Programs the pack's `bash` nodes and hooks start themselves and
+    /// assume are on `PATH`. A capability the project provides — its
+    /// lint, its tests — is a command the workflow names instead, and
+    /// never listed here.
     #[serde(default)]
-    pub commands: Vec<String>,
+    pub programs: Vec<String>,
 }
 
 /// One entry in `requires.runners` — a runner name plus the ceiling of

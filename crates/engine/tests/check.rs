@@ -27,9 +27,7 @@ fn check(workflow: &yunta_core::Workflow, config: &yunta_core::ConfigLayer) -> V
 fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
     Node {
         id: id.into(),
-        kind: NodeKind::Bash {
-            run: run.to_string(),
-        },
+        kind: NodeKind::Bash { run: run.into() },
         depends_on: depends_on.iter().map(|&d| d.into()).collect(),
         scope: Vec::new(),
         runner: None,
@@ -618,7 +616,7 @@ fn a_hook_command_matching_a_denied_pattern_is_a_check_error() {
     let mut node = bash("build", "cargo build", &[]);
     node.hooks = Some(yunta_core::Hooks {
         before: vec![yunta_core::HookStep {
-            run: "sudo sysctl -w net.core.x=1".to_string(),
+            run: "sudo sysctl -w net.core.x=1".into(),
             timeout_seconds: None,
             on_failure: Default::default(),
         }],

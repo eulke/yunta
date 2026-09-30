@@ -141,7 +141,7 @@ pub fn check_mounted(
     check_node_outputs(workflow, &mut errors);
 
     if let Some(permissions) = &config.permissions {
-        check_commands(&workflow.nodes, permissions, &mut errors);
+        check_commands(&workflow.nodes, config, permissions, &mut errors);
         if let Some(default_hooks) = workflow
             .node_defaults
             .as_ref()
@@ -149,9 +149,14 @@ pub fn check_mounted(
         {
             // node_defaults hooks run on every node that declares none of
             // its own — their commands are as real as any node's.
-            for step in default_hooks.before.iter().chain(&default_hooks.after) {
+            for command in default_hooks
+                .before
+                .iter()
+                .chain(&default_hooks.after)
+                .filter_map(|step| step.run.text(config))
+            {
                 if let Some(rule) =
-                    crate::permissions::command_violation(&step.run, Some(permissions))
+                    crate::permissions::command_violation(command, Some(permissions))
                 {
                     errors.push(CheckError::CommandDenied {
                         node: NODE_DEFAULTS.clone(),

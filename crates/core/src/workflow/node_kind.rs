@@ -18,7 +18,7 @@ pub enum NodeKind {
         prompt: PromptSource,
     },
     Bash {
-        run: String,
+        run: super::RunCommand,
     },
     Loop {
         until: LoopUntil,

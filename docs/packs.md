@@ -186,8 +186,11 @@ Field by field:
 - **`requires`** — the floor the installing team's config must provide:
   `runners` (the runner names your workflows use in `runner:`, optionally
   with the permission profile you expect them resolvable at), `mcp_servers` (names
-  your workflows reference under `context: { mcp: ... }`), `commands`
-  (binaries your `bash`/hook steps assume are on `PATH`). None of this is
+  your workflows reference under `context: { mcp: ... }`), `programs`
+  (binaries your `bash`/hook steps start themselves and assume are on
+  `PATH`). A capability the installing project provides — its lint, its
+  tests — is not a program: name it as a project command instead (see
+  below). None of this is
   enforced at install time — `yunta doctor` reports gaps, naming your pack,
   so an installing team can fix them before running anything.
 - **`contents`** — every path your pack ships, relative to the pack's own
@@ -201,6 +204,13 @@ Field by field:
   roles (`runner: reviewer`); the installing team's own `.yunta/config.yaml`
   resolves those. A pack that hardcodes `runner: claude-code` couldn't run on
   a Codex-only team, which defeats the point of shipping a pack at all.
+- **No tool of the installing repository.** A command your workflow runs to
+  lint, test or build is the project's to choose: write
+  `run: { command: lint }` and let the installing project declare what `lint`
+  runs under `commands:` (see [project commands](guide.md#project-commands)).
+  `yunta check` and `yunta doctor` tell the person installing your pack which
+  names their config lacks. List a program under `requires.programs` only when
+  your own `bash` step starts it.
 - **No composition outside the pack's own contents.** A workflow inside your
   pack can `use:` another workflow from the same pack; reaching into another
   pack or back out to the installing repo is rejected by `check`.

@@ -2,6 +2,7 @@
 
 use super::*;
 use yunta_core::template::TemplateVar;
+use yunta_core::RunCommand;
 
 /// Scans every literal `bash`/hook command for a `git push`
 /// aimed at the base branch — the `{{project.base_branch}}` template,
@@ -77,16 +78,9 @@ pub(crate) fn collect_push_to_base_warnings(
         let protected = gate_protected(i, nodes, &index_of, &mut cache);
         // A parallel child's commands push from the same ancestry as
         // its group.
-        let mut targets: Vec<(&Node, &str)> = Vec::new();
-        fn collect_commands<'a>(node: &'a Node, targets: &mut Vec<(&'a Node, &'a str)>) {
-            if let NodeKind::Bash { run } = &node.kind {
-                targets.push((node, run));
-            }
-            if let Some(hooks) = &node.hooks {
-                for step in hooks.before.iter().chain(&hooks.after) {
-                    targets.push((node, &step.run));
-                }
-            }
+        let mut targets: Vec<(&Node, &RunCommand)> = Vec::new();
+        fn collect_commands<'a>(node: &'a Node, targets: &mut Vec<(&'a Node, &'a RunCommand)>) {
+            targets.extend(yunta_core::node_commands(node).map(|run| (node, run)));
             if let NodeKind::Parallel {
                 nodes: children, ..
             } = &node.kind
@@ -98,6 +92,9 @@ pub(crate) fn collect_push_to_base_warnings(
         }
         collect_commands(node, &mut targets);
         for (owner, command) in targets {
+            let Some(command) = command.text(config) else {
+                continue;
+            };
             if let Some(branch) = pushes_to_base(command) {
                 if !protected {
                     warnings.push(CheckWarning::PushToBaseWithoutGate {

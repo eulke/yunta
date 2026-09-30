@@ -22,7 +22,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AdapterId, McpServerName, RunnerName};
+use crate::ids::{AdapterId, CommandName, McpServerName, RunnerName};
 use crate::workflow::OnInterrupt;
 use env::expand_path;
 use merge::merge;
@@ -66,6 +66,12 @@ pub struct ConfigLayer {
     pub paths: Option<PathsConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub defaults: Option<DefaultsConfig>,
+    /// `commands:` — `{name: command}`, what this project runs for each
+    /// capability a workflow names (`run: { command: lint }`). The name
+    /// is the workflow's, the text the project's: a pack asks for "the
+    /// lint" and the project says which tool that is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commands: Option<BTreeMap<CommandName, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub baseline: Option<BaselineConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -93,6 +99,11 @@ pub struct ConfigLayer {
 }
 
 impl ConfigLayer {
+    /// The text of the project's command `name`, if it declares one.
+    pub fn command(&self, name: &CommandName) -> Option<&str> {
+        self.commands.as_ref()?.get(name).map(String::as_str)
+    }
+
     /// Expands a leading `~` in every path this layer declares —
     /// `adapters.<id>.binary`, `storage.path`, `paths.runs`,
     /// `paths.worktrees`, `skills.paths[]` — against `home`, so no

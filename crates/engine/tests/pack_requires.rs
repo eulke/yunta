@@ -11,7 +11,7 @@ use yunta_engine::check_pack_requires;
 fn manifest(
     runners: Vec<RequiredRunner>,
     mcp_servers: Vec<&str>,
-    commands: Vec<&str>,
+    programs: Vec<&str>,
 ) -> PackManifest {
     PackManifest {
         name: "review-pack".into(),
@@ -23,7 +23,7 @@ fn manifest(
         requires: PackRequires {
             runners,
             mcp_servers: mcp_servers.into_iter().map(Into::into).collect(),
-            commands: commands.into_iter().map(str::to_string).collect(),
+            programs: programs.into_iter().map(str::to_string).collect(),
         },
         declares: PackDeclares {
             permissions: yunta_core::NodePermissions::ReadOnly,
@@ -131,16 +131,16 @@ fn a_defined_mcp_server_resolves() {
 }
 
 #[test]
-fn required_commands_pass_through_untouched_for_the_caller_to_check_on_path() {
+fn required_programs_pass_through_untouched_for_the_caller_to_check_on_path() {
     let manifest = manifest(vec![], vec![], vec!["gh", "cargo"]);
     let config = ConfigLayer::default();
 
     let gap = check_pack_requires(&manifest, &config);
     assert_eq!(
-        gap.required_commands,
+        gap.required_programs,
         vec!["gh".to_string(), "cargo".to_string()]
     );
-    // Commands never affect is_satisfied() — that's yunta doctor's own
+    // Programs never affect is_satisfied() — that's yunta doctor's own
     // PATH lookup, not this pure function's job.
     assert!(gap.is_satisfied());
 }
@@ -157,7 +157,7 @@ fn a_fully_satisfied_pack_reports_nothing_missing() {
 }
 
 /// What a gap leaves a run without, as the refusals `check` gives: a
-/// command counts only when the caller's lookup cannot find it.
+/// program counts only when the caller's lookup cannot find it.
 #[test]
 fn a_gap_is_refused_for_each_thing_the_run_would_lack() {
     let manifest = manifest(
@@ -171,14 +171,14 @@ fn a_gap_is_refused_for_each_thing_the_run_would_lack() {
     let gap = check_pack_requires(&manifest, &ConfigLayer::default());
 
     let refused: Vec<String> = gap
-        .unmet(&|command| command == "cargo")
+        .unmet(&|program| program == "cargo")
         .iter()
         .map(ToString::to_string)
         .collect();
     assert_eq!(refused.len(), 3, "{refused:?}");
     assert!(refused[0].starts_with("pack `acme/review-pack` requires runner `reviewer`"));
     assert!(refused[1].starts_with("pack `acme/review-pack` requires MCP server `internal-docs`"));
-    assert!(refused[2].starts_with("pack `acme/review-pack` requires command `gh`"));
+    assert!(refused[2].starts_with("pack `acme/review-pack` requires program `gh`"));
 
     let satisfied = check_pack_requires(
         &self::manifest(vec![], vec![], vec!["cargo"]),

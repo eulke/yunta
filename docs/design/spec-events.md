@@ -314,8 +314,8 @@ payload: `outcome: <frase>`, una falla que el engine enuncia en una oración,
 {adapter, exit?}`, una sesión que terminó sin evento terminal, `outside_scope:
 [...]`, cada path que el diff del nodo alcanzó fuera de su `scope:`, o
 `requested_scope: {paths, reason}`, la ampliación que pidió la sesión del nodo, o
-`unset: {key, ...}` —`baseline_suite`, `coverage`, `executor` (con `executor`) o
-`runner`—, la clave de config sin la que el nodo no corre y que la config congelada
+`unset: {key, ...}` —`baseline_suite`, `coverage`, `executor` (con `executor`),
+`runner` o `command` (con `command`, el nombre del comando del proyecto)—, la clave de config sin la que el nodo no corre y que la config congelada
 del run no declara: ningún intento de ese run puede terminar distinto, así que su
 menú no ofrece `retry`, o `unchanged: {since, failure}`, un `check` que juzga el
 árbol (`baseline_compare`, `coverage_gate`) al que una persona pidió correr de nuevo

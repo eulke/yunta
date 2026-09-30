@@ -6,7 +6,7 @@
 //! resolves to at least one candidate, whether an `mcp_servers:` name
 //! is defined — no adapter probing (`check` doesn't do that for a
 //! workflow's own `runner:` either) and no PATH
-//! lookup for `requires.commands` (that needs real filesystem access,
+//! lookup for `requires.programs` (that needs real filesystem access,
 //! `yunta doctor`'s job, not this pure function's).
 
 use yunta_core::{ConfigLayer, McpServerName, PackManifest, PackRef, RunnerName};
@@ -24,9 +24,9 @@ pub struct PackRequiresGap {
     pub missing_runners: Vec<RunnerName>,
     /// `requires.mcp_servers` names absent from `mcp_servers:`.
     pub missing_mcp_servers: Vec<McpServerName>,
-    /// `requires.commands` — passed through untouched; presence on
+    /// `requires.programs` — passed through untouched; presence on
     /// `PATH` is the caller's own concern (`yunta doctor`).
-    pub required_commands: Vec<String>,
+    pub required_programs: Vec<String>,
 }
 
 impl PackRequiresGap {
@@ -35,7 +35,7 @@ impl PackRequiresGap {
     }
 
     /// Everything this gap leaves a run of the pack's workflows without,
-    /// with `on_path` answering whether a required command is installed
+    /// with `on_path` answering whether a required program is installed
     /// where the run would look.
     pub fn unmet(&self, on_path: &dyn Fn(&str) -> bool) -> Vec<crate::CheckError> {
         let runners = self.missing_runners.iter().map(|runner| {
@@ -46,16 +46,16 @@ impl PackRequiresGap {
         let servers = self.missing_mcp_servers.iter().map(|server| {
             format!("MCP server `{server}`, which `mcp_servers:` does not define — define it")
         });
-        let commands = self
-            .required_commands
+        let programs = self
+            .required_programs
             .iter()
-            .filter(|command| !on_path(command))
-            .map(|command| {
-                format!("command `{command}`, which is not on this machine's `PATH` — install it")
+            .filter(|program| !on_path(program))
+            .map(|program| {
+                format!("program `{program}`, which is not on this machine's `PATH` — install it")
             });
         runners
             .chain(servers)
-            .chain(commands)
+            .chain(programs)
             .map(|requirement| crate::CheckError::PackRequirementUnmet {
                 pack: self.pack.to_string(),
                 requirement,
@@ -96,6 +96,6 @@ pub fn check_pack_requires(manifest: &PackManifest, config: &ConfigLayer) -> Pac
         pack: manifest.reference(),
         missing_runners,
         missing_mcp_servers,
-        required_commands: manifest.requires.commands.clone(),
+        required_programs: manifest.requires.programs.clone(),
     }
 }

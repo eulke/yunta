@@ -161,7 +161,7 @@ fn audit_node(node: &Node, workflow_dir: &Path, node_defaults_hooks: Option<&Hoo
 
     let (command, prompt, executor) = match &node.kind {
         NodeKind::Prompt { prompt } => (None, Some(resolve_prompt(prompt, workflow_dir)), None),
-        NodeKind::Bash { run } => (Some(run.clone()), None, None),
+        NodeKind::Bash { run } => (Some(run.to_string()), None, None),
         NodeKind::Loop { until, prompt, .. } => (
             Some(until.as_str().to_string()),
             Some(resolve_prompt(prompt, workflow_dir)),
@@ -178,8 +178,8 @@ fn audit_node(node: &Node, workflow_dir: &Path, node_defaults_hooks: Option<&Hoo
         id: node.id.as_str().to_string(),
         kind: node.kind.kind_name(),
         command,
-        hooks_before: before.iter().map(|step| step.run.clone()).collect(),
-        hooks_after: after.iter().map(|step| step.run.clone()).collect(),
+        hooks_before: before.iter().map(|step| step.run.to_string()).collect(),
+        hooks_after: after.iter().map(|step| step.run.to_string()).collect(),
         prompt,
         context: node.context.iter().map(describe_context).collect(),
         permissions: node.permissions.map(yunta_core::NodePermissions::as_str),

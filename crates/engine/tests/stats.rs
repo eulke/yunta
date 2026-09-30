@@ -20,9 +20,7 @@ use yunta_testkit_core::Log;
 fn node(id: &str, depends_on: &[&str]) -> Node {
     Node {
         id: id.into(),
-        kind: NodeKind::Bash {
-            run: "true".to_string(),
-        },
+        kind: NodeKind::Bash { run: "true".into() },
         depends_on: depends_on.iter().map(|d| (*d).into()).collect(),
         scope: Vec::new(),
         runner: Some("implementer".into()),

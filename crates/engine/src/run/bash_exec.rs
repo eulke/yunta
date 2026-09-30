@@ -3,7 +3,7 @@
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::TokenUsage;
-use yunta_core::Node;
+use yunta_core::{ConfigKey, Node, Resolved, RunCommand};
 
 use crate::process::{spawn_governed, GovernedCommand, Outcome};
 
@@ -22,12 +22,23 @@ use super::{RunCtx, RunError};
 pub(super) async fn execute_bash(
     ctx: &RunCtx<'_>,
     node: &Node,
-    run: &str,
+    run: &RunCommand,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    let rendered = match render_or_fail(ctx, node, run).await? {
-        Step::Value(rendered) => rendered,
-        Step::Ended(end) => return Ok(end),
+    // A script is the workflow's and is rendered with its templates; a
+    // project's command runs as the project wrote it.
+    let rendered = match run.resolve(&ctx.manifest.config) {
+        Ok(Resolved::Script(script)) => match render_or_fail(ctx, node, script).await? {
+            Step::Value(rendered) => rendered,
+            Step::Ended(end) => return Ok(end),
+        },
+        Ok(Resolved::Project { text, .. }) => text.to_string(),
+        Err(command) => {
+            let key = ConfigKey::Command {
+                command: command.clone(),
+            };
+            return super::check_exec::unset(ctx, node, key).await;
+        }
     };
 
     // The runtime moment: the rendered command against the merged

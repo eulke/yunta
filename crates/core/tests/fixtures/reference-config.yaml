@@ -47,6 +47,10 @@ skills:
 mcp_servers:
   internal-docs: { url: "https://docs.interna.example/mcp", auth_env: DOCS_TOKEN }
 
+commands:
+  lint: "cargo clippy --workspace -- -D warnings"
+  fmt: "cargo fmt"
+
 baseline:
   suite: "make test"
 coverage:

@@ -95,6 +95,9 @@ pub(super) async fn close_node(
             HookRun::Violation(rule) => {
                 return fail_with_tokens(ctx, node, rule, false, tokens).await
             }
+            HookRun::Unset(key) => {
+                return fail_with(ctx, node, Failure::unset(key), false, tokens).await
+            }
             HookRun::Failed { said } if step.on_failure == HookFailurePolicy::Fail => {
                 let failure = HookRun::failure(HookPhase::After, step, &said);
                 return fail_with_tokens(ctx, node, failure, false, tokens).await;

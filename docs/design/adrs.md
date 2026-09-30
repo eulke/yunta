@@ -209,3 +209,4 @@ lista.
 **D200 — An invariant's pass does not hold for a tree that moved while it ran.** `accepted` → [`adr/D200-an-invariants-pass-does-not-hold-for-a-tree-that-moved-while-it-ran.md`](adr/D200-an-invariants-pass-does-not-hold-for-a-tree-that-moved-while-it-ran.md)
 **D201 — Every node's work is committed when it closes.** `accepted` → [`adr/D201-every-nodes-work-is-committed-when-it-closes.md`](adr/D201-every-nodes-work-is-committed-when-it-closes.md)
 **D202 — A session opens only once its host has been awake for two minutes.** `accepted` → [`adr/D202-a-session-opens-only-once-its-host-has-been-awake-for-two-minutes.md`](adr/D202-a-session-opens-only-once-its-host-has-been-awake-for-two-minutes.md)
+**D203 — A workflow runs a project's commands by name.** `accepted` → [`adr/D203-a-workflow-runs-a-projects-commands-by-name.md`](adr/D203-a-workflow-runs-a-projects-commands-by-name.md)

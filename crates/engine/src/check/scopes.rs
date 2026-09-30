@@ -219,31 +219,20 @@ pub(crate) fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
     GroupScope { overlaps }
 }
 
-/// Static half of the runtime permissions rule: every literal command in
-/// the workflow — bash `run`, hook steps — against the merged model,
+/// Static half of the runtime permissions rule: every command in the
+/// workflow — bash `run`, hook steps, a project's command as `config`
+/// declares it — against the merged model,
 /// parallel children included. Criteria live in the runtime tasks document and
 /// executors resolve through config, so both are runtime-moment
 /// territory.
 pub(crate) fn check_commands(
     nodes: &[Node],
+    config: &ConfigLayer,
     permissions: &yunta_core::PermissionsConfig,
     errors: &mut Vec<CheckError>,
 ) {
     for node in nodes {
-        let mut commands: Vec<&str> = Vec::new();
-        if let NodeKind::Bash { run } = &node.kind {
-            commands.push(run);
-        }
-        if let Some(hooks) = &node.hooks {
-            commands.extend(
-                hooks
-                    .before
-                    .iter()
-                    .chain(&hooks.after)
-                    .map(|s| s.run.as_str()),
-            );
-        }
-        for command in commands {
+        for command in yunta_core::node_commands(node).filter_map(|run| run.text(config)) {
             if let Some(rule) = crate::permissions::command_violation(command, Some(permissions)) {
                 errors.push(CheckError::CommandDenied {
                     node: node.id.clone(),
@@ -255,7 +244,7 @@ pub(crate) fn check_commands(
             nodes: children, ..
         } = &node.kind
         {
-            check_commands(children, permissions, errors);
+            check_commands(children, config, permissions, errors);
         }
     }
 }

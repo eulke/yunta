@@ -8,12 +8,13 @@
 
 use super::*;
 
-/// `(node, program)` for the program each simple command of a literal
-/// `bash` `run:` or hook step starts, each pair once. A hook of
-/// `node_defaults:` is attributed to that block. A word built from a
-/// template or a variable, a path, and a shell builtin or keyword are
-/// left out: none of them is a name to look up on `PATH`.
-pub fn programs_named(workflow: &Workflow) -> Vec<(NodeId, String)> {
+/// `(node, program)` for the program each simple command of a `bash`
+/// `run:` or hook step starts, each pair once — a project's command read
+/// as `config` declares it. A hook of `node_defaults:` is attributed to
+/// that block. A word built from a template or a variable, a path, and a
+/// shell builtin or keyword are left out: none of them is a name to look
+/// up on `PATH`.
+pub fn programs_named(workflow: &Workflow, config: &ConfigLayer) -> Vec<(NodeId, String)> {
     let mut named: Vec<(NodeId, String)> = Vec::new();
     let mut name = |node: &NodeId, command: &str| {
         for program in leading_programs(command) {
@@ -24,13 +25,8 @@ pub fn programs_named(workflow: &Workflow) -> Vec<(NodeId, String)> {
         }
     };
     for node in workflow.iter_nodes() {
-        if let NodeKind::Bash { run } = &node.kind {
-            name(&node.id, run);
-        }
-        if let Some(hooks) = &node.hooks {
-            for step in hooks.before.iter().chain(&hooks.after) {
-                name(&node.id, &step.run);
-            }
+        for command in yunta_core::node_commands(node).filter_map(|run| run.text(config)) {
+            name(&node.id, command);
         }
     }
     let defaults = workflow
@@ -39,7 +35,9 @@ pub fn programs_named(workflow: &Workflow) -> Vec<(NodeId, String)> {
         .and_then(|defaults| defaults.hooks.as_ref());
     if let Some(hooks) = defaults {
         for step in hooks.before.iter().chain(&hooks.after) {
-            name(&NODE_DEFAULTS, &step.run);
+            if let Some(command) = step.run.text(config) {
+                name(&NODE_DEFAULTS, command);
+            }
         }
     }
     named

@@ -23,6 +23,16 @@
         }
       ]
     },
+    "commands": {
+      "description": "`commands:` — `{name: command}`, what this project runs for each\ncapability a workflow names (`run: { command: lint }`). The name\nis the workflow's, the text the project's: a pack asks for \"the\nlint\" and the project says which tool that is.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
     "coverage": {
       "anyOf": [
         {

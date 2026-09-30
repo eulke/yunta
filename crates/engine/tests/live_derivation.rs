@@ -32,9 +32,7 @@ fn at(offset_secs: i64) -> DateTime<Utc> {
 fn node(id: &str) -> Node {
     Node {
         id: id.into(),
-        kind: NodeKind::Bash {
-            run: "true".to_string(),
-        },
+        kind: NodeKind::Bash { run: "true".into() },
         depends_on: Vec::new(),
         scope: Vec::new(),
         runner: Some("implementer".into()),

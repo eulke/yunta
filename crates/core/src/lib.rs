@@ -77,9 +77,9 @@ pub use glob::{listed_globs, might_overlap, scope_globset, InvalidScopeGlob, Sco
 pub use hash::{sha256_hex, CommitSha, ContentHash, TreeId};
 pub use id_source::{IdSource, SystemIdSource};
 pub use ids::{
-    is_path_segment, AdapterId, AgentName, ExecutorName, FindingId, GitHubRepo, InputName,
-    InvalidId, McpServerName, ModeName, ModelName, NodeId, OptionId, PackName, PackRef, Pid,
-    Publisher, QuestionId, Responder, RunId, RunnerName, Seq, SessionId, SkillName, TaskId,
+    is_path_segment, AdapterId, AgentName, CommandName, ExecutorName, FindingId, GitHubRepo,
+    InputName, InvalidId, McpServerName, ModeName, ModelName, NodeId, OptionId, PackName, PackRef,
+    Pid, Publisher, QuestionId, Responder, RunId, RunnerName, Seq, SessionId, SkillName, TaskId,
     WorkflowName,
 };
 pub use inputs::{InputSpec, InputSpecError};
@@ -96,13 +96,14 @@ pub use schema_range::{SchemaRange, SchemaRangeError};
 pub use secret::Secret;
 pub use tasks::{Criterion, Task, TasksFile};
 pub use workflow::{
-    ArtifactContextRef, ArtifactKind, ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts,
-    CheckBuiltin, CleanupTarget, ContextFile, ContextSpec, Coordination, DistillArtifact,
-    ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeLayer,
-    KnowledgeParams, LoopUntil, McpQueryParams, ModeInclude, ModeSpec, MountArtifact, MountSpec,
-    Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions, OnFailure,
-    OnFinishStep, OnInterrupt, PromptSource, ReservedIdentity, RunEventsFilter, RunEventsParams,
-    ScopeExpansion, TasksParams, UnknownArtifactKind, Workflow, ARTIFACTS_DIR,
+    node_commands, ArtifactContextRef, ArtifactKind, ArtifactName, ArtifactRefId, ArtifactSpec,
+    Artifacts, CheckBuiltin, CleanupTarget, ContextFile, ContextSpec, Coordination,
+    DistillArtifact, ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy,
+    KnowledgeLayer, KnowledgeParams, LoopUntil, McpQueryParams, ModeInclude, ModeSpec,
+    MountArtifact, MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams,
+    NodePermissions, OnFailure, OnFinishStep, OnInterrupt, PromptSource, ReservedIdentity,
+    Resolved, RunCommand, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams,
+    UnknownArtifactKind, Workflow, ARTIFACTS_DIR,
 };
 
 /// The schema major this binary speaks — what a

@@ -58,6 +58,10 @@ skills:
 mcp_servers:                        # servers para la fuente de contexto `mcp`
   internal-docs: { url: "https://docs.interna.example/mcp", auth_env: DOCS_TOKEN }
 
+commands:                           # lo que el proyecto corre por cada capacidad que un workflow nombra
+  lint: "cargo clippy --workspace -- -D warnings"
+  fmt: "cargo fmt"
+
 baseline:
   suite: "cargo test --workspace"
 coverage:

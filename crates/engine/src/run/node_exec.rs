@@ -182,6 +182,7 @@ async fn execute_in_its_tree(
     for step in &hooks.before {
         match run_hook(ctx, node, HookPhase::Before, step).await? {
             HookRun::Violation(rule) => return fail(ctx, node, rule, false).await,
+            HookRun::Unset(key) => return super::check_exec::unset(ctx, node, key).await,
             HookRun::Failed { said } if step.on_failure == HookFailurePolicy::Fail => {
                 let failure = HookRun::failure(HookPhase::Before, step, &said);
                 return fail(ctx, node, failure, false).await;
@@ -190,19 +191,33 @@ async fn execute_in_its_tree(
         }
     }
 
-    let end = match &node.kind {
-        NodeKind::Bash { run } => execute_bash(ctx, node, run, cancel).await?,
-        NodeKind::Prompt { prompt } => execute_prompt(ctx, node, prompt, cancel).await?,
+    execute_kind(ctx, node, cancel).await
+}
+
+/// The work `node`'s kind does, built and boxed in a plain function
+/// rather than in the `async fn` that awaits it: an unoptimized build
+/// keeps each state machine an `async fn` builds in the stack frame that
+/// polls it, and a composed run stacks this frame once per nested node —
+/// a group, the workflow node inside it, each node of its child run.
+/// Built here, only the box reaches that frame.
+fn execute_kind<'a>(
+    ctx: &'a RunCtx<'_>,
+    node: &'a Node,
+    cancel: &'a CancellationToken,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<NodeEnd, RunError>> + 'a>> {
+    match &node.kind {
+        NodeKind::Bash { run } => Box::pin(execute_bash(ctx, node, run, cancel)),
+        NodeKind::Prompt { prompt } => Box::pin(execute_prompt(ctx, node, prompt, cancel)),
         NodeKind::Loop {
             until: yunta_core::LoopUntil::AllTasksComplete,
             prompt,
             ..
-        } => super::loop_exec::execute_loop(ctx, node, prompt, cancel).await?,
+        } => Box::pin(super::loop_exec::execute_loop(ctx, node, prompt, cancel)),
         NodeKind::Parallel {
             join,
             coordination,
             nodes,
-        } => {
+        } => Box::pin(async move {
             let end = execute_parallel(ctx, node, *join, nodes, cancel).await?;
             // The blackboard's consolidation happens exactly once,
             // at the group's own terminal close (success or failure —
@@ -226,45 +241,39 @@ async fn execute_in_its_tree(
                 )
                 .await?;
             }
-            end
-        }
+            Ok(end)
+        }),
         NodeKind::Check(builtin) => {
-            super::check_exec::execute_check(ctx, node, builtin, cancel).await?
+            Box::pin(super::check_exec::execute_check(ctx, node, builtin, cancel))
         }
         NodeKind::Executor {
             executor,
             with,
             timeout_seconds,
-        } => {
-            super::executor_exec::execute_executor(
-                ctx,
-                node,
-                executor,
-                with,
-                *timeout_seconds,
-                cancel,
-            )
-            .await?
-        }
+        } => Box::pin(super::executor_exec::execute_executor(
+            ctx,
+            node,
+            executor,
+            with,
+            *timeout_seconds,
+            cancel,
+        )),
         NodeKind::Workflow {
             r#use,
             inputs,
             isolation,
             mounts,
-        } => {
-            super::workflow_exec::execute_workflow(
-                ctx,
-                node,
-                super::workflow_exec::WorkflowCall {
-                    use_name: r#use,
-                    inputs,
-                    isolation: *isolation,
-                    mounts,
-                },
-                cancel,
-            )
-            .await?
-        }
+        } => Box::pin(super::workflow_exec::execute_workflow(
+            ctx,
+            node,
+            super::workflow_exec::WorkflowCall {
+                use_name: r#use,
+                inputs,
+                isolation: *isolation,
+                mounts,
+            },
+            cancel,
+        )),
         // A gate's resolution is a forge round-trip, not a
         // session — `schedule::next_step` intercepts a ready/orphaned
         // gate before it ever becomes an `Execute` step (its own
@@ -273,17 +282,15 @@ async fn execute_in_its_tree(
         // the only other way a node reaches this function without going
         // through the top-level scheduler (`parallel`'s own children).
         NodeKind::Gate { .. } => {
-            return Err(RunError::Broken {
-                diagnostic: format!(
-                    "node `{}` is a `kind: gate` but reached node execution, which only \
-                     dispatches sessions and checks — a gate resolves through its own \
-                     scheduler step (see this arm's own comment)",
-                    node.id
-                ),
-            });
+            let diagnostic = format!(
+                "node `{}` is a `kind: gate` but reached node execution, which only \
+                 dispatches sessions and checks — a gate resolves through its own \
+                 scheduler step (see this arm's own comment)",
+                node.id
+            );
+            Box::pin(std::future::ready(Err(RunError::Broken { diagnostic })))
         }
-    };
-    Ok(end)
+    }
 }
 
 /// Prepares the directory `node` writes the files it declares into, for

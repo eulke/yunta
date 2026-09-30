@@ -124,7 +124,7 @@ codex: unhealthy — `codex` not found on PATH
 
 It also validates every installed pack's own `requires:` against your merged
 config: a `runners:` entry the merged `runners:` doesn't define (or defines with zero
-candidates), an `mcp_servers:` name nothing declares, and a `commands:`
+candidates), an `mcp_servers:` name nothing declares, and a `programs:`
 binary missing from `PATH` are each reported with what to add, naming the
 pack that needs it. None of this blocks anything by itself — a pack can be
 installed and configured later, the same way an adapter that isn't set up

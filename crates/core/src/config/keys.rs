@@ -11,10 +11,10 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::ConfigLayer;
-use crate::ids::ExecutorName;
-use crate::workflow::{CheckBuiltin, Node, NodeKind};
+use crate::ids::{CommandName, ExecutorName};
+use crate::workflow::{node_commands, CheckBuiltin, Node, NodeKind};
 
-/// A config key a node's kind cannot run without.
+/// A config key a node cannot run without.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "key", rename_all = "snake_case")]
 pub enum ConfigKey {
@@ -28,38 +28,65 @@ pub enum ConfigKey {
     Executor { executor: ExecutorName },
     /// A session opens on a runner: the node's own, or `defaults.runner`.
     Runner,
+    /// `run: { command: <name> }` runs what the project declares under
+    /// `commands:` for that name.
+    Command { command: CommandName },
 }
 
 impl ConfigKey {
-    /// The key `config` leaves unset for `node`, if any.
+    /// Every key `node` needs the config to declare, in the order a run
+    /// meets them and each once — asked of the node alone, so a pack's
+    /// workflow says what it needs before any project reads it.
     ///
     /// The baseline is not asked here: a run measures it once for its
     /// whole lineage, so whether a comparison has something to compare
     /// against is a question about the run that started the lineage, not
     /// about the node.
-    pub fn unset(node: &Node, config: &ConfigLayer) -> Option<ConfigKey> {
+    pub fn needed_by(node: &Node) -> Vec<ConfigKey> {
+        let mut needed = Vec::new();
         match &node.kind {
-            NodeKind::Check(CheckBuiltin::CoverageGate) if config.coverage.is_none() => {
-                Some(ConfigKey::Coverage)
-            }
-            NodeKind::Executor { executor, .. } if !registered(config, executor) => {
-                Some(ConfigKey::Executor {
-                    executor: executor.clone(),
-                })
-            }
+            NodeKind::Check(CheckBuiltin::CoverageGate) => needed.push(ConfigKey::Coverage),
+            NodeKind::Executor { executor, .. } => needed.push(ConfigKey::Executor {
+                executor: executor.clone(),
+            }),
             NodeKind::Prompt { .. } | NodeKind::Loop { .. }
-                if node.runner.is_none()
-                    && node.runners.is_empty()
-                    && config
-                        .defaults
-                        .as_ref()
-                        .and_then(|defaults| defaults.runner.as_ref())
-                        .is_none() =>
+                if node.runner.is_none() && node.runners.is_empty() =>
             {
-                Some(ConfigKey::Runner)
+                needed.push(ConfigKey::Runner);
             }
-            _ => None,
+            _ => {}
         }
+        for command in node_commands(node).filter_map(|run| run.project()) {
+            let key = ConfigKey::Command {
+                command: command.clone(),
+            };
+            if !needed.contains(&key) {
+                needed.push(key);
+            }
+        }
+        needed
+    }
+
+    /// Whether `config` declares this key.
+    pub fn is_declared(&self, config: &ConfigLayer) -> bool {
+        match self {
+            ConfigKey::BaselineSuite => config.baseline.is_some(),
+            ConfigKey::Coverage => config.coverage.is_some(),
+            ConfigKey::Executor { executor } => registered(config, executor),
+            ConfigKey::Runner => config
+                .defaults
+                .as_ref()
+                .is_some_and(|defaults| defaults.runner.is_some()),
+            ConfigKey::Command { command } => config.command(command).is_some(),
+        }
+    }
+
+    /// Every key `node` needs that `config` leaves unset.
+    pub fn unset(node: &Node, config: &ConfigLayer) -> Vec<ConfigKey> {
+        ConfigKey::needed_by(node)
+            .into_iter()
+            .filter(|key| !key.is_declared(config))
+            .collect()
     }
 }
 
@@ -90,6 +117,11 @@ impl fmt::Display for ConfigKey {
             ConfigKey::Runner => f.write_str(
                 "it opens a session and names no runner, and the config declares no \
                  `defaults.runner` — name a `runner:` on the node, or declare `defaults.runner`",
+            ),
+            ConfigKey::Command { command } => write!(
+                f,
+                "it runs the project's command `{command}`, and the config declares none — \
+                 declare what this project runs for it under `commands.{command}`"
             ),
         }
     }

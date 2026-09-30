@@ -391,7 +391,7 @@
           "$ref": "#/$defs/HookFailurePolicy"
         },
         "run": {
-          "type": "string"
+          "$ref": "#/$defs/RunCommand"
         },
         "timeout_seconds": {
           "type": [
@@ -694,7 +694,7 @@
       "additionalProperties": false
     },
     "LoopUntil": {
-      "description": "The node kinds built so far. `gate` and\n`workflow` are the rest of the full catalogue and stay out until\ntheir own turn.\nWhat a `kind: loop` runs until. One condition exists: the tasks document\nhas no task left to do.",
+      "description": "What a `kind: loop` runs until. One condition exists: the tasks document\nhas no task left to do.",
       "type": "string",
       "enum": [
         "all_tasks_complete"
@@ -962,7 +962,7 @@
               "const": "bash"
             },
             "run": {
-              "type": "string"
+              "$ref": "#/$defs/RunCommand"
             }
           },
           "required": [
@@ -1369,6 +1369,26 @@
     },
     "Requiredness": {
       "type": "boolean"
+    },
+    "RunCommand": {
+      "description": "A script, or `{ command: <name> }` to run a command the project declares under `commands:`",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "command"
+          ]
+        }
+      ]
     },
     "RunEventsFilter": {
       "description": "The `run-events` filters the resolver knows. Absent (`None`) means\nthe whole log; `Failed` narrows it to `node_failed` events, `Findings`\nto `finding_posted` events (what a corrective node reads to act on\nwhat an earlier node found).",

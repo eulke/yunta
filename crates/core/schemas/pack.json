@@ -37,8 +37,8 @@
     "requires": {
       "$ref": "#/$defs/PackRequires",
       "default": {
-        "commands": [],
         "mcp_servers": [],
+        "programs": [],
         "runners": []
       }
     },
@@ -150,20 +150,20 @@
       "description": "What the installer's own config must provide — never satisfied\nby the pack itself; `check`/`add` validate these against the local\nmerged config, this type only parses what's asked for.",
       "type": "object",
       "properties": {
-        "commands": {
-          "description": "Binaries the pack's `bash` nodes assume are on `PATH`.",
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
-          }
-        },
         "mcp_servers": {
           "description": "Names the installer must define under its own `mcp_servers:`.",
           "type": "array",
           "default": [],
           "items": {
             "$ref": "#/$defs/McpServerName"
+          }
+        },
+        "programs": {
+          "description": "Programs the pack's `bash` nodes and hooks start themselves and\nassume are on `PATH`. A capability the project provides — its\nlint, its tests — is a command the workflow names instead, and\nnever listed here.",
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
           }
         },
         "runners": {

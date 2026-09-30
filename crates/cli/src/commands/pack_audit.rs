@@ -70,8 +70,8 @@ pub fn print_report(report: &PackAudit) {
             m.requires.mcp_servers.join(", ")
         );
     }
-    if !m.requires.commands.is_empty() {
-        println!("requires commands: {}", m.requires.commands.join(", "));
+    if !m.requires.programs.is_empty() {
+        println!("requires programs: {}", m.requires.programs.join(", "));
     }
 
     for workflow in &report.workflows {

@@ -9,6 +9,7 @@
 //! missing or wrong, instead of reporting that nothing matched.
 
 mod artifacts;
+mod command;
 mod context;
 mod hooks;
 mod node;
@@ -33,6 +34,7 @@ pub use artifacts::{
     ArtifactKind, ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, ReservedIdentity,
     UnknownArtifactKind, ARTIFACTS_DIR,
 };
+pub use command::{node_commands, Resolved, RunCommand};
 pub use context::{
     ArtifactContextRef, ContextFile, ContextSpec, KnowledgeLayer, KnowledgeParams, McpQueryParams,
     NodeOutputParams, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams,

@@ -683,13 +683,18 @@
         "terminal_state"
       ]
     },
+    "CommandName": {
+      "description": "A command name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
     "CommitSha": {
       "description": "A commit sha: 7 to 64 lowercase hex digits: a git object id, abbreviated or full",
       "type": "string",
       "minLength": 1
     },
     "ConfigKey": {
-      "description": "A config key a node's kind cannot run without.",
+      "description": "A config key a node cannot run without.",
       "oneOf": [
         {
           "description": "`baseline_compare` compares against what the lineage measured\nbefore its first node, and `baseline.suite` is what it measures.",
@@ -745,6 +750,23 @@
           },
           "required": [
             "key"
+          ]
+        },
+        {
+          "description": "`run: { command: <name> }` runs what the project declares under\n`commands:` for that name.",
+          "type": "object",
+          "properties": {
+            "command": {
+              "$ref": "#/$defs/CommandName"
+            },
+            "key": {
+              "type": "string",
+              "const": "command"
+            }
+          },
+          "required": [
+            "key",
+            "command"
           ]
         }
       ]

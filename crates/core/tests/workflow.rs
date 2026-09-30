@@ -38,7 +38,10 @@ fn parses_the_reference_schema_excerpt_without_loss() {
     let lint = &workflow.nodes[1];
     assert_eq!(lint.depends_on[0].as_str(), "implement");
     match &lint.kind {
-        NodeKind::Bash { run } => assert_eq!(run, "cargo clippy --workspace -- -D warnings"),
+        NodeKind::Bash { run } => assert_eq!(
+            run.script(),
+            Some("cargo clippy --workspace -- -D warnings")
+        ),
         other => panic!("expected Bash, got {other:?}"),
     }
     let on_failure = lint.on_failure.as_ref().unwrap();
@@ -48,7 +51,7 @@ fn parses_the_reference_schema_excerpt_without_loss() {
     let fix_lint = &workflow.nodes[2];
     assert_eq!(fix_lint.scope, vec![yunta_core::ScopeGlob::from("src/**")]);
     let hooks = fix_lint.hooks.as_ref().unwrap();
-    assert_eq!(hooks.after[0].run, "cargo fmt");
+    assert_eq!(hooks.after[0].run.script(), Some("cargo fmt"));
     assert!(hooks.before.is_empty());
 }
 
@@ -271,7 +274,10 @@ nodes:
 "#;
     let workflow: Workflow = serde_norway::from_str(yaml).unwrap();
     let defaults = workflow.node_defaults.unwrap();
-    assert_eq!(defaults.hooks.unwrap().after[0].run, "cargo fmt");
+    assert_eq!(
+        defaults.hooks.unwrap().after[0].run.script(),
+        Some("cargo fmt")
+    );
 }
 
 #[test]
