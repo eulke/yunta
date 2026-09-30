@@ -41,11 +41,17 @@ pub fn check_workflow_refs(
     let mut warnings = Vec::new();
     // Only the walk can answer either: `check` reads no files, so it
     // cannot know whether a workflow this one composes compares. The
-    // lineage measures once, before its first node, and only when the
-    // config names a suite — so a comparison under a config that names
-    // none has nothing to compare against, wherever it sits.
+    // lineage measures once, before its first node, only when the config
+    // names a suite and something reads the measurement — so a comparison
+    // under a config that names none has nothing to compare against,
+    // wherever it sits, and a suite is wasted only on a workflow that
+    // composes others none of which compares, with no loop of its own.
+    let measured_for_nothing = crate::run::baseline::reads_the_baseline(workflow)
+        && !workflow
+            .iter_nodes()
+            .any(|node| matches!(node.kind, yunta_core::NodeKind::Loop { .. }));
     match &config.baseline {
-        Some(baseline) if compares.is_empty() => {
+        Some(baseline) if compares.is_empty() && measured_for_nothing => {
             warnings.push(CheckWarning::BaselineNeverCompared {
                 suite: baseline.suite.clone(),
             });

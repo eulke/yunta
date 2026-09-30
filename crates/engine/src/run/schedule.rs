@@ -302,6 +302,7 @@ impl Policy {
                 .config
                 .baseline
                 .as_ref()
+                .filter(|_| crate::run::baseline::reads_the_baseline(&manifest.workflow))
                 .map(|baseline| baseline.suite.clone()),
             grants_scope: person_may_grant_scope(&manifest.config),
             denied: manifest.config.denied_paths().to_vec(),

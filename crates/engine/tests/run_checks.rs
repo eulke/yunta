@@ -39,14 +39,19 @@ nodes:
     );
 }
 
-/// The workflow every baseline test drives: one node, so what a log
-/// holds before it is what the wake itself did.
+/// The workflow every baseline test drives: one node and the comparison
+/// that reads the measurement, so what a log holds before the node is
+/// what the wake itself did.
 const ONE_NODE: &str = r#"
 name: baseline-at-first-wake
 nodes:
   - id: work
     kind: bash
     run: "true"
+  - id: regressions
+    kind: check
+    builtin: baseline_compare
+    depends_on: [work]
 "#;
 
 #[tokio::test]
@@ -95,6 +100,22 @@ async fn the_first_wake_measures_the_baseline_before_any_node() {
         .is_none(),
         "a first wake is not a resume: {events:#?}"
     );
+}
+
+/// A suite is measured for what reads it: a run with no comparison, no
+/// loop and nothing composed measures nothing, however the config names
+/// one.
+#[tokio::test]
+async fn a_run_that_reads_no_measurement_measures_nothing() {
+    let bench = Bench::new();
+    let only_work = "name: only-work\nnodes:\n  - { id: work, kind: bash, run: \"true\" }\n";
+    bench
+        .create(only_work, "sessions: []", CONFIG_WITH_BASELINE)
+        .await;
+    let RunReport { terminal, .. } = bench.wake().await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(baselines(&bench.events()).is_empty());
 }
 
 /// The log carries the tail of what the suite said; the bytes it hashes
@@ -178,6 +199,24 @@ nodes:
 
 /// One measurement per lineage means one per run, however many times an
 /// invocation picks the run back up.
+/// A gate the first wake stops at, then work and the comparison that
+/// reads the measurement.
+const GATED_THEN_COMPARED: &str = r#"
+name: measured-once
+nodes:
+  - id: approve
+    kind: gate
+    assignee: lead
+  - id: work
+    kind: bash
+    depends_on: [approve]
+    run: "true"
+  - id: regressions
+    kind: check
+    builtin: baseline_compare
+    depends_on: [work]
+"#;
+
 #[tokio::test]
 async fn a_resumed_run_measures_nothing_again() {
     let bench = Bench::new();
@@ -193,20 +232,8 @@ async fn a_resumed_run_measures_nothing_again() {
 
     // The gate has nobody to answer it on the first wake, so the run
     // pauses there; the second wake brings a surface that answers.
-    let workflow = r#"
-name: measured-once
-nodes:
-  - id: approve
-    kind: gate
-    assignee: lead
-  - id: work
-    kind: bash
-    depends_on: [approve]
-    run: "true"
-"#;
-
     let RunReport { terminal, .. } = bench
-        .run_with_config(workflow, "sessions: []", &config)
+        .run_with_config(GATED_THEN_COMPARED, "sessions: []", &config)
         .await;
     assert!(matches!(terminal, RunTerminal::Paused { .. }));
     let RunReport { terminal, .. } = bench.wake_answering(&ApproveEverything::new("test")).await;
@@ -226,7 +253,11 @@ nodes:
     let ran = tokio::fs::read_to_string(&suite_runs)
         .await
         .expect("the suite ran at least once");
-    assert_eq!(ran.lines().count(), 1, "and so never runs the suite again");
+    assert_eq!(
+        ran.lines().count(),
+        2,
+        "the measurement once and the comparison once: never measured again"
+    );
 }
 
 /// The suite a comparison runs is the invocation's to reuse: two

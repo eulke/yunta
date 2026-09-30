@@ -111,6 +111,10 @@ nodes:
   - id: work
     kind: bash
     run: \"true\"
+  - id: regressions
+    kind: check
+    builtin: baseline_compare
+    depends_on: [work]
 ";
 
     let (report, ()) = tokio::join!(

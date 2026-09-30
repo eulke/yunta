@@ -374,13 +374,13 @@ async fn a_successor_is_born_holding_its_predecessors_measurement() {
         .await
         .unwrap();
     let interaction = ScriptedInteraction::choose("promote");
+    // The comparison is the later mode's; the lineage measures at its
+    // root because the workflow reads the measurement somewhere.
+    let compared = format!(
+        "{PROMOTABLE_WORKFLOW}  - {{ id: regressions, kind: check, builtin: baseline_compare, depends_on: [lint] }}\n"
+    );
     let RunReport { terminal, .. } = bench
-        .run_full(
-            PROMOTABLE_WORKFLOW,
-            NO_SESSIONS,
-            CONFIG_WITH_BASELINE,
-            &interaction,
-        )
+        .run_full(&compared, NO_SESSIONS, CONFIG_WITH_BASELINE, &interaction)
         .await;
     assert!(matches!(terminal, RunTerminal::Promoted { .. }));
     let measured = baselines(&bench.events());

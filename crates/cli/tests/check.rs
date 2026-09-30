@@ -191,7 +191,14 @@ nodes:
   - id: lint
     kind: bash
     run: "true"
+  - id: child
+    kind: workflow
+    use: child
 "#,
+        )
+        .file(
+            ".yunta/workflows/child.yaml",
+            "name: child\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n",
         )
         .file("config.yaml", "baseline:\n  suite: \"make test\"\n");
 

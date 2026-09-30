@@ -2,7 +2,10 @@
 //! the invocation started.
 //!
 //! A run measures on its first wake, before any node of its own can
-//! change the tree, and only when its config names a suite. A run born
+//! change the tree, only when its config names a suite, and only when
+//! something of its own reads the measurement: a `baseline_compare`, a
+//! loop whose tasks are held to the suite, or a composed run that may
+//! hold either — a run that reads nothing pays for nothing. A run born
 //! of another — a `kind: workflow` child, a promotion successor — is
 //! born holding the root's measurement instead, so every
 //! `baseline_compare` anywhere in the lineage compares against the same
@@ -19,6 +22,20 @@ use yunta_core::{ContentHash, RunId};
 
 use super::{RunCtx, RunError};
 use crate::replay::RunState;
+
+/// Whether a run of `workflow` reads its lineage's measurement: a node
+/// compares against it, a loop holds its tasks to it, or a composed run
+/// — whose workflow is resolved only when it is born — may do either.
+pub fn reads_the_baseline(workflow: &yunta_core::Workflow) -> bool {
+    workflow.iter_nodes().any(|node| {
+        matches!(
+            node.kind,
+            yunta_core::NodeKind::Check(yunta_core::CheckBuiltin::BaselineCompare)
+                | yunta_core::NodeKind::Loop { .. }
+                | yunta_core::NodeKind::Workflow { .. }
+        )
+    })
+}
 
 /// The measurement a run hands to one it gives birth to: the fact,
 /// named by the run that took it.

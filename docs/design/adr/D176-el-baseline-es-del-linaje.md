@@ -1,9 +1,9 @@
 ---
 number: D176
 title: "El baseline es del linaje: la raíz lo mide en su primer despertar y todo run que nace de ella nace teniéndolo"
-status: accepted
+status: revised
 revises: [D18, D61, D167]
-revised_by: []
+revised_by: [D208]
 ---
 
 # D176 — El baseline es del linaje: la raíz lo mide en su primer despertar y todo run que nace de ella nace teniéndolo
