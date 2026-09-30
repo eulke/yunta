@@ -1,8 +1,8 @@
 # yunta/fragua
 
 The full reference pipeline, end to end: an ambiguity-resolving grill, a
-plan registered as a verified tasks document, implementation checked task by
-task, a lint→fix cycle, a baseline check, a two-runner review, the work held
+plan registered as a verified tasks document, the tests its tasks are held
+to written before any is built, implementation checked task by task, a lint→fix cycle, a baseline check, a two-runner review, the work held
 to the plan a person approved, and a PR.
 Open modes throughout (`quick`/`standard`/`full`) and the plan distilled to
 knowledge on finish. Installable and removable like any third-party pack —
@@ -13,9 +13,20 @@ yunta pack add <source-of-this-pack>
 yunta run yunta/fragua --input idea="add dark mode to the settings page"
 ```
 
-`--mode quick` skips the plan's approval and the multi-runner review for a
-fast pass, and still holds the work to its plan before asking you to ship it;
+`--mode quick` skips the plan's approval, its tests and the multi-runner
+review for a fast pass, and still holds the work to its plan before asking
+you to ship it;
 `standard` is the full human-in-the-loop cycle; `full` runs every node.
+
+## Tests before the work
+
+In `standard` and `full`, `spec` writes the tests each task is held to
+before any task is built, and `approve-plan` shows them beside the plan:
+you approve what the work has to make pass. Each test fails when it is
+handed over, a task closes only once its tests pass, and the session
+building a task cannot change them — a test it believes is wrong is a
+departure from the plan, and yours to settle. Sending the plan back with
+`adjust` writes its tests again before you are asked again.
 
 ## Held to its plan
 

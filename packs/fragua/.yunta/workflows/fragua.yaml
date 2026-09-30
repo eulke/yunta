@@ -5,11 +5,14 @@
 # server, which a pack's own mock self-test has no reason to stand up)
 # and `node_defaults.hooks` is dropped (an ecosystem-specific
 # convenience, not something a reference pack needs to demonstrate).
-# One addition: `conform` holds what the run built to the plan a person
-# approved before the pull request is asked for, in every mode — green
-# criteria say the work passes its tests, not that it is what the plan
-# says, and a departure nobody declared is what a person approving the
-# pull request would miss.
+# Two additions. `spec` writes the tests the plan's tasks are held to
+# before any is built, in the modes that approve the plan: the person
+# approving it reads the tests beside it, and nobody who builds a task
+# writes the test that judges it. `conform` holds what the run built to
+# the plan a person approved before the pull request is asked for, in
+# every mode — green criteria say the work passes its tests, not that it
+# is what the plan says, and a departure nobody declared is what a
+# person approving the pull request would miss.
 #
 # A pack runs in repositories its author has never seen, so it names
 # capabilities and never a tool or a layout: `lint` runs whatever the
@@ -29,7 +32,7 @@ inputs:
 
 modes:
   quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, conform, ship, pr] }
-  standard: { include: [grill, brief, plan, approve-plan, implement, lint, fix-lint, tests, review, conform, fix-findings, ship, pr] }
+  standard: { include: [grill, brief, plan, spec, approve-plan, implement, lint, fix-lint, tests, review, conform, fix-findings, ship, pr] }
   full:     { include: all }
 
 nodes:
@@ -69,14 +72,28 @@ nodes:
     artifacts:
       produces: [tasks]
 
+  - id: spec
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    depends_on: [plan]
+    context:
+      - artifact: { node: plan, kind: tasks }
+      - knowledge: {}
+    prompt: { file: prompts/spec.md }
+    artifacts:
+      produces: [spec]
+
   - id: approve-plan
     kind: gate
-    depends_on: [plan]
+    depends_on: [spec]
     assignee: lead
-    message: "Plan registered. Approve?"
+    message: "Plan and its tests registered. Approve?"
     options: [approve, adjust]
     on: { adjust: plan }
-    shows: [{ node: plan, kind: tasks }]
+    shows:
+      - { node: plan, kind: tasks }
+      - { node: spec, kind: spec }
 
   - id: implement
     kind: loop

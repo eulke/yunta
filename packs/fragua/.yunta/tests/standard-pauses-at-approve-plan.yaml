@@ -1,6 +1,6 @@
 # standard mode: grill asks, brief and plan produce their artifacts, the tasks
-# document registers, and the run pauses at `approve-plan` — its first human
-# decision — before any task runs. A gate with nobody to answer it
+# document registers, `spec` writes the tests its task is held to, and the run
+# pauses at `approve-plan` — its first human decision — before any task runs. A gate with nobody to answer it
 # leaves the run paused with the gate named in the pause reason.
 workflow: fragua
 mode: standard
@@ -13,6 +13,7 @@ expect:
     grill: finished
     brief: finished
     plan: finished
+    spec: finished
     implement: never ran
   tasks:
     T001: pending

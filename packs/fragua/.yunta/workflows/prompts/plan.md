@@ -34,4 +34,6 @@ it so they can disagree with it before anything is built:
     and after.
   - `invariants`: what the code it touches already promises and it must
     keep. Read that code first: its comments and tests say what it holds to.
-- For every criterion, what passing it `proves`, in words.
+- For every criterion, what passing it `proves`, in words. A criterion may
+  run a test that does not exist yet: name the command that will run it,
+  and whoever writes the task's tests writes that test.
