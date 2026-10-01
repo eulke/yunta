@@ -50,6 +50,11 @@ existing run is how `status`/`stats`/`graph` and the live view a `run` draws
 *render* information already in the log — never the log's content or the run's
 outcome.
 
+The manifest also records the repository the run was created in, as `project:
+{ git_common_dir }` — the git directory its main checkout and every linked
+worktree share, absolute — from manifest schema 3 on. A manifest written before
+it carries none and reads as it always did.
+
 The manifest also preserves the declaration order of `modes:` for newly
 created runs, so promotion follows the authored sequence. Manifests written
 before that preservation remain readable, though an order already changed

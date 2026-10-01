@@ -112,3 +112,60 @@ fn a_git_that_never_ran_keeps_the_io_error_under_it() {
         "git status --porcelain in `/repo` failed: no such file or directory"
     );
 }
+
+/// A repository with one commit, under a directory the test owns.
+fn a_repo() -> (tempfile::TempDir, std::path::PathBuf) {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    yunta_testkit::init_repo(&repo);
+    (root, repo)
+}
+
+#[tokio::test]
+async fn a_linked_worktree_names_the_repository_its_main_checkout_names() {
+    let owner = yunta_testkit::Owner::new();
+    let (root, repo) = a_repo();
+    let linked = root.path().join("linked");
+    yunta_testkit::git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            linked.to_str().unwrap(),
+            "-b",
+            "side",
+        ],
+    );
+
+    let main = yunta_engine::git::common_dir(&repo, owner.supervision())
+        .await
+        .unwrap();
+    let from_linked = yunta_engine::git::common_dir(&linked, owner.supervision())
+        .await
+        .unwrap();
+    assert_eq!(main, from_linked);
+    assert!(main.is_absolute(), "{}", main.display());
+}
+
+#[tokio::test]
+async fn run_branches_lists_every_run_branch_in_one_call() {
+    let owner = yunta_testkit::Owner::new();
+    let (_root, repo) = a_repo();
+    let first = yunta_core::RunId::from("01JQ0000000000000000000001");
+    let second = yunta_core::RunId::from("01JQ0000000000000000000002");
+    for branch in [
+        yunta_engine::run_branch(&first),
+        yunta_engine::run_branch(&second),
+        "yunta/unit/01JQ0000000000000000000001/task/t1/1".to_string(),
+        "feature/unrelated".to_string(),
+    ] {
+        yunta_testkit::git(&repo, &["branch", &branch]);
+    }
+
+    let runs = yunta_engine::git::run_branches(&repo, owner.supervision())
+        .await
+        .unwrap();
+    assert_eq!(runs.into_iter().collect::<Vec<_>>(), vec![first, second]);
+}

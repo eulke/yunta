@@ -86,7 +86,9 @@ pub use ids::{
     SkillName, TaskId, WorkflowName,
 };
 pub use inputs::{InputSpec, InputSpecError};
-pub use manifest::{content_hash, FrozenPaths, Manifest, PackProvenance, RelativeRootError};
+pub use manifest::{
+    content_hash, FrozenPaths, Manifest, PackProvenance, ProjectIdentity, RelativeRootError,
+};
 pub use nonempty::{Empty, NonEmpty};
 pub use pack::{
     PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest, PackManifestError,

@@ -922,6 +922,7 @@ mod tests {
             config_hash: yunta_core::sha256_hex(b"config"),
             paths: None,
             pack: None,
+            project: None,
         };
         let bytes = PersistedDoc::of(manifest).write().expect("manifest writes");
         let read = PersistedDoc::<yunta_core::Manifest>::read(&bytes).expect("manifest reads");

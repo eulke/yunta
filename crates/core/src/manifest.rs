@@ -102,6 +102,15 @@ pub struct PackProvenance {
     pub commit: Option<CommitSha>,
 }
 
+/// The repository a run was created in: the git directory that its main
+/// checkout and every linked worktree share, absolute and canonical. Every
+/// run on a machine lives under one state root, so this is what says
+/// which of them are one project's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ProjectIdentity {
+    pub git_common_dir: std::path::PathBuf,
+}
+
 /// Everything a run needs frozen at creation time. The
 /// engine never re-reads workflow, config or prompt files during a run —
 /// resume interprets the run with exactly what it was born with.
@@ -145,13 +154,18 @@ pub struct Manifest {
     /// before pack support existed (tolerant reader).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pack: Option<PackProvenance>,
+    /// `None` for a manifest written before runs recorded the repository
+    /// they were created in (tolerant reader), and for one created where
+    /// git could not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectIdentity>,
 }
 
 impl crate::persisted::Persisted for Manifest {
-    /// 2 since `paths` and `pack` joined it. A manifest stamped lower
-    /// is read as it is: the two fields are optional and a run born
-    /// without them still resumes.
-    const SCHEMA_VERSION: u32 = 2;
+    /// 3 since `project` joined it, 2 since `paths` and `pack` did. A
+    /// manifest stamped lower is read as it is: the three fields are
+    /// optional and a run born without them still resumes.
+    const SCHEMA_VERSION: u32 = 3;
     const NAME: &'static str = "run manifest";
 
     /// A manifest frozen while `inherit` was still a word reads as what

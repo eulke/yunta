@@ -173,6 +173,7 @@ mod tests {
             config_hash: ContentHash::sha256(b"config"),
             paths: None,
             pack: None,
+            project: None,
         }
     }
 

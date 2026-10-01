@@ -601,3 +601,31 @@ async fn frozen_manifest() -> yunta_core::Manifest {
     .unwrap()
     .manifest
 }
+
+#[tokio::test]
+async fn a_manifest_records_the_repository_it_was_frozen_in() {
+    let owner = Owner::new();
+    let repo = tempfile::tempdir().unwrap();
+    init_repo(repo.path());
+    let workflow: Workflow = serde_norway::from_str(WORKFLOW).unwrap();
+    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
+    let manifest = build_manifest(
+        &workflow,
+        &config,
+        repo.path(),
+        repo.path(),
+        &HashMap::new(),
+        owner.supervision(),
+    )
+    .await
+    .unwrap()
+    .manifest;
+
+    let expected = tokio::fs::canonicalize(repo.path().join(".git"))
+        .await
+        .unwrap();
+    assert_eq!(
+        manifest.project.map(|project| project.git_common_dir),
+        Some(expected)
+    );
+}

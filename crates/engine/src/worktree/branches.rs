@@ -14,7 +14,7 @@ use yunta_core::RunId;
 use super::UnitId;
 
 /// Where a run's own branches live.
-const RUN_BRANCHES: &str = "yunta/run";
+pub(crate) const RUN_BRANCHES: &str = "yunta/run";
 /// Where the branches of units' attempts live.
 const UNIT_BRANCHES: &str = "yunta/unit";
 

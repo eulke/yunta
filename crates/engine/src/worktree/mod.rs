@@ -41,6 +41,7 @@ use yunta_core::{CommitSha, InvalidId, Isolation, Pid, TreeId};
 use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
 
 use crate::process::Supervision;
+pub(crate) use branches::RUN_BRANCHES;
 pub use branches::{run_branch, unit_branch};
 pub use commit::{commit_tree, restore};
 pub use integrity::{RunWorktree, WorktreeIntegrity};

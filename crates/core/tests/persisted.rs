@@ -35,6 +35,7 @@ fn manifest() -> yunta_core::Manifest {
         config_hash: yunta_core::sha256_hex(b"config"),
         paths: None,
         pack: None,
+        project: None,
     }
 }
 

@@ -218,3 +218,4 @@ lista.
 **D209 — A failed command carries what it printed.** `accepted` → [`adr/D209-a-failed-command-carries-what-it-printed.md`](adr/D209-a-failed-command-carries-what-it-printed.md)
 **D210 — A run whose engine is gone reads as stalled.** `accepted` → [`adr/D210-a-run-whose-engine-is-gone-reads-as-stalled.md`](adr/D210-a-run-whose-engine-is-gone-reads-as-stalled.md)
 **D211 — NO_COLOR takes the color away and leaves the region.** `accepted` → [`adr/D211-no-color-takes-color-away-and-leaves-the-region.md`](adr/D211-no-color-takes-color-away-and-leaves-the-region.md)
+**D212 — A run records the repository it was created in.** `accepted` → [`adr/D212-a-run-records-the-repository-it-was-created-in.md`](adr/D212-a-run-records-the-repository-it-was-created-in.md)

@@ -118,6 +118,10 @@ pub async fn build_manifest(
         // path, which is also the tolerant reading of old manifests.
         paths: None,
         pack: pack_provenance(repo, workflow_dir).await,
+        project: crate::git::common_dir(repo, supervision)
+            .await
+            .ok()
+            .map(|git_common_dir| yunta_core::ProjectIdentity { git_common_dir }),
     };
     Ok(FrozenRun {
         manifest,

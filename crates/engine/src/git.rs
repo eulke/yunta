@@ -257,6 +257,41 @@ pub async fn push_branch(
 }
 
 /// The URL `remote` names in `repo`, or `None` when it names none.
+/// The git directory every worktree of the repository at `repo` shares,
+/// absolute and canonical: one answer for the main checkout and for each
+/// of its linked worktrees, which is what names the repository a run was
+/// created in.
+pub async fn common_dir(repo: &Path, supervision: Supervision<'_>) -> Result<PathBuf, GitError> {
+    let said = output(repo, &["rev-parse", "--git-common-dir"], supervision).await?;
+    let dir = repo.join(said.trim());
+    Ok(tokio::fs::canonicalize(&dir).await.unwrap_or(dir))
+}
+
+/// Every run that has its own branch in the repository at `repo`, read
+/// in one listing — what places a run made before runs recorded the
+/// repository they were created in.
+pub async fn run_branches(
+    repo: &Path,
+    supervision: Supervision<'_>,
+) -> Result<std::collections::BTreeSet<yunta_core::RunId>, GitError> {
+    let prefix = format!("{}/", crate::worktree::RUN_BRANCHES);
+    let said = output(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)",
+            &format!("refs/heads/{prefix}"),
+        ],
+        supervision,
+    )
+    .await?;
+    Ok(said
+        .lines()
+        .filter_map(|branch| branch.trim().strip_prefix(&prefix))
+        .filter_map(|id| id.parse().ok())
+        .collect())
+}
+
 pub async fn remote_url(repo: &Path, remote: &str, supervision: Supervision<'_>) -> Option<String> {
     output(repo, &["remote", "get-url", remote], supervision)
         .await
