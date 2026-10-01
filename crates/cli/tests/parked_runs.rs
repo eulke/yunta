@@ -670,7 +670,7 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
 
     let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
     assert!(
-        text.contains("1 waiting · 0 reroutes · paused — node `ask`"),
+        text.contains("1 waiting · paused — node `ask`"),
         "the summary counts the parked node and names it: {text}"
     );
     assert!(

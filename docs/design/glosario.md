@@ -147,6 +147,13 @@ superficie tiene que leer una ausencia para saber si un nodo no corre o todavía
 no arrancó.
 _Evitar_: estado del nodo, pendiente, nodo sin estado.
 
+**Correcting**:
+Un nodo que falló y fue mandado a corregir —por su propio `on_failure`, o porque
+una persona eligió reintentarlo— en un run que sigue abierto: su falla se está
+trabajando y no se cuenta como una falla en pie. Deja de estarlo cuando vuelve a
+correr, o cuando el run cierra sin haber vuelto a él.
+_Evitar_: reintentando, en reparación.
+
 **Stalled**:
 Un run cuyo log dice que avanza y cuyo engine ya no existe: el registro del run
 (`scratch/engine.json`) nombra un proceso que terminó, o un pid que el host le dio

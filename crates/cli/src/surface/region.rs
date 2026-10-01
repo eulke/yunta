@@ -103,7 +103,7 @@ impl Region {
             bar.set_message(text);
         }
         self.counters
-            .set_message(self.fit(&view::counter_line(frame)));
+            .set_message(self.fit(&crate::render::counter::line(frame)));
     }
 
     /// Writes one diagnostic into the terminal's history above the

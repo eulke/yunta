@@ -200,7 +200,7 @@ impl Closing {
 
     /// The labelled rows under the outcome.
     fn rows(&self) -> Vec<(&'static str, String)> {
-        let mut rows = vec![("progress", view::counter_line(&self.frame))];
+        let mut rows = vec![("progress", crate::render::counter::line(&self.frame))];
         rows.push(("tokens", self.tokens()));
         if let Some(slowest) = self.slowest() {
             rows.push(("slowest", slowest));

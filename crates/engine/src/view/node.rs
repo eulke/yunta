@@ -13,7 +13,7 @@ use yunta_core::{Node, NodeId, TaskId};
 use crate::live::{last_event_age, open_sessions, recent_tool_calls, OpenSession, ToolCall};
 use crate::replay::{NodeState, RunState};
 use crate::stats::NodeStat;
-use yunta_core::events::{Reroute, ResolvedRunner};
+use yunta_core::events::{NodeRecord, Reroute, RerouteOrigin, ResolvedRunner};
 
 use super::Included;
 
@@ -74,6 +74,11 @@ pub struct NodeFrame {
     /// The last re-route this node took; `None` for one that never
     /// rerouted.
     pub reroute: Option<Reroute>,
+    /// Whether the node failed and was sent on to be corrected, in a run
+    /// that has not closed: its failure is being worked on, and a surface
+    /// that counted it as failed would alarm a reader about a correction
+    /// the workflow planned for.
+    pub correcting: bool,
 }
 
 /// A task in `running`, and whether an agent is on it: one no
@@ -102,6 +107,20 @@ pub enum NodeStanding {
     Reached(NodeState),
 }
 
+/// Whether `record`'s latest failure was handed on to be corrected: it
+/// failed, and its own `on_failure` — or a person choosing to retry it —
+/// sent control to its correction after that failure. Until the node runs
+/// again its failure is being worked on, not standing.
+fn sent_to_correction(record: &NodeRecord) -> bool {
+    let failed = matches!(record.state, Some(NodeState::Failed { .. }));
+    match (&record.last_reroute, record.last_failed) {
+        (Some(reroute), Some(failed_at)) => {
+            failed && reroute.origin == RerouteOrigin::OnFailure && reroute.seq > failed_at
+        }
+        _ => false,
+    }
+}
+
 /// The derivations every node frame is read from, and the instant they
 /// are read at.
 ///
@@ -116,6 +135,9 @@ pub(super) struct Reading<'a> {
     pub(super) left_out: Vec<yunta_core::LeftOut>,
     pub(super) state: &'a RunState,
     pub(super) now: DateTime<Utc>,
+    /// Whether the run has not closed: a correction under way belongs to
+    /// a run that can still reach it.
+    pub(super) open: bool,
 }
 
 impl Reading<'_> {
@@ -153,6 +175,12 @@ impl Reading<'_> {
                 .nodes
                 .get(&node.id)
                 .and_then(|r| r.last_reroute.clone()),
+            correcting: self.open
+                && self
+                    .state
+                    .nodes
+                    .get(&node.id)
+                    .is_some_and(sent_to_correction),
         }
     }
 

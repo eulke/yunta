@@ -18,6 +18,7 @@
 //! version of one.
 
 pub(crate) mod bars;
+pub(crate) mod counter;
 pub(crate) mod escalation;
 mod findings;
 pub(crate) mod glyphs;

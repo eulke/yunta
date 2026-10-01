@@ -8,7 +8,7 @@
 //! [`crate::render`], and nothing here reimplements a piece of it.
 
 use yunta_core::events::TerminalState;
-use yunta_engine::{ChildLink, Counter, NodeFrame, NodeStanding, RunFrame};
+use yunta_engine::{ChildLink, NodeFrame, NodeStanding, RunFrame};
 
 use yunta_core::{NodeId, RunId};
 
@@ -224,51 +224,6 @@ fn recent_calls(node: &NodeFrame) -> String {
             .clone()
             .unwrap_or_else(|| "(unnamed tool)".to_string())
     }))
-}
-
-/// The counters, at both levels the contract names: the DAG's nodes and
-/// the ledger's tasks, each as done over what this run will do, with
-/// every other bucket beside it.
-///
-/// The buckets are not decoration. A task that fails at integration goes
-/// back to ready and a re-routed node runs again, so `done` alone walks
-/// backwards; printed beside `failed`, `running` and `waiting`, that same
-/// event reads as a move between buckets, which is what makes a
-/// denominator that grew attributable to the event that grew it.
-pub(super) fn counter_line(frame: &RunFrame) -> String {
-    let mut line = format!("nodes {}", counter(&frame.flow));
-    if let Some(tasks) = &frame.tasks {
-        line.push_str(&format!(" · tasks {}", counter(tasks)));
-    }
-    if frame.reroutes > 0 {
-        line.push_str(&format!(
-            " · {}",
-            yunta_core::text::counted(frame.reroutes, "reroute")
-        ));
-    }
-    line
-}
-
-/// One level's counters: done over the total this run will do, then each
-/// bucket that holds anything, then what the run's mode left out.
-fn counter(counter: &Counter) -> String {
-    let mut text = format!("{}/{}", counter.done, counter.total);
-    for (count, word) in [
-        (counter.failed, StateWord::Fail),
-        (counter.running, StateWord::Run),
-        (counter.waiting, StateWord::Wait),
-    ] {
-        if count > 0 {
-            text.push_str(&format!(" · {count} {}", word.short()));
-        }
-    }
-    if let Some(mode) = &counter.skipped_by {
-        text.push_str(&format!(" · {} skipped by `{mode}`", counter.skipped));
-    }
-    if counter.left_out > 0 {
-        text.push_str(&format!(" · {} left out", counter.left_out));
-    }
-    text
 }
 
 /// Every node the run is working on right now, in the workflow's own

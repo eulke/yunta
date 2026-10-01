@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 
 use yunta_core::events::StoredEvent;
 use yunta_core::{Manifest, RunId};
-use yunta_engine::{Counter, EngineLiveness, RunFrame, RunPhase};
+use yunta_engine::{EngineLiveness, RunFrame, RunPhase};
 
 use crate::commands::advice;
 
@@ -43,44 +43,23 @@ pub(crate) fn frame(
     yunta_engine::run_frame(run_id, &manifest.workflow, events, None, now)
 }
 
-/// The counters and the phase on one line: two levels — flow (the DAG's
-/// nodes, over what this run's mode schedules) and task (ledger tasks
-/// done over registered) — each a counter with context.
+/// The counters and the phase on one line: the counters every surface
+/// prints for the run, then the word the run is called by and what
+/// qualifies it.
 ///
 /// `engine` is what the run's registry says about the process driving
 /// it, which is what tells a run that is moving from one whose engine is
 /// gone.
 pub(crate) fn summary(frame: &RunFrame, engine: EngineLiveness) -> String {
-    let mut summary = format!("{}/{} nodes", terminated(&frame.flow), frame.flow.total);
-    if let Some(mode) = &frame.flow.skipped_by {
-        summary.push_str(&format!(" · {} skipped (mode: {mode})", frame.flow.skipped));
-    }
-    if frame.flow.left_out > 0 {
-        summary.push_str(&format!(" · {} left out", frame.flow.left_out));
-    }
-    if frame.flow.waiting > 0 {
-        summary.push_str(&format!(" · {} waiting", frame.flow.waiting));
-    }
-    if let Some(tasks) = &frame.tasks {
-        summary = format!("{}/{} tasks · {summary}", tasks.done, tasks.total);
-    }
-    summary.push_str(&format!(
-        " · {} reroutes · {}",
-        frame.reroutes,
+    let mut summary = format!(
+        "{} · {}",
+        crate::render::counter::line(frame),
         phase_label(&frame.phase, engine)
-    ));
+    );
     if let Some(note) = crate::commands::unknown_kinds_note(&frame.unknown_kinds) {
         summary.push_str(&format!(" · {note}"));
     }
     summary
-}
-
-/// The nodes this run has carried as far as they go, finished and failed
-/// together: a line with room for one number says how much of the graph
-/// is behind the run, and the phase beside it says whether the run
-/// survived it.
-fn terminated(flow: &Counter) -> usize {
-    flow.done + flow.failed
 }
 
 /// The phase on one line, for the end of a summary: the word every

@@ -65,6 +65,7 @@ pub fn node_frame(id: &NodeId, state: NodeStanding) -> NodeFrame {
         sessions: Vec::new(),
         activity: Vec::new(),
         reroute: None,
+        correcting: false,
     }
 }
 

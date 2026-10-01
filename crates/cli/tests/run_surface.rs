@@ -248,6 +248,34 @@ fn the_closing_block_leads_with_the_decision_a_parked_run_waits_on() {
     assert!(decision < counters, "{text}");
 }
 
+/// The block that closes a run and the page `status` prints for it count
+/// the same frame, so they print the same counters, word for word.
+#[test]
+fn status_and_the_closing_block_print_one_counter_for_one_run() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = project(root.path(), EXHAUSTED);
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    let run_id = run_id_from(&run);
+    let closing = stdout(&run);
+    let counters = closing
+        .lines()
+        .find_map(|line| line.trim_start().strip_prefix("progress"))
+        .map(str::trim)
+        .expect("the counters row")
+        .to_string();
+    assert!(counters.starts_with("nodes 0/2 · 1 failed"), "{closing}");
+
+    let status = yunta_in!(&repo, &home, &["status", &run_id]);
+    let page = stdout(&status);
+    assert!(
+        page.lines()
+            .next()
+            .is_some_and(|line| line.starts_with(&format!("run {run_id}: {counters} · "))),
+        "the page leads with the counters the closing block printed (`{counters}`):\n{page}"
+    );
+}
+
 #[test]
 fn resume_reports_exactly_what_run_reports() {
     let root = tempfile::tempdir().unwrap();

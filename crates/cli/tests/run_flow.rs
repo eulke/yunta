@@ -58,7 +58,7 @@ nodes:
         String::from_utf8_lossy(&status.stderr)
     );
     let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
-    assert_eq!(state["summary"], "2/2 nodes · 0 reroutes · finished");
+    assert_eq!(state["summary"], "nodes 2/2 · finished");
     assert_eq!(node_of(&state, "touch"), finished_node("touch"));
     assert_eq!(node_of(&state, "verify"), finished_node("verify"));
 
@@ -917,7 +917,7 @@ fn list_runs_groups_a_run_under_what_can_be_done_about_it() {
     );
     assert_eq!(
         lines.next(),
-        Some("    1/1 nodes · 0 reroutes · finished"),
+        Some("    nodes 1/1 · finished"),
         "under it, the same summary `yunta status` prints: {text}"
     );
 }
@@ -990,8 +990,9 @@ nodes:
     );
     let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(
-        state["summary"], "2/2 nodes · 0 reroutes · finished",
-        "the normative counters read both nodes done, no reroutes, finished"
+        state["summary"], "nodes 2/2 · finished",
+        "the normative counters read both nodes done and finished, and a run with no \
+         reroute says nothing about them"
     );
 }
 
@@ -1036,8 +1037,7 @@ nodes:
     let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
     let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(
-        state["summary"],
-        "3/3 nodes \u{b7} 1 skipped (mode: fan-only) \u{b7} 0 reroutes \u{b7} finished",
+        state["summary"], "nodes 3/3 \u{b7} 1 skipped by `fan-only` \u{b7} finished",
         "the group and both its children are inside the denominator, and the \
          only skipped node is the top-level one the mode leaves out"
     );

@@ -57,7 +57,7 @@ pub use yunta_core::events::{ChildLink, Degradation, Reroute};
 /// reads as a move *between* them — `failed` down one, `running` up one
 /// — which a surface can show and attribute to the event that caused
 /// it. The buckets partition the total:
-/// `done + failed + running + waiting + to_go == total`.
+/// `done + failed + correcting + running + waiting + to_go == total`.
 ///
 /// `skipped` sits outside that sum, because a node the run's mode leaves
 /// out is not work this run will do; `skipped_by` names the mode that
@@ -68,6 +68,9 @@ pub use yunta_core::events::{ChildLink, Degradation, Reroute};
 pub struct Counter {
     pub done: usize,
     pub failed: usize,
+    /// Failed and sent on to be corrected, in a run that has not closed:
+    /// the failure is being worked on. Always zero for tasks.
+    pub correcting: usize,
     pub running: usize,
     /// Parked on something outside the work itself: a node on a person
     /// (a published gate, unanswered questions), a task on the
@@ -163,6 +166,7 @@ pub fn run_frame(
     let state = derive(events);
     let stats = stats_observed_at(&state, workflow, events, Some(now));
     let mode = run_mode(events);
+    let phase = phase::phase(workflow, &state, events);
     let reading = Reading {
         stats: stats
             .nodes
@@ -173,6 +177,10 @@ pub fn run_frame(
         left_out: run_left_out(events),
         state: &state,
         now,
+        open: matches!(
+            phase,
+            RunPhase::Created | RunPhase::Running | RunPhase::Waiting { .. }
+        ),
     };
     let nodes: Vec<NodeFrame> = workflow
         .iter_nodes_with_group()
@@ -183,7 +191,7 @@ pub fn run_frame(
         run_id: run_id.clone(),
         workflow: workflow.name.clone(),
         mode: mode.clone(),
-        phase: phase::phase(workflow, &state, events),
+        phase,
         elapsed: stats.wall_clock,
         flow: flow_counter(&nodes, &mode),
         tasks: task_counter(&state),
@@ -221,6 +229,9 @@ fn flow_counter(nodes: &[NodeFrame], mode: &ModeName) -> Counter {
             }
             NodeStanding::ToGo => counter.to_go += 1,
             NodeStanding::Reached(NodeState::Finished { .. }) => counter.done += 1,
+            NodeStanding::Reached(NodeState::Failed { .. }) if node.correcting => {
+                counter.correcting += 1
+            }
             NodeStanding::Reached(NodeState::Failed { .. }) => counter.failed += 1,
             NodeStanding::Reached(NodeState::Running { .. }) => counter.running += 1,
             NodeStanding::Reached(NodeState::Waiting { .. }) => counter.waiting += 1,
