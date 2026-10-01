@@ -104,7 +104,7 @@ impl RunRow {
     /// the run is doing and the mode it does it in; the line under it is
     /// the same summary `yunta status` prints, so the two surfaces say
     /// the same thing about the same run.
-    fn render(&self, Look { glyphs, width }: Look) -> String {
+    fn render(&self, Look { glyphs, width, .. }: Look) -> String {
         // The row hangs one step under the heading of its group, and
         // its summary one step further under the row, so the summary
         // reads as this run's line rather than the next run's.

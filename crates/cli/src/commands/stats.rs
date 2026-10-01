@@ -446,7 +446,7 @@ fn render_workflow_history(
 /// The sparkline gets whatever `width` leaves after the indent and that
 /// note, so a workflow with hundreds of runs narrows its window
 /// instead of wrapping the line and breaking the block it sits in.
-fn cptv_line(history: &[RunSummary], Look { glyphs, width }: Look) -> String {
+fn cptv_line(history: &[RunSummary], Look { glyphs, width, .. }: Look) -> String {
     let latest = history
         .last()
         .and_then(|r| r.cptv)

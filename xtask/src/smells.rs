@@ -195,6 +195,24 @@ fn measure() -> BTreeMap<String, usize> {
         }),
     );
 
+    // The separator between two facts on a line written as a literal: a
+    // surface drawing with the ASCII set still prints it, where the
+    // glyph set would have printed what that terminal can draw.
+    counts.insert(
+        "separator_literal_outside_glyphs".to_string(),
+        cli_src
+            .iter()
+            .filter(|path| !path.ends_with("render/glyphs.rs") && !path.ends_with("tests.rs"))
+            .filter_map(|path| std::fs::read_to_string(path).ok())
+            .map(|text| {
+                production_only(&text)
+                    .lines()
+                    .filter(|line| !line.trim_start().starts_with("//") && line.contains('·'))
+                    .count()
+            })
+            .sum(),
+    );
+
     // A `_ =>` inside a ledger's fold is a kind that derives nothing
     // with nothing saying so: the arm exists, the reader sees no
     // diagnostic, and the state is simply wrong. Every kind is named,

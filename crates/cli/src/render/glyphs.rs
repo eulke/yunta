@@ -135,6 +135,23 @@ impl Glyphs {
         }
     }
 
+    /// What stands between two facts on one line: `a · b`.
+    pub(crate) fn sep(self) -> char {
+        match self {
+            Self::Unicode => '·',
+            Self::Ascii => '|',
+        }
+    }
+
+    /// The edge quoted output hangs from, so it reads as something a
+    /// command printed and not as something this one says.
+    pub(crate) fn gutter(self) -> char {
+        match self {
+            Self::Unicode => '│',
+            Self::Ascii => '|',
+        }
+    }
+
     /// The eight steps a sparkline climbs, lightest first.
     pub(crate) fn ramp(self) -> &'static [char; 8] {
         match self {

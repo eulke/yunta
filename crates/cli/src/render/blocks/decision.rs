@@ -1,0 +1,57 @@
+//! A decision a run waits on: every option, what it costs, and the
+//! command that chooses it.
+
+use super::Block;
+use crate::render::ink::{Line, Tone};
+use crate::render::{cell_width, wrap, Look, INDENT};
+
+/// One option on a decision's menu.
+pub(crate) struct DecisionOption {
+    pub(crate) id: String,
+    /// What the option does, when it says more than its id.
+    pub(crate) label: Option<String>,
+    /// What choosing it costs — never dropped: it is what makes the
+    /// choice a decision and not a guess.
+    pub(crate) tradeoff: String,
+    /// What the option needs said with it, when it needs anything.
+    pub(crate) asks: Option<String>,
+}
+
+/// A run's decision, every option with the command that chooses it: a
+/// reader copies a line rather than composing one from a menu.
+pub(crate) struct Decision {
+    /// What the run is called by.
+    pub(crate) handle: String,
+    pub(crate) options: Vec<DecisionOption>,
+}
+
+impl Block for Decision {
+    fn lines(&self, look: &Look) -> Vec<Line> {
+        let under = format!("{INDENT}{INDENT}");
+        let room = look.width.cells().saturating_sub(cell_width(&under));
+        let mut lines = Vec::new();
+        for option in &self.options {
+            let mut head = Line::new()
+                .plain(INDENT)
+                .push(Tone::Strong, option.id.as_str());
+            if let Some(label) = &option.label {
+                head = head.plain(" — ").plain(label.as_str());
+            }
+            lines.push(head);
+            let mut said = vec![option.tradeoff.clone()];
+            said.extend(option.asks.iter().map(|asks| format!("asks: {asks}")));
+            for part in said.iter().flat_map(|text| wrap(text, room)) {
+                lines.push(Line::new().plain(under.as_str()).push(Tone::Muted, part));
+            }
+            let text = match option.asks {
+                Some(_) => " --text \"<answer>\"",
+                None => "",
+            };
+            lines.push(Line::new().plain(under.as_str()).push(
+                Tone::Strong,
+                format!("yunta resolve-gate {} {}{text}", self.handle, option.id),
+            ));
+        }
+        lines
+    }
+}

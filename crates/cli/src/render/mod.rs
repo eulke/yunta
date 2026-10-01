@@ -18,6 +18,7 @@
 //! version of one.
 
 pub(crate) mod bars;
+pub(crate) mod blocks;
 pub(crate) mod counter;
 pub(crate) mod escalation;
 mod findings;
@@ -26,7 +27,9 @@ pub(crate) mod ink;
 pub(crate) mod line_width;
 pub(crate) mod look;
 pub(crate) mod markdown;
+pub(crate) mod paths;
 mod plan;
+pub(crate) mod prose;
 pub(crate) mod shown;
 mod spec;
 pub(crate) mod state;

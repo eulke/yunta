@@ -32,8 +32,12 @@ width a line got depended on which surface printed it.
 4. **A row redrawn in place never passes the terminal's edge**, floor or not:
    the live region and the prompt redraw their rows, and a row that wraps tears
    the next redraw.
+5. **Quoted output is at most six lines**: the end of what a command printed,
+   where a compiler and a test runner say what went wrong, then how many lines
+   came before and where the whole of it is. More buries the verdict under the
+   output it came from.
 
-The floor and the ceiling are registered in D170.
+The floor, the ceiling and the quoted lines are registered in D170.
 
 ## Rationale
 

@@ -21,6 +21,7 @@ revised_by: [D216, D217]
 | `SHOWN` | 4 | `cli/src/surface/view.rs` | llamadas recientes que una fila de la región muestra |
 | `Width::FLOOR` | 60 celdas | `cli/src/render/line_width.rs` | ancho mínimo al que se dispone una línea: debajo, una columna de nombres y lo que va al lado ya no comparten fila (D216) |
 | `Width::CEILING` | 120 celdas | `cli/src/render/line_width.rs` | ancho máximo: más larga, una línea ya no se lee de un barrido (D216) |
+| `QUOTED` | 6 líneas | `cli/src/render/blocks/evidence.rs` | líneas de salida que cita la evidencia: el final, donde un compilador o un runner de tests dice qué falló; el resto queda a un comando o una ruta (D216) |
 | `RunId::HANDLE_CHARS` | 6 | `core/src/ids.rs` | caracteres del id con que se llama a un run: treinta bits, una colisión en una máquina que nadie encuentra, y pocos para leer en una línea y tipear en la siguiente (D217) |
 | `UNDO_BOUND` | 10 s | `engine/src/worktree/mod.rs` | techo de cada paso del deshacer de un `worktree add` que la cancelación mató: alcanza para un git local con caché fría, y no deja esperando a quien apretó Ctrl-C dos veces |
 | `DEEP_STACK` | 64 MiB | `testkit/src/stack.rs` | pila del hilo en el que corre un test de composición profunda: un run que compone anida un future del engine por nivel y en debug tres niveles no entran en los 8 MiB que le tocan a un hilo de test; la reserva es espacio de direcciones, se compromete página a página, y el margen no cuesta nada |
