@@ -58,6 +58,10 @@ pub const COUNTERS: &[Counter] = &[
     ("reason_built_by_format", count_reason_built_by_format),
     ("sgr_outside_ink", count_sgr_outside_ink),
     (
+        "token_count_formatted_outside_units",
+        count_token_count_formatted_outside_units,
+    ),
+    (
         "run_tool_named_outside_vocabulary",
         count_run_tool_named_outside_vocabulary,
     ),
@@ -128,6 +132,21 @@ fn count_sgr_outside_ink(root: &Path) -> usize {
             "crates/cli/tests/",
             "crates/testkit/src/terminal.rs",
         ],
+    )
+}
+
+/// A count of tokens written as a bare number beside its unit, outside
+/// the module that says how a count of tokens reads.
+///
+/// `1859898 tokens` is a number a reader has to count the digits of, and
+/// two surfaces that each format their own say the same count two ways.
+/// The units module reads it as `1.86M tokens` everywhere, and exactly
+/// where the count stands beside a limit.
+fn count_token_count_formatted_outside_units(root: &Path) -> usize {
+    outside(
+        root,
+        &[Text("} tok"), Text(", \"token\")")],
+        &["crates/core/src/units.rs"],
     )
 }
 
@@ -365,6 +384,9 @@ mod tests {
         assert!(Text("env::remove_var").on("    env::remove_var(\"YUNTA_HOME\");"));
         assert!(Text("fn event(").on("pub fn event(self, payload: EventPayload) -> Self {"));
         assert!(!Text("fn event(").on("    let event = log.event(payload);"));
+        assert!(Text("} tok").on("        \"{INDENT}{}  {total:>8} tok\\n\","));
+        assert!(Text("} tok").on("    \"CPTV: {cptv:.1} tokens/task\""));
+        assert!(!Text("} tok").on("    \"tokens: {} in / {} out\""));
     }
 
     #[test]

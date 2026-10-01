@@ -105,7 +105,7 @@ workflow: `release-cycle` · mode: `default` · state: Done
 - ✓ 0 regression(s) vs baseline across 2 comparison(s) (suite `make test`, hash `22cc66aa7d26`)
 - ✓ scope: 4 file(s) touched, 0 violation(s)
 - ✓ Reviewed by 2 independent runner(s) via `review` (claude-code, codex)
-- cost: 1540 tokens (1200 in / 340 out) · CPTV: 770.0 tokens/task · 2 reroute(s)
+- cost: 1.54k tokens (1.2k in / 340 out) · CPTV: 770 tokens per task · 2 reroute(s)
 - ✓ event chain: 342 event(s), hash-linked, replayable
 
 ## Criteria
@@ -172,7 +172,7 @@ workflow: `release-cycle` · mode: `default` · state: Done
 - baseline: not used by this workflow
 - ✓ scope: 4 file(s) touched, 0 violation(s)
 - ✓ Reviewed by 2 independent runner(s) via `review` (claude-code, codex)
-- cost: 1540 tokens (1200 in / 340 out) · CPTV: 770.0 tokens/task · 2 reroute(s)
+- cost: 1.54k tokens (1.2k in / 340 out) · CPTV: 770 tokens per task · 2 reroute(s)
 - ✓ event chain: 10 event(s), hash-linked, replayable
 
 ## Criteria

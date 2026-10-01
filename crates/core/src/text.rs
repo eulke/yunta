@@ -105,17 +105,23 @@ pub fn aside(subject: impl fmt::Display, carried: &str) -> String {
 /// in hand becomes a phrase, so no message hedges with `(s)` while the
 /// number sits right beside it.
 ///
-/// `noun` takes a plain `-s` plural, which is every noun this system
-/// counts.
+/// `noun` takes a plain `-s` plural; [`counted_as`] takes one that
+/// does not.
 ///
 /// The phrase is one string, so its width varies with the count. A
 /// column that right-aligns its number (`{:>3}`) has to keep the two
 /// apart — format the count itself and follow it with the noun — or the
 /// column goes ragged the first time a total reaches two digits.
 pub fn counted(n: usize, noun: &str) -> String {
+    counted_as(n, noun, &format!("{noun}s"))
+}
+
+/// `n` things, named by a noun whose plural is not a plain `-s`:
+/// `1 capability the adapter lacks`, `2 capabilities the adapter lacks`.
+pub fn counted_as(n: usize, one: &str, many: &str) -> String {
     match n {
-        1 => format!("1 {noun}"),
-        n => format!("{n} {noun}s"),
+        1 => format!("1 {one}"),
+        n => format!("{n} {many}"),
     }
 }
 

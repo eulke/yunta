@@ -18,7 +18,7 @@ use std::io::Write;
 use yunta_engine::Moment;
 
 use crate::render::ink::Ink;
-use crate::render::{format_duration, Glyphs};
+use crate::render::{duration, Glyphs};
 
 use super::{chronicle, write_line};
 
@@ -66,7 +66,7 @@ impl Lines {
             .unwrap_or_default();
         write_line(
             &mut self.out,
-            &format!("[{}] {mark}{}", format_duration(moment.elapsed), said.text),
+            &format!("[{}] {mark}{}", duration(moment.elapsed), said.text),
         );
     }
 }

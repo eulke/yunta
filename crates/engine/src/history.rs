@@ -12,6 +12,7 @@
 use std::time::Duration;
 
 use yunta_core::events::StoredEvent;
+use yunta_core::units::Tokens;
 use yunta_core::{ContentHash, ModeName, RunId, Workflow};
 
 use crate::stats::{compute_run_stats, median};
@@ -112,8 +113,9 @@ pub fn budget_p90_warning(
     if (cap as f64) < estimation.tokens.p90 {
         Some(format!(
             "`limits.max_tokens_per_run` ({cap}) is below this workflow's \
-             historical p90 ({:.0} tokens over {} run(s)) — the run may pause on its budget",
-            estimation.tokens.p90, estimation.sample_count
+             historical p90 ({} over {}) — the run may pause on its budget",
+            Tokens::rounded(estimation.tokens.p90).exact(),
+            yunta_core::text::counted(estimation.sample_count, "run")
         ))
     } else {
         None

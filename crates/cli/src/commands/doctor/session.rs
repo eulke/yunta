@@ -118,11 +118,7 @@ impl fmt::Display for SessionProbe {
         write!(f, "{} ({}): ", self.binding, self.named_by)?;
         match &self.outcome {
             Outcome::Ok { tokens } => {
-                write!(
-                    f,
-                    "ok — {}",
-                    yunta_core::text::counted(*tokens as usize, "token")
-                )
+                write!(f, "ok — {}", yunta_core::units::Tokens(*tokens))
             }
             Outcome::Died(died) => write!(f, "session died — {died}"),
             Outcome::NoDelivery(why) => write!(f, "session opened, no questions document — {why}"),

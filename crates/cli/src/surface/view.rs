@@ -13,7 +13,7 @@ use yunta_engine::{ChildLink, NodeFrame, NodeStanding, RunFrame};
 use yunta_core::{NodeId, RunId};
 
 use crate::commands::advice;
-use crate::render::{format_duration, indent, Glyphs, Mark, NodeDisplay, CHILD_DEPTH};
+use crate::render::{duration, indent, Glyphs, Mark, NodeDisplay, CHILD_DEPTH};
 
 /// How deep a node's detail sits under the node's own row, in steps of
 /// [`indent`] — the step every surface here shares, so the detail lines
@@ -205,10 +205,10 @@ fn headline(node: &NodeFrame, glyphs: Glyphs) -> String {
         }
     }
     if let Some(elapsed) = node.elapsed {
-        row.push_str(&format!(" · {}", format_duration(elapsed)));
+        row.push_str(&format!(" · {}", duration(elapsed)));
     }
     if let Some(age) = node.last_event_age {
-        row.push_str(&format!(" · last event {} ago", format_duration(age)));
+        row.push_str(&format!(" · last event {} ago", duration(age)));
     }
     row
 }

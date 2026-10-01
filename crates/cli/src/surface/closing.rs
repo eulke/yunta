@@ -28,7 +28,7 @@ use crate::commands::status::decision::{self, Layout};
 use crate::commands::{advice, unknown_kinds_note};
 use crate::error::Outcome;
 use crate::render::ink::{Ink, Line, Tone};
-use crate::render::{format_duration, indent, truncate, Glyphs, Mark, INDENT, LABEL_WIDTH};
+use crate::render::{duration, indent, truncate, Glyphs, Mark, Tokens, INDENT, LABEL_WIDTH};
 use yunta_core::text::counted;
 
 use super::view;
@@ -229,7 +229,7 @@ impl Closing {
     /// the only honest comparison there is, because it is what already
     /// happened rather than a prediction.
     fn tokens(&self) -> String {
-        let spent = format!("{} spent", self.frame.tokens.total());
+        let spent = format!("{} spent", Tokens(self.frame.tokens.total()).figure());
         match &self.frame.prior {
             Some(prior) => format!("{spent} · {}", history(prior)),
             None => spent,
@@ -253,7 +253,7 @@ impl Closing {
             timed
                 .iter()
                 .take(SLOWEST)
-                .map(|(node, elapsed)| format!("{} {}", node.id, format_duration(*elapsed)))
+                .map(|(node, elapsed)| format!("{} {}", node.id, duration(*elapsed)))
                 .collect::<Vec<_>>()
                 .join(" · "),
         )

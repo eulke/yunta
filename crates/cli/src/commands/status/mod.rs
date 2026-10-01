@@ -25,7 +25,7 @@ use crate::context::Context;
 use crate::error::note;
 use crate::error::{CliError, Outcome};
 use crate::render::state::RunWord;
-use crate::render::{indent, NodeDisplay, Width, CHILD_DEPTH, INDENT};
+use crate::render::{indent, NodeDisplay, Tokens, Width, CHILD_DEPTH, INDENT};
 
 pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -113,8 +113,8 @@ fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState, run_dir: &Pat
 
     println!(
         "tokens: {} in / {} out",
-        state.total_tokens().input,
-        state.total_tokens().output
+        Tokens(state.total_tokens().input).figure(),
+        Tokens(state.total_tokens().output).figure()
     );
     if let Some(drift) = state.run.environment_drift() {
         println!("environment: {drift}");
@@ -123,7 +123,7 @@ fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState, run_dir: &Pat
         println!(
             "host: suspended {} for {} in all — durations leave it out",
             yunta_core::text::counted(times, "time"),
-            crate::render::format_duration(slept)
+            crate::render::duration(slept)
         );
     }
 }

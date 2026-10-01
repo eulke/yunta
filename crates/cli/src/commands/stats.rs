@@ -21,9 +21,10 @@ use yunta_engine::{
 use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
 use crate::render::{
-    bar, cell_width, format_duration, format_pct, id_column, middle_cut, sparkline, truncate,
-    Glyphs, Look, NodeDisplay, INDENT, LABEL_WIDTH, STATE_WIDTH,
+    bar, cell_width, duration, id_column, middle_cut, sparkline, truncate, Glyphs, Look,
+    NodeDisplay, Ratio, Tokens, INDENT, LABEL_WIDTH, STATE_WIDTH,
 };
+use yunta_core::units::DURATION_WIDEST;
 
 pub async fn stats(
     run_id: Option<&RunId>,
@@ -220,12 +221,12 @@ fn render_run_stats(
     if let Some(note) = super::unknown_kinds_note(&stats.unknown_kinds) {
         out.push_str(&format!("{note}\n"));
     }
-    out.push_str(&rates(stats));
+    out.push_str(&rates(stats, glyphs));
     out.push_str(&spend(stats, pricing));
     if !stats.asleep.is_zero() {
         out.push_str(&format!(
             "host asleep: {} — left out of every duration\n",
-            format_duration(stats.asleep)
+            duration(stats.asleep)
         ));
     }
     out.push_str(&format!(
@@ -246,21 +247,28 @@ fn render_run_stats(
 }
 
 /// The three rates a run is read by, each saying `n/a` and why rather
-/// than a number nothing supports.
-fn rates(stats: &RunStats) -> String {
+/// than a number nothing supports, and each saying what it divides.
+fn rates(stats: &RunStats, glyphs: Glyphs) -> String {
     let cptv = match stats.cptv {
         Some(cptv) => format!(
-            "CPTV: {cptv:.1} tokens/task done ({} done)",
-            stats.tasks_done
+            "CPTV (cost per verified task): {} · {}",
+            Tokens::rounded(cptv),
+            yunta_core::text::counted(stats.tasks_done, "task done")
         ),
-        None => "CPTV: n/a (no task done yet)".to_string(),
+        None => "CPTV (cost per verified task): n/a — no task is done".to_string(),
     };
     let rework = match stats.rework_rate {
-        Some(rate) => format!("rework rate: {}", format_pct(rate)),
+        Some(rate) => format!(
+            "rework rate: {} (tokens spent on retries and re-routes)",
+            Ratio(rate).reads(glyphs.times())
+        ),
         None => "rework rate: n/a".to_string(),
     };
     let cache = match stats.cache_rate {
-        Some(rate) => format!("cache rate: {}", format_pct(rate)),
+        Some(rate) => format!(
+            "cache rate: {} (cached tokens per input token)",
+            Ratio(rate).reads(glyphs.times())
+        ),
         None => "cache rate: n/a (adapter never reported it)".to_string(),
     };
     format!("{cptv}\n{rework}\n{cache}\n")
@@ -273,12 +281,13 @@ fn spend(
     pricing: Option<&std::collections::BTreeMap<String, yunta_core::PricingEntry>>,
 ) -> String {
     let cached = match stats.total_tokens.cached {
-        Some(cached) => format!(" ({cached} cached)"),
+        Some(cached) => format!(" ({} cached)", Tokens(cached).figure()),
         None => String::new(),
     };
     let mut out = format!(
         "tokens: {} in / {} out{cached}\n",
-        stats.total_tokens.input, stats.total_tokens.output
+        Tokens(stats.total_tokens.input).figure(),
+        Tokens(stats.total_tokens.output).figure()
     );
     if let Some(line) = currency_line(stats.total_tokens.total(), pricing) {
         out.push_str(&format!("{line}\n"));
@@ -354,9 +363,10 @@ fn render_runners(stats: &RunStats, glyphs: Glyphs) -> String {
     for (runner, tokens) in &by_runner {
         let total = tokens.total();
         out.push_str(&format!(
-            "{INDENT}{} {}  {total:>8} tok\n",
+            "{INDENT}{} {}  {}\n",
             middle_cut(runner.as_str(), column, glyphs),
             bar(total, max_runner_tokens, glyphs),
+            Tokens(total).column().trim_end(),
         ));
     }
     out
@@ -373,15 +383,16 @@ fn node_line(
     let total = node.tokens.total();
     let blocked = node
         .blocked_fraction()
-        .map(format_pct)
-        .unwrap_or_else(|| " n/a".to_string());
+        .map(|fraction| Ratio(fraction).reads(glyphs.times()))
+        .unwrap_or_else(|| "n/a".to_string());
     format!(
-        "{INDENT}{} {} {} {}  {total:>8} tok  {:>8}  blk:{blocked}",
+        "{INDENT}{} {} {} {}  {}  {:>DURATION_WIDEST$}  {blocked:>4} blocked",
         crate::render::ink::Ink::stdout().mark(glyphs, display.word.mark()),
         truncate(display.word.word(), STATE_WIDTH, glyphs),
         middle_cut(node.node_id.as_str(), column, glyphs),
         bar(total, max_tokens, glyphs),
-        format_duration(node.wall_clock()),
+        Tokens(total).column(),
+        duration(node.wall_clock()),
     )
 }
 
@@ -406,10 +417,10 @@ fn render_workflow_history(
             truncate(mode.as_str(), LABEL_WIDTH, look.glyphs),
             runs,
             median_cptv
-                .map(|v| format!("{v:.1}"))
+                .map(|v| Tokens::rounded(v).figure())
                 .unwrap_or_else(|| "n/a".to_string()),
             median_tokens
-                .map(|v| format!("{v:.0}"))
+                .map(|v| Tokens::rounded(v).figure())
                 .unwrap_or_else(|| "n/a".to_string()),
         ));
     }
@@ -538,14 +549,14 @@ fn mode_table(history: &[RunSummary]) -> Vec<(ModeName, usize, Option<f64>, Opti
 /// so the three surfaces never phrase the same numbers differently.
 pub(crate) fn format_estimation_line(estimation: &yunta_engine::PriorEstimation) -> String {
     let wall_clock = match estimation.wall_clock_secs {
-        Some(p) => format_duration(Duration::from_secs_f64(p.median)),
+        Some(p) => duration(Duration::from_secs_f64(p.median)),
         None => "n/a".to_string(),
     };
     format!(
-        "{} · median {:.0} tokens, p90 {:.0} · median wall-clock {}",
+        "{} · median {}, p90 {} · median wall-clock {}",
         yunta_core::text::counted(estimation.sample_count, "past run"),
-        estimation.tokens.median,
-        estimation.tokens.p90,
+        Tokens::rounded(estimation.tokens.median),
+        Tokens::rounded(estimation.tokens.p90).figure(),
         wall_clock,
     )
 }
@@ -898,7 +909,7 @@ mod tests {
             "what it found, and what still stands: {text}"
         );
         assert!(
-            text.contains("CPTV: 500.0 tokens/task done (1 done)"),
+            text.contains("CPTV (cost per verified task): 500 tokens · 1 task done"),
             "{text}"
         );
     }

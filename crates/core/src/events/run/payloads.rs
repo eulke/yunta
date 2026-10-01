@@ -290,8 +290,8 @@ impl std::fmt::Display for PauseReason {
             PauseReason::CancelledAfterCrash => f.write_str("cancelled after crash"),
             PauseReason::BudgetExhausted { spent, cap } => write!(
                 f,
-                "budget: run spent {spent} tokens with `limits.max_tokens_per_run: {cap}` — \
-                 {PAST_THE_CAP}"
+                "budget: run spent {} with `limits.max_tokens_per_run: {cap}` — {PAST_THE_CAP}",
+                crate::units::Tokens(*spent).exact()
             ),
             PauseReason::LoopOverrun { node, cap } => write!(
                 f,

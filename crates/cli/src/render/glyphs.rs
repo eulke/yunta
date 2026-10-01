@@ -127,6 +127,14 @@ impl Glyphs {
         }
     }
 
+    /// The sign a multiple is read with: `120×`.
+    pub(crate) fn times(self) -> char {
+        match self {
+            Self::Unicode => '×',
+            Self::Ascii => 'x',
+        }
+    }
+
     /// The eight steps a sparkline climbs, lightest first.
     pub(crate) fn ramp(self) -> &'static [char; 8] {
         match self {

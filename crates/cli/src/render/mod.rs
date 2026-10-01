@@ -30,7 +30,6 @@ mod plan;
 pub(crate) mod shown;
 mod spec;
 pub(crate) mod state;
-pub(crate) mod units;
 pub(crate) mod width;
 
 pub(crate) use bars::{bar, sparkline};
@@ -39,8 +38,8 @@ pub(crate) use glyphs::Glyphs;
 pub(crate) use line_width::Width;
 pub(crate) use look::Look;
 pub(crate) use state::{Mark, NodeDisplay, StateWord, STATE_WIDTH};
-pub(crate) use units::{format_duration, format_pct};
 pub(crate) use width::{
     cell_width, cut, id_column, indent, middle_cut, truncate, wrap, CHILD_DEPTH, INDENT,
     INDENT_WIDTH, LABEL_WIDTH, LINE_WIDTH,
 };
+pub(crate) use yunta_core::units::{duration, Ratio, Tokens};

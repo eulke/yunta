@@ -8,6 +8,7 @@
 
 use super::{BaselineSummary, DiagnosticCount, EventChainStatus, Receipt, RunnerUsage};
 use yunta_core::events::BaselineOrigin;
+use yunta_core::units::Tokens;
 use yunta_core::NodeId;
 
 /// Fan-out siblings share their base id (`<base>@<runner>`, see
@@ -99,12 +100,12 @@ pub fn render_markdown(receipt: &Receipt) -> String {
         }
     }
     out.push_str(&format!(
-        "- cost: {} tokens ({} in / {} out){} · {} reroute(s)\n",
-        receipt.cost.tokens.total(),
-        receipt.cost.tokens.input,
-        receipt.cost.tokens.output,
+        "- cost: {} ({} in / {} out){} · {} reroute(s)\n",
+        Tokens(receipt.cost.tokens.total()),
+        Tokens(receipt.cost.tokens.input).figure(),
+        Tokens(receipt.cost.tokens.output).figure(),
         match receipt.cost.cptv {
-            Some(cptv) => format!(" · CPTV: {cptv:.1} tokens/task"),
+            Some(cptv) => format!(" · CPTV: {} per task", Tokens::rounded(cptv)),
             None => String::new(),
         },
         receipt.cost.reroutes,

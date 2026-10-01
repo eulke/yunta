@@ -422,7 +422,7 @@ fn a_cap_below_the_historical_p90_produces_the_warning() {
         .expect("cap 250 < p90 300 must warn");
     assert_eq!(
         warning,
-        "`limits.max_tokens_per_run` (250) is below this workflow's historical p90 (300 tokens over 3 run(s)) — the run may pause on its budget"
+        "`limits.max_tokens_per_run` (250) is below this workflow's historical p90 (300 tokens over 3 runs) — the run may pause on its budget"
     );
 }
 

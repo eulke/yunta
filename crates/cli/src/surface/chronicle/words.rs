@@ -16,7 +16,7 @@ use yunta_core::NonEmpty;
 use yunta_engine::{Happening, NodeState, NodeWait};
 
 use super::super::view;
-use crate::render::{format_duration, Mark, NodeDisplay, StateWord};
+use crate::render::{duration, Mark, NodeDisplay, StateWord};
 use tasks::happening as tasks_happening;
 
 /// What the moment carries beyond its subject, and the state it is
@@ -55,8 +55,8 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
         H::HostSuspended { slept } => format!(
             "host suspended for {} — durations leave it out; new sessions wait until it has \
              been awake {}",
-            format_duration(*slept),
-            format_duration(yunta_engine::SETTLE_AFTER_SUSPENSION)
+            duration(*slept),
+            duration(yunta_engine::SETTLE_AFTER_SUSPENSION)
         ),
         H::Closed { terminal, .. } => view::closed_as(*terminal).to_string(),
         H::PromotionSignaled { to, reason, .. } => {
@@ -96,7 +96,7 @@ fn node_words(happening: &node::happening::Happening) -> (Option<Mark>, String) 
         H::Reached { state, elapsed, .. } => {
             let display = NodeDisplay::of(Some(state));
             let worked = elapsed
-                .map(|elapsed| format!(" · {}", format_duration(elapsed)))
+                .map(|elapsed| format!(" · {}", duration(elapsed)))
                 .unwrap_or_default();
             (
                 Some(display.word.mark()),
@@ -218,7 +218,7 @@ fn task_words(happening: &tasks_happening::Happening) -> String {
             red,
             duration_ms,
         } => {
-            let took = format_duration(std::time::Duration::from_millis(*duration_ms));
+            let took = duration(std::time::Duration::from_millis(*duration_ms));
             match (closes, red) {
                 (true, _) => format!("{task} checked in {took}: it would close"),
                 (false, 0) => {

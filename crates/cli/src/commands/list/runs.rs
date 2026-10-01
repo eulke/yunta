@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use yunta_core::events::StoredEvent;
+use yunta_core::units::DURATION_WIDEST;
 use yunta_core::{Clock, Manifest, ModeName, RunId, WorkflowName};
 use yunta_engine::{EngineLiveness, RunFrame};
 use yunta_storage::Storage;
@@ -23,7 +24,7 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::project::Project;
 use crate::render::state::RunWord;
-use crate::render::{cell_width, format_duration, indent, truncate, Look, INDENT};
+use crate::render::{cell_width, duration, indent, truncate, Look, INDENT};
 
 /// The cells a run id gets. A ULID is 26 characters, and the id is what
 /// a reader copies into the next command, so this column pads a shorter
@@ -34,11 +35,6 @@ const ID_WIDTH: usize = 26;
 /// names a repo's own workflows carry, and the column the eye runs down
 /// to find the run it came for.
 const NAME_WIDTH: usize = 24;
-
-/// The cells the time-in-state gets, right-aligned so a column of them
-/// compares as numbers: `9s` through `23h59m` (see
-/// [`crate::render::format_duration`]).
-const AGE_WIDTH: usize = 6;
 
 /// The part of a listing a run belongs in — the inbox's own grouping,
 /// derived from the run's phase so a heading can never disagree with the
@@ -281,14 +277,16 @@ impl RunRow {
         // reads as this run's line rather than the next run's.
         let margin = indent(2);
         format!(
-            "{INDENT}{:<ID_WIDTH$}  {}  {:>AGE_WIDTH$}\n{margin}{}\n",
+            // The age right-aligned, so a column of them compares as
+            // numbers.
+            "{INDENT}{:<ID_WIDTH$}  {}  {:>DURATION_WIDEST$}\n{margin}{}\n",
             self.run_id.as_str(),
             truncate(
                 &format!("{} ({})", self.workflow, self.mode),
                 NAME_WIDTH,
                 glyphs
             ),
-            format_duration(self.age),
+            duration(self.age),
             truncate(
                 &self.summary,
                 width.cells().saturating_sub(cell_width(&margin)),
