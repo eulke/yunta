@@ -48,6 +48,37 @@ nodes:
     );
 }
 
+/// `run` refuses what `check` refuses, saying it in the same words: a
+/// workflow that one of them accepts and the other rejects would leave a
+/// reader to work out which to believe.
+#[test]
+fn run_refuses_with_the_errors_check_lists() {
+    let project = Checkout::new()
+        .file(
+            "workflow.yaml",
+            r#"
+name: fixture
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "do the thing"
+"#,
+        )
+        .committed();
+
+    let check = yunta_at!(&project, &["check", "workflow.yaml"]);
+    let run = yunta_at!(&project, &["run", "workflow.yaml"]);
+    assert!(!check.status.success() && !run.status.success());
+    let problem = "  node `plan` references runner `planner`, which `runners:` does not define";
+    for (command, said) in [("check", stderr(&check)), ("run", stderr(&run))] {
+        assert!(
+            said.lines().any(|line| line == problem),
+            "`{command}` names the problem in the words the other uses: {said}"
+        );
+    }
+}
+
 #[test]
 fn a_config_file_resolves_the_runner() {
     let project = Checkout::new().file(

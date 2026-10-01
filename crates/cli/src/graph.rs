@@ -16,8 +16,7 @@ use std::path::Path;
 
 use yunta_core::{Clock, NodeId, RunId, Workflow};
 
-use crate::commands::refusals::check_or_refuse;
-use crate::commands::resolve_workflow_ref;
+use crate::commands::{resolve_workflow_ref, verdict};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::render::NodeDisplay;
@@ -39,15 +38,34 @@ pub async fn graph(
 ) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
 
-    let (workflow, labels) = match (workflow_path, run_id) {
+    let (workflow, labels, outcome) = match (workflow_path, run_id) {
         (Some(path), None) => {
             // A bare catalog name resolves the same way `check` and
             // `run` resolve it — `graph review` works without spelling
             // out the path.
             let path = resolve_workflow_ref(&ctx.cwd, path)?;
             let workflow = crate::load_workflow(&path)?;
-            check_or_refuse(&ctx.cwd, &workflow, &ctx.project.config, &path)?;
-            (workflow, None)
+            // A file that reads is drawn whatever the project's config
+            // makes of it, with the verdict beside the drawing, on
+            // stderr, and in the exit code: the graph is the file's.
+            let verdict = verdict::verdict(
+                &ctx,
+                &workflow,
+                &path,
+                &ctx.project.config,
+                verdict::layer_conflicts(&ctx.cwd)?,
+                verdict::Reach::Workflow,
+            )
+            .await;
+            verdict.warn();
+            let outcome = match verdict.passes() {
+                true => Outcome::Success,
+                false => {
+                    crate::error::note(verdict.refusal(&ctx).await);
+                    Outcome::Reported
+                }
+            };
+            (workflow, None, outcome)
         }
         (None, Some(run_id)) => {
             let open = ctx.open_run(run_id).await?;
@@ -58,7 +76,7 @@ pub async fn graph(
                 &open.events,
                 ctx.clock.now(),
             );
-            (manifest.workflow, derived_labels(&frame))
+            (manifest.workflow, derived_labels(&frame), Outcome::Success)
         }
         (Some(_), Some(_)) => {
             return Err(CliError::msg(
@@ -79,7 +97,7 @@ pub async fn graph(
         GraphFormat::Dot => render_dot(&workflow, labels.as_ref()),
     };
     print!("{rendered}");
-    Ok(Outcome::Success)
+    Ok(outcome)
 }
 
 /// One label per node of the graph, derived from the event log

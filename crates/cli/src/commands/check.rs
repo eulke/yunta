@@ -7,11 +7,10 @@
 
 use std::path::Path;
 
-use yunta_core::text::problems;
 use yunta_core::ConfigLayer;
 
 use crate::context::Context;
-use crate::error::{note, warn, CliError, Outcome};
+use crate::error::{note, CliError, Outcome};
 use crate::{load_yaml, project};
 
 pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome, CliError> {
@@ -29,52 +28,26 @@ pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<O
     // (a lower layer re-permitting what a higher one denied is refused
     // here, citing both layers). An explicit `--config` is a single
     // already-merged file: nothing layered to conflict.
-    let config: ConfigLayer = match config_path {
-        Some(path) => load_yaml(path, "config")?,
-        None => {
-            let layers = project::load_named_layers(&cwd)?;
-            let named: Vec<(&str, &ConfigLayer)> =
-                layers.iter().map(|(name, layer)| (*name, layer)).collect();
-            let conflicts = yunta_core::permission_layer_conflicts(&named);
-            if !conflicts.is_empty() {
-                note(problems(workflow_path.display(), &conflicts));
-                return Ok(Outcome::Reported);
-            }
-            ConfigLayer::merge_layers(layers.into_iter().map(|(_, layer)| layer))
-        }
+    let (config, conflicts): (ConfigLayer, Vec<String>) = match config_path {
+        Some(path) => (load_yaml(path, "config")?, Vec::new()),
+        None => (
+            ConfigLayer::merge_layers(
+                project::load_named_layers(&cwd)?
+                    .into_iter()
+                    .map(|(_, layer)| layer),
+            ),
+            super::verdict::layer_conflicts(&cwd)?,
+        ),
     };
-
-    let mut errors = yunta_engine::check(&workflow, &config, &super::declared_capabilities);
-    // Composition references (`use:`) resolve against the repo catalog
-    // under `cwd` (`.yunta/workflows/`), then packs — the same catalog a
-    // run's children resolve against at birth.
-    let origin = yunta_engine::origin_of(&cwd, &workflow_path);
-    let refs = yunta_engine::check_workflow_refs(
+    let verdict = super::verdict::verdict(
+        &ctx,
         &workflow,
+        &workflow_path,
         &config,
-        &cwd,
-        &origin,
-        &super::declared_capabilities,
-    );
-    errors.extend(refs.errors);
-    for warning in &yunta_engine::check_warnings(&workflow, &config) {
-        warn(warning);
-    }
-    for warning in &refs.warnings {
-        warn(warning);
-    }
-    let (unprovided, missing_programs) =
-        super::refusals::environment(&cwd, &workflow, &config, &origin);
-    for warning in &missing_programs {
-        warn(warning);
-    }
-    errors.extend(unprovided);
-    let context_files =
-        super::context_files_at_head(&ctx, &workflow, config.resolved_isolation()).await;
-    for warning in &context_files.warnings {
-        warn(warning);
-    }
-    errors.extend(context_files.errors);
+        conflicts,
+        super::verdict::Reach::Workflow,
+    )
+    .await;
 
     // Verification-effectiveness findings, surfaced here too — right when
     // someone is already looking at this workflow — not only via `stats
@@ -89,15 +62,5 @@ pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<O
         note(format!("\n{text}"));
     }
 
-    if errors.is_empty() {
-        println!("{}: OK", workflow_path.display());
-        Ok(Outcome::Success)
-    } else {
-        note(problems(workflow_path.display(), &errors));
-        let detected = crate::detect::Detected::in_repo(&cwd, ctx.supervision()).await;
-        for line in crate::detect::suggestions(&errors, &detected) {
-            note(format!("  {line}"));
-        }
-        Ok(Outcome::Reported)
-    }
+    Ok(verdict.report(&ctx, workflow_path.display()).await)
 }

@@ -27,6 +27,7 @@ pub mod schema;
 pub mod stats;
 pub mod status;
 pub mod test;
+pub(crate) mod verdict;
 pub mod verify;
 
 use std::collections::HashMap;

@@ -4,16 +4,15 @@
 //! paper to edit, not a working pipeline. Never references a pack and
 //! never touches `yunta.lock` — `new` creates the team's own content,
 //! `pack add` is the only verb that brings in someone else's, and the
-//! two stay disjoint on purpose. Runs `check` on what it wrote: a
-//! problem with the file is reported as `yunta check` would, and what
-//! the config still has to declare before the workflow can run is said
-//! without failing, since the file is not where that gets fixed.
+//! two stay disjoint on purpose. Reaches the verdict `yunta check` would
+//! on what it wrote and reports it the same way, exit code included: a
+//! skeleton the project's config cannot run is written, and said not to
+//! run.
 
-use yunta_core::text::problems;
 use yunta_core::{ConfigLayer, Workflow};
 
 use crate::ask::{choose, Choice, Console, Escape};
-use crate::error::{note, warn, CliError, Outcome};
+use crate::error::{warn, CliError, Outcome};
 use crate::project;
 use crate::surface::Diagnostics;
 
@@ -58,13 +57,22 @@ impl Shape {
         }
     }
 
-    fn skeleton(&self, name: &str) -> String {
+    /// The skeleton named `name`. `lint_declared` says whether the
+    /// project's config declares a `lint` command, which a lint-fix
+    /// skeleton then runs by name instead of leaving a placeholder.
+    fn skeleton(&self, name: &str, lint_declared: bool) -> String {
         let template = match self {
             Self::OneNode => ONE_NODE_TEMPLATE,
             Self::LintFix => LINT_FIX_TEMPLATE,
             Self::Tasks => TASKS_TEMPLATE,
         };
-        template.replace("{{workflow-name}}", name)
+        let lint = match lint_declared {
+            true => LINT_DECLARED,
+            false => LINT_PLACEHOLDER,
+        };
+        template
+            .replace("{{workflow-name}}", name)
+            .replace("{{lint}}", lint)
     }
 }
 
@@ -97,13 +105,21 @@ name: {{workflow-name}}
 nodes:
   - id: lint
     kind: bash
-    run: \"true\"  # replace with your real lint/test command
+    {{lint}}
     on_failure: { goto: fix, max_reroutes: 1 }
   - id: fix
     kind: prompt
     # runner: implementer  # uncomment once runners: defines this role
     prompt: \"Fix what `lint` reported.\"
 ";
+
+/// The lint step when the project declares its `lint` command: run by
+/// the name `.yunta/config.yaml` gives it.
+const LINT_DECLARED: &str =
+    "run: { command: lint }  # the project's own lint command, as its config declares it";
+
+/// The lint step when the project declares none.
+const LINT_PLACEHOLDER: &str = "run: \"true\"  # replace with your real lint/test command";
 
 const TASKS_TEMPLATE: &str = "\
 name: {{workflow-name}}
@@ -188,10 +204,24 @@ pub async fn new_workflow(
         },
     };
 
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    // Same layered config `yunta check` resolves without an explicit
+    // `--config` — an empty/default layer set (no `.yunta/config.yaml`
+    // yet, e.g. `new` run before `init`) is a legal, empty `ConfigLayer`,
+    // not an error.
+    let config = ConfigLayer::merge_layers(
+        project::load_named_layers(&cwd)?
+            .into_iter()
+            .map(|(_, l)| l),
+    );
+    let lint_declared = config
+        .command(&yunta_core::CommandName::from_static("lint"))
+        .is_some();
+
     // Build the real type before writing: a skeleton that doesn't parse as
     // a `Workflow` never reaches disk, so `--force` can't leave an invalid
     // file behind.
-    let yaml = shape.skeleton(name);
+    let yaml = shape.skeleton(name, lint_declared);
     let workflow: Workflow = yunta_core::yaml::parse(&yaml).map_err(|e| {
         CliError::msg(format!(
             "the {} skeleton does not parse as a workflow: {e}",
@@ -199,7 +229,6 @@ pub async fn new_workflow(
         ))
     })?;
 
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let path = cwd.join(".yunta/workflows").join(format!("{name}.yaml"));
     if path.exists() && !force {
         return Err(CliError::msg(format!(
@@ -214,32 +243,18 @@ pub async fn new_workflow(
     std::fs::write(&path, &yaml).map_err(|source| CliError::io("write", path.display(), source))?;
     println!("wrote {} ({})", path.display(), shape.label());
 
-    // Same layered config `yunta check` resolves without an explicit
-    // `--config` — an empty/default layer set (no `.yunta/config.yaml`
-    // yet, e.g. `new` run before `init`) is a legal, empty `ConfigLayer`,
-    // not an error. These skeletons name no `runner:`, so the file stands
-    // on its own; what the config still has to declare before the
-    // workflow can run is said, and is not the file's to fix.
-    let config = ConfigLayer::merge_layers(
-        project::load_named_layers(&cwd)?
-            .into_iter()
-            .map(|(_, l)| l),
-    );
-
-    let (unset, errors): (Vec<_>, Vec<_>) =
-        yunta_engine::check(&workflow, &config, &super::declared_capabilities)
-            .into_iter()
-            .partition(|error| matches!(error, yunta_engine::CheckError::Unset { .. }));
-    if !errors.is_empty() {
-        note(problems(path.display(), &errors));
-        return Ok(Outcome::Reported);
-    }
-    println!("{}: OK", path.display());
-    if !unset.is_empty() {
-        println!("before it can run, the config has to declare:");
-        for key in &unset {
-            println!("  {key}");
-        }
-    }
-    Ok(Outcome::Success)
+    // The verdict `yunta check` reaches on the file, said under it: a
+    // workflow the config cannot run is reported as one, whatever it is
+    // the config has to declare first.
+    let ctx = crate::context::Context::load()?;
+    let verdict = super::verdict::verdict(
+        &ctx,
+        &workflow,
+        &path,
+        &config,
+        super::verdict::layer_conflicts(&cwd)?,
+        super::verdict::Reach::Workflow,
+    )
+    .await;
+    Ok(verdict.report(&ctx, path.display()).await)
 }

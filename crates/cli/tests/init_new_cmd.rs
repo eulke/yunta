@@ -111,9 +111,22 @@ fn init_detects_a_rust_ecosystem_from_cargo_toml() {
     assert!(stdout(&result).contains("rust"), "got: {}", stdout(&result));
 }
 
+/// A project whose config names a runner every session can use, so a
+/// skeleton's agent nodes have somewhere to run.
+const RUNNABLE: &str = "defaults:\n  runner: implementer\nrunners:\n  implementer:\n    - { adapter: mock, model: mock-model }\n";
+
+/// [`setup`], with [`RUNNABLE`] as the project's config: what a test about
+/// the file `new` writes, rather than about the config, starts from.
+fn runnable_setup() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let (root, repo, home) = setup();
+    std::fs::create_dir_all(repo.join(".yunta")).unwrap();
+    std::fs::write(repo.join(".yunta/config.yaml"), RUNNABLE).unwrap();
+    (root, repo, home)
+}
+
 #[test]
 fn every_new_shape_writes_a_workflow_that_passes_check() {
-    let (_root, repo, home) = setup();
+    let (_root, repo, home) = runnable_setup();
 
     for shape in ["one-node", "lint-fix", "tasks"] {
         let name = format!("wf-{shape}");
@@ -132,7 +145,7 @@ fn every_new_shape_writes_a_workflow_that_passes_check() {
 
 #[test]
 fn new_never_references_a_pack_or_touches_the_lock_file() {
-    let (_root, repo, home) = setup();
+    let (_root, repo, home) = runnable_setup();
 
     for shape in ["one-node", "lint-fix", "tasks"] {
         let name = format!("structural-{shape}");
@@ -165,7 +178,7 @@ fn new_rejects_an_unknown_shape() {
 
 #[test]
 fn new_refuses_to_overwrite_without_force_and_succeeds_with_it() {
-    let (_root, repo, home) = setup();
+    let (_root, repo, home) = runnable_setup();
 
     let first = yunta_in!(&repo, &home, &["new", "dup", "--shape", "one-node"]);
     assert!(first.status.success());
@@ -211,17 +224,66 @@ fn new_rejects_an_unsafe_workflow_name() {
 }
 
 #[test]
-fn new_works_before_init_ever_ran() {
+fn new_writes_before_init_ever_ran_and_says_the_workflow_cannot_run_yet() {
     let (_root, repo, home) = setup();
     // The repository holds no `.yunta/config.yaml`. The skeleton names no
-    // `runner:`, so the file itself is sound; what it cannot do is run,
-    // and `new` says what the config has to declare first.
+    // `runner:`: it is written, and `new` says, as `check` would, that it
+    // cannot run until the config declares one.
     let result = yunta_in!(&repo, &home, &["new", "standalone", "--shape", "tasks"]);
-    assert!(result.status.success(), "stderr: {}", stderr(&result));
-    let said = stdout(&result);
+    assert!(repo.join(".yunta/workflows/standalone.yaml").is_file());
+    assert!(stdout(&result).contains("wrote "), "{}", stdout(&result));
+    let said = stderr(&result);
     assert!(
-        said.contains("OK") && said.contains("node `plan`") && said.contains("defaults.runner"),
+        !result.status.success(),
+        "a workflow that cannot run is not OK"
+    );
+    assert!(
+        said.contains("node `plan`") && said.contains("defaults.runner"),
         "got: {said}"
+    );
+}
+
+#[test]
+fn new_and_check_agree_on_a_workflow_that_needs_a_runner() {
+    let (_root, repo, home) = setup();
+    let new = yunta_in!(&repo, &home, &["new", "lf", "--shape", "lint-fix"]);
+    let check = yunta_in!(&repo, &home, &["check", "lf"]);
+
+    assert_eq!(
+        new.status.code(),
+        check.status.code(),
+        "one verdict, one exit code"
+    );
+    assert!(!check.status.success());
+    let problem = |said: &str| {
+        said.lines()
+            .find(|line| line.contains("node `fix`"))
+            .map(str::trim)
+            .map(str::to_string)
+    };
+    assert!(problem(&stderr(&check)).is_some(), "{}", stderr(&check));
+    assert_eq!(
+        problem(&stderr(&new)),
+        problem(&stderr(&check)),
+        "`new` says what `check` says, in the same words"
+    );
+}
+
+#[test]
+fn new_lint_fix_runs_the_projects_lint() {
+    let (_root, repo, home) = runnable_setup();
+    std::fs::write(
+        repo.join(".yunta/config.yaml"),
+        format!("{RUNNABLE}commands:\n  lint: \"cargo clippy\"\n"),
+    )
+    .unwrap();
+
+    let result = yunta_in!(&repo, &home, &["new", "lf", "--shape", "lint-fix"]);
+    assert!(result.status.success(), "{}", stderr(&result));
+    let written = std::fs::read_to_string(repo.join(".yunta/workflows/lf.yaml")).unwrap();
+    assert!(
+        written.contains("run: { command: lint }"),
+        "the lint step runs the command the project declares: {written}"
     );
 }
 
@@ -257,7 +319,7 @@ fn init_never_replaces_an_unreadable_gitignore() {
 
 #[test]
 fn new_writes_only_a_parseable_skeleton() {
-    let (_root, repo, home) = setup();
+    let (_root, repo, home) = runnable_setup();
 
     // Every shape the CLI writes parses back as a real `Workflow` — `new`
     // builds the type from its skeleton before the file ever touches disk.

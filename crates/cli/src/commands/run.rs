@@ -12,7 +12,7 @@
 //! injected source.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use yunta_adapters::MOCK_ID;
 use yunta_core::{AdapterId, Clock, IdSource, InputName, Manifest, ModeName, Workflow};
@@ -193,7 +193,7 @@ pub(super) async fn runnable(
     adapter: Option<&AdapterId>,
     mock_fixture: Option<&Path>,
 ) -> Result<(FrozenRun, Adapters), CliError> {
-    let (workflow_path, workflow) = resolve_and_check(ctx, workflow_path)?;
+    let (workflow_path, workflow) = super::verdict::resolve_runnable(ctx, workflow_path).await?;
     super::committer::refuse_without_committer(ctx).await?;
     let adapters = match mock_fixture {
         Some(_) => HashMap::new(),
@@ -347,19 +347,6 @@ async fn estimate(
         warn(warning);
     }
     (estimation, budget_warning)
-}
-
-/// A workflow reference resolved to its file and loaded, refused if it
-/// fails `yunta check` — the shared front of `yunta run` and the control
-/// plane's `run_workflow`, so both reach the same workflow the same way: a
-/// bare catalog name (no extension) resolves through the repo catalog then
-/// a publisher's vendored packs (`acme/review`); anything with an
-/// extension is taken as a literal path.
-fn resolve_and_check(ctx: &Context, workflow_path: &Path) -> Result<(PathBuf, Workflow), CliError> {
-    let resolved = super::resolve_workflow_ref(&ctx.cwd, workflow_path)?;
-    let workflow = crate::load_workflow(&resolved)?;
-    super::refusals::check_or_refuse(&ctx.cwd, &workflow, &ctx.project.config, &resolved)?;
-    Ok((resolved, workflow))
 }
 
 /// Freezes the run: its manifest, the documents its `inputs:` named,

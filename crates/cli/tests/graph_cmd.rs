@@ -112,15 +112,16 @@ nodes:
 }
 
 #[test]
-fn graph_refuses_a_workflow_that_fails_check() {
+fn graph_refuses_a_workflow_that_breaks_its_own_rules() {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     init_repo(&repo);
     let home = root.path().join("state");
 
-    // depends_on references a node that doesn't exist — check must catch
-    // this before graph tries to render anything.
+    // depends_on references a node that doesn't exist: the file breaks
+    // its own rules, and every command that reads it refuses it the same
+    // way before anything is drawn.
     write(
         &repo.join("wf.yaml"),
         r#"
@@ -135,6 +136,43 @@ nodes:
 
     let output = yunta_in!(&repo, &home, &["graph", "wf.yaml"]);
     assert!(!output.status.success());
+    assert!(stdout(&output).is_empty(), "{}", stdout(&output));
+}
+
+#[test]
+fn graph_draws_a_workflow_check_refuses_and_exits_with_its_verdict() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    // A sound file the project's config cannot run: its runner is not
+    // declared. The graph is the file's, so it is drawn.
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: unrunnable
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "plan it"
+"#,
+    );
+
+    let output = yunta_in!(&repo, &home, &["graph", "wf.yaml"]);
+    assert!(!output.status.success(), "the exit code is the verdict");
+    assert!(
+        stdout(&output).starts_with("graph TD"),
+        "the workflow is drawn: {}",
+        stdout(&output)
+    );
+    let said = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        said.contains("fails `yunta check`") && said.contains("runner `planner`"),
+        "the verdict goes beside the drawing: {said}"
+    );
 }
 
 #[test]

@@ -1,57 +1,9 @@
-//! What a workflow is refused for before a run exists: every problem
-//! `check` finds, and what the machine it would run on lacks.
+//! What the machine a workflow would run on has to provide, read the
+//! same way by every command that reaches a verdict on it.
 
 use std::path::Path;
 
 use yunta_core::{ConfigLayer, Workflow};
-
-use super::declared_capabilities;
-use crate::error::{warn, CliError};
-
-/// `yunta check` before running anything — a workflow that fails static
-/// validation never creates a run. `workflow_path` is where `workflow`
-/// itself was loaded from — needed to tell `check_workflow_refs`
-/// whether this workflow already lives inside a pack, since the
-/// cross-pack composition rule only applies once you're inside one.
-pub(crate) fn check_or_refuse(
-    cwd: &Path,
-    workflow: &Workflow,
-    config: &ConfigLayer,
-    workflow_path: &Path,
-) -> Result<(), CliError> {
-    // Warnings (e.g. a `parallel` group that can't verify its children
-    // won't collide) are visible but never block — only `check()`'s
-    // errors do.
-    for warning in yunta_engine::check_warnings(workflow, config) {
-        warn(warning);
-    }
-    let mut errors = yunta_engine::check(workflow, config, &declared_capabilities);
-    // The composition reference graph (`use:` names resolve, acyclic,
-    // within depth) reads the repo catalog under the current
-    // directory — the same `.yunta/workflows/` a run's children resolve
-    // against at birth.
-    let origin = yunta_engine::origin_of(cwd, workflow_path);
-    let refs =
-        yunta_engine::check_workflow_refs(workflow, config, cwd, &origin, &declared_capabilities);
-    for warning in &refs.warnings {
-        warn(warning);
-    }
-    errors.extend(refs.errors);
-    let (unprovided, missing_programs) = environment(cwd, workflow, config, &origin);
-    for warning in &missing_programs {
-        warn(warning);
-    }
-    errors.extend(unprovided);
-    if errors.is_empty() {
-        return Ok(());
-    }
-    let mut said = yunta_core::text::problems("the workflow fails `yunta check`", &errors);
-    let detected = crate::detect::Detected::in_files(cwd);
-    for line in crate::detect::suggestions(&errors, &detected) {
-        said.push_str(&format!("\n  {line}"));
-    }
-    Err(CliError::msg(said))
-}
 
 /// What the machine a run would use has to provide for `workflow`: what
 /// the pack it comes from `requires:`, refused when this project or
