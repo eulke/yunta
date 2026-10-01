@@ -3346,6 +3346,16 @@
           "const": "test-file-exists"
         },
         {
+          "description": "A spec written again for a departure changes the tests of a task\nnobody departed from.",
+          "type": "string",
+          "const": "other-spec-changed"
+        },
+        {
+          "description": "A spec written again for a departure gives the task departed from\nthe tests it had.",
+          "type": "string",
+          "const": "departed-spec-unchanged"
+        },
+        {
           "description": "A criterion's command never answers where the engine runs\ncriteria: it is not found, not executable, or never returns.",
           "type": "string",
           "const": "criterion-cannot-run"

@@ -112,6 +112,12 @@ rule_codes! {
     UnknownSpecTask => "unknown-spec-task",
     /// A spec's file names a path the run's tree already holds.
     TestFileExists => "test-file-exists",
+    /// A spec written again for a departure changes the tests of a task
+    /// nobody departed from.
+    OtherSpecChanged => "other-spec-changed",
+    /// A spec written again for a departure gives the task departed from
+    /// the tests it had.
+    DepartedSpecUnchanged => "departed-spec-unchanged",
     /// A criterion's command never answers where the engine runs
     /// criteria: it is not found, not executable, or never returns.
     CriterionCannotRun => "criterion-cannot-run",

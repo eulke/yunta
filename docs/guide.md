@@ -310,7 +310,8 @@ wrong is a departure from the plan — `yunta_declare_deviation` on that criteri
 for a person to settle. Accepted, the test is written again by the node that wrote
 the spec, never by whoever builds the task: the loop sends the run back to that
 node, which is told the departure and what the person said and may change only
-that task's tests; every node between it and the loop runs again, so a gate that
+that task's tests — its handover refuses a spec that changes another task's, or
+gives the task the tests it had; every node between it and the loop runs again, so a gate that
 approved the tests asks about the new ones; and the task goes on from the work it
 left, held to them. A spec the run was given, which no node of it writes, offers no
 acceptance for such a departure — only sending it back. The files reach the run's

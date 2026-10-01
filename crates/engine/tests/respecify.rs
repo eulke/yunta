@@ -313,3 +313,45 @@ async fn a_run_paused_before_the_tests_written_again_are_approved_goes_on_when_r
         "written again once, not on the wake"
     );
 }
+
+#[tokio::test]
+async fn a_spec_written_again_that_changes_another_tasks_spec_is_refused_naming_it() {
+    let rewrites_hello = both(SAYS_HI).replace("test -f hello.txt", "test -s hello.txt");
+    let fixture = plan_session(TWO_TASKS)
+        + &specifying(&[(&both(GREETS), true)])
+        + "  - match_prompt_contains: \"Implement your task\"
+    effects:
+      - { path: hello.txt, content: hello }
+    outcome: { type: completed, summary: hello }
+" + &departing_from_the_test()
+        + &specifying(&[(&rewrites_hello, false), (&both(SAYS_HI), true)]);
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(&approved_loop(), &fixture, &approving_twice())
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(refused(&bench), [vec!["other-spec-changed".to_string()]]);
+}
+
+#[tokio::test]
+async fn a_spec_written_again_that_gives_the_task_the_same_tests_is_refused() {
+    let same = spec_of("greet", GREETS, "sh tests/greet.sh");
+    let fixture = plan_session(PLAN)
+        + &specifying(&[(&same, true)])
+        + &departing_from_the_test()
+        + &specifying(&[
+            (&same, false),
+            (&spec_of("greet", SAYS_HI, "sh tests/greet.sh"), true),
+        ]);
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(&approved_loop(), &fixture, &approving_twice())
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        refused(&bench),
+        [vec!["departed-spec-unchanged".to_string()]]
+    );
+}

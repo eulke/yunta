@@ -85,9 +85,13 @@ impl SessionTools {
             .map(|(task, _)| task.clone())
             .collect();
         let asked = |one: &&Spec| owed.is_empty() || owed.contains(&one.task);
+        let mut broken = match owed.is_empty() {
+            true => Vec::new(),
+            false => rewritten(spec, &self.held_spec(&events).await?, &owed),
+        };
         let (checkout, base) = self.handover_checkout().await?;
         let supervision = self.host.supervision(&self.stop);
-        let broken = already_held(&checkout, &base, spec, &asked, supervision).await?;
+        broken.extend(already_held(&checkout, &base, spec, &asked, supervision).await?);
         write_test_files(&checkout, spec).await?;
         let mut proven = SpecProven {
             broken,
@@ -136,6 +140,21 @@ impl SessionTools {
         Ok((broken, probes))
     }
 
+    /// The spec the run holds, which a spec written again for a
+    /// departure is held against.
+    async fn held_spec(
+        &self,
+        events: &[yunta_core::events::StoredEvent],
+    ) -> Result<SpecFile, RunToolError> {
+        Ok(
+            crate::artifacts::latest::<SpecFile>(&self.host.run_dir, events)
+                .await
+                .map_err(|source| RunToolError::Plan { source })?
+                .map(|held| held.document)
+                .unwrap_or(SpecFile { specs: Vec::new() }),
+        )
+    }
+
     /// A checkout of the run's tree as it stands, for this node's
     /// handed-over documents alone, and the commit it holds: made once,
     /// and put back to the run's tree before each later submission. What
@@ -179,6 +198,53 @@ impl SessionTools {
         reset.map_err(|detail| RunToolError::Handover { detail })?;
         Ok((checkout, base))
     }
+}
+
+/// What a spec written again for the departures from `owed`'s tests
+/// breaks against the spec the run holds: it changes another task's
+/// tests, or gives a task departed from the tests it had.
+fn rewritten(spec: &SpecFile, held: &SpecFile, owed: &[TaskId]) -> Vec<Diagnostic> {
+    let mut found = Vec::new();
+    let mut flag = |task: &TaskId, index: Option<usize>, code: RuleCode, detail: String| {
+        let subject = match index {
+            Some(index) => Subject::Spec(Named::new(task.clone(), index)),
+            None => Subject::Document,
+        };
+        found.push(Diagnostic::new(subject, Problem::rule(code, detail)));
+    };
+    for (index, one) in spec.specs.iter().enumerate() {
+        let was = held.of(&one.task);
+        match (owed.contains(&one.task), was == Some(one)) {
+            (true, true) => flag(
+                &one.task,
+                Some(index),
+                RuleCode::DepartedSpecUnchanged,
+                "gives the task the tests a person accepted are wrong; write them again as the \
+                 departure and the person say"
+                    .to_string(),
+            ),
+            (false, false) => flag(
+                &one.task,
+                Some(index),
+                RuleCode::OtherSpecChanged,
+                "nobody departed from this task's tests; hand its spec over as the run holds it"
+                    .to_string(),
+            ),
+            _ => {}
+        }
+    }
+    for gone in held.specs.iter().filter(|was| spec.of(&was.task).is_none()) {
+        flag(
+            &gone.task,
+            None,
+            RuleCode::OtherSpecChanged,
+            format!(
+                "leaves out task `{}`'s spec, which the run holds; hand it over as it is",
+                gone.task
+            ),
+        );
+    }
+    found
 }
 
 /// Every file of `spec` whose path the run's tree holds at `base`: written

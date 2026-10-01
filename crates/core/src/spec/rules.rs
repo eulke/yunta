@@ -51,6 +51,14 @@ pub(super) const RUN_RULES: &[Rule] = &[
         demand: "every file is new: the run's tree holds nothing at its `path`",
     },
     Rule {
+        code: RuleCode::OtherSpecChanged,
+        demand: "written again for a departure, every other task's spec is as the run holds it",
+    },
+    Rule {
+        code: RuleCode::DepartedSpecUnchanged,
+        demand: "written again for a departure, the spec of the task departed from changes",
+    },
+    Rule {
         code: RuleCode::CriterionCannotRun,
         demand: "every test runs where the engine runs criteria: each program it calls is on \
                  that `PATH`",

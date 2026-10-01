@@ -204,7 +204,8 @@ pub(crate) fn continuation_notice(
 /// accepted are wrong.
 const WRITE_AGAIN: &str = "Write those tasks' tests again, as the departures and the person \
                            say, and hand the spec over again — every other task's spec as it \
-                           is.";
+                           is: one that changes another task's tests, or gives a task the tests \
+                           it had, is refused.";
 
 /// The tests a person accepted are wrong, task by task: what each
 /// session departed from, and what the person said.
