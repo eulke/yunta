@@ -7,7 +7,8 @@ use std::path::Path;
 
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{
-    check_workflow_refs, origin_of, resolve_workflow, CatalogError, CheckError, WorkflowOrigin,
+    check_workflow_refs, origin_of, resolve_workflow, CatalogError, CheckError, Composition,
+    WorkflowOrigin,
 };
 
 fn write(path: &Path, contents: &str) {
@@ -182,7 +183,7 @@ fn cross_pack_composition_is_rejected_in_check() {
     assert!(
         errors.iter().any(|e| matches!(
             e,
-            CheckError::CrossPackWorkflowRef { name, from_pack, .. }
+            CheckError::Composition(Composition::CrossPack { name, from_pack, .. })
                 if name == "other/thing" && from_pack == "acme/review-pack"
         )),
         "got: {errors:?}"
@@ -221,7 +222,7 @@ fn a_pack_workflow_referencing_back_to_the_repo_is_also_rejected() {
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e, CheckError::CrossPackWorkflowRef { .. })),
+            .any(|e| matches!(e, CheckError::Composition(Composition::CrossPack { .. }))),
         "got: {errors:?}"
     );
 }

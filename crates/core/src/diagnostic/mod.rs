@@ -159,18 +159,26 @@ impl Diagnostic {
     }
 }
 
-impl fmt::Display for Diagnostic {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Diagnostic {
+    /// What is wrong, in the document's own words, without where: for a
+    /// surface that shows the place itself.
+    pub fn said(&self) -> String {
         let rendered = self.problem.to_string();
         // A problem with the file as a whole reads as one sentence
         // ("the document is not YAML: ..."), never as a subject and a
         // restatement of it.
         match &self.subject {
             Subject::Document if self.problem.about_document() => {
-                write!(f, "the document {rendered}")
+                format!("the document {rendered}")
             }
-            subject => write!(f, "{subject}: {rendered}"),
-        }?;
+            subject => format!("{subject}: {rendered}"),
+        }
+    }
+}
+
+impl fmt::Display for Diagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.said())?;
         // A document that did not parse says where the parser stopped,
         // as the parser always has; where a broken rule is written is
         // the surface's to show beside it.
@@ -220,7 +228,7 @@ impl Report {
         let kind = self.document.kind;
         for diagnostic in &mut self.diagnostics {
             if diagnostic.at.is_none() {
-                diagnostic.at = map.locate_key(&diagnostic.pointer(kind));
+                diagnostic.at = map.place(&diagnostic.pointer(kind));
             }
         }
         self

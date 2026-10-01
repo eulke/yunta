@@ -135,7 +135,7 @@ pub(crate) fn walk_workflow_refs(
                 .chain(std::iter::once(name.clone()))
                 .collect::<Vec<_>>()
                 .join(" -> ");
-            errors.push(CheckError::WorkflowRefCycle { chain });
+            errors.push(CheckError::Composition(Composition::Cycle { chain }));
             continue;
         }
         let depth = path.len() as u32 + 1;
@@ -146,29 +146,29 @@ pub(crate) fn walk_workflow_refs(
                 .chain(std::iter::once(name.clone()))
                 .collect::<Vec<_>>()
                 .join(" -> ");
-            errors.push(CheckError::WorkflowRefTooDeep {
+            errors.push(CheckError::Composition(Composition::TooDeep {
                 chain,
                 depth,
                 max: max_depth,
-            });
+            }));
             continue;
         }
         let resolved = match resolve_workflow(repo_root, &name) {
             Ok(resolved) => resolved,
             Err(e @ CatalogError::Ambiguous { .. }) => {
-                errors.push(CheckError::AmbiguousWorkflowRef {
+                errors.push(CheckError::Composition(Composition::Ambiguous {
                     node,
                     name,
                     detail: e.to_string(),
-                });
+                }));
                 continue;
             }
             Err(e) => {
-                errors.push(CheckError::WorkflowRefMissing {
+                errors.push(CheckError::Composition(Composition::Missing {
                     node,
                     name,
                     detail: e.to_string(),
-                });
+                }));
                 continue;
             }
         };
@@ -188,11 +188,11 @@ pub(crate) fn walk_workflow_refs(
                     if p2 == publisher && n2 == pack_name
             );
             if !same_pack {
-                errors.push(CheckError::CrossPackWorkflowRef {
+                errors.push(CheckError::Composition(Composition::CrossPack {
                     node,
                     name,
                     from_pack: format!("{publisher}/{pack_name}"),
-                });
+                }));
                 continue;
             }
         }
@@ -200,21 +200,21 @@ pub(crate) fn walk_workflow_refs(
         let text = match std::fs::read_to_string(&resolved.path) {
             Ok(text) => text,
             Err(_) => {
-                errors.push(CheckError::WorkflowRefMissing {
+                errors.push(CheckError::Composition(Composition::Missing {
                     node,
                     name,
                     detail: format!("`{}` doesn't exist", resolved.path.display()),
-                });
+                }));
                 continue;
             }
         };
         let child = match yunta_core::workflow::read::read(&text, &resolved.path) {
             Ok(child) => child,
             Err(report) => {
-                errors.push(CheckError::WorkflowRefUnparseable {
+                errors.push(CheckError::Composition(Composition::Unparseable {
                     path: resolved.path,
                     detail: report.to_string(),
-                });
+                }));
                 continue;
             }
         };
@@ -222,7 +222,7 @@ pub(crate) fn walk_workflow_refs(
         let problems =
             crate::check::check_mounted(&child, config, declared, mounts_of(workflow, &node));
         if !problems.is_empty() {
-            errors.push(CheckError::ComposedWorkflowFails {
+            errors.push(CheckError::Composition(Composition::Fails {
                 node: node.clone(),
                 name: name.clone(),
                 problems: problems
@@ -230,7 +230,7 @@ pub(crate) fn walk_workflow_refs(
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join("; "),
-            });
+            }));
         }
         path.push(name);
         compares.extend(comparisons(&child, path));
@@ -248,4 +248,75 @@ fn mounts_of<'a>(workflow: &'a Workflow, id: &NodeId) -> &'a [yunta_core::MountS
             _ => None,
         })
         .unwrap_or(&[])
+}
+
+/// What refuses a `use:` reference: one that does not resolve, or
+/// resolves to a workflow its birth would refuse, or composes into a
+/// cycle or past the depth a run allows.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum Composition {
+    /// A composition reference that can't resolve today — the
+    /// same broken-reference class as `BrokenReference`, across
+    /// files. Advisory about the *current* catalog by design: the child
+    /// freezes its own file at birth, so a run only ever meets the file
+    /// as it is then.
+    #[error("node `{node}`: `use: {name}` cannot be resolved — {detail}")]
+    Missing {
+        node: NodeId,
+        name: String,
+        detail: String,
+    },
+
+    /// Two packs installed under the same publisher each declare a
+    /// workflow with the same file basename — the flat
+    /// `publisher/workflow` namespace can't tell them apart.
+    #[error("node `{node}`: `use: {name}` is ambiguous — {detail}")]
+    Ambiguous {
+        node: NodeId,
+        name: String,
+        detail: String,
+    },
+
+    /// Cross-pack references aren't supported — a workflow
+    /// that lives inside a pack may only `use:` other workflows from
+    /// that same pack, never the repo's own catalog or a different
+    /// pack (no transitive pack dependencies).
+    #[error(
+        "node `{node}`: `use: {name}` reaches outside pack `{from_pack}` — composition across \
+         packs isn't supported; copy what you need into your own pack instead"
+    )]
+    CrossPack {
+        node: NodeId,
+        name: String,
+        from_pack: String,
+    },
+
+    #[error("workflow `{path}` (referenced through composition) does not parse: {detail}")]
+    Unparseable {
+        path: std::path::PathBuf,
+        detail: String,
+    },
+
+    /// A workflow this one composes that its birth would refuse, found
+    /// before the run that would compose it spends anything.
+    #[error("node `{node}`: `use: {name}` fails check — {problems}")]
+    Fails {
+        node: NodeId,
+        name: String,
+        problems: String,
+    },
+
+    /// The graph of references between workflows must be acyclic.
+    #[error("workflow composition cycle: {chain}")]
+    Cycle { chain: String },
+
+    /// The configurable maximum nesting depth, checked statically over
+    /// the reference graph (the runtime guard at child birth enforces
+    /// the same limit over what actually loads).
+    #[error(
+        "workflow composition {chain} nests {} deep but `limits.max_workflow_depth` is \
+         {max} — flatten the composition or raise the limit",
+        yunta_core::text::counted(*depth as usize, "level")
+    )]
+    TooDeep { chain: String, depth: u32, max: u32 },
 }

@@ -191,7 +191,13 @@ fn references_reach(workflow: &Workflow, ids: &HashSet<&NodeId>) -> Vec<Diagnost
                     index,
                     &node.id,
                     RuleCode::UnknownDependency,
-                    format!("`{field}` names `{target}`, and no node carries that id"),
+                    format!(
+                        "`{field}` names `{target}`, and no node carries that id{}",
+                        crate::text::did_you_mean(
+                            target.as_str(),
+                            ids.iter().map(|id| id.as_str())
+                        )
+                    ),
                 ));
             }
         };

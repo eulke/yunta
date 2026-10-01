@@ -1,6 +1,7 @@
 //! Every refusal `check` makes about the workflow file says where in the
 //! file it is: the node it names and, inside it, the key that says what
-//! it refuses — so a surface can quote the line a person fixes.
+//! it refuses — placed on the value when the value is what is wrong, so a
+//! surface quotes the part a person fixes.
 
 use yunta_core::yaml::{Location, SourceMap};
 use yunta_core::{ConfigLayer, Workflow};
@@ -17,7 +18,7 @@ fn refusals(text: &str, config: &str) -> Vec<(CheckError, Option<(usize, usize)>
         .map(|error| {
             let at = error
                 .pointer()
-                .and_then(|pointer| map.locate_key(&pointer))
+                .and_then(|pointer| map.place(&pointer))
                 .map(|Location { line, col, .. }| (line, col));
             (error, at)
         })
@@ -25,26 +26,26 @@ fn refusals(text: &str, config: &str) -> Vec<(CheckError, Option<(usize, usize)>
 }
 
 #[test]
-fn an_unknown_runner_points_at_its_nodes_runner_key() {
+fn an_unknown_runner_points_at_the_runner_it_names() {
     let text =
         "name: w\nnodes:\n  - id: fix\n    kind: prompt\n    prompt: p\n    runner: implementr\n";
     let found = refusals(text, "{}");
     assert!(
         found.iter().any(
-            |(error, at)| matches!(error, CheckError::UnknownRunner { .. }) && *at == Some((6, 5))
+            |(error, at)| matches!(error, CheckError::UnknownRunner { .. }) && *at == Some((6, 13))
         ),
         "{found:?}"
     );
 }
 
 #[test]
-fn an_unset_command_points_at_the_run_key() {
+fn an_unset_command_points_at_the_command_it_names() {
     let text = "name: w\nnodes:\n  - id: lint\n    kind: bash\n    run: { command: lint }\n";
     let found = refusals(text, "{}");
     assert!(
         found
             .iter()
-            .any(|(error, at)| matches!(error, CheckError::Unset { .. }) && *at == Some((5, 5))),
+            .any(|(error, at)| matches!(error, CheckError::Unset { .. }) && *at == Some((5, 21))),
         "{found:?}"
     );
 }

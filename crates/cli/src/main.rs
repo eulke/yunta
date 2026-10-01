@@ -135,8 +135,10 @@ pub(crate) fn load_manifest(
 pub(crate) fn load_workflow(path: &Path) -> Result<yunta_core::Workflow, CliError> {
     let contents = std::fs::read_to_string(path)
         .map_err(|source| CliError::io("read workflow at", path.display(), source))?;
-    yunta_core::workflow::read::read(&contents, path)
-        .map_err(|report| CliError::msg(report.to_string()))
+    yunta_core::workflow::read::read(&contents, path).map_err(|report| CliError::Document {
+        report,
+        text: Some(contents.clone()),
+    })
 }
 
 /// Reads and parses a YAML file into `T`, naming what it was reading and

@@ -93,7 +93,7 @@ pub use catalog::{
 };
 pub use check::{
     check, check_context_files, check_mode_start, check_mounted, check_warnings,
-    check_workflow_refs, programs_named, CheckError, CheckWarning, ContextFilesCheck,
+    check_workflow_refs, programs_named, CheckError, CheckWarning, Composition, ContextFilesCheck,
     MissingContextFile, RefsCheck, RunTreeOrigin, Unanswerable, UntakenRoute,
 };
 pub use events_export::{render_events_jsonl, EventsExportError};

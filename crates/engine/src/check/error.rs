@@ -26,8 +26,16 @@ pub enum CheckError {
         capability: yunta_core::Capability,
         adapters: String,
     },
-    #[error("node `{node}` references runner `{runner}`, which `runners:` does not define")]
-    UnknownRunner { node: NodeId, runner: RunnerName },
+    #[error(
+        "node `{node}` references runner `{runner}`, which `runners:` does not define{}",
+        super::pointer::near(.near.as_ref())
+    )]
+    UnknownRunner {
+        node: NodeId,
+        runner: RunnerName,
+        /// The runner `runners:` does define that is one slip away.
+        near: Option<String>,
+    },
 
     #[error(
         "node `{node}` references runner `{runner}`, which `runners:` defines with zero candidates"
@@ -37,10 +45,13 @@ pub enum CheckError {
     /// A config key the node's kind cannot run without, left unset. A
     /// run freezes its config when it is created, so the node would stop
     /// the run every time it is reached.
-    #[error("node `{node}`: {key}")]
+    #[error("node `{node}`: {key}{}", super::pointer::near(.near.as_ref()))]
     Unset {
         node: NodeId,
         key: yunta_core::ConfigKey,
+        /// The name the config does declare that is one slip away from
+        /// the one the node asks for.
+        near: Option<String>,
     },
 
     /// A literal `files:` path the tree a run starts from does not hold,
@@ -402,76 +413,15 @@ pub enum CheckError {
     )]
     MaxParallelNodesZero,
 
-    /// A composition reference that can't resolve today — the
-    /// same broken-reference class as `BrokenReference`, across
-    /// files. Advisory about the *current* catalog by design: the child
-    /// freezes its own file at birth, so a run only ever meets the file
-    /// as it is then.
-    #[error("node `{node}`: `use: {name}` cannot be resolved — {detail}")]
-    WorkflowRefMissing {
-        node: NodeId,
-        name: String,
-        detail: String,
-    },
-
-    /// Two packs installed under the same publisher each declare a
-    /// workflow with the same file basename — the flat
-    /// `publisher/workflow` namespace can't tell them apart.
-    #[error("node `{node}`: `use: {name}` is ambiguous — {detail}")]
-    AmbiguousWorkflowRef {
-        node: NodeId,
-        name: String,
-        detail: String,
-    },
-
-    /// Cross-pack references aren't supported — a workflow
-    /// that lives inside a pack may only `use:` other workflows from
-    /// that same pack, never the repo's own catalog or a different
-    /// pack (no transitive pack dependencies).
-    #[error(
-        "node `{node}`: `use: {name}` reaches outside pack `{from_pack}` — composition across \
-         packs isn't supported; copy what you need into your own pack instead"
-    )]
-    CrossPackWorkflowRef {
-        node: NodeId,
-        name: String,
-        from_pack: String,
-    },
-
-    #[error("workflow `{path}` (referenced through composition) does not parse: {detail}")]
-    WorkflowRefUnparseable {
-        path: std::path::PathBuf,
-        detail: String,
-    },
-
-    /// A workflow this one composes that its birth would refuse, found
-    /// before the run that would compose it spends anything.
-    #[error("node `{node}`: `use: {name}` fails check — {problems}")]
-    ComposedWorkflowFails {
-        node: NodeId,
-        name: String,
-        problems: String,
-    },
+    /// A `use:` reference to another workflow, refused.
+    #[error(transparent)]
+    Composition(#[from] super::refs::Composition),
 
     /// A comparison against a baseline nothing measures: the lineage
     /// measures once, before its first node, and only the suite the
     /// config names.
     #[error("{sites}: {}", yunta_core::ConfigKey::BaselineSuite)]
     BaselineWithoutSuite { sites: String },
-
-    /// The graph of references between workflows must be acyclic.
-    #[error("workflow composition cycle: {chain}")]
-    WorkflowRefCycle { chain: String },
-
-    /// The configurable maximum nesting depth, checked statically over
-    /// the reference graph (the runtime guard at child birth enforces
-    /// the same limit over what actually loads).
-    #[error(
-        "workflow composition {chain} nests {} deep but `limits.max_workflow_depth` is \
-         {max} — flatten the composition or raise the limit",
-        yunta_core::text::counted(*depth as usize, "level")
-    )]
-    WorkflowRefTooDeep { chain: String, depth: u32, max: u32 },
 
     /// A pack says what it needs from the project and the machine under
     /// `requires:`; a run of its workflows without it stops where the need

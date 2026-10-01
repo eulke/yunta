@@ -31,6 +31,14 @@ with an editor open finds it, and a workflow of forty nodes is read by line.
    diagnostics carry no `at`. The field is absent rather than empty.
 4. **The field is additive** in the events and in `status --json`: a reader that
    predates it never meets it.
+5. **A surface that has the text quotes the line**, with carets under the part
+   at fault — the value when the value is what is wrong (`implementr` in
+   `runner: implementr`), the key otherwise — and a `check` refusal about the
+   workflow file is placed the same way, through where the refusal says it is.
+6. **A name within two edits of one the document or the config declares is
+   suggested**, at the end of the sentence that refuses it, when it is closer than
+   every other and the edits are not most of what was typed. A tie suggests
+   nothing: a guess offered as an answer costs a reader more than no answer.
 
 ## Rationale
 

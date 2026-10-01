@@ -117,7 +117,7 @@ fn refusals(workflow: &str, config: &str) -> Vec<(String, ConfigKey)> {
     yunta_engine::check(&workflow, &config, &|_| None)
         .into_iter()
         .filter_map(|error| match error {
-            CheckError::Unset { node, key } => Some((node.to_string(), key)),
+            CheckError::Unset { node, key, .. } => Some((node.to_string(), key)),
             _ => None,
         })
         .collect()

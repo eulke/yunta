@@ -14,7 +14,8 @@ use yunta_core::{
     RunnerCandidate, Workflow,
 };
 use yunta_engine::{
-    check as check_against, check_warnings, CheckError, CheckWarning, Unanswerable, UntakenRoute,
+    check as check_against, check_warnings, CheckError, CheckWarning, Composition, Unanswerable,
+    UntakenRoute,
 };
 
 /// The rules under test here are about the workflow, not about which
@@ -266,6 +267,7 @@ fn runner_not_declared_in_config_is_reported() {
         vec![CheckError::UnknownRunner {
             node: "plan".into(),
             runner: "planner".into(),
+            near: None,
         }]
     );
 }
@@ -613,10 +615,21 @@ fn every_error_message_names_its_rule() {
     assert_eq!(
         CheckError::UnknownRunner {
             node: "a".into(),
-            runner: "planner".into()
+            runner: "planner".into(),
+            near: None,
         }
         .to_string(),
         "node `a` references runner `planner`, which `runners:` does not define"
+    );
+    assert_eq!(
+        CheckError::UnknownRunner {
+            node: "a".into(),
+            runner: "planer".into(),
+            near: Some("planner".into()),
+        }
+        .to_string(),
+        "node `a` references runner `planer`, which `runners:` does not define — did you mean \
+         `planner`?"
     );
 }
 
@@ -1216,7 +1229,7 @@ fn a_missing_composition_reference_is_a_check_error() {
     assert!(
         errors.iter().any(|e| matches!(
             e,
-            CheckError::WorkflowRefMissing { node, name, .. }
+            CheckError::Composition(Composition::Missing { node, name, .. })
                 if node.as_str() == "sub" && name == "ghost"
         )),
         "got: {errors:?}"
@@ -1241,7 +1254,7 @@ fn a_composition_cycle_is_a_check_error_naming_the_chain() {
     assert!(
         errors.iter().any(|e| matches!(
             e,
-            CheckError::WorkflowRefCycle { chain } if chain == "a -> b -> a"
+            CheckError::Composition(Composition::Cycle { chain }) if chain == "a -> b -> a"
         )),
         "got: {errors:?}"
     );
@@ -1267,11 +1280,11 @@ fn composition_deeper_than_the_limit_is_a_check_error() {
     assert!(
         errors.iter().any(|e| matches!(
             e,
-            CheckError::WorkflowRefTooDeep {
+            CheckError::Composition(Composition::TooDeep {
                 depth: 3,
                 max: 2,
                 ..
-            }
+            })
         )),
         "got: {errors:?}"
     );
@@ -2108,7 +2121,7 @@ fn unset_keys(yaml: &str, config: &str) -> Vec<(String, yunta_core::ConfigKey)> 
     check(&wf, &config)
         .into_iter()
         .filter_map(|error| match error {
-            CheckError::Unset { node, key } => Some((node.to_string(), key)),
+            CheckError::Unset { node, key, .. } => Some((node.to_string(), key)),
             _ => None,
         })
         .collect()
@@ -2610,7 +2623,7 @@ fn a_composed_workflow_its_birth_would_refuse_is_refused_before_the_parent_runs(
     assert!(
         matches!(
             errors.as_slice(),
-            [CheckError::ComposedWorkflowFails { node, name, problems }]
+            [CheckError::Composition(Composition::Fails { node, name, problems })]
                 if node.as_str() == "sub" && name == "a" && problems.contains("node `gate`")
         ),
         "got: {errors:?}"
@@ -2643,7 +2656,7 @@ nodes:
     assert!(
         matches!(
             errors.as_slice(),
-            [CheckError::ComposedWorkflowFails { problems, .. }] if problems.contains("loop `build`")
+            [CheckError::Composition(Composition::Fails { problems, .. })] if problems.contains("loop `build`")
         ),
         "got: {errors:?}"
     );

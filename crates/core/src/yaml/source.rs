@@ -149,6 +149,32 @@ impl SourceMap {
         }
     }
 
+    /// Where a reader looks for what `pointer` names: the value when it is
+    /// one scalar — `implementr` in `runner: implementr` — and the key
+    /// otherwise; and when the text does not write that value, the
+    /// nearest place above it that it does write, short of the document
+    /// as a whole.
+    pub fn place(&self, pointer: &Pointer) -> Option<Location> {
+        let mut steps = pointer.steps().to_vec();
+        while !steps.is_empty() {
+            let here = Pointer(steps.clone());
+            if let Some(found) = self.find(&here) {
+                return match (&found.value, steps.last()) {
+                    (Tree::Scalar(_), _) => Some(found.at),
+                    (_, Some(Step::Key(_))) => self.locate_key(&here),
+                    // An entry of a list — a node, a task — is where its
+                    // first key is written.
+                    (Tree::Mapping(entries), _) => entries
+                        .first()
+                        .map_or(Some(found.at), |entry| Some(entry.key_at)),
+                    (Tree::Sequence(_), _) => Some(found.at),
+                };
+            }
+            steps.pop();
+        }
+        None
+    }
+
     /// The keys of the mapping `pointer` names, each with where it is
     /// written, in the order the text has them.
     pub fn keys_at(&self, pointer: &Pointer) -> Vec<(String, Location)> {
@@ -380,6 +406,20 @@ mod tests {
             .map(|(key, _)| key)
             .collect();
         assert_eq!(keys, ["id", "kind", "run"]);
+    }
+
+    #[test]
+    fn a_place_is_the_value_a_reader_fixes_or_the_nearest_place_written() {
+        let map = SourceMap::read(WORKFLOW);
+        let fix = Pointer::root().key("nodes").node("fix");
+        assert_eq!(map.place(&fix.clone().key("runner")), at(8, 13, 10));
+        assert_eq!(map.place(&fix.clone().key("depends_on")), at(9, 5, 10));
+        assert_eq!(
+            map.place(&fix.key("run").key("command")),
+            at(6, 5, 2),
+            "a key the node does not write falls back to the node"
+        );
+        assert_eq!(map.place(&Pointer::root().key("nowhere")), None);
     }
 
     #[test]

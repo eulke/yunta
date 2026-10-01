@@ -133,9 +133,11 @@ impl ArtifactRefId {
 
         let valid: Vec<&str> = claimed.iter().copied().chain(ArtifactRefId::KEYS).collect();
         let unknown = |key: &dyn fmt::Display| {
+            let key = key.to_string();
             D::Error::custom(format!(
-                "unknown key `{key}` for {what}; one of {}",
-                list(&valid)
+                "unknown key `{key}` for {what}; one of {}{}",
+                list(&valid),
+                crate::text::did_you_mean(&key, valid.iter().copied())
             ))
         };
         let mut id: Option<ArtifactRefId> = None;

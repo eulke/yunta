@@ -12,6 +12,7 @@
 #![cfg_attr(not(test), allow(dead_code, unused_imports))]
 
 mod decision;
+pub(crate) mod diagnostic;
 mod evidence;
 mod fields;
 mod headline;

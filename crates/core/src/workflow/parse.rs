@@ -42,8 +42,9 @@ pub(super) fn keyed_entry<'de, D: Deserializer<'de>>(
         .map_or(key, |(_, canonical)| canonical);
     if !keys.contains(&key) {
         return Err(D::Error::custom(format!(
-            "unknown key `{key}` for {what}; one of {}",
-            list(keys)
+            "unknown key `{key}` for {what}; one of {}{}",
+            list(keys),
+            crate::text::did_you_mean(key, keys.iter().copied())
         )));
     }
     Ok((key.to_string(), value))

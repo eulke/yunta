@@ -197,3 +197,28 @@ fn blocks_match_their_goldens() {
         );
     }
 }
+
+#[test]
+fn a_quoted_refusal_matches_its_golden() {
+    let text = "name: fix\nnodes:\n  - id: lint\n    kind: bash\n    run: { command: lnt }\n  - id: fix\n    kind: prompt\n    prompt: p\n    runner: implementr\n";
+    let at = |line, col, len| Some(yunta_core::yaml::Location { line, col, len });
+    let problems = [
+        (
+            "node `lint`: it runs the project's command `lnt`, and the config declares none — \
+             did you mean `lint`?"
+                .to_string(),
+            at(5, 21, 3),
+        ),
+        (
+            "node `fix` references runner `implementr`, which `runners:` does not define — \
+             did you mean `implementer`?"
+                .to_string(),
+            at(9, 13, 10),
+        ),
+        ("a conflict between config layers".to_string(), None),
+    ];
+    assert_golden(
+        &goldens().join("quoted-refusal.txt"),
+        &super::diagnostic::located("wf.yaml", &problems, "wf.yaml", Some(text)),
+    );
+}

@@ -132,6 +132,43 @@ pub fn agreeing<'a>(n: usize, one: &'a str, many: &'a str) -> &'a str {
     }
 }
 
+/// The candidate `typed` most likely misspells: within two edits of it,
+/// and closer than every other. `None` when nothing is that close, when
+/// two are equally close, or when the edits would be most of what was
+/// typed — a suggestion is offered only when it is the one a reader
+/// meant.
+pub fn nearest<'a>(typed: &str, candidates: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
+    /// The edits a misspelling is taken to be within: a slip of one key,
+    /// or two letters swapped.
+    const NEAR: usize = 2;
+    let room = NEAR.min(typed.chars().count().saturating_sub(1));
+    let mut best: Option<(&str, usize)> = None;
+    let mut tied = false;
+    for candidate in candidates {
+        let edits = strsim::levenshtein(typed, candidate);
+        if candidate == typed || edits > room {
+            continue;
+        }
+        match best {
+            Some((held, closest)) if edits == closest && held != candidate => tied = true,
+            Some((_, closest)) if edits >= closest => {}
+            _ => {
+                best = Some((candidate, edits));
+                tied = false;
+            }
+        }
+    }
+    best.filter(|_| !tied).map(|(candidate, _)| candidate)
+}
+
+/// ` — did you mean `name`?`, said after a name nothing answers to when
+/// one of `candidates` is [`nearest`] to it; nothing otherwise.
+pub fn did_you_mean<'a>(typed: &str, candidates: impl IntoIterator<Item = &'a str>) -> String {
+    nearest(typed, candidates)
+        .map(|near| format!(" — did you mean `{near}`?"))
+        .unwrap_or_default()
+}
+
 /// Identifiers as a reader sees a list of them, each in its own
 /// backticks — the one joiner every sentence about a set of ids uses.
 pub fn listed<'a>(ids: impl IntoIterator<Item = &'a str>) -> String {
@@ -199,7 +236,32 @@ pub fn escape_mermaid(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{aside, counted, detailed};
+    use super::{aside, counted, detailed, did_you_mean, nearest};
+
+    #[test]
+    fn an_unknown_key_suggests_the_key_one_typo_away() {
+        let keys = ["depends_on", "scope", "prompt", "runner"];
+        assert_eq!(nearest("promt", keys), Some("prompt"));
+        assert_eq!(nearest("depend_on", keys), Some("depends_on"));
+        assert_eq!(did_you_mean("scpe", keys), " — did you mean `scope`?");
+    }
+
+    #[test]
+    fn a_name_far_from_every_candidate_or_between_two_suggests_nothing() {
+        assert_eq!(nearest("artifacts", ["scope", "runner"]), None, "too far");
+        assert_eq!(nearest("cat", ["bat", "hat"]), None, "two are as close");
+        assert_eq!(
+            nearest("ab", ["xy"]),
+            None,
+            "the edits would be the whole word"
+        );
+        assert_eq!(
+            nearest("scope", ["scope"]),
+            None,
+            "a name is not its own near miss"
+        );
+        assert_eq!(did_you_mean("artifacts", ["scope"]), "");
+    }
 
     #[test]
     fn a_count_names_its_noun_in_the_number_it_is() {

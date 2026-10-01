@@ -26,6 +26,7 @@ pub(crate) fn check_unset_keys(
         for key in ConfigKey::unset(node, config) {
             errors.push(CheckError::Unset {
                 node: node.id.clone(),
+                near: near_key(&key, config),
                 key,
             });
         }
@@ -46,11 +47,25 @@ pub(crate) fn check_unset_keys(
         }
     }
     for command in named {
+        let key = ConfigKey::Command {
+            command: command.clone(),
+        };
         errors.push(CheckError::Unset {
             node: NODE_DEFAULTS.clone(),
-            key: ConfigKey::Command {
-                command: command.clone(),
-            },
+            near: near_key(&key, config),
+            key,
         });
     }
+}
+
+/// The command `config` declares that the one `key` asks for most likely
+/// misspells. Only a command has a name a person types: the other keys
+/// are sections, present or not.
+fn near_key(key: &ConfigKey, config: &ConfigLayer) -> Option<String> {
+    let ConfigKey::Command { command } = key else {
+        return None;
+    };
+    let declared = config.commands.as_ref()?;
+    yunta_core::text::nearest(command.as_str(), declared.keys().map(|name| name.as_str()))
+        .map(str::to_string)
 }

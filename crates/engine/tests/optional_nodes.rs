@@ -96,7 +96,7 @@ fn a_required_node_with_an_unset_key_is_still_refused() {
     assert!(
         errors.iter().any(|error| matches!(
             error,
-            CheckError::Unset { node, key } if node.as_str() == "lint" && *key == lint_command()
+            CheckError::Unset { node, key, .. } if node.as_str() == "lint" && *key == lint_command()
         )),
         "{errors:?}"
     );

@@ -267,8 +267,9 @@ impl<'de> Deserialize<'de> for Node {
         };
         let Some(kind_keys) = NodeKind::keys(kind_name) else {
             return Err(D::Error::custom(format!(
-                "{subject}: unknown kind `{kind_name}`; one of {}",
-                list(NodeKind::KINDS)
+                "{subject}: unknown kind `{kind_name}`; one of {}{}",
+                list(NodeKind::KINDS),
+                crate::text::did_you_mean(kind_name, NodeKind::KINDS.iter().copied())
             )));
         };
         let unknown: Vec<&str> = kind_part
@@ -292,6 +293,14 @@ impl<'de> Deserialize<'de> for Node {
             for (key, hint) in RETIRED_NODE_KEYS {
                 if unknown.contains(key) {
                     message.push_str(&format!("; `{key}`: {hint}"));
+                }
+            }
+            for key in &unknown {
+                let retired = RETIRED_NODE_KEYS.iter().any(|(old, _)| old == key);
+                if let Some(near) = crate::text::nearest(key, valid.iter().copied()) {
+                    if !retired {
+                        message.push_str(&format!("; `{key}`: did you mean `{near}`?"));
+                    }
                 }
             }
             return Err(D::Error::custom(message));

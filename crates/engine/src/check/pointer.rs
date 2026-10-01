@@ -10,7 +10,7 @@ use yunta_core::yaml::Pointer;
 use yunta_core::{ConfigKey, NodeId};
 
 use super::site::node;
-use super::{CheckError, Unanswerable};
+use super::{CheckError, Composition, Unanswerable};
 
 impl CheckError {
     /// Where in the workflow file this is about, from its root, or
@@ -26,8 +26,8 @@ impl CheckError {
             } => node(id).key(field.as_str()),
             CheckError::UnknownRunner { node: id, .. }
             | CheckError::RunnerHasNoCandidates { node: id, .. } => node(id).key("runner"),
-            CheckError::Unset { node: id, key } => match key {
-                ConfigKey::Command { .. } => node(id).key("run"),
+            CheckError::Unset { node: id, key, .. } => match key {
+                ConfigKey::Command { .. } => node(id).key("run").key("command"),
                 ConfigKey::Executor { .. } => node(id).key("executor"),
                 ConfigKey::Runner => node(id).key("runner"),
                 ConfigKey::BaselineSuite
@@ -69,20 +69,20 @@ impl CheckError {
             | CheckError::MountOnFanOut { node: id, .. }
             | CheckError::MountInsideParallel { node: id, .. } => node(id).key("mounts"),
             CheckError::ResumeSessionOnSessionlessNode { node: id } => node(id).key("on_interrupt"),
-            CheckError::WorkflowRefMissing { node: id, .. }
-            | CheckError::AmbiguousWorkflowRef { node: id, .. }
-            | CheckError::CrossPackWorkflowRef { node: id, .. }
-            | CheckError::ComposedWorkflowFails { node: id, .. } => node(id).key("use"),
+            CheckError::Composition(Composition::Missing { node: id, .. })
+            | CheckError::Composition(Composition::Ambiguous { node: id, .. })
+            | CheckError::Composition(Composition::CrossPack { node: id, .. })
+            | CheckError::Composition(Composition::Fails { node: id, .. }) => node(id).key("use"),
             CheckError::PackPermissionsCeilingExceeded { node: id, .. } => {
                 node(id).key("permissions")
             }
             CheckError::PackManifestUnreadable { .. }
             | CheckError::PackManifestMalformed { .. }
             | CheckError::MaxParallelNodesZero
-            | CheckError::WorkflowRefUnparseable { .. }
+            | CheckError::Composition(Composition::Unparseable { .. })
             | CheckError::BaselineWithoutSuite { .. }
-            | CheckError::WorkflowRefCycle { .. }
-            | CheckError::WorkflowRefTooDeep { .. }
+            | CheckError::Composition(Composition::Cycle { .. })
+            | CheckError::Composition(Composition::TooDeep { .. })
             | CheckError::PackRequirementUnmet { .. } => return None,
         })
     }
@@ -99,6 +99,12 @@ impl Unanswerable {
             Unanswerable::NodeOutputOfNonBash { node: id, .. } => node(id).key("context"),
         }
     }
+}
+
+/// ` — did you mean `name`?` when a refusal holds a near miss.
+pub(super) fn near(near: Option<&String>) -> String {
+    near.map(|near| format!(" — did you mean `{near}`?"))
+        .unwrap_or_default()
 }
 
 /// `a -> b -> a`: a cycle as a sentence names it.

@@ -146,6 +146,14 @@ pub enum CliError {
         candidates: Vec<crate::commands::run_ref::Candidate>,
     },
 
+    /// A document that does not read, or breaks its own rules: every
+    /// problem it has, each quoted from the text it was read from.
+    #[error("{}", crate::render::blocks::diagnostic::report(.report, .text.as_deref()))]
+    Document {
+        report: yunta_core::diagnostic::Report,
+        text: Option<String>,
+    },
+
     /// A document kind this binary does not publish. The sentence
     /// lists the kinds that exist, so `yunta schema` and the
     /// `document_shape` tool answer the same mistake the same way.

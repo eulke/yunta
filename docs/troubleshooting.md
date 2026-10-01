@@ -7,18 +7,31 @@ bugs — Yunta prefers a named, actionable error over guessing what you meant.
 ## `yunta check` refuses the workflow
 
 `check` validates statically, before any session opens. The message always
-names the node and the exact problem:
+names the node and the exact problem, and a problem about the workflow file is
+followed by the line it is about, with carets under the part at fault:
 
-- **`node "x" references runner "y", which "runners:" does not define`** —
-  add the role under `runners:` in `.yunta/config.yaml` (see
+```
+workflow.yaml: 1 error
+  node `fix` references runner `implementr`, which `runners:` does not define — did you mean `implementer`?
+     --> workflow.yaml:6:13
+      |
+    6 |     runner: implementr
+      |             ^^^^^^^^^^
+```
+
+A name one or two typos away from one the workflow or the config declares — a
+key, a node id, a runner, a command — is suggested at the end of the sentence.
+
+- **``node `x` references runner `y`, which `runners:` does not define``** —
+  add the runner under `runners:` in `.yunta/config.yaml` (see
   [adapters](adapters.md#configuring-runners)), or fix the typo in the
   node's `runner:`.
 - **`cycle in depends_on: ...`** — the path is printed; break the cycle,
   there's no partial-order fallback.
-- **`node "x" on_failure.goto targets unknown node "y"`** / **`node "x"
-  depends_on unknown node "y"`** — a typo'd or removed node id. Every
-  `goto`/`depends_on` target must exist in the same workflow.
-- **`node "x" references {{inputs.y}}, which inputs: does not declare`** —
+- **``node `x`: `depends_on` names `y`, and no node carries that id``** (or
+  `on_failure.goto`, a gate option's `on`) — a typo'd or removed node id.
+  Every target must exist in the same workflow.
+- **``node `x` references `{{inputs.y}}`, which `inputs:` does not declare``** —
   add `y` under the workflow's own `inputs:`, or fix the template reference.
 - **a pack ceiling error naming the node, the pack, and both the declared
   and requested permission level** — a node inside a pack asked for more

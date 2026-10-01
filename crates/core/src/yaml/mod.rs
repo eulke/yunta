@@ -99,10 +99,20 @@ impl serde_saphyr::MessageFormatter for Said {
         match error {
             Error::SerdeUnknownField {
                 field, expected, ..
-            } => format!("unknown field `{field}`, {}", one_of(expected)).into(),
+            } => format!(
+                "unknown field `{field}`, {}{}",
+                one_of(expected),
+                near(field, expected)
+            )
+            .into(),
             Error::SerdeUnknownVariant {
                 variant, expected, ..
-            } => format!("unknown variant `{variant}`, {}", one_of(expected)).into(),
+            } => format!(
+                "unknown variant `{variant}`, {}{}",
+                one_of(expected),
+                near(variant, expected)
+            )
+            .into(),
             Error::DuplicateMappingKey { key: Some(key), .. } => {
                 format!("`{key}` is written twice in one mapping").into()
             }
@@ -111,6 +121,15 @@ impl serde_saphyr::MessageFormatter for Said {
             }
             other => serde_saphyr::UserMessageFormatter.format_message(other),
         }
+    }
+}
+
+/// The name `typed` most likely misspells, when there is a choice to
+/// make: with one name expected, the refusal already names it.
+fn near(typed: &str, expected: &[&str]) -> String {
+    match expected {
+        [_, _, ..] => crate::text::did_you_mean(typed, expected.iter().copied()),
+        _ => String::new(),
     }
 }
 

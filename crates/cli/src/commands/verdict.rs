@@ -7,12 +7,13 @@
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 
-use yunta_core::text::problems;
+use yunta_core::yaml::{Location, SourceMap};
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::CheckError;
 
 use crate::context::Context;
 use crate::error::{note, warn, CliError, Outcome};
+use crate::render::blocks::diagnostic::located;
 
 /// How much of the project a verdict reads beyond the workflow itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +36,8 @@ pub(crate) struct Verdict {
     conflicts: Vec<String>,
     errors: Vec<CheckError>,
     warnings: Vec<String>,
+    /// The file the workflow was read from, which its refusals quote.
+    path: PathBuf,
 }
 
 /// What `workflow`, read from `path`, gets here under `config`.
@@ -79,6 +82,7 @@ pub(crate) async fn verdict(
         conflicts,
         errors,
         warnings,
+        path: path.to_path_buf(),
     }
 }
 
@@ -151,16 +155,23 @@ impl Verdict {
         CliError::msg(self.problems(ctx, "the workflow fails `yunta check`").await)
     }
 
-    /// Every problem under `heading`, then what this project could declare
-    /// for the ones a declaration fixes.
+    /// Every problem under `heading`, each refusal about the workflow
+    /// quoted from its file, then what this project could declare for the
+    /// ones a declaration fixes.
     async fn problems(&self, ctx: &Context, heading: impl Display) -> String {
-        let all: Vec<String> = self
+        let text = tokio::fs::read_to_string(&self.path).await.ok();
+        let map = text.as_deref().map(SourceMap::read).unwrap_or_default();
+        let all: Vec<(String, Option<Location>)> = self
             .conflicts
             .iter()
-            .cloned()
-            .chain(self.errors.iter().map(ToString::to_string))
+            .map(|conflict| (conflict.clone(), None))
+            .chain(self.errors.iter().map(|error| {
+                let at = error.pointer().and_then(|pointer| map.place(&pointer));
+                (error.to_string(), at)
+            }))
             .collect();
-        let mut said = problems(heading, &all);
+        let shown = self.path.display().to_string();
+        let mut said = located(&heading.to_string(), &all, &shown, text.as_deref());
         let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision())
             .await
             .for_errors(&self.errors)

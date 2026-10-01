@@ -23,6 +23,7 @@ pub(crate) fn check_config_defaults(config: &ConfigLayer, errors: &mut Vec<Check
             errors.push(CheckError::UnknownRunner {
                 node: DEFAULTS.clone(),
                 runner: runner.clone(),
+                near: near_runner(config, runner),
             });
         }
     }
@@ -246,4 +247,11 @@ pub(crate) fn check_reserved_artifact_names(workflow: &Workflow, errors: &mut Ve
             }
         }
     }
+}
+
+/// The runner `config` defines that `runner` most likely misspells.
+pub(crate) fn near_runner(config: &ConfigLayer, runner: &RunnerName) -> Option<String> {
+    let defined = config.runners.as_ref()?;
+    yunta_core::text::nearest(runner.as_str(), defined.keys().map(RunnerName::as_str))
+        .map(str::to_string)
 }

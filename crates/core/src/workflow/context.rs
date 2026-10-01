@@ -151,10 +151,11 @@ impl<'de> Deserialize<'de> for ContextFile {
         let path: Option<String> = take::<D, _>(&mut mapping, "path")?;
         let optional: Option<bool> = take::<D, _>(&mut mapping, "optional")?;
         if let Some((key, _)) = mapping.into_iter().next() {
+            let key = key.as_str().unwrap_or("?");
             return Err(D::Error::custom(format!(
-                "unknown key `{}` for a `files:` entry; one of {}",
-                key.as_str().unwrap_or("?"),
-                super::parse::list(KEYS)
+                "unknown key `{key}` for a `files:` entry; one of {}{}",
+                super::parse::list(KEYS),
+                crate::text::did_you_mean(key, KEYS.iter().copied())
             )));
         }
         let path = path.ok_or_else(|| {

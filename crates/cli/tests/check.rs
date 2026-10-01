@@ -245,3 +245,42 @@ nodes:
         "check says the suite would be measured and never read: {said}"
     );
 }
+
+#[test]
+fn check_points_at_the_line_and_column_of_an_unknown_runner() {
+    let project = Checkout::new()
+        .file(
+            ".yunta/config.yaml",
+            "runners:\n  implementer:\n    - { adapter: mock, model: m }\n",
+        )
+        .file(
+            "workflow.yaml",
+            "name: fixture\nnodes:\n  - id: fix\n    kind: prompt\n    prompt: p\n    runner: implementr\n",
+        );
+
+    let output = yunta_at!(project, &["check", "workflow.yaml"]);
+    assert!(!output.status.success());
+    let said = stderr(&output);
+    let quoted: Vec<&str> = said
+        .lines()
+        .skip_while(|line| !line.contains("runner `implementr`"))
+        .take(5)
+        .collect();
+    assert!(
+        quoted[0].ends_with("— did you mean `implementer`?"),
+        "the near miss is named: {said}"
+    );
+    assert_eq!(
+        quoted[1..]
+            .iter()
+            .map(|line| line.trim_end())
+            .collect::<Vec<_>>(),
+        [
+            "     --> workflow.yaml:6:13",
+            "      |",
+            "    6 |     runner: implementr",
+            "      |             ^^^^^^^^^^",
+        ],
+        "{said}"
+    );
+}
