@@ -300,6 +300,11 @@ it is the state it can account for.
 
 `yunta list --runs` orders runs by the timestamp of their first event.
 
+`yunta list --runs` lists the runs of the repository it is run in — the ones
+whose manifest names its git directory, and the ones that name none and have
+their own branch in it — and ends with how many runs on the machine belong to
+other projects; `--all`, or running it outside a repository, lists every run.
+
 `yunta list --runs` groups runs by what can be done about them — what needs a
 person, what stalled, what is in flight, what has closed, and last the runs whose
 log or manifest does not read back. A run is stalled when its log says it is

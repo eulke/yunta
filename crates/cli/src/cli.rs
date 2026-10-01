@@ -131,9 +131,13 @@ enum Command {
     /// `--runs`.
     List {
         /// Lists local runs and their derived state instead of
-        /// workflows.
+        /// workflows: the runs of the repository this is run in.
         #[arg(long)]
         runs: bool,
+        /// With `--runs`: every run on this machine, whichever repository
+        /// it was created in.
+        #[arg(long, requires = "runs")]
+        all: bool,
     },
     /// Health-checks every adapter this project's `runners:` names —
     /// binary present, version compatible, auth valid.
@@ -372,9 +376,9 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             .await
         }
         Command::Cancel { run_id } => commands::cancel::cancel(&run_id).await,
-        Command::List { runs } => {
+        Command::List { runs, all } => {
             if runs {
-                commands::list::list_runs()
+                commands::list::list_runs(all).await
             } else {
                 commands::list::list_workflows().await
             }

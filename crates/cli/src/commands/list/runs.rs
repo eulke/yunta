@@ -8,6 +8,8 @@
 //! so the listing and the run's own page can never disagree about where
 //! a run stands.
 
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -120,7 +122,10 @@ struct Unreadable {
     problem: String,
 }
 
-pub fn list_runs() -> Result<Outcome, CliError> {
+/// The runs of the repository this is run in — every run on the machine
+/// with `all`, or when this is run outside a repository — as the inbox,
+/// and how many runs the listing leaves to other projects.
+pub async fn list_runs(all: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let storage = ctx.storage()?;
 
@@ -132,17 +137,79 @@ pub fn list_runs() -> Result<Outcome, CliError> {
         return Ok(Outcome::Success);
     }
 
+    let here = match all {
+        true => None,
+        false => Here::of(&ctx).await,
+    };
     let now = ctx.clock.now();
     let mut rows = Vec::new();
     let mut unreadable = Vec::new();
+    let mut elsewhere = 0;
     for run_id in run_ids {
         match run_row(&ctx.project, &storage, run_id, now) {
-            Ok(row) => rows.push(row),
-            Err(problem) => unreadable.push(problem),
+            Ok((row, project))
+                if here
+                    .as_ref()
+                    .is_none_or(|here| here.holds(&row.run_id, project.as_deref())) =>
+            {
+                rows.push(row)
+            }
+            Err(problem)
+                if here
+                    .as_ref()
+                    .is_none_or(|here| here.holds(&problem.run_id, None)) =>
+            {
+                unreadable.push(problem)
+            }
+            Ok(_) | Err(_) => elsewhere += 1,
         }
     }
-    print!("{}", render_runs(rows, unreadable, Glyphs::from_env()));
+    if rows.is_empty() && unreadable.is_empty() {
+        println!("no runs in this repository");
+    } else {
+        print!("{}", render_runs(rows, unreadable, Glyphs::from_env()));
+    }
+    if elsewhere > 0 {
+        println!(
+            "\n{} in other projects — yunta list --runs --all",
+            yunta_core::text::counted(elsewhere, "run")
+        );
+    }
     Ok(Outcome::Success)
+}
+
+/// The repository a listing is asked in: the git directory its checkouts
+/// share, and the runs that have their own branch in it.
+struct Here {
+    git_common_dir: PathBuf,
+    branches: BTreeSet<RunId>,
+}
+
+impl Here {
+    /// The repository `ctx.cwd` is in, or `None` outside one — where every
+    /// run is listed, since there is no project to narrow to.
+    async fn of(ctx: &Context) -> Option<Self> {
+        let git_common_dir = yunta_engine::git::common_dir(&ctx.cwd, ctx.supervision())
+            .await
+            .ok()?;
+        let branches = yunta_engine::git::run_branches(&ctx.cwd, ctx.supervision())
+            .await
+            .unwrap_or_default();
+        Some(Here {
+            git_common_dir,
+            branches,
+        })
+    }
+
+    /// Whether the run `run_id`, created in the repository whose git
+    /// directory is `project` when its manifest says so, belongs here. A
+    /// run that does not say is placed by its branch.
+    fn holds(&self, run_id: &RunId, project: Option<&Path>) -> bool {
+        match project {
+            Some(project) => project == self.git_common_dir,
+            None => self.branches.contains(run_id),
+        }
+    }
 }
 
 /// The listing itself: what needs a person first, then what is still
@@ -230,13 +297,14 @@ impl RunRow {
     }
 }
 
-/// One run's row, or what stops it from having one.
+/// One run's row and the repository its manifest says it was created
+/// in, or what stops it from having one.
 fn run_row(
     project: &Project,
     storage: &Storage,
     run_id: RunId,
     now: DateTime<Utc>,
-) -> Result<RunRow, Unreadable> {
+) -> Result<(RunRow, Option<PathBuf>), Unreadable> {
     let events = storage
         .events_for_run(&run_id)
         .map_err(|e| Unreadable::new(&run_id, format!("its event log does not read back: {e}")))?;
@@ -264,11 +332,12 @@ fn run_row(
                 ),
             )
         })?;
-    Ok(RunRow::of(
+    let row = RunRow::of(
         &progress::frame(&run_id, &manifest, &events, now),
         yunta_engine::engine_liveness(&run_dir, &yunta_engine::lock::SystemProbe),
         time_in_state(&events, now),
-    ))
+    );
+    Ok((row, manifest.project.map(|project| project.git_common_dir)))
 }
 
 impl Unreadable {
