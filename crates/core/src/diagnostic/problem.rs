@@ -125,6 +125,9 @@ rule_codes! {
     CriterionAlreadyPasses => "criterion-already-passes",
     /// A guard that has to pass before the work already fails.
     GuardAlreadyRed => "guard-already-red",
+    /// A finding's proposed criterion already passes on the run's tree,
+    /// so passing it later proves no fix.
+    ProposedCriterionAlreadyPasses => "proposed-criterion-already-passes",
     /// A plan a person reviews says nothing of what it changes in one line.
     NoSummary => "no-summary",
     /// A plan, or one of its tasks, that a person reviews does not say

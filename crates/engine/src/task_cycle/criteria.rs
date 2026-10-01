@@ -365,6 +365,30 @@ fn median_duration(history: &TaskLedger, cmd: &str) -> Option<u64> {
 /// through the same cache, which keeps what they answered for that
 /// tree — so what a command that could not run said can be handed back
 /// to whoever wrote it.
+/// What one command answers in `cwd`, through the memo: a criterion no
+/// task declares, such as the one a finding proposes to prove its fix.
+pub(crate) async fn probe_command(
+    cmd: &str,
+    cwd: &Path,
+    memo: &Memo,
+    supervision: Supervision<'_>,
+) -> Result<CriterionRun, TaskCycleError> {
+    let criterion = Criterion {
+        cmd: cmd.to_string(),
+        r#type: None,
+        proves: None,
+    };
+    let task = TaskId::from_static("proposed-criterion");
+    let runs = run_all_criteria(
+        &task,
+        std::slice::from_ref(&criterion),
+        cwd,
+        memo,
+        supervision,
+    );
+    Ok(runs.await?.remove(0))
+}
+
 pub(crate) async fn probe(
     task: &Task,
     cwd: &Path,

@@ -98,7 +98,11 @@ impl SessionTools {
         };
         let id = entry.id.clone();
         let standing = self.finding_status(&id).await?;
-        if let Some(broken) = Self::id_rule(operation, &id, standing.as_ref()) {
+        let mut broken = Self::id_rule(operation, &id, standing.as_ref());
+        if let (None, Some(proposed)) = (&broken, &entry.proposed_criterion) {
+            broken = self.proposed_breaks(&id, &proposed.cmd).await?;
+        }
+        if let Some(broken) = broken {
             let report = Report::new(
                 DocumentRef::new(ArtifactKind::Findings, tool_of(operation)),
                 vec![broken],

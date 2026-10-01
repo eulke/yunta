@@ -113,8 +113,10 @@ fn post_finding_tool(session: &SessionTools) -> Tool {
          counted, deduplicated and consulted with every other finding on the \
          run, survives this session, and — when this node declares a `findings` \
          artifact — is written into that file at the end. Never write a findings \
-         file yourself. To change a finding you reported, use `{update}`; to take one \
-         back, `{withdraw}`.",
+         file yourself. A `proposed_criterion` is a command that fails on the run's \
+         tree now and passes once the finding is fixed: one that already passes, or \
+         cannot run, is refused. To change a finding you reported, use `{update}`; to \
+         take one back, `{withdraw}`.",
             update = session.called(RunTool::UpdateFinding),
             withdraw = session.called(RunTool::WithdrawFinding),
         ),

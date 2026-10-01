@@ -334,7 +334,9 @@ stands in for one that never arrived.
 
 Findings are reported one at a time instead. A session calls `yunta_post_finding`
 the moment it sees one — validated on its own, so a refusal names what to fix in
-that finding and everything already reported stands. `yunta_update_finding` replaces
+that finding and everything already reported stands. A finding that proposes a
+criterion has it run on the run's tree as it is reported: one that already passes
+proves no fix, and one that cannot run proves nothing, so both are refused. `yunta_update_finding` replaces
 one by id with its whole new content, and `yunta_withdraw_finding` takes one back
 with a reason; a withdrawal is final, and a finding that comes back is a new id.
 Any session reads the findings standing in the run, each with the node that reported

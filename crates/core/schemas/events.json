@@ -3416,6 +3416,11 @@
           "const": "guard-already-red"
         },
         {
+          "description": "A finding's proposed criterion already passes on the run's tree,\nso passing it later proves no fix.",
+          "type": "string",
+          "const": "proposed-criterion-already-passes"
+        },
+        {
           "description": "A plan a person reviews says nothing of what it changes in one line.",
           "type": "string",
           "const": "no-summary"

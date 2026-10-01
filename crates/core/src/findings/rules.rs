@@ -40,6 +40,21 @@ pub(super) const RULES: &[Rule] = &[
     },
 ];
 
+/// What the engine demands where it runs a finding's proposed criterion,
+/// on the run's tree as the finding is reported: that it runs, and that
+/// it fails there — what passes before a fix proves no fix.
+pub(super) const RUN_RULES: &[Rule] = &[
+    Rule {
+        code: RuleCode::CriterionCannotRun,
+        demand: "a `proposed_criterion` runs where the engine runs criteria: each program it \
+                 calls is on that `PATH`",
+    },
+    Rule {
+        code: RuleCode::ProposedCriterionAlreadyPasses,
+        demand: "a `proposed_criterion` fails on the run's tree until the finding is fixed",
+    },
+];
+
 /// What one entry is held to on its own — every rule of a findings
 /// document except the one that spans it.
 pub(super) const ENTRY_RULES: &[Rule] = &[

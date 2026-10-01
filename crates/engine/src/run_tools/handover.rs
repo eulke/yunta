@@ -140,6 +140,41 @@ impl SessionTools {
         Ok((broken, probes))
     }
 
+    /// The rule a finding's proposed criterion breaks on the run's tree as
+    /// it stands: one that cannot run, or one that already passes — what
+    /// passes before a fix proves no fix. `None` when it fails there.
+    pub(super) async fn proposed_breaks(
+        &self,
+        id: &yunta_core::FindingId,
+        cmd: &str,
+    ) -> Result<Option<Diagnostic>, RunToolError> {
+        let (checkout, _) = self.handover_checkout().await?;
+        let supervision = self.host.supervision(&self.stop);
+        let run = crate::task_cycle::probe_command(cmd, &checkout, &self.host.memo, supervision)
+            .await
+            .map_err(|source| RunToolError::Check { source })?;
+        let problem = if run.could_not_run().is_some() {
+            Problem::rule(
+                RuleCode::CriterionCannotRun,
+                cannot_run(&run, self.host.environment.as_ref()),
+            )
+        } else if run.exit_code == 0 {
+            Problem::rule(
+                RuleCode::ProposedCriterionAlreadyPasses,
+                format!(
+                    "`{cmd}` already exits 0 on the run's tree; a criterion that proves a fix \
+                     fails until the fix is in"
+                ),
+            )
+        } else {
+            return Ok(None);
+        };
+        Ok(Some(Diagnostic::new(
+            Subject::Finding(Named::new(id.clone(), 0)),
+            problem,
+        )))
+    }
+
     /// The spec the run holds, which a spec written again for a
     /// departure is held against.
     async fn held_spec(

@@ -129,6 +129,8 @@ impl crate::shape::Document for FindingsFile {
     }
 
     const RULES: &'static [crate::diagnostic::Rule] = rules::RULES;
+
+    const RUN_RULES: &'static [crate::diagnostic::Rule] = rules::RUN_RULES;
 }
 
 /// The shape one finding takes on its own, as a session hands it over.
