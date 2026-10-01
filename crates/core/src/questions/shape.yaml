@@ -1,6 +1,6 @@
 # What a node needs a person to decide. A node that needs an answer does
-# not converse: it writes this file and ends, and the engine asks.
-# Written strictly — any key not listed here fails the node.
+# not converse: it hands this document over and ends, and the engine asks.
+# Written strictly — any key not listed here is refused.
 
 questions:                              # required; an empty list is valid and
                                         #   means nothing needs deciding

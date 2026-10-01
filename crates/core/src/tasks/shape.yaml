@@ -1,5 +1,5 @@
 # A tasks document: one task per independently-verifiable unit of work.
-# Written strictly — any key not listed here fails the node.
+# Written strictly — any key not listed here is refused.
 #
 # `summary`, `description`, `why` of each decision, and each task's
 # `description`, `changes` and `outcome`, and each criterion's `proves`,

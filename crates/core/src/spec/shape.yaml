@@ -2,8 +2,8 @@
 # Each task gets the files its tests live in, whole, and the commands that
 # run them: the engine writes the files into the tree the task's work
 # starts from, denies that work any change to them, and adds the commands
-# to the task's criteria. Written strictly — any key not listed here fails
-# the node.
+# to the task's criteria. Written strictly — any key not listed here is
+# refused.
 
 specs:                                  # required
   - task: add-dark-mode                 # required: a task of the run's plan,

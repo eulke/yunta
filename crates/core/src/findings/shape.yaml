@@ -1,5 +1,5 @@
 # What a review found, as data the engine counts and carries forward.
-# Written strictly — any key not listed here fails the node.
+# Written strictly — any key not listed here is refused.
 
 findings:                               # required; an empty list is valid and
                                         #   means the review found nothing
