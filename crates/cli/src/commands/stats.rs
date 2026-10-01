@@ -377,7 +377,7 @@ fn node_line(
         .unwrap_or_else(|| " n/a".to_string());
     format!(
         "{INDENT}{} {} {} {}  {total:>8} tok  {:>8}  blk:{blocked}",
-        glyphs.mark(display.word.mark()),
+        crate::render::ink::Ink::stdout().mark(glyphs, display.word.mark()),
         truncate(display.word.word(), STATE_WIDTH, glyphs),
         middle_cut(node.node_id.as_str(), column, glyphs),
         bar(total, max_tokens, glyphs),

@@ -341,6 +341,18 @@ run, they do not drive it. `yunta test` writes a case's `final_state` in the sam
 words: `finished`, `needs you`, `reported`, `failed`, `promoted`; a case written
 with `paused` is refused, naming `needs you`.
 
+## Color
+
+Every command takes `--color auto|always|never`, decided for each stream on its
+own: stdout and stderr can be a terminal and a pipe at once. Under `auto`, in
+order, `NO_COLOR` (set and not empty) turns color off, `CLICOLOR_FORCE` (set,
+not `0`) turns it on even for a pipe, `CLICOLOR=0` turns it off, and otherwise a
+stream gets color when it is a terminal and `TERM` is not `dumb`. Only the sixteen
+ANSI colors are used, so a terminal draws them in its own palette. A painted line
+reads the same once its color is taken out: color repeats the words, it never
+replaces them. `NO_COLOR` changes nothing but color — the live view is drawn on a
+terminal either way.
+
 ## The JSON surfaces
 
 `stats --json`, `status --json` and `run --json` carry `schema_version: 6`. The

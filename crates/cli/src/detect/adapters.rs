@@ -54,7 +54,7 @@ pub(crate) fn healthy(probed: &[ProbedAdapter]) -> Vec<AdapterId> {
 
 /// The role a project that names none gets proposed: what the skeletons
 /// `yunta new` writes name in their comments.
-const PROPOSED_ROLE: &str = "implementer";
+const PROPOSED_RUNNER: &str = "implementer";
 
 /// The lines that say how to declare the runners `roles` names — the
 /// proposed role when it names none — each on the first adapter that
@@ -66,7 +66,7 @@ pub(crate) fn runner_step(
     needs_default: bool,
     healthy: &[AdapterId],
 ) -> Vec<String> {
-    let proposed = [RunnerName::from_static(PROPOSED_ROLE)];
+    let proposed = [RunnerName::from_static(PROPOSED_RUNNER)];
     let roles = match roles.is_empty() {
         true => &proposed[..],
         false => roles,

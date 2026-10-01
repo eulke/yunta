@@ -433,41 +433,40 @@ impl TermLike for Watched {
 mod tests {
     use super::*;
 
-    fn env(stderr_is_terminal: bool, term: Option<&str>, no_color: Option<&str>) -> TerminalEnv {
+    fn env(stderr_is_terminal: bool, term: Option<&str>) -> TerminalEnv {
         TerminalEnv {
             stderr_is_terminal,
             term: term.map(str::to_string),
-            no_color: no_color.map(str::to_string),
         }
     }
 
     #[test]
     fn quiet_settles_the_delivery_whatever_the_terminal_offers() {
-        let terminal = env(true, Some("xterm-256color"), None);
+        let terminal = env(true, Some("xterm-256color"));
         assert_eq!(Delivery::choose(true, &terminal), Delivery::Quiet);
     }
 
     #[test]
     fn a_terminal_on_stderr_gets_the_region() {
-        let terminal = env(true, Some("xterm-256color"), None);
+        let terminal = env(true, Some("xterm-256color"));
         assert_eq!(Delivery::choose(false, &terminal), Delivery::Live);
     }
 
     #[test]
     fn every_downgrade_names_what_was_missing() {
         for (env, reason) in [
-            (env(false, Some("xterm"), None), NOT_A_TERMINAL),
-            (env(true, Some("dumb"), None), DUMB_TERMINAL),
+            (env(false, Some("xterm")), NOT_A_TERMINAL),
+            (env(true, Some("dumb")), DUMB_TERMINAL),
         ] {
             assert_eq!(Delivery::choose(false, &env), Delivery::Lines { reason });
         }
     }
 
     #[test]
-    fn no_color_takes_the_color_away_and_leaves_the_region() {
-        for no_color in [Some("1"), Some("")] {
-            let terminal = env(true, Some("xterm"), no_color);
-            assert_eq!(Delivery::choose(false, &terminal), Delivery::Live);
-        }
+    fn the_delivery_reads_nothing_about_color() {
+        // `NO_COLOR` is the color policy's, never the delivery's: the
+        // region is plain text, and a terminal gets it.
+        let terminal = env(true, Some("xterm"));
+        assert_eq!(Delivery::choose(false, &terminal), Delivery::Live);
     }
 }

@@ -179,6 +179,10 @@ work held to its plan, PR).
 | `yunta mcp` | Runs the MCP control plane over stdio: `document_shape`, `list_workflows`, `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`, `answer_questions`. |
 | `yunta gc [--dry-run]` | Removes orphaned run and worktree directories, respecting `storage.retention_days`. |
 
+Every command takes `--color auto|always|never`. `auto` colors a stream that is a
+terminal, unless `NO_COLOR` is set or `CLICOLOR=0`; `CLICOLOR_FORCE` colors a pipe
+too. Color only repeats what the words say, so nothing is lost without it.
+
 Every command's own `--help` is the source of truth for flags; this table is for
 finding the right one.
 

@@ -221,3 +221,4 @@ lista.
 **D212 — A run records the repository it was created in.** `accepted` → [`adr/D212-a-run-records-the-repository-it-was-created-in.md`](adr/D212-a-run-records-the-repository-it-was-created-in.md)
 **D213 — A person closes a run nobody will continue.** `accepted` → [`adr/D213-a-person-closes-a-run-nobody-will-continue.md`](adr/D213-a-person-closes-a-run-nobody-will-continue.md)
 **D214 — One vocabulary, one mark per meaning, and exit codes that say which word.** `accepted` → [`adr/D214-one-vocabulary-and-exit-codes-that-say-which-word.md`](adr/D214-one-vocabulary-and-exit-codes-that-say-which-word.md)
+**D215 — Output is built from tones and inked once per stream.** `accepted` → [`adr/D215-output-is-built-from-tones-and-inked-once-per-stream.md`](adr/D215-output-is-built-from-tones-and-inked-once-per-stream.md)

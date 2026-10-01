@@ -17,6 +17,11 @@ use crate::graph;
 pub struct Cli {
     #[command(subcommand)]
     command: Command,
+    /// When to color what is printed: on a terminal that draws it
+    /// (`auto`, honoring `NO_COLOR`, `CLICOLOR` and `CLICOLOR_FORCE`),
+    /// `always`, or `never`.
+    #[arg(long, global = true, value_enum, default_value_t)]
+    pub(crate) color: crate::render::ink::ColorWhen,
 }
 
 impl Cli {

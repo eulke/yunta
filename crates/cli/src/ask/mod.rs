@@ -198,11 +198,12 @@ impl Console {
         let term = Term::stderr();
         if !term.is_term() {
             diagnostics
-                .raise(
-                    "warning: nothing was asked here: a prompt draws on stderr, and this \
-                     run's is redirected — the run parks with its state intact; run it \
-                     again with stderr on a terminal to be asked",
-                )
+                .raise(format!(
+                    "{}: nothing was asked here: a prompt draws on stderr, and this run's is \
+                     redirected — the run parks with its state intact; run it again with \
+                     stderr on a terminal to be asked",
+                    crate::error::warning_word()
+                ))
                 .await;
             return None;
         }
@@ -355,9 +356,10 @@ async fn handed_mode(diagnostics: &Diagnostics) -> Option<Termios> {
         Err(e) => {
             diagnostics
                 .raise(format!(
-                    "warning: this terminal does not say what mode it is in ({e}) — a \
-                     prompt this run leaves mid-read leaves it as the read left it; run \
-                     `stty sane` to type into your shell again"
+                    "{}: this terminal does not say what mode it is in ({e}) — a prompt this \
+                     run leaves mid-read leaves it as the read left it; run `stty sane` to \
+                     type into your shell again",
+                    crate::error::warning_word()
                 ))
                 .await;
             None

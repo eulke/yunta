@@ -22,6 +22,7 @@ pub(crate) mod counter;
 pub(crate) mod escalation;
 mod findings;
 pub(crate) mod glyphs;
+pub(crate) mod ink;
 pub(crate) mod markdown;
 mod plan;
 pub(crate) mod shown;

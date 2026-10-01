@@ -17,6 +17,7 @@ use std::io::Write;
 
 use yunta_engine::Moment;
 
+use crate::render::ink::Ink;
 use crate::render::{format_duration, Glyphs};
 
 use super::{chronicle, write_line};
@@ -24,6 +25,8 @@ use super::{chronicle, write_line};
 /// One line per event, written as the event arrives.
 pub(super) struct Lines {
     out: Box<dyn Write + Send>,
+    /// How the stream this writes to is painted.
+    ink: Ink,
 }
 
 impl Lines {
@@ -34,7 +37,10 @@ impl Lines {
             &mut out,
             &format!("live view off ({reason}): one line per event"),
         );
-        Self { out }
+        Self {
+            out,
+            ink: Ink::stderr(),
+        }
     }
 
     /// Writes one diagnostic the run raised, as its own line.
@@ -56,7 +62,7 @@ impl Lines {
         let said = chronicle::say(moment);
         let mark = said
             .mark
-            .map(|mark| format!("{} ", glyphs.mark(mark)))
+            .map(|mark| format!("{} ", self.ink.mark(glyphs, mark)))
             .unwrap_or_default();
         write_line(
             &mut self.out,

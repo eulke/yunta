@@ -56,6 +56,7 @@ pub const COUNTERS: &[Counter] = &[
         count_session_request_literal_outside_plan,
     ),
     ("reason_built_by_format", count_reason_built_by_format),
+    ("sgr_outside_ink", count_sgr_outside_ink),
     (
         "run_tool_named_outside_vocabulary",
         count_run_tool_named_outside_vocabulary,
@@ -108,6 +109,26 @@ fn outside(root: &Path, marks: &[Mark], owners: &[&str]) -> usize {
                 .count()
         })
         .sum()
+}
+
+/// Paint written outside the one place that paints.
+///
+/// Color only repeats what the words say, and the module that writes it
+/// is what proves a painted line reads the same once the color is gone.
+/// An escape written anywhere else is color nothing holds to that. The
+/// prompt's bracketed-paste switch is a terminal mode, not paint, and a
+/// test that types keys into a terminal sends what a keyboard sends.
+fn count_sgr_outside_ink(root: &Path) -> usize {
+    outside(
+        root,
+        &[Text("\\x1b[")],
+        &[
+            "crates/cli/src/render/ink.rs",
+            "crates/cli/src/ask/keys.rs",
+            "crates/cli/tests/",
+            "crates/testkit/src/terminal.rs",
+        ],
+    )
 }
 
 /// Whether `path` is one of the sites `owners` names.

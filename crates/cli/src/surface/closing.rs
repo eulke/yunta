@@ -27,6 +27,7 @@ use yunta_engine::{run_frame, NodeFrame, PriorEstimation, RunFrame, RunPhase};
 use crate::commands::status::decision::{self, Layout};
 use crate::commands::{advice, unknown_kinds_note};
 use crate::error::Outcome;
+use crate::render::ink::{Ink, Line, Tone};
 use crate::render::{format_duration, indent, truncate, Glyphs, Mark, INDENT, LABEL_WIDTH};
 use yunta_core::text::counted;
 
@@ -100,12 +101,17 @@ impl Closing {
     /// The whole block, ready to print.
     pub(crate) fn render(&self, glyphs: Glyphs) -> String {
         let verdict = self.verdict();
-        let mut out = format!(
-            "run {}: {} {}\n",
-            self.run_id,
-            glyphs.mark(verdict.mark),
-            verdict.text
-        );
+        let headline = Line::new()
+            .plain("run ")
+            .push(Tone::Strong, self.run_id.to_string())
+            .plain(": ")
+            .push(
+                Tone::of(verdict.mark),
+                glyphs.mark(verdict.mark).to_string(),
+            )
+            .plain(" ")
+            .plain(verdict.text);
+        let mut out = format!("{}\n", Ink::stdout().paint(&headline));
         if let Some((node, escalation)) = &self.decision {
             out.push_str(&decision::block(
                 Layout::Trailer,

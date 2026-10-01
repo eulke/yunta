@@ -46,6 +46,7 @@ fn main() -> ExitCode {
         .init();
 
     let cli = cli::Cli::parse();
+    render::ink::settle(color_policy(cli.color));
     tracing::debug!("yunta starting");
 
     let outcome = drive(cli);
@@ -60,9 +61,23 @@ fn main() -> ExitCode {
         Ok(Outcome::Reported) => ExitCode::FAILURE,
         Ok(Outcome::Code(code)) => ExitCode::from(code),
         Err(error) => {
-            eprintln!("error: {error}");
+            let said = render::ink::Ink::stderr().word(render::ink::Tone::Failed, "error");
+            eprintln!("{said}: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// What decides whether a stream gets color: the command line, and the
+/// variables the convention reads, read here once for the whole process.
+fn color_policy(when: render::ink::ColorWhen) -> render::ink::ColorPolicy {
+    let set = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
+    render::ink::ColorPolicy {
+        when,
+        no_color: set("NO_COLOR").is_some(),
+        force: set("CLICOLOR_FORCE").is_some_and(|value| value != "0"),
+        off: set("CLICOLOR").is_some_and(|value| value == "0"),
+        dumb: set("TERM").is_some_and(|value| value == "dumb"),
     }
 }
 
