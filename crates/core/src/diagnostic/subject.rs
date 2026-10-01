@@ -9,7 +9,9 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use super::DocumentKind;
 use crate::ids::TaskId;
+use crate::yaml::Pointer;
 use crate::{FindingId, NodeId, QuestionId};
 
 /// One entry of a document: by name when its id parsed, by position
@@ -93,6 +95,35 @@ fn ordinal_suffix(n: usize) -> &'static str {
         (_, 2) => "nd",
         (_, 3) => "rd",
         _ => "th",
+    }
+}
+
+impl Subject {
+    /// Where this entry is written in a document of `kind`, from its
+    /// root: a task, a criterion, a finding, a question or its answer, a
+    /// spec, or a workflow node by its id when the id was read.
+    pub fn pointer(&self, kind: DocumentKind) -> Pointer {
+        let root = Pointer::root();
+        match self {
+            Subject::Document => root,
+            Subject::Task(task) => root.key("tasks").index(task.index),
+            Subject::Criterion { task, index } => root
+                .key("tasks")
+                .index(task.index)
+                .key("criteria")
+                .index(*index),
+            Subject::Finding(finding) => root.key("findings").index(finding.index),
+            Subject::Question(question) => match kind {
+                DocumentKind::Artifact(crate::ArtifactKind::Answers) => root.key("answers"),
+                _ => root.key("questions"),
+            }
+            .index(question.index),
+            Subject::Spec(spec) => root.key("specs").index(spec.index),
+            Subject::Node(node) => match &node.id {
+                Some(id) => root.key("nodes").node(id.as_str()),
+                None => root.key("nodes").index(node.index),
+            },
+        }
     }
 }
 

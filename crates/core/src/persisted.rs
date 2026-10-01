@@ -169,6 +169,7 @@ impl<T: Persisted> PersistedDoc<T> {
             Self::unreadable(crate::yaml::YamlError::Parse {
                 path: String::new(),
                 message: error.to_string(),
+                at: None,
             })
         })?;
         Ok(PersistedDoc {

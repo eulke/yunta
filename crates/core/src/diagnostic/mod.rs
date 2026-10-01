@@ -27,6 +27,7 @@ pub use artifact::{ArtifactCode, ArtifactFailure, FileCode, FileProblem};
 pub use problem::{DiagnosticCode, ParseCode, Problem, Rule, RuleCode};
 pub use subject::{Named, Subject};
 
+use crate::yaml::{Location, Pointer, SourceMap};
 use crate::ArtifactKind;
 
 /// Which document a report is about: the kind that fixes its shape, and
@@ -118,11 +119,37 @@ pub struct Diagnostic {
     pub subject: Subject,
     #[serde(flatten)]
     pub problem: Problem,
+    /// Where in the document's text the problem is, when whoever read
+    /// the document read it from text: where the parser stopped, or
+    /// where the entry the subject names is written. A document handed
+    /// over as a structured value has no text, and no place in it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Location>,
 }
 
 impl Diagnostic {
     pub fn new(subject: Subject, problem: Problem) -> Self {
-        Diagnostic { subject, problem }
+        Diagnostic {
+            subject,
+            problem,
+            at: None,
+        }
+    }
+
+    /// This diagnostic, placed at `at` in its document's text.
+    pub fn at(mut self, at: Option<Location>) -> Self {
+        self.at = at;
+        self
+    }
+
+    /// Where in a document of `kind` the problem is, from its root: the
+    /// entry the subject names, and inside it the value a parser refused.
+    pub fn pointer(&self, kind: DocumentKind) -> Pointer {
+        let entry = self.subject.pointer(kind);
+        match &self.problem {
+            Problem::Parse { path, .. } => entry.join(Pointer::parse_path(path)),
+            Problem::Rule { .. } => entry,
+        }
     }
 
     /// The stable name of this kind of problem: what a receipt counts
@@ -143,6 +170,15 @@ impl fmt::Display for Diagnostic {
                 write!(f, "the document {rendered}")
             }
             subject => write!(f, "{subject}: {rendered}"),
+        }?;
+        // A document that did not parse says where the parser stopped,
+        // as the parser always has; where a broken rule is written is
+        // the surface's to show beside it.
+        match (&self.problem, &self.at) {
+            (Problem::Parse { .. }, Some(at)) => {
+                write!(f, " at line {} column {}", at.line, at.col)
+            }
+            _ => Ok(()),
         }
     }
 }
@@ -168,6 +204,26 @@ impl Report {
 
     pub fn is_empty(&self) -> bool {
         self.diagnostics.is_empty()
+    }
+
+    /// This report with every problem placed in `text`, the document it
+    /// is about, that was not placed already.
+    pub fn located(mut self, text: &str) -> Self {
+        if self
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.at.is_some())
+        {
+            return self;
+        }
+        let map = SourceMap::read(text);
+        let kind = self.document.kind;
+        for diagnostic in &mut self.diagnostics {
+            if diagnostic.at.is_none() {
+                diagnostic.at = map.locate_key(&diagnostic.pointer(kind));
+            }
+        }
+        self
     }
 }
 

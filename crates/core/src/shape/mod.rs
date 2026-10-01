@@ -102,12 +102,14 @@ pub fn read<T: Document>(bytes: &[u8], path: impl Into<String>) -> Result<T, Rep
             if broken.is_empty() {
                 Ok(parsed)
             } else {
-                Err(Report::new(document, broken))
+                Err(Report::new(document, broken).located(text))
             }
         }
-        Err(crate::yaml::YamlError::Parse { path, message }) => {
-            Err(one(Problem::parse(path, message)))
-        }
+        Err(crate::yaml::YamlError::Parse { path, message, at }) => Err(Report::new(
+            document.clone(),
+            vec![Diagnostic::new(Subject::Document, Problem::parse(path, message)).at(at)],
+        )
+        .located(text)),
         Err(other) => Err(one(Problem::parse("", other.to_string()))),
     }
 }

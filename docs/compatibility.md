@@ -411,7 +411,10 @@ what is wrong with the artifact itself — `artifact-missing`, `artifact-empty`,
 `artifact-unheld` — and is absent for a content failure, whose problems each carry
 a code of their own. A content failure carries `kind`, the artifact kind whose
 shape the content was read against, and `diagnostics`, every problem that document
-has in document order. A file-level failure carries `file` instead, naming what
+has in document order. A problem read from the file's text carries `at`
+(`{line, col, len}`, counted from one, `len` in characters): where the parser
+stopped, or where the entry the problem names is written. A document a session
+handed over as a value has no text, and its problems carry no `at`. A file-level failure carries `file` instead, naming what
 went wrong with the file itself: never written, empty, past
 `limits.max_artifact_bytes`, or refused by the filesystem. A document a node ended
 owing carries `producer`, the node that owes it, and `artifact`, the identity it

@@ -143,7 +143,7 @@ lista.
 **D134 — Un archivo que falta y un archivo mal escrito son dos fallas, no una.** `revised` *(Revisada por D157.)* → [`adr/D134-un-archivo-que-falta-y-un-archivo-mal-escrito.md`](adr/D134-un-archivo-que-falta-y-un-archivo-mal-escrito.md)
 **D135 — Códigos de regla tipados, contados por el par `(kind, código)`.** `accepted` → [`adr/D135-codigos-de-regla-tipados-contados-por-el-par.md`](adr/D135-codigos-de-regla-tipados-contados-por-el-par.md)
 **D136 — Las reglas viven con el tipo del que hablan, y leer un documento las corre.** `accepted` → [`adr/D136-las-reglas-viven-con-el-tipo-del-que-hablan.md`](adr/D136-las-reglas-viven-con-el-tipo-del-que-hablan.md)
-**D137 — El diagnóstico no lleva posición: el sujeto es la ubicación.** `accepted` → [`adr/D137-el-diagnostico-no-lleva-posicion-el-sujeto.md`](adr/D137-el-diagnostico-no-lleva-posicion-el-sujeto.md)
+**D137 — El diagnóstico no lleva posición: el sujeto es la ubicación.** `revised` *(Revisada por D219.)* → [`adr/D137-el-diagnostico-no-lleva-posicion-el-sujeto.md`](adr/D137-el-diagnostico-no-lleva-posicion-el-sujeto.md)
 **D138 — El ciclo de reparación es de la frontera; lo tiene todo nodo que resuelve un runner.** `retired` *(Retirada por D156.)* → [`adr/D138-el-ciclo-de-reparacion-es-de-la-frontera.md`](adr/D138-el-ciclo-de-reparacion-es-de-la-frontera.md)
 **D139 — Los JSON Schema viven en `crates/core/schemas/` y el binario los sirve embebidos.** `accepted` → [`adr/D139-los-json-schema-viven-en-crates-core-schemas.md`](adr/D139-los-json-schema-viven-en-crates-core-schemas.md)
 **D140 — Lo que un diagnóstico enumera está atado por un test a lo que el parser acepta.** `revised` *(Revisada por D156.)* → [`adr/D140-lo-que-un-diagnostico-enumera-esta-atado.md`](adr/D140-lo-que-un-diagnostico-enumera-esta-atado.md)
@@ -225,3 +225,4 @@ lista.
 **D216 — A line is laid out to its stream's width, between a floor and a ceiling.** `accepted` → [`adr/D216-a-line-is-laid-out-to-its-streams-width.md`](adr/D216-a-line-is-laid-out-to-its-streams-width.md)
 **D217 — A run is called by the end of its id, and every command finds it by any unambiguous part.** `accepted` → [`adr/D217-a-run-is-called-by-the-end-of-its-id.md`](adr/D217-a-run-is-called-by-the-end-of-its-id.md)
 **D218 — YAML is read, written and located by one library.** `accepted` → [`adr/D218-yaml-is-read-and-written-by-one-library.md`](adr/D218-yaml-is-read-and-written-by-one-library.md)
+**D219 — A diagnostic says where in its text it is, beside the entry it names.** `accepted` → [`adr/D219-a-diagnostic-says-where-in-its-text-it-is.md`](adr/D219-a-diagnostic-says-where-in-its-text-it-is.md)

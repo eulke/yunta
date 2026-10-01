@@ -75,10 +75,10 @@ pub(super) fn nested<'de, D: Deserializer<'de>, T: DeserializeOwned>(
 
     yaml::from_value(value).map_err(|error| {
         D::Error::custom(match error {
-            YamlError::Parse { path, message } if path.is_empty() || path == "." => {
+            YamlError::Parse { path, message, .. } if path.is_empty() || path == "." => {
                 format!("{key}: {message}")
             }
-            YamlError::Parse { path, message } => format!("{key}.{path}: {message}"),
+            YamlError::Parse { path, message, .. } => format!("{key}.{path}: {message}"),
             other => other.to_string(),
         })
     })

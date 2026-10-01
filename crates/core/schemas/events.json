@@ -1265,6 +1265,19 @@
     "Diagnostic": {
       "description": "One thing that is wrong with a document.",
       "type": "object",
+      "properties": {
+        "at": {
+          "description": "Where in the document's text the problem is, when whoever read\nthe document read it from text: where the parser stopped, or\nwhere the entry the subject names is written. A document handed\nover as a structured value has no text, and no place in it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Location"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
       "allOf": [
         {
           "oneOf": [
@@ -2411,7 +2424,7 @@
           "$ref": "#/$defs/FindingId"
         },
         "location": {
-          "$ref": "#/$defs/Location"
+          "$ref": "#/$defs/Location2"
         },
         "proposed_criterion": {
           "anyOf": [
@@ -2825,6 +2838,32 @@
       ]
     },
     "Location": {
+      "description": "A place in a text: the line and column it starts at, both counted\nfrom one as an editor counts them, and how many characters it takes.",
+      "type": "object",
+      "properties": {
+        "col": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "len": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "line": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "line",
+        "col",
+        "len"
+      ]
+    },
+    "Location2": {
       "description": "where a finding is: a path relative to the work, with its lines when they are known (`src/lib.rs`, `src/lib.rs:10`, `src/lib.rs:10-14`), or one relative to the run's own directory under the `run:` prefix (`run:objects`). Never absolute",
       "type": "string",
       "minLength": 1

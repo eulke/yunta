@@ -71,17 +71,15 @@ pub const RULES: &[crate::diagnostic::Rule] = &[
 pub fn read(bytes: &str, path: &Path) -> Result<Workflow, Report> {
     let document = DocumentRef::new(DocumentKind::Workflow, path.display().to_string());
     let mut workflow: Workflow = crate::yaml::parse(bytes).map_err(|error| {
-        let (path, message) = match error {
-            crate::yaml::YamlError::Parse { path, message } => (path, message),
-            other => (String::new(), other.to_string()),
+        let (path, message, at) = match error {
+            crate::yaml::YamlError::Parse { path, message, at } => (path, message, at),
+            other => (String::new(), other.to_string(), None),
         };
         Report::new(
             document.clone(),
-            vec![Diagnostic::new(
-                Subject::Document,
-                Problem::parse(path, message),
-            )],
+            vec![Diagnostic::new(Subject::Document, Problem::parse(path, message)).at(at)],
         )
+        .located(bytes)
     })?;
     // This is the authored frontier. A persisted manifest reads the
     // same Node type after fan-out and legitimately contains `@`.
@@ -100,7 +98,7 @@ pub fn read(bytes: &str, path: &Path) -> Result<Workflow, Report> {
         })
         .collect();
     if !authored_ids.is_empty() {
-        return Err(Report::new(document, authored_ids));
+        return Err(Report::new(document, authored_ids).located(bytes));
     }
     // Fan-out declarations are about the shape as written, so they are
     // read before the expansion multiplies them; every rule after sees
@@ -112,7 +110,7 @@ pub fn read(bytes: &str, path: &Path) -> Result<Workflow, Report> {
     if broken.is_empty() {
         Ok(workflow)
     } else {
-        Err(Report::new(document, broken))
+        Err(Report::new(document, broken).located(bytes))
     }
 }
 

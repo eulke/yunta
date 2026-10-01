@@ -1,9 +1,9 @@
 ---
 number: D137
 title: "El diagnóstico no lleva posición: el sujeto es la ubicación"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D219]
 ---
 
 # D137 — El diagnóstico no lleva posición: el sujeto es la ubicación

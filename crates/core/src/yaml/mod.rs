@@ -22,9 +22,14 @@ pub use value::{Mapping, Number, Value};
 pub enum YamlError {
     /// The document does not parse into the expected type. `path`
     /// locates the offending value from the document's root; it is
-    /// empty when the root itself is the problem.
-    #[error("{}", locate(path, message))]
-    Parse { path: String, message: String },
+    /// empty when the root itself is the problem. `at` is where in the
+    /// text the parser stopped, when it was reading text.
+    #[error("{}", locate(path, message, at.as_ref()))]
+    Parse {
+        path: String,
+        message: String,
+        at: Option<Location>,
+    },
     #[error("not valid UTF-8: {source}")]
     Utf8 {
         #[source]
@@ -34,11 +39,15 @@ pub enum YamlError {
     Serialize { message: String },
 }
 
-fn locate(path: &str, message: &str) -> String {
+fn locate(path: &str, message: &str, at: Option<&Location>) -> String {
+    let said = match at {
+        Some(at) => format!("{message} at line {} column {}", at.line, at.col),
+        None => message.to_string(),
+    };
     if path.is_empty() || path == "." {
-        message.to_string()
+        said
     } else {
-        format!("`{path}`: {message}")
+        format!("`{path}`: {said}")
     }
 }
 
@@ -56,25 +65,25 @@ pub fn parse<T: DeserializeOwned>(text: &str) -> Result<T, YamlError> {
     .map_err(|error| YamlError::Parse {
         path,
         message: said(&error),
+        at: error.location().map(|at| Location {
+            line: at.line() as usize,
+            col: at.column() as usize,
+            len: at.span().len() as usize,
+        }),
     })
 }
 
 /// What a reader is told when a document does not read: the refusal in
-/// serde's own words, then where in the text it is.
+/// serde's own words. Where in the text it is travels beside it.
 fn said(error: &serde_saphyr::Error) -> String {
     use serde_saphyr::MessageFormatter;
-    let message: String = Said
-        .format_message(error)
+    Said.format_message(error)
         .chars()
         .flat_map(|c| match c.is_control() {
             true => c.escape_debug().collect::<Vec<_>>(),
             false => vec![c],
         })
-        .collect();
-    match error.location() {
-        Some(at) => format!("{message} at line {} column {}", at.line(), at.column()),
-        None => message,
-    }
+        .collect()
 }
 
 /// The refusals serde words for every format, in those words — the names
@@ -148,6 +157,7 @@ pub fn from_value<T: DeserializeOwned>(value: Value) -> Result<T, YamlError> {
     serde_path_to_error::deserialize(value).map_err(|error| YamlError::Parse {
         path: error.path().to_string(),
         message: error.into_inner().to_string(),
+        at: None,
     })
 }
 
