@@ -2,8 +2,11 @@
 //!
 //! A terminal draws no emphasis and no diagram, and re-flows nothing on
 //! its own: prose is wrapped here, under the indent of the block it sits
-//! in, while code keeps its spacing and is only cut where it is wider
-//! than the column — re-flowing code changes what it says.
+//! in, while code keeps its spacing — re-flowing code changes what it
+//! says. A line of code wider than the column breaks after a space and
+//! goes on one step under where it starts, the way a formatter continues
+//! a line, so what follows reads as the same line and not as one of its
+//! own.
 
 use crate::render::{cell_width, cut, wrap, INDENT};
 
@@ -23,8 +26,8 @@ pub(crate) fn hanging(indent: &str, lead: &str, text: &str, width: usize) -> Vec
 }
 
 /// `text` as a terminal shows it: paragraphs and list items wrapped to
-/// `width` under `indent`, code as written — cut where it is wider, never
-/// re-flowed — and each `mermaid` block named rather than drawn.
+/// `width` under `indent`, code as written — continued where it is wider,
+/// never re-flowed — and each `mermaid` block named rather than drawn.
 pub(crate) fn markdown(text: &str, indent: &str, width: usize) -> Vec<String> {
     let mut page = Page {
         indent,
@@ -99,13 +102,14 @@ impl Page<'_> {
         }
         let code = format!("{}{INDENT}", self.indent);
         let room = self.width.saturating_sub(cell_width(&code));
-        self.lines.extend(cut(line, room).into_iter().map(|piece| {
-            if piece.is_empty() {
-                String::new()
-            } else {
-                format!("{code}{piece}")
-            }
-        }));
+        self.lines
+            .extend(continued(line, room).into_iter().map(|piece| {
+                if piece.is_empty() {
+                    String::new()
+                } else {
+                    format!("{code}{piece}")
+                }
+            }));
     }
 
     /// The fence that opens a block, and what it is named as when it is
@@ -154,4 +158,84 @@ fn list_item(line: &str) -> Option<(&str, &str)> {
         return Some(("", line));
     }
     None
+}
+
+/// How far a line of code that goes on is set under where it starts.
+const HANG: &str = "    ";
+
+/// `line` of code in pieces that each fit `width`: broken after the last
+/// space that fits, and between characters only where no space does —
+/// each piece after the first set [`HANG`] under the line's own indent.
+fn continued(line: &str, width: usize) -> Vec<String> {
+    if cell_width(line) <= width {
+        return vec![line.to_string()];
+    }
+    let lead = &line[..line.len() - line.trim_start().len()];
+    let under = format!("{lead}{HANG}");
+    let mut pieces = Vec::new();
+    let mut rest = line.trim_end();
+    let mut prefix = "";
+    loop {
+        let room = width.saturating_sub(cell_width(prefix)).max(1);
+        if cell_width(rest) <= room {
+            pieces.push(format!("{prefix}{rest}"));
+            return pieces;
+        }
+        let (piece, after) = split_within(rest, room);
+        pieces.push(format!("{prefix}{piece}"));
+        rest = after;
+        prefix = &under;
+    }
+}
+
+/// The longest head of `text` that fits `room` and ends before a space,
+/// and what follows that space; with no such space, the head cut between
+/// characters.
+fn split_within(text: &str, room: usize) -> (&str, &str) {
+    let body_starts = text.len() - text.trim_start().len();
+    let fits = text
+        .char_indices()
+        .filter(|(at, ch)| *at > body_starts && *ch == ' ')
+        .map(|(at, _)| at)
+        .take_while(|at| cell_width(text[..*at].trim_end()) <= room)
+        .last();
+    match fits {
+        Some(at) => (text[..at].trim_end(), text[at..].trim_start()),
+        None => {
+            let head = cut(text, room).into_iter().next().unwrap_or_default();
+            let at = head.len().min(text.len());
+            (&text[..at], &text[at..])
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_line_of_code_wider_than_the_column_goes_on_under_itself_after_a_space() {
+        let drawn = markdown(
+            "```rust\n    now.signed_duration_since(created_at) <= chrono::Duration::from_std(window)\n```",
+            "",
+            48,
+        );
+        assert_eq!(
+            drawn,
+            [
+                "      now.signed_duration_since(created_at) <=",
+                "          chrono::Duration::from_std(window)",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_token_no_space_lets_fit_is_cut_and_still_hangs_under_its_line() {
+        let drawn = markdown("```\nabcdefghijklmnopqrstuvwxyz\n```", "", 12);
+        assert_eq!(
+            drawn,
+            ["  abcdefghij", "      klmnop", "      qrstuv", "      wxyz"]
+        );
+        assert!(drawn.iter().all(|line| cell_width(line) <= 12));
+    }
 }

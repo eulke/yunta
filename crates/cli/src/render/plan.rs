@@ -91,7 +91,12 @@ fn designed(file: &TasksFile, width: usize) -> Vec<String> {
     if let Some(design) = said(&file.design) {
         lines.extend(markdown(design, BODY, width));
     }
-    for shape in &file.shapes {
+    for (at, shape) in file.shapes.iter().enumerate() {
+        // Each shape stands apart from the prose above it and from the
+        // shape before it: its heading says whose it is and where.
+        if at > 0 || said(&file.design).is_some() {
+            lines.push(String::new());
+        }
         let built = format!(
             "{} — built by {}, in {}",
             shape.name, shape.owner, shape.file
