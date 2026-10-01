@@ -8,7 +8,7 @@ use yunta_core::events::{
     ArtifactId, Escalation, EscalationError, EventPayload, Fact, GateEvent, GateResolvedPayload,
     HumanChoice, NodeEvent, PauseReason, Shown, TokenUsage,
 };
-use yunta_core::{ArtifactContextRef, Node, NodeId, NodeKind, NonEmpty, OptionId, Workflow};
+use yunta_core::{ArtifactContextRef, Node, NodeId, NodeKind, NonEmpty, OptionId, Seq, Workflow};
 
 use super::gate_exec::{emit_started, GateStep};
 use super::node_close::{fail, finish_node};
@@ -94,7 +94,13 @@ impl<'a> InternalGate<'a> {
                         .iter_nodes()
                         .find(|candidate| candidate.id == *target)
                 });
-                offers::declared(id, target)
+                let mut option = offers::declared(id, target);
+                if target.is_none() && self.shows_the_run_findings() {
+                    option.tradeoff = "resolves this gate and settles every finding it shows; \
+                                       the flow continues"
+                        .to_string();
+                }
+                option
             })
             .collect();
         if !declared.iter().any(aborts) {
@@ -152,6 +158,16 @@ impl<'a> InternalGate<'a> {
     }
 }
 
+/// Where on the log the gate's last decision sits.
+async fn decided_at(ctx: &RunCtx<'_>, node: &Node) -> Result<Option<Seq>, RunError> {
+    let state = ctx.run_view().await?.state;
+    Ok(state
+        .gates
+        .get(&node.id)
+        .and_then(|gate| gate.resolved.last())
+        .map(|(_, at)| *at))
+}
+
 /// Whether choosing `option` pauses the run.
 fn aborts(option: &OptionId) -> bool {
     ReservedOption::of(option) == Some(ReservedOption::Abort)
@@ -204,6 +220,7 @@ pub(super) async fn resolve(ctx: &RunCtx<'_>, node: &Node) -> Result<GateStep, R
     if !aborted {
         emit_started(ctx, node).await?;
     }
+    let shown = escalation.shows().to_vec();
     if !already_recorded {
         record(ctx, node, escalation, &choice).await?;
     }
@@ -216,7 +233,7 @@ pub(super) async fn resolve(ctx: &RunCtx<'_>, node: &Node) -> Result<GateStep, R
             free_text: choice.free_text,
         }));
     }
-    land(ctx, &gate, choice).await?;
+    land(ctx, &gate, choice, &shown).await?;
     Ok(GateStep::Resolved)
 }
 
@@ -248,10 +265,16 @@ async fn land(
     ctx: &RunCtx<'_>,
     gate: &InternalGate<'_>,
     choice: HumanChoice,
+    shown: &[Shown],
 ) -> Result<(), RunError> {
     let node = gate.node;
     let chosen = choice.option;
     let Some(target) = gate.on.get(&chosen) else {
+        // Going on past what it showed settles the run's findings it
+        // showed: a person read each, with its answers, and went on.
+        if let Some(decided) = decided_at(ctx, node).await? {
+            super::gate_findings::settle(ctx, node, shown, decided).await?;
+        }
         finish_node(ctx, node, chosen.to_string(), TokenUsage::default()).await?;
         return Ok(());
     };

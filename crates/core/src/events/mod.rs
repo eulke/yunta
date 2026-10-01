@@ -413,6 +413,7 @@ wire_kinds! {
     FindingRefused => "finding_refused",
     FindingAnswered => "finding_answered",
     FindingProved => "finding_proved",
+    FindingSettled => "finding_settled",
     ArtifactSubmitted => "artifact_submitted",
     ArtifactAccepted => "artifact_accepted",
     PromotionSignaled => "promotion_signaled",

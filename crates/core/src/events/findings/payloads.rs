@@ -96,6 +96,20 @@ pub struct FindingProvedPayload {
     pub result: crate::events::CriterionResult,
 }
 
+/// A person went on past a gate that showed them a finding, which
+/// settles it: it stands, and no longer counts against the run. The gate
+/// is the envelope's own `node_id`; `caused_by` is the decision that
+/// settled it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FindingSettledPayload {
+    /// The node that reported the finding; absent for one the engine
+    /// reported about the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<NodeId>,
+    pub id: FindingId,
+    pub caused_by: crate::ids::Seq,
+}
+
 /// What an answer says of a finding: fixed by the answering node's work,
 /// or declined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

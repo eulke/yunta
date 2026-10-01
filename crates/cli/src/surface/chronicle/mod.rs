@@ -76,6 +76,7 @@ pub(super) fn kept(happening: &Happening) -> bool {
                 | findings::happening::Change::Withdrawn { .. }
                 | findings::happening::Change::Answered { .. }
                 | findings::happening::Change::Proved { .. }
+                | findings::happening::Change::Settled { .. }
         ),
         Happening::Children(children::happening::Happening::Closed { .. }) => true,
         Happening::Children(_) => false,

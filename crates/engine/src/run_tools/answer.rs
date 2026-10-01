@@ -101,5 +101,8 @@ fn answerable(ledger: &FindingLedger, node: &NodeId, id: &FindingId) -> Result<(
 fn settled_by(settled: &yunta_core::events::findings::Settled) -> String {
     match settled {
         yunta_core::events::findings::Settled::Proof { cmd } => format!("`{cmd}` passed"),
+        yunta_core::events::findings::Settled::Person { gate } => {
+            format!("a person went on past gate `{gate}`, which showed it")
+        }
     }
 }

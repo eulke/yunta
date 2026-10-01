@@ -40,6 +40,10 @@ pub enum Change {
         cmd: String,
         passed: bool,
     },
+    /// A person went on past a gate that showed it.
+    Settled {
+        of: Option<NodeId>,
+    },
 }
 
 impl Happening {
@@ -98,6 +102,9 @@ impl From<&FindingEvent> for Happening {
                     passed: p.result.exit_code == 0,
                 },
             ),
+            FindingEvent::Settled(p) => {
+                Happening::about(Some(&p.id), Change::Settled { of: p.node.clone() })
+            }
         }
     }
 }

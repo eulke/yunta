@@ -7,8 +7,9 @@
 //! from the log alone, so a process that never asked the question — a
 //! `resolve_gate` from the control plane — rebuilds the identical one.
 
-use yunta_core::events::{ArtifactId, Shown};
-use yunta_core::{ArtifactContextRef, ArtifactKind, ContentHash};
+use yunta_core::events::findings::RunFindings;
+use yunta_core::events::{ArtifactId, EventPayload, FindingEvent, FindingSettledPayload, Shown};
+use yunta_core::{ArtifactContextRef, ArtifactKind, ContentHash, Node, Seq};
 
 use super::{RunCtx, RunError};
 use crate::replay::RunState;
@@ -72,4 +73,46 @@ pub(crate) async fn keep(ctx: &RunCtx<'_>, state: &RunState) -> Result<(), RunEr
     tokio::fs::write(&path, &bytes)
         .await
         .map_err(|source| io("written", source))
+}
+
+/// Settles every finding `shown` put before the person who went on past
+/// `gate` with the decision at `caused_by`: exactly the findings the view
+/// they were shown named, read back by its hash, and still standing and
+/// unsettled now.
+pub(crate) async fn settle(
+    ctx: &RunCtx<'_>,
+    gate: &Node,
+    shown: &[Shown],
+    caused_by: Seq,
+) -> Result<(), RunError> {
+    let Some(view) = shown.iter().find(|shown| shows_view(shown)) else {
+        return Ok(());
+    };
+    let bytes = crate::artifacts::store::ObjectStore::at(ctx.run_dir)
+        .get(&view.content_hash)
+        .await
+        .map_err(crate::artifacts::HeldError::from)?;
+    let Ok(seen) = yunta_core::yaml::parse_bytes::<RunFindings>(&bytes) else {
+        return Ok(());
+    };
+    let ledger = yunta_core::events::findings::FindingLedger::of(&ctx.load_events().await?);
+    let unsettled = ledger.unsettled();
+    for standing in seen.findings {
+        let still = unsettled
+            .iter()
+            .any(|posted| posted.node == standing.node && posted.finding.id == standing.finding.id);
+        if !still {
+            continue;
+        }
+        ctx.emit(
+            Some(&gate.id),
+            EventPayload::Findings(FindingEvent::Settled(FindingSettledPayload {
+                node: standing.node,
+                id: standing.finding.id,
+                caused_by,
+            })),
+        )
+        .await?;
+    }
+    Ok(())
 }

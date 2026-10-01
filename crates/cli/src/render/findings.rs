@@ -4,7 +4,7 @@
 //! and when. The run's findings read the same way, each with the node
 //! that found it and what other nodes answered.
 
-use yunta_core::events::findings::{RunFindings, StandingFinding};
+use yunta_core::events::findings::{RunFindings, Settled, StandingFinding};
 use yunta_core::events::FindingSeverity;
 use yunta_core::{FindingEntry, FindingsFile};
 
@@ -92,12 +92,16 @@ fn standing_lines(standing: &StandingFinding, width: usize) -> Vec<String> {
         ));
     }
     if let Some(proof) = &standing.proof {
-        let verdict = match standing.settled.is_some() {
-            true => "settled — ",
-            false => "not proved — ",
+        let verdict = match standing.settled {
+            Some(Settled::Proof { .. }) => "settled — ",
+            _ => "not proved — ",
         };
         let said = format!("`{}` exits {}", proof.cmd, proof.exit_code);
         lines.extend(hanging(BODY, verdict, &said, width));
+    }
+    if let Some(Settled::Person { gate }) = &standing.settled {
+        let said = format!("a person went on past `{gate}`");
+        lines.extend(hanging(BODY, "settled — ", &said, width));
     }
     lines
 }

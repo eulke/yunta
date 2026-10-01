@@ -307,6 +307,11 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 tail: Vec::new(),
             },
         })),
+        EventPayload::Findings(FindingEvent::Settled(FindingSettledPayload {
+            node: Some("only".into()),
+            id: "f-1".into(),
+            caused_by: 7.into(),
+        })),
         EventPayload::Artifacts(ArtifactEvent::Submitted(ArtifactSubmittedPayload {
             name: "plan.yaml".to_string(),
             artifact_kind: yunta_core::ArtifactKind::Tasks,

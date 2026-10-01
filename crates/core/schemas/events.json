@@ -1887,6 +1887,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "finding_settled"
+            }
+          },
+          "$ref": "#/$defs/FindingSettledPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "artifact_submitted"
             }
           },
@@ -2434,6 +2447,33 @@
       "required": [
         "operation",
         "report"
+      ]
+    },
+    "FindingSettledPayload": {
+      "description": "A person went on past a gate that showed them a finding, which\nsettles it: it stands, and no longer counts against the run. The gate\nis the envelope's own `node_id`; `caused_by` is the decision that\nsettled it.",
+      "type": "object",
+      "properties": {
+        "caused_by": {
+          "$ref": "#/$defs/Seq"
+        },
+        "id": {
+          "$ref": "#/$defs/FindingId"
+        },
+        "node": {
+          "description": "The node that reported the finding; absent for one the engine\nreported about the run.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "caused_by"
       ]
     },
     "FindingSeverity": {

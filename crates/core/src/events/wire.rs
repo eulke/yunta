@@ -74,6 +74,7 @@ pub(crate) enum EventPayloadWire {
     FindingRefused(FindingRefusedPayload),
     FindingAnswered(FindingAnsweredPayload),
     FindingProved(FindingProvedPayload),
+    FindingSettled(FindingSettledPayload),
     ArtifactSubmitted(ArtifactSubmittedPayload),
     ArtifactAccepted(ArtifactAcceptedPayload),
     PromotionSignaled(PromotionSignaledPayload),
@@ -88,114 +89,78 @@ pub(crate) enum EventPayloadWire {
     RunFinished(RunFinishedPayload),
 }
 
-impl From<EventPayloadWire> for EventPayload {
-    fn from(wire: EventPayloadWire) -> Self {
-        use EventPayloadWire as W;
-        match wire {
-            W::RunCreated(p) => Self::Run(RunEvent::Created(p)),
-            W::RunnerResolved(p) => Self::Node(NodeEvent::RunnerResolved(p)),
-            W::BaselineCaptured(p) => Self::Run(RunEvent::BaselineCaptured(p)),
-            W::NodeStarted(p) => Self::Node(NodeEvent::Started(p)),
-            W::AgentSessionOpened(p) => Self::Session(SessionEvent::Opened(p)),
-            W::AgentMessage(p) => Self::Session(SessionEvent::Message(p)),
-            W::ArtifactWritten(p) => Self::Artifacts(ArtifactEvent::Written(p)),
-            W::ContextAssembled(p) => Self::Node(NodeEvent::ContextAssembled(p)),
-            W::TaskRegistered(p) => Self::Tasks(TaskEvent::Registered(p)),
-            W::CriteriaChecked(p) => Self::Node(NodeEvent::CriteriaChecked(p)),
-            W::TaskStatusChanged(p) => Self::Tasks(TaskEvent::StatusChanged(p)),
-            W::TaskCheckStarted(p) => Self::Tasks(TaskEvent::CheckStarted(p)),
-            W::TaskCheckAnswered(p) => Self::Tasks(TaskEvent::CheckAnswered(p)),
-            W::DeviationDeclared(p) => Self::Tasks(TaskEvent::DeviationDeclared(p)),
-            W::DeviationResolved(p) => Self::Tasks(TaskEvent::DeviationResolved(p)),
-            W::ScopeChecked(p) => Self::Node(NodeEvent::ScopeChecked(p)),
-            W::ScopeExpansionRequested(p) => Self::Scope(ScopeEvent::Requested(p)),
-            W::ScopeExpansionGranted(p) => Self::Scope(ScopeEvent::Granted(p)),
-            W::ScopeExpansionDenied(p) => Self::Scope(ScopeEvent::Denied(p)),
-            W::NodeFinished(p) => Self::Node(NodeEvent::Finished(p)),
-            W::NodeFailed(p) => Self::Node(NodeEvent::Failed(p)),
-            W::HookExecuted(p) => Self::Node(NodeEvent::HookExecuted(p)),
-            W::NodeRerouted(p) => Self::Node(NodeEvent::Rerouted(p)),
-            W::PullRequestOpened(p) => Self::Node(NodeEvent::PullRequestOpened(p)),
-            W::GateWaiting(p) => Self::Gates(GateEvent::Waiting(p)),
-            W::GateResolved(p) => Self::Gates(GateEvent::Resolved(p)),
-            W::QuestionsAsked(p) => Self::Gates(GateEvent::QuestionsAsked(p)),
-            W::QuestionsAnswered(p) => Self::Gates(GateEvent::QuestionsAnswered(p)),
-            W::LoopIteration(p) => Self::Children(ChildEvent::LoopIteration(p)),
-            W::FindingPosted(p) => Self::Findings(FindingEvent::Posted(p)),
-            W::FindingUpdated(p) => Self::Findings(FindingEvent::Updated(p)),
-            W::FindingWithdrawn(p) => Self::Findings(FindingEvent::Withdrawn(p)),
-            W::FindingRefused(p) => Self::Findings(FindingEvent::Refused(p)),
-            W::FindingAnswered(p) => Self::Findings(FindingEvent::Answered(p)),
-            W::FindingProved(p) => Self::Findings(FindingEvent::Proved(p)),
-            W::ArtifactSubmitted(p) => Self::Artifacts(ArtifactEvent::Submitted(p)),
-            W::ArtifactAccepted(p) => Self::Artifacts(ArtifactEvent::Accepted(p)),
-            W::PromotionSignaled(p) => Self::Run(RunEvent::PromotionSignaled(p)),
-            W::ChildRunCreated(p) => Self::Children(ChildEvent::Created(p)),
-            W::ChildRunFinished(p) => Self::Children(ChildEvent::Finished(p)),
-            W::CapabilityDegraded(p) => Self::Session(SessionEvent::CapabilityDegraded(p)),
-            W::WriteRefused(p) => Self::Session(SessionEvent::WriteRefused(p)),
-            W::RunToolFailed(p) => Self::Session(SessionEvent::RunToolFailed(p)),
-            W::HostSuspended(p) => Self::Run(RunEvent::HostSuspended(p)),
-            W::RunPaused(p) => Self::Run(RunEvent::Paused(p)),
-            W::RunResumed(p) => Self::Run(RunEvent::Resumed(p)),
-            W::RunFinished(p) => Self::Run(RunEvent::Finished(p)),
+/// Writes both directions between the two shapes from one table — each
+/// wire variant beside the domain arm and variant it is — so they cannot
+/// disagree, and a kind is added in one line.
+macro_rules! wire_table {
+    ($($wire:ident => $domain:ident($event:ident::$variant:ident),)*) => {
+        impl From<EventPayloadWire> for EventPayload {
+            fn from(wire: EventPayloadWire) -> Self {
+                match wire {
+                    $(EventPayloadWire::$wire(p) => Self::$domain($event::$variant(p)),)*
+                }
+            }
         }
-    }
+
+        impl From<EventPayload> for EventPayloadWire {
+            fn from(payload: EventPayload) -> Self {
+                match payload {
+                    $(EventPayload::$domain($event::$variant(p)) => Self::$wire(p),)*
+                }
+            }
+        }
+    };
 }
 
-impl From<EventPayload> for EventPayloadWire {
-    fn from(payload: EventPayload) -> Self {
-        use EventPayloadWire as W;
-        match payload {
-            EventPayload::Run(RunEvent::Created(p)) => W::RunCreated(p),
-            EventPayload::Node(NodeEvent::RunnerResolved(p)) => W::RunnerResolved(p),
-            EventPayload::Run(RunEvent::BaselineCaptured(p)) => W::BaselineCaptured(p),
-            EventPayload::Node(NodeEvent::Started(p)) => W::NodeStarted(p),
-            EventPayload::Session(SessionEvent::Opened(p)) => W::AgentSessionOpened(p),
-            EventPayload::Session(SessionEvent::Message(p)) => W::AgentMessage(p),
-            EventPayload::Artifacts(ArtifactEvent::Written(p)) => W::ArtifactWritten(p),
-            EventPayload::Node(NodeEvent::ContextAssembled(p)) => W::ContextAssembled(p),
-            EventPayload::Tasks(TaskEvent::Registered(p)) => W::TaskRegistered(p),
-            EventPayload::Node(NodeEvent::CriteriaChecked(p)) => W::CriteriaChecked(p),
-            EventPayload::Tasks(TaskEvent::StatusChanged(p)) => W::TaskStatusChanged(p),
-            EventPayload::Tasks(TaskEvent::CheckStarted(p)) => W::TaskCheckStarted(p),
-            EventPayload::Tasks(TaskEvent::CheckAnswered(p)) => W::TaskCheckAnswered(p),
-            EventPayload::Tasks(TaskEvent::DeviationDeclared(p)) => W::DeviationDeclared(p),
-            EventPayload::Tasks(TaskEvent::DeviationResolved(p)) => W::DeviationResolved(p),
-            EventPayload::Node(NodeEvent::ScopeChecked(p)) => W::ScopeChecked(p),
-            EventPayload::Scope(ScopeEvent::Requested(p)) => W::ScopeExpansionRequested(p),
-            EventPayload::Scope(ScopeEvent::Granted(p)) => W::ScopeExpansionGranted(p),
-            EventPayload::Scope(ScopeEvent::Denied(p)) => W::ScopeExpansionDenied(p),
-            EventPayload::Node(NodeEvent::Finished(p)) => W::NodeFinished(p),
-            EventPayload::Node(NodeEvent::Failed(p)) => W::NodeFailed(p),
-            EventPayload::Node(NodeEvent::HookExecuted(p)) => W::HookExecuted(p),
-            EventPayload::Node(NodeEvent::Rerouted(p)) => W::NodeRerouted(p),
-            EventPayload::Node(NodeEvent::PullRequestOpened(p)) => W::PullRequestOpened(p),
-            EventPayload::Gates(GateEvent::Waiting(p)) => W::GateWaiting(p),
-            EventPayload::Gates(GateEvent::Resolved(p)) => W::GateResolved(p),
-            EventPayload::Gates(GateEvent::QuestionsAsked(p)) => W::QuestionsAsked(p),
-            EventPayload::Gates(GateEvent::QuestionsAnswered(p)) => W::QuestionsAnswered(p),
-            EventPayload::Children(ChildEvent::LoopIteration(p)) => W::LoopIteration(p),
-            EventPayload::Findings(FindingEvent::Posted(p)) => W::FindingPosted(p),
-            EventPayload::Findings(FindingEvent::Updated(p)) => W::FindingUpdated(p),
-            EventPayload::Findings(FindingEvent::Withdrawn(p)) => W::FindingWithdrawn(p),
-            EventPayload::Findings(FindingEvent::Refused(p)) => W::FindingRefused(p),
-            EventPayload::Findings(FindingEvent::Answered(p)) => W::FindingAnswered(p),
-            EventPayload::Findings(FindingEvent::Proved(p)) => W::FindingProved(p),
-            EventPayload::Artifacts(ArtifactEvent::Submitted(p)) => W::ArtifactSubmitted(p),
-            EventPayload::Artifacts(ArtifactEvent::Accepted(p)) => W::ArtifactAccepted(p),
-            EventPayload::Run(RunEvent::PromotionSignaled(p)) => W::PromotionSignaled(p),
-            EventPayload::Children(ChildEvent::Created(p)) => W::ChildRunCreated(p),
-            EventPayload::Children(ChildEvent::Finished(p)) => W::ChildRunFinished(p),
-            EventPayload::Session(SessionEvent::CapabilityDegraded(p)) => W::CapabilityDegraded(p),
-            EventPayload::Session(SessionEvent::WriteRefused(p)) => W::WriteRefused(p),
-            EventPayload::Session(SessionEvent::RunToolFailed(p)) => W::RunToolFailed(p),
-            EventPayload::Run(RunEvent::HostSuspended(p)) => W::HostSuspended(p),
-            EventPayload::Run(RunEvent::Paused(p)) => W::RunPaused(p),
-            EventPayload::Run(RunEvent::Resumed(p)) => W::RunResumed(p),
-            EventPayload::Run(RunEvent::Finished(p)) => W::RunFinished(p),
-        }
-    }
+wire_table! {
+    RunCreated => Run(RunEvent::Created),
+    RunnerResolved => Node(NodeEvent::RunnerResolved),
+    BaselineCaptured => Run(RunEvent::BaselineCaptured),
+    NodeStarted => Node(NodeEvent::Started),
+    AgentSessionOpened => Session(SessionEvent::Opened),
+    AgentMessage => Session(SessionEvent::Message),
+    ArtifactWritten => Artifacts(ArtifactEvent::Written),
+    ContextAssembled => Node(NodeEvent::ContextAssembled),
+    TaskRegistered => Tasks(TaskEvent::Registered),
+    CriteriaChecked => Node(NodeEvent::CriteriaChecked),
+    TaskStatusChanged => Tasks(TaskEvent::StatusChanged),
+    TaskCheckStarted => Tasks(TaskEvent::CheckStarted),
+    TaskCheckAnswered => Tasks(TaskEvent::CheckAnswered),
+    DeviationDeclared => Tasks(TaskEvent::DeviationDeclared),
+    DeviationResolved => Tasks(TaskEvent::DeviationResolved),
+    ScopeChecked => Node(NodeEvent::ScopeChecked),
+    ScopeExpansionRequested => Scope(ScopeEvent::Requested),
+    ScopeExpansionGranted => Scope(ScopeEvent::Granted),
+    ScopeExpansionDenied => Scope(ScopeEvent::Denied),
+    NodeFinished => Node(NodeEvent::Finished),
+    NodeFailed => Node(NodeEvent::Failed),
+    HookExecuted => Node(NodeEvent::HookExecuted),
+    NodeRerouted => Node(NodeEvent::Rerouted),
+    PullRequestOpened => Node(NodeEvent::PullRequestOpened),
+    GateWaiting => Gates(GateEvent::Waiting),
+    GateResolved => Gates(GateEvent::Resolved),
+    QuestionsAsked => Gates(GateEvent::QuestionsAsked),
+    QuestionsAnswered => Gates(GateEvent::QuestionsAnswered),
+    LoopIteration => Children(ChildEvent::LoopIteration),
+    FindingPosted => Findings(FindingEvent::Posted),
+    FindingUpdated => Findings(FindingEvent::Updated),
+    FindingWithdrawn => Findings(FindingEvent::Withdrawn),
+    FindingRefused => Findings(FindingEvent::Refused),
+    FindingAnswered => Findings(FindingEvent::Answered),
+    FindingProved => Findings(FindingEvent::Proved),
+    FindingSettled => Findings(FindingEvent::Settled),
+    ArtifactSubmitted => Artifacts(ArtifactEvent::Submitted),
+    ArtifactAccepted => Artifacts(ArtifactEvent::Accepted),
+    PromotionSignaled => Run(RunEvent::PromotionSignaled),
+    ChildRunCreated => Children(ChildEvent::Created),
+    ChildRunFinished => Children(ChildEvent::Finished),
+    CapabilityDegraded => Session(SessionEvent::CapabilityDegraded),
+    WriteRefused => Session(SessionEvent::WriteRefused),
+    RunToolFailed => Session(SessionEvent::RunToolFailed),
+    HostSuspended => Run(RunEvent::HostSuspended),
+    RunPaused => Run(RunEvent::Paused),
+    RunResumed => Run(RunEvent::Resumed),
+    RunFinished => Run(RunEvent::Finished),
 }
 
 /// Where an artifact came from, as the log spells it: the recorded

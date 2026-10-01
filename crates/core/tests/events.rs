@@ -55,6 +55,7 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
         | EventPayload::Findings(FindingEvent::Refused(_))
         | EventPayload::Findings(FindingEvent::Answered(_))
         | EventPayload::Findings(FindingEvent::Proved(_))
+        | EventPayload::Findings(FindingEvent::Settled(_))
         | EventPayload::Artifacts(ArtifactEvent::Submitted(_))
         | EventPayload::Artifacts(ArtifactEvent::Accepted(_))
         | EventPayload::Run(RunEvent::PromotionSignaled(_))
@@ -200,12 +201,12 @@ fn every_domain_declares_the_kinds_the_wire_carries() {
 }
 
 #[test]
-fn there_are_exactly_47_kinds_with_distinct_names() {
+fn there_are_exactly_48_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 47);
+    assert_eq!(kinds.len(), 48);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 47, "expected 47 distinct kind names");
+    assert_eq!(names.len(), 48, "expected 48 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -273,6 +274,7 @@ const KIND_NAMES: &[&str] = &[
     "finding_refused",
     "finding_answered",
     "finding_proved",
+    "finding_settled",
     "artifact_submitted",
     "artifact_accepted",
     "promotion_signaled",

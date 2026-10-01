@@ -22,10 +22,11 @@
 //! found. An answer lasts while what it answered does: an update replaces
 //! the finding it was about, and a withdrawal takes it away.
 //!
-//! An answer is a node's word. What settles a finding is evidence: the
+//! An answer is a node's word. What settles a finding is evidence — the
 //! criterion it proposes, failing when it was reported, passing on the
-//! tree the node that answered it fixed left. A settled finding still
-//! stands — it is what was found — and stops counting against the run.
+//! tree the node that answered it fixed left — or a person who went on
+//! past a gate that showed it to them. A settled finding still stands —
+//! it is what was found — and stops counting against the run.
 
 use std::collections::BTreeMap;
 
@@ -67,6 +68,8 @@ pub struct Proof {
 pub enum Settled {
     /// The criterion it proposes passed after a node answered it fixed.
     Proof { cmd: String },
+    /// A person went on past `gate`, which showed it to them.
+    Person { gate: NodeId },
 }
 
 /// Where one id stands.
@@ -158,6 +161,12 @@ impl FindingLedger {
             FindingEvent::Refused(_) => {}
             FindingEvent::Answered(p) => self.answered(node, p),
             FindingEvent::Proved(p) => self.proved(node, p),
+            FindingEvent::Settled(p) => {
+                let key = (p.node.clone(), p.id.clone());
+                if let (Some(gate), Some(Slot::Live(_))) = (node, self.slots.get(&key)) {
+                    self.settled.entry(key).or_insert(Settled::Person { gate });
+                }
+            }
         }
     }
 

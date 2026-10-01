@@ -525,7 +525,9 @@ findings: every finding standing in it — each reviewer's, the engine's own, th
 node reported without declaring a findings document — with the node that found it
 and every answer another node gave it. It is a view the log derives, pinned by the
 hash of its bytes like any document, so a decision recorded from another process
-names the same findings, and it needs no node to produce it.
+names the same findings, and it needs no node to produce it. Going on past it — an
+option that neither aborts nor sends the run back — settles every finding it showed,
+which the option says: a person read each one with its answers and went on.
 
 A plan a gate shows has to say those things. Next to `tasks:` it carries a
 `summary`, a Markdown `description` (code blocks and `mermaid` diagrams welcome), a
