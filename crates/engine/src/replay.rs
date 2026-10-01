@@ -115,6 +115,12 @@ impl RunState {
             .collect()
     }
 
+    /// Every finding that stands and nothing settled: what still counts.
+    pub fn unsettled_findings(&self) -> Vec<Finding> {
+        let unsettled = self.findings.unsettled().into_iter();
+        unsettled.map(|posted| posted.finding).collect()
+    }
+
     /// Whether `node`'s questions were answered and its close still owes
     /// it a terminal.
     ///

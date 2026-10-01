@@ -295,6 +295,11 @@ fn finding_words(happening: &findings::happening::Happening) -> String {
             format!("{named} of `{of}` answered {}", answer.as_str()),
             &one_line(why),
         ),
+        Change::Proved { of, cmd, passed } => format!(
+            "{named} of `{of}` {} by `{}`",
+            if *passed { "settled" } else { "not proved" },
+            one_line(cmd)
+        ),
         Change::Refused {
             operation,
             problems,

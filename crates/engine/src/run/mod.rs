@@ -32,6 +32,7 @@ mod distill;
 mod escalation;
 mod exec;
 mod executor_exec;
+mod finding_proofs;
 mod gate_exec;
 pub(crate) mod gate_findings;
 mod hooks_exec;

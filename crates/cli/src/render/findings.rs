@@ -47,39 +47,73 @@ pub(super) fn run_findings(view: &RunFindings, width: usize) -> Vec<String> {
         .iter()
         .filter(|standing| !standing.answers.is_empty())
         .count();
-    let mut lines = vec![match (counts.is_empty(), answered) {
-        (true, _) => "the run's findings — none".to_string(),
-        (false, 0) => format!("the run's findings — {}", counts.join(", ")),
-        (false, _) => format!(
-            "the run's findings — {}; {answered} answered",
-            counts.join(", ")
+    let settled = found
+        .iter()
+        .filter(|standing| standing.settled.is_some())
+        .count();
+    let mut lines = vec![match counts.is_empty() {
+        true => "the run's findings — none".to_string(),
+        false => format!(
+            "the run's findings — {}{}",
+            counts.join(", "),
+            tally(answered, settled)
         ),
     }];
     for standing in found {
-        let finding = &standing.finding;
-        let found_by = match &standing.node {
-            Some(node) => format!("{} of `{node}`, at {}", finding.id, finding.location),
-            None => format!("{}, the run's own, at {}", finding.id, finding.location),
-        };
         lines.push(String::new());
-        lines.extend(headline(finding.severity, &finding.title, width));
-        lines.extend(hanging(BODY, "", &found_by, width));
-        lines.extend(markdown(&finding.detail, BODY, width));
-        for answer in &standing.answers {
-            let by = answer
-                .by
-                .as_ref()
-                .map(|node| format!(" by `{node}`"))
-                .unwrap_or_default();
-            lines.extend(hanging(
-                BODY,
-                &format!("{}{by} — ", answer.answer.as_str()),
-                &answer.why,
-                width,
-            ));
-        }
+        lines.extend(standing_lines(standing, width));
     }
     lines
+}
+
+/// One standing finding: what is wrong, which node found it where, what
+/// goes wrong, each answer it got and what its proof showed.
+fn standing_lines(standing: &StandingFinding, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let finding = &standing.finding;
+    let found_by = match &standing.node {
+        Some(node) => format!("{} of `{node}`, at {}", finding.id, finding.location),
+        None => format!("{}, the run's own, at {}", finding.id, finding.location),
+    };
+    lines.extend(headline(finding.severity, &finding.title, width));
+    lines.extend(hanging(BODY, "", &found_by, width));
+    lines.extend(markdown(&finding.detail, BODY, width));
+    for answer in &standing.answers {
+        let by = answer
+            .by
+            .as_ref()
+            .map(|node| format!(" by `{node}`"))
+            .unwrap_or_default();
+        lines.extend(hanging(
+            BODY,
+            &format!("{}{by} — ", answer.answer.as_str()),
+            &answer.why,
+            width,
+        ));
+    }
+    if let Some(proof) = &standing.proof {
+        let verdict = match standing.settled.is_some() {
+            true => "settled — ",
+            false => "not proved — ",
+        };
+        let said = format!("`{}` exits {}", proof.cmd, proof.exit_code);
+        lines.extend(hanging(BODY, verdict, &said, width));
+    }
+    lines
+}
+
+/// What of the run's findings others answered and what settled, after
+/// the severities; empty when neither.
+fn tally(answered: usize, settled: usize) -> String {
+    let said: Vec<String> = [(answered, "answered"), (settled, "settled")]
+        .into_iter()
+        .filter(|(count, _)| *count > 0)
+        .map(|(count, what)| format!("{count} {what}"))
+        .collect();
+    match said.is_empty() {
+        true => String::new(),
+        false => format!("; {}", said.join(", ")),
+    }
 }
 
 /// A finding's first line: how severe, and what is wrong.

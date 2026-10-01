@@ -198,7 +198,7 @@ pub fn run_frame(
         children: state.children.links().to_vec(),
         degraded: state.degradations.all().to_vec(),
         unknown_kinds: unknown_kind_counts(&state),
-        blocking_findings: crate::dedup_findings(&state.effective_findings())
+        blocking_findings: crate::dedup_findings(&state.unsettled_findings())
             .iter()
             .filter(|finding| finding.severity == FindingSeverity::Blocking)
             .count(),

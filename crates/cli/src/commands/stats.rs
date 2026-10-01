@@ -234,7 +234,11 @@ fn render_run_stats(
     ));
     out.push_str(&format!(
         "{}\n",
-        findings_line(&stats.findings, stats.findings_effective)
+        findings_line(
+            &stats.findings,
+            stats.findings_effective,
+            stats.findings_settled
+        )
     ));
     out.push_str(&render_nodes(stats, state, glyphs));
     out.push_str(&render_runners(stats, glyphs));
@@ -298,11 +302,16 @@ fn submissions_line(submissions: &yunta_engine::Submissions) -> String {
 /// said as two: a log carrying five posts, one update and one
 /// withdrawal stands at four, and a reader shown only one of those
 /// numbers draws the wrong conclusion from either.
-fn findings_line(activity: &yunta_engine::FindingActivity, effective: u64) -> String {
+fn findings_line(activity: &yunta_engine::FindingActivity, effective: u64, settled: u64) -> String {
     format!(
-        "findings: {} posted, {} updated, {} withdrawn, {} refused, {} answered — {effective} \
-         standing",
-        activity.posted, activity.updated, activity.withdrawn, activity.refused, activity.answered
+        "findings: {} posted, {} updated, {} withdrawn, {} refused — {effective} standing\n\
+         answers: {} given, {} proved — {settled} settled",
+        activity.posted,
+        activity.updated,
+        activity.withdrawn,
+        activity.refused,
+        activity.answered,
+        activity.proved
     )
 }
 
@@ -609,6 +618,8 @@ struct RunStatsJson {
     /// posts: a reader given only `findings.posted` reads a withdrawn
     /// finding as one that still stands.
     findings_standing: u64,
+    /// How many of those a proof or a person settled.
+    findings_settled: u64,
 }
 
 impl RunStatsJson {
@@ -643,6 +654,7 @@ impl RunStatsJson {
             submissions: stats.artifact_submissions,
             findings: stats.findings,
             findings_standing: stats.findings_effective,
+            findings_settled: stats.findings_settled,
         }
     }
 }
@@ -849,9 +861,11 @@ mod tests {
                 withdrawn: 1,
                 refused: 0,
                 answered: 2,
+                proved: 1,
             },
             findings_by_node: Default::default(),
             findings_effective: 4,
+            findings_settled: 1,
         };
         let text = render_run_stats(
             &RunId::from_static("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
@@ -867,7 +881,8 @@ mod tests {
         );
         assert!(
             text.contains(
-                "findings: 5 posted, 1 updated, 1 withdrawn, 0 refused, 2 answered — 4 standing"
+                "findings: 5 posted, 1 updated, 1 withdrawn, 0 refused — 4 standing\n\
+                 answers: 2 given, 1 proved — 1 settled"
             ),
             "what it found, and what still stands: {text}"
         );

@@ -34,50 +34,70 @@ pub enum Change {
         answer: FindingAnswer,
         why: String,
     },
+    /// The criterion it proposes ran on the tree the answering node left.
+    Proved {
+        of: NodeId,
+        cmd: String,
+        passed: bool,
+    },
+}
+
+impl Happening {
+    /// What happened to `finding`, said with its severity and title.
+    fn of(finding: &crate::events::Finding, change: Change) -> Self {
+        Happening::Finding {
+            id: Some(finding.id.clone()),
+            severity: Some(finding.severity),
+            title: finding.title.clone(),
+            change,
+        }
+    }
+
+    /// What happened to the finding `id`, by its id alone.
+    fn about(id: Option<&FindingId>, change: Change) -> Self {
+        Happening::Finding {
+            id: id.cloned(),
+            severity: None,
+            title: String::new(),
+            change,
+        }
+    }
 }
 
 impl From<&FindingEvent> for Happening {
     fn from(event: &FindingEvent) -> Self {
         match event {
-            FindingEvent::Posted(p) => Happening::Finding {
-                id: Some(p.finding.id.clone()),
-                severity: Some(p.finding.severity),
-                title: p.finding.title.clone(),
-                change: Change::Posted,
-            },
-            FindingEvent::Updated(p) => Happening::Finding {
-                id: Some(p.finding.id.clone()),
-                severity: Some(p.finding.severity),
-                title: p.finding.title.clone(),
-                change: Change::Updated,
-            },
-            FindingEvent::Withdrawn(p) => Happening::Finding {
-                id: Some(p.id.clone()),
-                severity: None,
-                title: String::new(),
-                change: Change::Withdrawn {
+            FindingEvent::Posted(p) => Happening::of(&p.finding, Change::Posted),
+            FindingEvent::Updated(p) => Happening::of(&p.finding, Change::Updated),
+            FindingEvent::Withdrawn(p) => Happening::about(
+                Some(&p.id),
+                Change::Withdrawn {
                     reason: p.reason.clone(),
                 },
-            },
-            FindingEvent::Refused(p) => Happening::Finding {
-                id: p.id.clone(),
-                severity: None,
-                title: String::new(),
-                change: Change::Refused {
+            ),
+            FindingEvent::Refused(p) => Happening::about(
+                p.id.as_ref(),
+                Change::Refused {
                     operation: p.operation,
                     problems: p.report.diagnostics.len(),
                 },
-            },
-            FindingEvent::Answered(p) => Happening::Finding {
-                id: Some(p.id.clone()),
-                severity: None,
-                title: String::new(),
-                change: Change::Answered {
+            ),
+            FindingEvent::Answered(p) => Happening::about(
+                Some(&p.id),
+                Change::Answered {
                     of: p.node.clone(),
                     answer: p.answer,
                     why: p.why.clone(),
                 },
-            },
+            ),
+            FindingEvent::Proved(p) => Happening::about(
+                Some(&p.id),
+                Change::Proved {
+                    of: p.node.clone(),
+                    cmd: p.result.cmd.clone(),
+                    passed: p.result.exit_code == 0,
+                },
+            ),
         }
     }
 }

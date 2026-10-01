@@ -84,6 +84,18 @@ pub struct FindingAnsweredPayload {
     pub why: String,
 }
 
+/// What a node's work proved of a finding it answered fixed: the
+/// criterion the finding proposes, run on the tree the node left. Passing
+/// settles the finding; failing is kept, so a person reads that the
+/// evidence did not bear the answer out. The proving node is the
+/// envelope's own `node_id`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FindingProvedPayload {
+    pub node: NodeId,
+    pub id: FindingId,
+    pub result: crate::events::CriterionResult,
+}
+
 /// What an answer says of a finding: fixed by the answering node's work,
 /// or declined.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

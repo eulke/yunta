@@ -146,3 +146,64 @@ fn an_answer_to_a_finding_that_does_not_stand_is_ignored() {
     assert!(answers_to(&ledger, "f9").is_empty());
     assert!(ledger.effective().is_empty());
 }
+
+fn proved(id: &str, exit_code: i32) -> FindingEvent {
+    FindingEvent::Proved(yunta_core::events::FindingProvedPayload {
+        node: "review".into(),
+        id: id.into(),
+        result: yunta_core::events::CriterionResult {
+            cmd: "test -f fixed.txt".to_string(),
+            exit_code,
+            r#type: None,
+            reused: false,
+            duration_ms: None,
+            output: None,
+            tail: Vec::new(),
+        },
+    })
+}
+
+#[test]
+fn a_passing_proof_settles_a_finding_that_still_stands() {
+    let ledger = fold(&[
+        ("review", posted("f1")),
+        ("fix", answered("f1", FindingAnswer::Fixed, "done")),
+        ("fix", proved("f1", 0)),
+    ]);
+
+    assert_eq!(ledger.effective().len(), 1, "settled, it still stands");
+    assert!(ledger.unsettled().is_empty(), "and no longer counts");
+    let standing = &ledger.standing().findings[0];
+    assert_eq!(standing.proof.as_ref().unwrap().exit_code, 0);
+    assert!(standing.settled.is_some());
+}
+
+#[test]
+fn a_failing_proof_is_kept_and_settles_nothing() {
+    let ledger = fold(&[
+        ("review", posted("f1")),
+        ("fix", answered("f1", FindingAnswer::Fixed, "done")),
+        ("fix", proved("f1", 1)),
+    ]);
+
+    assert_eq!(ledger.unsettled().len(), 1);
+    let standing = &ledger.standing().findings[0];
+    assert_eq!(standing.proof.as_ref().unwrap().exit_code, 1);
+    assert!(standing.settled.is_none());
+}
+
+#[test]
+fn an_update_unsettles_what_it_replaces() {
+    let updated = FindingEvent::Updated(FindingUpdatedPayload {
+        finding: finding("f1", "it came back"),
+    });
+    let ledger = fold(&[
+        ("review", posted("f1")),
+        ("fix", answered("f1", FindingAnswer::Fixed, "done")),
+        ("fix", proved("f1", 0)),
+        ("review", updated),
+    ]);
+
+    assert_eq!(ledger.unsettled().len(), 1);
+    assert!(ledger.standing().findings[0].proof.is_none());
+}

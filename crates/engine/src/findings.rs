@@ -5,19 +5,20 @@
 //! is the reading that only a log can answer: which findings a
 //! successor starts from.
 
-use yunta_core::events::findings::effective;
 use yunta_core::events::{Finding, StoredEvent};
 
 /// The findings a successor inherits, derived purely from the parent's
-/// own log: every finding the log leaves standing — the content of its
-/// latest posting, and nothing its node took back — deduplicated by
+/// own log: every finding the log leaves standing and nothing settled —
+/// the content of its latest posting, nothing its node took back, and
+/// nothing a proof or a person settled — deduplicated by
 /// location + title normalized for case and whitespace. The first
 /// standing occurrence's full record wins, so no authorship or detail is
 /// lost to the collapse. Deterministic: same log, same output — the
 /// promotion close accepts exactly this as the run's own findings
 /// artifact.
 pub fn inherited_findings(events: &[StoredEvent]) -> Vec<Finding> {
-    let standing: Vec<Finding> = effective(events)
+    let standing: Vec<Finding> = yunta_core::events::findings::FindingLedger::of(events)
+        .unsettled()
         .into_iter()
         .map(|posted| posted.finding)
         .collect();
@@ -44,6 +45,38 @@ mod tests {
             detail: "detail".to_string(),
             proposed_criterion: None,
         }
+    }
+
+    #[test]
+    fn a_settled_finding_is_not_inherited() {
+        let events = Log::for_run("run-1")
+            .node(
+                "review",
+                EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
+                    finding: finding("f1", "Missing file", "fixed.txt"),
+                })),
+            )
+            .node(
+                "fix",
+                EventPayload::Findings(FindingEvent::Proved(
+                    yunta_core::events::FindingProvedPayload {
+                        node: "review".into(),
+                        id: "f1".into(),
+                        result: yunta_core::events::CriterionResult {
+                            cmd: "test -f fixed.txt".to_string(),
+                            exit_code: 0,
+                            r#type: None,
+                            reused: false,
+                            duration_ms: None,
+                            output: None,
+                            tail: Vec::new(),
+                        },
+                    },
+                )),
+            )
+            .build();
+
+        assert!(inherited_findings(&events).is_empty());
     }
 
     #[test]

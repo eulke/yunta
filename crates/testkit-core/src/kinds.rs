@@ -294,6 +294,19 @@ pub fn all_kinds() -> Vec<EventPayload> {
             answer: FindingAnswer::Fixed,
             why: "the call returns its error now".to_string(),
         })),
+        EventPayload::Findings(FindingEvent::Proved(FindingProvedPayload {
+            node: "only".into(),
+            id: "f-1".into(),
+            result: CriterionResult {
+                cmd: "cargo test -p cli errors".to_string(),
+                exit_code: 0,
+                r#type: None,
+                reused: false,
+                duration_ms: Some(120),
+                output: None,
+                tail: Vec::new(),
+            },
+        })),
         EventPayload::Artifacts(ArtifactEvent::Submitted(ArtifactSubmittedPayload {
             name: "plan.yaml".to_string(),
             artifact_kind: yunta_core::ArtifactKind::Tasks,

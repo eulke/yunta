@@ -38,7 +38,8 @@ are valid there. A mistyped key never silently becomes a default.
   inherited from the run this one succeeds.
 - **`check`** — automatic verification against data the engine already has: `builtin:
   baseline_compare` (did a passing suite start failing), `builtin: coverage_gate`
-  (threshold), `builtin: findings_gate` (fails above a declared `max_severity`). No
+  (threshold), `builtin: findings_gate` (fails while a finding no proof or person
+  settled is at or above a declared `max_severity`). No
   session opens; these read state the engine already derived.
 - **`gate`** — a human decision. `assignee:`, `options: [...]`, and `on: {option:
   target}` to re-route on a choice exactly like `on_failure.goto` does; every node
@@ -344,7 +345,11 @@ it and its answers, with `yunta_findings`. Another node answers a finding with
 `yunta_answer_finding` — `fixed` when its work
 fixed it, `declined` when it is wrong or its fix belongs to another change, always
 with why — and the answer stands beside the finding, never in it: only the node that
-reported a finding changes or withdraws it. A
+reported a finding changes or withdraws it. An answer is a node's word; evidence
+settles a finding. Answered `fixed`, the criterion it proposes runs on the tree the
+answering node leaves as that node closes, and passing settles it: it still stands,
+and no longer keeps the run from succeeding, trips `findings_gate` or reaches a
+successor run. A failing one is kept, for a person to read. A
 `prompt` or `loop` node that declares `produces: [findings]` gets that document
 derived at its close, from every finding it reported that still stands,
 in the order it first reported them — a node that reports nothing gets a document

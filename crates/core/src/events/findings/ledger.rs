@@ -21,6 +21,11 @@
 //! it: an answer is what a node says, and the finding is still what was
 //! found. An answer lasts while what it answered does: an update replaces
 //! the finding it was about, and a withdrawal takes it away.
+//!
+//! An answer is a node's word. What settles a finding is evidence: the
+//! criterion it proposes, failing when it was reported, passing on the
+//! tree the node that answered it fixed left. A settled finding still
+//! stands — it is what was found — and stops counting against the run.
 
 use std::collections::BTreeMap;
 
@@ -44,6 +49,24 @@ pub struct AnswerGiven {
     pub by: Option<NodeId>,
     pub answer: FindingAnswer,
     pub why: String,
+}
+
+/// The criterion a finding proposes, run on the tree the node that
+/// answered it fixed left: who ran it, the command, and its exit.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Proof {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub by: Option<NodeId>,
+    pub cmd: String,
+    pub exit_code: i32,
+}
+
+/// What settled a finding.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "by", rename_all = "snake_case")]
+pub enum Settled {
+    /// The criterion it proposes passed after a node answered it fixed.
+    Proof { cmd: String },
 }
 
 /// Where one id stands.
@@ -70,6 +93,10 @@ pub struct FindingLedger {
     /// What other nodes answered about each finding that stands, one
     /// answer per answering node, in the order they first answered.
     answers: BTreeMap<(Option<NodeId>, FindingId), Vec<AnswerGiven>>,
+    /// The latest proof run for each finding that stands.
+    proofs: BTreeMap<(Option<NodeId>, FindingId), Proof>,
+    /// What settled each finding that stands, once something did.
+    settled: BTreeMap<(Option<NodeId>, FindingId), Settled>,
 }
 
 impl FindingLedger {
@@ -109,14 +136,14 @@ impl FindingLedger {
             FindingEvent::Updated(p) => {
                 let key = (node, p.finding.id.clone());
                 if matches!(self.slots.get(&key), Some(Slot::Live(_))) {
-                    self.answers.remove(&key);
+                    self.forget(&key);
                     self.slots.insert(key, Slot::Live(p.finding.clone()));
                 }
             }
             FindingEvent::Withdrawn(p) => {
                 let key = (node, p.id.clone());
                 if matches!(self.slots.get(&key), Some(Slot::Live(_))) {
-                    self.answers.remove(&key);
+                    self.forget(&key);
                     self.slots.insert(
                         key,
                         Slot::Withdrawn {
@@ -130,7 +157,57 @@ impl FindingLedger {
             // changed.
             FindingEvent::Refused(_) => {}
             FindingEvent::Answered(p) => self.answered(node, p),
+            FindingEvent::Proved(p) => self.proved(node, p),
         }
+    }
+
+    /// Drops what was said and proved of a finding that no longer stands
+    /// as it was.
+    fn forget(&mut self, key: &(Option<NodeId>, FindingId)) {
+        self.answers.remove(key);
+        self.proofs.remove(key);
+        self.settled.remove(key);
+    }
+
+    /// Folds one proof: kept while the finding stands, and settling it
+    /// when the criterion passed.
+    fn proved(&mut self, by: Option<NodeId>, proof: &crate::events::FindingProvedPayload) {
+        let key = (Some(proof.node.clone()), proof.id.clone());
+        if !matches!(self.slots.get(&key), Some(Slot::Live(_))) {
+            return;
+        }
+        let cmd = proof.result.cmd.clone();
+        if proof.result.exit_code == 0 {
+            self.settled
+                .entry(key.clone())
+                .or_insert(Settled::Proof { cmd: cmd.clone() });
+        }
+        self.proofs.insert(
+            key,
+            Proof {
+                by,
+                cmd,
+                exit_code: proof.result.exit_code,
+            },
+        );
+    }
+
+    /// What settled the finding `id` that `node` reported, if anything
+    /// did while it stands.
+    pub fn settled(&self, node: Option<&NodeId>, id: &FindingId) -> Option<&Settled> {
+        self.settled.get(&(node.cloned(), id.clone()))
+    }
+
+    /// Every finding that stands and nothing settled — what still counts
+    /// against the run — in the order each was first posted.
+    pub fn unsettled(&self) -> Vec<PostedFinding> {
+        self.effective()
+            .into_iter()
+            .filter(|posted| {
+                self.settled(posted.node.as_ref(), &posted.finding.id)
+                    .is_none()
+            })
+            .collect()
     }
 
     /// Folds one answer: kept beside the finding it answers while that
@@ -189,12 +266,15 @@ impl FindingLedger {
             findings: self
                 .effective()
                 .into_iter()
-                .map(|posted| super::standing::StandingFinding {
-                    answers: self
-                        .answers(posted.node.as_ref(), &posted.finding.id)
-                        .to_vec(),
-                    node: posted.node,
-                    finding: posted.finding,
+                .map(|posted| {
+                    let key = (posted.node.clone(), posted.finding.id.clone());
+                    super::standing::StandingFinding {
+                        answers: self.answers.get(&key).cloned().unwrap_or_default(),
+                        proof: self.proofs.get(&key).cloned(),
+                        settled: self.settled.get(&key).cloned(),
+                        node: posted.node,
+                        finding: posted.finding,
+                    }
                 })
                 .collect(),
         }

@@ -4,11 +4,11 @@
 //!
 //! What a session reads through the run's tools and what a gate shows a
 //! person about the run's findings are this one view, so the two never
-//! disagree about what stands.
+//! disagree about what stands — or what settled it.
 
 use serde::{Deserialize, Serialize};
 
-use super::ledger::AnswerGiven;
+use super::ledger::{AnswerGiven, Proof, Settled};
 use crate::events::Finding;
 use crate::ids::NodeId;
 
@@ -28,4 +28,11 @@ pub struct StandingFinding {
     pub finding: Finding,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub answers: Vec<AnswerGiven>,
+    /// The last time the criterion it proposes ran after an answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proof: Option<Proof>,
+    /// What settled it, when something did: it still stands, and no
+    /// longer counts against the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settled: Option<Settled>,
 }

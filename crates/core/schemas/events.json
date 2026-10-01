@@ -1874,6 +1874,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "finding_proved"
+            }
+          },
+          "$ref": "#/$defs/FindingProvedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "artifact_submitted"
             }
           },
@@ -2374,6 +2387,26 @@
       },
       "required": [
         "finding"
+      ]
+    },
+    "FindingProvedPayload": {
+      "description": "What a node's work proved of a finding it answered fixed: the\ncriterion the finding proposes, run on the tree the node left. Passing\nsettles the finding; failing is kept, so a person reads that the\nevidence did not bear the answer out. The proving node is the\nenvelope's own `node_id`.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/FindingId"
+        },
+        "node": {
+          "$ref": "#/$defs/NodeId"
+        },
+        "result": {
+          "$ref": "#/$defs/CriterionResult"
+        }
+      },
+      "required": [
+        "node",
+        "id",
+        "result"
       ]
     },
     "FindingRefusedPayload": {

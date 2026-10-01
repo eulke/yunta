@@ -128,6 +128,7 @@ pub struct FindingActivity {
     pub withdrawn: u64,
     pub refused: u64,
     pub answered: u64,
+    pub proved: u64,
 }
 
 /// One run's derived stats — everything `yunta stats <run_id>`
@@ -179,6 +180,8 @@ pub struct RunStats {
     /// an update replaces and a withdrawal removes — never a count of
     /// `finding_posted` events.
     pub findings_effective: u64,
+    /// How many of those a proof or a person settled.
+    pub findings_settled: u64,
 }
 
 impl RunStats {
@@ -292,6 +295,10 @@ pub(crate) fn stats_observed_at(
         findings: activity.findings,
         findings_by_node: activity.findings_by_node,
         findings_effective: yunta_core::events::findings::effective(events).len() as u64,
+        findings_settled: {
+            let ledger = yunta_core::events::findings::FindingLedger::of(events);
+            (ledger.effective().len() - ledger.unsettled().len()) as u64
+        },
         cptv: cptv(state),
         rework_rate,
         cache_rate,
@@ -546,6 +553,9 @@ impl Activity {
                 }
                 Some(EventPayload::Findings(FindingEvent::Answered(_))) => {
                     activity.count_finding(node, |f| &mut f.answered)
+                }
+                Some(EventPayload::Findings(FindingEvent::Proved(_))) => {
+                    activity.count_finding(node, |f| &mut f.proved)
                 }
                 _ => {}
             }

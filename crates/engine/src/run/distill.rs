@@ -64,6 +64,9 @@ struct ProvenanceArtifact {
 struct ProvenanceVerification {
     criteria: CriteriaCounts,
     findings: FindingCounts,
+    /// The standing findings a proof or a person settled, already among
+    /// `findings`.
+    settled: FindingCounts,
 }
 
 #[derive(Serialize)]
@@ -108,21 +111,38 @@ fn verification(events: &[StoredEvent]) -> ProvenanceVerification {
     // back — so an event-by-event tally counts an update twice and a
     // withdrawal as one that no longer stands. The evidence reports the
     // set the run holds at the close, which is what the fold answers.
-    let mut findings = FindingCounts {
-        blocking: 0,
-        major: 0,
-        minor: 0,
-        note: 0,
-    };
-    for posted in effective(events) {
-        match posted.finding.severity {
-            FindingSeverity::Blocking => findings.blocking += 1,
-            FindingSeverity::Major => findings.major += 1,
-            FindingSeverity::Minor => findings.minor += 1,
-            FindingSeverity::Note => findings.note += 1,
-        }
+    let ledger = yunta_core::events::findings::FindingLedger::of(events);
+    let unsettled = ledger.unsettled();
+    let settled = ledger
+        .effective()
+        .into_iter()
+        .filter(|posted| !unsettled.contains(posted));
+    ProvenanceVerification {
+        criteria,
+        findings: FindingCounts::of(effective(events)),
+        settled: FindingCounts::of(settled),
     }
-    ProvenanceVerification { criteria, findings }
+}
+
+impl FindingCounts {
+    /// How many of each severity `found` holds.
+    fn of(found: impl IntoIterator<Item = yunta_core::events::findings::PostedFinding>) -> Self {
+        let mut counts = FindingCounts {
+            blocking: 0,
+            major: 0,
+            minor: 0,
+            note: 0,
+        };
+        for posted in found {
+            match posted.finding.severity {
+                FindingSeverity::Blocking => counts.blocking += 1,
+                FindingSeverity::Major => counts.major += 1,
+                FindingSeverity::Minor => counts.minor += 1,
+                FindingSeverity::Note => counts.note += 1,
+            }
+        }
+        counts
+    }
 }
 
 /// Runs the whole distill step for one closing run. Every failure past

@@ -311,7 +311,9 @@ async fn execute_findings_gate(
     max_severity: FindingSeverity,
 ) -> Result<NodeEnd, RunError> {
     let state = ctx.run_view().await?.state;
-    let effective = state.effective_findings();
+    // A finding settled by its proof or by a person stands, and is past
+    // what a gate on severity holds the run to.
+    let effective = state.unsettled_findings();
     let offending: Vec<&str> = effective
         .iter()
         .filter(|finding| severity_rank(finding.severity) <= severity_rank(max_severity))

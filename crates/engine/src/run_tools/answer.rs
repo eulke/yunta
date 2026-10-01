@@ -48,23 +48,11 @@ impl SessionTools {
                 withdraw: self.called(RunTool::WithdrawFinding),
             });
         }
-        let ledger = FindingLedger::of(&self.events().await?);
-        match ledger.status(&answered.node, &answered.id) {
-            Some(Slot::Live(_)) => {}
-            Some(Slot::Withdrawn { reason }) => {
-                return Err(RunToolError::WithdrawnFinding {
-                    node: answered.node,
-                    id: answered.id,
-                    reason: reason.clone(),
-                })
-            }
-            None => {
-                return Err(RunToolError::NoSuchFinding {
-                    node: answered.node,
-                    id: answered.id,
-                })
-            }
-        }
+        answerable(
+            &FindingLedger::of(&self.events().await?),
+            &answered.node,
+            &answered.id,
+        )?;
         let (node, id, answer) = (answered.node.clone(), answered.id.clone(), answered.answer);
         self.append(EventPayload::Findings(FindingEvent::Answered(
             FindingAnsweredPayload {
@@ -77,8 +65,41 @@ impl SessionTools {
         .await?;
         Ok(format!(
             "your answer to `{node}`'s finding `{id}` — {} — is recorded: a person reads it \
-             beside the finding, which stands until its own node takes it back",
+             beside the finding, which stands until its own node takes it back. Answered \
+             fixed, the criterion it proposes runs on the tree you leave, and passing \
+             settles it",
             answer.as_str()
         ))
+    }
+}
+
+/// Whether the finding `id` that `node` reported can be answered: it
+/// stands, and nothing settled it.
+fn answerable(ledger: &FindingLedger, node: &NodeId, id: &FindingId) -> Result<(), RunToolError> {
+    if let Some(settled) = ledger.settled(Some(node), id) {
+        return Err(RunToolError::SettledFinding {
+            node: node.clone(),
+            id: id.clone(),
+            settled: settled_by(settled),
+        });
+    }
+    match ledger.status(node, id) {
+        Some(Slot::Live(_)) => Ok(()),
+        Some(Slot::Withdrawn { reason }) => Err(RunToolError::WithdrawnFinding {
+            node: node.clone(),
+            id: id.clone(),
+            reason: reason.clone(),
+        }),
+        None => Err(RunToolError::NoSuchFinding {
+            node: node.clone(),
+            id: id.clone(),
+        }),
+    }
+}
+
+/// What settled a finding, as a refusal names it.
+fn settled_by(settled: &yunta_core::events::findings::Settled) -> String {
+    match settled {
+        yunta_core::events::findings::Settled::Proof { cmd } => format!("`{cmd}` passed"),
     }
 }

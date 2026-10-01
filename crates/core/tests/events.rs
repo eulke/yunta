@@ -54,6 +54,7 @@ fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
         | EventPayload::Findings(FindingEvent::Withdrawn(_))
         | EventPayload::Findings(FindingEvent::Refused(_))
         | EventPayload::Findings(FindingEvent::Answered(_))
+        | EventPayload::Findings(FindingEvent::Proved(_))
         | EventPayload::Artifacts(ArtifactEvent::Submitted(_))
         | EventPayload::Artifacts(ArtifactEvent::Accepted(_))
         | EventPayload::Run(RunEvent::PromotionSignaled(_))
@@ -199,12 +200,12 @@ fn every_domain_declares_the_kinds_the_wire_carries() {
 }
 
 #[test]
-fn there_are_exactly_46_kinds_with_distinct_names() {
+fn there_are_exactly_47_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 46);
+    assert_eq!(kinds.len(), 47);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 46, "expected 46 distinct kind names");
+    assert_eq!(names.len(), 47, "expected 47 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -235,56 +236,60 @@ fn every_kind_starts_at_schema_version_1() {
     }
 }
 
+/// Every kind's name, in the order the binary writes them.
+const KIND_NAMES: &[&str] = &[
+    "run_created",
+    "runner_resolved",
+    "baseline_captured",
+    "node_started",
+    "agent_session_opened",
+    "agent_message",
+    "artifact_written",
+    "context_assembled",
+    "task_registered",
+    "criteria_checked",
+    "task_status_changed",
+    "task_check_started",
+    "task_check_answered",
+    "deviation_declared",
+    "deviation_resolved",
+    "scope_checked",
+    "scope_expansion_requested",
+    "scope_expansion_granted",
+    "scope_expansion_denied",
+    "node_finished",
+    "node_failed",
+    "hook_executed",
+    "node_rerouted",
+    "pull_request_opened",
+    "gate_waiting",
+    "gate_resolved",
+    "questions_asked",
+    "questions_answered",
+    "loop_iteration",
+    "finding_posted",
+    "finding_updated",
+    "finding_withdrawn",
+    "finding_refused",
+    "finding_answered",
+    "finding_proved",
+    "artifact_submitted",
+    "artifact_accepted",
+    "promotion_signaled",
+    "child_run_created",
+    "child_run_finished",
+    "capability_degraded",
+    "write_refused",
+    "run_tool_failed",
+    "host_suspended",
+    "run_paused",
+    "run_resumed",
+    "run_finished",
+];
+
 #[test]
 fn kind_names_match_the_spec_exactly() {
-    let expected = [
-        "run_created",
-        "runner_resolved",
-        "baseline_captured",
-        "node_started",
-        "agent_session_opened",
-        "agent_message",
-        "artifact_written",
-        "context_assembled",
-        "task_registered",
-        "criteria_checked",
-        "task_status_changed",
-        "task_check_started",
-        "task_check_answered",
-        "deviation_declared",
-        "deviation_resolved",
-        "scope_checked",
-        "scope_expansion_requested",
-        "scope_expansion_granted",
-        "scope_expansion_denied",
-        "node_finished",
-        "node_failed",
-        "hook_executed",
-        "node_rerouted",
-        "pull_request_opened",
-        "gate_waiting",
-        "gate_resolved",
-        "questions_asked",
-        "questions_answered",
-        "loop_iteration",
-        "finding_posted",
-        "finding_updated",
-        "finding_withdrawn",
-        "finding_refused",
-        "finding_answered",
-        "artifact_submitted",
-        "artifact_accepted",
-        "promotion_signaled",
-        "child_run_created",
-        "child_run_finished",
-        "capability_degraded",
-        "write_refused",
-        "run_tool_failed",
-        "host_suspended",
-        "run_paused",
-        "run_resumed",
-        "run_finished",
-    ];
+    let expected = KIND_NAMES;
     let actual: Vec<&str> = all_kinds().iter().map(|k| k.kind_name()).collect();
     assert_eq!(actual, expected.to_vec());
 }

@@ -12,7 +12,7 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 37 rows and **46 `kind` names**.
+The current Run Contract event table has 38 rows and **47 `kind` names**.
 It had 32 rows and 39 kinds before `host_suspended` was added. The table
 defines the normative set; this document specifies each payload.
 
@@ -26,7 +26,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | One of the 46 names in this document, with a `_vN` suffix beyond v1. |
+| `kind` | string | One of the 47 names in this document, with a `_vN` suffix beyond v1. |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
 
@@ -114,7 +114,7 @@ atribuidos al adapter: `agent_session_opened` y
 Si esta lectura no es la intención original, es exactamente el tipo de cosa a
 corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
-## 5. Los 46 tipos de evento, campo por campo
+## 5. Los 47 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -554,6 +554,23 @@ la anterior. No cambia ningún conteo: es lo que dice un nodo.
 | `id` | string | sí | el id del hallazgo, como lo reportó ese nodo |
 | `answer` | enum | sí | `fixed` \| `declined` |
 | `why` | string | sí | no vacío |
+
+### 5.21.3b `finding_proved` — engine
+**Fuente:** el nodo que respondió `fixed` (envelope), el hallazgo y el resultado de su criterio
+
+Una respuesta es la palabra de un nodo; lo que resuelve un hallazgo es
+evidencia. Cuando cierra un nodo que respondió `fixed` un hallazgo que
+propone un criterio —rechazado si ya pasaba al reportarse—, el engine lo
+corre sobre el árbol que deja ese nodo y registra el resultado. Si pasa, el
+hallazgo queda resuelto: sigue en pie, y deja de contar para el resultado
+del run, `findings_gate` y la herencia. Si falla, el resultado queda igual,
+para que una persona lea que la evidencia no respaldó la respuesta.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `node` | `NodeId` | sí | el nodo que reportó el hallazgo |
+| `id` | string | sí | el id del hallazgo, como lo reportó ese nodo |
+| `result` | objeto | sí | el resultado del criterio, con la forma de `criteria_checked.results` (§5.10) |
 
 ### 5.21.4 `artifact_submitted` — engine
 **Fuente:** node_id, el artifact que una sesión entregó y el veredicto

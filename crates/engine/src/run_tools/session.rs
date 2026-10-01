@@ -151,6 +151,12 @@ pub(super) enum RunToolError {
         update: String,
         withdraw: String,
     },
+    #[error("node `{node}`'s finding `{id}` is settled — {settled}; there is nothing to answer")]
+    SettledFinding {
+        node: NodeId,
+        id: yunta_core::FindingId,
+        settled: String,
+    },
     #[error("node `{node}` reported no finding `{id}` on this run")]
     NoSuchFinding {
         node: NodeId,

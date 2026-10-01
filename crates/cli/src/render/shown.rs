@@ -311,10 +311,9 @@ tasks:
         );
     }
 
-    #[test]
-    fn a_review_shown_after_it_was_answered_reads_each_answer_under_its_finding() {
-        let view: yunta_core::events::findings::RunFindings = serde_norway::from_str(
-            r#"
+    /// A finding another node fixed and its proof settled, and one the
+    /// engine reported about the run.
+    const ANSWERED: &str = r#"
 findings:
   - node: review
     id: halfway
@@ -324,14 +323,19 @@ findings:
     detail: "It never says good night."
     answers:
       - { by: fix, answer: fixed, why: "it says good night now" }
+    proof: { by: fix, cmd: "grep -q night greeting.txt", exit_code: 0 }
+    settled: { by: proof, cmd: "grep -q night greeting.txt" }
   - id: cleanup
     severity: minor
     title: "A cleanup did not finish"
     location: "run:scratch"
     detail: "Left behind."
-"#,
-        )
-        .unwrap();
+"#;
+
+    #[test]
+    fn a_review_shown_after_it_was_answered_reads_each_answer_under_its_finding() {
+        let view: yunta_core::events::findings::RunFindings =
+            serde_norway::from_str(ANSWERED).unwrap();
         let drawn = shown(
             &document(
                 ShownContent::RunFindings(view),
@@ -344,12 +348,13 @@ findings:
         assert_eq!(
             drawn,
             vec![
-                "the run's findings — 1 blocking, 1 minor; 1 answered",
+                "the run's findings — 1 blocking, 1 minor; 1 answered, 1 settled",
                 "",
                 "  blocking — The greeting stops halfway",
                 "    halfway of `review`, at greeting.txt",
                 "    It never says good night.",
                 "    fixed by `fix` — it says good night now",
+                "    settled — `grep -q night greeting.txt` exits 0",
                 "",
                 "  minor — A cleanup did not finish",
                 "    cleanup, the run's own, at run:scratch",

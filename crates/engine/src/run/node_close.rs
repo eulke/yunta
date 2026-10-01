@@ -115,6 +115,8 @@ pub(super) async fn close_node(
     if let Some(end) = land_unit(ctx, node, tokens).await? {
         return Ok(end);
     }
+    // The tree this node leaves is the one its answers are proved on.
+    super::finding_proofs::prove(ctx, node).await?;
 
     // An opaque artifact's name can carry a template
     // (`report-{{runner.name}}.md`) — rendered per node so every fan-out

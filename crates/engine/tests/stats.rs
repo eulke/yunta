@@ -593,6 +593,7 @@ fn submissions_and_finding_calls_are_counted_by_verdict_and_by_node() {
         withdrawn: 1,
         refused: 1,
         answered: 0,
+        proved: 0,
     };
     assert_eq!(stats.findings, posted_by_a);
     assert_eq!(
