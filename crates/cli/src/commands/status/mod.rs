@@ -236,7 +236,10 @@ fn print_detail(failure: &Failure) {
             }
         }
         Failure::PathsDenied { denied_paths } => {
-            println!("{detail}denied to every run by the project (permissions.paths.deny):");
+            println!(
+                "{detail}denied to every session of the run — by the project \
+                 (permissions.paths.deny), or as a test a person approved:"
+            );
             for path in denied_paths {
                 println!("{}{}", indent(3), path.display());
             }

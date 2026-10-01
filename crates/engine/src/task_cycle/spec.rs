@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 
 use yunta_core::events::TaskLedger;
-use yunta_core::{ScopeGlob, Task, TestFile};
+use yunta_core::{Task, TestFile};
 
 use super::criteria::pre_check_unless_cut;
 use super::{CriterionRun, Memo, SessionSetup, TaskCycleError};
@@ -86,21 +86,7 @@ pub(super) fn files<'a>(setup: &'a SessionSetup, task: &Task) -> &'a [TestFile] 
 
 /// Where `files` sit in the repository, as the paths a diff names.
 pub(super) fn paths(files: &[TestFile]) -> impl Iterator<Item = PathBuf> + '_ {
-    files
-        .iter()
-        .map(|file| PathBuf::from(crate::worktree::in_repo(&file.path)))
-}
-
-/// What `task`'s work may never change: what the project denies to every
-/// run, and the files its tests live in.
-pub(super) fn denied(project: &[ScopeGlob], files: &[TestFile]) -> Vec<ScopeGlob> {
-    // Each file as the pattern that selects exactly it — an escaped path
-    // always compiles.
-    project
-        .iter()
-        .cloned()
-        .chain(paths(files).filter_map(|path| ScopeGlob::exact(&path).ok()))
-        .collect()
+    files.iter().map(|file| PathBuf::from(file.in_repo()))
 }
 
 /// `unit`, judged from the tree it started from with `files` in it.

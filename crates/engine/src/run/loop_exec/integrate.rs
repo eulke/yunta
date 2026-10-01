@@ -319,13 +319,16 @@ async fn integrate_task(
     // authorized for this task is as much its scope as what the tasks
     // document declared, and an audit that ignored the grants would
     // reject work a human already allowed.
+    // Every test a person approved, the task's own among them: its own
+    // are what it staged, which the audit leaves out of its diff.
+    let deny = crate::run::denied::Denied::of(ctx).await?.every();
     let scope = audit(
         task_worktree,
         &onto,
         &crate::run_dir::index_for(ctx.run_dir, &unit.who),
         crate::scope::Ceiling {
             scope: &effective_scope(ctx, task).await?,
-            deny: ctx.manifest.config.denied_paths(),
+            deny: &deny,
         },
         staged,
         supervision,

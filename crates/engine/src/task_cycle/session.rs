@@ -23,7 +23,8 @@ use super::DispatchOutcome;
 /// (values never touch the log, nothing undeclared leaks).
 #[derive(Clone)]
 pub struct SessionSetup {
-    /// What the project denies to every run: every session's fence
+    /// What no session of the run may write: what the project denies to
+    /// every run, and every test a person approved. Every session's fence
     /// refuses it, whatever its scope.
     pub denied: Vec<yunta_core::ScopeGlob>,
     /// The directories every session of the run shares, which a session

@@ -50,8 +50,9 @@ pub(crate) async fn resolve_setup(
     };
     state_run_wide_absences(ctx, node, adapter.as_ref()).await?;
     let node_scope = super::node_scope::session_access(ctx, node).await?;
+    let denied = super::denied::Denied::of(ctx).await?.every();
     Ok(Ok(SessionSetup {
-        denied: ctx.manifest.config.denied_paths().to_vec(),
+        denied,
         shared_dirs: ctx
             .manifest
             .config

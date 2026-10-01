@@ -50,8 +50,8 @@ pub(crate) struct Work<'a> {
 
 /// Judges `task`'s work: its criteria on `work`'s tree, then that tree's
 /// diff against `ceiling` — the scope it declared plus what was granted,
-/// never a request still waiting on a decision, and what the project
-/// denies to every run.
+/// never a request still waiting on a decision, and what no session of
+/// the run may write.
 pub(crate) async fn judge(
     task: &Task,
     ceiling: crate::scope::Ceiling<'_>,

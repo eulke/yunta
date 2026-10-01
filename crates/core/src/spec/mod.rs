@@ -10,7 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Criterion, TaskId};
+use crate::{Criterion, ScopeGlob, TaskId};
 
 mod rules;
 
@@ -25,6 +25,16 @@ impl SpecFile {
     /// The spec of `task`, when the document has one.
     pub fn of(&self, task: &TaskId) -> Option<&Spec> {
         self.specs.iter().find(|spec| &spec.task == task)
+    }
+
+    /// Every file the document gives any task, each as the pattern that
+    /// selects exactly it.
+    pub fn test_globs(&self) -> Vec<ScopeGlob> {
+        self.specs
+            .iter()
+            .flat_map(|spec| &spec.files)
+            .filter_map(TestFile::glob)
+            .collect()
     }
 }
 
@@ -61,6 +71,27 @@ pub struct TestFile {
     pub path: String,
     /// The file, whole.
     pub content: String,
+}
+
+impl TestFile {
+    /// Its path as git names it inside the repository: its names alone,
+    /// joined by `/` — `./tests/a.sh` is `tests/a.sh`.
+    pub fn in_repo(&self) -> String {
+        std::path::Path::new(&self.path)
+            .components()
+            .filter_map(|component| match component {
+                std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("/")
+    }
+
+    /// The pattern that selects exactly this file — an escaped path
+    /// always compiles.
+    pub fn glob(&self) -> Option<ScopeGlob> {
+        ScopeGlob::exact(std::path::Path::new(&self.in_repo())).ok()
+    }
 }
 
 /// One test: the command that runs it, and what its passing proves.

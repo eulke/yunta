@@ -15,6 +15,8 @@ use yunta_core::events::{FindingEvent, NodeEvent, SessionEvent};
 use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::Bench;
 
+pub mod spec;
+
 // --- kind: questions ------------------------------------
 
 pub const QUESTIONS_WORKFLOW: &str = r#"

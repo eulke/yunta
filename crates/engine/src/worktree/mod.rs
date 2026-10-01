@@ -44,7 +44,7 @@ use crate::process::Supervision;
 pub use branches::{run_branch, unit_branch};
 pub use commit::{commit_tree, restore};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
-pub use overlay::{in_repo, tree_with, write_files};
+pub use overlay::{tree_with, write_files};
 pub use unit::{
     carry_work, commit_work, land, open_unit, rebase_onto, reopen_unit, snapshot_commit, Carried,
     Rebase, Unit, UnitHome, UnitId,

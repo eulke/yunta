@@ -9,7 +9,7 @@
 //! the unit's audit measures against is that tree with the files in it,
 //! so the files are never the work's change, and a change to them is.
 
-use std::path::{Component, Path};
+use std::path::Path;
 
 use yunta_core::{InvalidId, TestFile, TreeId};
 
@@ -35,7 +35,7 @@ pub async fn tree_with(
     crate::git::output(repo, &["read-tree", from.as_str()], private).await?;
     let scratch = index.with_extension("blob");
     for file in files {
-        let path = in_repo(&file.path);
+        let path = file.in_repo();
         tokio::fs::write(&scratch, &file.content)
             .await
             .map_err(|source| WorktreeError::Io {
@@ -76,7 +76,7 @@ pub async fn tree_with(
 /// Writes `files` into `worktree`, each whole, over whatever is there.
 pub async fn write_files(worktree: &Path, files: &[TestFile]) -> Result<(), WorktreeError> {
     for file in files {
-        let path = worktree.join(in_repo(&file.path));
+        let path = worktree.join(file.in_repo());
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent)
                 .await
@@ -95,17 +95,4 @@ pub async fn write_files(worktree: &Path, files: &[TestFile]) -> Result<(), Work
             })?;
     }
     Ok(())
-}
-
-/// A file's path as git names it inside the repository: its names alone,
-/// joined by `/` — `./tests/a.sh` is `tests/a.sh`.
-pub fn in_repo(path: &str) -> String {
-    Path::new(path)
-        .components()
-        .filter_map(|component| match component {
-            Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("/")
 }

@@ -179,7 +179,8 @@ struct TaskSheet<'a> {
     /// What the diff is held to: declared plus granted.
     scope: &'a [ScopeGlob],
     /// What the diff may never touch, whatever its scope: what the project
-    /// denies to every run, and the files the task's tests live in.
+    /// denies to every run, and the files of every test a person approved,
+    /// this task's own among them.
     #[serde(skip_serializing_if = "<[ScopeGlob]>::is_empty")]
     denied: &'a [ScopeGlob],
     criteria: Vec<Declared<'a>>,

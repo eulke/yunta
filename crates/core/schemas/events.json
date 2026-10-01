@@ -2143,7 +2143,7 @@
           ]
         },
         {
-          "description": "The work reached paths the project denies to every run\n(`permissions.paths.deny`). No grant widens a deny, so a person\nis never offered one: the work goes, or the project changes its\nconfig.",
+          "description": "The work reached paths no session of the run may write: what the\nproject denies to every run (`permissions.paths.deny`), or a test a\nperson approved. No grant widens a deny, so a person is never\noffered one: the work goes, or the project changes its\nconfig.",
           "type": "object",
           "properties": {
             "denied_paths": {
@@ -2745,7 +2745,7 @@
           ]
         },
         "refused": {
-          "description": "What the failed attempt left in the run's tree that the project\ndenies to every run, put back as the branch had it rather than\ncommitted. Absent when there was none.",
+          "description": "What the failed attempt left in the run's tree that no session of\nthe run may write, put back as the branch had it rather than\ncommitted. Absent when there was none.",
           "type": "array",
           "items": {
             "type": "string"
@@ -2850,7 +2850,7 @@
           ]
         },
         {
-          "description": "The work reached paths the project denies to every run\n(`permissions.paths.deny`). No grant widens a deny, so a person\nis never offered one: the work goes, or the project changes its\nconfig.",
+          "description": "The work reached paths no session of the run may write: what the\nproject denies to every run (`permissions.paths.deny`), or a test a\nperson approved. No grant widens a deny, so a person is never\noffered one: the work goes, or the project changes its\nconfig.",
           "type": "object",
           "properties": {
             "denied_paths": {
@@ -3678,7 +3678,7 @@
       "type": "object",
       "properties": {
         "denied": {
-          "description": "The paths of the diff the project denies to every run, whatever\nthe scope allows. Absent when there are none, and in a log written\nbefore the project could deny any.",
+          "description": "The paths of the diff no session of the run may write, whatever\nthe scope allows: what the project denies to every run, and the\ntests a person approved. Absent when there are none, and in a log\nwritten before anything could be denied.",
           "type": "array",
           "items": {
             "type": "string"
@@ -4027,7 +4027,7 @@
           "type": "boolean"
         },
         "denied": {
-          "description": "What it changed that the project denies to every run.",
+          "description": "What it changed that no session of the run may write: what the\nproject denies to every run, or a test a person approved.",
           "type": "array",
           "items": {
             "type": "string"

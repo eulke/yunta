@@ -231,9 +231,10 @@ pub struct ScopeCheckedPayload {
     pub task_id: Option<TaskId>,
     pub diff: Vec<PathBuf>,
     pub violations: Vec<PathBuf>,
-    /// The paths of the diff the project denies to every run, whatever
-    /// the scope allows. Absent when there are none, and in a log written
-    /// before the project could deny any.
+    /// The paths of the diff no session of the run may write, whatever
+    /// the scope allows: what the project denies to every run, and the
+    /// tests a person approved. Absent when there are none, and in a log
+    /// written before anything could be denied.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub denied: Vec<PathBuf>,
 }
@@ -309,8 +310,8 @@ pub struct NodeFailedPayload {
     /// corrective node starts from it and nothing is blamed on another.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit: Option<CommitSha>,
-    /// What the failed attempt left in the run's tree that the project
-    /// denies to every run, put back as the branch had it rather than
+    /// What the failed attempt left in the run's tree that no session of
+    /// the run may write, put back as the branch had it rather than
     /// committed. Absent when there was none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub refused: Vec<PathBuf>,

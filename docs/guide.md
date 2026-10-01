@@ -149,6 +149,10 @@ fails without landing, and a task that wrote one is not integrated. A failure ov
 denied path never offers `grant`, a scope-expansion request for one is refused
 without asking anyone, and a node's request for one is never put to a person. The
 list is empty unless the project writes one, so no workflow fails for lacking it.
+Once a run holds a [spec](#artifacts-the-engine-reads), every file of it is denied the same way to
+every session of the run — the tests a person approved stay as approved through
+the pull request. A lint command that rewrites files fails over one of them like
+over any denied path.
 
 ## Config layers and state
 
@@ -293,7 +297,9 @@ the tree its work starts from and its tests join its criteria, so it closes only
 when they pass; the suite the run measured answers for that tree before the tests
 are in it. Its work may never change those files: its session's fence refuses the
 write, `yunta_task` lists them as denied, and a change the audit finds keeps the
-task open. A test the implementer believes is wrong is a departure from the plan —
+task open. Neither may any other session of the run — another task, a node after
+the loop, one scoped to what the run changed: every file of the spec is denied to
+all of them, as the project's own denies are. A test the implementer believes is wrong is a departure from the plan —
 `yunta_declare_deviation` on that criterion — for a person to settle. The files
 reach the run's tree with the task's own commit.
 Nothing else to declare, and an opaque artifact mounts nothing because it has no

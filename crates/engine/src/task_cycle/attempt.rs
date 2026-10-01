@@ -34,7 +34,8 @@ pub(super) struct AttemptParams<'a> {
     /// Every path granted before this attempt: on the log when the cycle
     /// began, and what the engine granted in the cycle's earlier attempts.
     pub(super) already_granted_paths: &'a [ScopeGlob],
-    /// What the project denies to every run: never written, never
+    /// What no session of the run may write — what the project denies to
+    /// every run, and every test a person approved: never written, never
     /// granted.
     pub(super) denied: &'a [ScopeGlob],
     /// The session this attempt picks back up, and the answer it is told,

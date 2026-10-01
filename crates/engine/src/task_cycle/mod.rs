@@ -296,12 +296,9 @@ async fn cycle(
         guarded,
     } = laid;
     let unit = &overlaid;
-    let denied = spec::denied(
-        permissions
-            .and_then(|permissions| permissions.paths.as_ref())
-            .map_or(&[], |paths| paths.deny.as_slice()),
-        spec::files(setup, task),
-    );
+    // What the run denies every session: the project's deny and every
+    // test a person approved, this task's own among them.
+    let denied = setup.denied.clone();
     let params = AttemptParams {
         task,
         instruction,

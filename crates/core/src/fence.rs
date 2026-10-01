@@ -49,8 +49,9 @@ pub struct Fence {
     pub allowed: Option<Vec<ScopeGlob>>,
     pub roots: Vec<PathBuf>,
     pub advice: Advice,
-    /// What the project denies to every run under the worktree, refused
-    /// whatever `allowed` admits.
+    /// What no session of the run may write under the worktree — what the
+    /// project denies to every run, and the tests a person approved —
+    /// refused whatever `allowed` admits.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub denied: Vec<ScopeGlob>,
     /// How the session's CLI names the run's tools, which is what a
@@ -88,7 +89,7 @@ pub struct Refusal {
     pub allowed: Option<Vec<ScopeGlob>>,
     pub roots: Vec<PathBuf>,
     pub advice: Advice,
-    /// Whether the path is one the project denies to every run, which no
+    /// Whether the path is one no session of the run may write, which no
     /// request widens.
     pub denied: bool,
     /// How the model the refusal reaches calls the run's tools.
@@ -323,8 +324,8 @@ impl fmt::Display for Refusal {
             return write!(
                 f,
                 "{REFUSAL_MARKER}{} is outside what this session may ever write: the project \
-                 denies it to every run (permissions.paths.deny), or it holds a test this \
-                 session's task is held to, and no request widens that. Do not write here.",
+                 denies it to every run (permissions.paths.deny), or it holds a test a person \
+                 approved, and no request widens that. Do not write here.",
                 self.target.display()
             );
         }

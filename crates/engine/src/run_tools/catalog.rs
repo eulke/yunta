@@ -198,7 +198,9 @@ fn check_scope_tool(session: &SessionTools) -> Tool {
              when your session ends. `scope` is what you may write — what the node \
              declared plus what a person granted it — and `outside_scope` lists every \
              path you changed outside it. A path outside fails the node; if your fix \
-             needs one, ask with `{ask}` instead of writing it.",
+             needs one, ask with `{ask}` instead of writing it — unless no session of \
+             the run may write it (what the project denies, or a test a person \
+             approved), which no request widens.",
             ask = session.called(RunTool::RequestScopeExpansion),
         ),
         no_arguments(),

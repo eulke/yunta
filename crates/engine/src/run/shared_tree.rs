@@ -28,7 +28,7 @@ pub(super) enum Closing {
 #[derive(Default)]
 pub(super) struct AtClose {
     pub(super) committed: Option<(CommitSha, TreeId)>,
-    /// What the work left that the project denies to every run: never
+    /// What the work left that no session of the run may write: never
     /// committed, and in a run with a worktree of its own put back as the
     /// branch had it.
     pub(super) refused: Vec<PathBuf>,
@@ -43,8 +43,8 @@ pub(super) struct AtClose {
 /// another node is still working in the same tree: the tree holds both
 /// nodes' work at once, so it is committed by whichever of them closes
 /// last, naming the others. The close that commits answers for the whole
-/// commit: what it would add that the project denies is refused and put
-/// back first.
+/// commit: what it would add that no session of the run may write is
+/// refused and put back first.
 pub(super) async fn at_close(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -63,7 +63,7 @@ pub(super) async fn at_close(
     let index =
         crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
     // Boxed: a close runs at the bottom of every composed run's stack.
-    let refused = Box::pin(refuse_denied(ctx, &index)).await?;
+    let refused = Box::pin(refuse_denied(ctx, node, &index)).await?;
     let committed = Box::pin(crate::worktree::commit_tree(
         ctx.worktree,
         &index,
@@ -74,10 +74,14 @@ pub(super) async fn at_close(
     Ok(AtClose { committed, refused })
 }
 
-/// What the run's tree would commit that the project denies to every
-/// run, put back as `HEAD` has it.
-async fn refuse_denied(ctx: &RunCtx<'_>, index: &Path) -> Result<Vec<PathBuf>, RunError> {
-    let deny = ctx.manifest.config.denied_paths();
+/// What the run's tree would commit that the run denies `node`, put back
+/// as `HEAD` has it.
+async fn refuse_denied(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    index: &Path,
+) -> Result<Vec<PathBuf>, RunError> {
+    let deny = super::denied::Denied::of(ctx).await?.closing(node);
     if deny.is_empty() {
         return Ok(Vec::new());
     }
@@ -85,16 +89,16 @@ async fn refuse_denied(ctx: &RunCtx<'_>, index: &Path) -> Result<Vec<PathBuf>, R
     let tree = crate::worktree::capture_tree(ctx.worktree, index, supervision).await?;
     let head = crate::worktree::head_commit(ctx.worktree, supervision).await?;
     let added = crate::scope::changed_between(ctx.worktree, &head, &tree, supervision).await?;
-    let refused = crate::scope::denied(&added, deny, &[])?;
+    let refused = crate::scope::denied(&added, &deny, &[])?;
     crate::worktree::restore(ctx.worktree, &refused, supervision).await?;
     Ok(refused)
 }
 
 /// In a person's own checkout nothing is committed or put back: what
-/// `node` wrote there that the project denies is only refused, for the
+/// `node` wrote there that the run denies it is only refused, for the
 /// node to fail with.
 async fn refused_in_place(ctx: &RunCtx<'_>, node: &Node) -> Result<AtClose, RunError> {
-    let deny = ctx.manifest.config.denied_paths();
+    let deny = super::denied::Denied::of(ctx).await?.closing(node);
     let state = ctx.run_view().await?.state;
     let from = state.nodes.from_tree(&node.id).cloned();
     let (false, Some(from)) = (deny.is_empty(), from) else {
@@ -106,7 +110,7 @@ async fn refused_in_place(ctx: &RunCtx<'_>, node: &Node) -> Result<AtClose, RunE
         crate::scope::changed_since(ctx.worktree, &from, &index, ctx.root_supervision()).await?;
     Ok(AtClose {
         committed: None,
-        refused: crate::scope::denied(&diff, deny, &[])?,
+        refused: crate::scope::denied(&diff, &deny, &[])?,
     })
 }
 

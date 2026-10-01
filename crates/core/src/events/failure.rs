@@ -98,9 +98,10 @@ pub enum Failure {
     /// very tree an earlier attempt failed on: it is refused before
     /// running, since the same command on the same tree answers the same.
     Unchanged { unchanged: Unchanged },
-    /// The work reached paths the project denies to every run
-    /// (`permissions.paths.deny`). No grant widens a deny, so a person
-    /// is never offered one: the work goes, or the project changes its
+    /// The work reached paths no session of the run may write: what the
+    /// project denies to every run (`permissions.paths.deny`), or a test a
+    /// person approved. No grant widens a deny, so a person is never
+    /// offered one: the work goes, or the project changes its
     /// config.
     PathsDenied { denied_paths: Vec<PathBuf> },
     /// A failure the engine states in one sentence.
@@ -180,7 +181,7 @@ impl Failure {
         !matches!(self, Failure::Unset { .. })
     }
 
-    /// Work that reached `paths`, which the project denies to every run.
+    /// Work that reached `paths`, which no session of the run may write.
     pub fn paths_denied(paths: Vec<PathBuf>) -> Self {
         Failure::PathsDenied {
             denied_paths: paths,
@@ -313,8 +314,8 @@ impl fmt::Display for Failure {
             }
             Failure::PathsDenied { denied_paths } => write!(
                 f,
-                "wrote what the project denies to every run (`permissions.paths.deny`) — {}; no \
-                 grant widens it: undo those changes, or change the project's config",
+                "wrote what no session of the run may write (`permissions.paths.deny`, or a \
+                 test a person approved) — {}; no grant widens it: undo those changes",
                 denied_paths
                     .iter()
                     .map(|path| path.display().to_string())

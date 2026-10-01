@@ -51,15 +51,16 @@ pub enum ScopeCheckError {
 pub struct ScopeCheckResult {
     pub diff: Vec<PathBuf>,
     /// Every path of the diff the work may not have changed: outside its
-    /// scope, or denied to every run.
+    /// scope, or denied to every session of the run.
     pub violations: Vec<PathBuf>,
-    /// The violations the project denies to every run
-    /// (`permissions.paths.deny`), which no grant widens.
+    /// The violations no session of the run may write — what the project
+    /// denies to every run (`permissions.paths.deny`), and the tests a
+    /// person approved — which no grant widens.
     pub denied: Vec<PathBuf>,
 }
 
-/// What a unit of work is held to: the scope it may change, and what the
-/// project denies to every run whatever that scope allows.
+/// What a unit of work is held to: the scope it may change, and what no
+/// session of the run may write whatever that scope allows.
 #[derive(Debug, Clone, Copy)]
 pub struct Ceiling<'a> {
     pub scope: &'a [ScopeGlob],
@@ -146,8 +147,8 @@ pub async fn audit(
     })
 }
 
-/// The paths of `diff` the project denies to every run, less what the
-/// adapter staged for its own mechanics.
+/// The paths of `diff` that `deny` selects, less what the adapter staged
+/// for its own mechanics.
 pub fn denied(
     diff: &[PathBuf],
     deny: &[ScopeGlob],

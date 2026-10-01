@@ -138,7 +138,8 @@ pub struct TaskCheckAnsweredPayload {
     /// What the work changed outside the task's scope.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outside_scope: Vec<PathBuf>,
-    /// What it changed that the project denies to every run.
+    /// What it changed that no session of the run may write: what the
+    /// project denies to every run, or a test a person approved.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub denied: Vec<PathBuf>,
     pub duration_ms: u64,
