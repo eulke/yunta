@@ -23,7 +23,7 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::project::Project;
 use crate::render::state::RunWord;
-use crate::render::{cell_width, format_duration, indent, truncate, Glyphs, INDENT, LINE_WIDTH};
+use crate::render::{cell_width, format_duration, indent, truncate, Look, INDENT};
 
 /// The cells a run id gets. A ULID is 26 characters, and the id is what
 /// a reader copies into the next command, so this column pads a shorter
@@ -169,7 +169,7 @@ pub async fn list_runs(all: bool) -> Result<Outcome, CliError> {
     if rows.is_empty() && unreadable.is_empty() {
         println!("no runs in this repository");
     } else {
-        print!("{}", render_runs(rows, unreadable, Glyphs::from_env()));
+        print!("{}", render_runs(rows, unreadable, Look::stdout()));
     }
     if elsewhere > 0 {
         println!(
@@ -224,7 +224,7 @@ impl Here {
 ///
 /// A run under `unreadable` has no state to have been in for any length
 /// of time, so that group is ordered by id alone.
-fn render_runs(mut rows: Vec<RunRow>, mut unreadable: Vec<Unreadable>, glyphs: Glyphs) -> String {
+fn render_runs(mut rows: Vec<RunRow>, mut unreadable: Vec<Unreadable>, look: Look) -> String {
     rows.sort_by(|a, b| b.age.cmp(&a.age).then_with(|| a.run_id.cmp(&b.run_id)));
     let mut out = String::new();
     for standing in Standing::ALL {
@@ -234,7 +234,7 @@ fn render_runs(mut rows: Vec<RunRow>, mut unreadable: Vec<Unreadable>, glyphs: G
         }
         push_heading(&mut out, standing.heading(), group.len());
         for row in group {
-            out.push_str(&row.render(glyphs));
+            out.push_str(&row.render(look));
         }
     }
     if !unreadable.is_empty() {
@@ -275,7 +275,7 @@ impl RunRow {
     /// the run is doing and the mode it does it in; the line under it is
     /// the same summary `yunta status` prints, so the two surfaces say
     /// the same thing about the same run.
-    fn render(&self, glyphs: Glyphs) -> String {
+    fn render(&self, Look { glyphs, width }: Look) -> String {
         // The row hangs one step under the heading of its group, and
         // its summary one step further under the row, so the summary
         // reads as this run's line rather than the next run's.
@@ -291,7 +291,7 @@ impl RunRow {
             format_duration(self.age),
             truncate(
                 &self.summary,
-                LINE_WIDTH.saturating_sub(cell_width(&margin)),
+                width.cells().saturating_sub(cell_width(&margin)),
                 glyphs
             )
             .trim_end(),
@@ -432,7 +432,7 @@ mod tests {
                 row(OLDEST, Standing::NeedsYou, 86_400),
             ],
             Vec::new(),
-            Glyphs::Ascii,
+            Look::plain(),
         );
         assert_eq!(listed(&text), [OLDEST, NEWEST], "{text}");
     }
@@ -445,7 +445,7 @@ mod tests {
                 row(TIED_A, Standing::InFlight, 60),
             ],
             Vec::new(),
-            Glyphs::Ascii,
+            Look::plain(),
         );
         assert_eq!(listed(&text), [TIED_A, TIED_B], "{text}");
     }
@@ -459,7 +459,7 @@ mod tests {
                 row(OLDEST, Standing::NeedsYou, 5),
             ],
             Vec::new(),
-            Glyphs::Ascii,
+            Look::plain(),
         );
         assert_eq!(listed(&text), [OLDEST, TIED_A, NEWEST], "{text}");
         assert!(text.contains("needs you (1)"), "{text}");
@@ -475,7 +475,7 @@ mod tests {
                 Unreadable::new(&RunId::from_static(NEWEST), "gone".to_string()),
                 Unreadable::new(&RunId::from_static(TIED_A), "gone".to_string()),
             ],
-            Glyphs::Ascii,
+            Look::plain(),
         );
         assert_eq!(listed(&text), [OLDEST, TIED_A, NEWEST], "{text}");
         assert!(text.contains("unreadable (2)"), "{text}");

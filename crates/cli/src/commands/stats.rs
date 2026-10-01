@@ -4,8 +4,8 @@
 //! (the imperative half) and renders them, either as `--json` or as a
 //! terminal visualization (horizontal bars per node/runner, a sparkline
 //! of a workflow's historical CPTV, a comparison table between modes).
-//! Every rendered line stays inside [`crate::render::LINE_WIDTH`] and
-//! reads with its glyphs and color stripped, because the columns, bars,
+//! Every rendered line stays inside the width stdout gets and reads
+//! with its glyphs and color stripped, because the columns, bars,
 //! words and glyphs all come from `crate::render`, which is where both
 //! rules live.
 
@@ -22,7 +22,7 @@ use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
 use crate::render::{
     bar, cell_width, format_duration, format_pct, id_column, middle_cut, sparkline, truncate,
-    Glyphs, NodeDisplay, INDENT, LABEL_WIDTH, LINE_WIDTH, STATE_WIDTH,
+    Glyphs, Look, NodeDisplay, INDENT, LABEL_WIDTH, STATE_WIDTH,
 };
 
 pub async fn stats(
@@ -94,7 +94,7 @@ async fn stats_workflow(workflow_name: &WorkflowName, json: bool) -> Result<Outc
     }
     print!(
         "{}",
-        render_workflow_history(workflow_name, &history, Glyphs::from_env())
+        render_workflow_history(workflow_name, &history, Look::stdout())
     );
     if let Some(findings) = &findings {
         let text = render_verification_findings(findings);
@@ -389,7 +389,7 @@ fn node_line(
 fn render_workflow_history(
     workflow_name: &WorkflowName,
     history: &[RunSummary],
-    glyphs: Glyphs,
+    look: Look,
 ) -> String {
     let mut out = format!(
         "workflow `{workflow_name}` — {}\n",
@@ -397,13 +397,13 @@ fn render_workflow_history(
     );
 
     out.push_str("\nCPTV over time:\n");
-    out.push_str(&format!("{}\n", cptv_line(history, glyphs)));
+    out.push_str(&format!("{}\n", cptv_line(history, look)));
 
     out.push_str("\nmodes:\n");
     for (mode, runs, median_cptv, median_tokens) in mode_table(history) {
         out.push_str(&format!(
             "{INDENT}{} {:>3} runs   median CPTV {}   median tokens {}\n",
-            truncate(mode.as_str(), LABEL_WIDTH, glyphs),
+            truncate(mode.as_str(), LABEL_WIDTH, look.glyphs),
             runs,
             median_cptv
                 .map(|v| format!("{v:.1}"))
@@ -431,17 +431,19 @@ fn render_workflow_history(
 /// value spelled out beside it — the sparkline carries the shape and the
 /// number carries the scale.
 ///
-/// The sparkline gets whatever [`LINE_WIDTH`] leaves after the indent and
-/// that note, so a workflow with hundreds of runs narrows its window
+/// The sparkline gets whatever `width` leaves after the indent and that
+/// note, so a workflow with hundreds of runs narrows its window
 /// instead of wrapping the line and breaking the block it sits in.
-fn cptv_line(history: &[RunSummary], glyphs: Glyphs) -> String {
+fn cptv_line(history: &[RunSummary], Look { glyphs, width }: Look) -> String {
     let latest = history
         .last()
         .and_then(|r| r.cptv)
         .map(|c| format!("{c:.1}"))
         .unwrap_or_else(|| "n/a".to_string());
     let note = format!("  (oldest -> newest, latest = {latest})");
-    let cells = LINE_WIDTH.saturating_sub(cell_width(INDENT) + cell_width(&note));
+    let cells = width
+        .cells()
+        .saturating_sub(cell_width(INDENT) + cell_width(&note));
     let series: Vec<f64> = history.iter().map(|r| r.cptv.unwrap_or(0.0)).collect();
     format!("{INDENT}{}{note}", sparkline(&series, cells, glyphs))
 }
@@ -904,9 +906,12 @@ mod tests {
     #[test]
     fn a_long_history_narrows_its_sparkline_instead_of_wrapping_the_line() {
         let history: Vec<RunSummary> = (1..=200).map(|n| summary(f64::from(n))).collect();
-        let line = cptv_line(&history, Glyphs::Ascii);
+        let line = cptv_line(&history, Look::plain());
         let cells = cell_width(&line);
-        assert!(cells <= LINE_WIDTH, "{cells} cells: {line}");
+        assert!(
+            cells <= Look::plain().width.cells(),
+            "{cells} cells: {line}"
+        );
         assert!(
             line.contains(Glyphs::Ascii.ellipsis()),
             "a narrowed window says so: {line}"
@@ -916,7 +921,7 @@ mod tests {
     #[test]
     fn a_history_that_fits_draws_every_run_and_marks_no_window() {
         let history: Vec<RunSummary> = (1..=3).map(|n| summary(f64::from(n))).collect();
-        let line = cptv_line(&history, Glyphs::Ascii);
+        let line = cptv_line(&history, Look::plain());
         assert!(!line.contains(Glyphs::Ascii.ellipsis()), "{line}");
         assert!(line.contains("latest = 3.0"), "{line}");
     }

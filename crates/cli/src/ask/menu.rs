@@ -33,7 +33,7 @@
 use dialoguer::FuzzySelect;
 
 use super::{Answered, Console, NoAnswer};
-use crate::render::{wrap, INDENT, INDENT_WIDTH, LINE_WIDTH};
+use crate::render::{wrap, INDENT, INDENT_WIDTH};
 
 /// The keys a list answers to, named above every one of them.
 const KEYS: &str = "arrows move, type to filter, enter chooses";
@@ -51,8 +51,9 @@ pub(crate) struct Choice<T> {
 /// Puts `choices` to the person — `verb` says what picking one does —
 /// and returns the value behind the one picked.
 pub(crate) fn choose<T>(console: &Console, verb: &str, choices: Vec<Choice<T>>) -> Answered<T> {
-    let read = read(&choices);
-    let rows = rows(&choices, console.width());
+    let width = console.width();
+    let read = read(&choices, width);
+    let rows = rows(&choices, width);
     // What is read above the list is whatever the list's own rows have
     // no space for: what an option carries underneath, and a head a row
     // had to cut. An option a row holds whole is read on that row.
@@ -89,12 +90,12 @@ pub(crate) fn choose<T>(console: &Console, verb: &str, choices: Vec<Choice<T>>) 
 }
 
 /// Every option as it is read: its position, its text and what it
-/// carries underneath, each broken to the cells a line has and every
-/// line after the first sitting under the text of the first.
-fn read<T>(choices: &[Choice<T>]) -> Vec<String> {
+/// carries underneath, each broken to `width` cells and every line after
+/// the first sitting under the text of the first.
+fn read<T>(choices: &[Choice<T>], width: usize) -> Vec<String> {
     let digits = digits(choices);
     let indent = " ".repeat(INDENT_WIDTH + digits + INDENT_WIDTH);
-    let room = LINE_WIDTH.saturating_sub(indent.len());
+    let room = width.saturating_sub(indent.len());
     choices
         .iter()
         .enumerate()
@@ -179,6 +180,7 @@ impl Drop for Cursor<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::LINE_WIDTH;
 
     /// The cells an option's text has once the marker, the position and
     /// the gap after it are drawn.
@@ -199,7 +201,7 @@ mod tests {
     #[test]
     fn every_option_is_numbered_from_one() {
         assert_eq!(
-            read(&choices(false)),
+            read(&choices(false), LINE_WIDTH),
             vec!["  1  approve", "  2  adjust", "  3  abort"]
         );
         assert_eq!(
@@ -212,15 +214,18 @@ mod tests {
     fn an_option_too_long_for_one_line_is_broken_rather_than_left_to_the_terminal() {
         // A tradeoff the engine writes for an exhausted re-route, which
         // is half again as wide as a line has room for.
-        let block = read(&[Choice {
-            head: "retry — Re-route to `fix` once more".to_string(),
-            detail: Some(
-                "tradeoff: Uses one extra correction attempt beyond the declared \
+        let block = read(
+            &[Choice {
+                head: "retry — Re-route to `fix` once more".to_string(),
+                detail: Some(
+                    "tradeoff: Uses one extra correction attempt beyond the declared \
                  max_reroutes (0); escalates again if `fix` doesn't fix it"
-                    .to_string(),
-            ),
-            value: 0u8,
-        }]);
+                        .to_string(),
+                ),
+                value: 0u8,
+            }],
+            LINE_WIDTH,
+        );
         let block = block.first().map(String::as_str).unwrap_or_default();
         assert!(
             block.lines().count() > 2,
@@ -237,7 +242,7 @@ mod tests {
 
     #[test]
     fn a_second_line_sits_under_the_first_and_not_deeper() {
-        let read = read(&choices(true));
+        let read = read(&choices(true), LINE_WIDTH);
         let first = read.first().map(String::as_str).unwrap_or_default();
         let (head, detail) = first.split_once('\n').unwrap_or_default();
         assert_eq!(head, "  1  approve");
@@ -285,7 +290,7 @@ mod tests {
             value: 0u8,
         };
         let rows = rows(std::slice::from_ref(&long), 20);
-        let read = read(std::slice::from_ref(&long));
+        let read = read(std::slice::from_ref(&long), LINE_WIDTH);
         let row = rows.first().map(String::as_str).unwrap_or_default();
         let block = read.first().map(String::as_str).unwrap_or_default();
         assert!(row.len() < 20 - INDENT_WIDTH, "{row:?}");

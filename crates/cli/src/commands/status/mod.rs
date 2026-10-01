@@ -25,7 +25,7 @@ use crate::context::Context;
 use crate::error::note;
 use crate::error::{CliError, Outcome};
 use crate::render::state::RunWord;
-use crate::render::{indent, NodeDisplay, CHILD_DEPTH, INDENT};
+use crate::render::{indent, NodeDisplay, Width, CHILD_DEPTH, INDENT};
 
 pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -163,12 +163,23 @@ fn print_decision(
             println!("{}", decision::run_tree_line(tree));
             print!(
                 "{}",
-                decision::block(decision::Layout::Page, run_id, &node, &escalation)
+                decision::block(
+                    decision::Layout::Page {
+                        width: Width::stdout().cells()
+                    },
+                    run_id,
+                    &node,
+                    &escalation
+                )
             );
         }
         None => print!(
             "{}",
-            decision::without_menu(run_id, &advice::parked_in_full(waiting))
+            decision::without_menu(
+                run_id,
+                &advice::parked_in_full(waiting),
+                Width::stdout().cells()
+            )
         ),
     }
     println!("{INDENT}{}   closes it for good", advice::close(run_id));

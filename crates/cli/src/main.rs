@@ -47,6 +47,7 @@ fn main() -> ExitCode {
 
     let cli = cli::Cli::parse();
     render::ink::settle(color_policy(cli.color));
+    render::line_width::settle(columns());
     tracing::debug!("yunta starting");
 
     let outcome = drive(cli);
@@ -79,6 +80,15 @@ fn color_policy(when: render::ink::ColorWhen) -> render::ink::ColorPolicy {
         off: set("CLICOLOR").is_some_and(|value| value == "0"),
         dumb: set("TERM").is_some_and(|value| value == "dumb"),
     }
+}
+
+/// The width a reader asked every line to be laid out in, when
+/// `COLUMNS` names one.
+fn columns() -> Option<usize> {
+    std::env::var("COLUMNS")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|cells| *cells > 0)
 }
 
 /// Runs `cli` on a runtime of this process's own, and leaves.

@@ -18,7 +18,7 @@ use super::field::ask_line;
 use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, ANSWER};
 use crate::commands::status::decision::run_tree_line;
-use crate::render::{evidence, option_headline, option_tradeoff, INDENT, INDENT_WIDTH, LINE_WIDTH};
+use crate::render::{evidence, option_headline, option_tradeoff, INDENT, INDENT_WIDTH};
 
 /// Free text is offered on every decision, whatever was on the menu:
 /// the menu is there to make the common answer quick, never to be the
@@ -100,7 +100,7 @@ fn present(
     for document in shown {
         console.say("")?;
         console.say("what you are deciding on")?;
-        let width = console.width().min(LINE_WIDTH).saturating_sub(INDENT_WIDTH);
+        let width = console.width().saturating_sub(INDENT_WIDTH);
         console.block(
             &crate::render::shown::shown(document, width).join("\n"),
             INDENT,

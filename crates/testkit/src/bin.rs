@@ -18,9 +18,9 @@ pub(crate) const TERM: &str = "xterm-256color";
 /// narrow, so one on the host silently changes what every run may do.
 /// `home` gets an empty one instead, and `HOME` points there too, so
 /// nothing reaches the developer's own `~/.yunta`. `USER` names the
-/// author of what the run commits, and the two terminal variables
-/// decide what it may draw — all inherited would make the same suite
-/// measure differently on two machines.
+/// author of what the run commits, and the terminal variables decide
+/// what it may draw and how wide — all inherited would make the same
+/// suite measure differently on two machines.
 ///
 /// Git is pinned the same way and for the same reason: a run commits,
 /// and a developer's global or system git config decides the branch a
@@ -44,7 +44,9 @@ pub fn hermetic<C: Spawning>(cmd: &mut C, dir: &Path, home: &Path) {
     ] {
         cmd.carries(name, value);
     }
-    cmd.drops("NO_COLOR");
+    for name in ["NO_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "COLUMNS"] {
+        cmd.drops(name);
+    }
 }
 
 /// What [`hermetic`] needs of a command, so a test that spawns the

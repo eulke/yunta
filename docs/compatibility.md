@@ -353,6 +353,14 @@ reads the same once its color is taken out: color repeats the words, it never
 replaces them. `NO_COLOR` changes nothing but color — the live view is drawn on a
 terminal either way.
 
+## Line width
+
+A line is laid out to the width of the stream it is written to: a terminal's
+own width, held between 60 and 120 cells. `COLUMNS`, set to a positive number,
+is the width asked for and wins over the measured one, on a terminal or a pipe;
+with neither, a line is 80 cells. A row the live view or a prompt redraws in
+place never passes the terminal's edge, whatever the floor says.
+
 ## The JSON surfaces
 
 `stats --json`, `status --json` and `run --json` carry `schema_version: 6`. The

@@ -22,7 +22,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle, T
 use yunta_core::RunId;
 use yunta_engine::RunFrame;
 
-use crate::render::{truncate, Glyphs, LINE_WIDTH};
+use crate::render::{truncate, Glyphs, Width};
 
 use super::scrollback::Scrollback;
 use super::{view, Screen};
@@ -178,17 +178,12 @@ impl Region {
             .to_string()
     }
 
-    /// The cells one row of this region may take: the terminal's own
-    /// width, and [`LINE_WIDTH`] wherever the terminal is wider.
-    ///
-    /// Both halves earn their place. Past the terminal's edge a row
-    /// wraps, which is the tear [`Region::fit`] exists to prevent; below
-    /// it, a layout that grew with the window would reflow the run under
-    /// a reader every time they resized it, and the rows are written to
-    /// be read at eighty cells. Asked on every redraw, so a window
-    /// resized mid-run is followed.
+    /// The cells one row of this region may take: the width a line on
+    /// this terminal gets, never past the terminal's edge — past it a
+    /// row wraps, which is the tear [`Region::fit`] exists to prevent.
+    /// Asked on every redraw, so a window resized mid-run is followed.
     fn width(&self) -> usize {
-        usize::from(self.screen.width()).min(LINE_WIDTH)
+        Width::row(usize::from(self.screen.width())).cells()
     }
 }
 
@@ -355,7 +350,7 @@ mod tests {
                 &RUN,
                 true,
             );
-            let room = usize::from(columns).min(LINE_WIDTH);
+            let room = Width::row(usize::from(columns)).cells();
             let drawn = rows(&term);
             assert_eq!(
                 drawn.len(),

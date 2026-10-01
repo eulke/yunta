@@ -23,6 +23,8 @@ pub(crate) mod escalation;
 mod findings;
 pub(crate) mod glyphs;
 pub(crate) mod ink;
+pub(crate) mod line_width;
+pub(crate) mod look;
 pub(crate) mod markdown;
 mod plan;
 pub(crate) mod shown;
@@ -34,6 +36,8 @@ pub(crate) mod width;
 pub(crate) use bars::{bar, sparkline};
 pub(crate) use escalation::{evidence, option_headline, option_tradeoff};
 pub(crate) use glyphs::Glyphs;
+pub(crate) use line_width::Width;
+pub(crate) use look::Look;
 pub(crate) use state::{Mark, NodeDisplay, StateWord, STATE_WIDTH};
 pub(crate) use units::{format_duration, format_pct};
 pub(crate) use width::{

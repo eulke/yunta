@@ -32,9 +32,7 @@ use yunta_core::events::{GateOption, GateWaitingPayload};
 use yunta_core::{NodeId, RunId};
 
 use crate::commands::advice;
-use crate::render::{
-    cell_width, evidence, indent, option_headline, option_tradeoff, wrap, INDENT, LINE_WIDTH,
-};
+use crate::render::{cell_width, evidence, indent, option_headline, option_tradeoff, wrap, INDENT};
 
 /// Where a run works, on the one line every surface says it with: the
 /// path whole — it is copied into another terminal, never wrapped — and
@@ -58,9 +56,9 @@ pub(crate) fn run_tree_line(tree: &Path) -> String {
 #[derive(Clone, Copy)]
 pub(crate) enum Layout {
     /// A page of its own: every part under its own heading, wrapped to
-    /// the width a terminal is taken to have, because a reader who came
-    /// to `yunta status` came for exactly this.
-    Page,
+    /// `width` cells, because a reader who came to `yunta status` came
+    /// for exactly this.
+    Page { width: usize },
     /// A trailer under the outcome a run closed with: every part on the
     /// one line it is given, its label inline, so the decision reads as
     /// the end of the block above it rather than as a second page.
@@ -110,7 +108,7 @@ impl Layout {
     /// just reported.
     fn heading(self, node: &NodeId) -> String {
         match self {
-            Layout::Page => format!("decision needed on node `{node}`:\n"),
+            Layout::Page { .. } => format!("decision needed on node `{node}`:\n"),
             Layout::Trailer => format!("{INDENT}waiting on node `{node}`\n"),
         }
     }
@@ -119,7 +117,7 @@ impl Layout {
     /// sentence the whole block is about.
     fn lead(self, summary: &str) -> String {
         match self {
-            Layout::Page => paragraph(summary, 1),
+            Layout::Page { width } => paragraph(summary, 1, width),
             Layout::Trailer => verbatim(2, &one_line(summary)),
         }
     }
@@ -129,7 +127,9 @@ impl Layout {
     /// the trailer keeps the label inline, on the part's own line.
     fn field(self, label: &str, text: &str) -> String {
         match self {
-            Layout::Page => format!("{}{}", self.section(label), paragraph(text, 2)),
+            Layout::Page { width } => {
+                format!("{}{}", self.section(label), paragraph(text, 2, width))
+            }
             Layout::Trailer => verbatim(2, &yunta_core::text::detailed(label, &one_line(text))),
         }
     }
@@ -144,10 +144,10 @@ impl Layout {
             return String::new();
         }
         match self {
-            Layout::Page => {
+            Layout::Page { width } => {
                 let mut out = self.section(label);
                 for fact in facts {
-                    out.push_str(&paragraph(fact, 2));
+                    out.push_str(&paragraph(fact, 2, width));
                 }
                 out
             }
@@ -160,7 +160,7 @@ impl Layout {
     /// last line before the advice.
     fn section(self, label: &str) -> String {
         match self {
-            Layout::Page => verbatim(1, &format!("{label}:")),
+            Layout::Page { .. } => verbatim(1, &format!("{label}:")),
             Layout::Trailer => String::new(),
         }
     }
@@ -180,7 +180,11 @@ impl Layout {
             None => option_tradeoff(option),
         };
         match self {
-            Layout::Page => format!("{}{}", paragraph(&headline, 2), paragraph(&tradeoff, 3)),
+            Layout::Page { width } => format!(
+                "{}{}",
+                paragraph(&headline, 2, width),
+                paragraph(&tradeoff, 3, width)
+            ),
             Layout::Trailer => format!(
                 "{}{}",
                 verbatim(2, &one_line(&headline)),
@@ -199,7 +203,7 @@ impl Layout {
     /// page nobody is waiting in front of does not.
     fn advice(self) -> String {
         match self {
-            Layout::Page => String::new(),
+            Layout::Page { .. } => String::new(),
             Layout::Trailer => verbatim(
                 1,
                 "the run holds its own state on disk — close this terminal whenever you like \
@@ -211,16 +215,17 @@ impl Layout {
 
 /// The block `yunta status` prints for a run parked on something with no
 /// menu: what it waits on, that nothing here is answerable by choosing
-/// an option, and what moves the run instead.
-pub(crate) fn without_menu(run_id: &RunId, reason: &str) -> String {
+/// an option, and what moves the run instead, wrapped to `width` cells.
+pub(crate) fn without_menu(run_id: &RunId, reason: &str, width: usize) -> String {
     let mut out = "waiting on:\n".to_string();
-    out.push_str(&paragraph(reason, 1));
+    out.push_str(&paragraph(reason, 1, width));
     out.push_str(&paragraph(
         "no options to choose here: a menu is reconstructed for a failed node, \
          an exhausted re-route and an unresolved gate node, and this pause is \
          none of them. Resolve it where it was raised — a budget, a scope, an \
          answers file, a review on the forge — then hand the run back with:",
         1,
+        width,
     ));
     out.push_str(&verbatim(2, &advice::resume(run_id)));
     out
@@ -232,15 +237,15 @@ fn verbatim(depth: usize, text: &str) -> String {
     format!("{}{text}\n", indent(depth))
 }
 
-/// `text` as whole lines `depth` steps in, each one inside the width a
-/// terminal is taken to have.
+/// `text` as whole lines `depth` steps in, each one inside `width`
+/// cells.
 ///
 /// Text with no words in it draws nothing: a block is built out of
 /// fields an escalation may leave empty, and an indent on a line of its
 /// own is trailing whitespace a reader never asked for.
-fn paragraph(text: &str, depth: usize) -> String {
+fn paragraph(text: &str, depth: usize, width: usize) -> String {
     let margin = indent(depth);
-    let room = LINE_WIDTH.saturating_sub(cell_width(&margin));
+    let room = width.saturating_sub(cell_width(&margin));
     wrap(text, room)
         .into_iter()
         .filter(|line| !line.is_empty())
@@ -284,6 +289,10 @@ mod tests {
     use yunta_core::NonEmpty;
 
     use super::*;
+    use crate::render::LINE_WIDTH;
+
+    /// A page laid out off a terminal.
+    const PAGE: Layout = Layout::Page { width: LINE_WIDTH };
 
     fn escalation() -> GateWaitingPayload {
         escalation_saying("node `lint` failed and its 0 re-route(s) to `fix-lint` are exhausted")
@@ -372,7 +381,7 @@ mod tests {
 
     #[test]
     fn a_page_hangs_every_part_of_a_decision_under_a_heading_of_its_own() {
-        let page = block(Layout::Page, &RUN, &NODE, &escalation());
+        let page = block(PAGE, &RUN, &NODE, &escalation());
         assert!(
             page.starts_with("decision needed on node `lint`:\n"),
             "{page}"
@@ -388,7 +397,7 @@ mod tests {
 
     #[test]
     fn a_page_hangs_evidence_under_its_own_heading_when_it_says_more_than_the_summary() {
-        let page = block(Layout::Page, &RUN, &GATE, &gate());
+        let page = block(PAGE, &RUN, &GATE, &gate());
         assert!(page.lines().any(|line| line == "  evidence:"), "{page}");
         assert!(page.contains("assignee: lead"), "{page}");
     }
@@ -398,7 +407,7 @@ mod tests {
         // The summary is what happened and the evidence is what the log
         // says about it. A reader audits the first against the second,
         // which only works while neither one is a copy of the other.
-        for layout in [Layout::Page, Layout::Trailer] {
+        for layout in [PAGE, Layout::Trailer] {
             let drawn = block(layout, &RUN, &NODE, &escalation());
             assert_eq!(
                 drawn.matches("exit 1").count(),
@@ -429,7 +438,7 @@ mod tests {
         )
         .expect("an escalation with nothing attached repeats nothing")
         .into_payload();
-        for layout in [Layout::Page, Layout::Trailer] {
+        for layout in [PAGE, Layout::Trailer] {
             let drawn = block(layout, &RUN, &NODE, &bare);
             assert!(
                 !drawn.contains("evidence"),
@@ -449,7 +458,7 @@ mod tests {
 
     #[test]
     fn every_line_of_a_decision_fits_the_width_a_terminal_is_taken_to_have() {
-        let block = block(Layout::Page, &RUN, &NODE, &escalation());
+        let block = block(PAGE, &RUN, &NODE, &escalation());
         for line in block.lines() {
             assert!(
                 cell_width(line) <= LINE_WIDTH,
@@ -461,7 +470,7 @@ mod tests {
 
     #[test]
     fn a_decision_names_every_option_with_its_tradeoff() {
-        let block = block(Layout::Page, &RUN, &NODE, &escalation());
+        let block = block(PAGE, &RUN, &NODE, &escalation());
         assert!(
             block.contains("retry — Re-route to `fix-lint` once more"),
             "{block}"
@@ -480,7 +489,7 @@ mod tests {
 
     #[test]
     fn the_command_leaves_the_option_for_the_reader_to_choose() {
-        let block = block(Layout::Page, &RUN, &NODE, &escalation());
+        let block = block(PAGE, &RUN, &NODE, &escalation());
         assert!(
             block.contains("yunta resolve-gate 01JBZ5X8K3N7Q2W6E4R9T1Y0P5 <option>"),
             "{block}"

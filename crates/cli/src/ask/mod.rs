@@ -249,9 +249,11 @@ impl Console {
         self.term.read_key_raw()
     }
 
-    /// The cells one row of this terminal holds.
+    /// The cells one row drawn on this terminal may take: the width a
+    /// line here gets, never past the terminal's edge, since a prompt
+    /// redraws its rows in place.
     pub(crate) fn width(&self) -> usize {
-        usize::from(self.term.size().1)
+        crate::render::Width::row(usize::from(self.term.size().1)).cells()
     }
 
     /// Redraws the row a line is being typed on: `prompt`, then `text`,
