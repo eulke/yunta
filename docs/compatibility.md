@@ -170,7 +170,12 @@ reading the run fails naming its position.
 
 `node_failed` records what failed, not a sentence about it. Its `failure` is
 either `outcome:` — one sentence the engine states, for a failure with no
-artifact behind it — or `artifacts:`, one entry per declared artifact that did
+artifact behind it — `exited:` — a command the node ran that exited non-zero:
+its `code`, the `tail` of what it printed (stdout, then stderr, at most 20
+lines, redacted like the rest of the log), the `output` object holding all of
+it under the run's `objects/`, and, when the command was not the node's own
+`run:`, its `origin` (`executor` with its name, or `hook` with its `phase` and
+`command`) — or `artifacts:`, one entry per declared artifact that did
 not close. An entry is one of four: the file itself (`artifact-missing`,
 `artifact-empty`, `artifact-oversized` with both numbers, `artifact-unreadable`),
 a document nobody handed over (`artifact-undelivered`), which carries the node

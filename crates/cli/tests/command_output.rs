@@ -113,6 +113,102 @@ fn what_criteria_and_hooks_print_is_the_runs_and_never_the_terminals() {
     );
 }
 
+/// A build that fails the way a compiler does: why on stdout, the secret
+/// it was handed on stderr, and a non-zero exit.
+const FAILING_BUILD: &str = r#"
+name: failing-build
+nodes:
+  - id: build
+    kind: bash
+    run: |
+      printf 'error[E0425]: cannot find value `x` in this scope\n --> src/lib.rs:3:5\n'
+      echo "token $NOISY_TOKEN" >&2
+      exit 101
+"#;
+
+/// A project with [`FAILING_BUILD`] run once, and the id of that run.
+fn failed_build() -> (Checkout, String) {
+    let checkout = Checkout::new()
+        .with_stubs(vec![("NOISY_TOKEN".to_string(), SECRET.to_string())])
+        .config("defaults:\n  isolation: none\nsecrets: [NOISY_TOKEN]\n")
+        .workflow("wf", FAILING_BUILD)
+        .committed();
+    let run = yunta_at!(&checkout, &["run", "wf.yaml"]);
+    assert!(!run.status.success(), "the build fails");
+    let run_id = run_id_from(&run);
+    (checkout, run_id)
+}
+
+#[test]
+fn a_failed_bash_node_keeps_what_it_printed_redacted_and_quotes_its_last_lines() {
+    let (checkout, run_id) = failed_build();
+    let events = events(&checkout, &run_id);
+
+    let failed = events
+        .iter()
+        .find(|event| event["kind"] == "node_failed")
+        .expect("the build failed");
+    assert_eq!(failed["exited"]["code"], 101);
+    let tail: Vec<&str> = failed["exited"]["tail"]
+        .as_array()
+        .expect("a failed command carries its tail")
+        .iter()
+        .map(|line| line.as_str().expect("a line"))
+        .collect();
+    assert_eq!(
+        tail,
+        vec![
+            "error[E0425]: cannot find value `x` in this scope",
+            " --> src/lib.rs:3:5",
+            "token [redacted]"
+        ],
+        "stdout, then stderr, with the secret taken out"
+    );
+    assert_eq!(
+        object(&checkout, &run_id, &failed["exited"]["output"]),
+        "error[E0425]: cannot find value `x` in this scope\n --> src/lib.rs:3:5\n\
+         token [redacted]\n",
+        "the whole output is kept, redacted like the log"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| event.to_string().contains(SECRET)),
+        "the secret reaches no event"
+    );
+}
+
+#[test]
+fn status_quotes_the_tail_of_a_failed_command_and_names_where_the_rest_is() {
+    let (checkout, run_id) = failed_build();
+
+    let status = yunta_at!(&checkout, &["status", &run_id]);
+    let out = stdout(&status);
+    assert!(
+        out.contains("error[E0425]: cannot find value `x` in this scope")
+            && out.contains(" --> src/lib.rs:3:5"),
+        "the reason the compiler gave is on the page:\n{out}"
+    );
+    let objects = runs_root(&checkout.home).join(&run_id).join("objects");
+    assert!(
+        out.lines()
+            .any(|line| line.trim_start().starts_with("whole output: ")
+                && line.contains(&objects.display().to_string())),
+        "the page names where everything the command printed is kept:\n{out}"
+    );
+
+    let json = yunta_at!(&checkout, &["status", &run_id, "--json"]);
+    let document: Value = serde_json::from_str(&stdout(&json)).expect("one JSON document");
+    let build = document["nodes"]
+        .as_array()
+        .expect("the nodes")
+        .iter()
+        .find(|node| node["id"] == "build")
+        .expect("the build node");
+    assert_eq!(build["command_exit"]["code"], 101, "{build}");
+    assert_eq!(build["command_exit"]["tail"][1], " --> src/lib.rs:3:5");
+}
+
 /// The red pre-check carries its tail and names its output; the green
 /// post-check names its output and carries no tail. Both redacted.
 fn criteria_are_kept(checkout: &Checkout, run_id: &str, events: &[Value]) {

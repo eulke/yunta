@@ -3,7 +3,7 @@
 //! sits in the graph, and — for a node waiting or one whose session
 //! died — the shape a program acts on instead of parsing a sentence.
 
-use yunta_core::events::{Failure, SessionDeath, SessionEnd};
+use yunta_core::events::{CommandExit, Failure, SessionDeath, SessionEnd};
 use yunta_engine::{NodeFrame, NodeStanding, NodeState, NodeWait};
 
 use crate::render::state::{NodeDisplay, StateWord};
@@ -61,6 +61,11 @@ pub(crate) struct NodeJson {
     /// acts on without parsing one.
     #[serde(skip_serializing_if = "Option::is_none")]
     session_death: Option<SessionDeathJson>,
+    /// How the command this node ran ended, for a node that failed
+    /// because one exited non-zero: its code, the last lines it printed
+    /// and the run object holding all of it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    command_exit: Option<CommandExit>,
     /// Most recent failed `yunta-run` call in this node's attempt.
     #[serde(skip_serializing_if = "Option::is_none")]
     last_tool_failure: Option<RunToolFailureJson>,
@@ -90,6 +95,13 @@ impl NodeJson {
                     failure: Failure::SessionDied { died },
                     ..
                 }) => Some(SessionDeathJson::of(died)),
+                _ => None,
+            },
+            command_exit: match &node.state {
+                NodeStanding::Reached(NodeState::Failed {
+                    failure: Failure::Exited { exited },
+                    ..
+                }) => Some(exited.clone()),
                 _ => None,
             },
             last_tool_failure: record

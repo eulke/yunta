@@ -410,6 +410,7 @@ fn node_diagnostics(events: &[StoredEvent]) -> BTreeMap<String, Vec<ArtifactProb
                 // tree nothing changed: the node's own entry carries
                 // each of them whole.
                 Failure::Message { .. }
+                | Failure::Exited { .. }
                 | Failure::SessionDied { .. }
                 | Failure::ScopeViolated { .. }
                 | Failure::PathsDenied { .. }

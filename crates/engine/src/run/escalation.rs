@@ -52,7 +52,7 @@ pub(crate) fn build_reroute_escalation(
         format!(
             "node `{node}` failed and its {max_reroutes} re-route(s) to `{goto}` are exhausted"
         ),
-        vec![Fact::bare(cause.to_string())].into(),
+        failure_facts(&cause.0).into(),
         NonEmpty::from((retry, rest)),
     )
 }
@@ -83,16 +83,16 @@ pub(crate) fn build_failure_escalation(
     if !failure.retry_can_change() {
         return Escalation::new(
             format!("node `{node}` failed"),
-            vec![
-                Fact::bare(failure.to_string()),
-                Fact::labelled(
+            failure_facts(failure)
+                .into_iter()
+                .chain([Fact::labelled(
                     "way out",
                     "this run's config was frozen when it was created, so no attempt of it \
                      can go differently — declare what is missing in the config and start a \
                      new run",
-                ),
-            ]
-            .into(),
+                )])
+                .collect::<Vec<_>>()
+                .into(),
             NonEmpty::from((offers::abort(), Vec::new())),
         );
     }
@@ -112,9 +112,19 @@ pub(crate) fn build_failure_escalation(
     }
     Escalation::new(
         format!("node `{node}` failed"),
-        vec![Fact::bare(failure.to_string())].into(),
+        failure_facts(failure).into(),
         options,
     )
+}
+
+/// What a failure is attested by: the failure itself and, for a command
+/// that printed something, each line it printed last as a fact of its
+/// own, so every surface lists them a line apiece, in the order the
+/// command wrote them.
+pub(super) fn failure_facts(failure: &Failure) -> Vec<Fact> {
+    std::iter::once(Fact::bare(failure.headline()))
+        .chain(failure.tail().iter().map(Fact::bare))
+        .collect()
 }
 
 /// Reconstructs the escalation object a paused run is

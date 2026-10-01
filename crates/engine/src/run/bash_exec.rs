@@ -7,7 +7,7 @@ use yunta_core::{ConfigKey, Node, Resolved, RunCommand};
 
 use crate::process::{spawn_governed, GovernedCommand, Outcome};
 
-use super::node_close::{close_node, fail, Close};
+use super::node_close::{close_node, fail, fail_with, Close};
 use super::node_exec::{cancelled_end, render_or_fail, NodeEnd};
 use super::step::Step;
 use super::{RunCtx, RunError};
@@ -51,45 +51,27 @@ pub(super) async fn execute_bash(
     }
 
     let command = GovernedCommand::shell(ctx.worktree, &rendered);
-    let (status, stdout_bytes, stderr_bytes) =
-        match spawn_governed(command, ctx.supervision(cancel)).await? {
-            Outcome::Exited {
-                status,
-                stdout,
-                stderr,
-            } => (status, stdout, stderr),
-            // A bash node has no timeout of its own: the only way it
-            // stops early is the run's cancellation.
-            Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => {
-                return cancelled_end(ctx, node).await;
-            }
-        };
+    let outcome = spawn_governed(command, ctx.supervision(cancel)).await?;
+    let Outcome::Exited {
+        status,
+        stdout,
+        stderr,
+    } = &outcome
+    else {
+        // A bash node has no timeout of its own: the only way it stops
+        // early is the run's cancellation.
+        return cancelled_end(ctx, node).await;
+    };
     // Captured regardless of exit status — a
     // failing `lint` is exactly the case a corrective node's own
     // `node-output` context wants to read.
-    crate::run::context_resolve::write_node_output(
-        ctx.run_dir,
-        &node.id,
-        &stdout_bytes,
-        &stderr_bytes,
-    )
-    .await?;
+    crate::run::context_resolve::write_node_output(ctx.run_dir, &node.id, stdout, stderr).await?;
 
     if status.success() {
         close_node(ctx, node, Close::new("exit 0", TokenUsage::default())).await
     } else {
-        let stderr_tail = super::stderr_tail(&stderr_bytes);
-        fail(
-            ctx,
-            node,
-            // A command that fails saying nothing — `test -f x` is the
-            // ordinary case — is reported as the exit code alone.
-            yunta_core::text::detailed(
-                format!("exit {}", status.code().unwrap_or(-1)),
-                &stderr_tail,
-            ),
-            false,
-        )
-        .await
+        let code = status.code().unwrap_or(-1);
+        let failure = super::command_exited(ctx, &outcome, code, None, "bash node").await?;
+        fail_with(ctx, node, failure, false, TokenUsage::default()).await
     }
 }

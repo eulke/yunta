@@ -10,10 +10,6 @@ use super::Outcome;
 pub struct CommandOutput(std::sync::Arc<[u8]>);
 
 impl CommandOutput {
-    /// How many lines a failure quotes of what its command printed:
-    /// enough to show a compiler's error, never a whole build log.
-    pub const TAIL_LINES: usize = 20;
-
     /// What `outcome`'s collected streams hold.
     pub fn of(outcome: &Outcome) -> Self {
         let (Outcome::Exited { stdout, stderr, .. }
@@ -43,13 +39,14 @@ impl CommandOutput {
         Some(line.chars().take(240).collect())
     }
 
-    /// The last [`TAIL_LINES`](Self::TAIL_LINES) lines, in order.
+    /// The last [`TAIL_LINES`](yunta_core::events::TAIL_LINES) lines, in
+    /// order.
     pub fn tail(&self) -> Vec<String> {
         let text = String::from_utf8_lossy(&self.0);
         let mut tail: Vec<String> = text
             .lines()
             .rev()
-            .take(Self::TAIL_LINES)
+            .take(yunta_core::events::TAIL_LINES)
             .map(str::to_string)
             .collect();
         tail.reverse();

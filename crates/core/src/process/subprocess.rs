@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::lines::LineReader;
-use crate::events::{SessionEnd, SessionExit, STDERR_TAIL_LINES};
+use crate::events::{SessionEnd, SessionExit, TAIL_LINES};
 use crate::port::{AgentError, AgentEvent, AgentSession, ProbeReport};
 use crate::process::signal::{signal_group, Signal};
 
@@ -173,7 +173,7 @@ pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
     // The tail is shared with the session: the drain writes it as the
     // child speaks, and `exit` reads it once the child is gone, which is
     // the only moment anybody asks.
-    let stderr_tail = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_LINES)));
+    let stderr_tail = Arc::new(Mutex::new(VecDeque::with_capacity(TAIL_LINES)));
     let secrets: Vec<Secret<String>> = launch.env.values().cloned().collect();
     let tail = Arc::clone(&stderr_tail);
     let stderr_drain = tokio::spawn(async move {
@@ -181,7 +181,7 @@ pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
         while let Some(line) = lines.next_line().await {
             tracing::debug!(adapter = %adapter, "stderr: {line}");
             let mut tail = tail.lock().unwrap_or_else(PoisonError::into_inner);
-            if tail.len() == STDERR_TAIL_LINES {
+            if tail.len() == TAIL_LINES {
                 tail.pop_front();
             }
             tail.push_back(redacted(line, &secrets));
@@ -243,7 +243,7 @@ pub struct SubprocessSession {
     reaped: bool,
     reader: JoinHandle<()>,
     stderr_drain: JoinHandle<()>,
-    /// The last [`STDERR_TAIL_LINES`] lines the child wrote, redacted.
+    /// The last [`TAIL_LINES`] lines the child wrote, redacted.
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
     receiver: Option<mpsc::UnboundedReceiver<AgentEvent>>,
 }

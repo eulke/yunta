@@ -382,6 +382,33 @@ nodes:
     }
 }
 
+/// A compiler says why on stdout; the failure quotes it as it says it.
+#[tokio::test]
+async fn a_bash_node_that_fails_quotes_what_it_printed_on_stdout() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: compiler-says-why
+nodes:
+  - id: build
+    kind: bash
+    run: |
+      printf 'error[E0425]: cannot find value `x` in this scope\n --> src/lib.rs:3:5\n'
+      exit 101
+"#;
+
+    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
+
+    match terminal {
+        RunTerminal::Paused { reason } => assert_eq!(
+            reason,
+            "node `build` failed: exit 101: error[E0425]: cannot find value `x` in this \
+             scope\n --> src/lib.rs:3:5"
+        ),
+        other => panic!("expected Paused, got {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn a_failing_hook_fails_its_node_saying_what_it_printed_last() {
     let bench = Bench::new();

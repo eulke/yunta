@@ -348,17 +348,21 @@ they are gone, and the task's next cycle reads the answer.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `outcome` [inferido] | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter | solo en `node_finished` | el outcome del agente es telemetría, esto es el veredicto |
-| `outcome` / `artifacts` / `died` / `outside_scope` / `requested_scope` / `unset` / `unchanged` / `denied_paths` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló \| paths que el trabajo escribió y el proyecto niega a todo run | solo en `node_failed` | por qué falló, como dato: uno de los ocho, plano sobre el payload; ver abajo |
+| `outcome` / `artifacts` / `died` / `exited` / `outside_scope` / `requested_scope` / `unset` / `unchanged` / `denied_paths` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| `{code, tail, output, origin?}` el comando que salió distinto de cero \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló \| paths que el trabajo escribió y el proyecto niega a todo run | solo en `node_failed` | por qué falló, como dato: uno de los nueve, plano sobre el payload; ver abajo |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage` |
 | `commit` | sha de commit git | no; en `node_finished` y `node_failed`, y ausente cuando el cierre no commiteó nada | el commit que el cierre hizo de lo que el nodo dejó en el árbol del run: ausente si nada cambió, si el nodo aterrizó desde un checkout propio, si otro nodo seguía trabajando en el mismo árbol o si el run trabaja sin árbol propio (D201) |
 | `tree` | id de árbol git | no; en `node_finished` y `node_failed`, y ausente en un log escrito antes del campo | el árbol del run tal como el nodo lo dejó, después de lo que aterrizó ahí —un nodo con checkout propio nombra el árbol del run en que aterrizó, no su checkout—; un gate nombra el que vio quien decidió. Es contra lo que se mide si el pase de un invariante sigue hablando del árbol del run (Contrato §11.3) |
 | `refused` | lista de paths | sí; solo en `node_failed`, vacía —y omitida del log— si no hubo ninguno | lo que el intento dejó en el árbol del run y el proyecto niega a todo run (`permissions.paths.deny`): no se commiteó y, en un run con worktree propio, volvió a como la rama lo tenía. La falla propia del nodo sigue siendo su causa (D206) |
 | `retryable` | `bool` | solo en `node_failed` | guía la política de reintento; lo fija quien gobierna el presupuesto, de modo que un intento terminal nunca se registra como reintentable |
 
-**La falla es dato, no prosa.** La falla toma una de ocho formas, planas sobre el
+**La falla es dato, no prosa.** La falla toma una de nueve formas, planas sobre el
 payload: `outcome: <frase>`, una falla que el engine enuncia en una oración,
 `artifacts: [...]`, un elemento por artifact declarado que no cerró, `died:
-{adapter, exit?}`, una sesión que terminó sin evento terminal, `outside_scope:
+{adapter, exit?}`, una sesión que terminó sin evento terminal, `exited: {code,
+tail, output, origin?}`, un comando que el nodo corrió —su `run:`, su executor o
+uno de sus hooks, que `origin` nombra cuando no es el `run:` propio— y salió
+distinto de cero, con las últimas líneas que imprimió —stdout y después stderr,
+redactadas como todo el log— y el objeto que guarda la salida entera, `outside_scope:
 [...]`, cada path que el diff del nodo alcanzó fuera de su `scope:`, o
 `requested_scope: {paths, reason}`, la ampliación que pidió la sesión del nodo, o
 `unset: {key, ...}` —`baseline_suite`, `coverage`, `executor` (con `executor`),

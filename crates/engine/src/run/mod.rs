@@ -361,23 +361,35 @@ pub struct RunEnv<'a> {
     pub observer: Option<Arc<dyn RunObserver>>,
 }
 
-/// The tail of what a child process wrote to stderr, as the diagnostic
-/// of a node that failed quotes it.
+/// The failure a command that exited `code` becomes: what it printed
+/// kept, redacted, in the run's objects, and its last lines on the
+/// failure itself, stdout included — a compiler or a test runner says
+/// why on stdout as often as on stderr.
 ///
-/// Bounded, because a diagnostic is read by a person and a run that
-/// fails on a thousand-line stack trace would otherwise carry all of it
-/// onto the log, into every surface that quotes the log, and into the
-/// receipt. The last lines are the ones that say why, so those are the
-/// ones kept, in the order the process wrote them.
-fn stderr_tail(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
-    let mut tail: Vec<&str> = text
-        .lines()
-        .rev()
-        .take(crate::process::CommandOutput::TAIL_LINES)
-        .collect();
-    tail.reverse();
-    tail.join("\n")
+/// `what` names the command in the error a failed write reports.
+async fn command_exited(
+    ctx: &RunCtx<'_>,
+    outcome: &crate::process::Outcome,
+    code: i32,
+    origin: Option<yunta_core::events::CommandOrigin>,
+    what: &str,
+) -> Result<yunta_core::events::Failure, RunError> {
+    let printed = crate::process::CommandOutput::of(outcome);
+    let output = crate::artifacts::store::ObjectStore::at(ctx.run_dir)
+        .put_redacted(printed.bytes(), &ctx.redactor)
+        .await
+        .map_err(|source| RunError::Io {
+            context: format!("keep what {what} printed"),
+            source,
+        })?;
+    Ok(yunta_core::events::Failure::exited(
+        yunta_core::events::CommandExit {
+            origin,
+            code,
+            tail: printed.tail(),
+            output: Some(output),
+        },
+    ))
 }
 
 /// Drives a run until it finishes or pauses. Serving `yunta run` and

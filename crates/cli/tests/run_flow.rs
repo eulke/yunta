@@ -2077,10 +2077,16 @@ nodes:
     let run_id = run_id_from(&run);
     let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
     let state: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    let verify = node_of(&state, "verify");
+    assert_eq!(verify["state"], "failed", "{state:#}");
     assert_eq!(
-        node_of(&state, "verify"),
-        serde_json::json!({"id": "verify", "state": "failed", "detail": "exit 1"}),
+        verify["detail"], "exit 1",
         "a command that said nothing is quoted with nothing promised: {state:#}"
+    );
+    assert_eq!(verify["command_exit"]["code"], 1, "{state:#}");
+    assert!(
+        verify["command_exit"].get("tail").is_none(),
+        "a command that printed nothing has no last lines to quote: {state:#}"
     );
 }
 

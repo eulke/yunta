@@ -30,6 +30,7 @@ pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let open = ctx.open_run(run_id).await?;
     let events = open.events;
+    let run_dir = open.run_dir;
     // What this binary did not understand in a file a later one wrote:
     // said, because a reader acting on a manifest whose newer half is
     // invisible to them should know that is what they are doing.
@@ -53,7 +54,7 @@ pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let frame = progress::frame(run_id, &manifest, &events, now);
     let state = yunta_engine::derive(&events);
     println!("run {run_id}: {}", progress::summary(&frame));
-    print_derived(&frame, &state);
+    print_derived(&frame, &state, &run_dir);
     let tree = ctx.project.run_tree(&manifest, run_id, &ctx.cwd);
     print_decision((run_id, &manifest, &tree), &events, &frame.phase);
     Ok(Outcome::Success)
@@ -67,7 +68,7 @@ pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
 /// group followed by its own children, the ones this mode leaves out
 /// among them and labelled `skipped`. One derivation for the whole
 /// page: the same list, in the same order, the live view draws.
-fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState) {
+fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState, run_dir: &Path) {
     if !frame.nodes.is_empty() {
         println!("nodes:");
         for node in &frame.nodes {
@@ -105,7 +106,7 @@ fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState) {
         }
     }
 
-    print_failures(frame, state);
+    print_failures(frame, state, run_dir);
 
     println!(
         "tokens: {} in / {} out",
@@ -163,7 +164,7 @@ fn print_decision(
 /// person opens to find out what went wrong unable to say. A node that
 /// failed on two artifacts says which problem came from which, because
 /// the log records each document's problems with the document.
-fn print_failures(frame: &RunFrame, state: &yunta_engine::RunState) {
+fn print_failures(frame: &RunFrame, state: &yunta_engine::RunState, run_dir: &Path) {
     let failed: Vec<(&NodeId, &Failure)> = frame
         .nodes
         .iter()
@@ -179,7 +180,7 @@ fn print_failures(frame: &RunFrame, state: &yunta_engine::RunState) {
     println!("failures:");
     for (id, failure) in failed {
         println!("{INDENT}{id}:");
-        print_detail(failure);
+        print_detail(failure, run_dir);
     }
 }
 
@@ -201,6 +202,10 @@ fn has_detail(failure: &Failure) -> bool {
         // does the key a config leaves unset.
         Failure::ScopeRequested { .. } | Failure::Unset { .. } => false,
         Failure::Message { outcome } => outcome.contains('\n'),
+        // What a failing command printed, and where the rest of it is,
+        // is the reason a person reads; the node's own line has room
+        // for neither.
+        Failure::Exited { exited } => !exited.tail.is_empty() || exited.output.is_some(),
         // Why it was not run again, then what the attempt that ran
         // failed with: more than a line holds.
         Failure::Unchanged { .. } => true,
@@ -209,7 +214,7 @@ fn has_detail(failure: &Failure) -> bool {
 
 /// The detail of one failure, hanging under the node that failed, which
 /// is itself one step under the heading.
-fn print_detail(failure: &Failure) {
+fn print_detail(failure: &Failure, run_dir: &Path) {
     let detail = indent(2);
     match failure {
         Failure::Artifacts { artifacts } => {
@@ -227,6 +232,22 @@ fn print_detail(failure: &Failure) {
             println!("{}", yunta_core::text::indent(&died.to_string(), &detail));
             for line in died.exit.iter().flat_map(|exit| &exit.stderr_tail) {
                 println!("{}", yunta_core::text::indent(line, &indent(3)));
+            }
+        }
+        // How the command ended, then what it printed last, then where
+        // everything it printed is kept.
+        Failure::Exited { exited } => {
+            println!("{detail}{}", exited.headline());
+            for line in &exited.tail {
+                println!("{}{line}", indent(3));
+            }
+            if let Some(output) = &exited.output {
+                println!(
+                    "{detail}whole output: {}",
+                    yunta_engine::ObjectStore::at(run_dir)
+                        .path_of(output)
+                        .display()
+                );
             }
         }
         Failure::ScopeViolated { outside_scope } => {

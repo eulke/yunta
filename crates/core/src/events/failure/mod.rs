@@ -14,56 +14,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::diagnostic::{ArtifactFailure, Report};
 use crate::glob::{listed_globs, InvalidScopeGlob, ScopeGlob};
+use crate::hash::ContentHash;
 use crate::ids::AdapterId;
 
-/// How many stderr lines a session keeps for its exit (D180): enough to
-/// read a CLI's startup error, and not enough for a whole session log to
-/// ride along in an event.
-pub const STDERR_TAIL_LINES: usize = 20;
+mod exit;
 
-/// How the process ended: the status it exited with, or the signal that
-/// ended it.
-///
-/// A closed union rather than two optionals, so a process that says
-/// neither is not representable. A stored `type` this build does not
-/// know reads back as [`SessionEnd::Unknown`] — the tolerance everything
-/// persisted here gives a reader older than its writer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum SessionEnd {
-    Code {
-        code: i32,
-    },
-    Signal {
-        signal: i32,
-    },
-    #[serde(other)]
-    Unknown,
-}
-
-/// What a process left behind: how it ended, and the last lines it wrote
-/// to stderr, redacted of every value its environment carried.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct SessionExit {
-    pub end: SessionEnd,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub stderr_tail: Vec<String>,
-}
-
-/// A session that ended without ever reporting a terminal event: whose
-/// it was, and how its process went, when it had one of its own.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct SessionDeath {
-    pub adapter: AdapterId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exit: Option<SessionExit>,
-}
+pub use exit::{CommandExit, CommandOrigin, SessionDeath, SessionEnd, SessionExit, TAIL_LINES};
 
 /// Why a node failed.
 ///
 /// Untagged, with `Message` last: a payload carrying `artifacts:` reads
 /// as [`Failure::Artifacts`], one carrying `died:` as
-/// [`Failure::SessionDied`], one carrying `outside_scope:` as
+/// [`Failure::SessionDied`], one carrying `exited:` as
+/// [`Failure::Exited`], one carrying `outside_scope:` as
 /// [`Failure::ScopeViolated`], one carrying `requested_scope:` as
 /// [`Failure::ScopeRequested`], one carrying `unset:` as
 /// [`Failure::Unset`], one carrying `unchanged:` as
@@ -104,6 +67,9 @@ pub enum Failure {
     /// offered one: the work goes, or the project changes its
     /// config.
     PathsDenied { denied_paths: Vec<PathBuf> },
+    /// A command the node ran exited non-zero, and what it printed last
+    /// is the reason a person reads.
+    Exited { exited: CommandExit },
     /// A failure the engine states in one sentence.
     Message { outcome: String },
 }
@@ -114,6 +80,18 @@ pub enum Failure {
 pub struct Unchanged {
     pub since: u32,
     pub failure: Box<Failure>,
+}
+
+impl Unchanged {
+    /// Why the attempt was not run, ending in what the attempt that last
+    /// ran failed with, as `failed` says it.
+    fn sentence(&self, failed: &str) -> String {
+        format!(
+            "not run again: nothing in the run's tree changed since attempt {} failed on it — \
+             change what it failed on there first. Attempt {} failed: {failed}",
+            self.since, self.since
+        )
+    }
 }
 
 /// What a node's session asked to be allowed to write, and why, in its
@@ -181,6 +159,58 @@ impl Failure {
         !matches!(self, Failure::Unset { .. })
     }
 
+    /// A command that exited non-zero, and what it left behind.
+    pub fn exited(exited: CommandExit) -> Self {
+        Failure::Exited { exited }
+    }
+
+    /// The failure as one claim, without the lines a failing command
+    /// printed: what a surface states before it lists them.
+    pub fn headline(&self) -> String {
+        match self {
+            Failure::Exited { exited } => exited.headline(),
+            Failure::Unchanged { unchanged } => unchanged.sentence(&unchanged.failure.headline()),
+            Failure::Artifacts { .. }
+            | Failure::SessionDied { .. }
+            | Failure::ScopeViolated { .. }
+            | Failure::ScopeRequested { .. }
+            | Failure::Unset { .. }
+            | Failure::PathsDenied { .. }
+            | Failure::Message { .. } => self.to_string(),
+        }
+    }
+
+    /// The last lines the failing command printed. Empty for a failure
+    /// that is not about a command, or one that printed nothing.
+    pub fn tail(&self) -> &[String] {
+        match self {
+            Failure::Exited { exited } => &exited.tail,
+            Failure::Unchanged { unchanged } => unchanged.failure.tail(),
+            Failure::Artifacts { .. }
+            | Failure::SessionDied { .. }
+            | Failure::ScopeViolated { .. }
+            | Failure::ScopeRequested { .. }
+            | Failure::Unset { .. }
+            | Failure::PathsDenied { .. }
+            | Failure::Message { .. } => &[],
+        }
+    }
+
+    /// The run object holding everything the failing command printed.
+    pub fn output(&self) -> Option<&ContentHash> {
+        match self {
+            Failure::Exited { exited } => exited.output.as_ref(),
+            Failure::Unchanged { unchanged } => unchanged.failure.output(),
+            Failure::Artifacts { .. }
+            | Failure::SessionDied { .. }
+            | Failure::ScopeViolated { .. }
+            | Failure::ScopeRequested { .. }
+            | Failure::Unset { .. }
+            | Failure::PathsDenied { .. }
+            | Failure::Message { .. } => None,
+        }
+    }
+
     /// Work that reached `paths`, which no session of the run may write.
     pub fn paths_denied(paths: Vec<PathBuf>) -> Self {
         Failure::PathsDenied {
@@ -209,6 +239,7 @@ impl Failure {
             | Failure::ScopeRequested { .. }
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
+            | Failure::Exited { .. }
             | Failure::Message { .. } => &[],
         }
     }
@@ -224,6 +255,7 @@ impl Failure {
             | Failure::SessionDied { .. }
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
+            | Failure::Exited { .. }
             | Failure::Message { .. } => false,
         }
     }
@@ -271,13 +303,14 @@ impl Failure {
             Failure::Artifacts { artifacts } => artifacts.iter(),
             Failure::Unchanged { unchanged } => unchanged.failure.failures(),
             // A dead session names no artifact, and neither does a
-            // scope or a sentence: the count of documents that did not
-            // close is about documents this node declared.
+            // scope, a command or a sentence: the count of documents
+            // that did not close is about documents this node declared.
             Failure::SessionDied { .. }
             | Failure::ScopeViolated { .. }
             | Failure::ScopeRequested { .. }
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
+            | Failure::Exited { .. }
             | Failure::Message { .. } => [].iter(),
         }
     }
@@ -290,13 +323,11 @@ impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Failure::Message { outcome } => f.write_str(outcome),
+            Failure::Exited { exited } => write!(f, "{exited}"),
             Failure::Unset { unset } => write!(f, "{unset}"),
-            Failure::Unchanged { unchanged } => write!(
-                f,
-                "not run again: nothing in the run's tree changed since attempt {} failed on \
-                 it — change what it failed on there first. Attempt {} failed: {}",
-                unchanged.since, unchanged.since, unchanged.failure
-            ),
+            Failure::Unchanged { unchanged } => {
+                f.write_str(&unchanged.sentence(&unchanged.failure.to_string()))
+            }
             Failure::SessionDied { died } => write!(f, "{died}"),
             Failure::ScopeViolated { outside_scope } => {
                 write!(
@@ -337,39 +368,6 @@ impl fmt::Display for Failure {
                 }
                 Ok(())
             }
-        }
-    }
-}
-
-impl fmt::Display for SessionDeath {
-    /// Every shape the type admits, the absence included: a session with
-    /// no process of its own has nothing to report about one.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Some(exit) = &self.exit else {
-            return write!(
-                f,
-                "session `{}` ended without a terminal event",
-                self.adapter
-            );
-        };
-        write!(
-            f,
-            "session `{}` {} before any terminal event",
-            self.adapter, exit.end
-        )?;
-        match exit.stderr_tail.last() {
-            Some(last) => write!(f, " — {last}"),
-            None => Ok(()),
-        }
-    }
-}
-
-impl fmt::Display for SessionEnd {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            SessionEnd::Code { code } => write!(f, "exited with code {code}"),
-            SessionEnd::Signal { signal } => write!(f, "was killed by signal {signal}"),
-            SessionEnd::Unknown => f.write_str("ended in a way this build does not know"),
         }
     }
 }

@@ -682,6 +682,97 @@ fn a_node_failed_by_a_dead_session_round_trips_with_its_exit() {
     assert_eq!(payload, parsed, "{json}");
 }
 
+/// A command that exited 101 having printed a compiler's error on
+/// stdout, the way `cargo build` prints one.
+fn compiler_exit(origin: Option<CommandOrigin>) -> Failure {
+    Failure::exited(CommandExit {
+        origin,
+        code: 101,
+        tail: vec![
+            "error[E0425]: cannot find value `x` in this scope".to_string(),
+            " --> src/lib.rs:3:5".to_string(),
+        ],
+        output: Some(yunta_core::sha256_hex(b"everything it printed")),
+    })
+}
+
+#[test]
+fn a_node_failed_by_a_command_round_trips_with_what_it_printed() {
+    let payload = EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
+        compiler_exit(None),
+        false,
+        TokenUsage::default(),
+    )));
+
+    let json: serde_json::Value = serde_json::to_value(&payload).unwrap();
+    assert_eq!(json["exited"]["code"], 101);
+    assert_eq!(json["exited"]["tail"][1], " --> src/lib.rs:3:5");
+    assert!(json["exited"]["output"].is_string(), "{json}");
+    assert!(
+        json.get("outcome").is_none(),
+        "the prose is produced from the data, never stored beside it: {json}"
+    );
+
+    let parsed: EventPayload = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(payload, parsed, "{json}");
+}
+
+#[test]
+fn a_failure_logged_as_a_sentence_before_commands_were_data_still_reads_as_one() {
+    let parsed: Failure =
+        serde_json::from_value(serde_json::json!({ "outcome": "exit 1: no such file" })).unwrap();
+    assert_eq!(parsed, Failure::message("exit 1: no such file"));
+}
+
+#[test]
+fn a_failed_command_names_itself_and_quotes_its_last_lines() {
+    let node = compiler_exit(None);
+    assert_eq!(node.headline(), "exit 101");
+    assert_eq!(
+        node.to_string(),
+        "exit 101: error[E0425]: cannot find value `x` in this scope\n --> src/lib.rs:3:5"
+    );
+
+    let executor = compiler_exit(Some(CommandOrigin::Executor {
+        executor: "probe".to_string(),
+    }));
+    assert_eq!(executor.headline(), "executor `probe` exited 101");
+
+    let hook = compiler_exit(Some(CommandOrigin::Hook {
+        phase: HookPhase::Before,
+        command: "cargo fmt --check".to_string(),
+    }));
+    assert_eq!(hook.headline(), "before hook `cargo fmt --check` failed");
+
+    let silent = Failure::exited(CommandExit {
+        origin: None,
+        code: 1,
+        tail: Vec::new(),
+        output: None,
+    });
+    assert_eq!(
+        silent.to_string(),
+        "exit 1",
+        "a command that printed nothing reads as how it ended"
+    );
+}
+
+#[test]
+fn a_check_refused_on_an_unchanged_tree_still_quotes_what_the_attempt_that_ran_printed() {
+    let refused = Failure::unchanged(1, compiler_exit(None));
+    assert_eq!(refused.tail(), compiler_exit(None).tail());
+    assert_eq!(refused.output(), compiler_exit(None).output());
+    assert!(
+        refused.headline().ends_with("Attempt 1 failed: exit 101"),
+        "{}",
+        refused.headline()
+    );
+    assert!(
+        refused.to_string().ends_with(" --> src/lib.rs:3:5"),
+        "{refused}"
+    );
+}
+
 #[test]
 fn a_node_failed_outside_its_scope_round_trips_naming_each_path() {
     let payload = EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(

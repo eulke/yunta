@@ -183,11 +183,12 @@ async fn execute_in_its_tree(
         match run_hook(ctx, node, HookPhase::Before, step).await? {
             HookRun::Violation(rule) => return fail(ctx, node, rule, false).await,
             HookRun::Unset(key) => return super::check_exec::unset(ctx, node, key).await,
-            HookRun::Failed { said } if step.on_failure == HookFailurePolicy::Fail => {
-                let failure = HookRun::failure(HookPhase::Before, step, &said);
-                return fail(ctx, node, failure, false).await;
+            HookRun::Failed(exit) if step.on_failure == HookFailurePolicy::Fail => {
+                let failure = yunta_core::events::Failure::exited(exit);
+                return super::node_close::fail_with(ctx, node, failure, false, Default::default())
+                    .await;
             }
-            HookRun::Passed | HookRun::Failed { .. } => {}
+            HookRun::Passed | HookRun::Failed(_) => {}
         }
     }
 

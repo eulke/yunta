@@ -1,7 +1,9 @@
 //! `hooks:` around a node — the `before`/`after` commands, the node's
 //! own list merged over `node_defaults`, and how a hook failure lands.
 
-use yunta_core::events::{EventPayload, HookExecutedPayload, HookPhase};
+use yunta_core::events::{
+    CommandExit, CommandOrigin, EventPayload, HookExecutedPayload, HookPhase,
+};
 use yunta_core::{ConfigKey, HookStep, Hooks, Node, Resolved};
 
 use crate::process::{spawn_governed, CommandOutput, GovernedCommand, Outcome};
@@ -11,31 +13,36 @@ use super::node_exec::template_vars;
 use super::{RunCtx, RunError};
 use yunta_core::events::NodeEvent;
 
-/// How one hook step went: it passed, it failed (with the last lines it
-/// printed, before the caller applies `on_failure`), or the permissions
+/// How one hook step went: it passed, it failed (with what it left
+/// behind, before the caller applies `on_failure`), or the permissions
 /// model refused it outright. The distinction matters because
 /// `on_failure: warn` downgrades a hook's own failure, never a
 /// governance violation — otherwise any hook could opt out of the model
 /// by declaring itself warn-only.
 pub(super) enum HookRun {
     Passed,
-    Failed {
-        said: String,
-    },
+    Failed(CommandExit),
     Violation(String),
     /// It names a command the run's frozen config does not declare.
     Unset(ConfigKey),
 }
 
-impl HookRun {
-    /// Why a node whose hook failed fails: the hook, and what it printed
-    /// last, the way a `bash` node's failure quotes its own.
-    pub(super) fn failure(phase: HookPhase, step: &HookStep, said: &str) -> String {
-        let phase = match phase {
-            HookPhase::Before => "before",
-            HookPhase::After => "after",
-        };
-        yunta_core::text::detailed(format!("{phase} hook `{}` failed", step.run), said)
+/// What a hook that failed left behind, named as the workflow wrote it.
+fn hook_exit(
+    phase: HookPhase,
+    step: &HookStep,
+    code: i32,
+    tail: Vec<String>,
+    output: Option<yunta_core::ContentHash>,
+) -> CommandExit {
+    CommandExit {
+        origin: Some(CommandOrigin::Hook {
+            phase,
+            command: step.run.to_string(),
+        }),
+        code,
+        tail,
+        output,
     }
 }
 
@@ -79,9 +86,13 @@ pub(super) async fn run_hook(
                 })),
             )
             .await?;
-            return Ok(HookRun::Failed {
-                said: String::new(),
-            });
+            return Ok(HookRun::Failed(hook_exit(
+                phase,
+                step,
+                -1,
+                Vec::new(),
+                None,
+            )));
         }
     };
 
@@ -121,8 +132,8 @@ pub(super) async fn run_hook(
         0 => (Vec::new(), HookRun::Passed),
         _ => {
             let tail = printed.tail();
-            let said = tail.join("\n");
-            (tail, HookRun::Failed { said })
+            let exit = hook_exit(phase, step, exit_code, tail.clone(), Some(output.clone()));
+            (tail, HookRun::Failed(exit))
         }
     };
 

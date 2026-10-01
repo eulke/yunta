@@ -215,3 +215,4 @@ lista.
 **D206 — A project's denied paths are never written by a run.** `accepted` → [`adr/D206-a-projects-denied-paths-are-never-written-by-a-run.md`](adr/D206-a-projects-denied-paths-are-never-written-by-a-run.md)
 **D207 — A pull_request node opens its pull request through the forge.** `accepted` → [`adr/D207-a-pull-request-node-opens-its-pull-request-through-the-forge.md`](adr/D207-a-pull-request-node-opens-its-pull-request-through-the-forge.md)
 **D208 — A run measures its suite only when it reads the measurement.** `accepted` → [`adr/D208-a-run-measures-its-suite-only-when-it-reads-the-measurement.md`](adr/D208-a-run-measures-its-suite-only-when-it-reads-the-measurement.md)
+**D209 — A failed command carries what it printed.** `accepted` → [`adr/D209-a-failed-command-carries-what-it-printed.md`](adr/D209-a-failed-command-carries-what-it-printed.md)

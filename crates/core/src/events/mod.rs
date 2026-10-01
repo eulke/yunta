@@ -29,7 +29,8 @@ pub use artifacts::{payloads::*, ArtifactEvent};
 pub use children::{ledger::*, payloads::*, ChildEvent};
 pub use evidence::{Evidence, Fact};
 pub use failure::{
-    Failure, RequestedScope, SessionDeath, SessionEnd, SessionExit, STDERR_TAIL_LINES,
+    CommandExit, CommandOrigin, Failure, RequestedScope, SessionDeath, SessionEnd, SessionExit,
+    TAIL_LINES,
 };
 pub use findings::{payloads::*, FindingEvent};
 pub use gates::{ledger::*, payloads::*, GateEvent};

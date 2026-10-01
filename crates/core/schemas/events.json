@@ -689,10 +689,92 @@
         "terminal_state"
       ]
     },
+    "CommandExit": {
+      "description": "What a command that exited non-zero left behind: whose command it was\nwhen it was not the node's own `run:`, the code it exited with, the\nlast lines it printed — stdout, then stderr, as a reader reads them —\nand the run object holding everything it printed.\n\nThe tail is what a person deciding about the failure reads first, so\nit rides on the event; the whole output stays in the run's object\nstore, where a reader who needs more than the tail finds it by hash.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "origin": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CommandOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "output": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContentHash"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tail": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "code"
+      ]
+    },
     "CommandName": {
       "description": "A command name: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
       "minLength": 1
+    },
+    "CommandOrigin": {
+      "description": "Who ran a command that is not the node's own `run:`.",
+      "oneOf": [
+        {
+          "description": "An external executor the node delegated its work to.",
+          "type": "object",
+          "properties": {
+            "executor": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "executor"
+            }
+          },
+          "required": [
+            "kind",
+            "executor"
+          ]
+        },
+        {
+          "description": "One of the node's hooks, as the workflow wrote its command.",
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "hook"
+            },
+            "phase": {
+              "$ref": "#/$defs/HookPhase"
+            }
+          },
+          "required": [
+            "kind",
+            "phase",
+            "command"
+          ]
+        }
+      ]
     },
     "CommitSha": {
       "description": "A commit sha: 7 to 64 lowercase hex digits: a git object id, abbreviated or full",
@@ -2112,7 +2194,7 @@
       ]
     },
     "Failure": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], one carrying `unchanged:` as\n[`Failure::Unchanged`], one carrying `denied_paths:` as\n[`Failure::PathsDenied`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], one carrying `unchanged:` as\n[`Failure::Unchanged`], one carrying `denied_paths:` as\n[`Failure::PathsDenied`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "anyOf": [
         {
           "description": "Declared artifacts that did not close, each saying what went\nwrong with it: the file, the content of the document, or the run\nthat owes the artifact and holds none of it.",
@@ -2205,6 +2287,18 @@
           },
           "required": [
             "denied_paths"
+          ]
+        },
+        {
+          "description": "A command the node ran exited non-zero, and what it printed last\nis the reason a person reads.",
+          "type": "object",
+          "properties": {
+            "exited": {
+              "$ref": "#/$defs/CommandExit"
+            }
+          },
+          "required": [
+            "exited"
           ]
         },
         {
@@ -2859,7 +2953,7 @@
       ]
     },
     "NodeFailedPayload": {
-      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], one carrying `unchanged:` as\n[`Failure::Unchanged`], one carrying `denied_paths:` as\n[`Failure::PathsDenied`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
+      "description": "Why a node failed.\n\nUntagged, with `Message` last: a payload carrying `artifacts:` reads\nas [`Failure::Artifacts`], one carrying `died:` as\n[`Failure::SessionDied`], one carrying `exited:` as\n[`Failure::Exited`], one carrying `outside_scope:` as\n[`Failure::ScopeViolated`], one carrying `requested_scope:` as\n[`Failure::ScopeRequested`], one carrying `unset:` as\n[`Failure::Unset`], one carrying `unchanged:` as\n[`Failure::Unchanged`], one carrying `denied_paths:` as\n[`Failure::PathsDenied`], and a log written before failures were\ndata carries `outcome:` alone and reads back as\n[`Failure::Message`]. That tolerance is the rule for what is\npersisted and versioned, and it is why no reader needs to know which\nversion wrote the line it is looking at.",
       "type": "object",
       "properties": {
         "commit": {
@@ -2991,6 +3085,18 @@
           },
           "required": [
             "denied_paths"
+          ]
+        },
+        {
+          "description": "A command the node ran exited non-zero, and what it printed last\nis the reason a person reads.",
+          "type": "object",
+          "properties": {
+            "exited": {
+              "$ref": "#/$defs/CommandExit"
+            }
+          },
+          "required": [
+            "exited"
           ]
         },
         {

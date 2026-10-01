@@ -3,7 +3,7 @@
 //! serves so the loop reads as the schedule it runs.
 
 use yunta_core::events::{
-    EventPayload, Evidence, Fact, Failure, FindingSeverity, NodeReroutedPayload, PauseReason,
+    EventPayload, Evidence, Failure, FindingSeverity, NodeReroutedPayload, PauseReason,
     PromotionSignaledPayload, RerouteCause, RerouteOrigin, RunFinishedPayload, TerminalState,
     TokenUsage,
 };
@@ -248,7 +248,7 @@ pub(super) async fn gate_exhausted(
                 ),
             });
         };
-        let evidence: Evidence = vec![Fact::bare(cause.to_string())].into();
+        let evidence: Evidence = super::escalation::failure_facts(&cause.0).into();
         ctx.emit(
             None,
             EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload {
