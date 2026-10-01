@@ -205,3 +205,10 @@ the mock adapter calls the server directly.
 A CLI merges both entries into one table by key, so the per-run server
 carries a name of its own: registering the control plane as `yunta` — the
 natural thing to call it — leaves both intact.
+
+Each CLI hands the server's tools to its model under a name of its own:
+Claude Code as `mcp__yunta-run__yunta_task`, Codex as
+`mcp__yunta_run__yunta_task`. An adapter declares that rule as its
+`tool_naming` capability, and every text the engine shows a session names a
+run tool by it, so a session calls the name its CLI has on the first try
+rather than the bare `yunta_task`, which reaches nothing.

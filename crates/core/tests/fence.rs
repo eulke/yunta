@@ -17,6 +17,7 @@ fn fence(allowed: &[&str], roots: &[&str]) -> Fence {
         roots: roots.iter().map(PathBuf::from).collect(),
         advice: Advice::ReportFinding,
         denied: Vec::new(),
+        naming: yunta_core::ToolNaming::Bare,
     }
 }
 
@@ -119,6 +120,25 @@ fn a_granted_expansion_is_inside_the_fence() {
 }
 
 #[test]
+fn a_refusal_names_the_tool_it_advises_the_way_the_session_s_cli_does() {
+    let fence = fence(&["src/**"], &[]);
+    let fence = Fence {
+        advice: Advice::RequestExpansion,
+        ..fence
+    }
+    .naming(yunta_core::ToolNaming::McpPrefixed);
+    let Verdict::Refused(refusal) = fence.judge(&worktree(), Path::new("docs/readme.md")) else {
+        panic!("outside every glob");
+    };
+    let text = refusal.to_string();
+    assert!(
+        text.contains("mcp__yunta-run__yunta_request_scope_expansion"),
+        "{text}"
+    );
+    assert_eq!(refused_target(&text), Some(refusal.target.clone()));
+}
+
+#[test]
 fn a_refusal_message_round_trips_its_target_and_says_its_advice() {
     for (advice, expected) in [
         (Advice::RequestExpansion, "yunta_request_scope_expansion"),
@@ -129,6 +149,7 @@ fn a_refusal_message_round_trips_its_target_and_says_its_advice() {
             roots: Vec::new(),
             advice,
             denied: Vec::new(),
+            naming: yunta_core::ToolNaming::Bare,
         };
         let Verdict::Refused(refusal) = fence.judge(&worktree(), Path::new("docs/readme.md"))
         else {

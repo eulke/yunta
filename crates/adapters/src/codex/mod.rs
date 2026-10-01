@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use yunta_core::{
     AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, SessionId,
-    Unbuildable,
+    ToolNaming, Unbuildable,
 };
 
 use yunta_core::fence::Coverage;
@@ -263,6 +263,10 @@ impl Adapter for CodexAdapter {
             // is never claimed, and `network: false` degrades to
             // declarative-only here even where the sandbox closes it.
             network_isolation: false,
+            // The CLI names an MCP server's tools `mcp__<server>__<tool>`
+            // with the server's `-` written `_`: a session finds
+            // `mcp__yunta_run__yunta_task`, never `yunta_task`.
+            tool_naming: ToolNaming::McpPrefixedUnderscored,
         }
     }
 

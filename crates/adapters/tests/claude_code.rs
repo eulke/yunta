@@ -57,6 +57,21 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
 }
 
 #[tokio::test]
+async fn a_run_tool_is_named_the_way_this_cli_lists_it_in_its_init_line() {
+    // The init line of a session holding the run tools lists each one as
+    // the model calls it: that name, and nothing shorter, reaches it.
+    let naming = adapter().capabilities().tool_naming;
+    assert_eq!(
+        yunta_core::RunTool::Task.called(naming),
+        "mcp__yunta-run__yunta_task"
+    );
+    assert_eq!(
+        yunta_core::RunTool::from_called("mcp__yunta-run__yunta_task", naming),
+        Some(yunta_core::RunTool::Task)
+    );
+}
+
+#[tokio::test]
 async fn capability_usage_reporting_surfaces_the_streams_usage() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(
@@ -737,6 +752,7 @@ async fn a_claude_session_installs_the_fence_by_settings_and_add_dir_and_nothing
         roots: vec![artifacts.clone()],
         advice: Advice::ReportFinding,
         denied: Vec::new(),
+        naming: yunta_core::ToolNaming::Bare,
     };
     let args = argv_for(dir.path(), req).await;
 
@@ -1191,6 +1207,7 @@ async fn a_refused_write_in_the_stream_becomes_write_refused() {
         roots: Vec::new(),
         advice: yunta_core::fence::Advice::ReportFinding,
         denied: false,
+        naming: yunta_core::ToolNaming::Bare,
     };
     let user_line = serde_json::json!({
         "type": "user",

@@ -14,9 +14,27 @@
 //! what the session reports, and a plain file the session writes itself.
 //! A node that declares nothing of a kind hears nothing about it.
 
-use yunta_core::{ArtifactKind, ArtifactSpec};
+use yunta_core::{ArtifactKind, ArtifactSpec, RunTool};
 
 use super::listener::RunToolsSession;
+
+/// The names this session's CLI gives the run's tools, beside the names
+/// any text — an author's prompt included — may give them. `None` when
+/// nothing is mounted, or the CLI calls each by its own name.
+pub(crate) fn naming_notice(session: Option<&RunToolsSession>) -> Option<String> {
+    let renamed = session?.renamed();
+    if renamed.is_empty() {
+        return None;
+    }
+    let mut text = String::from(
+        "\n\nThis run's tools reach you under names of your CLI's own. Call each by the \
+         name it has here, whatever any text calls it:",
+    );
+    for (called, tool) in renamed {
+        text.push_str(&format!("\n  `{called}` — {tool}"));
+    }
+    Some(text)
+}
 
 /// What a session is told about the artifacts its node declares: which
 /// documents to submit and through which tool, which findings to report
@@ -27,11 +45,11 @@ pub(crate) fn submission_notice(
     declared: &[ArtifactSpec],
     artifact_dir: Option<&std::path::Path>,
 ) -> Option<String> {
-    session?;
+    let session = session?;
     let text: String = [
-        documents_to_submit(declared),
-        findings_to_report(declared),
-        files_to_write(declared, artifact_dir),
+        documents_to_submit(session, declared),
+        findings_to_report(session, declared),
+        files_to_write(session, declared, artifact_dir),
     ]
     .into_iter()
     .flatten()
@@ -46,17 +64,17 @@ pub(crate) fn task_notice(
     session: Option<&RunToolsSession>,
     task: Option<&super::host::TaskAccess>,
 ) -> Option<String> {
-    session?;
+    let session = session?;
     let task = task?;
     let plan = match task.plan {
-        Some(_) => {
+        Some(_) => format!(
             " It also carries the plan the task belongs to: the design the task names, and \
              the other tasks, which own what your scope leaves out. Build the design as the \
              plan declares it; where your task cannot, ask for the scope it needs, or declare \
-             the departure with `yunta_declare_deviation` — never build something else and \
-             say nothing."
-        }
-        None => "",
+             the departure with `{depart}` — never build something else and say nothing.",
+            depart = session.called(RunTool::DeclareDeviation),
+        ),
+        None => String::new(),
     };
     Some(format!(
         "\n\nRead this task's scope, criteria and notes with `{read}` before you change \
@@ -64,18 +82,20 @@ pub(crate) fn task_notice(
          what earlier attempts left red.{plan} When your session ends the engine runs every \
          criterion and rejects any change outside the scope; `{check}` judges your work \
          exactly that way, so call it before you finish.",
-        read = super::catalog::RunTool::Task.name(),
-        check = super::catalog::RunTool::CheckTask.name(),
+        read = session.called(RunTool::Task),
+        check = session.called(RunTool::CheckTask),
     ))
 }
 
 /// The documents this node declares under a kind that has a submission
 /// tool, each paired with the tool that takes it.
-fn documents_to_submit(declared: &[ArtifactSpec]) -> Option<String> {
-    let submitted: Vec<(ArtifactKind, &str)> = declared
+fn documents_to_submit(session: &RunToolsSession, declared: &[ArtifactSpec]) -> Option<String> {
+    let submitted: Vec<(ArtifactKind, String)> = declared
         .iter()
         .filter_map(|spec| match spec {
-            ArtifactSpec::Interpreted(kind) => kind.submit_tool().map(|tool| (*kind, tool)),
+            ArtifactSpec::Interpreted(kind) => kind
+                .submit_tool()
+                .map(|_| (*kind, session.called(RunTool::Submit(*kind)))),
             ArtifactSpec::Opaque(_) => None,
         })
         .collect();
@@ -100,7 +120,7 @@ fn documents_to_submit(declared: &[ArtifactSpec]) -> Option<String> {
 
 /// The findings artifact this node declares — a file the session never
 /// writes, because the engine derives it from what the session reported.
-fn findings_to_report(declared: &[ArtifactSpec]) -> Option<String> {
+fn findings_to_report(session: &RunToolsSession, declared: &[ArtifactSpec]) -> Option<String> {
     let kind = declared.iter().find_map(|spec| match spec {
         ArtifactSpec::Interpreted(kind) if kind.submit_tool().is_none() => Some(*kind),
         _ => None,
@@ -113,9 +133,9 @@ fn findings_to_report(declared: &[ArtifactSpec]) -> Option<String> {
          post it again; the others already reported are kept. To change a finding you \
          reported, `{update}` with the same id and the whole finding; to take one back, \
          `{withdraw}` with its id and why. A withdrawn id is final.",
-        post = ArtifactKind::POST_FINDING_TOOL,
-        update = ArtifactKind::UPDATE_FINDING_TOOL,
-        withdraw = ArtifactKind::WITHDRAW_FINDING_TOOL,
+        post = session.called(RunTool::PostFinding),
+        update = session.called(RunTool::UpdateFinding),
+        withdraw = session.called(RunTool::WithdrawFinding),
     ))
 }
 
@@ -123,6 +143,7 @@ fn findings_to_report(declared: &[ArtifactSpec]) -> Option<String> {
 /// own directory, told only when the session was granted it, since a
 /// session that cannot reach it has nothing to act on.
 fn files_to_write(
+    session: &RunToolsSession,
     declared: &[ArtifactSpec],
     artifact_dir: Option<&std::path::Path>,
 ) -> Option<String> {
@@ -147,7 +168,7 @@ fn files_to_write(
     }
     text.push_str(&format!(
         "\nYou may call `{}` to confirm a file is there before this session ends.",
-        super::catalog::RunTool::CheckArtifact.name()
+        session.called(RunTool::CheckArtifact)
     ));
     Some(text)
 }
@@ -254,16 +275,16 @@ fn scope_notice(
             "The scope you asked for was refused. Stay within the scope you have.".to_string()
         }
     };
-    let read = session.map(|_| match asker {
+    let read = session.map(|session| match asker {
         Asker::Task => format!(
             " `{read}` shows your task's scope and what still keeps it from closing; call \
              `{check}` before you finish.",
-            read = super::catalog::RunTool::Task.name(),
-            check = super::catalog::RunTool::CheckTask.name(),
+            read = session.called(RunTool::Task),
+            check = session.called(RunTool::CheckTask),
         ),
         Asker::Node => format!(
             " `{check}` shows what your close would find outside your scope.",
-            check = super::catalog::RunTool::CheckScope.name(),
+            check = session.called(RunTool::CheckScope),
         ),
     });
     format!(

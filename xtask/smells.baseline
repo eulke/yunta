@@ -12,6 +12,7 @@ let_underscore_in_prod 20
 numeric_const_without_adr 40
 prod_fns_over_50_lines 79
 reason_built_by_format 5
+run_tool_named_outside_vocabulary 1
 session_request_literal_outside_plan 0
 sleep_outside_mock_latency 4
 space_runs_in_prod_strings 0

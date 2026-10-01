@@ -593,6 +593,11 @@
           "type": "boolean",
           "default": false
         },
+        "tool_naming": {
+          "description": "How the model in this adapter's sessions calls a tool of a server\nthe adapter mounts — the name every text the engine shows a\nsession gives a run tool, so a session never calls a name its CLI\ndoes not have.",
+          "$ref": "#/$defs/ToolNaming",
+          "default": "bare"
+        },
         "usage_reporting": {
           "description": "Emits trustworthy token usage in the stream.",
           "type": "boolean",
@@ -4213,6 +4218,26 @@
       "required": [
         "input",
         "output"
+      ]
+    },
+    "ToolNaming": {
+      "description": "How a CLI names the tools of an MCP server it mounts, as its model\ncalls them: a rule over the server's name and the tool's, never a\ntable, so it names every tool — including one added after the\nadapter was written.",
+      "oneOf": [
+        {
+          "description": "The tool's own name: `yunta_task`.",
+          "type": "string",
+          "const": "bare"
+        },
+        {
+          "description": "`mcp__<server>__<tool>`, the server's name as it was configured.",
+          "type": "string",
+          "const": "mcp_prefixed"
+        },
+        {
+          "description": "`mcp__<server>__<tool>`, with every `-` of the server's name\nwritten `_`.",
+          "type": "string",
+          "const": "mcp_prefixed_underscored"
+        }
       ]
     },
     "ToolTarget": {

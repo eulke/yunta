@@ -210,6 +210,9 @@ pub struct RunToolsAccess {
     /// close asks, answered by the same function.
     pub node_kind: NodeKind,
     pub declared: Vec<ArtifactSpec>,
+    /// How the session's CLI names these tools to its model, which is
+    /// what every text it is shown names one by.
+    pub naming: yunta_core::ToolNaming,
 }
 
 /// What a task session's tools reach: its task as the cycle judges it,

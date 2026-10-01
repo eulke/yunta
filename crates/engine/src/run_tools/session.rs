@@ -61,6 +61,8 @@ pub(super) struct SessionTools {
     /// The artifacts this node's close will verify, names already
     /// rendered.
     pub(super) declared: Vec<ArtifactSpec>,
+    /// How the session's CLI names these tools to its model.
+    pub(super) naming: yunta_core::ToolNaming,
 }
 
 impl SessionTools {
@@ -78,6 +80,7 @@ impl SessionTools {
             node,
             node_kind,
             declared,
+            naming,
         } = access;
         SessionTools {
             host,
@@ -88,7 +91,13 @@ impl SessionTools {
             cwd,
             stop,
             declared,
+            naming,
         }
+    }
+
+    /// What this session's model calls `tool` by.
+    pub(super) fn called(&self, tool: RunTool) -> String {
+        tool.called(self.naming)
     }
 }
 
@@ -137,9 +146,7 @@ pub(super) enum RunToolError {
          either declares no scope or may not be granted more on this run"
     )]
     NoScopeToWiden,
-    #[error(
-        "`yunta_check_scope` judges a node's own scope, and this session's node declares none"
-    )]
+    #[error("this tool judges a node's own scope, and this session's node declares none")]
     NoNodeScope,
     #[error("this attempt's start is not on the log, so there is no tree to judge its work from")]
     NoStartingTree,

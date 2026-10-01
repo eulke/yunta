@@ -17,6 +17,7 @@ use rmcp::transport::streamable_http_server::session::local::LocalSessionManager
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use tokio_util::sync::CancellationToken;
 use yunta_core::port::RunToolsEndpoint;
+use yunta_core::RunTool;
 
 /// One live listener, tied to one session attempt. Dropping it tears
 /// the server down — the structured-concurrency shape (the spawner owns
@@ -24,8 +25,38 @@ use yunta_core::port::RunToolsEndpoint;
 /// no listener ever outlives the session it authenticated.
 pub struct RunToolsSession {
     pub endpoint: RunToolsEndpoint,
+    /// How the session's CLI names these tools to its model.
+    naming: yunta_core::ToolNaming,
+    /// The tools this session is served, in the order it reads them.
+    offered: Vec<RunTool>,
     shutdown: CancellationToken,
     server: tokio::task::JoinHandle<()>,
+}
+
+impl RunToolsSession {
+    /// How this session's CLI names these tools to its model.
+    pub fn naming(&self) -> yunta_core::ToolNaming {
+        self.naming
+    }
+
+    /// What this session's model calls `tool` by — the one name every
+    /// text it is shown gives that tool.
+    pub fn called(&self, tool: RunTool) -> String {
+        tool.called(self.naming)
+    }
+
+    /// Each tool this session is served, as its model calls it, beside
+    /// the tool's own name — empty when the two are the same.
+    pub(crate) fn renamed(&self) -> Vec<(String, &'static str)> {
+        match self.naming {
+            yunta_core::ToolNaming::Bare => Vec::new(),
+            _ => self
+                .offered
+                .iter()
+                .map(|tool| (self.called(*tool), tool.name()))
+                .collect(),
+        }
+    }
 }
 
 impl Drop for RunToolsSession {
@@ -55,7 +86,9 @@ pub async fn open_session_listener(
         .as_ref()
         .map_or_else(CancellationToken::new, |t| t.cancel.child_token());
 
+    let naming = access.naming;
     let tools = SessionTools::new(access, (task, node_scope), cwd, shutdown.clone());
+    let offered = super::catalog::offered(&tools);
     let service = StreamableHttpService::new(
         move || Ok(tools.clone()),
         Arc::new(transport_sessions()),
@@ -74,6 +107,8 @@ pub async fn open_session_listener(
             url,
             token: token.into(),
         },
+        naming,
+        offered,
         shutdown,
         server,
     })

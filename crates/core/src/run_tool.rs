@@ -94,8 +94,14 @@ impl RunTool {
         Self::all().into_iter().find(|tool| tool.name() == name)
     }
 
-    pub fn from_claude_name(name: &str) -> Option<Self> {
-        let prefix = format!("mcp__{}__", crate::port::RunToolsEndpoint::SERVER_NAME);
-        Self::parse(name.strip_prefix(&prefix)?)
+    /// What a session whose CLI names tools by `naming` calls this tool.
+    pub fn called(self, naming: crate::ToolNaming) -> String {
+        naming.call_name(crate::port::RunToolsEndpoint::SERVER_NAME, self.name())
+    }
+
+    /// The run tool `called` names, as a CLI that names tools by `naming`
+    /// calls it.
+    pub fn from_called(called: &str, naming: crate::ToolNaming) -> Option<Self> {
+        Self::parse(naming.tool_of(crate::port::RunToolsEndpoint::SERVER_NAME, called)?)
     }
 }

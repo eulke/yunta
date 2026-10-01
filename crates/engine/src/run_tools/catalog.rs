@@ -18,7 +18,7 @@ use super::session::SessionTools;
 
 trait RunToolCatalog {
     fn offered_to(self, session: &SessionTools) -> bool;
-    fn declared(self) -> Tool;
+    fn declared(self, session: &SessionTools) -> Tool;
 }
 
 impl RunToolCatalog for RunTool {
@@ -41,20 +41,21 @@ impl RunToolCatalog for RunTool {
         }
     }
 
-    /// The tool as the session is offered it: its name, what it does,
-    /// and the shape of what it takes.
-    fn declared(self) -> Tool {
+    /// The tool as the session is offered it: its name, what it does —
+    /// naming any other tool the way this session's CLI does — and the
+    /// shape of what it takes.
+    fn declared(self, session: &SessionTools) -> Tool {
         match self {
             RunTool::CheckArtifact => check_artifact_tool(),
             RunTool::TaskStatus => task_status_tool(),
             RunTool::Task => task_tool(),
             RunTool::CheckTask => check_task_tool(),
             RunTool::GetBlackboard => blackboard_tool(),
-            RunTool::CheckScope => check_scope_tool(),
+            RunTool::CheckScope => check_scope_tool(session),
             RunTool::RequestScopeExpansion => scope_expansion_tool(),
             RunTool::DeclareDeviation => deviation_tool(),
-            RunTool::PostFinding => post_finding_tool(),
-            RunTool::UpdateFinding => update_finding_tool(),
+            RunTool::PostFinding => post_finding_tool(session),
+            RunTool::UpdateFinding => update_finding_tool(session),
             RunTool::WithdrawFinding => withdraw_finding_tool(),
             RunTool::Submit(kind) => submit_tool(self.name(), kind),
         }
@@ -63,16 +64,23 @@ impl RunToolCatalog for RunTool {
 
 /// The tools this session is served, in the order it reads them.
 pub(super) fn mounted(session: &SessionTools) -> Vec<Tool> {
+    offered(session)
+        .into_iter()
+        .map(|tool| tool.declared(session))
+        .collect()
+}
+
+/// Which run tools this session is served, in the order it reads them.
+pub(super) fn offered(session: &SessionTools) -> Vec<RunTool> {
     RunTool::all()
         .into_iter()
         .filter(|tool| tool.offered_to(session))
-        .map(RunTool::declared)
         .collect()
 }
 
 fn check_artifact_tool() -> Tool {
     Tool::new(
-        "yunta_check_artifact",
+        RunTool::CheckArtifact.name(),
         "Check an artifact this node declares, before your session ends: for a \
          file you wrote, that it is there and within its size; for a document you \
          submitted, what the engine read out of the file it wrote. Runs exactly the \
@@ -92,30 +100,36 @@ fn check_artifact_tool() -> Tool {
     )
 }
 
-fn post_finding_tool() -> Tool {
+fn post_finding_tool(session: &SessionTools) -> Tool {
     finding_tool(
         ArtifactKind::POST_FINDING_TOOL,
-        "Report a structured finding the moment you see it — one call per \
+        &format!(
+            "Report a structured finding the moment you see it — one call per \
          finding. The engine validates it at once: unknown keys, wrong types, \
          empty fields, and an id this node already used are refused with what \
          to fix, and nothing else you reported is lost. An accepted finding is \
          counted, deduplicated and consulted with every other finding on the \
          run, survives this session, and — when this node declares a `findings` \
          artifact — is written into that file at the end. Never write a findings \
-         file yourself. To change a finding you reported, use \
-         `yunta_update_finding`; to take one back, `yunta_withdraw_finding`.",
+         file yourself. To change a finding you reported, use `{update}`; to take one \
+         back, `{withdraw}`.",
+            update = session.called(RunTool::UpdateFinding),
+            withdraw = session.called(RunTool::WithdrawFinding),
+        ),
     )
 }
 
-fn update_finding_tool() -> Tool {
+fn update_finding_tool(session: &SessionTools) -> Tool {
     finding_tool(
         ArtifactKind::UPDATE_FINDING_TOOL,
-        "Replace a finding this node already reported, by id, with its whole \
-         new content — same fields as `yunta_post_finding`, validated the same \
-         way. Use it when a finding turns out to be more or less severe, wrongly \
-         located, or better explained. Only a finding this node reported can be \
-         updated, and a withdrawn one cannot; the previous state stays in the \
-         run's log.",
+        &format!(
+            "Replace a finding this node already reported, by id, with its whole \
+             new content — same fields as `{post}`, validated the same way. Use it when \
+             a finding turns out to be more or less severe, wrongly located, or better \
+             explained. Only a finding this node reported can be updated, and a \
+             withdrawn one cannot; the previous state stays in the run's log.",
+            post = session.called(RunTool::PostFinding),
+        ),
     )
 }
 
@@ -133,7 +147,7 @@ fn withdraw_finding_tool() -> Tool {
 
 fn task_status_tool() -> Tool {
     Tool::new(
-        "yunta_task_status",
+        RunTool::TaskStatus.name(),
         "Read-only view of the run's tasks document (task id -> status) — the same data \
          the `tasks` context source mounts, queryable mid-session.",
         no_arguments(),
@@ -176,14 +190,17 @@ fn check_task_tool() -> Tool {
     )
 }
 
-fn check_scope_tool() -> Tool {
+fn check_scope_tool(session: &SessionTools) -> Tool {
     Tool::new(
         RunTool::CheckScope.name(),
-        "Audit what this node changed against its scope exactly as the engine will \
-         when your session ends. `scope` is what you may write — what the node declared \
-         plus what a person granted it — and `outside_scope` lists every path you \
-         changed outside it. A path outside fails the node; if your fix needs one, ask \
-         with yunta_request_scope_expansion instead of writing it.",
+        format!(
+            "Audit what this node changed against its scope exactly as the engine will \
+             when your session ends. `scope` is what you may write — what the node \
+             declared plus what a person granted it — and `outside_scope` lists every \
+             path you changed outside it. A path outside fails the node; if your fix \
+             needs one, ask with `{ask}` instead of writing it.",
+            ask = session.called(RunTool::RequestScopeExpansion),
+        ),
         no_arguments(),
     )
 }
@@ -220,7 +237,7 @@ fn deviation_tool() -> Tool {
 
 fn scope_expansion_tool() -> Tool {
     Tool::new(
-        "yunta_request_scope_expansion",
+        RunTool::RequestScopeExpansion.name(),
         "Ask for the scope you work to be widened — you never widen it yourself. \
          Provide the paths and the reason; for a task, also a verifiable criterion \
          that is red today. The request is decided when this attempt ends: a task's by \
@@ -240,7 +257,7 @@ fn scope_expansion_tool() -> Tool {
 
 fn blackboard_tool() -> Tool {
     Tool::new(
-        "yunta_get_blackboard",
+        RunTool::GetBlackboard.name(),
         "Read this group's blackboard — your OWN posts only while the group runs \
          (siblings' posts become readable after the join, through the \
          group's consolidated output, so results never depend on arrival order).",
@@ -281,11 +298,11 @@ const FINDING_FIELDS: [&str; 5] = ["id", "severity", "title", "location", "detai
 
 /// A tool that takes one finding, under the entry schema the findings
 /// document publishes.
-fn finding_tool(name: &'static str, description: &'static str) -> Tool {
+fn finding_tool(name: &'static str, description: &str) -> Tool {
     let (properties, defs) = finding_entry_schema();
     Tool::new(
         name,
-        description,
+        description.to_string(),
         tool_schema(properties, &FINDING_FIELDS, defs),
     )
 }

@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use yunta_core::{
     AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, Secret, SessionId,
-    Unbuildable,
+    ToolNaming, Unbuildable,
 };
 
 use yunta_core::fence::{Coverage, Fenced};
@@ -285,6 +285,10 @@ impl Adapter for ClaudeCodeAdapter {
             // post-hoc audit is the boundary, so `network: false` degrades
             // to declarative-only rather than claiming isolation.
             network_isolation: false,
+            // The CLI lists an MCP server's tools as `mcp__<server>__<tool>`
+            // in its own init line, and that is the only name a call
+            // reaches them by.
+            tool_naming: ToolNaming::McpPrefixed,
         }
     }
 

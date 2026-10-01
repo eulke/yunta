@@ -20,7 +20,7 @@ use serde::Deserialize;
 use yunta_core::fence::{Coverage, Fenced};
 use yunta_core::template::TemplateVar;
 use yunta_core::yaml::{self, Value};
-use yunta_core::{Capabilities, FenceLevel, ModelName};
+use yunta_core::{Capabilities, FenceLevel, ModelName, ToolNaming};
 
 /// A parsed fixture: adapter-level capabilities plus one script per
 /// expected `spawn()`, in order.
@@ -213,6 +213,11 @@ pub struct FixtureCapabilities {
     pub skills: bool,
     pub run_tools: bool,
     pub network_isolation: bool,
+    /// How the scripted session's CLI names tools, for a test about the
+    /// names the engine shows a session. A scripted step calls a run
+    /// tool by its own name whatever this says: the mock is the engine's
+    /// client, not a model reading a prompt.
+    pub tool_naming: ToolNaming,
 }
 
 impl From<FixtureCapabilities> for Capabilities {
@@ -226,6 +231,7 @@ impl From<FixtureCapabilities> for Capabilities {
             skills: fixture.skills,
             run_tools: fixture.run_tools,
             network_isolation: fixture.network_isolation,
+            tool_naming: fixture.tool_naming,
         }
     }
 }

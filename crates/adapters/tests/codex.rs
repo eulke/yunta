@@ -58,6 +58,18 @@ async fn capabilities_declare_what_this_adapter_actually_does() {
 }
 
 #[tokio::test]
+async fn a_run_tool_is_named_the_way_this_cli_hands_it_to_the_model() {
+    // A session's own tool list names the server's tools with its `-`
+    // written `_`: `mcp__yunta_run__yunta_check_artifact` is what a
+    // session found when it looked `yunta_check_artifact` up.
+    let naming = adapter().capabilities().tool_naming;
+    assert_eq!(
+        yunta_core::RunTool::CheckArtifact.called(naming),
+        "mcp__yunta_run__yunta_check_artifact"
+    );
+}
+
+#[tokio::test]
 async fn capability_usage_reporting_surfaces_the_streams_usage() {
     let dir = tempfile::tempdir().unwrap();
     let lines = write_lines(

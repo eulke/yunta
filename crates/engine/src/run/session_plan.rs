@@ -183,6 +183,7 @@ async fn tools_access(
             node: node.id.clone(),
             node_kind: node.kind.clone(),
             declared: crate::run::node_exec::declared_artifacts(ctx, node),
+            naming: adapter.capabilities().tool_naming,
         })))
 }
 
@@ -264,7 +265,7 @@ pub(crate) async fn open_session(
     let held_to = HeldTo::of(setup, &plan);
     let run_tools = mount_tools(setup, &plan, &held_to, adapter, observer).await?;
     let scratch_dir = scratch_dir(setup, &plan);
-    let fence = fence(setup, &plan, &held_to, run_tools.is_some());
+    let fence = fence(setup, &plan, &held_to, run_tools.as_ref());
     let task = plan.task.clone();
 
     let request = SessionRequest {
@@ -311,6 +312,7 @@ fn told(
         .map(|access| access.declared.as_slice())
         .unwrap_or_default();
     let notices = [
+        crate::run_tools::naming_notice(run_tools),
         crate::run_tools::submission_notice(run_tools, declared, setup.artifact_dir.as_deref()),
         crate::run_tools::task_notice(run_tools, task),
     ];
@@ -332,13 +334,14 @@ fn fence(
     setup: &SessionSetup,
     plan: &SessionPlan<'_>,
     held_to: &HeldTo,
-    holds_run_tools: bool,
+    run_tools: Option<&RunToolsSession>,
 ) -> Fence {
-    let advice = if holds_run_tools && held_to.may_ask() {
+    let advice = if run_tools.is_some() && held_to.may_ask() {
         Advice::RequestExpansion
     } else {
         Advice::ReportFinding
     };
+    let naming = run_tools.map(RunToolsSession::naming).unwrap_or_default();
     let fence = Fence::for_session(
         plan.profile,
         held_to.scope(),
@@ -346,7 +349,8 @@ fn fence(
         setup.artifact_dir.as_deref(),
         advice,
     )
-    .denying(held_to.denied(&setup.denied));
+    .denying(held_to.denied(&setup.denied))
+    .naming(naming);
     // A session that writes nothing keeps nothing writable.
     match plan.profile {
         yunta_core::port::PermissionProfile::ReadOnly => fence,

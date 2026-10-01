@@ -144,8 +144,8 @@ pub(super) async fn execute_loop(
             match super::context_resolve::resolve_for_task(
                 ctx,
                 node,
-                &task.id,
-                &prep.context_memo,
+                (&task.id, &prep.context_memo),
+                prep.adapter.capabilities().tool_naming,
                 cancel,
             )
             .await?

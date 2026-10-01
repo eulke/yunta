@@ -145,6 +145,8 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | `chosen` | `{adapter, model, agent?}` | sí | binding resuelto y congelado |
 | `discarded` | lista de `{candidate, reason}` | sí (puede ser vacía) | candidatos no elegidos y por qué — nunca vacío sin motivo si hubo &gt;1 candidato |
 
+Un nodo con sesión resuelve su runner antes de armar su contexto: el contexto le nombra a la sesión las run tools como las nombra el CLI de ese runner (`tool_naming`), así que `runner_resolved` precede a su `context_assembled`.
+
 ### 5.3 `baseline_captured` — engine
 **Fuente:** comando de suite, resultados, hash
 
@@ -192,7 +194,7 @@ que `from_tree` es exactamente el árbol de `found` (D201).
 | `session_id` | `SessionId` (opaco) | sí | persiste para `resume` |
 | `agent` | `Option<String>` | no | agente nombrado del adapter, si se pidió (`agent:`) |
 | `model` | `Option<ModelName>` | no | el modelo que el CLI reportó para la sesión; ausente cuando no reportó ninguno — nunca el pedido |
-| `capabilities` | `Capabilities` (`fence`: `none \| tool_calls \| filesystem`; el resto bools: resume_session, permission_profiles, custom_agents, usage_reporting, skills, run_tools, network_isolation) | sí | snapshot de capacidades del adapter en ese momento — constantes tras construcción. Un log viejo lleva `edit_hooks` en vez de `fence`, y el lector lo lee como `none` |
+| `capabilities` | `Capabilities` (`fence`: `none \| tool_calls \| filesystem`; `tool_naming`: `bare \| mcp_prefixed \| mcp_prefixed_underscored`; el resto bools: resume_session, permission_profiles, custom_agents, usage_reporting, skills, run_tools, network_isolation) | sí | snapshot de capacidades del adapter en ese momento — constantes tras construcción. `tool_naming` es cómo el CLI le nombra al modelo las tools de un servidor MCP (`yunta_task`, `mcp__yunta-run__yunta_task`, `mcp__yunta_run__yunta_task`): el nombre con el que todo texto del engine le menciona una run tool a esa sesión. Un log viejo lleva `edit_hooks` en vez de `fence`, y el lector lo lee como `none`; uno sin `tool_naming`, como `bare` |
 | `fence` | `Coverage` (`{"coverage": "exact"}` · `{"coverage": "widened_to_roots", "roots": [...]}` · `{"coverage": "tools_only"}`) | no | cuánto del canal de escritura cercó realmente la sesión, derivado de lo que el adapter construyó; ausente cuando no construyó ninguno. El nivel viaja una vez, en `capabilities.fence` |
 | `task_id` | `Option<TaskId>` | no | la tarea que trabaja una sesión de `loop`; ausente para la sesión propia de un nodo. Con `concurrency` > 1 las sesiones de un loop se intercalan, y es lo que dice de qué tarea es cada una |
 | `continues` | `Option<SessionId>` | no | la sesión que esta reanuda: la misma conversación, retomada después de la respuesta a lo que pidió (una ampliación de scope concedida o denegada). Ausente para una sesión que abrió nueva; cuando la reanudación no fue posible, un `capability_degraded` (`resume_session` → sesión nueva) lo dice |

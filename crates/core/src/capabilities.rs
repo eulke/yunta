@@ -45,6 +45,51 @@ pub struct Capabilities {
     /// policy and audit, never enforced.
     #[serde(default)]
     pub network_isolation: bool,
+    /// How the model in this adapter's sessions calls a tool of a server
+    /// the adapter mounts — the name every text the engine shows a
+    /// session gives a run tool, so a session never calls a name its CLI
+    /// does not have.
+    #[serde(default)]
+    pub tool_naming: ToolNaming,
+}
+
+/// How a CLI names the tools of an MCP server it mounts, as its model
+/// calls them: a rule over the server's name and the tool's, never a
+/// table, so it names every tool — including one added after the
+/// adapter was written.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolNaming {
+    /// The tool's own name: `yunta_task`.
+    #[default]
+    Bare,
+    /// `mcp__<server>__<tool>`, the server's name as it was configured.
+    McpPrefixed,
+    /// `mcp__<server>__<tool>`, with every `-` of the server's name
+    /// written `_`.
+    McpPrefixedUnderscored,
+}
+
+impl ToolNaming {
+    /// What the model calls `tool` of `server` by.
+    pub fn call_name(self, server: &str, tool: &str) -> String {
+        match self {
+            ToolNaming::Bare => tool.to_string(),
+            ToolNaming::McpPrefixed => format!("mcp__{server}__{tool}"),
+            ToolNaming::McpPrefixedUnderscored => {
+                format!("mcp__{}__{tool}", server.replace('-', "_"))
+            }
+        }
+    }
+
+    /// The tool of `server` that `called` names under this rule, when it
+    /// names one of that server's.
+    pub fn tool_of<'a>(self, server: &str, called: &'a str) -> Option<&'a str> {
+        let prefix = self.call_name(server, "");
+        called.strip_prefix(prefix.as_str())
+    }
 }
 
 /// What an adapter can build to keep a session's writes inside its
@@ -156,6 +201,27 @@ mod tests {
             assert_eq!(written, serde_json::json!(capability.as_str()));
             assert_eq!(capability.to_string(), capability.as_str());
         }
+    }
+
+    #[test]
+    fn a_tool_is_called_by_the_rule_its_cli_names_it_by_and_read_back_by_it() {
+        let server = "yunta-run";
+        for (naming, called) in [
+            (ToolNaming::Bare, "yunta_task"),
+            (ToolNaming::McpPrefixed, "mcp__yunta-run__yunta_task"),
+            (
+                ToolNaming::McpPrefixedUnderscored,
+                "mcp__yunta_run__yunta_task",
+            ),
+        ] {
+            assert_eq!(naming.call_name(server, "yunta_task"), called);
+            assert_eq!(naming.tool_of(server, called), Some("yunta_task"));
+        }
+        assert_eq!(
+            ToolNaming::McpPrefixed.tool_of(server, "mcp__other__yunta_task"),
+            None,
+            "a tool of another server is not this server's"
+        );
     }
 
     #[test]

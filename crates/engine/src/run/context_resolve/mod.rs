@@ -99,9 +99,10 @@ const EXTERNAL_CALL_TIMEOUT: Duration = Duration::from_secs(30);
 pub(super) async fn resolve_and_assemble(
     ctx: &RunCtx<'_>,
     node: &Node,
+    naming: yunta_core::ToolNaming,
     cancel: &CancellationToken,
 ) -> Result<Step<Option<String>>, RunError> {
-    assemble(ctx, node, None, None, cancel).await
+    assemble(ctx, node, (None, None), naming, cancel).await
 }
 
 /// Resolved content cached across one loop node's task briefs,
@@ -142,28 +143,32 @@ impl Resolved {
 pub(super) async fn resolve_for_task(
     ctx: &RunCtx<'_>,
     node: &Node,
-    task_id: &yunta_core::TaskId,
-    memo: &StableContextMemo,
+    (task_id, memo): (&yunta_core::TaskId, &StableContextMemo),
+    naming: yunta_core::ToolNaming,
     cancel: &CancellationToken,
 ) -> Result<Step<Option<String>>, RunError> {
-    assemble(ctx, node, Some(task_id), Some(memo), cancel).await
+    assemble(ctx, node, (Some(task_id), Some(memo)), naming, cancel).await
 }
 
 /// The one mapping from a resolution's result to the node's end: a
 /// block to prepend, the node's own failure, or — when `cancel` fired
 /// while a `command:` source ran — the cancelled end.
+/// The context a session of `node` reads: for one task's brief when
+/// `task` names it, memoizing stable sources across briefs. `naming` is
+/// how the session's CLI names the run's tools, which the shape of a
+/// document it hands over names the tool that takes it by.
 async fn assemble(
     ctx: &RunCtx<'_>,
     node: &Node,
-    task_id: Option<&yunta_core::TaskId>,
-    memo: Option<&StableContextMemo>,
+    task: (Option<&yunta_core::TaskId>, Option<&StableContextMemo>),
+    naming: yunta_core::ToolNaming,
     cancel: &CancellationToken,
 ) -> Result<Step<Option<String>>, RunError> {
-    if node.context.is_empty() && artifact_shapes(node).is_empty() {
+    if node.context.is_empty() && artifact_shapes(node, naming).is_empty() {
         return Ok(Step::Value(None));
     }
 
-    match resolve_all(ctx, node, task_id, memo, cancel).await {
+    match resolve_all(ctx, node, task, naming, cancel).await {
         Ok(block) => Ok(Step::Value(Some(block))),
         Err(ContextResolveError::Cancelled { .. }) => {
             Ok(Step::Ended(cancelled_end(ctx, node).await?))
@@ -177,8 +182,8 @@ async fn assemble(
 async fn resolve_all(
     ctx: &RunCtx<'_>,
     node: &Node,
-    task_id: Option<&yunta_core::TaskId>,
-    memo: Option<&StableContextMemo>,
+    (task_id, memo): (Option<&yunta_core::TaskId>, Option<&StableContextMemo>),
+    naming: yunta_core::ToolNaming,
     cancel: &CancellationToken,
 ) -> Result<String, ContextResolveError> {
     let mut sources = Vec::with_capacity(node.context.len());
@@ -186,7 +191,7 @@ async fn resolve_all(
     let mut run_stable_blocks = Vec::new();
     let mut volatile_blocks = Vec::new();
 
-    mount_artifact_shapes(ctx, node, &mut stable_blocks, &mut sources).await?;
+    mount_artifact_shapes(ctx, node, naming, (&mut stable_blocks, &mut sources)).await?;
 
     for spec in &node.context {
         let source_id = source_id_for(spec);

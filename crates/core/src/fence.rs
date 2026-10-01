@@ -53,6 +53,10 @@ pub struct Fence {
     /// whatever `allowed` admits.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub denied: Vec<ScopeGlob>,
+    /// How the session's CLI names the run's tools, which is what a
+    /// refusal that advises one names it by.
+    #[serde(default)]
+    pub naming: crate::ToolNaming,
 }
 
 /// What a refusal tells the model to do instead. A session that mounted
@@ -87,6 +91,8 @@ pub struct Refusal {
     /// Whether the path is one the project denies to every run, which no
     /// request widens.
     pub denied: bool,
+    /// How the model the refusal reaches calls the run's tools.
+    pub naming: crate::ToolNaming,
 }
 
 /// How much of a session the fence actually covered, derived from what
@@ -138,6 +144,7 @@ impl Fence {
             roots,
             advice,
             denied: Vec::new(),
+            naming: crate::ToolNaming::default(),
         }
     }
 
@@ -149,6 +156,7 @@ impl Fence {
             roots,
             advice,
             denied: Vec::new(),
+            naming: crate::ToolNaming::default(),
         }
     }
 
@@ -171,6 +179,7 @@ impl Fence {
                 roots,
                 advice,
                 denied: Vec::new(),
+                naming: crate::ToolNaming::default(),
             },
         }
     }
@@ -188,6 +197,12 @@ impl Fence {
             denied: denied.to_vec(),
             ..self
         }
+    }
+
+    /// The same fence, its refusals naming a run tool the way a CLI that
+    /// names tools by `naming` hands it to its model.
+    pub fn naming(self, naming: crate::ToolNaming) -> Self {
+        Fence { naming, ..self }
     }
 
     /// Whether `target` is inside the fence. Pure: `target` is resolved
@@ -225,6 +240,7 @@ impl Fence {
                 roots: self.roots.clone(),
                 advice: self.advice,
                 denied,
+                naming: self.naming,
             })
         }
     }
@@ -333,13 +349,17 @@ impl fmt::Display for Refusal {
                     .join(", ")
             )
         )?;
-        f.write_str(match self.advice {
-            Advice::RequestExpansion => {
-                "Ask for more scope with the run tool yunta_request_scope_expansion; \
-                 a granted expansion applies from the next attempt. Do not write here."
+        match self.advice {
+            Advice::RequestExpansion => write!(
+                f,
+                "Ask for more scope with the run tool {}; a granted expansion applies from \
+                 the next attempt. Do not write here.",
+                crate::RunTool::RequestScopeExpansion.called(self.naming)
+            ),
+            Advice::ReportFinding => {
+                f.write_str("Report the need as a finding; do not write here.")
             }
-            Advice::ReportFinding => "Report the need as a finding; do not write here.",
-        })
+        }
     }
 }
 

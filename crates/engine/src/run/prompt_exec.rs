@@ -46,6 +46,7 @@ async fn assemble_prompt(
     ctx: &RunCtx<'_>,
     node: &Node,
     prompt: &PromptSource,
+    naming: yunta_core::ToolNaming,
     cancel: &CancellationToken,
 ) -> Result<Step<String>, RunError> {
     let rendered = match render_or_fail(ctx, node, prompt_text(ctx, node, prompt)).await? {
@@ -53,7 +54,7 @@ async fn assemble_prompt(
         Step::Ended(end) => return Ok(Step::Ended(end)),
     };
     let context_block =
-        match super::context_resolve::resolve_and_assemble(ctx, node, cancel).await? {
+        match super::context_resolve::resolve_and_assemble(ctx, node, naming, cancel).await? {
             Step::Value(block) => block,
             Step::Ended(end) => return Ok(Step::Ended(end)),
         };
@@ -127,16 +128,19 @@ pub(super) async fn execute_prompt(
     prompt: &PromptSource,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    let rendered = match assemble_prompt(ctx, node, prompt, cancel).await? {
-        Step::Value(rendered) => rendered,
-        Step::Ended(end) => return Ok(end),
-    };
+    // The runner first: what the session is shown names the run's tools
+    // the way its CLI does, and only the runner says which CLI that is.
     let chosen = match resolve_node_runner(ctx, node).await? {
         Step::Value(chosen) => chosen,
         Step::Ended(end) => return Ok(end),
     };
-
     let adapter = &ctx.adapters[&chosen.adapter];
+    let naming = adapter.capabilities().tool_naming;
+    let rendered = match assemble_prompt(ctx, node, prompt, naming, cancel).await? {
+        Step::Value(rendered) => rendered,
+        Step::Ended(end) => return Ok(end),
+    };
+
     report_declarative_network(ctx, node, adapter.as_ref()).await?;
     let setup = match super::session_plan::resolve_setup(ctx, node, &chosen).await? {
         Ok(setup) => setup,

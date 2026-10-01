@@ -240,6 +240,9 @@ impl ToolsHost {
                     prompt: yunta_core::PromptSource::Inline(String::new()),
                 },
                 declared,
+                // The tools as a client calls them directly, by their
+                // own names.
+                naming: yunta_core::ToolNaming::Bare,
             },
             (task.map(Arc::new), node_scope.map(Arc::new)),
             cwd,

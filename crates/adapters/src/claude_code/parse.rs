@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use serde_json::Value;
-use yunta_core::{InvalidId, ModelName, RunTool, SessionId};
+use yunta_core::{InvalidId, ModelName, RunTool, SessionId, ToolNaming};
 
 use crate::failure;
 use yunta_core::events::ToolTarget;
@@ -219,7 +219,7 @@ fn assistant_message(
                 item.get("id").and_then(Value::as_str),
                 item.get("name").and_then(Value::as_str),
             ) {
-                if let Some(tool) = RunTool::from_claude_name(name) {
+                if let Some(tool) = RunTool::from_called(name, ToolNaming::McpPrefixed) {
                     run_tool_calls.insert(id.to_string(), tool);
                 }
             }

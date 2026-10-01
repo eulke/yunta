@@ -56,6 +56,10 @@ pub const COUNTERS: &[Counter] = &[
         count_session_request_literal_outside_plan,
     ),
     ("reason_built_by_format", count_reason_built_by_format),
+    (
+        "run_tool_named_outside_vocabulary",
+        count_run_tool_named_outside_vocabulary,
+    ),
 ];
 
 /// What a line carries to count as a write of the pattern.
@@ -288,6 +292,40 @@ fn count_reason_built_by_format(root: &Path) -> usize {
             Text("policy_applied: format!"),
         ],
         &[],
+    )
+}
+
+/// A run tool named by a literal outside the vocabulary that names it.
+///
+/// What a session calls a tool is its CLI's to say, and a text the
+/// engine shows a session names one through the session's own rule. A
+/// literal `yunta_task` written somewhere else is the bare name, which a
+/// CLI that prefixes the tools it mounts has nothing under: the session
+/// calls it, misses, and pays for a second turn to find the real one.
+fn count_run_tool_named_outside_vocabulary(root: &Path) -> usize {
+    outside(
+        root,
+        &[
+            Text("yunta_task"),
+            Text("yunta_check_task"),
+            Text("yunta_check_artifact"),
+            Text("yunta_get_blackboard"),
+            Text("yunta_check_scope"),
+            Text("yunta_request_scope_expansion"),
+            Text("yunta_declare_deviation"),
+            Text("yunta_post_finding"),
+            Text("yunta_update_finding"),
+            Text("yunta_withdraw_finding"),
+            Text("yunta_submit_"),
+        ],
+        &[
+            "/tests/",
+            "crates/testkit",
+            "crates/core/src/run_tool.rs",
+            "crates/core/src/workflow/artifacts.rs",
+            // The rule itself, and the cases that pin it.
+            "crates/core/src/capabilities.rs",
+        ],
     )
 }
 

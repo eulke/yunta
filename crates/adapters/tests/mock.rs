@@ -144,6 +144,7 @@ outcome: { type: completed, summary: "done" }
         roots: Vec::new(),
         advice: Advice::ReportFinding,
         denied: Vec::new(),
+        naming: yunta_core::ToolNaming::Bare,
     };
     let session = fixture.spawn(req).await.unwrap();
     let events = drain(session).await;
@@ -182,6 +183,7 @@ outcome: { type: completed, summary: "done" }
         roots: Vec::new(),
         advice: Advice::ReportFinding,
         denied: Vec::new(),
+        naming: yunta_core::ToolNaming::Bare,
     };
     let session = fixture.spawn(req).await.unwrap();
     let _ = drain(session).await;

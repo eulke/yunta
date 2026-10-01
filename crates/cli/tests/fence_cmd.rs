@@ -45,6 +45,7 @@ fn the_fence_command_refuses_with_exit_two_and_the_reason_on_stderr() {
         roots: Vec::new(),
         advice: Advice::RequestExpansion,
         denied: Vec::new(),
+        naming: yunta_core::ToolNaming::Bare,
     };
 
     let out = hook(
@@ -69,6 +70,7 @@ fn the_fence_command_allows_with_exit_zero_and_nothing_on_stdout() {
         roots: Vec::new(),
         advice: Advice::RequestExpansion,
         denied: Vec::new(),
+        naming: yunta_core::ToolNaming::Bare,
     };
 
     let out = hook(worktree, Some(&fence), &writing("/work/task-1/src/lib.rs"));
