@@ -133,7 +133,7 @@ impl SessionTools {
         );
         let offered = match offered {
             Ok(verified) => self.proven(kind, verified).await?,
-            refused => refused,
+            refused => Offered::told_nothing(refused),
         };
         self.record(kind, offered).await
     }
@@ -146,19 +146,30 @@ impl SessionTools {
         &self,
         kind: ArtifactKind,
         verified: VerifiedArtifact,
-    ) -> Result<Result<VerifiedArtifact, crate::artifacts::SubmitError>, RunToolError> {
-        let broken = match &verified.content {
-            crate::artifacts::ArtifactContent::Tasks(tasks) => self.handover(tasks).await?,
-            crate::artifacts::ArtifactContent::Spec(spec) => self.spec_handover(spec).await?,
-            _ => return Ok(Ok(verified)),
+    ) -> Result<Offered, RunToolError> {
+        let (broken, told) = match &verified.content {
+            crate::artifacts::ArtifactContent::Tasks(tasks) => {
+                (self.handover(tasks).await?, String::new())
+            }
+            crate::artifacts::ArtifactContent::Spec(spec) => {
+                let proven = self.spec_handover(spec).await?;
+                let told = failing_now(&proven.failing, &self.host.redactor);
+                (proven.broken, told)
+            }
+            _ => return Ok(Offered::told_nothing(Ok(verified))),
         };
         if broken.is_empty() {
-            return Ok(Ok(verified));
+            return Ok(Offered {
+                verdict: Ok(verified),
+                told,
+            });
         }
-        Ok(Err(crate::artifacts::SubmitError::Refused(Report::new(
-            DocumentRef::new(kind, verified.path.display().to_string()),
-            broken,
-        ))))
+        Ok(Offered::told_nothing(Err(
+            crate::artifacts::SubmitError::Refused(Report::new(
+                DocumentRef::new(kind, verified.path.display().to_string()),
+                broken,
+            )),
+        )))
     }
 
     /// Records the engine's verdict on a submitted document and answers
@@ -173,11 +184,11 @@ impl SessionTools {
     /// the run now holds, which is what [`accept`] states — so a reader
     /// asking what the run holds never has to know that a session is
     /// what handed it over.
-    async fn record(
-        &self,
-        kind: ArtifactKind,
-        offered: Result<crate::artifacts::VerifiedArtifact, crate::artifacts::SubmitError>,
-    ) -> Result<String, RunToolError> {
+    async fn record(&self, kind: ArtifactKind, offered: Offered) -> Result<String, RunToolError> {
+        let Offered {
+            verdict: offered,
+            told,
+        } = offered;
         let name = ArtifactId::Interpreted { kind }.view_name();
         // The acceptance comes first, because the hash the submission
         // names is the one the run's own store answers for — a session
@@ -199,7 +210,7 @@ impl SessionTools {
                     SubmissionOutcome::Accepted {
                         content_hash: accepted.content_hash,
                     },
-                    Ok(format!("{name} — accepted. {}", read_as(&verified))),
+                    Ok(format!("{name} — accepted. {}{told}", read_as(&verified))),
                 )
             }
             Err(crate::artifacts::SubmitError::Refused(report)) => {
@@ -262,4 +273,49 @@ fn render_verdict(name: &str, verified: Result<VerifiedArtifact, ArtifactFailure
             None => format!("{name} — {failure}"),
         },
     }
+}
+
+/// A document's verdict, and what an acceptance tells the session beside
+/// what the engine read out of it.
+struct Offered {
+    verdict: Result<VerifiedArtifact, crate::artifacts::SubmitError>,
+    told: String,
+}
+
+impl Offered {
+    fn told_nothing(verdict: Result<VerifiedArtifact, crate::artifacts::SubmitError>) -> Self {
+        Offered {
+            verdict,
+            told: String::new(),
+        }
+    }
+}
+
+/// How each test of an accepted spec fails before the work: its exit and
+/// the last line it printed, redacted the way the log would be. A test
+/// that fails for anything but the missing behavior — a typo, a wrong
+/// path — fails after the work too, and this is where its writer sees it.
+fn failing_now(
+    failing: &[(yunta_core::TaskId, crate::task_cycle::CriterionRun)],
+    redactor: &yunta_core::Redactor,
+) -> String {
+    if failing.is_empty() {
+        return String::new();
+    }
+    let mut text = String::from(
+        "\n\nHow each test fails now, before any work — one that fails for anything but the \
+         missing behavior fails after the work too:",
+    );
+    for (task, run) in failing {
+        let said = match run.said() {
+            Some(said) => format!(" — it said `{}`", redactor.text(&said)),
+            None => ", printing nothing".to_string(),
+        };
+        text.push_str(&format!(
+            "\n  `{}` (task `{task}`): exit {}{said}",
+            run.cmd,
+            run.exit_described()
+        ));
+    }
+    text
 }

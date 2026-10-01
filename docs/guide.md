@@ -292,7 +292,9 @@ does: every task it names is the plan's, every file is new to the run's tree —
 that is not would replace what the project holds and deny it to the work — and in
 a checkout of the run's tree with every one of its files written in, each test runs
 and fails: a test that already passes holds the work to nothing, and the session
-hears which in the same call.
+hears which in the same call. An accepted spec is answered with how each test fails
+now — its exit and the last line it printed — so a test failing for anything but
+the missing behavior shows before anyone approves it.
 
 A loop holds each task to the spec the run holds. The task's files are written into
 the tree its work starts from and its tests join its criteria, so it closes only

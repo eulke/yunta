@@ -1178,6 +1178,34 @@ async fn submitted(host: &ToolsHost, tasks: serde_json::Value) -> (bool, String)
 }
 
 #[tokio::test]
+async fn a_spec_accepted_says_how_each_test_fails_before_the_work() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let plan = json!([{ "id": "greet", "title": "Greet", "scope": ["greeting.txt"],
+                        "criteria": [{ "cmd": "test -f greeting.txt" }] }]);
+    let (refused, text) = submitted(&host, plan).await;
+    assert!(!refused, "got: {text}");
+    let spec = yunta_core::ArtifactSpec::Interpreted(yunta_core::ArtifactKind::Spec);
+    let session = host.session_declaring("spec", None, vec![spec]).await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let (refused, text) = call(
+        &client,
+        "yunta_submit_spec",
+        json!({ "document": { "specs": [{
+            "task": "greet",
+            "files": [{ "path": "tests/greet.sh", "content": "echo no greeting yet; exit 1\n" }],
+            "tests": [{ "cmd": "sh tests/greet.sh", "proves": "there is a greeting" }],
+        }] } }),
+    )
+    .await;
+    client.cancel().await.unwrap();
+
+    assert!(!refused, "got: {text}");
+    let said = "`sh tests/greet.sh` (task `greet`): exit 1 — it said `no greeting yet`";
+    assert!(text.contains(said), "`{said}` is missing from:\n{text}");
+}
+
+#[tokio::test]
 async fn a_tasks_document_whose_criterion_cannot_run_is_refused_saying_why() {
     let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
 

@@ -22,11 +22,19 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::diagnostic::{Diagnostic, Named, Problem, RuleCode, Subject};
 use yunta_core::events::ExecutionEnvironment;
-use yunta_core::{CommitSha, Spec, SpecFile, Task, TasksFile};
+use yunta_core::{CommitSha, Spec, SpecFile, Task, TaskId, TasksFile};
 
 use super::session::{RunToolError, SessionTools};
 use crate::task_cycle::{probe, CriterionRun};
 use crate::worktree::{open_unit, UnitHome, UnitId};
+
+/// What a spec's handover found: every rule it breaks, and how each test
+/// of a task the plan declares answered in the run's tree with every
+/// file of the spec in it.
+pub(super) struct SpecProven {
+    pub(super) broken: Vec<Diagnostic>,
+    pub(super) failing: Vec<(TaskId, CriterionRun)>,
+}
 
 impl SessionTools {
     /// Every rule the document's criteria break where the engine runs
@@ -62,10 +70,7 @@ impl SessionTools {
 
     /// Every rule the spec breaks against the run's plan and where its
     /// tests run. Empty when the spec can be accepted.
-    pub(super) async fn spec_handover(
-        &self,
-        spec: &SpecFile,
-    ) -> Result<Vec<Diagnostic>, RunToolError> {
+    pub(super) async fn spec_handover(&self, spec: &SpecFile) -> Result<SpecProven, RunToolError> {
         let events = self.events().await?;
         let plan = crate::artifacts::latest::<TasksFile>(&self.host.run_dir, &events)
             .await
@@ -73,31 +78,38 @@ impl SessionTools {
             .map(|held| held.document);
         let (checkout, base) = self.handover_checkout().await?;
         let supervision = self.host.supervision(&self.stop);
-        let mut found = already_held(&checkout, &base, spec, supervision).await?;
+        let broken = already_held(&checkout, &base, spec, supervision).await?;
         write_test_files(&checkout, spec).await?;
+        let mut proven = SpecProven {
+            broken,
+            failing: Vec::new(),
+        };
         for (index, one) in spec.specs.iter().enumerate() {
-            found.extend(self.tested(index, one, plan.as_ref(), &checkout).await?);
+            let (broken, runs) = self.tested(index, one, plan.as_ref(), &checkout).await?;
+            proven.broken.extend(broken);
+            proven
+                .failing
+                .extend(runs.into_iter().map(|run| (one.task.clone(), run)));
         }
-        Ok(found)
+        Ok(proven)
     }
 
-    /// What one spec breaks where its tests run: a task the plan does
+    /// What one spec breaks where its tests run — a task the plan does
     /// not declare, or a test that cannot run or already passes in
-    /// `checkout`, which holds every file of the document.
+    /// `checkout`, which holds every file of the document — and how each
+    /// of its tests answered there.
     async fn tested(
         &self,
         index: usize,
         one: &Spec,
         plan: Option<&TasksFile>,
         checkout: &Path,
-    ) -> Result<Vec<Diagnostic>, RunToolError> {
+    ) -> Result<(Vec<Diagnostic>, Vec<CriterionRun>), RunToolError> {
         let subject = || Subject::Spec(Named::new(one.task.clone(), index));
         let Some(task) = plan.and_then(|plan| plan.tasks.iter().find(|task| task.id == one.task))
         else {
-            return Ok(vec![Diagnostic::new(
-                subject(),
-                Problem::rule(RuleCode::UnknownSpecTask, unplanned(&one.task, plan)),
-            )]);
+            let unknown = Problem::rule(RuleCode::UnknownSpecTask, unplanned(&one.task, plan));
+            return Ok((vec![Diagnostic::new(subject(), unknown)], Vec::new()));
         };
         let tested = Task {
             criteria: one.criteria().collect(),
@@ -108,12 +120,11 @@ impl SessionTools {
         let probes = probe(&tested, checkout, &self.host.memo, supervision)
             .await
             .map_err(|source| RunToolError::Check { source })?;
-        Ok(
-            judged(index, &tested, &probes, self.host.environment.as_ref())
-                .into_iter()
-                .map(|diagnostic| Diagnostic::new(subject(), diagnostic.problem))
-                .collect(),
-        )
+        let broken = judged(index, &tested, &probes, self.host.environment.as_ref())
+            .into_iter()
+            .map(|diagnostic| Diagnostic::new(subject(), diagnostic.problem))
+            .collect();
+        Ok((broken, probes))
     }
 
     /// A checkout of the run's tree as it stands, for this node's
