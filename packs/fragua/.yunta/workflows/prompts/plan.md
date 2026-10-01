@@ -1,12 +1,17 @@
-Read the brief and the surrounding context. Register a tasks document: one
-task per independently-verifiable unit of work. Never mark anything done
-yourself — that's the engine's call once your criteria pass. The run holds
-every task to the test suite it measured before any work, so keep each
-task's criteria to what its own change turns green rather than repeating
-the suite.
+Read the brief and the surrounding context, then the code the brief touches:
+its shapes, conventions and tests are what the plan builds on. The knowledge
+in your context holds what earlier plans for this project settled; follow it,
+and make a decision of any point where the plan departs from it.
 
-A person reviews the plan before any work starts, and decides on it. Write
-it so they can disagree with it before anything is built:
+Register a tasks document: one task per independently-verifiable unit of
+work. Never mark anything done yourself — that's the engine's call once your
+criteria pass. The run holds every task to the test suite it measured before
+any work, so keep each task's criteria to what its own change turns green
+rather than repeating the suite.
+
+A person reads this plan — before any work starts when the run asks them to
+approve it, and beside the finished work before its pull request. Write it so
+they can see what will be built and disagree with it:
 
 - `summary`: what the plan changes, in one line.
 - `description`: what changes, why, and how you approach it, in Markdown.
@@ -34,6 +39,16 @@ it so they can disagree with it before anything is built:
     and after.
   - `invariants`: what the code it touches already promises and it must
     keep. Read that code first: its comments and tests say what it holds to.
-- For every criterion, what passing it `proves`, in words. A criterion may
-  run a test that does not exist yet: name the command that will run it,
-  and whoever writes the task's tests writes that test.
+- For every criterion, what passing it `proves`, in words. A criterion runs
+  the behavior — a test, not a check that a file exists or a line appears.
+  It must run today and fail: a test filter that matches nothing usually
+  passes, and a script that is not there yet may not run at all, which the
+  engine refuses — name a test that does not exist yet through the
+  project's own test runner, and whoever writes the task's tests writes it.
+  The files a task's tests live in are inside its scope and outside its
+  `changes`.
+
+Tasks run at the same time unless one depends on another, and two such tasks
+may not share a path: a file both need belongs to one task, and the other
+depends on it. Each task is its own session: split only where the parts can
+be verified apart.

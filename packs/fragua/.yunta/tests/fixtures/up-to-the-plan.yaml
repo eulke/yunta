@@ -9,7 +9,7 @@
 # nobody has to answer for the case to run to its end.
 capabilities: { run_tools: true }
 sessions:
-  - match_prompt_contains: "ambiguities"
+  - match_prompt_contains: "only a person can decide"
     steps:
       - { type: run_tool, tool: yunta_submit_questions, arguments: { document: { questions: [] } } }
     outcome: { type: completed, summary: "nothing to ask" }

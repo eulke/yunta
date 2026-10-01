@@ -44,8 +44,17 @@ nodes:
     runner: planner
     permissions: read-only
     prompt: |
-      Identify the ambiguities in "{{inputs.idea}}" and raise the questions
-      you need; don't converse.
+      Find what in "{{inputs.idea}}" only a person can decide. Read the code
+      first: what it already answers is not a question, and neither is
+      anything a sensible default settles. Ask only what changes what gets
+      built — its behavior, its reach, what it must not break.
+
+      A person answers every question at once, without the code in front of
+      them: make each one stand alone, say what depends on the answer and
+      what you would choose. Prefer `boolean`, or `choice` with the options
+      you see; use `text` only when the answer cannot be listed. A question
+      is `required` only when the brief cannot be written without it. When
+      nothing needs deciding, hand over an empty list.
     artifacts:
       produces: [questions]
 
@@ -57,8 +66,19 @@ nodes:
       - artifact: { node: grill, kind: questions }
       - artifact: { node: grill, kind: answers }
     prompt: |
-      Write the brief for "{{inputs.idea}}" from the questions and their
-      answers.
+      Write the brief for "{{inputs.idea}}" from the idea and the answers a
+      person gave to the questions in your context. It is what the plan is
+      built from:
+
+      - What changes, for whom, and why.
+      - What is in, and what is out.
+      - Each answer, as the requirement it sets.
+      - Open points: every question left unanswered and anything the answers
+        do not settle, each with the assumption you would make. The plan
+        closes them.
+
+      Add nothing the idea and the answers do not say: a guess is an open
+      point, not a requirement.
     artifacts:
       produces: [brief.md]
 
@@ -110,7 +130,15 @@ nodes:
       mode: ask
       max_per_run: 3
     prompt: |
-      Read your task from the tasks document. Implement it inside its own scope.
+      Build your task as its plan declares it, inside its scope.
+
+      - Where one of its criteria runs a test that is not there, write it so
+        it checks what the criterion `proves`. Never weaken a test or a guard
+        to turn it green.
+      - Keep every `invariant` the task lists, and write like the code around
+        you.
+      - Check your task as you go, not only before you finish: the check runs
+        its criteria exactly as the engine will.
 
   - id: lint
     kind: bash
@@ -124,7 +152,10 @@ nodes:
     kind: prompt
     runner: mechanical
     context: [{ node-output: { node: lint } }]
-    prompt: "Fix exclusively the errors in the report."
+    prompt: |
+      Fix every error in the lint report, and nothing else. Change the code
+      the way each message asks; never silence a rule — no disable comment,
+      no config change — and never change what the code does.
     scope: run
 
   - id: tests
