@@ -220,7 +220,9 @@ fn deviation_tool() -> Tool {
          your work does or needs instead (`instead`), and `why`. Call it whenever you cannot \
          build what the plan declares within your scope — never build something else and say \
          nothing. Your task does not close on a departure: when your session ends a person \
-         accepts it, or sends it back with what to do instead.",
+         accepts it, or sends it back with what to do instead. Accepted, a criterion of the \
+         plan you depart from stops holding your task. The suite the run measured holds \
+         every task and is no plan's to depart from.",
         object(json!({
             "type": "object",
             "properties": {

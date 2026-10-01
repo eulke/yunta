@@ -20,7 +20,7 @@ use crate::run_log::RunLog;
 use yunta_core::events::TaskEvent;
 
 pub(crate) use crossing::{carried_into, standing_of, Standing};
-pub use judged::{judged_task, specified};
+pub use judged::{held_by, judged_plan, judged_task, suite_of, HeldBy};
 pub use view::PlanView;
 
 /// Whether this run shows `producer`'s tasks document to a person: a gate

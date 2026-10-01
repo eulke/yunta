@@ -45,6 +45,7 @@ impl SessionTools {
             }
         }
         held_by_the_plan(access, &departure.from)?;
+        not_the_suite(access, &departure.from)?;
         let declared = DeviationDeclaredPayload {
             task_id: access.task.id.clone(),
             from: departure.from,
@@ -60,6 +61,17 @@ impl SessionTools {
              the task as the plan says."
                 .to_string(),
         )
+    }
+}
+
+/// Refuses a departure from the suite the run holds every task to: it
+/// is the run's, measured before any work, and no plan's to depart from.
+fn not_the_suite(access: &TaskAccess, from: &DepartsFrom) -> Result<(), RunToolError> {
+    match (from, access.suite.as_deref()) {
+        (DepartsFrom::Criterion(cmd), Some(suite)) if cmd.trim() == suite.trim() => {
+            Err(RunToolError::SuiteDeparture { cmd: cmd.clone() })
+        }
+        _ => Ok(()),
     }
 }
 

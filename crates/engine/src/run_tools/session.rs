@@ -137,6 +137,11 @@ pub(super) enum RunToolError {
     #[error("the plan holds no {from} — it holds {known}")]
     NotInThePlan { from: String, known: String },
     #[error(
+        "`{cmd}` is the suite the run measured green before any work, which holds every task — \
+         it is not the plan's to depart from: keep what passed passing"
+    )]
+    SuiteDeparture { cmd: String },
+    #[error(
         "this session's node is not in a `coordination: blackboard` group — the blackboard is \
          never mounted outside one"
     )]

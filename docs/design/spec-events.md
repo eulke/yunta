@@ -294,7 +294,7 @@ first, or whose answer never reached it.
 | `planned` | string | only in `deviation_declared` | what the plan says |
 | `instead` | string | only in `deviation_declared` | what the work does or needs instead |
 | `why` | string | only in `deviation_declared` | — |
-| `accepted` | `bool` | only in `deviation_resolved` | true: the task closes as it stands if its criteria pass; false: its session picks the work back up with what the person said |
+| `accepted` | `bool` | only in `deviation_resolved` | true: the task closes as it stands if its criteria pass, less a criterion of its plan it departed from; false: its session picks the work back up with what the person said |
 | `said` | string | no, in `deviation_resolved` | what the person said |
 
 The session's own words are kept here in full: unlike its messages, a
@@ -303,8 +303,9 @@ departure is something it states to the run on purpose. Neither is audit:
 one does not close, whatever its criteria say — not even after a scope request
 its session made in the same attempt is answered. `deviation_resolved` settles
 everything the task owed when it was asked: accepted, those departures become
-part of what the plan is shown with from then on; sent back, they are gone, and
-the task's next cycle reads the answer.
+part of what the plan is shown with from then on — and a criterion of the plan
+one departs from, which nothing else supplies, stops holding the task; sent back,
+they are gone, and the task's next cycle reads the answer.
 
 ### 5.12 `scope_checked` — engine
 **Fuente:** task_id/node_id, diff observado, violaciones

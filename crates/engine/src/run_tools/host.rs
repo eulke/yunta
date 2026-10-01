@@ -247,6 +247,8 @@ pub struct TaskAccess {
     pub checks: Arc<CheckTurn>,
     /// The plan the task belongs to, when a loop is working one.
     pub plan: Option<Arc<yunta_core::TasksFile>>,
+    /// The suite the run holds every task to, which no task departs from.
+    pub suite: Option<String>,
 }
 
 /// The one check of a task that judges at a time, and the tree it is

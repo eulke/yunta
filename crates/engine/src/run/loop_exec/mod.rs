@@ -42,7 +42,7 @@ pub(super) async fn execute_loop(
     prompt: &PromptSource,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    let prep = match prepare_loop(ctx, node, prompt).await? {
+    let mut prep = match prepare_loop(ctx, node, prompt).await? {
         LoopReady::Go(prep) => *prep,
         LoopReady::Ended(end) => return Ok(end),
     };
@@ -216,9 +216,18 @@ pub(super) async fn execute_loop(
             // Pending again) tasks with the decisions on the log.
         }
         if !departures.is_empty() {
-            if let Some(end) = resolve_departures(ctx, node, departures, state.tokens).await? {
+            let holders = depart::Holders {
+                suite: prep.setup.suite.as_deref(),
+                spec: prep.setup.spec.as_deref(),
+            };
+            if let Some(end) =
+                resolve_departures(ctx, node, departures, &holders, state.tokens).await?
+            {
                 return Ok(end);
             }
+            // An accepted departure from a criterion of the plan waives
+            // it: the tasks are judged again by what the log now holds.
+            prep.rejudge(ctx).await?;
         }
     }
 }
@@ -228,6 +237,8 @@ struct LoopPrep<'a> {
     instruction: String,
     adapter: std::sync::Arc<dyn yunta_core::port::Adapter>,
     setup: crate::task_cycle::SessionSetup,
+    /// The registered document, as its planner wrote it.
+    document: TasksFile,
     /// The registered document, each task as the run judges it.
     tasks: TasksFile,
     concurrency: u32,
@@ -255,6 +266,23 @@ struct LoopState {
     /// task's status, and the empty-batch tail still names which tasks
     /// are blocked.
     blocked: Vec<(TaskId, BlockedCause)>,
+}
+
+impl LoopPrep<'_> {
+    /// Judges every task again by what the log holds now — the
+    /// departures a person accepted since — and gives its sessions the
+    /// plan as it is judged.
+    async fn rejudge(&mut self, ctx: &RunCtx<'_>) -> Result<(), RunError> {
+        let view = ctx.run_view().await?;
+        self.tasks = crate::tasks::judged_plan(
+            &self.document,
+            view.state.run.baseline(),
+            self.setup.spec.as_deref(),
+            &view.state.tasks,
+        );
+        self.setup.plan = Some(std::sync::Arc::new(self.tasks.clone()));
+        Ok(())
+    }
 }
 
 impl LoopState {
@@ -331,22 +359,14 @@ async fn prepare_loop<'a>(
     let spec = crate::artifacts::latest::<yunta_core::SpecFile>(ctx.run_dir, &view.events)
         .await?
         .map(|held| std::sync::Arc::new(held.document));
-    let tasks = TasksFile {
-        tasks: held
-            .document
-            .tasks
-            .iter()
-            .map(|task| {
-                crate::tasks::specified(crate::tasks::judged_task(task, baseline), spec.as_deref())
-            })
-            .collect(),
-        ..held.document
-    };
+    let tasks =
+        crate::tasks::judged_plan(&held.document, baseline, spec.as_deref(), &view.state.tasks);
     // Every task session reads the plan its task belongs to: the design
     // it names, and the tasks that own what it may not touch.
     let setup = crate::task_cycle::SessionSetup {
         plan: Some(std::sync::Arc::new(tasks.clone())),
         spec,
+        suite: crate::tasks::suite_of(baseline).map(str::to_string),
         ..setup
     };
 
@@ -370,6 +390,7 @@ async fn prepare_loop<'a>(
         instruction,
         adapter,
         setup,
+        document: held.document,
         tasks,
         concurrency,
         scope_expansion,

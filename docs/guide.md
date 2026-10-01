@@ -562,7 +562,10 @@ Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:
   `yunta_request_scope_expansion` and `yunta_declare_deviation` for a loop's task
   sessions, which read their task and the plan it belongs to, judge their work, and
   say where it departs from the plan through them — a departure keeps the task open
-  until a person accepts it or sends it back (a loop therefore needs a runner that
+  until a person accepts it or sends it back; accepting a departure from a criterion
+  its plan declares, and nothing else supplies, stops that criterion holding the
+  task, and no task departs from the suite the run measured, which holds every one
+  (a loop therefore needs a runner that
   can hold these tools); `yunta_check_scope` and `yunta_request_scope_expansion` for
   the session of a node that declares `scope:`, which audits its work against that
   scope and asks a person to widen it rather than writing outside it;

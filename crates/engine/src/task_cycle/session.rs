@@ -38,6 +38,9 @@ pub struct SessionSetup {
     /// each task's files are laid over the tree its work starts from and
     /// denied to that work.
     pub spec: Option<std::sync::Arc<yunta_core::SpecFile>>,
+    /// The suite the run measured green before any work, which holds
+    /// every task as a guard. `None` when it holds none.
+    pub suite: Option<String>,
     pub skills: Vec<PathBuf>,
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
     pub env: std::collections::HashMap<String, yunta_core::Secret<String>>,
@@ -147,6 +150,7 @@ impl SessionSetup {
             shared_dirs: Vec::new(),
             plan: None,
             spec: None,
+            suite: None,
             skills: Vec::new(),
             adapter_settings: serde_json::Map::new(),
             env: std::collections::HashMap::new(),

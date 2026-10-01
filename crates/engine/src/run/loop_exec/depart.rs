@@ -9,9 +9,9 @@
 //! the person said.
 
 use yunta_core::events::{
-    DeviationDeclaredPayload, DeviationResolvedPayload, Escalation, EventPayload, Fact, GateEvent,
-    GateOption, GateResolvedPayload, TaskEvent, TaskLedger, TaskStatus, TaskStatusChangedPayload,
-    TokenUsage,
+    DepartsFrom, DeviationDeclaredPayload, DeviationResolvedPayload, Escalation, EventPayload,
+    Fact, GateEvent, GateOption, GateResolvedPayload, TaskEvent, TaskLedger, TaskStatus,
+    TaskStatusChangedPayload, TokenUsage,
 };
 use yunta_core::{Node, NonEmpty, OptionId, TaskId};
 
@@ -25,6 +25,13 @@ use crate::task_cycle::{BlockedCause, TaskCycleReport, TaskOutcome};
 const ACCEPT: &str = "accept";
 /// The option that sends a departure back to the session that made it.
 const SEND_BACK: &str = "send-back";
+
+/// What holds a task to its criteria besides its plan, which decides
+/// what accepting a departure from one of them does.
+pub(super) struct Holders<'a> {
+    pub(super) suite: Option<&'a str>,
+    pub(super) spec: Option<&'a yunta_core::SpecFile>,
+}
 
 /// A task blocked on the departures its session declared.
 pub(super) struct PendingDeparture {
@@ -65,11 +72,12 @@ pub(super) async fn resolve_departures(
     ctx: &RunCtx<'_>,
     node: &Node,
     pending: Vec<PendingDeparture>,
+    holders: &Holders<'_>,
     tokens: TokenUsage,
 ) -> Result<Option<NodeEnd>, RunError> {
     let mut unanswered: Vec<TaskId> = Vec::new();
     for departure in pending {
-        let escalation = escalation(&departure).map_err(|source| RunError::Broken {
+        let escalation = escalation(&departure, holders).map_err(|source| RunError::Broken {
             diagnostic: format!("task `{}`'s departure: {source}", departure.task_id),
         })?;
         let Some(choice) = ctx.ask_human(&escalation).await? else {
@@ -163,6 +171,7 @@ async fn reopened(
 /// the three answers.
 fn escalation(
     departure: &PendingDeparture,
+    holders: &Holders<'_>,
 ) -> Result<Escalation, yunta_core::events::EscalationError> {
     let mut facts = Vec::new();
     for deviation in &departure.deviations {
@@ -184,9 +193,7 @@ fn escalation(
             GateOption {
                 id: OptionId::from_static(ACCEPT),
                 label: "Accept the departure".to_string(),
-                tradeoff: "The task closes on the work as it stands, if its criteria pass; \
-                           the rest of the plan builds on what it did instead"
-                    .to_string(),
+                tradeoff: accepting(departure, holders),
                 asks: None,
             },
             vec![
@@ -200,4 +207,34 @@ fn escalation(
             ],
         )),
     )
+}
+
+/// What accepting `departure` does, in the words its option offers: the
+/// task closes on the work it left, and a criterion of its plan it
+/// departs from stops holding it — nothing else can rewrite one.
+fn accepting(departure: &PendingDeparture, holders: &Holders<'_>) -> String {
+    let waived: Vec<String> = departure
+        .deviations
+        .as_slice()
+        .iter()
+        .filter_map(|deviation| match &deviation.from {
+            DepartsFrom::Criterion(cmd) => Some(cmd),
+            _ => None,
+        })
+        .filter(|cmd| {
+            crate::tasks::held_by(&departure.task_id, cmd, holders.suite, holders.spec)
+                == crate::tasks::HeldBy::Plan
+        })
+        .cloned()
+        .collect();
+    match waived.is_empty() {
+        true => "The task closes on the work as it stands, if its criteria pass; the rest of \
+                 the plan builds on what it did instead"
+            .to_string(),
+        false => format!(
+            "The task stops being held to {} and closes on the work as it stands, if its \
+             other criteria pass; the rest of the plan builds on what it did instead",
+            yunta_core::text::listed(waived.iter().map(String::as_str))
+        ),
+    }
 }
