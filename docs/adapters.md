@@ -133,6 +133,27 @@ claude-code: healthy (1.2.3)
 codex: unhealthy — `codex` not found on PATH
 ```
 
+A config whose `runners:` names no adapter has nothing to probe, and `doctor`
+says so with the runner to declare, on the adapter CLIs this machine answers for
+and the model left for you to name:
+
+```
+runners: none declared, and `lint-fix` needs one
+  declare a runner in .yunta/config.yaml — this machine answers for `claude-code`:
+      runners:
+        implementer:
+          - { adapter: claude-code, model: <model> }
+      defaults:
+        runner: implementer
+```
+
+That is a failure only when a workflow in the catalog has an agent node that
+would stop on it; with none, it is a warning. The same holds for a forge whose
+token variable is not set: `doctor` fails for it only when a workflow in the
+catalog opens a pull request, since a gate published to the forge asks on the
+console without one. `yunta init` ends with the same runner step, and `yunta
+check` adds it under a workflow that names a runner the config lacks.
+
 It also validates every installed pack's own `requires:` against your merged
 config: a `runners:` entry the merged `runners:` doesn't define (or defines with zero
 candidates), an `mcp_servers:` name nothing declares, and a `programs:`

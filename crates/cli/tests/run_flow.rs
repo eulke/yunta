@@ -923,7 +923,7 @@ fn list_runs_groups_a_run_under_what_can_be_done_about_it() {
 }
 
 #[test]
-fn doctor_reports_no_adapter_when_runners_names_none_this_build_supports() {
+fn doctor_cautions_when_no_runner_is_declared_and_no_workflow_needs_one() {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -931,8 +931,17 @@ fn doctor_reports_no_adapter_when_runners_names_none_this_build_supports() {
     let home = root.path().join("state");
 
     let doctor = yunta_in!(&repo, &home, &["doctor"]);
-    assert!(doctor.status.success());
-    assert!(stdout(&doctor).contains("no adapter to probe"));
+    assert!(doctor.status.success(), "{}", stderr(&doctor));
+    assert!(
+        stderr(&doctor).contains("warning: runners: none declared"),
+        "{}",
+        stderr(&doctor)
+    );
+    assert!(
+        stdout(&doctor).contains("declare a runner in .yunta/config.yaml"),
+        "{}",
+        stdout(&doctor)
+    );
 }
 
 #[test]

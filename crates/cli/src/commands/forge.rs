@@ -52,15 +52,7 @@ pub(crate) fn refuse_unreachable_forge(
     else {
         return Ok(());
     };
-    let left_out: Vec<yunta_core::NodeId> = yunta_core::left_out(workflow, config)
-        .into_iter()
-        .map(|left| left.node)
-        .collect();
-    let opens = workflow.iter_nodes_with_group().any(|(node, group)| {
-        matches!(node.kind, NodeKind::PullRequest { .. })
-            && !left_out.contains(group.map_or(&node.id, |group| &group.id))
-    });
-    if !opens || secrets.get(&github.token_env).is_some() {
+    if !opens_a_pull_request(workflow, config) || secrets.get(&github.token_env).is_some() {
         return Ok(());
     }
     Err(CliError::msg(format!(
@@ -68,6 +60,50 @@ pub(crate) fn refuse_unreachable_forge(
          variable its token is in, is not set here — set it, then run again",
         github.repo, github.token_env
     )))
+}
+
+/// What `doctor` says of a forge whose token variable, `token_env`, is
+/// not set here. Without the token a gate published to the forge falls
+/// back to the console; only a `pull_request` node stops. So the missing
+/// token stops something only when the catalog has one, and `false` says
+/// it does.
+fn unset_token(ctx: &crate::context::Context, named: &str, token_env: &str) -> bool {
+    let config = &ctx.project.config;
+    let opening: Vec<String> = super::list::catalog_workflows(&ctx.cwd)
+        .into_iter()
+        .filter(|(_, workflow)| opens_a_pull_request(workflow, config))
+        .map(|(name, _)| name)
+        .collect();
+    let unset = format!("{named} — `{token_env}`, the variable its token is in, is not set");
+    if opening.is_empty() {
+        warn(format!(
+            "{unset}; no workflow here opens a pull request, and a gate published there asks \
+             on the console instead — export {token_env} to reach it"
+        ));
+        return true;
+    }
+    println!(
+        "{unset}, and {} {} a pull request through it — export {token_env} to reach it",
+        yunta_core::text::listed(opening.iter().map(String::as_str)),
+        match opening.len() {
+            1 => "opens",
+            _ => "open",
+        },
+    );
+    false
+}
+
+/// Whether a run of `workflow` under `config` reaches a `pull_request`
+/// node: one the project leaves out never asks the forge for anything.
+fn opens_a_pull_request(workflow: &Workflow, config: &ConfigLayer) -> bool {
+    let left_out: Vec<yunta_core::NodeId> = yunta_core::left_out(workflow, config)
+        .into_iter()
+        .map(|left| left.node)
+        .collect();
+    workflow.iter_nodes_with_group().any(|(node, group)| {
+        matches!(node.kind, NodeKind::PullRequest { .. })
+            && !left_out.contains(group.map_or(&node.id, |group| &group.id))
+    })
 }
 
 /// What `doctor` says about the forge the config declares — nothing
@@ -86,11 +122,7 @@ pub(crate) async fn report_forge(ctx: &crate::context::Context) -> bool {
     };
     let named = format!("forge: github {}", github.repo);
     let Some(forge) = forge_for(config, &yunta_core::ProcessSecrets) else {
-        println!(
-            "{named} — `{}`, the variable its token is in, is not set",
-            github.token_env
-        );
-        return false;
+        return unset_token(ctx, &named, &github.token_env);
     };
     let healthy = match forge.probe().await {
         Ok(yunta_core::port::ForgeProbe {

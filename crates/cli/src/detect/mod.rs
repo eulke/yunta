@@ -7,6 +7,7 @@
 //! beside a key a workflow needs and the config lacks — no run reads a
 //! detected value.
 
+mod adapters;
 mod ecosystems;
 mod js;
 mod remote;
@@ -14,9 +15,10 @@ mod remote;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use yunta_core::{CommandName, ConfigKey, GitHubRepo};
+use yunta_core::{AdapterId, CommandName, ConfigKey, GitHubRepo, RunnerName};
 use yunta_engine::process::Supervision;
 
+pub(crate) use adapters::{healthy, probe_known_adapters, runner_step, ProbedAdapter};
 pub(crate) use ecosystems::Ecosystem;
 
 /// What one repository was found to have.
@@ -30,6 +32,10 @@ pub(crate) struct Detected {
     pub(crate) suite: Option<String>,
     /// The GitHub repository `origin` names.
     pub(crate) forge: Option<GitHubRepo>,
+    /// The adapter CLIs that answered healthy here, when something asked
+    /// — probing spawns each one, so only a caller with a runner to
+    /// propose does.
+    pub(crate) adapters: Vec<AdapterId>,
 }
 
 impl Detected {
@@ -45,6 +51,7 @@ impl Detected {
                 commands: found.commands,
                 suite: found.suite,
                 forge: None,
+                adapters: Vec::new(),
             },
             None => Detected::default(),
         }
@@ -56,6 +63,16 @@ impl Detected {
             forge: remote::github_repo(repo, supervision).await,
             ..Detected::in_files(repo)
         }
+    }
+
+    /// The same, with the adapters this machine answers for when
+    /// `errors` name a runner the config lacks — the one suggestion that
+    /// needs them.
+    pub(crate) async fn for_errors(mut self, errors: &[yunta_engine::CheckError]) -> Self {
+        if !runners_wanted(errors).is_empty() || default_wanted(errors) {
+            self.adapters = healthy(&probe_known_adapters().await);
+        }
+        self
     }
 
     /// What to declare for `key`, as this repository answers it — `None`
@@ -98,7 +115,42 @@ pub(crate) fn suggestions(errors: &[yunta_engine::CheckError], detected: &Detect
             }
         }
     }
+    let roles = runners_wanted(errors);
+    let needs_default = default_wanted(errors);
+    if !roles.is_empty() || needs_default {
+        said.extend(runner_step(&roles, needs_default, &detected.adapters));
+    }
     said
+}
+
+/// The runners `errors` say a node names and the config does not
+/// declare, or declares with no candidate — each once, in order.
+fn runners_wanted(errors: &[yunta_engine::CheckError]) -> Vec<RunnerName> {
+    let mut roles: Vec<RunnerName> = Vec::new();
+    for error in errors {
+        if let yunta_engine::CheckError::UnknownRunner { runner, .. }
+        | yunta_engine::CheckError::RunnerHasNoCandidates { runner, .. } = error
+        {
+            if !roles.contains(runner) {
+                roles.push(runner.clone());
+            }
+        }
+    }
+    roles
+}
+
+/// Whether `errors` say a node names no runner and the config declares no
+/// `defaults.runner` for it.
+fn default_wanted(errors: &[yunta_engine::CheckError]) -> bool {
+    errors.iter().any(|error| {
+        matches!(
+            error,
+            yunta_engine::CheckError::Unset {
+                key: ConfigKey::Runner,
+                ..
+            }
+        )
+    })
 }
 
 /// What one ecosystem answered for a repository.

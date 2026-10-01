@@ -67,12 +67,7 @@ pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
 async fn probe_adapters(ctx: &Context) -> (BTreeSet<AdapterId>, bool) {
     let adapters = ctx.adapters();
     if adapters.is_empty() {
-        println!(
-            "no adapter to probe — `runners:` in the merged config names none this build \
-             supports (built: {})",
-            super::built_adapter_names()
-        );
-        return (BTreeSet::new(), true);
+        return (BTreeSet::new(), no_runner_declared(ctx).await);
     }
     let mut healthy = BTreeSet::new();
     let mut all_healthy = true;
@@ -102,6 +97,80 @@ async fn probe_adapters(ctx: &Context) -> (BTreeSet<AdapterId>, bool) {
         }
     }
     (healthy, all_healthy)
+}
+
+/// What `doctor` says of a project whose `runners:` names no adapter
+/// this build supports: that nothing has an adapter to run on, and the
+/// runner to declare with the adapters this machine answers for. `false`
+/// when a workflow in the catalog needs one — it would stop the first
+/// time it reached an agent node — and a caution otherwise.
+async fn no_runner_declared(ctx: &Context) -> bool {
+    let needing = needing_a_runner(ctx);
+    let errors: Vec<yunta_engine::CheckError> = needing
+        .iter()
+        .flat_map(|(_, errors)| errors.iter().cloned())
+        .collect();
+    let detected = crate::detect::Detected::default().for_errors(&errors).await;
+    let mut step = crate::detect::suggestions(&errors, &detected);
+    if step.is_empty() {
+        let probed = crate::detect::probe_known_adapters().await;
+        step = crate::detect::runner_step(&[], true, &crate::detect::healthy(&probed));
+    }
+    let names: Vec<&str> = needing.iter().map(|(name, _)| name.as_str()).collect();
+    let said = match names.is_empty() {
+        true => {
+            "runners: none declared — a workflow's agent nodes cannot run until one is".to_string()
+        }
+        false => format!(
+            "runners: none declared, and {} {} one",
+            yunta_core::text::listed(names.iter().copied()),
+            match names.len() {
+                1 => "needs",
+                _ => "need",
+            }
+        ),
+    };
+    match names.is_empty() {
+        true => crate::error::warn(said),
+        false => println!("{said}"),
+    }
+    for line in step {
+        println!("  {line}");
+    }
+    names.is_empty()
+}
+
+/// Every catalog workflow that names a runner the config lacks, with
+/// what `check` says about each.
+fn needing_a_runner(ctx: &Context) -> Vec<(String, Vec<yunta_engine::CheckError>)> {
+    super::list::catalog_workflows(&ctx.cwd)
+        .into_iter()
+        .map(|(name, workflow)| {
+            let errors = yunta_engine::check(
+                &workflow,
+                &ctx.project.config,
+                &super::declared_capabilities,
+            )
+            .into_iter()
+            .filter(names_a_runner)
+            .collect();
+            (name, errors)
+        })
+        .filter(|(_, errors): &(String, Vec<_>)| !errors.is_empty())
+        .collect()
+}
+
+/// Whether `error` is about a runner the config lacks.
+fn names_a_runner(error: &yunta_engine::CheckError) -> bool {
+    matches!(
+        error,
+        yunta_engine::CheckError::UnknownRunner { .. }
+            | yunta_engine::CheckError::RunnerHasNoCandidates { .. }
+            | yunta_engine::CheckError::Unset {
+                key: yunta_core::ConfigKey::Runner,
+                ..
+            }
+    )
 }
 
 /// Checks every installed pack's own `requires:` against this

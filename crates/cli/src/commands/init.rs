@@ -10,8 +10,6 @@
 
 use std::path::Path;
 
-use yunta_core::port::ProbeReport;
-use yunta_core::{AdapterId, AdapterSettings};
 use yunta_engine::process::Supervision;
 
 use crate::ask::{ask_line, Console, Escape};
@@ -49,44 +47,10 @@ async fn detect_base_branch(repo: &Path, supervision: Supervision<'_>) -> String
     "main".to_string()
 }
 
-struct ProbedAdapter {
-    id: AdapterId,
-    healthy: bool,
-    detail: String,
-}
-
-/// Probes every adapter this binary builds, in the order the
-/// composition root declares them — the id each reports about itself,
-/// never one re-spelled here.
-async fn probe_known_adapters() -> Vec<ProbedAdapter> {
-    let mut probed = Vec::new();
-    for adapter in super::built_adapters(|_| AdapterSettings::default()) {
-        let id = adapter.id().clone();
-        probed.push(match adapter.probe().await {
-            Ok(ProbeReport::Healthy { version }) => ProbedAdapter {
-                id,
-                healthy: true,
-                detail: version.unwrap_or_else(|| "version unknown".to_string()),
-            },
-            Ok(ProbeReport::Unhealthy { diagnostic }) => ProbedAdapter {
-                id,
-                healthy: false,
-                detail: diagnostic,
-            },
-            Err(e) => ProbedAdapter {
-                id,
-                healthy: false,
-                detail: e.to_string(),
-            },
-        });
-    }
-    probed
-}
-
 fn render_config_yaml(
     project_name: &str,
     base_branch: &str,
-    probed: &[ProbedAdapter],
+    probed: &[crate::detect::ProbedAdapter],
     detected: &crate::detect::Detected,
 ) -> String {
     let mut out = String::new();
@@ -318,7 +282,7 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         None => (default_name, default_branch),
     };
 
-    let probed = probe_known_adapters().await;
+    let probed = crate::detect::probe_known_adapters().await;
 
     let mut wrote = Vec::new();
     let mut skipped = Vec::new();
@@ -396,7 +360,15 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         claude_md_suggestion()
     );
 
-    println!("next: run `yunta doctor` to confirm everything above is actually usable.");
+    // The config is written with its runners commented out: a probe
+    // names an adapter and never a model, and the model is the project's
+    // to choose. Until a runner is declared, no agent node can run, so
+    // that is the step this ends with.
+    println!("no runner is declared, so a workflow's agent nodes cannot run until one is.");
+    for line in crate::detect::runner_step(&[], true, &crate::detect::healthy(&probed)) {
+        println!("{line}");
+    }
+    println!("\nnext: run `yunta doctor` to confirm everything above is actually usable.");
 
     Ok(Outcome::Success)
 }

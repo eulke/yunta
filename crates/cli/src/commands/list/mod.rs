@@ -129,6 +129,21 @@ pub(crate) async fn render_catalog(cwd: &Path, history_source: Option<&Context>)
     out
 }
 
+/// Every workflow the catalog offers that reads back — the repo's own,
+/// then every installed pack's — by the name a person runs it with.
+/// What does not read is left to `list` and `check` to name.
+pub(crate) fn catalog_workflows(cwd: &Path) -> Vec<(String, yunta_core::Workflow)> {
+    repo_catalog_entries(cwd)
+        .into_iter()
+        .chain(pack_catalog_entries(cwd).0)
+        .filter_map(|entry| {
+            crate::load_workflow(&entry.path)
+                .ok()
+                .map(|workflow| (entry.display_name, workflow))
+        })
+        .collect()
+}
+
 fn repo_catalog_entries(cwd: &std::path::Path) -> Vec<CatalogEntry> {
     let workflows_dir = cwd.join(".yunta/workflows");
     let mut paths = Vec::new();

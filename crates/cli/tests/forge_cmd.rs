@@ -47,13 +47,16 @@ fn yunta_run_refuses_before_creating_a_run_when_the_forge_token_is_unset() {
 #[test]
 fn doctor_names_an_unset_forge_token() {
     let (_root, repo, home) = a_project_with_an_unreachable_forge();
+    // In the catalog, the workflow is one a person runs from here: its
+    // pull request is what the token would be for.
+    write(&repo.join(".yunta/workflows/opens.yaml"), OPENS);
 
     let doctor = yunta_in!(&repo, &home, &["doctor"]);
 
     assert!(!doctor.status.success());
     assert!(
         stdout(&doctor).contains(
-            "forge: github acme/web — `YUNTA_TEST_FORGE_TOKEN_NOBODY_SETS`, the variable its token is in, is not set"
+            "forge: github acme/web — `YUNTA_TEST_FORGE_TOKEN_NOBODY_SETS`, the variable its token is in, is not set, and `opens` opens a pull request through it"
         ),
         "{}",
         stdout(&doctor)

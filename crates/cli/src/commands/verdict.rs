@@ -161,7 +161,10 @@ impl Verdict {
             .chain(self.errors.iter().map(ToString::to_string))
             .collect();
         let mut said = problems(heading, &all);
-        let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision()).await;
+        let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision())
+            .await
+            .for_errors(&self.errors)
+            .await;
         for line in crate::detect::suggestions(&self.errors, &detected) {
             said.push_str(&format!("\n  {line}"));
         }
