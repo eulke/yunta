@@ -13,9 +13,9 @@ yunta pack add <source-of-this-pack>
 yunta run yunta/fragua --input idea="add dark mode to the settings page"
 ```
 
-`--mode quick` skips the plan's approval, its tests and the multi-runner
-review for a fast pass, and still holds the work to its plan before asking
-you to ship it;
+`--mode quick` skips the plan's approval, its tests, the multi-runner
+review and the fixes it asks for, and still holds the work to its plan
+before asking you to ship it;
 `standard` is the full human-in-the-loop cycle; `full` runs every node.
 
 ## Tests before the work
@@ -23,20 +23,27 @@ you to ship it;
 In `standard` and `full`, `spec` writes the tests each task is held to
 before any task is built, and `approve-plan` shows them beside the plan:
 you approve what the work has to make pass. Each test fails when it is
-handed over, a task closes only once its tests pass, and the session
-building a task cannot change them — a test it believes is wrong is a
-departure from the plan, and yours to settle. Sending the plan back with
-`adjust` writes its tests again before you are asked again.
+handed over, a task closes only once its tests pass, and no session of the
+run can change them. A test the session building a task believes is wrong
+is a departure from the plan, and yours to settle: accepted, `spec` writes
+that task's tests again and `approve-plan` asks you about them before the
+task goes on. Sending the plan back with `adjust` writes its tests again
+before you are asked again.
 
 ## Held to its plan
 
 Green criteria say the work passes its tests, not that it is what the plan
-says. Before `ship` asks you, `conform` — a read-only `reviewer` — reads the
-plan, every departure from it a task's session declared with the answer it
-got, and the diff of everything the run changed, and posts a finding for each
-difference nobody accepted. `ship` shows you the plan, headed by the
-departures you accepted, and those findings; in `standard` and `full`,
-`fix-findings` works them first.
+says. In `standard` and `full`, two reviewers read the brief and the diff,
+and `fix-findings` answers each finding they report — fixed, or declined and
+why; a fix whose finding proposes a criterion is proved by it, which settles
+the finding. Then, in every mode, `conform` — a read-only `reviewer` — reads
+the plan, every departure from it a task's session declared with the answer
+it got, and the diff of everything going into the pull request, and posts a
+finding for each difference nobody accepted.
+
+`ship` shows you the plan, headed by the departures you accepted, and every
+finding the run holds, each with the node that found it and how it was
+answered or settled. Going on settles what it showed.
 
 ## Attaching the receipt
 

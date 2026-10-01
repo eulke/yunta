@@ -5,14 +5,17 @@
 # server, which a pack's own mock self-test has no reason to stand up)
 # and `node_defaults.hooks` is dropped (an ecosystem-specific
 # convenience, not something a reference pack needs to demonstrate).
-# Two additions. `spec` writes the tests the plan's tasks are held to
-# before any is built, in the modes that approve the plan: the person
-# approving it reads the tests beside it, and nobody who builds a task
-# writes the test that judges it. `conform` holds what the run built to
-# the plan a person approved before the pull request is asked for, in
-# every mode — green criteria say the work passes its tests, not that it
-# is what the plan says, and a departure nobody declared is what a
-# person approving the pull request would miss.
+# Additions. `spec` writes the tests the plan's tasks are held to before
+# any is built, in the modes that approve the plan: the person approving
+# it reads the tests beside it, and nobody who builds a task writes the
+# test that judges it. `review` reads the brief and the diff of what the
+# run changed — a read-only session may have no shell to find it with.
+# `fix-findings` answers each finding, fixed or declined, and a fix whose
+# finding proposes a criterion is proved by it. `conform` then holds the
+# work going into the pull request to the plan a person approved, in
+# every mode: green criteria say the work passes its tests, not that it
+# is what the plan says. `ship` shows the plan and every finding the run
+# holds with its answer, and going on settles what it showed.
 #
 # A pack runs in repositories its author has never seen, so it names
 # capabilities and never a tool or a layout: `lint` runs whatever the
@@ -39,6 +42,7 @@ nodes:
   - id: grill
     kind: prompt
     runner: planner
+    permissions: read-only
     prompt: |
       Identify the ambiguities in "{{inputs.idea}}" and raise the questions
       you need; don't converse.
@@ -134,15 +138,33 @@ nodes:
     depends_on: [tests]
     runners: [reviewer, reviewer-alt]
     permissions: read-only
-    prompt: "Audit the changes and report what you find."
+    context:
+      - artifact: { node: brief, name: brief.md }
+      - command: "git diff {{run.base}}"
+    prompt: { file: prompts/review.md }
     artifacts:
       produces: [findings]
+
+  - id: fix-findings
+    kind: prompt
+    runner: executor
+    depends_on: [review]
+    prompt: |
+      Read the findings this run holds that are not settled — each with the
+      node that reported it and how others answered it. Answer every one: fix
+      it and answer it fixed, or answer it declined and say why — it is wrong,
+      or its fix belongs to another change. Fix every `blocking` and `major`
+      finding that is right; a `minor` or a `note` only where the fix stays
+      where it points. Change what each finding points to and nothing else,
+      and never weaken a test to make one go away. A finding that proposes a
+      criterion is settled when that criterion passes on what you leave; lint
+      and the test suite run again after you.
 
   - id: conform
     kind: prompt
     runner: reviewer
     permissions: read-only
-    depends_on: [tests]
+    depends_on: [fix-findings]
     context:
       - artifact: { node: plan, kind: tasks }
       - run-events: { filter: deviations }
@@ -151,22 +173,14 @@ nodes:
     artifacts:
       produces: [findings]
 
-  - id: fix-findings
-    kind: prompt
-    runner: executor
-    depends_on: [review, conform]
-    context:
-      - run-events: { filter: findings }
-    prompt: "Fix blocking findings; document discarded ones with a reason."
-
   - id: ship
     kind: gate
-    depends_on: [fix-findings]
+    depends_on: [conform]
     assignee: lead
-    message: "The work, held to its plan. Create the PR?"
+    message: "The work beside its plan, and every finding the run holds with its answer. Create the PR?"
     shows:
       - { node: plan, kind: tasks }
-      - { node: conform, kind: findings }
+      - { kind: findings }
 
   - id: pr
     kind: pull_request

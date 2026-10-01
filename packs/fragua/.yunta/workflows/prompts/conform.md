@@ -13,8 +13,9 @@ Check, reading the diff and the code it touches:
 - Every task's `outcome` is what a person would observe now.
 - What each criterion `proves` is what its test checks, not a weaker claim.
 
-A departure a person accepted is the plan now: never report it. Report
-every other difference through `yunta_post_finding`:
+A departure a person accepted is the plan now: never report it. The tests a
+task's criteria run are part of its work, not more than the plan asks. Report
+every other difference as a finding:
 
 - `blocking`: the work builds a shape or a decision other than the plan
   says and nobody declared it, or a person sent a departure back and the
