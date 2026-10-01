@@ -38,8 +38,9 @@ pub struct PostedFinding {
 
 /// What one node answered about a finding: the node, `None` for an
 /// answer the log carries without one, what it answered and why.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AnswerGiven {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub by: Option<NodeId>,
     pub answer: FindingAnswer,
     pub why: String,
@@ -178,6 +179,25 @@ impl FindingLedger {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Every finding that stands, as one view: each with the node that
+    /// reported it and how other nodes answered it, in the order each
+    /// was first posted.
+    pub fn standing(&self) -> super::standing::RunFindings {
+        super::standing::RunFindings {
+            findings: self
+                .effective()
+                .into_iter()
+                .map(|posted| super::standing::StandingFinding {
+                    answers: self
+                        .answers(posted.node.as_ref(), &posted.finding.id)
+                        .to_vec(),
+                    node: posted.node,
+                    finding: posted.finding,
+                })
+                .collect(),
+        }
     }
 
     /// The same, for one node — never the engine's own run-level

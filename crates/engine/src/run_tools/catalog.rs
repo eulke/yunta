@@ -57,6 +57,7 @@ impl RunToolCatalog for RunTool {
             RunTool::PostFinding => post_finding_tool(session),
             RunTool::UpdateFinding => update_finding_tool(session),
             RunTool::WithdrawFinding => withdraw_finding_tool(),
+            RunTool::Findings => findings_tool(session),
             RunTool::AnswerFinding => answer_finding_tool(session),
             RunTool::Submit(kind) => submit_tool(self.name(), kind),
         }
@@ -146,18 +147,35 @@ fn withdraw_finding_tool() -> Tool {
     )
 }
 
+fn findings_tool(session: &SessionTools) -> Tool {
+    Tool::new(
+        RunTool::Findings.name(),
+        format!(
+            "Read the findings standing in this run: each with the `node` that reported it — \
+             none for one the engine reported about the run itself — its id, severity, title, \
+             location, detail and proposed criterion, and the `answers` other nodes gave it \
+             with `{answer}`. A finding taken back is not here. What a gate shows a person \
+             about the run's findings is this same view.",
+            answer = session.called(RunTool::AnswerFinding),
+        ),
+        no_arguments(),
+    )
+}
+
 fn answer_finding_tool(session: &SessionTools) -> Tool {
     Tool::new(
         RunTool::AnswerFinding.name(),
         format!(
             "Answer a finding another node reported: `fixed` when your work fixed it, \
              `declined` when it is wrong or its fix belongs to another change — always saying \
-             `why`. Name it by the node that reported it and its id. The answer stands beside \
+             `why`. Name it by the node that reported it and its id, as `{findings}` shows \
+             them. The answer stands beside \
              the finding for a person to read, and answering it again replaces what you \
              answered before. A finding your own node reported is yours to change with \
              `{update}` or take back with `{withdraw}`.",
             update = session.called(RunTool::UpdateFinding),
             withdraw = session.called(RunTool::WithdrawFinding),
+            findings = session.called(RunTool::Findings),
         ),
         object(json!({
             "type": "object",

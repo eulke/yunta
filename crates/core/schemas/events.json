@@ -3644,6 +3644,7 @@
         "yunta_post_finding",
         "yunta_update_finding",
         "yunta_withdraw_finding",
+        "yunta_findings",
         "yunta_answer_finding",
         "yunta_submit_tasks",
         "yunta_submit_spec",

@@ -26,6 +26,12 @@ struct Answered {
 }
 
 impl SessionTools {
+    /// The findings standing in the run, as the one view a gate shows.
+    pub(super) async fn findings_standing(&self) -> Result<String, RunToolError> {
+        let standing = FindingLedger::of(&self.events().await?).standing();
+        serde_json::to_string_pretty(&standing).map_err(|source| RunToolError::Render { source })
+    }
+
     pub(super) async fn answer_finding(
         &self,
         args: serde_json::Map<String, Value>,

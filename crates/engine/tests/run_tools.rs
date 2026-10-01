@@ -1178,6 +1178,79 @@ async fn submitted(host: &ToolsHost, tasks: serde_json::Value) -> (bool, String)
 }
 
 #[tokio::test]
+async fn every_session_reads_the_findings_standing_with_each_node_and_answer() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    seed_finding(&host, "review", "f1");
+    seed_finding(&host, "review", "f2");
+    host.record(
+        Some("review"),
+        EventPayload::Findings(FindingEvent::Withdrawn(
+            yunta_core::events::FindingWithdrawnPayload {
+                id: "f2".into(),
+                reason: "not a bug".to_string(),
+            },
+        )),
+    );
+    let session = host.session("fix", None).await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let (is_error, text) = call(
+        &client,
+        "yunta_answer_finding",
+        json!({ "node": "review", "id": "f1", "answer": "fixed", "why": "the check is in" }),
+    )
+    .await;
+    assert!(!is_error, "got: {text}");
+    let (is_error, text) = call(&client, "yunta_findings", json!({})).await;
+    client.cancel().await.unwrap();
+
+    assert!(!is_error, "got: {text}");
+    let standing: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        standing,
+        json!({ "findings": [{
+            "node": "review",
+            "id": "f1",
+            "severity": "minor",
+            "title": "seeded f1",
+            "location": "src/lib.rs",
+            "detail": "seeded directly",
+            "answers": [{ "by": "fix", "answer": "fixed", "why": "the check is in" }],
+        }] }),
+        "a finding taken back is not there"
+    );
+}
+
+#[tokio::test]
+async fn an_engine_finding_reads_with_no_node() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    host.record(
+        None,
+        EventPayload::Findings(FindingEvent::Posted(
+            yunta_core::events::FindingPostedPayload {
+                finding: yunta_core::events::Finding {
+                    id: "cleanup".into(),
+                    severity: yunta_core::events::FindingSeverity::Minor,
+                    title: "a cleanup did not finish".to_string(),
+                    location: "run:scratch".into(),
+                    detail: "left behind".to_string(),
+                    proposed_criterion: None,
+                },
+            },
+        )),
+    );
+    let session = host.session("fix", None).await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let (_, text) = call(&client, "yunta_findings", json!({})).await;
+    client.cancel().await.unwrap();
+
+    let standing: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert!(standing["findings"][0].get("node").is_none(), "{text}");
+    assert_eq!(standing["findings"][0]["id"], "cleanup");
+}
+
+#[tokio::test]
 async fn a_spec_accepted_says_how_each_test_fails_before_the_work() {
     let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
     let plan = json!([{ "id": "greet", "title": "Greet", "scope": ["greeting.txt"],
@@ -1522,6 +1595,7 @@ fn assert_serves_the_session_tools(result: &serde_json::Value) {
         "yunta_post_finding",
         "yunta_update_finding",
         "yunta_withdraw_finding",
+        "yunta_findings",
         "yunta_answer_finding",
         "yunta_task_status",
     ] {
@@ -1664,11 +1738,12 @@ fn the_catalog_and_the_dispatch_name_the_same_tools() {
     }
     assert_eq!(yunta_engine::RunTool::parse("yunta_nonesuch"), None);
 
-    // And the set is exactly the submittable kinds plus the twelve fixed
-    // tools, so a kind that gains a submission tool gains its tool here.
+    // And the set is exactly the submittable kinds plus the thirteen
+    // fixed tools, so a kind that gains a submission tool gains its tool
+    // here.
     let submissions = yunta_core::ArtifactKind::ALL
         .into_iter()
         .filter(|kind| kind.submit_tool().is_some())
         .count();
-    assert_eq!(yunta_engine::RunTool::all().len(), 12 + submissions);
+    assert_eq!(yunta_engine::RunTool::all().len(), 13 + submissions);
 }

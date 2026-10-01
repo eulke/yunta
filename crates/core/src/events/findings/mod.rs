@@ -5,7 +5,9 @@ pub mod happening;
 pub mod kinds;
 pub mod ledger;
 pub mod payloads;
+pub mod standing;
 
 pub use kinds::FindingEvent;
 pub use ledger::*;
 pub use payloads::*;
+pub use standing::{RunFindings, StandingFinding};

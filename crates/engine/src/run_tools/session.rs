@@ -309,6 +309,7 @@ impl ServerHandler for SessionTools {
             Some(RunTool::PostFinding) => self.post_finding(args).await,
             Some(RunTool::UpdateFinding) => self.update_finding(args).await,
             Some(RunTool::WithdrawFinding) => self.withdraw_finding(args).await,
+            Some(RunTool::Findings) => self.findings_standing().await,
             Some(RunTool::AnswerFinding) => self.answer_finding(args).await,
             Some(RunTool::GetBlackboard) => self.get_blackboard().await,
             Some(RunTool::TaskStatus) => self.task_status().await,

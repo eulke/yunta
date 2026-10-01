@@ -337,7 +337,9 @@ the moment it sees one — validated on its own, so a refusal names what to fix 
 that finding and everything already reported stands. `yunta_update_finding` replaces
 one by id with its whole new content, and `yunta_withdraw_finding` takes one back
 with a reason; a withdrawal is final, and a finding that comes back is a new id.
-Another node answers a finding with `yunta_answer_finding` — `fixed` when its work
+Any session reads the findings standing in the run, each with the node that reported
+it and its answers, with `yunta_findings`. Another node answers a finding with
+`yunta_answer_finding` — `fixed` when its work
 fixed it, `declined` when it is wrong or its fix belongs to another change, always
 with why — and the answer stands beside the finding, never in it: only the node that
 reported a finding changes or withdraws it. A
@@ -569,8 +571,8 @@ Two distinct surfaces, both stdio/HTTP MCP, neither a daemon:
   of the MCP session that started it.
 - **Per-run tools**: a loopback HTTP MCP endpoint opened for the duration of a single
   agent session that declared `run_tools` capability — `yunta_post_finding`,
-  `yunta_update_finding`, `yunta_withdraw_finding`, `yunta_answer_finding`,
-  `yunta_check_artifact` and
+  `yunta_update_finding`, `yunta_withdraw_finding`, `yunta_findings`,
+  `yunta_answer_finding`, `yunta_check_artifact` and
   `yunta_task_status` for every such session; `yunta_task`, `yunta_check_task`,
   `yunta_request_scope_expansion` and `yunta_declare_deviation` for a loop's task
   sessions, which read their task and the plan it belongs to, judge their work, and
