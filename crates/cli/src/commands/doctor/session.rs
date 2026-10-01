@@ -343,6 +343,7 @@ mod tests {
                 cptv: None,
                 tokens: TokenUsage::default(),
             },
+            closed_by: None,
         }));
         let report = yunta_engine::RunReport {
             terminal: yunta_engine::RunTerminal::Finished,

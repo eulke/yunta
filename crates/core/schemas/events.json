@@ -3745,6 +3745,17 @@
     "RunFinishedPayload": {
       "type": "object",
       "properties": {
+        "closed_by": {
+          "description": "The person who closed a run nobody was going to continue. Absent\nfor a run the engine closed by driving it to its end.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Responder"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "metrics": {
           "$ref": "#/$defs/RunMetrics"
         },

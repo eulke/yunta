@@ -304,6 +304,7 @@ fn a_finished_run_stops_its_clock_at_its_last_event() {
                 cptv: None,
                 tokens: tokens(100, 50),
             },
+            closed_by: None,
         })))
         .build();
 

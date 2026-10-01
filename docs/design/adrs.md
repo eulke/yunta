@@ -219,3 +219,4 @@ lista.
 **D210 — A run whose engine is gone reads as stalled.** `accepted` → [`adr/D210-a-run-whose-engine-is-gone-reads-as-stalled.md`](adr/D210-a-run-whose-engine-is-gone-reads-as-stalled.md)
 **D211 — NO_COLOR takes the color away and leaves the region.** `accepted` → [`adr/D211-no-color-takes-color-away-and-leaves-the-region.md`](adr/D211-no-color-takes-color-away-and-leaves-the-region.md)
 **D212 — A run records the repository it was created in.** `accepted` → [`adr/D212-a-run-records-the-repository-it-was-created-in.md`](adr/D212-a-run-records-the-repository-it-was-created-in.md)
+**D213 — A person closes a run nobody will continue.** `accepted` → [`adr/D213-a-person-closes-a-run-nobody-will-continue.md`](adr/D213-a-person-closes-a-run-nobody-will-continue.md)

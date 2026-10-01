@@ -91,6 +91,11 @@ pub(crate) fn cancel(run_id: &RunId) -> String {
     format!("yunta cancel {run_id}")
 }
 
+/// Closes a stopped run nobody is going to continue.
+pub(crate) fn close(run_id: &RunId) -> String {
+    format!("yunta close {run_id}")
+}
+
 /// Shows where a run stands, derived from its own log.
 pub(crate) fn status(run_id: &RunId) -> String {
     format!("yunta status {run_id}")

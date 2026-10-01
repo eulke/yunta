@@ -140,10 +140,7 @@ fn print_stall(run_id: &RunId, phase: &RunPhase, engine: yunta_engine::EngineLiv
         "{INDENT}{}   continues it from its log",
         advice::resume(run_id)
     );
-    println!(
-        "{INDENT}{}   records where it stopped",
-        advice::cancel(run_id)
-    );
+    println!("{INDENT}{}   closes it for good", advice::close(run_id));
 }
 
 /// What a parked run is waiting on, printed last because it is what the
@@ -174,6 +171,7 @@ fn print_decision(
             decision::without_menu(run_id, &advice::parked_in_full(waiting))
         ),
     }
+    println!("{INDENT}{}   closes it for good", advice::close(run_id));
 }
 
 /// Every failure with more than one line of detail, laid out one block

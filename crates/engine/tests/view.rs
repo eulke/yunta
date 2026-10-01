@@ -222,6 +222,7 @@ fn run_finished(terminal_state: TerminalState) -> EventPayload {
             cptv: None,
             tokens: tokens(10, 5),
         },
+        closed_by: None,
     }))
 }
 

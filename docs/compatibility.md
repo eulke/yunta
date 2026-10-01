@@ -300,6 +300,10 @@ it is the state it can account for.
 
 `yunta list --runs` orders runs by the timestamp of their first event.
 
+A run a person closed with `yunta close` ends in `run_finished` with
+`terminal_state: cancelled` and `closed_by`, the responder who closed it; a run
+the engine drove to its end carries no `closed_by`.
+
 `yunta list --runs` lists the runs of the repository it is run in — the ones
 whose manifest names its git directory, and the ones that name none and have
 their own branch in it — and ends with how many runs on the machine belong to

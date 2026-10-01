@@ -410,6 +410,10 @@ pub struct ResumePolicy {
 pub struct RunFinishedPayload {
     pub terminal_state: TerminalState,
     pub metrics: RunMetrics,
+    /// The person who closed a run nobody was going to continue. Absent
+    /// for a run the engine closed by driving it to its end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_by: Option<crate::Responder>,
 }
 
 impl RunFinishedPayload {
@@ -427,6 +431,15 @@ impl RunFinishedPayload {
                 cptv: (tasks_done > 0).then(|| tokens.total() as f64 / tasks_done as f64),
                 tokens,
             },
+            closed_by: None,
+        }
+    }
+
+    /// The same close, made by `by` rather than by the engine.
+    pub fn closed_by(self, by: crate::Responder) -> Self {
+        RunFinishedPayload {
+            closed_by: Some(by),
+            ..self
         }
     }
 }

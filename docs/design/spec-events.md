@@ -725,6 +725,7 @@ the run reports leaves the span out (D199).
 | `environment` | `{shell, path}` | no, solo en `run_resumed` | con qué corren los comandos desde este wake; si difiere del de `run_created`, `yunta status` lo dice |
 | `terminal_state` | estado | solo en `run_finished` | — |
 | `metrics` | `{cptv?, tokens, ...}` | solo en `run_finished` | derivadas del log, nunca estimadas |
+| `closed_by` | responder | no, solo en `run_finished` | quién cerró un run detenido que nadie iba a continuar (`yunta close`), con `terminal_state: cancelled`; ausente cuando el engine cerró el run llevándolo a su fin |
 
 ## 6. Regla transversal
 

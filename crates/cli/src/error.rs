@@ -128,6 +128,16 @@ pub enum CliError {
         source: crate::commands::DetachedResumeError,
     },
 
+    /// A run that cannot be closed. The engine's sentence says what is
+    /// true of the run; which command moves it instead is this border's
+    /// word.
+    #[error("{refusal}{}", close_advice(.run_id, .refusal))]
+    CloseRefused {
+        run_id: RunId,
+        #[source]
+        refusal: yunta_engine::CloseRunError,
+    },
+
     /// A document kind this binary does not publish. The sentence
     /// lists the kinds that exist, so `yunta schema` and the
     /// `document_shape` tool answer the same mistake the same way.
@@ -209,6 +219,33 @@ impl CliError {
             yunta_engine::ResolveGateError::UnknownOption { .. }
             | yunta_engine::ResolveGateError::Unsaid { .. }
             | yunta_engine::ResolveGateError::Storage(_) => refusal.into(),
+        }
+    }
+}
+
+/// What to do instead of closing a run the engine would not close.
+fn close_advice(run_id: &RunId, refusal: &yunta_engine::CloseRunError) -> String {
+    match refusal {
+        yunta_engine::CloseRunError::Driven => format!(
+            " — `{}` stops it, and then it can be closed",
+            crate::commands::advice::cancel(run_id)
+        ),
+        yunta_engine::CloseRunError::Moving => format!(
+            " — `{}` shows where it is",
+            crate::commands::advice::status(run_id)
+        ),
+        yunta_engine::CloseRunError::AlreadyClosed
+        | yunta_engine::CloseRunError::Storage(_)
+        | yunta_engine::CloseRunError::Export(_) => String::new(),
+    }
+}
+
+impl CliError {
+    /// An engine refusal to close a run, in this border's vocabulary.
+    pub fn close_refused(run_id: &RunId, refusal: yunta_engine::CloseRunError) -> Self {
+        CliError::CloseRefused {
+            run_id: run_id.clone(),
+            refusal,
         }
     }
 }

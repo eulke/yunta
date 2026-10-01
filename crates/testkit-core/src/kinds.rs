@@ -383,6 +383,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
                     cached: Some(200),
                 },
             },
+            closed_by: None,
         })),
     ]
 }

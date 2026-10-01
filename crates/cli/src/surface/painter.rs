@@ -421,6 +421,7 @@ mod tests {
                 cptv: None,
                 tokens: TokenUsage::default(),
             },
+            closed_by: None,
         }))
     }
 

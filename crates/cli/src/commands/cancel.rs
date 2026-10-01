@@ -50,7 +50,19 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     });
 
     if state.broken.is_some() || has_terminal_run_event {
-        println!("run {run_id}: already stopped — nothing to cancel");
+        let parked = events.last().is_some_and(|event| {
+            matches!(
+                event.payload(),
+                Some(EventPayload::Run(RunEvent::Paused(_)))
+            )
+        });
+        match parked {
+            true => println!(
+                "run {run_id}: already stopped — nothing to cancel; `{}` closes it for good",
+                advice::close(run_id)
+            ),
+            false => println!("run {run_id}: already stopped — nothing to cancel"),
+        }
         return Ok(Outcome::Success);
     }
 
@@ -152,28 +164,42 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         }
     }
 
-    // Case 2 — the engine crashed; its leftovers are ours to clean. The
-    // `run_paused` is emitted through the engine, not hand-built here, so
-    // the CLI never stamps an event with a clock of its own.
-    kill_groups(&registry.process_groups);
-    yunta_engine::record_pause_after_crash(
-        &storage,
-        run_id,
-        &yunta_core::events::PauseReason::CancelledAfterCrash,
-        &ctx.clock,
-    )
-    .await?;
-    if let Err(e) = std::fs::remove_file(yunta_engine::registry_path(&run_dir)) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            warn(format!("could not delete engine.json: {e}"));
-        }
-    }
+    // Case 2 — the engine crashed; its leftovers are ours to clean.
+    settle_crash(&ctx, &storage, run_id, &run_dir, &registry).await?;
     println!(
         "run {run_id}: engine (pid {}) was already dead — killed {}, recorded the pause",
         registry.engine_pid,
         yunta_core::text::counted(registry.process_groups.len(), "orphaned process group")
     );
     Ok(Outcome::Success)
+}
+
+/// What a run whose engine died left behind, settled: every process
+/// group the engine registered killed, the run's pause recorded, and the
+/// registry naming the dead engine removed. The `run_paused` is emitted
+/// through the engine, not hand-built here, so the CLI never stamps an
+/// event with a clock of its own.
+pub(crate) async fn settle_crash(
+    ctx: &Context,
+    storage: &yunta_storage::AsyncStorage,
+    run_id: &RunId,
+    run_dir: &std::path::Path,
+    registry: &yunta_engine::EngineProcessFile,
+) -> Result<(), CliError> {
+    kill_groups(&registry.process_groups);
+    yunta_engine::record_pause_after_crash(
+        storage,
+        run_id,
+        &yunta_core::events::PauseReason::CancelledAfterCrash,
+        &ctx.clock,
+    )
+    .await?;
+    if let Err(e) = std::fs::remove_file(yunta_engine::registry_path(run_dir)) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            warn(format!("could not delete engine.json: {e}"));
+        }
+    }
+    Ok(())
 }
 
 /// SIGKILL to every process group the engine registered. A group that is

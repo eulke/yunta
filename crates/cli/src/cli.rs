@@ -127,6 +127,17 @@ enum Command {
         /// The run id to cancel.
         run_id: RunId,
     },
+    /// Closes a stopped run nobody is going to continue, as cancelled,
+    /// so it stops waiting on a person. A run whose engine died is
+    /// settled first, as `cancel` settles one.
+    Close {
+        /// The run id to close.
+        run_id: RunId,
+        /// Who is closing it, for the audit trail (`run_finished.closed_by`).
+        /// Omitted, the close is recorded as `unverified:$USER`.
+        #[arg(long)]
+        by: Option<Responder>,
+    },
     /// Lists workflows under `.yunta/workflows/`, or local runs with
     /// `--runs`.
     List {
@@ -376,6 +387,7 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             .await
         }
         Command::Cancel { run_id } => commands::cancel::cancel(&run_id).await,
+        Command::Close { run_id, by } => commands::close::close(&run_id, by.as_ref()).await,
         Command::List { runs, all } => {
             if runs {
                 commands::list::list_runs(all).await

@@ -507,6 +507,7 @@ async fn receipt_of_failure(workflow_yaml: &str, node: &str, failure: Failure) -
                     cptv: None,
                     tokens: TokenUsage::default(),
                 },
+                closed_by: None,
             }))),
         },
     ];
