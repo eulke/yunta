@@ -89,6 +89,8 @@ pub fn to_json_string<T: serde::Serialize>(value: &T) -> Result<String, String> 
 pub(crate) struct RunDocument {
     schema_version: u32,
     run_id: String,
+    /// What every line a person reads calls the run by.
+    handle: String,
     /// How the run stands, in the one vocabulary every surface uses.
     outcome: RunWord,
     /// The same standing in a sentence, with the counters a person reads
@@ -166,6 +168,7 @@ impl RunDocument {
         RunDocument {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.to_string(),
+            handle: run_id.handle().to_string(),
             outcome: RunWord::observed(&frame, engine),
             summary: progress::summary(&frame, engine),
             reason: reason(&frame.phase),

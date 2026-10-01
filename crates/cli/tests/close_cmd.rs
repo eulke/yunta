@@ -3,7 +3,9 @@
 //! engine is driving is not, and a run whose engine died is settled first.
 
 use serde_json::Value;
-use yunta_testkit::{run_id_from, runs_root, stderr, stdout, wait_until, yunta_at, Checkout};
+use yunta_testkit::{
+    full_run_id, run_id_from, runs_root, stderr, stdout, wait_until, yunta_at, Checkout,
+};
 
 /// A build that fails at once: the run stops on a person.
 const FAILS: &str = "name: fails\nnodes:\n  - { id: build, kind: bash, run: \"exit 101\" }\n";
@@ -32,7 +34,7 @@ fn parked() -> (Checkout, String) {
         .committed();
     let run = yunta_at!(&checkout, &["run", "wf.yaml"]);
     assert!(!run.status.success());
-    let run_id = run_id_from(&run);
+    let run_id = full_run_id(&checkout.home, &run_id_from(&run));
     (checkout, run_id)
 }
 
@@ -117,7 +119,7 @@ fn close_of_a_stalled_run_records_the_crash_then_closes() {
         .workflow("wf", &holding(&started, &go))
         .committed();
     let detached = yunta_at!(&checkout, &["run", "wf.yaml", "--detach"]);
-    let run_id = run_id_from(&detached);
+    let run_id = full_run_id(&checkout.home, &run_id_from(&detached));
     wait_until(
         || started.exists(),
         || "the detached engine never reached the node".into(),

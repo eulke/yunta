@@ -540,7 +540,7 @@ is missing in the same answer.
 An option that sends the run back to a node with a session, like `adjust` above,
 asks what should change and doesn't take an empty answer: those words are what the
 planner picks its work back up with, in the same session, instead of planning again
-from the brief. From another process, say them with `yunta resolve-gate <run_id>
+from the brief. From another process, say them with `yunta resolve-gate <run>
 adjust --text "…"`.
 
 To skip the review altogether, run a mode that leaves the gate out: fragua's
@@ -548,8 +548,8 @@ To skip the review altogether, run a mode that leaves the gate out: fragua's
 
 ## Gates from the outside
 
-A paused run doesn't need anything watching it: `yunta status <run_id>` shows what
-it's waiting on and the exact option ids available, `yunta resolve-gate <run_id>
+A paused run doesn't need anything watching it: `yunta status <run>` shows what
+it's waiting on and the exact option ids available, `yunta resolve-gate <run>
 <option>` answers it from a completely separate process (or `yunta mcp`'s
 `resolve_gate` tool, for an agent doing it programmatically), and the run picks the
 decision up on its own next resume. Nothing about answering a gate requires the
@@ -562,7 +562,7 @@ same way, from anywhere.
 
 ## The Verified Work Receipt
 
-`yunta receipt <run_id>` closes a finished run out as a certificate: markdown for a
+`yunta receipt <run>` closes a finished run out as a certificate: markdown for a
 PR, JSON for tooling, both derived entirely from the event log — criteria with exit
 codes, baseline regressions, scope, which runners reviewed (and whether that was a
 fan-out of independent ones), cost and CPTV, re-routes, and the event chain's own

@@ -10,7 +10,9 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::text::LINE_WIDTH;
-use yunta_testkit::{git, run_id_from, stdout, wait_for, write, yunta_in, Checkout, MOCK_CONFIG};
+use yunta_testkit::{
+    git, handle, run_id_from, stdout, wait_for, write, yunta_in, Checkout, MOCK_CONFIG,
+};
 
 /// A node that fails with its one re-route already spent: the run parks
 /// on a decision whose menu is rebuilt from the log alone.
@@ -162,11 +164,11 @@ fn status_of_a_parked_run_shows_every_option_and_the_command_that_answers_it() {
     // The command carries the run's own id and leaves the option open:
     // an example option is what gets pasted.
     assert!(
-        text.contains(&format!("yunta resolve-gate {run_id} <option>")),
+        text.contains(&format!("yunta resolve-gate {} <option>", handle(&run_id))),
         "{text}"
     );
     assert!(
-        !text.contains(&format!("yunta resolve-gate {run_id} retry")),
+        !text.contains(&format!("yunta resolve-gate {} retry", handle(&run_id))),
         "no option is offered as a command to paste: {text}"
     );
 
@@ -214,7 +216,7 @@ fn one_decision_reads_as_a_trailer_when_a_run_stops_and_as_a_page_when_it_is_ask
             "one tradeoff per option: {text}"
         );
         assert!(
-            text.contains(&format!("yunta resolve-gate {run_id} <option>")),
+            text.contains(&format!("yunta resolve-gate {} <option>", handle(&run_id))),
             "{text}"
         );
     }
@@ -445,7 +447,7 @@ fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
     );
     assert!(text.contains("abort — Abort the run"), "{text}");
     assert!(
-        text.contains(&format!("yunta resolve-gate {run_id} <option>")),
+        text.contains(&format!("yunta resolve-gate {} <option>", handle(&run_id))),
         "{text}"
     );
     assert!(
@@ -538,7 +540,7 @@ fn a_pause_with_no_menu_still_says_what_the_run_is_waiting_on() {
         "the absent menu is named, not silently missing: {text}"
     );
     assert!(
-        text.contains(&format!("yunta resume {run_id}")),
+        text.contains(&format!("yunta resume {}", handle(&run_id))),
         "the way back into the run is on the page: {text}"
     );
     assert!(
@@ -609,7 +611,7 @@ fn the_listing_puts_a_waiting_run_above_a_running_one() {
         "what waits on a person comes first: {text}"
     );
     assert!(
-        position(&text, &parked_id) < in_flight,
+        position(&text, handle(&parked_id)) < in_flight,
         "the parked run is in the group that needs a person: {text}"
     );
     assert!(
@@ -678,7 +680,7 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
         "the page names the question still unanswered, not only the node: {text}"
     );
     assert!(
-        text.contains(&format!("yunta resume {run_id}")),
+        text.contains(&format!("yunta resume {}", handle(&run_id))),
         "the way back into the run is on the page: {text}"
     );
 
@@ -712,7 +714,7 @@ fn a_run_whose_manifest_does_not_read_back_is_listed_as_itself() {
     let text = stdout(&list);
     assert!(text.contains("unreadable (1)"), "{text}");
     assert!(
-        text.contains(&run_id),
+        text.contains(handle(&run_id)),
         "a run that cannot be derived is still named: {text}"
     );
 }

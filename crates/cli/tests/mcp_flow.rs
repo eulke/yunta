@@ -443,6 +443,63 @@ async fn workflow_status_returns_versioned_json() {
     client.cancel().await.unwrap();
 }
 
+/// A repository under `root` with one workflow that finishes, run once
+/// from the command line: the repository, the state root and the run's
+/// whole id.
+fn ran_once(root: &Path) -> (std::path::PathBuf, std::path::PathBuf, String) {
+    let repo = root.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: greet\nnodes:\n  - id: hello\n    kind: bash\n    run: \"true\"\n",
+    );
+    git(&repo, &["add", "."]);
+    git(&repo, &["commit", "-q", "-m", "workflow"]);
+    let run_id = run_id_from(&yunta_in!(&repo, &home, &["run", "wf.yaml"]));
+    (repo, home, run_id)
+}
+
+/// The control plane names a run by its whole id: the handle a person
+/// types at a terminal is not an id a program can rely on to stay
+/// unambiguous, so it is refused rather than resolved.
+#[tokio::test]
+async fn mcp_still_requires_a_full_run_id() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home, run_id) = ran_once(root.path());
+
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    command.arg("mcp");
+    let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+    let status = |run: &str| {
+        CallToolRequestParams::new("workflow_status")
+            .with_arguments(json!({ "run_id": run }).as_object().unwrap().clone())
+    };
+
+    let whole = tool_text(&client.call_tool(status(&run_id)).await.unwrap());
+    let document: Value = serde_json::from_str(&whole).expect("one JSON document");
+    assert_eq!(document["run_id"], run_id.as_str(), "{whole}");
+    assert_eq!(
+        document["handle"],
+        yunta_testkit::handle(&run_id),
+        "{whole}"
+    );
+
+    let by_handle = yunta_testkit::handle(&run_id);
+    let refused = tool_text(&client.call_tool(status(by_handle)).await.unwrap());
+    assert!(
+        serde_json::from_str::<Value>(&refused).is_err(),
+        "a handle names no run to the control plane: {refused}"
+    );
+    client.cancel().await.unwrap();
+}
+
 #[tokio::test]
 async fn run_workflow_accepts_pack_names() {
     let root = tempfile::tempdir().unwrap();

@@ -460,6 +460,28 @@ impl From<ulid::Ulid> for RunId {
     }
 }
 
+impl RunId {
+    /// How many characters of a run's id its handle keeps: enough that
+    /// two runs on one machine sharing one is a collision nobody meets,
+    /// few enough to read off one line and type into the next.
+    pub const HANDLE_CHARS: usize = 6;
+
+    /// What a person calls the run by: the last [`RunId::HANDLE_CHARS`]
+    /// characters of its id. A ULID opens with the time it was made,
+    /// which every run of a day shares, and closes with its random part,
+    /// which tells two runs apart even when they were made in the same
+    /// millisecond. An id no longer than a handle is its own.
+    pub fn handle(&self) -> &str {
+        let id = self.as_str();
+        let start = id
+            .char_indices()
+            .rev()
+            .nth(Self::HANDLE_CHARS - 1)
+            .map_or(0, |(at, _)| at);
+        id.get(start..).unwrap_or(id)
+    }
+}
+
 string_id!(
     /// A task's id from the tasks document, unique within one tasks document:
     /// `^[A-Za-z][A-Za-z0-9_-]*$`.
@@ -872,6 +894,22 @@ impl From<u64> for Seq {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_handle_is_the_random_tail_of_a_ulid() {
+        let made = ulid::Ulid::from_parts(1_700_000_000_000, 0x0123_4567_89AB_CDEF);
+        let run = RunId::from(made);
+        let random = made.to_string();
+        assert_eq!(run.handle(), &random[random.len() - RunId::HANDLE_CHARS..]);
+        // Two runs made in the same millisecond share their head and
+        // differ in their handle.
+        let twin = RunId::from(ulid::Ulid::from_parts(
+            1_700_000_000_000,
+            0x0123_4567_89AB_CDEE,
+        ));
+        assert_ne!(run.handle(), twin.handle());
+        assert_eq!(RunId::from_static("run-1").handle(), "run-1");
+    }
 
     #[test]
     fn a_name_starts_with_a_letter_and_continues_with_letters_digits_underscore_or_dash() {

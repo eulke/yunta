@@ -289,7 +289,7 @@ mod tests {
             "the demand line stays the first row and says what changed: {demanded:?}"
         );
         assert!(
-            first.contains(&format!("yunta resolve-gate {RUN} <option>")),
+            first.contains(&format!("yunta resolve-gate {} <option>", RUN.handle())),
             "it carries the command that answers it, whole: {first}"
         );
         assert!(
@@ -391,7 +391,7 @@ mod tests {
             .unwrap_or_default()
             .to_string();
         assert!(
-            child.starts_with("    ") && child.contains(&format!("child run {CHILD}")),
+            child.starts_with("    ") && child.contains(&format!("child run {}", CHILD.handle())),
             "the child sits under the node that bore it: {drawn:?}"
         );
         assert!(

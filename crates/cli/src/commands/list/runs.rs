@@ -3,165 +3,41 @@
 //! moving, what has closed) and ordered inside each group by how long it
 //! has been there, so the run to answer first is the first one read.
 //!
-//! The grouping and the line under each run are both read off the run's
-//! own [`RunFrame`], through the same projection `yunta status` prints,
-//! so the listing and the run's own page can never disagree about where
-//! a run stands.
+//! Which runs it lists, and in which group, is the [`Inbox`]'s answer;
+//! this module lays it out.
 
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
-
-use chrono::{DateTime, Utc};
-use yunta_core::events::StoredEvent;
 use yunta_core::units::DURATION_WIDEST;
-use yunta_core::{Clock, Manifest, ModeName, RunId, WorkflowName};
-use yunta_engine::{EngineLiveness, RunFrame};
-use yunta_storage::Storage;
+use yunta_core::RunId;
 
-use crate::commands::status::progress;
+use super::inbox::{Inbox, RunRow, Standing, Unreadable};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::project::Project;
-use crate::render::state::RunWord;
 use crate::render::{cell_width, duration, indent, truncate, Look, INDENT};
 
-/// The cells a run id gets. A ULID is 26 characters, and the id is what
-/// a reader copies into the next command, so this column pads a shorter
-/// id and never cuts a longer one: a cut id is one nobody can use.
-const ID_WIDTH: usize = 26;
+/// The cells a run's handle gets: what a reader copies into the next
+/// command, so the column pads a shorter one and never cuts one.
+const HANDLE_WIDTH: usize = RunId::HANDLE_CHARS;
 
 /// The cells the workflow name and the run's mode share — enough for the
 /// names a repo's own workflows carry, and the column the eye runs down
 /// to find the run it came for.
-const NAME_WIDTH: usize = 24;
-
-/// The part of a listing a run belongs in — the inbox's own grouping,
-/// derived from the run's phase so a heading can never disagree with the
-/// summary printed under it.
-///
-/// The order of the variants is the order the groups print in: what
-/// stopped on a person comes before what is still moving, which comes
-/// before what is already closed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Standing {
-    /// Stopped until a person acts: a decision to answer, or a log that
-    /// stopped making sense.
-    NeedsYou,
-    /// Its log says it is moving and the engine that drove it is gone:
-    /// it waits on a person as surely as a decision does, but what it
-    /// takes is a resume, not an answer.
-    Stalled,
-    /// Moving on its own, or created and not yet started.
-    InFlight,
-    /// Closed, however it closed.
-    Closed,
-}
-
-impl Standing {
-    /// Every group, in printing order.
-    const ALL: [Standing; 4] = [
-        Standing::NeedsYou,
-        Standing::Stalled,
-        Standing::InFlight,
-        Standing::Closed,
-    ];
-
-    /// Which group a run called `word` belongs in. A log that stopped
-    /// making sense needs a person as much as a decision does: nothing
-    /// moves it on its own again.
-    ///
-    /// The grouping is read off the word every other surface calls the
-    /// run by, so a heading and the summary under it are two views of
-    /// one answer rather than two readings of a phase.
-    fn of(word: RunWord) -> Self {
-        match word {
-            RunWord::NeedsYou | RunWord::Broken => Standing::NeedsYou,
-            RunWord::Stalled => Standing::Stalled,
-            RunWord::Created | RunWord::Running => Standing::InFlight,
-            RunWord::Finished
-            | RunWord::Reported
-            | RunWord::Failed
-            | RunWord::Cancelled
-            | RunWord::Promoted => Standing::Closed,
-        }
-    }
-
-    /// The heading a group of runs prints under. It says what the reader
-    /// can do about the rows below it, which is what a listing is read
-    /// for.
-    fn heading(self) -> &'static str {
-        match self {
-            Self::NeedsYou => "needs you",
-            Self::Stalled => "stalled",
-            Self::InFlight => "in flight",
-            Self::Closed => "closed",
-        }
-    }
-}
-
-/// One run as the listing shows it, read off that run's own frame.
-struct RunRow {
-    run_id: RunId,
-    standing: Standing,
-    workflow: WorkflowName,
-    mode: ModeName,
-    /// How long the run has been where it is — what the rows of a group
-    /// are ordered by.
-    age: Duration,
-    summary: String,
-}
-
-/// A run the listing can name but not derive: its log or the manifest it
-/// froze does not read back. It is listed as itself, never dropped — a
-/// run missing from a listing is a run nobody goes looking for.
-struct Unreadable {
-    run_id: RunId,
-    problem: String,
-}
+const NAME_WIDTH: usize = 44;
 
 /// The runs of the repository this is run in — every run on the machine
 /// with `all`, or when this is run outside a repository — as the inbox,
 /// and how many runs the listing leaves to other projects.
 pub async fn list_runs(all: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
-    let storage = ctx.storage()?;
-
-    let run_ids: Vec<RunId> = storage
-        .list_runs()
-        .map(|runs| runs.into_iter().map(|run| run.run_id).collect())?;
-    if run_ids.is_empty() {
+    let inbox = Inbox::gather(&ctx, all).await?;
+    if inbox.is_empty() {
         println!("no runs in {}", ctx.project.storage_path.display());
         return Ok(Outcome::Success);
     }
-
-    let here = match all {
-        true => None,
-        false => Here::of(&ctx).await,
-    };
-    let now = ctx.clock.now();
-    let mut rows = Vec::new();
-    let mut unreadable = Vec::new();
-    let mut elsewhere = 0;
-    for run_id in run_ids {
-        match run_row(&ctx.project, &storage, run_id, now) {
-            Ok((row, project))
-                if here
-                    .as_ref()
-                    .is_none_or(|here| here.holds(&row.run_id, project.as_deref())) =>
-            {
-                rows.push(row)
-            }
-            Err(problem)
-                if here
-                    .as_ref()
-                    .is_none_or(|here| here.holds(&problem.run_id, None)) =>
-            {
-                unreadable.push(problem)
-            }
-            Ok(_) | Err(_) => elsewhere += 1,
-        }
-    }
+    let Inbox {
+        rows,
+        unreadable,
+        elsewhere,
+    } = inbox;
     if rows.is_empty() && unreadable.is_empty() {
         println!("no runs in this repository");
     } else {
@@ -174,40 +50,6 @@ pub async fn list_runs(all: bool) -> Result<Outcome, CliError> {
         );
     }
     Ok(Outcome::Success)
-}
-
-/// The repository a listing is asked in: the git directory its checkouts
-/// share, and the runs that have their own branch in it.
-struct Here {
-    git_common_dir: PathBuf,
-    branches: BTreeSet<RunId>,
-}
-
-impl Here {
-    /// The repository `ctx.cwd` is in, or `None` outside one — where every
-    /// run is listed, since there is no project to narrow to.
-    async fn of(ctx: &Context) -> Option<Self> {
-        let git_common_dir = yunta_engine::git::common_dir(&ctx.cwd, ctx.supervision())
-            .await
-            .ok()?;
-        let branches = yunta_engine::git::run_branches(&ctx.cwd, ctx.supervision())
-            .await
-            .unwrap_or_default();
-        Some(Here {
-            git_common_dir,
-            branches,
-        })
-    }
-
-    /// Whether the run `run_id`, created in the repository whose git
-    /// directory is `project` when its manifest says so, belongs here. A
-    /// run that does not say is placed by its branch.
-    fn holds(&self, run_id: &RunId, project: Option<&Path>) -> bool {
-        match project {
-            Some(project) => project == self.git_common_dir,
-            None => self.branches.contains(run_id),
-        }
-    }
 }
 
 /// The listing itself: what needs a person first, then what is still
@@ -237,7 +79,11 @@ fn render_runs(mut rows: Vec<RunRow>, mut unreadable: Vec<Unreadable>, look: Loo
         unreadable.sort_by(|a, b| a.run_id.cmp(&b.run_id));
         push_heading(&mut out, "unreadable", unreadable.len());
         for run in &unreadable {
-            out.push_str(&format!("{INDENT}{}: {}\n", run.run_id, run.problem));
+            out.push_str(&format!(
+                "{INDENT}{}: {}\n",
+                run.run_id.handle(),
+                run.problem
+            ));
         }
     }
     out
@@ -253,19 +99,6 @@ fn push_heading(out: &mut String, heading: &str, runs: usize) {
 }
 
 impl RunRow {
-    /// One row from the run's own frame: which group it belongs in, what
-    /// the run is, and the line `yunta status` prints for it.
-    fn of(frame: &RunFrame, engine: EngineLiveness, age: Duration) -> Self {
-        RunRow {
-            run_id: frame.run_id.clone(),
-            standing: Standing::of(RunWord::observed(frame, engine)),
-            workflow: frame.workflow.clone(),
-            mode: frame.mode.clone(),
-            age,
-            summary: progress::summary(frame, engine),
-        }
-    }
-
     /// Two lines: what the run is, then where it stands. The identity
     /// line carries the id a reader copies, the workflow that names what
     /// the run is doing and the mode it does it in; the line under it is
@@ -279,8 +112,8 @@ impl RunRow {
         format!(
             // The age right-aligned, so a column of them compares as
             // numbers.
-            "{INDENT}{:<ID_WIDTH$}  {}  {:>DURATION_WIDEST$}\n{margin}{}\n",
-            self.run_id.as_str(),
+            "{INDENT}{:<HANDLE_WIDTH$}  {}  {:>DURATION_WIDEST$}\n{margin}{}\n",
+            self.run_id.handle(),
             truncate(
                 &format!("{} ({})", self.workflow, self.mode),
                 NAME_WIDTH,
@@ -297,73 +130,12 @@ impl RunRow {
     }
 }
 
-/// One run's row and the repository its manifest says it was created
-/// in, or what stops it from having one.
-fn run_row(
-    project: &Project,
-    storage: &Storage,
-    run_id: RunId,
-    now: DateTime<Utc>,
-) -> Result<(RunRow, Option<PathBuf>), Unreadable> {
-    let events = storage
-        .events_for_run(&run_id)
-        .map_err(|e| Unreadable::new(&run_id, format!("its event log does not read back: {e}")))?;
-    // The same frozen-path-aware search `status` uses, so a run created
-    // under a since-changed `paths.runs` still lists.
-    let run_dir = project.run_dir(run_id.as_str()).ok_or_else(|| {
-        Unreadable::new(
-            &run_id,
-            format!(
-                "manifest missing or unreadable under {}",
-                project.runs_root.display()
-            ),
-        )
-    })?;
-    let manifest_path = yunta_engine::run_dir::manifest_path(&run_dir);
-    let manifest: Manifest = std::fs::read_to_string(&manifest_path)
-        .ok()
-        .and_then(|text| yunta_core::yaml::parse(&text).ok())
-        .ok_or_else(|| {
-            Unreadable::new(
-                &run_id,
-                format!(
-                    "manifest missing or unreadable at {}",
-                    manifest_path.display()
-                ),
-            )
-        })?;
-    let row = RunRow::of(
-        &progress::frame(&run_id, &manifest, &events, now),
-        yunta_engine::engine_liveness(&run_dir, &yunta_engine::lock::SystemProbe),
-        time_in_state(&events, now),
-    );
-    Ok((row, manifest.project.map(|project| project.git_common_dir)))
-}
-
-impl Unreadable {
-    fn new(run_id: &RunId, problem: String) -> Self {
-        Unreadable {
-            run_id: run_id.clone(),
-            problem,
-        }
-    }
-}
-
-/// How long the run has been where it is: the time since its last event,
-/// which is the event that put it there — a parked run's own
-/// `run_paused`, a running node's last word, a closed run's
-/// `run_finished`. Zero for a log with no events, and for one whose last
-/// event is stamped after `now`, since a run cannot have been somewhere
-/// for a negative time.
-fn time_in_state(events: &[StoredEvent], now: DateTime<Utc>) -> Duration {
-    events
-        .last()
-        .map(|event| (now - event.timestamp).to_std().unwrap_or(Duration::ZERO))
-        .unwrap_or(Duration::ZERO)
-}
-
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use yunta_core::{ModeName, RunId};
+
     use super::*;
 
     fn row(id: &'static str, standing: Standing, age_secs: u64) -> RunRow {
@@ -377,14 +149,23 @@ mod tests {
         }
     }
 
-    /// The ids of the runs a listing names, in the order it names them —
-    /// the first word of every line that opens with one, whether the line
-    /// is a row's identity line or an unreadable run's `id: problem`.
+    /// The handles of the runs a listing names, in the order it names
+    /// them — the first word of every line that opens with one, whether
+    /// the line is a row's identity line or an unreadable run's
+    /// `handle: problem`.
     fn listed(text: &str) -> Vec<&str> {
         text.lines()
-            .filter_map(|line| line.split_whitespace().next())
+            .filter_map(|line| line.strip_prefix(INDENT))
+            .filter(|row| !row.starts_with(' '))
+            .filter_map(|row| row.split_whitespace().next())
             .map(|word| word.trim_end_matches(':'))
-            .filter(|word| word.len() == ID_WIDTH)
+            .collect()
+    }
+
+    /// What each of `ids` is called by on a line a person reads.
+    fn handles(ids: &[&'static str]) -> Vec<&'static str> {
+        ids.iter()
+            .map(|id| &id[id.len() - HANDLE_WIDTH..])
             .collect()
     }
 
@@ -392,35 +173,6 @@ mod tests {
     const TIED_A: &str = "01JBZ5X8K3N7Q2W6E4R9T1Y0P2";
     const TIED_B: &str = "01JBZ5X8K3N7Q2W6E4R9T1Y0P3";
     const NEWEST: &str = "01JBZ5X8K3N7Q2W6E4R9T1Y0P4";
-
-    #[test]
-    fn the_word_a_run_is_called_by_decides_the_group_it_is_listed_under() {
-        // A log that stopped making sense needs a person as much as a
-        // decision does: nothing moves it on its own again.
-        for word in [RunWord::NeedsYou, RunWord::Broken] {
-            assert_eq!(Standing::of(word), Standing::NeedsYou, "{word}");
-        }
-        for word in [RunWord::Created, RunWord::Running] {
-            assert_eq!(Standing::of(word), Standing::InFlight, "{word}");
-        }
-        for word in [
-            RunWord::Finished,
-            RunWord::Reported,
-            RunWord::Failed,
-            RunWord::Cancelled,
-            RunWord::Promoted,
-        ] {
-            assert_eq!(Standing::of(word), Standing::Closed, "{word}");
-        }
-    }
-
-    #[test]
-    fn every_word_a_run_can_be_called_by_has_a_group() {
-        // The listing is an inbox: a run whose word fell through would
-        // be a run nobody goes looking for.
-        let groups: Vec<Standing> = RunWord::ALL.into_iter().map(Standing::of).collect();
-        assert_eq!(groups.len(), RunWord::ALL.len());
-    }
 
     #[test]
     fn a_group_answers_the_run_that_has_waited_longest_first() {
@@ -432,7 +184,7 @@ mod tests {
             Vec::new(),
             Look::plain(),
         );
-        assert_eq!(listed(&text), [OLDEST, NEWEST], "{text}");
+        assert_eq!(listed(&text), handles(&[OLDEST, NEWEST]), "{text}");
     }
 
     #[test]
@@ -445,7 +197,7 @@ mod tests {
             Vec::new(),
             Look::plain(),
         );
-        assert_eq!(listed(&text), [TIED_A, TIED_B], "{text}");
+        assert_eq!(listed(&text), handles(&[TIED_A, TIED_B]), "{text}");
     }
 
     #[test]
@@ -459,7 +211,7 @@ mod tests {
             Vec::new(),
             Look::plain(),
         );
-        assert_eq!(listed(&text), [OLDEST, TIED_A, NEWEST], "{text}");
+        assert_eq!(listed(&text), handles(&[OLDEST, TIED_A, NEWEST]), "{text}");
         assert!(text.contains("needs you (1)"), "{text}");
         assert!(text.contains("in flight (1)"), "{text}");
         assert!(text.contains("closed (1)"), "{text}");
@@ -475,7 +227,7 @@ mod tests {
             ],
             Look::plain(),
         );
-        assert_eq!(listed(&text), [OLDEST, TIED_A, NEWEST], "{text}");
+        assert_eq!(listed(&text), handles(&[OLDEST, TIED_A, NEWEST]), "{text}");
         assert!(text.contains("unreadable (2)"), "{text}");
     }
 }

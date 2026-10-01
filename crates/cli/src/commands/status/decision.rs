@@ -97,7 +97,7 @@ pub(crate) fn block(
         out.push_str(&layout.option(option));
     }
     out.push_str(&layout.section("answer it with"));
-    out.push_str(&verbatim(2, &advice::resolve_gate(run_id)));
+    out.push_str(&verbatim(2, &advice::resolve_gate(run_id.handle())));
     out.push_str(&layout.advice());
     out
 }
@@ -227,7 +227,7 @@ pub(crate) fn without_menu(run_id: &RunId, reason: &str, width: usize) -> String
         1,
         width,
     ));
-    out.push_str(&verbatim(2, &advice::resume(run_id)));
+    out.push_str(&verbatim(2, &advice::resume(run_id.handle())));
     out
 }
 
@@ -278,7 +278,7 @@ impl DecisionJson {
         DecisionJson {
             node: node.to_string(),
             escalation,
-            resolve_with: advice::resolve_gate(run_id),
+            resolve_with: advice::resolve_gate(run_id.as_str()),
         }
     }
 }
@@ -491,7 +491,7 @@ mod tests {
     fn the_command_leaves_the_option_for_the_reader_to_choose() {
         let block = block(PAGE, &RUN, &NODE, &escalation());
         assert!(
-            block.contains("yunta resolve-gate 01JBZ5X8K3N7Q2W6E4R9T1Y0P5 <option>"),
+            block.contains("yunta resolve-gate T1Y0P5 <option>"),
             "{block}"
         );
     }

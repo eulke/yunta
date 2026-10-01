@@ -128,6 +128,16 @@ rule is refused with the value, what it was meant to be and the rule:
   between a parent and its child, and between a run and its promotion
   successor, is recorded in the log (`child_run_created`, `promoted_from`),
   never encoded in the id.
+- A run's handle is the last six characters of its id: the random part of a
+  ULID, which tells apart two runs made in the same millisecond. Every line a
+  person reads names a run by its handle; `--json` (which carries both,
+  `run_id` and `handle`), `--quiet`, the receipt, the `status` headline, a line
+  naming a run's directory and the control plane name it by the whole id. A
+  command that takes a run accepts the whole id, any part that starts or ends
+  it in either case, `last` — the newest run of the repository it runs in —
+  and `needs` — that repository's run waiting on a person. A part two runs
+  share, and `needs` with two runs waiting, is refused listing each whole id.
+  The control plane's tools take the whole id only.
 - A finding id is any printable label; a session id is whatever the
   adapter's CLI issued, as long as it is not empty.
 
@@ -370,7 +380,8 @@ rather than `paused`, and a run that finished holding blocking findings is
 `reported` rather than `finished`.
 
 `run --json`, `resume --json`, `status --json` and the control plane's
-`workflow_status` all emit one document. It is derived from the run's own event
+`workflow_status` all emit one document. It names the run by its whole `run_id`
+and by the `handle` every line a person reads calls it. It is derived from the run's own event
 log, so the command that drove a run to its stop and the command that reads that
 run afterwards publish the same answer, field for field. `outcome` is the word
 every text surface prints for the run — `created`, `running`, `stalled`,

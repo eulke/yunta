@@ -87,8 +87,9 @@ pub enum CliError {
     /// engine's sentence says what is true of the run; which command
     /// shows a reader where it actually is is this border's word, so it
     /// is added here — once, for the command and the control plane
-    /// alike.
-    #[error("{refusal} — `{}` shows where it is", crate::commands::advice::status(.run_id))]
+    /// alike, and so with the run's whole id, which is what a control
+    /// plane names a run by.
+    #[error("{refusal} — `{}` shows where it is", crate::commands::advice::status(.run_id.as_str()))]
     NotPaused {
         run_id: RunId,
         #[source]
@@ -99,7 +100,7 @@ pub enum CliError {
     /// Those pauses are settled where they were raised — a budget, a
     /// scope, an answers file, a review on a forge — and the run handed
     /// back, which is what the advice names.
-    #[error("{refusal} — settle it where it was raised, then `{}`", crate::commands::advice::resume(.run_id))]
+    #[error("{refusal} — settle it where it was raised, then `{}`", crate::commands::advice::resume(.run_id.as_str()))]
     NoMenu {
         run_id: RunId,
         #[source]
@@ -135,6 +136,14 @@ pub enum CliError {
         run_id: RunId,
         #[source]
         refusal: yunta_engine::CloseRunError,
+    },
+
+    /// A run named by something more than one run answers to. Every
+    /// run it could be is listed whole, so the next command can name one.
+    #[error("{said} — name one:{}", one_per_line(.candidates))]
+    AmbiguousRun {
+        said: String,
+        candidates: Vec<crate::commands::run_ref::Candidate>,
     },
 
     /// A document kind this binary does not publish. The sentence
@@ -222,16 +231,28 @@ impl CliError {
     }
 }
 
+/// Every run a reference could mean, one to a line under the sentence:
+/// the id whole, and what tells it apart when there is something to say.
+fn one_per_line(candidates: &[crate::commands::run_ref::Candidate]) -> String {
+    candidates
+        .iter()
+        .map(|candidate| match &candidate.about {
+            Some(about) => format!("\n  {}  {about}", candidate.run_id),
+            None => format!("\n  {}", candidate.run_id),
+        })
+        .collect()
+}
+
 /// What to do instead of closing a run the engine would not close.
 fn close_advice(run_id: &RunId, refusal: &yunta_engine::CloseRunError) -> String {
     match refusal {
         yunta_engine::CloseRunError::Driven => format!(
             " — `{}` stops it, and then it can be closed",
-            crate::commands::advice::cancel(run_id)
+            crate::commands::advice::cancel(run_id.handle())
         ),
         yunta_engine::CloseRunError::Moving => format!(
             " — `{}` shows where it is",
-            crate::commands::advice::status(run_id)
+            crate::commands::advice::status(run_id.handle())
         ),
         yunta_engine::CloseRunError::AlreadyClosed
         | yunta_engine::CloseRunError::Storage(_)

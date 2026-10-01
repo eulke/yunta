@@ -36,6 +36,7 @@ const ENGINE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 const ENGINE_SHUTDOWN_POLL: Duration = Duration::from_millis(200);
 
 pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
+    let called = run_id.handle();
     let ctx = Context::load()?;
     let storage = ctx.async_storage().await?;
     let open = ctx.open_run(run_id).await?;
@@ -58,10 +59,10 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         });
         match parked {
             true => println!(
-                "run {run_id}: already stopped — nothing to cancel; `{}` closes it for good",
-                advice::close(run_id)
+                "run {called}: already stopped — nothing to cancel; `{}` closes it for good",
+                advice::close(run_id.handle())
             ),
-            false => println!("run {run_id}: already stopped — nothing to cancel"),
+            false => println!("run {called}: already stopped — nothing to cancel"),
         }
         return Ok(Outcome::Success);
     }
@@ -77,10 +78,10 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         // because only one of them is a broken file on their disk.
         yunta_engine::Registry::Corrupt(error) => {
             return Err(CliError::msg(format!(
-                "run `{run_id}`: its `engine.json` is there and this binary cannot read it \
+                "run `{called}`: its `engine.json` is there and this binary cannot read it \
                  ({}) — `{}` recovers the run once its process has stopped.",
                 describe(&error),
-                advice::resume(run_id)
+                advice::resume(run_id.handle())
             )))
         }
         // Case 3 — no channel. Legacy fallback behavior, now the
@@ -91,14 +92,14 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
                 .values()
                 .any(|record| matches!(record.state, Some(NodeState::Running { .. })));
             if !has_live_node {
-                println!("run {run_id}: no node in progress — nothing to cancel");
+                println!("run {called}: no node in progress — nothing to cancel");
                 return Ok(Outcome::Success);
             }
             return Err(CliError::msg(format!(
-                "run `{run_id}` has a node in progress but no `engine.json` to signal \
+                "run `{called}` has a node in progress but no `engine.json` to signal \
                  through — the engine that ran it predates this build, or its scratch \
                  directory is gone. `{}` recovers the run once its process has stopped.",
-                advice::resume(run_id)
+                advice::resume(run_id.handle())
             )));
         }
     };
@@ -106,14 +107,14 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     if registry.liveness(&yunta_engine::lock::SystemProbe) == Liveness::Alive {
         // Case 1 — the engine handles the rest itself.
         println!(
-            "run {run_id}: signalling the live engine (pid {})",
+            "run {called}: signalling the live engine (pid {})",
             registry.engine_pid
         );
         signal_process(registry.engine_pid, Signal::SIGINT).map_err(|e| {
             CliError::msg(format!(
                 "{} — retry `{}`",
                 describe(&e),
-                advice::cancel(run_id)
+                advice::cancel(run_id.handle())
             ))
         })?;
 
@@ -127,9 +128,9 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
                 () = tokio::time::sleep(ENGINE_SHUTDOWN_POLL) => {}
                 () = ctx.cancellation().cancelled() => {
                     note(format!(
-                        "run {run_id}: interrupted while waiting — the SIGINT is with the \
+                        "run {called}: interrupted while waiting — the SIGINT is with the \
                          engine, which stops on its own; `{}` says where it got to",
-                        advice::status(run_id)
+                        advice::status(run_id.handle())
                     ));
                     return Ok(Outcome::Success);
                 }
@@ -145,12 +146,12 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
                 )
             });
             if terminal {
-                println!("run {run_id}: cancelled — the log has its terminal");
+                println!("run {called}: cancelled — the log has its terminal");
                 return Ok(Outcome::Success);
             }
             if tokio::time::Instant::now() >= deadline {
                 note(format!(
-                    "run {run_id}: the engine did not stop within {ENGINE_SHUTDOWN_TIMEOUT:?} \
+                    "run {called}: the engine did not stop within {ENGINE_SHUTDOWN_TIMEOUT:?} \
                      — escalating to SIGKILL on its process groups"
                 ));
                 kill_groups(&registry.process_groups);
@@ -167,7 +168,7 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     // Case 2 — the engine crashed; its leftovers are ours to clean.
     settle_crash(&ctx, &storage, run_id, &run_dir, &registry).await?;
     println!(
-        "run {run_id}: engine (pid {}) was already dead — killed {}, recorded the pause",
+        "run {called}: engine (pid {}) was already dead — killed {}, recorded the pause",
         registry.engine_pid,
         yunta_core::text::counted(registry.process_groups.len(), "orphaned process group")
     );

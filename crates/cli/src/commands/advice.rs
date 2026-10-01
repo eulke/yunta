@@ -10,12 +10,12 @@
 //! renaming a subcommand is a change to this file rather than a hunt
 //! through prose.
 //!
-//! Each command carries the run's own id and nothing else a reader would
-//! have to invent — a gate's option stays `<option>`, because an option
+//! Each command carries what the run is called by — its handle on a
+//! line a person reads, its whole id in a document a program reads —
+//! and nothing else a reader would have to invent — a gate's option stays `<option>`, because an option
 //! id printed as an example gets pasted, and no id printed beside a run
 //! is ever one that run's own menu does not offer.
 
-use yunta_core::RunId;
 use yunta_engine::{NodeWait, RunPhase, WaitingOn};
 
 /// What a run is parked on, or `None` for a run nobody has to touch —
@@ -75,40 +75,40 @@ pub(crate) fn parked_in_full(on: &WaitingOn) -> String {
 
 /// Answers a run parked on a decision, with the option left for the
 /// reader to pick off the menu printed above it.
-pub(crate) fn resolve_gate(run_id: &RunId) -> String {
-    format!("yunta resolve-gate {run_id} <option>")
+pub(crate) fn resolve_gate(run: &str) -> String {
+    format!("yunta resolve-gate {run} <option>")
 }
 
 /// Hands a run back to the engine, once whatever stopped it is settled
 /// somewhere else — a budget, a scope, an answers file, a review on a
 /// forge.
-pub(crate) fn resume(run_id: &RunId) -> String {
-    format!("yunta resume {run_id}")
+pub(crate) fn resume(run: &str) -> String {
+    format!("yunta resume {run}")
 }
 
 /// Stops a run and the whole process tree under it.
-pub(crate) fn cancel(run_id: &RunId) -> String {
-    format!("yunta cancel {run_id}")
+pub(crate) fn cancel(run: &str) -> String {
+    format!("yunta cancel {run}")
 }
 
 /// Closes a stopped run nobody is going to continue.
-pub(crate) fn close(run_id: &RunId) -> String {
-    format!("yunta close {run_id}")
+pub(crate) fn close(run: &str) -> String {
+    format!("yunta close {run}")
 }
 
 /// Shows where a run stands, derived from its own log.
-pub(crate) fn status(run_id: &RunId) -> String {
-    format!("yunta status {run_id}")
+pub(crate) fn status(run: &str) -> String {
+    format!("yunta status {run}")
 }
 
 /// Gathers a finished run's manifest, log and artifacts into the bundle
 /// that certifies it.
-pub(crate) fn receipt(run_id: &RunId) -> String {
-    format!("yunta receipt {run_id}")
+pub(crate) fn receipt(run: &str) -> String {
+    format!("yunta receipt {run}")
 }
 
 /// Walks a run's event hash chain, which is what says where a log stopped
 /// being readable.
-pub(crate) fn verify(run_id: &RunId) -> String {
-    format!("yunta verify {run_id}")
+pub(crate) fn verify(run: &str) -> String {
+    format!("yunta verify {run}")
 }

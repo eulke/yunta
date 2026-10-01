@@ -2,7 +2,7 @@
 //! and says how many runs on the machine belong to other projects;
 //! `--all` lists them all.
 
-use yunta_testkit::{run_id_from, runs_root, stderr, stdout, yunta_at, Checkout};
+use yunta_testkit::{handle, run_id_from, runs_root, stderr, stdout, yunta_at, Checkout};
 
 const ONE_NODE: &str = "name: one\nnodes:\n  - { id: only, kind: bash, run: \"true\" }\n";
 
@@ -32,8 +32,8 @@ fn list_runs_shows_only_runs_of_the_repository_it_runs_in() {
     let ((first, first_run), (_, second_run)) = two_projects(root.path());
 
     let listed = stdout(&yunta_at!(&first, &["list", "--runs"]));
-    assert!(listed.contains(&first_run), "{listed}");
-    assert!(!listed.contains(&second_run), "{listed}");
+    assert!(listed.contains(handle(&first_run)), "{listed}");
+    assert!(!listed.contains(handle(&second_run)), "{listed}");
     assert!(
         listed.contains("1 run in other projects — yunta list --runs --all"),
         "{listed}"
@@ -47,7 +47,7 @@ fn list_runs_all_shows_every_run() {
 
     let listed = stdout(&yunta_at!(&first, &["list", "--runs", "--all"]));
     assert!(
-        listed.contains(&first_run) && listed.contains(&second_run),
+        listed.contains(handle(&first_run)) && listed.contains(handle(&second_run)),
         "{listed}"
     );
     assert!(!listed.contains("other projects"), "{listed}");
@@ -82,10 +82,13 @@ fn a_run_from_before_projects_were_recorded_belongs_where_its_branch_is() {
     std::fs::write(&manifest, without).unwrap();
 
     let here = stdout(&yunta_at!(&first, &["list", "--runs"]));
-    assert!(here.contains(&first_run), "its branch is here: {here}");
+    assert!(
+        here.contains(handle(&first_run)),
+        "its branch is here: {here}"
+    );
     let there = stdout(&yunta_at!(&second, &["list", "--runs"]));
     assert!(
-        !there.contains(&first_run),
+        !there.contains(handle(&first_run)),
         "its branch is not there: {there}"
     );
 }

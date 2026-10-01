@@ -138,9 +138,12 @@ fn print_stall(run_id: &RunId, frame: &RunFrame, engine: yunta_engine::EngineLiv
     println!("no process is driving this run: the engine that ran it is gone");
     println!(
         "{INDENT}{}   continues it from its log",
-        advice::resume(run_id)
+        advice::resume(run_id.handle())
     );
-    println!("{INDENT}{}   closes it for good", advice::close(run_id));
+    println!(
+        "{INDENT}{}   closes it for good",
+        advice::close(run_id.handle())
+    );
 }
 
 /// What a parked run is waiting on, printed last because it is what the
@@ -182,7 +185,10 @@ fn print_decision(
             )
         ),
     }
-    println!("{INDENT}{}   closes it for good", advice::close(run_id));
+    println!(
+        "{INDENT}{}   closes it for good",
+        advice::close(run_id.handle())
+    );
 }
 
 /// Every failure with more than one line of detail, laid out one block

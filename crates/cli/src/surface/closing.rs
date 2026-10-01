@@ -103,7 +103,7 @@ impl Closing {
         let verdict = self.verdict();
         let headline = Line::new()
             .plain("run ")
-            .push(Tone::Strong, self.run_id.to_string())
+            .push(Tone::Strong, self.run_id.handle())
             .plain(": ")
             .push(
                 Tone::of(verdict.mark),
@@ -294,17 +294,19 @@ impl Closing {
 
     /// What a person does next, given how this run stopped.
     fn next_commands(&self) -> String {
-        let status = advice::status(&self.run_id);
+        let status = advice::status(self.run_id.handle());
         match &self.frame.phase {
-            RunPhase::Finished => format!("{} · {status}", advice::receipt(&self.run_id)),
+            RunPhase::Finished => format!("{} · {status}", advice::receipt(self.run_id.handle())),
             RunPhase::Waiting { .. } => format!(
                 "{} · {status}",
                 view::answer_command(&self.run_id, self.decision.is_some())
             ),
             RunPhase::Failed { .. } | RunPhase::Cancelled => {
-                format!("{status} · {}", advice::resume(&self.run_id))
+                format!("{status} · {}", advice::resume(self.run_id.handle()))
             }
-            RunPhase::Broken { .. } => format!("{} · {status}", advice::verify(&self.run_id)),
+            RunPhase::Broken { .. } => {
+                format!("{} · {status}", advice::verify(self.run_id.handle()))
+            }
             RunPhase::Created | RunPhase::Running | RunPhase::Promoted { .. } => status,
         }
     }

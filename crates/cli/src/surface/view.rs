@@ -55,8 +55,8 @@ pub(super) fn demand_line(frame: &RunFrame, run_id: &RunId, answerable: bool) ->
 /// review on a forge.
 pub(super) fn answer_command(run_id: &RunId, answerable: bool) -> String {
     match answerable {
-        true => advice::resolve_gate(run_id),
-        false => advice::resume(run_id),
+        true => advice::resolve_gate(run_id.handle()),
+        false => advice::resume(run_id.handle()),
     }
 }
 
@@ -120,7 +120,7 @@ pub(super) fn child_row(child: &ChildLink, glyphs: Glyphs) -> String {
         "{} {} · child run {}",
         glyphs.mark(standing.0),
         standing.1,
-        child.run_id
+        child.run_id.handle()
     )
 }
 
@@ -356,9 +356,9 @@ mod tests {
     fn a_child_row_says_where_the_child_stands_before_which_child_it_is() {
         let open = child(&FIRST, Some("compose"), None);
         let row = child_row(&open, Glyphs::Ascii);
-        assert_eq!(row, format!("> still open · child run {FIRST}"));
+        assert_eq!(row, format!("> still open · child run {}", FIRST.handle()));
         assert!(
-            row.find("still open") < row.find(FIRST.as_str()),
+            row.find("still open") < row.find(FIRST.handle()),
             "a row cut to a narrow terminal loses which child, never that there is one: {row}"
         );
     }

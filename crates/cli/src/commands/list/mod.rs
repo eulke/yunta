@@ -10,6 +10,7 @@
 //!
 //! The runs view lives in [`runs`], which renders them as an inbox.
 
+pub(crate) mod inbox;
 mod runs;
 
 use std::collections::HashSet;

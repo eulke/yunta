@@ -106,7 +106,7 @@ any other state.
 A node that fails with no `on_failure` re-route pauses the run on a decision
 too (under the default `defaults.on_failure: pause`): run it again or stop. At
 a terminal the run asks right away, so you can fix the cause and choose
-`retry` without leaving it; otherwise `yunta resolve-gate <run_id> retry`
+`retry` without leaving it; otherwise `yunta resolve-gate <run> retry`
 answers later. A plain `yunta resume` never retries a failed node on its own.
 `yunta resolve-gate` (or the MCP `resolve_gate` tool) answers a decision from
 a completely separate process, and the MCP `answer_questions` tool answers a

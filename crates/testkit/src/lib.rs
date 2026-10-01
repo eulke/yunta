@@ -33,7 +33,9 @@ mod tools;
 mod wait;
 
 pub use bench::{Bench, MOCK_CONFIG};
-pub use bin::{hermetic, run_id_from, run_id_in, run_yunta, stderr, stdout, Spawning};
+pub use bin::{
+    full_run_id, handle, hermetic, run_id_from, run_id_in, run_yunta, stderr, stdout, Spawning,
+};
 pub use checkout::Checkout;
 pub use child::{CliChild, ProcessGroupCleanup};
 pub use corpus::{

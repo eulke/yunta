@@ -367,10 +367,16 @@ fn gate_words(happening: &gates::happening::Happening) -> (Option<Mark>, String)
 fn child_words(happening: &children::happening::Happening) -> (Option<Mark>, String) {
     use children::happening::Happening as H;
     match happening {
-        H::Born(run_id) => (Some(Mark::Running), format!("child run {run_id} opened")),
+        H::Born(run_id) => (
+            Some(Mark::Running),
+            format!("child run {} opened", run_id.handle()),
+        ),
         H::Closed { run_id, terminal } => {
             let (mark, closed) = view::child_standing(Some(*terminal));
-            (Some(mark), format!("child run {run_id} {closed}"))
+            (
+                Some(mark),
+                format!("child run {} {closed}", run_id.handle()),
+            )
         }
         H::Iteration { iteration } => (None, format!("iteration {iteration}")),
     }

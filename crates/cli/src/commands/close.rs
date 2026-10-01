@@ -11,6 +11,7 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 
 pub async fn close(run_id: &RunId, by: Option<&Responder>) -> Result<Outcome, CliError> {
+    let called = run_id.handle();
     let ctx = Context::load()?;
     let storage = ctx.async_storage().await?;
     let open = ctx.open_run(run_id).await?;
@@ -27,7 +28,7 @@ pub async fn close(run_id: &RunId, by: Option<&Responder>) -> Result<Outcome, Cl
         .await
         .map_err(|refusal| CliError::close_refused(run_id, refusal))?;
     println!(
-        "run {run_id}: closed as cancelled by {by} — its branch and worktree stay until `yunta gc` \
+        "run {called}: closed as cancelled by {by} — its branch and worktree stay until `yunta gc` \
          removes them"
     );
     Ok(Outcome::Success)

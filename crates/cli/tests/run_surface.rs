@@ -11,8 +11,8 @@
 use std::path::Path;
 
 use yunta_testkit::{
-    git, run_id_from, stderr, stdout, write, yunta_at, yunta_in, yunta_on_terminal, Checkout,
-    Terminal,
+    git, handle, run_id_from, stderr, stdout, write, yunta_at, yunta_in, yunta_on_terminal,
+    Checkout, Terminal,
 };
 
 /// A repo with `wf.yaml` written and committed, and the state root to run
@@ -242,7 +242,7 @@ fn the_closing_block_names_a_finished_run_and_what_to_do_with_it() {
         assert!(text.contains(label), "no `{label}` row in: {text}");
     }
     assert!(
-        text.contains(&format!("yunta receipt {run_id}")),
+        text.contains(&format!("yunta receipt {}", handle(&run_id))),
         "a finished run's next command certifies it: {text}"
     );
     assert!(
@@ -271,7 +271,7 @@ fn the_closing_block_leads_with_the_decision_a_parked_run_waits_on() {
         "every option carries the tradeoff that makes it a choice: {text}"
     );
     assert!(
-        text.contains(&format!("yunta resolve-gate {run_id} <option>")),
+        text.contains(&format!("yunta resolve-gate {} <option>", handle(&run_id))),
         "the exact command, with the option left to the reader: {text}"
     );
     assert!(
@@ -672,7 +672,7 @@ fn a_parked_run_is_called_the_same_thing_on_every_surface() {
         .find("needs you")
         .unwrap_or_else(|| panic!("a group for it: {text}"));
     let listed = text
-        .find(&run_id)
+        .find(handle(&run_id))
         .unwrap_or_else(|| panic!("the run itself: {text}"));
     assert!(needs_you < listed, "the run is under that heading: {text}");
 }

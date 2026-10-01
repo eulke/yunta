@@ -24,6 +24,7 @@ pub(crate) mod refusals;
 pub mod resolve_gate;
 pub mod resume;
 pub mod run;
+pub(crate) mod run_ref;
 pub mod schema;
 pub mod stats;
 pub mod status;
@@ -48,9 +49,10 @@ use crate::error::CliError;
 ///
 /// Every surface that hands a run off reports the same failure, so the
 /// sentence is worded here once and each caller only says what it was
-/// doing when it got this back.
+/// doing when it got this back — with the run's whole id, since the
+/// control plane is one of those surfaces.
 #[derive(Debug, thiserror::Error)]
-#[error("cannot spawn a detached `{}`: {source}", advice::resume(.run_id))]
+#[error("cannot spawn a detached `{}`: {source}", advice::resume(.run_id.as_str()))]
 pub(crate) struct DetachedResumeError {
     run_id: RunId,
     #[source]

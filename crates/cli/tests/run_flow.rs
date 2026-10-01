@@ -947,7 +947,10 @@ fn list_runs_groups_a_run_under_what_can_be_done_about_it() {
     );
     let row = lines.next().unwrap_or_default();
     assert!(
-        row.starts_with(&format!("  {run_id}  only-node (default)")),
+        row.starts_with(&format!(
+            "  {}  only-node (default)",
+            yunta_testkit::handle(&run_id)
+        )),
         "the row names the workflow and the mode, not only the id: {text}"
     );
     assert_eq!(
@@ -1128,13 +1131,14 @@ nodes:
     assert!(!output.status.success());
     let text = stdout(&output);
     let run_id = run_id_from(&output);
+    let called = yunta_testkit::handle(&run_id);
     assert!(
         text.lines()
-            .any(|l| l.starts_with(&format!("run {run_id}: ")) && l.contains("needs you")),
+            .any(|l| l.starts_with(&format!("run {called}: ")) && l.contains("needs you")),
         "a gate with no TTY degrades to a paused run instead of hanging: {text}"
     );
     assert!(
-        text.contains(&format!("yunta resolve-gate {run_id} <option>")),
+        text.contains(&format!("yunta resolve-gate {called} <option>")),
         "and says how to answer it from anywhere: {text}"
     );
 }
@@ -3458,7 +3462,10 @@ fn detached_run_holding(project: &Checkout, root: &Path) -> (String, Pid) {
         || marker_written(&root.join("started.txt")),
         || "the detached run never reached the node".into(),
     );
-    let engine = engine_pid_of(&yunta_testkit::runs_root(&project.home).join(&run_id));
+    let engine = engine_pid_of(
+        &yunta_testkit::runs_root(&project.home)
+            .join(yunta_testkit::full_run_id(&project.home, &run_id)),
+    );
     (run_id, engine)
 }
 

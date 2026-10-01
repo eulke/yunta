@@ -2,7 +2,9 @@
 //! surface that reads it from outside says nothing is driving it.
 
 use serde_json::Value;
-use yunta_testkit::{run_id_from, runs_root, stderr, stdout, wait_until, yunta_at, Checkout};
+use yunta_testkit::{
+    full_run_id, run_id_from, runs_root, stderr, stdout, wait_until, yunta_at, Checkout,
+};
 
 /// A node that says it started and then holds until it is told to go,
 /// so the run is mid-node when its engine is killed.
@@ -18,7 +20,7 @@ fn holding(started: &std::path::Path, go: &std::path::Path) -> String {
 /// registry behind, and waits until the host says it is gone.
 fn kill_the_engine(checkout: &Checkout, run_id: &str) {
     let registry = runs_root(&checkout.home)
-        .join(run_id)
+        .join(full_run_id(&checkout.home, run_id))
         .join("scratch")
         .join("engine.json");
     let engine: Value =

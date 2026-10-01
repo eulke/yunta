@@ -89,7 +89,7 @@ how its process ended and the last thing it wrote to stderr, which is
 normally the whole answer: a configuration key it does not accept, a
 credential it could not read, a flag it does not know.
 
-`yunta status <run_id>` shows the rest of what the CLI said on its way out,
+`yunta status <run>` shows the rest of what the CLI said on its way out,
 up to its last twenty lines. Values that came from the session's own
 environment — the run tools' token among them — read as `[redacted]`.
 
@@ -102,13 +102,13 @@ you can fix the configuration and check it without spending a workflow.
 run never accepted its required `yunta_submit_questions` call. The probe
 asks for `{"document":{"questions":[]}}`; this empty document needs no
 human answer. Check the binding's tool access. For a workflow run that
-shows the same symptom, `yunta status <run_id>` can show a failed
+shows the same symptom, `yunta status <run>` can show a failed
 `yunta-run` call. Codex sessions need the per-run server's tool approval;
 Yunta supplies that approval when it mounts the endpoint.
 
 ## A run reports a failed `yunta-run` call
 
-The live chronicle shows each failed call, while `yunta status <run_id>` shows
+The live chronicle shows each failed call, while `yunta status <run>` shows
 the **last failed call of the attempt**, with the tool name and either
 `approval_blocked` or `call_failed`. The event log records every failed call
 as `run_tool_failed`. `status --json` exposes the last one on the node as
@@ -218,7 +218,7 @@ saw.
 
 ## A node's criteria never turn green
 
-`yunta status <run_id>` shows which criterion is failing, its exit code and
+`yunta status <run>` shows which criterion is failing, its exit code and
 the last line it printed. What a criterion prints never reaches your
 terminal; the run keeps it. The last 20 lines of a red criterion are on its
 `criteria_checked` event, which is what a task session reads through
@@ -272,19 +272,19 @@ else: check `yunta status`.
 ## A run is stuck in `waiting`
 
 Not stuck — paused on a `gate`, waiting for a human decision, and it
-survives the engine restarting. `yunta status <run_id>` shows what it's
-waiting on and the exact option ids; `yunta resolve-gate <run_id> <option>`
+survives the engine restarting. `yunta status <run>` shows what it's
+waiting on and the exact option ids; `yunta resolve-gate <run> <option>`
 answers it from any process. See [gates from the
 outside](guide.md#gates-from-the-outside).
 
 ## A node failed and `resume` pauses on the same failure
 
 A node with no `on_failure` re-route that fails leaves the decision to you:
-`yunta status <run_id>` lists `retry` and `abort`. Fix the cause in the run's
+`yunta status <run>` lists `retry` and `abort`. Fix the cause in the run's
 own worktree (`~/.yunta/worktrees/<run_id>` by default), not in your checkout:
 the run starts from the commit it was created on and never sees files you add
 or change there afterwards. Then run
-`yunta resolve-gate <run_id> retry`. The node starts a fresh attempt; nothing
+`yunta resolve-gate <run> retry`. The node starts a fresh attempt; nothing
 before it runs again. A plain `yunta resume` asks the same question again
 rather than spending on a retry nobody chose.
 
@@ -340,7 +340,7 @@ What to do:
 - **If the bytes are gone for good**, the run cannot be resumed — its
   artifacts are part of what it is. Start a new run from the same inputs.
 
-`yunta verify <run_id>` reports the same check on demand, without resuming.
+`yunta verify <run>` reports the same check on demand, without resuming.
 
 A run created by a Yunta older than the object store reports instead that it
 holds artifacts this binary cannot verify — a `minor` finding, not a break.
@@ -412,7 +412,7 @@ was created in rather than on one of its own, so resume it from there.
 ## Something looks corrupted, or a replay disagrees with what you remember
 
 ```bash
-yunta verify <run_id>
+yunta verify <run>
 ```
 
 Checks a run's two mechanical guarantees and reports them apart:
@@ -432,6 +432,6 @@ never guess from `status` output alone if you suspect this.
 
 `yunta <command> --help` is the source of truth for flags — this doc and the
 [workflow guide](guide.md) cover behavior, not every flag. If a run's
-behavior doesn't match anything here, `yunta status <run_id>` and the run's
+behavior doesn't match anything here, `yunta status <run>` and the run's
 own `progress.md` (in the run's directory) are both derived straight from
 the event log and are the most reliable place to start.

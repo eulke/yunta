@@ -74,7 +74,10 @@ pub(super) async fn detached(detaching: Detaching<'_>) -> Result<Outcome, CliErr
         .await?;
         return Ok(Outcome::Success);
     }
-    println!("run {run_id}: detached, driving forward independently");
+    println!(
+        "run {}: detached, driving forward independently",
+        run_id.handle()
+    );
     Ok(Outcome::Success)
 }
 

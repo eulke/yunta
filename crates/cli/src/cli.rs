@@ -5,7 +5,9 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use yunta_core::{AdapterId, ModeName, OptionId, PackRef, Responder, RunId};
+use yunta_core::{AdapterId, ModeName, OptionId, PackRef, Responder};
+
+use crate::commands::run_ref::{named, RunArg, RunRef};
 
 use crate::commands;
 use crate::error::{CliError, Outcome};
@@ -85,8 +87,8 @@ enum Command {
     },
     /// Shows a run's derived state: nodes, tasks and tokens.
     Status {
-        /// The run id (as printed by `yunta run`).
-        run_id: RunId,
+        #[command(flatten)]
+        run: RunArg,
         /// Prints the derived state as one versioned JSON document
         /// instead of the human view — the same DTO the control plane's
         /// `workflow_status` returns.
@@ -95,8 +97,8 @@ enum Command {
     },
     /// Resumes a run from its event log, restarting orphaned nodes.
     Resume {
-        /// The run id to resume.
-        run_id: RunId,
+        #[command(flatten)]
+        run: RunArg,
         /// Prints the run id and nothing else, the same way `run` does.
         #[arg(long, conflicts_with = "json")]
         quiet: bool,
@@ -113,8 +115,8 @@ enum Command {
     /// and unresolved `kind: gate` nodes alike. `yunta status` shows the
     /// pause reason; the option must be on that decision's own menu.
     ResolveGate {
-        /// The run id waiting on a decision.
-        run_id: RunId,
+        #[command(flatten)]
+        run: RunArg,
         /// The chosen option id, as printed by `yunta status`.
         option: OptionId,
         /// Who's answering, for the audit trail
@@ -129,15 +131,15 @@ enum Command {
     /// Sends every running node's session an ordered interrupt,
     /// escalating to `kill` if it doesn't close in time.
     Cancel {
-        /// The run id to cancel.
-        run_id: RunId,
+        #[command(flatten)]
+        run: RunArg,
     },
     /// Closes a stopped run nobody is going to continue, as cancelled,
     /// so it stops waiting on a person. A run whose engine died is
     /// settled first, as `cancel` settles one.
     Close {
-        /// The run id to close.
-        run_id: RunId,
+        #[command(flatten)]
+        run: RunArg,
         /// Who is closing it, for the audit trail (`run_finished.closed_by`).
         /// Omitted, the close is recorded as `unverified:$USER`.
         #[arg(long)]
@@ -186,9 +188,10 @@ enum Command {
         /// with `--run`, which draws the workflow that run froze.
         workflow: Option<PathBuf>,
         /// Draw the workflow this run froze, each node annotated with
-        /// the state its own log derives.
+        /// the state its own log derives — named as any command names a
+        /// run.
         #[arg(long)]
-        run: Option<RunId>,
+        run: Option<RunRef>,
         /// Diagram language: `mermaid` (default) or `dot`.
         #[arg(long, default_value = "mermaid")]
         format: graph::GraphFormat,
@@ -205,15 +208,15 @@ enum Command {
     /// the log as persisted, and the bytes of every artifact that log
     /// accepted, read back and hashed against its own name.
     Verify {
-        /// The run id to verify.
-        run_id: RunId,
+        #[command(flatten)]
+        run: RunArg,
     },
     /// Generates a Verified Work Receipt for a finished run: markdown
     /// and JSON derived entirely from the event log, written to
     /// the run's own directory and printed to stdout.
     Receipt {
-        /// The run id to generate a receipt for.
-        run_id: RunId,
+        #[command(flatten)]
+        run: RunArg,
         /// Prints the JSON receipt instead of the markdown one.
         #[arg(long)]
         json: bool,
@@ -226,10 +229,12 @@ enum Command {
     /// Shows verification cost stats: one run (`run_id`) or a workflow's
     /// own history (`--workflow`), never both.
     Stats {
-        /// The run id to inspect.
-        run_id: Option<RunId>,
+        /// The run: its handle, its id or any part that starts or ends it,
+        /// `last` (this repository's newest) or `needs` (the one waiting on
+        /// you).
+        run: Option<RunRef>,
         /// Aggregates every past run of this workflow instead of one run.
-        #[arg(long, conflicts_with = "run_id")]
+        #[arg(long, conflicts_with = "run")]
         workflow: Option<yunta_core::WorkflowName>,
         /// Prints machine-readable JSON instead of the terminal view.
         #[arg(long)]
@@ -371,28 +376,28 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             )
             .await
         }
-        Command::Status { run_id, json } => commands::status::status(&run_id, json).await,
-        Command::Resume {
-            run_id,
-            quiet,
-            json,
-        } => commands::resume::resume(&run_id, quiet, json).await,
+        Command::Status { run, json } => commands::status::status(&run.named().await?, json).await,
+        Command::Resume { run, quiet, json } => {
+            commands::resume::resume(&run.named().await?, quiet, json).await
+        }
         Command::ResolveGate {
-            run_id,
+            run,
             option,
             by,
             free_text,
         } => {
             commands::resolve_gate::resolve_gate(
-                &run_id,
+                &run.named().await?,
                 &option,
                 by.as_ref(),
                 free_text.as_deref(),
             )
             .await
         }
-        Command::Cancel { run_id } => commands::cancel::cancel(&run_id).await,
-        Command::Close { run_id, by } => commands::close::close(&run_id, by.as_ref()).await,
+        Command::Cancel { run } => commands::cancel::cancel(&run.named().await?).await,
+        Command::Close { run, by } => {
+            commands::close::close(&run.named().await?, by.as_ref()).await
+        }
         Command::List { runs, all } => {
             if runs {
                 commands::list::list_runs(all).await
@@ -407,10 +412,19 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             workflow,
             run,
             format,
-        } => graph::graph(workflow.as_deref(), run.as_ref(), format).await,
+        } => {
+            graph::graph(
+                workflow.as_deref(),
+                named(run.as_ref()).await?.as_ref(),
+                format,
+            )
+            .await
+        }
         Command::Test { dir } => commands::test::test(dir.as_deref()).await,
-        Command::Verify { run_id } => commands::verify::verify(&run_id).await,
-        Command::Receipt { run_id, json } => commands::receipt::receipt(&run_id, json).await,
+        Command::Verify { run } => commands::verify::verify(&run.named().await?).await,
+        Command::Receipt { run, json } => {
+            commands::receipt::receipt(&run.named().await?, json).await
+        }
         Command::Pack { action } => match action {
             PackAction::Add {
                 source,
@@ -426,10 +440,13 @@ async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             PackAction::Audit { pack } => commands::pack_audit::audit(&pack).await,
         },
         Command::Stats {
-            run_id,
+            run,
             workflow,
             json,
-        } => commands::stats::stats(run_id.as_ref(), workflow.as_ref(), json).await,
+        } => {
+            commands::stats::stats(named(run.as_ref()).await?.as_ref(), workflow.as_ref(), json)
+                .await
+        }
         Command::Init { interactive, force } => commands::init::init(interactive, force).await,
         Command::Fence { adapter } => fence_hook(&adapter),
         Command::Schema { kind, json } => commands::schema::schema(kind.as_deref(), json),

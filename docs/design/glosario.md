@@ -171,6 +171,14 @@ después a otro proceso. Es una lectura, no un evento; sin registro no se afirma
 porque un run que pasa de un proceso a otro tampoco tiene uno por un instante.
 _Evitar_: colgado, huérfano, zombie.
 
+**Handle**:
+Cómo una persona llama a un run: los últimos seis caracteres de su id, la parte
+al azar de un ULID. Toda línea que lee una persona lo nombra así, y todo comando
+que recibe un run lo acepta junto con el id entero, cualquier parte que lo
+empiece o lo termine, `last` y `needs`. Un documento para un programa y el plano
+de control nombran el id entero.
+_Evitar_: alias, id corto, apodo.
+
 **Crónica**:
 Qué pasó, en orden, derivada del mismo log y con los mismos tipos que el frame:
 un **momento** por evento. Lo que el frame dice que un nodo *es*, un momento

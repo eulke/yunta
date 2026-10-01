@@ -133,6 +133,29 @@ pub fn run_id_in(text: &str) -> String {
     find_run_id(text).unwrap_or_else(|| panic!("no `run <id>:` line in output:\n{text}"))
 }
 
+/// What every line a person reads calls the run whose id is `id`.
+pub fn handle(id: &str) -> &str {
+    let start = id.len().saturating_sub(yunta_core::RunId::HANDLE_CHARS);
+    id.get(start..).unwrap_or(id)
+}
+
+/// The whole id of the run `called` names under `home`: `called` is the
+/// handle a line a person reads prints — what [`run_id_from`] finds — or
+/// the id itself. For a test that opens the run's own directory, which
+/// is named by the whole id.
+pub fn full_run_id(home: &Path, called: &str) -> String {
+    let runs = std::fs::read_dir(crate::runs_root(home)).expect("the runs under the test's home");
+    let named: Vec<String> = runs
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|id| id.ends_with(called))
+        .collect();
+    match named.as_slice() {
+        [one] => one.clone(),
+        other => panic!("`{called}` names {} runs: {other:?}", other.len()),
+    }
+}
+
 fn find_run_id(text: &str) -> Option<String> {
     text.lines().find_map(|line| {
         line.strip_prefix("run ")

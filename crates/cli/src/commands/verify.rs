@@ -37,10 +37,11 @@ pub async fn verify(run_id: &RunId) -> Result<Outcome, CliError> {
 
 /// Recomputes the run's event hash chain and reports it.
 fn chain(run_id: &RunId, storage: &Storage) -> Result<Outcome, CliError> {
+    let called = run_id.handle();
     match storage.verify_chain(run_id)? {
         ChainVerification::Intact { events } => {
             println!(
-                "run {run_id}: chain intact — {} verified",
+                "run {called}: chain intact — {} verified",
                 yunta_core::text::counted(events, "event")
             );
             Ok(Outcome::Success)
@@ -49,7 +50,7 @@ fn chain(run_id: &RunId, storage: &Storage) -> Result<Outcome, CliError> {
             // A broken chain is the `broken` reading of the run: the
             // log can no longer be trusted from this point on.
             note(format!(
-                "run {run_id}: chain BROKEN at seq {seq} — {detail}"
+                "run {called}: chain BROKEN at seq {seq} — {detail}"
             ));
             Ok(Outcome::Reported)
         }
@@ -60,12 +61,13 @@ fn chain(run_id: &RunId, storage: &Storage) -> Result<Outcome, CliError> {
 /// store answered — the same verification a resume runs before it wakes
 /// the run.
 async fn objects(run_id: &RunId, ctx: &Context, storage: &Storage) -> Result<Outcome, CliError> {
+    let called = run_id.handle();
     let Some(run_dir) = ctx.project.run_dir(run_id.as_str()) else {
         // The log outlives the directory: `yunta gc` removes a run's
         // directory before purging its events. The chain still answers
         // for the log; the bytes it names are simply no longer here.
         note(format!(
-            "run {run_id}: objects not checked — no run directory under {} (or the default state \
+            "run {called}: objects not checked — no run directory under {} (or the default state \
              root), so the bytes its log names are not here to read",
             ctx.project.runs_root.display()
         ));
@@ -78,7 +80,7 @@ async fn objects(run_id: &RunId, ctx: &Context, storage: &Storage) -> Result<Out
         Ok(events) => events,
         Err(error) => {
             note(format!(
-                "run {run_id}: objects not checked — the log does not read back as events, so \
+                "run {called}: objects not checked — the log does not read back as events, so \
                  nothing names them: {error}"
             ));
             return Ok(Outcome::Reported);
@@ -88,13 +90,13 @@ async fn objects(run_id: &RunId, ctx: &Context, storage: &Storage) -> Result<Out
     let integrity = ArtifactIntegrity::of(&run_dir, &events).await;
     let verdict = if integrity.faults.is_empty() {
         println!(
-            "run {run_id}: objects intact — {} verified",
+            "run {called}: objects intact — {} verified",
             yunta_core::text::counted(integrity.verified, "artifact")
         );
         Outcome::Success
     } else {
         note(format!(
-            "run {run_id}: objects BROKEN — {} of {} are not the bytes the run accepted",
+            "run {called}: objects BROKEN — {} of {} are not the bytes the run accepted",
             integrity.faults.len(),
             yunta_core::text::counted(integrity.verified + integrity.faults.len(), "artifact")
         ));
@@ -104,7 +106,7 @@ async fn objects(run_id: &RunId, ctx: &Context, storage: &Storage) -> Result<Out
         Outcome::Reported
     };
     if let Some(detail) = integrity.unverifiable_detail() {
-        note(format!("run {run_id}: {detail}"));
+        note(format!("run {called}: {detail}"));
     }
     Ok(verdict)
 }

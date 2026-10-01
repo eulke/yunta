@@ -60,7 +60,7 @@ async fn gathered(ctx: &Context, run_id: &RunId) -> Result<(PathBuf, Receipt), C
         // a reader where that run stands is this border's vocabulary.
         CliError::msg(format!(
             "{e}; `{}` shows where it is",
-            super::advice::status(run_id)
+            super::advice::status(run_id.handle())
         ))
     })?;
     Ok((run_dir, receipt))
