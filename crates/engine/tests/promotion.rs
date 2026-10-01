@@ -735,13 +735,28 @@ fn inherited_findings_dedup_the_way_the_frame_counts_them() {
             .into_iter()
             .map(|posted| posted.finding)
             .collect();
+    let counted: Vec<String> = yunta_engine::dedup_findings(&standing)
+        .iter()
+        .map(|finding| finding.title.clone())
+        .collect();
 
+    let inherited = yunta_engine::inherited_findings(&events);
     assert_eq!(
-        yunta_engine::inherited_findings(&events),
-        yunta_engine::dedup_findings(&standing),
+        inherited
+            .iter()
+            .map(|finding| finding.title.clone())
+            .collect::<Vec<_>>(),
+        counted,
         "a successor inherits the set the run's own frame counts",
     );
-    assert_eq!(yunta_engine::inherited_findings(&events).len(), 2);
+    assert_eq!(
+        inherited
+            .iter()
+            .map(|finding| finding.id.to_string())
+            .collect::<Vec<_>>(),
+        ["review-a/f1", "review-b/f3"],
+        "each under the node that reported it: ids are unique only within one node"
+    );
 }
 
 #[tokio::test]
@@ -770,5 +785,62 @@ async fn a_promotion_successor_is_stamped_by_the_run_clock() {
             .unwrap()
             .with_timezone(&chrono::Utc),
         "the clock the caller handed in, not the one on the wall"
+    );
+}
+
+#[tokio::test]
+async fn a_successor_holds_its_predecessors_unsettled_findings_as_the_runs_own() {
+    let interaction = ScriptedInteraction::choose("promote");
+    let planted = [finding("scope-expansion-T001-1", "Denied", "tasks/T001")];
+    let (bench, terminal) =
+        run_with_mode_and_findings(PROMOTABLE_WORKFLOW, "quick", &interaction, &planted).await;
+    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
+
+    let manifest = bench.manifest();
+    let run_dir = bench.run_dir();
+    let ids = SeqIdSource::new("minted");
+    let successor = successor_of(predecessor_of(&bench, &manifest, &run_dir), &bench, &ids).await;
+
+    let events = bench.storage.events_for_run(&successor.run_id).unwrap();
+    let standing = yunta_core::events::findings::FindingLedger::of(&events).standing();
+    let held: Vec<(Option<String>, String)> = standing
+        .findings
+        .iter()
+        .map(|found| {
+            (
+                found.node.as_ref().map(ToString::to_string),
+                found.finding.id.to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        held,
+        [(None, "scope-expansion-T001-1".to_string())],
+        "the run's own, so its gates show it and a person can settle it"
+    );
+    assert!(
+        !yunta_engine::derive(&events).woken(),
+        "holding what it was born with is no wake"
+    );
+}
+
+#[test]
+fn two_nodes_findings_under_one_id_are_inherited_as_two() {
+    use yunta_core::events::FindingPostedPayload;
+    let posted = |finding: yunta_core::events::Finding| {
+        EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload { finding }))
+    };
+    let events = Log::for_run("run-x")
+        .node("review@a", posted(finding("f-1", "a race", "src/a.rs")))
+        .node("review@b", posted(finding("f-1", "a leak", "src/b.rs")))
+        .build();
+
+    let inherited = yunta_engine::inherited_findings(&events);
+    let ids: Vec<String> = inherited.iter().map(|f| f.id.to_string()).collect();
+    assert_eq!(ids, ["review@a/f-1", "review@b/f-1"]);
+    let file = yunta_core::FindingsFile::from_findings(inherited);
+    assert!(
+        yunta_core::shape::Document::check(&file).is_empty(),
+        "the document the successor inherits never repeats an id"
     );
 }

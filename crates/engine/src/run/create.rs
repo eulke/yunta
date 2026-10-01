@@ -255,6 +255,9 @@ pub async fn create_run(
     .await?;
 
     register_birth_documents(&log, &run_dir, artifacts, &documents).await?;
+    if promoted_from.is_some() {
+        hold_inherited_findings(&log, artifacts).await?;
+    }
 
     // Last: the measurement of the lineage this run is born into, if
     // it was born into one. What its own tree did is not a birth fact —
@@ -338,6 +341,44 @@ async fn birth_registrations(
         documents.push(Some(BirthDocument { document, carried }));
     }
     Ok(documents)
+}
+
+/// A promotion successor holds the findings its predecessor left
+/// unsettled as the run's own: the run-level findings document it
+/// inherits, entry by entry, so its gates show them and a person can
+/// settle them — not only a context source that reads them.
+async fn hold_inherited_findings(
+    log: &RunLog<'_>,
+    artifacts: &[BirthArtifact],
+) -> Result<(), RunError> {
+    let findings = ArtifactId::Interpreted {
+        kind: yunta_core::ArtifactKind::Findings,
+    };
+    let run_level = artifacts.iter().filter(|artifact| {
+        artifact.artifact == findings
+            && matches!(
+                artifact.origin,
+                BirthOrigin::Inherited { producer: None, .. }
+            )
+    });
+    for artifact in run_level {
+        let file = yunta_core::shape::read::<yunta_core::FindingsFile>(
+            &artifact.bytes,
+            "the inherited findings",
+        )
+        .map_err(crate::artifacts::HeldError::from)?;
+        for entry in file.findings {
+            let finding = yunta_core::events::Finding::from(entry);
+            log.record(
+                None,
+                EventPayload::Findings(yunta_core::events::FindingEvent::Posted(
+                    yunta_core::events::FindingPostedPayload { finding },
+                )),
+            )
+            .await?;
+        }
+    }
+    Ok(())
 }
 
 /// Accepts every birth artifact in order and, for each tasks document,

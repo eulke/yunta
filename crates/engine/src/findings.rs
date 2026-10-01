@@ -5,12 +5,15 @@
 //! is the reading that only a log can answer: which findings a
 //! successor starts from.
 
+use yunta_core::events::findings::PostedFinding;
 use yunta_core::events::{Finding, StoredEvent};
+use yunta_core::FindingId;
 
 /// The findings a successor inherits, derived purely from the parent's
 /// own log: every finding the log leaves standing and nothing settled —
 /// the content of its latest posting, nothing its node took back, and
-/// nothing a proof or a person settled — deduplicated by
+/// nothing a proof or a person settled — each under its node's name
+/// before its id, deduplicated by
 /// location + title normalized for case and whitespace. The first
 /// standing occurrence's full record wins, so no authorship or detail is
 /// lost to the collapse. Deterministic: same log, same output — the
@@ -20,9 +23,25 @@ pub fn inherited_findings(events: &[StoredEvent]) -> Vec<Finding> {
     let standing: Vec<Finding> = yunta_core::events::findings::FindingLedger::of(events)
         .unsettled()
         .into_iter()
-        .map(|posted| posted.finding)
+        .map(qualified)
         .collect();
     crate::replay::dedup_findings(&standing)
+}
+
+/// `posted`'s finding under an id no other node's finding shares: the
+/// node that reported it before its own id — ids are unique only within
+/// one node, and the successor holds them all as the run's. The engine's
+/// own findings keep theirs.
+fn qualified(posted: PostedFinding) -> Finding {
+    let Some(node) = posted.node else {
+        return posted.finding;
+    };
+    let id = FindingId::try_from(format!("{node}/{}", posted.finding.id))
+        .unwrap_or_else(|_| posted.finding.id.clone());
+    Finding {
+        id,
+        ..posted.finding
+    }
 }
 
 #[cfg(test)]
@@ -132,7 +151,7 @@ mod tests {
 
         let inherited = inherited_findings(&events);
         assert_eq!(inherited.len(), 1, "got: {inherited:?}");
-        assert_eq!(inherited[0].id, "f1");
+        assert_eq!(inherited[0].id, "review/f1");
     }
 
     #[test]
@@ -161,7 +180,7 @@ mod tests {
 
         let inherited = inherited_findings(&events);
         assert_eq!(inherited.len(), 1, "got: {inherited:?}");
-        assert_eq!(inherited[0].id, "f2");
+        assert_eq!(inherited[0].id, "review/f2");
     }
 
     #[test]
@@ -190,6 +209,6 @@ mod tests {
 
         let inherited = inherited_findings(&events);
         assert_eq!(inherited.len(), 1, "got: {inherited:?}");
-        assert_eq!(inherited[0].id, "f2");
+        assert_eq!(inherited[0].id, "review/f2");
     }
 }
