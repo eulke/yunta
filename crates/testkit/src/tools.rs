@@ -51,7 +51,7 @@ impl ToolsHost {
         let root = tempfile::tempdir().expect("tempdir");
         let storage = Storage::open(&root.path().join("yunta.db")).expect("open storage");
         let run_id = RunId::from("run-tools-1");
-        let workflow: Workflow = serde_norway::from_str(workflow_yaml).expect("parse workflow");
+        let workflow: Workflow = yunta_core::yaml::parse(workflow_yaml).expect("parse workflow");
         let run_dir = born_run_dir(root.path());
         let worktree = born_tree(root.path());
         let host = Arc::new(RunToolsHost::new(

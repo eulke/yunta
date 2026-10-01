@@ -15,11 +15,11 @@ use yunta_engine::{build_manifest, ManifestError};
 use yunta_testkit::{git_output, init_repo, Owner};
 
 fn workflow(yaml: &str) -> Workflow {
-    serde_norway::from_str(yaml).unwrap()
+    yunta_core::yaml::parse(yaml).unwrap()
 }
 
 fn config(yaml: &str) -> ConfigLayer {
-    serde_norway::from_str(yaml).unwrap()
+    yunta_core::yaml::parse(yaml).unwrap()
 }
 
 const WORKFLOW: &str = r#"
@@ -287,8 +287,8 @@ async fn a_manifest_survives_yaml_round_trip_with_the_same_hash() {
     .unwrap()
     .manifest;
 
-    let yaml = serde_norway::to_string(&manifest).unwrap();
-    let reread: yunta_core::Manifest = serde_norway::from_str(&yaml).unwrap();
+    let yaml = yunta_core::yaml::to_string(&manifest).unwrap();
+    let reread: yunta_core::Manifest = yunta_core::yaml::parse(&yaml).unwrap();
 
     assert_eq!(manifest.manifest_hash(), reread.manifest_hash());
     assert_eq!(manifest, reread);
@@ -464,8 +464,8 @@ nodes:
     depends_on: [review]
     run: "true"
 "#;
-    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
-    let config: yunta_core::ConfigLayer = serde_norway::from_str(
+    let workflow: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
+    let config: yunta_core::ConfigLayer = yunta_core::yaml::parse(
         "runners:\n  reviewer:\n    - { adapter: mock, model: m }\n  reviewer-alt:\n    - { adapter: mock, model: m }\n",
     )
     .unwrap();
@@ -587,8 +587,8 @@ async fn frozen_manifest() -> yunta_core::Manifest {
     let owner = Owner::new();
     let repo = tempfile::tempdir().unwrap();
     init_repo(repo.path());
-    let workflow: Workflow = serde_norway::from_str(WORKFLOW).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
+    let workflow: Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
+    let config: ConfigLayer = yunta_core::yaml::parse(CONFIG).unwrap();
     build_manifest(
         &workflow,
         &config,
@@ -607,8 +607,8 @@ async fn a_manifest_records_the_repository_it_was_frozen_in() {
     let owner = Owner::new();
     let repo = tempfile::tempdir().unwrap();
     init_repo(repo.path());
-    let workflow: Workflow = serde_norway::from_str(WORKFLOW).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
+    let workflow: Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
+    let config: ConfigLayer = yunta_core::yaml::parse(CONFIG).unwrap();
     let manifest = build_manifest(
         &workflow,
         &config,

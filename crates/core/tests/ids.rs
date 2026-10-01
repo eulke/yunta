@@ -248,7 +248,7 @@ tasks:
         .to_string();
     assert_eq!(
         error,
-        "`tasks[0].id`: tasks[0]: `1-bad-id` is not a valid task id: a letter followed by letters, digits, `_` or `-` at line 2 column 5"
+        "`tasks[0].id`: `1-bad-id` is not a valid task id: a letter followed by letters, digits, `_` or `-` at line 2 column 9"
     );
 }
 
@@ -277,7 +277,7 @@ declares:
         .to_string();
     assert_eq!(
         error,
-        "`requires.roles`: requires: unknown field `roles`, expected one of `runners`, `mcp_servers`, `programs` at line 5 column 3"
+        "`requires.roles`: unknown field `roles`, expected one of `runners`, `mcp_servers`, `programs` at line 5 column 3"
     );
 }
 
@@ -295,7 +295,7 @@ declares:
         .to_string();
     assert_eq!(
         error,
-        "`publisher`: `acme/evil` is not a valid publisher: one path segment: printable ASCII without whitespace, `/` or `\\`, and not `.` or `..`"
+        "`publisher`: `acme/evil` is not a valid publisher: one path segment: printable ASCII without whitespace, `/` or `\\`, and not `.` or `..` at line 2 column 12"
     );
 }
 

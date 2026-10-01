@@ -113,7 +113,7 @@ impl<'de> Deserialize<'de> for MockFixture {
         let value = Value::deserialize(deserializer)?;
         let has_sessions = value
             .as_mapping()
-            .is_some_and(|m| m.contains_key(Value::from("sessions")));
+            .is_some_and(|m| m.contains_key("sessions"));
 
         if has_sessions {
             #[derive(Deserialize)]

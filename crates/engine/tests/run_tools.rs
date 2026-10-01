@@ -502,7 +502,7 @@ async fn a_node_nobody_may_widen_is_not_offered_the_request() {
 /// history of the repo, one criterion red until the work is done, and a
 /// guard that must stay green.
 fn greeting_task() -> yunta_core::Task {
-    serde_norway::from_str(
+    yunta_core::yaml::parse(
         r#"
 id: T001
 title: Write the greeting
@@ -611,7 +611,7 @@ fn two_cycles_of_one_attempt_each(host: &ToolsHost) {
 /// A plan whose design declares a type one task creates and another
 /// uses, and whose tasks split the files between them.
 fn colored_plan() -> yunta_core::TasksFile {
-    serde_norway::from_str(
+    yunta_core::yaml::parse(
         r#"
 summary: Color the CLI's messages
 description: One palette, used by every surface.
@@ -870,7 +870,7 @@ async fn a_check_of_a_tree_that_moved_on_stops_the_one_still_judging_the_old() {
     // check judges work nobody is going to close any more.
     let world = tempfile::tempdir().unwrap();
     let started = world.path().join("started");
-    let task: yunta_core::Task = serde_norway::from_str(&format!(
+    let task: yunta_core::Task = yunta_core::yaml::parse(&format!(
         "id: T001\ntitle: Move on\nscope: [moved.txt]\ncriteria:\n  - cmd: \"if [ -f moved.txt ]; then true; else touch {}; sleep 30; fi\"\n",
         started.display()
     ))
@@ -1126,7 +1126,7 @@ fn tasks_spec() -> yunta_core::ArtifactSpec {
 
 /// The node those specs belong to, as the close reads it.
 fn plan_node() -> yunta_core::Node {
-    serde_norway::from_str(
+    yunta_core::yaml::parse(
         r#"
 id: plan
 kind: prompt

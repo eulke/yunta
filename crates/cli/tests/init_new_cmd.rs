@@ -29,7 +29,7 @@ fn init_writes_config_gitignore_and_the_mechanism_skill() {
         .is_file());
 
     let config = std::fs::read_to_string(repo.join(".yunta/config.yaml")).unwrap();
-    let parsed: serde_norway::Value = serde_norway::from_str(&config).unwrap();
+    let parsed: yunta_core::yaml::Value = yunta_core::yaml::parse(&config).unwrap();
     assert_eq!(
         parsed["project"]["name"], "repo",
         "init writes a project section naming the repo: {config}"
@@ -353,7 +353,7 @@ fn init_writes_the_commands_and_suite_a_pnpm_project_declares() {
     assert!(result.status.success(), "stderr: {}", stderr(&result));
 
     let config = std::fs::read_to_string(repo.join(".yunta/config.yaml")).unwrap();
-    let parsed: serde_norway::Value = serde_norway::from_str(&config).unwrap();
+    let parsed: yunta_core::yaml::Value = yunta_core::yaml::parse(&config).unwrap();
     assert_eq!(parsed["commands"]["lint"], "pnpm lint", "{config}");
     assert_eq!(
         parsed["commands"]["typecheck"], "pnpm check-types",
@@ -379,7 +379,7 @@ fn init_writes_the_github_forge_origin_points_at() {
     assert!(result.status.success(), "stderr: {}", stderr(&result));
 
     let config = std::fs::read_to_string(repo.join(".yunta/config.yaml")).unwrap();
-    let parsed: serde_norway::Value = serde_norway::from_str(&config).unwrap();
+    let parsed: yunta_core::yaml::Value = yunta_core::yaml::parse(&config).unwrap();
     assert_eq!(parsed["forge"]["github"]["repo"], "acme/web", "{config}");
     assert_eq!(
         parsed["forge"]["github"]["token_env"], "GITHUB_TOKEN",

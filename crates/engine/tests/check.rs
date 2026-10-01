@@ -182,7 +182,7 @@ fn workflow_with_inputs(
 }
 
 fn input_spec(yaml: &str) -> yunta_core::InputSpec {
-    serde_norway::from_str(yaml).unwrap()
+    yunta_core::yaml::parse(yaml).unwrap()
 }
 
 fn config_with_runner(role: &str, candidates: usize) -> ConfigLayer {
@@ -477,7 +477,7 @@ nodes:
     context:
       - artifact: { node: build, kind: answers }
 "#;
-    let wf: Workflow = serde_norway::from_str(asking).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(asking).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
     assert!(
         errors.iter().any(|e| matches!(
@@ -488,7 +488,7 @@ nodes:
     );
 
     // The same source aimed at the node that does ask is fine.
-    let wf: Workflow = serde_norway::from_str(
+    let wf: Workflow = yunta_core::yaml::parse(
         &asking.replace("node: build, kind: answers", "node: grill, kind: answers"),
     )
     .unwrap();
@@ -890,7 +890,7 @@ fn an_undeclared_input_reference_inside_a_files_context_pattern_is_caught() {
 // --- top-level fan-out write collision ---------------------------------------
 
 fn config_with_fanout(max_parallel_nodes: u32) -> ConfigLayer {
-    serde_norway::from_str(&format!(
+    yunta_core::yaml::parse(&format!(
         "defaults:\n  max_parallel_nodes: {max_parallel_nodes}\n"
     ))
     .unwrap()
@@ -1019,7 +1019,7 @@ nodes:
 on_finish:
   - distill: [{ node: plan, name: plan.md }, { node: plan, name: ghost.md }]
 "#;
-    let wf: Workflow = serde_norway::from_str(yaml).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
     assert!(
         errors
@@ -1029,7 +1029,7 @@ on_finish:
     );
 
     let yaml_ok = yaml.replace(", { node: plan, name: ghost.md }", "");
-    let wf: Workflow = serde_norway::from_str(&yaml_ok).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(&yaml_ok).unwrap();
     assert_eq!(check(&wf, &ConfigLayer::default()), Vec::new());
 }
 
@@ -1046,7 +1046,7 @@ nodes:
     runners: [reviewer, reviewer-alt]
     prompt: "Audit."
 "#;
-    let wf: Workflow = serde_norway::from_str(yaml).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
     assert!(
         errors.iter().any(|e| matches!(
@@ -1071,7 +1071,7 @@ nodes:
     runners: [reviewer, reviewer-alt]
     prompt: "Audit."
 "#;
-    let wf: Workflow = serde_norway::from_str(yaml).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
     assert!(
         errors.iter().any(|e| matches!(
@@ -1102,7 +1102,7 @@ nodes:
     use: qa-review
     agent: benito
 "#;
-    let wf: Workflow = serde_norway::from_str(yaml).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
     for (node, field) in [
         ("qa", "runner"),
@@ -1131,7 +1131,7 @@ nodes:
       - { id: feat-a, kind: workflow, use: build-feature, isolation: none }
       - { id: feat-b, kind: workflow, use: build-feature, isolation: none, scope: ["src/b/**"] }
 "#;
-    let wf: Workflow = serde_norway::from_str(yaml).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
     // `feat-a` shares the parent's tree with a concurrent sibling and
     // declares nothing — disjointness is unverifiable, so it is refused.
@@ -1162,7 +1162,7 @@ nodes:
       - { id: feat-a, kind: workflow, use: build-feature, isolation: none, scope: ["src/a/**"] }
       - { id: feat-b, kind: workflow, use: build-feature, isolation: none, scope: ["src/b/**"] }
 "#;
-    let wf: Workflow = serde_norway::from_str(disjoint).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(disjoint).unwrap();
     assert!(
         check(&wf, &ConfigLayer::default()).is_empty(),
         "disjoint siblings sharing one tree must pass"
@@ -1204,7 +1204,7 @@ fn uses(name: &str, child: &str) -> String {
 #[test]
 fn a_missing_composition_reference_is_a_check_error() {
     let root = catalog_root(&[]);
-    let wf: Workflow = serde_norway::from_str(&uses("parent", "ghost")).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(&uses("parent", "ghost")).unwrap();
     let errors = yunta_engine::check_workflow_refs(
         &wf,
         &ConfigLayer::default(),
@@ -1229,7 +1229,7 @@ fn a_composition_cycle_is_a_check_error_naming_the_chain() {
         ("a", uses("a", "b").as_str()),
         ("b", uses("b", "a").as_str()),
     ]);
-    let wf: Workflow = serde_norway::from_str(&uses("parent", "a")).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(&uses("parent", "a")).unwrap();
     let errors = yunta_engine::check_workflow_refs(
         &wf,
         &ConfigLayer::default(),
@@ -1254,8 +1254,8 @@ fn composition_deeper_than_the_limit_is_a_check_error() {
         ("b", uses("b", "c").as_str()),
         ("c", LEAF),
     ]);
-    let wf: Workflow = serde_norway::from_str(&uses("parent", "a")).unwrap();
-    let config: ConfigLayer = serde_norway::from_str("limits: { max_workflow_depth: 2 }").unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(&uses("parent", "a")).unwrap();
+    let config: ConfigLayer = yunta_core::yaml::parse("limits: { max_workflow_depth: 2 }").unwrap();
     let errors = yunta_engine::check_workflow_refs(
         &wf,
         &config,
@@ -1291,7 +1291,7 @@ fn composition_deeper_than_the_limit_is_a_check_error() {
 #[test]
 fn a_healthy_composition_graph_passes_check_workflow_refs() {
     let root = catalog_root(&[("a", uses("a", "b").as_str()), ("b", LEAF)]);
-    let wf: Workflow = serde_norway::from_str(&uses("parent", "a")).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(&uses("parent", "a")).unwrap();
     assert!(yunta_engine::check_workflow_refs(
         &wf,
         &ConfigLayer::default(),
@@ -1310,8 +1310,9 @@ fn a_healthy_composition_graph_passes_check_workflow_refs() {
 #[test]
 fn a_suite_nothing_compares_is_a_warning() {
     let root = catalog_root(&[("a", LEAF)]);
-    let wf: Workflow = serde_norway::from_str(&uses("parent", "a")).unwrap();
-    let config: ConfigLayer = serde_norway::from_str("baseline: { suite: \"make test\" }").unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(&uses("parent", "a")).unwrap();
+    let config: ConfigLayer =
+        yunta_core::yaml::parse("baseline: { suite: \"make test\" }").unwrap();
     let warnings = yunta_engine::check_workflow_refs(
         &wf,
         &config,
@@ -1349,8 +1350,9 @@ fn a_suite_a_composed_workflow_compares_is_not() {
         "a",
         "name: a\nnodes:\n  - { id: no-regressions, kind: check, builtin: baseline_compare }\n",
     )]);
-    let wf: Workflow = serde_norway::from_str(&uses("parent", "a")).unwrap();
-    let config: ConfigLayer = serde_norway::from_str("baseline: { suite: \"make test\" }").unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(&uses("parent", "a")).unwrap();
+    let config: ConfigLayer =
+        yunta_core::yaml::parse("baseline: { suite: \"make test\" }").unwrap();
     assert!(
         yunta_engine::check_workflow_refs(
             &wf,
@@ -1379,7 +1381,7 @@ nodes:
     context:
       - files: ["notes.md"]
 "#;
-    let wf: Workflow = serde_norway::from_str(looped).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(looped).unwrap();
     assert!(
         !check(&wf, &ConfigLayer::default())
             .iter()
@@ -1396,7 +1398,7 @@ nodes:
     context:
       - files: ["notes.md"]
 "#;
-    let wf: Workflow = serde_norway::from_str(bash).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(bash).unwrap();
     assert!(check(&wf, &ConfigLayer::default())
         .iter()
         .any(|e| matches!(e, CheckError::ContextOnUnsupportedNode { .. })));
@@ -1407,10 +1409,10 @@ nodes:
 #[test]
 fn max_parallel_nodes_zero_is_a_check_error() {
     let wf: Workflow =
-        serde_norway::from_str("name: x\nnodes:\n  - { id: a, kind: bash, run: \"true\" }\n")
+        yunta_core::yaml::parse("name: x\nnodes:\n  - { id: a, kind: bash, run: \"true\" }\n")
             .unwrap();
     let config: ConfigLayer =
-        serde_norway::from_str("defaults: { max_parallel_nodes: 0 }").unwrap();
+        yunta_core::yaml::parse("defaults: { max_parallel_nodes: 0 }").unwrap();
     assert!(
         check(&wf, &config)
             .iter()
@@ -1424,7 +1426,7 @@ fn max_parallel_nodes_zero_is_a_check_error() {
 
 #[test]
 fn a_push_to_the_base_branch_without_a_prior_gate_warns() {
-    let config: ConfigLayer = serde_norway::from_str("project: { base_branch: main }").unwrap();
+    let config: ConfigLayer = yunta_core::yaml::parse("project: { base_branch: main }").unwrap();
 
     // Direct push to the configured base, no gate anywhere upstream.
     let ungated = r#"
@@ -1438,7 +1440,7 @@ nodes:
     depends_on: [build]
     run: "git push origin main"
 "#;
-    let wf: Workflow = serde_norway::from_str(ungated).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(ungated).unwrap();
     assert!(
         check_warnings(&wf, &config)
             .iter()
@@ -1477,7 +1479,7 @@ nodes:
     depends_on: [ship]
     run: "git push origin main"
 "#;
-    let wf: Workflow = serde_norway::from_str(gated).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(gated).unwrap();
     assert!(check_warnings(&wf, &config)
         .iter()
         .all(|w| !matches!(w, CheckWarning::PushToBaseWithoutGate { .. })));
@@ -1490,7 +1492,7 @@ nodes:
     kind: bash
     run: "git push origin {{project.base_branch}}"
 "#;
-    let wf: Workflow = serde_norway::from_str(templated).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(templated).unwrap();
     assert!(check_warnings(&wf, &config)
         .iter()
         .any(|w| matches!(w, CheckWarning::PushToBaseWithoutGate { .. })));
@@ -1504,7 +1506,7 @@ nodes:
     kind: bash
     run: "git push -u origin {{run.branch}}"
 "#;
-    let wf: Workflow = serde_norway::from_str(run_branch).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(run_branch).unwrap();
     assert!(check_warnings(&wf, &config)
         .iter()
         .all(|w| !matches!(w, CheckWarning::PushToBaseWithoutGate { .. })));
@@ -1525,9 +1527,9 @@ nodes:
       mode: rules
       within: ["src/**"]
 "#;
-    let wf: Workflow = serde_norway::from_str(workflow).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(workflow).unwrap();
     let ceiling: ConfigLayer =
-        serde_norway::from_str("permissions: { scope_expansion: { max_mode: ask } }").unwrap();
+        yunta_core::yaml::parse("permissions: { scope_expansion: { max_mode: ask } }").unwrap();
     assert!(
         check(&wf, &ceiling).iter().any(
             |e| matches!(e, CheckError::ScopeExpansionModeOverCeiling { node, .. }
@@ -1539,7 +1541,7 @@ nodes:
 
     // Harder than the ceiling is fine; so is everything with no ceiling.
     let deny_node = workflow.replace("mode: rules", "mode: deny");
-    let wf_deny: Workflow = serde_norway::from_str(&deny_node).unwrap();
+    let wf_deny: Workflow = yunta_core::yaml::parse(&deny_node).unwrap();
     assert!(!check(&wf_deny, &ceiling)
         .iter()
         .any(|e| matches!(e, CheckError::ScopeExpansionModeOverCeiling { .. })));
@@ -1560,7 +1562,7 @@ nodes:
     run: "true"
     on_interrupt: resume_session
 "#;
-    let wf: Workflow = serde_norway::from_str(yaml).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     assert!(
         check(&wf, &ConfigLayer::default()).iter().any(
             |e| matches!(e, CheckError::ResumeSessionOnSessionlessNode { node }
@@ -1578,7 +1580,7 @@ nodes:
     prompt: "go"
     on_interrupt: resume_session
 "#;
-    let wf: Workflow = serde_norway::from_str(prompt).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(prompt).unwrap();
     assert!(!check(&wf, &ConfigLayer::default())
         .iter()
         .any(|e| matches!(e, CheckError::ResumeSessionOnSessionlessNode { .. })));
@@ -1587,7 +1589,7 @@ nodes:
 // --- mount declaration rules -------------------------------------------------
 
 fn parsed(yaml: &str) -> Workflow {
-    serde_norway::from_str(yaml).unwrap()
+    yunta_core::yaml::parse(yaml).unwrap()
 }
 
 #[test]
@@ -1720,7 +1722,7 @@ nodes:
     artifacts:
       produces: [tasks, tasks]
 "#;
-    let wf: Workflow = serde_norway::from_str(yaml).expect("the fixture parses");
+    let wf: Workflow = yunta_core::yaml::parse(yaml).expect("the fixture parses");
     let errors = check(&wf, &config_with_runner("planner", 1));
     assert!(
         errors.iter().any(|e| matches!(
@@ -1754,7 +1756,7 @@ nodes:
     artifacts:
       produces: [tasks]
 "#;
-    let wf: Workflow = serde_norway::from_str(yaml).expect("the fixture parses");
+    let wf: Workflow = yunta_core::yaml::parse(yaml).expect("the fixture parses");
     let errors = check(&wf, &ConfigLayer::default());
     let clash = errors
         .iter()
@@ -1783,7 +1785,7 @@ nodes:
     until: all_tasks_complete
     prompt: "do the task"
 "#;
-    let wf: Workflow = serde_norway::from_str(yaml).expect("the fixture parses");
+    let wf: Workflow = yunta_core::yaml::parse(yaml).expect("the fixture parses");
     let errors = check(&wf, &ConfigLayer::default());
     assert!(
         !errors
@@ -1811,7 +1813,7 @@ nodes:
     context:
       - artifact: { node: review, name: findings }
 "#;
-    let wf: Workflow = serde_norway::from_str(yaml).expect("the fixture parses");
+    let wf: Workflow = yunta_core::yaml::parse(yaml).expect("the fixture parses");
     let errors = check(&wf, &ConfigLayer::default());
     let reserved = errors
         .iter()
@@ -1901,7 +1903,7 @@ nodes:
       produces: [tasks]
 "#
     );
-    serde_norway::from_str(&yaml).expect("the fixture parses")
+    yunta_core::yaml::parse(&yaml).expect("the fixture parses")
 }
 
 #[test]
@@ -1948,7 +1950,7 @@ fn only(capability: yunta_core::Capability) -> yunta_core::Capabilities {
 /// A `bash`-free node on runner `planner`, declaring `permissions:` or
 /// `agent:` as the caller asks.
 fn asking_node(yaml: &str) -> Workflow {
-    workflow(vec![serde_norway::from_str(yaml).expect("the node parses")])
+    workflow(vec![yunta_core::yaml::parse(yaml).expect("the node parses")])
 }
 
 #[test]
@@ -2068,7 +2070,7 @@ nodes:
         nodes:
           - { id: work, kind: bash, run: "true" }
 "#;
-    let wf: Workflow = serde_norway::from_str(nested).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(nested).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
     assert!(
         errors.iter().any(|e| matches!(
@@ -2088,7 +2090,7 @@ nodes:
       - { id: a, kind: bash, run: "true" }
       - { id: b, kind: bash, run: "true" }
 "#;
-    let wf: Workflow = serde_norway::from_str(flat).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(flat).unwrap();
     assert!(
         !check(&wf, &ConfigLayer::default())
             .iter()
@@ -2101,8 +2103,8 @@ nodes:
 
 /// The unset keys `check` refuses a workflow for under `config`, by node.
 fn unset_keys(yaml: &str, config: &str) -> Vec<(String, yunta_core::ConfigKey)> {
-    let wf: Workflow = serde_norway::from_str(yaml).expect("the fixture parses");
-    let config: ConfigLayer = serde_norway::from_str(config).expect("the config parses");
+    let wf: Workflow = yunta_core::yaml::parse(yaml).expect("the fixture parses");
+    let config: ConfigLayer = yunta_core::yaml::parse(config).expect("the config parses");
     check(&wf, &config)
         .into_iter()
         .filter_map(|error| match error {
@@ -2203,7 +2205,7 @@ nodes:
 
 #[test]
 fn the_refusal_names_the_node_and_what_to_declare() {
-    let wf: Workflow = serde_norway::from_str(
+    let wf: Workflow = yunta_core::yaml::parse(
         "name: w\nnodes:\n  - { id: gate, kind: check, builtin: coverage_gate }\n",
     )
     .unwrap();
@@ -2231,8 +2233,8 @@ fn source_errors(yaml: &str) -> Vec<CheckError> {
 }
 
 fn source_errors_mounted(yaml: &str, mounts: &[yunta_core::MountSpec]) -> Vec<CheckError> {
-    let wf: Workflow = serde_norway::from_str(yaml).expect("the fixture parses");
-    let config: ConfigLayer = serde_norway::from_str(SOURCES_CONFIG).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(yaml).expect("the fixture parses");
+    let config: ConfigLayer = yunta_core::yaml::parse(SOURCES_CONFIG).unwrap();
     yunta_engine::check_mounted(&wf, &config, &|_| None, mounts)
         .into_iter()
         .filter(|e| {
@@ -2307,7 +2309,7 @@ fn a_loop_takes_its_tasks_from_a_producer_an_input_a_mount_or_a_child() {
     );
 
     let mount: yunta_core::MountSpec =
-        serde_norway::from_str("artifact: { node: plan, kind: tasks }").unwrap();
+        yunta_core::yaml::parse("artifact: { node: plan, kind: tasks }").unwrap();
     assert_eq!(
         source_errors_mounted(&format!("name: w\nnodes:\n{LOOP} }}\n"), &[mount]),
         Vec::new(),
@@ -2550,8 +2552,8 @@ nodes:
 
 fn refs_errors(parent: &str, catalog: &[(&str, &str)], config: &str) -> Vec<CheckError> {
     let root = catalog_root(catalog);
-    let wf: Workflow = serde_norway::from_str(parent).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(config).unwrap();
+    let wf: Workflow = yunta_core::yaml::parse(parent).unwrap();
+    let config: ConfigLayer = yunta_core::yaml::parse(config).unwrap();
     yunta_engine::check_workflow_refs(
         &wf,
         &config,
@@ -2720,7 +2722,7 @@ nodes:
 
     let wf: Workflow = yunta_core::workflow::read::read(&yaml, std::path::Path::new("w.yaml"))
         .expect("a mode may read what an earlier mode keeps");
-    let config: ConfigLayer = serde_norway::from_str(SOURCES_CONFIG).unwrap();
+    let config: ConfigLayer = yunta_core::yaml::parse(SOURCES_CONFIG).unwrap();
     let warned: Vec<String> = check_warnings(&wf, &config)
         .iter()
         .filter(|w| matches!(w, CheckWarning::ReadOnlyThroughPromotion { .. }))

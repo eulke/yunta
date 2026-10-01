@@ -18,7 +18,7 @@ fn specs(yaml: &str) -> BTreeMap<InputName, InputSpec> {
     struct Workflow {
         inputs: BTreeMap<InputName, InputSpec>,
     }
-    let workflow: Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     workflow.inputs
 }
 

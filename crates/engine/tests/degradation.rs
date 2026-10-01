@@ -400,7 +400,7 @@ on_finish:
     assert!(posted.len() >= 2, "this run posts both findings");
 
     let document = yunta_core::FindingsFile::from_findings(posted.clone());
-    let yaml = serde_norway::to_string(&document).expect("a findings document serializes");
+    let yaml = yunta_core::yaml::to_string(&document).expect("a findings document serializes");
     let read = yunta_core::shape::read::<yunta_core::FindingsFile>(
         yaml.as_bytes(),
         "artifacts/findings.yaml",

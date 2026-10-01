@@ -31,7 +31,6 @@ yunta-engine.workspace = true
 chrono.workspace = true
 tempfile.workspace = true
 # Benches parse workflow/config/fixture YAML literals the tests write.
-serde_norway.workspace = true
 # An event a constructor refuses still reaches a reader off disk: the
 # wire form is how a test writes one.
 serde_json.workspace = true

@@ -1,9 +1,9 @@
 ---
 number: D112
 title: "Reemplazo de `serde_yaml` por `serde_norway`, un fork mantenido con la misma API"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D218]
 ---
 
 # D112 — Reemplazo de `serde_yaml` por `serde_norway`, un fork mantenido con la misma API

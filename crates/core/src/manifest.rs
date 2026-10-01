@@ -183,8 +183,7 @@ impl crate::persisted::Persisted for Manifest {
 fn rename_isolation(value: &mut crate::yaml::Value, retired: &str, replacement: &str) {
     match value {
         crate::yaml::Value::Mapping(fields) => {
-            if let Some(found) = fields.get_mut(crate::yaml::Value::String("isolation".to_string()))
-            {
+            if let Some(found) = fields.get_mut("isolation") {
                 if found.as_str() == Some(retired) {
                     *found = crate::yaml::Value::from(replacement);
                 }

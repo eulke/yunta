@@ -261,8 +261,8 @@ impl Bench {
         config_yaml: &str,
         between: impl FnOnce(),
     ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
-        let workflow: Workflow = serde_norway::from_str(workflow_yaml).expect("parse workflow");
-        let config: ConfigLayer = serde_norway::from_str(config_yaml).expect("parse config");
+        let workflow: Workflow = yunta_core::yaml::parse(workflow_yaml).expect("parse workflow");
+        let config: ConfigLayer = yunta_core::yaml::parse(config_yaml).expect("parse config");
         let frozen = self.freeze(&workflow, &config).await;
         // A `type: document` input is born as an artifact, so the run a
         // bench creates holds what its `inputs:` named alongside

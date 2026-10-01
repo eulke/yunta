@@ -125,7 +125,7 @@ async fn answered_questions_finish_the_node_and_materialize_the_answers_artifact
             .expect("the answers artifact has a view"),
     )
     .unwrap();
-    let parsed: yunta_core::AnswersFile = serde_norway::from_str(&raw).unwrap();
+    let parsed: yunta_core::AnswersFile = yunta_core::yaml::parse(&raw).unwrap();
     assert_eq!(parsed.answers, vec![answer("q1", "staging")]);
 
     // The answers are the run's too, with the origin that says the
@@ -232,7 +232,7 @@ async fn resuming_a_questions_pause_with_a_live_surface_answers_and_continues() 
         Some(yunta_engine::NodeState::Finished { .. })
     ));
     let raw = String::from_utf8(bench.projection(Some("ask"), "answers.yaml").unwrap()).unwrap();
-    let parsed: yunta_core::AnswersFile = serde_norway::from_str(&raw).unwrap();
+    let parsed: yunta_core::AnswersFile = yunta_core::yaml::parse(&raw).unwrap();
     assert_eq!(parsed.answers, vec![answer("q1", "production")]);
 }
 

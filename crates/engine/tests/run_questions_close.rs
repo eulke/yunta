@@ -400,7 +400,7 @@ sessions:
         !grill.iter().any(|k| k == "questions_asked"),
         "nothing was asked: {grill:?}"
     );
-    let answers: yunta_core::AnswersFile = serde_norway::from_slice(
+    let answers: yunta_core::AnswersFile = yunta_core::yaml::parse_bytes(
         &bench
             .projection(Some("grill"), "answers.yaml")
             .expect("the answers the next node mounts"),

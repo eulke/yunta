@@ -83,7 +83,7 @@ mod tests {
     }
 
     fn tasks(yaml: &str) -> ShownDocument {
-        plan(serde_norway::from_str(yaml).unwrap(), Vec::new())
+        plan(yunta_core::yaml::parse(yaml).unwrap(), Vec::new())
     }
 
     fn plan(plan: TasksFile, departed: Vec<AcceptedDeparture>) -> ShownDocument {
@@ -335,7 +335,7 @@ findings:
     #[test]
     fn a_review_shown_after_it_was_answered_reads_each_answer_under_its_finding() {
         let view: yunta_core::events::findings::RunFindings =
-            serde_norway::from_str(ANSWERED).unwrap();
+            yunta_core::yaml::parse(ANSWERED).unwrap();
         let drawn = shown(
             &document(
                 ShownContent::RunFindings(view),
@@ -367,7 +367,7 @@ findings:
 
     #[test]
     fn a_review_is_read_the_most_severe_finding_first() {
-        let found: yunta_core::FindingsFile = serde_norway::from_str(
+        let found: yunta_core::FindingsFile = yunta_core::yaml::parse(
             r#"
 findings:
   - id: stray-space
@@ -413,7 +413,7 @@ findings:
 
     #[test]
     fn a_spec_is_read_task_by_task_with_its_tests_files_whole() {
-        let spec: yunta_core::SpecFile = serde_norway::from_str(
+        let spec: yunta_core::SpecFile = yunta_core::yaml::parse(
             r#"
 specs:
   - task: greet

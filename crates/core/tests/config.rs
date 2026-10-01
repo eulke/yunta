@@ -173,7 +173,7 @@ paths:
   worktrees: ~/.yunta/worktrees
 "#;
 
-    let layer: ConfigLayer = serde_norway::from_str(yaml).expect("reference config should parse");
+    let layer: ConfigLayer = yunta_core::yaml::parse(yaml).expect("reference config should parse");
 
     assert_eq!(
         layer.runners.as_ref().unwrap()["reviewer"][0]
@@ -201,14 +201,14 @@ fn isolation_defaults_to_worktree_when_unset() {
 
 #[test]
 fn isolation_parses_from_defaults_and_none_is_a_real_choice() {
-    let layer: ConfigLayer = serde_norway::from_str("defaults:\n  isolation: none\n").unwrap();
+    let layer: ConfigLayer = yunta_core::yaml::parse("defaults:\n  isolation: none\n").unwrap();
     assert_eq!(layer.resolved_isolation(), Isolation::None);
 }
 
 #[test]
 fn an_unknown_isolation_value_is_a_parse_error_not_silently_ignored() {
     let err =
-        serde_norway::from_str::<ConfigLayer>("defaults:\n  isolation: container\n").unwrap_err();
+        yunta_core::yaml::parse::<ConfigLayer>("defaults:\n  isolation: container\n").unwrap_err();
     assert!(err.to_string().contains("container") || err.to_string().contains("unknown"));
 }
 
@@ -241,7 +241,7 @@ fn max_parallel_nodes_defaults_to_1_when_unset() {
 #[test]
 fn max_parallel_nodes_parses_from_defaults() {
     let layer: ConfigLayer =
-        serde_norway::from_str("defaults:\n  max_parallel_nodes: 4\n").unwrap();
+        yunta_core::yaml::parse("defaults:\n  max_parallel_nodes: 4\n").unwrap();
     assert_eq!(layer.resolved_max_parallel_nodes(), 4);
 }
 
@@ -274,7 +274,7 @@ fn on_interrupt_defaults_to_restart_node_when_unset() {
 #[test]
 fn on_interrupt_parses_fail_if_uncertain_from_defaults() {
     let layer: ConfigLayer =
-        serde_norway::from_str("defaults:\n  on_interrupt: fail_if_uncertain\n").unwrap();
+        yunta_core::yaml::parse("defaults:\n  on_interrupt: fail_if_uncertain\n").unwrap();
     assert_eq!(layer.resolved_on_interrupt(), OnInterrupt::FailIfUncertain);
 }
 
@@ -290,7 +290,7 @@ permissions:
   network:
     default: true
 "#;
-    let layer: ConfigLayer = serde_norway::from_str(yaml).unwrap();
+    let layer: ConfigLayer = yunta_core::yaml::parse(yaml).unwrap();
     let perms = layer.permissions.unwrap();
     let commands = perms.commands.unwrap();
     assert_eq!(commands.deny, vec!["curl * | *", "sudo *"]);
@@ -432,7 +432,7 @@ fn layers_that_only_narrow_produce_no_conflicts() {
 #[test]
 fn skills_executors_parses_name_kind_and_path() {
     let yaml = "skills:\n  executors:\n    - { name: coverage-gate, kind: binary, path: .yunta/bin/coverage-gate }\n";
-    let layer: ConfigLayer = serde_norway::from_str(yaml).unwrap();
+    let layer: ConfigLayer = yunta_core::yaml::parse(yaml).unwrap();
     let executors = layer.skills.unwrap().executors;
     assert_eq!(
         executors,
@@ -447,7 +447,7 @@ fn skills_executors_parses_name_kind_and_path() {
 #[test]
 fn an_unknown_executor_kind_fails_to_parse() {
     let yaml = "skills:\n  executors:\n    - { name: x, kind: wasm, path: x }\n";
-    let result: Result<ConfigLayer, _> = serde_norway::from_str(yaml);
+    let result: Result<ConfigLayer, _> = yunta_core::yaml::parse(yaml);
     assert!(
         result.is_err(),
         "`wasm` is reserved for later but not built yet — must not silently parse as binary"
@@ -493,7 +493,7 @@ fn mcp_servers_parses_the_reference_config_shape() {
 mcp_servers:
   internal-docs: { url: "https://docs.interna.example/mcp", auth_env: DOCS_TOKEN }
 "#;
-    let layer: ConfigLayer = serde_norway::from_str(yaml).unwrap();
+    let layer: ConfigLayer = yunta_core::yaml::parse(yaml).unwrap();
     let servers = layer.mcp_servers.unwrap();
     assert_eq!(
         servers["internal-docs"].url,
@@ -511,7 +511,7 @@ fn mcp_servers_auth_env_defaults_to_absent_for_a_public_server() {
 mcp_servers:
   public-docs: { url: "https://docs.example.com/mcp" }
 "#;
-    let layer: ConfigLayer = serde_norway::from_str(yaml).unwrap();
+    let layer: ConfigLayer = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(layer.mcp_servers.unwrap()["public-docs"].auth_env, None);
 }
 
@@ -564,7 +564,7 @@ limits:
   max_artifact_bytes: 10485760
   inline_context_bytes: 32000
 "#;
-    let layer: ConfigLayer = serde_norway::from_str(yaml).unwrap();
+    let layer: ConfigLayer = yunta_core::yaml::parse(yaml).unwrap();
     let limits = layer.limits.unwrap();
     assert_eq!(limits.max_tokens_per_run, Some(2_000_000));
     assert_eq!(limits.max_loop_iterations, Some(12));
@@ -575,13 +575,15 @@ limits:
 }
 
 #[test]
-fn an_underscored_limit_literal_is_a_loud_parse_error_not_a_silent_string() {
-    // serde_norway (YAML 1.2) resolves `2_000_000` as a string — the
-    // canonical form is `2000000`; anything else must fail the parse
-    // rather than quietly become an unlimited run.
-    let result: Result<ConfigLayer, _> =
-        serde_norway::from_str("limits:\n  max_tokens_per_run: 2_000_000\n");
-    assert!(result.is_err(), "underscored literal must not parse");
+fn an_underscored_limit_literal_reads_as_the_number_it_spells() {
+    // Digits grouped with `_` are the number a person wrote, never a
+    // string that leaves the run without a limit.
+    let layer: ConfigLayer =
+        yunta_core::yaml::parse("limits:\n  max_tokens_per_run: 2_000_000\n").unwrap();
+    assert_eq!(
+        layer.limits.and_then(|limits| limits.max_tokens_per_run),
+        Some(2_000_000)
+    );
 }
 
 #[test]
@@ -627,7 +629,7 @@ project:
   base_branch: main
   branch_prefix: yunta/
 "#;
-    let layer: ConfigLayer = serde_norway::from_str(yaml).unwrap();
+    let layer: ConfigLayer = yunta_core::yaml::parse(yaml).unwrap();
     let project = layer.project.unwrap();
     assert_eq!(project.name.as_deref(), Some("mi-repo"));
     assert_eq!(project.base_branch.as_deref(), Some("main"));
@@ -664,9 +666,9 @@ fn repo_overrides_only_the_project_fields_it_sets() {
 #[test]
 fn scope_expansion_ceiling_merges_to_the_strictest_layer() {
     let org: ConfigLayer =
-        serde_norway::from_str("permissions: { scope_expansion: { max_mode: ask } }").unwrap();
+        yunta_core::yaml::parse("permissions: { scope_expansion: { max_mode: ask } }").unwrap();
     let repo: ConfigLayer =
-        serde_norway::from_str("permissions: { scope_expansion: { max_mode: deny } }").unwrap();
+        yunta_core::yaml::parse("permissions: { scope_expansion: { max_mode: deny } }").unwrap();
     // org → repo (most specific last): the harder ceiling wins.
     let merged = ConfigLayer::merge_layers(vec![org.clone(), repo]);
     assert_eq!(
@@ -682,7 +684,7 @@ fn scope_expansion_ceiling_merges_to_the_strictest_layer() {
     // The other way around the ceiling still holds: a softer lower
     // layer never wins the merge.
     let soft_repo: ConfigLayer =
-        serde_norway::from_str("permissions: { scope_expansion: { max_mode: rules } }").unwrap();
+        yunta_core::yaml::parse("permissions: { scope_expansion: { max_mode: rules } }").unwrap();
     let merged = ConfigLayer::merge_layers(vec![org, soft_repo]);
     assert_eq!(
         merged
@@ -698,9 +700,9 @@ fn scope_expansion_ceiling_merges_to_the_strictest_layer() {
 #[test]
 fn a_layer_softening_the_scope_expansion_ceiling_is_a_conflict() {
     let org: ConfigLayer =
-        serde_norway::from_str("permissions: { scope_expansion: { max_mode: ask } }").unwrap();
+        yunta_core::yaml::parse("permissions: { scope_expansion: { max_mode: ask } }").unwrap();
     let repo: ConfigLayer =
-        serde_norway::from_str("permissions: { scope_expansion: { max_mode: rules } }").unwrap();
+        yunta_core::yaml::parse("permissions: { scope_expansion: { max_mode: rules } }").unwrap();
     let conflicts = yunta_core::permission_layer_conflicts(&[("org", &org), ("repo", &repo)]);
     assert!(
         conflicts
@@ -711,7 +713,7 @@ fn a_layer_softening_the_scope_expansion_ceiling_is_a_conflict() {
 
     // Hardening is narrowing — never a conflict.
     let hard: ConfigLayer =
-        serde_norway::from_str("permissions: { scope_expansion: { max_mode: deny } }").unwrap();
+        yunta_core::yaml::parse("permissions: { scope_expansion: { max_mode: deny } }").unwrap();
     assert!(yunta_core::permission_layer_conflicts(&[("org", &org), ("repo", &hard)]).is_empty());
 }
 
@@ -860,7 +862,7 @@ fn telemetry_is_not_a_config_key() {
     // Retired until the OTel exporter exists (D121): a key the engine only
     // parsed and never acted on is a silent degradation. `deny_unknown_fields`
     // now rejects it, naming the key.
-    let err = serde_norway::from_str::<yunta_core::ConfigLayer>("telemetry:\n  enabled: false\n")
+    let err = yunta_core::yaml::parse::<yunta_core::ConfigLayer>("telemetry:\n  enabled: false\n")
         .unwrap_err();
     assert!(err.to_string().contains("telemetry"), "{err}");
 }

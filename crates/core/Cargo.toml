@@ -46,13 +46,13 @@ indexmap = { workspace = true, features = ["serde"] }
 # YAML is the authoring format of every type in this crate; the parser
 # lives next to them so the whole workspace reads and writes YAML through
 # one module, and a document's parse error carries the failing key's path.
-serde_norway.workspace = true
 # Every scope glob in the workspace compiles through one rule that lives
 # next to the schema declaring it; the engine and the mock consume it.
 globset.workspace = true
 # Names the path of a value that failed inside an already-buffered
 # `Value` — the one place the parser's own path tracking cannot reach.
 serde_path_to_error.workspace = true
+serde-saphyr.workspace = true
 # Run ids are ULIDs (time-ordered, one path segment, collision-free across
 # processes). The crate is the encoding and the 48-bit millisecond
 # arithmetic and nothing else; its randomness comes from `rand`, already

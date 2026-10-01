@@ -47,7 +47,7 @@ fn rendered(failures: &[ArtifactFailure]) -> String {
 }
 
 fn node(yaml: &str) -> Node {
-    serde_norway::from_str(yaml).unwrap()
+    yunta_core::yaml::parse(yaml).unwrap()
 }
 
 /// Puts a file where `node` writes what it declares, which is where the

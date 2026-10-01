@@ -66,7 +66,7 @@ async fn a_unit(owner: &Owner) -> (tempfile::TempDir, tempfile::TempDir, Unit) {
 /// The node those task sessions belong to: a `loop` node named `build`,
 /// declaring nothing of its own.
 fn build_node() -> yunta_core::Node {
-    serde_norway::from_str("{ id: build, kind: bash, run: \"true\" }")
+    yunta_core::yaml::parse("{ id: build, kind: bash, run: \"true\" }")
         .expect("the node the setup names")
 }
 

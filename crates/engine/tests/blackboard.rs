@@ -90,7 +90,7 @@ async fn blackboard_posts_land_hot_and_the_join_consolidates_them() {
     );
     // The group's node-output wraps the consolidated findings in the same
     // `stdout:`/`stderr:` envelope every node's captured output uses.
-    let doc: serde_json::Value = serde_norway::from_str(&output).unwrap();
+    let doc: serde_json::Value = yunta_core::yaml::parse(&output).unwrap();
     let ids: Vec<&str> = doc["stdout"]
         .as_array()
         .unwrap()
@@ -301,7 +301,7 @@ fn consolidate_blackboard_is_invariant_under_event_shuffling() {
     let consolidated_reversed = yunta_engine::consolidate_blackboard(&reversed, &members);
     assert_eq!(consolidated_forward, consolidated_reversed);
     let consolidated: Vec<serde_json::Value> =
-        serde_norway::from_str(&consolidated_forward).unwrap();
+        yunta_core::yaml::parse(&consolidated_forward).unwrap();
     let ids: Vec<&str> = consolidated
         .iter()
         .map(|finding| finding["id"].as_str().unwrap())
@@ -355,7 +355,7 @@ fn group_log() -> Vec<yunta_core::events::StoredEvent> {
 
 fn consolidated_titles(events: &[yunta_core::events::StoredEvent]) -> Vec<String> {
     let rendered = yunta_engine::consolidate_blackboard(events, &["a".into()]);
-    let entries: Vec<serde_json::Value> = serde_norway::from_str(&rendered).unwrap();
+    let entries: Vec<serde_json::Value> = yunta_core::yaml::parse(&rendered).unwrap();
     entries
         .iter()
         .map(|entry| entry["title"].as_str().unwrap().to_string())

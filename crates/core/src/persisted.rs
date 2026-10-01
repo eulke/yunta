@@ -195,25 +195,16 @@ impl<T: Persisted> PersistedDoc<T> {
     fn write_yaml(&self) -> Result<String, PersistedError> {
         // YAML mappings preserve insertion order. Passing the document
         // through JSON would alphabetize `modes:` and change promotion.
-        let mut ordered = serde_norway::to_value(&self.doc).map_err(|error| {
-            Self::unreadable(crate::yaml::YamlError::Serialize {
-                message: error.to_string(),
-            })
-        })?;
+        let mut ordered = crate::yaml::to_value(&self.doc).map_err(Self::unreadable)?;
         if let Some(fields) = ordered.as_mapping_mut() {
             fields.insert(
                 crate::yaml::Value::String(T::VERSION_KEY.to_string()),
                 crate::yaml::Value::from(T::SCHEMA_VERSION),
             );
             for (key, kept) in &self.unknown {
-                let key = crate::yaml::Value::String(key.clone());
-                if !fields.contains_key(&key) {
-                    let kept = serde_norway::to_value(kept).map_err(|error| {
-                        Self::unreadable(crate::yaml::YamlError::Serialize {
-                            message: error.to_string(),
-                        })
-                    })?;
-                    fields.insert(key, kept);
+                if !fields.contains_key(key) {
+                    let kept = crate::yaml::to_value(kept).map_err(Self::unreadable)?;
+                    fields.insert(crate::yaml::Value::String(key.clone()), kept);
                 }
             }
         }

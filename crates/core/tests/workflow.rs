@@ -14,7 +14,7 @@ const FIXTURE: &str = include_str!("fixtures/m0-workflow.yaml");
 
 #[test]
 fn parses_the_reference_schema_excerpt_without_loss() {
-    let workflow: Workflow = serde_norway::from_str(FIXTURE).expect("fixture should parse");
+    let workflow: Workflow = yunta_core::yaml::parse(FIXTURE).expect("fixture should parse");
 
     assert_eq!(workflow.name, "fix-lint-loop");
     assert_eq!(workflow.nodes.len(), 3);
@@ -60,9 +60,9 @@ fn parses_the_reference_schema_excerpt_without_loss() {
 
 #[test]
 fn round_trips_through_serialization() {
-    let first: Workflow = serde_norway::from_str(FIXTURE).unwrap();
-    let re_serialized = serde_norway::to_string(&first).unwrap();
-    let second: Workflow = serde_norway::from_str(&re_serialized).unwrap();
+    let first: Workflow = yunta_core::yaml::parse(FIXTURE).unwrap();
+    let re_serialized = yunta_core::yaml::to_string(&first).unwrap();
+    let second: Workflow = yunta_core::yaml::parse(&re_serialized).unwrap();
 
     assert_eq!(first, second);
 }
@@ -85,10 +85,10 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let first: Workflow = serde_norway::from_str(yaml).unwrap();
-    let re_serialized = serde_norway::to_string(&first).unwrap();
+    let first: Workflow = yunta_core::yaml::parse(yaml).unwrap();
+    let re_serialized = yunta_core::yaml::to_string(&first).unwrap();
     let second: Workflow =
-        serde_norway::from_str(&re_serialized).expect("include: all must round-trip");
+        yunta_core::yaml::parse(&re_serialized).expect("include: all must round-trip");
     assert_eq!(first, second);
     assert_eq!(
         first.modes.as_ref().unwrap()["full"].include,
@@ -115,9 +115,9 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let first: Workflow = serde_norway::from_str(yaml).unwrap();
-    let re_serialized = serde_norway::to_string(&first).unwrap();
-    let second: Workflow = serde_norway::from_str(&re_serialized).unwrap();
+    let first: Workflow = yunta_core::yaml::parse(yaml).unwrap();
+    let re_serialized = yunta_core::yaml::to_string(&first).unwrap();
+    let second: Workflow = yunta_core::yaml::parse(&re_serialized).unwrap();
     assert_eq!(first, second);
 
     // The promotion-ladder guarantee: declaration order, not
@@ -154,7 +154,7 @@ nodes:
     on: { ajustar: plan }
     shows: [{ node: plan, kind: tasks }]
 "#;
-    let first: Workflow = serde_norway::from_str(yaml).unwrap();
+    let first: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let NodeKind::Gate {
         assignee,
         message,
@@ -181,8 +181,8 @@ nodes:
     );
     assert!(external.is_none(), "an internal gate has no external block");
 
-    let re_serialized = serde_norway::to_string(&first).unwrap();
-    let second: Workflow = serde_norway::from_str(&re_serialized).unwrap();
+    let re_serialized = yunta_core::yaml::to_string(&first).unwrap();
+    let second: Workflow = yunta_core::yaml::parse(&re_serialized).unwrap();
     assert_eq!(first, second);
 }
 
@@ -195,7 +195,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     assert!(!workflow.nodes[0].invariant);
 }
 
@@ -208,7 +208,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     assert!(workflow.modes.is_none());
 }
 
@@ -219,7 +219,7 @@ id: plan
 kind: prompt
 prompt: "prompts/plan.md"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Prompt { prompt } => {
             assert_eq!(prompt, PromptSource::Inline("prompts/plan.md".to_string()));
@@ -238,7 +238,7 @@ hooks:
   after:
     - run: "cargo fmt"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     let step = &node.hooks.unwrap().after[0];
     assert_eq!(step.on_failure, HookFailurePolicy::Fail);
     assert_eq!(step.timeout_seconds, None);
@@ -256,7 +256,7 @@ hooks:
       on_failure: warn
       timeout_seconds: 5
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     let step = &node.hooks.unwrap().after[0];
     assert_eq!(step.on_failure, HookFailurePolicy::Warn);
     assert_eq!(step.timeout_seconds, Some(5));
@@ -275,7 +275,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let defaults = workflow.node_defaults.unwrap();
     assert_eq!(
         defaults.hooks.unwrap().after[0].run.script(),
@@ -296,7 +296,7 @@ nodes:
     kind: bash
     run: "echo load"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Parallel { join, nodes, .. } => {
             assert_eq!(join, JoinPolicy::All);
@@ -319,7 +319,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Parallel { join, .. } => assert_eq!(join, JoinPolicy::Any),
         other => panic!("expected Parallel, got {other:?}"),
@@ -333,7 +333,7 @@ id: implement
 kind: bash
 run: "true"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.on_interrupt, None);
 }
 
@@ -345,7 +345,7 @@ kind: prompt
 prompt: "do it"
 on_interrupt: fail_if_uncertain
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.on_interrupt, Some(OnInterrupt::FailIfUncertain));
 }
 
@@ -356,7 +356,7 @@ id: no-regressions
 kind: check
 builtin: baseline_compare
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Check(builtin) => assert_eq!(builtin, CheckBuiltin::BaselineCompare),
         other => panic!("expected Check, got {other:?}"),
@@ -370,7 +370,7 @@ id: coverage
 kind: check
 builtin: coverage_gate
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Check(builtin) => assert_eq!(builtin, CheckBuiltin::CoverageGate),
         other => panic!("expected Check, got {other:?}"),
@@ -385,7 +385,7 @@ kind: check
 builtin: findings_gate
 max_severity: major
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Check(builtin) => assert_eq!(
             builtin,
@@ -404,7 +404,7 @@ id: mystery
 kind: check
 builtin: something_undefined
 "#;
-    let result: Result<yunta_core::Node, _> = serde_norway::from_str(yaml);
+    let result: Result<yunta_core::Node, _> = yunta_core::yaml::parse(yaml);
     assert!(result.is_err(), "unknown builtin must not parse");
 }
 
@@ -415,7 +415,7 @@ id: coverage-gate
 kind: executor
 executor: coverage-gate
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Executor {
             executor,
@@ -441,7 +441,7 @@ with:
   suite: unit
 timeout_seconds: 30
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Executor {
             executor,
@@ -465,7 +465,7 @@ kind: loop
 until: all_tasks_complete
 prompt: "do it"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Loop {
             scope_expansion, ..
@@ -486,7 +486,7 @@ scope_expansion:
   within: ["src/**"]
   max_per_run: 3
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Loop {
             scope_expansion, ..
@@ -510,7 +510,7 @@ prompt: "do it"
 scope_expansion:
   within: ["src/**"]
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Loop {
             scope_expansion, ..
@@ -532,7 +532,7 @@ kind: loop
 until: all_tasks_complete
 prompt: "do it"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Loop { concurrency, .. } => assert_eq!(concurrency, None),
         other => panic!("expected Loop, got {other:?}"),
@@ -548,7 +548,7 @@ until: all_tasks_complete
 prompt: "do it"
 concurrency: 4
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Loop { concurrency, .. } => assert_eq!(concurrency, Some(4)),
         other => panic!("expected Loop, got {other:?}"),
@@ -563,7 +563,7 @@ kind: prompt
 prompt: "plan it"
 permissions: read-only
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.permissions, Some(NodePermissions::ReadOnly));
 }
 
@@ -574,7 +574,7 @@ id: implement
 kind: bash
 run: "true"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.permissions, None);
     assert_eq!(node.network, None);
 }
@@ -587,7 +587,7 @@ kind: bash
 run: "cargo clippy"
 network: false
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.network, Some(false));
 }
 
@@ -599,7 +599,7 @@ kind: prompt
 prompt: "plan it"
 permissions: unrestricted
 "#;
-    let result: Result<yunta_core::Node, _> = serde_norway::from_str(yaml);
+    let result: Result<yunta_core::Node, _> = yunta_core::yaml::parse(yaml);
     assert!(result.is_err(), "unknown profile must not parse");
 }
 
@@ -610,7 +610,7 @@ id: implement
 kind: bash
 run: "true"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.description, None);
 }
 
@@ -622,7 +622,7 @@ kind: bash
 run: "true"
 description: "Wires up the CLI's graph command"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(
         node.description.as_deref(),
         Some("Wires up the CLI's graph command")
@@ -636,7 +636,7 @@ id: plan
 kind: prompt
 prompt: { file: prompts/plan.md }
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Prompt { prompt } => {
             assert_eq!(
@@ -657,7 +657,7 @@ id: plan
 kind: prompt
 prompt: "plan it"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert!(node.context.is_empty());
 }
 
@@ -687,14 +687,14 @@ fn a_required_files_entry_serializes_as_the_bare_path_it_always_was() {
         written,
         r#"{"files":[{"path":"docs/architecture.md","optional":true}]}"#
     );
-    let read: ContextSpec = serde_norway::from_str(&written).unwrap();
+    let read: ContextSpec = yunta_core::yaml::parse(&written).unwrap();
     assert_eq!(read, optional, "what is written reads back as itself");
 }
 
 #[test]
 fn a_files_entry_that_is_neither_shape_is_refused_by_name() {
     let refused = |entry: &str| {
-        serde_norway::from_str::<yunta_core::ContextSpec>(&format!("files: [{entry}]"))
+        yunta_core::yaml::parse::<yunta_core::ContextSpec>(&format!("files: [{entry}]"))
             .unwrap_err()
             .to_string()
     };
@@ -731,7 +731,7 @@ context:
   - run-events: { filter: failed }
   - mcp: { server: internal-docs, query: "{{inputs.idea}}" }
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.context.len(), 8);
 
     use yunta_core::{ContextFile, ContextSpec};
@@ -799,7 +799,7 @@ prompt: "plan it"
 context:
   - knowledge: { layers: [repo] }
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match &node.context[0] {
         yunta_core::ContextSpec::Knowledge { knowledge } => {
             assert_eq!(knowledge.layers, vec![yunta_core::KnowledgeLayer::Repo])
@@ -817,7 +817,7 @@ prompt: "plan it"
 context:
   - knowledge: { layers: [repo, user, org] }
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match &node.context[0] {
         yunta_core::ContextSpec::Knowledge { knowledge } => assert_eq!(
             knowledge.layers,
@@ -885,7 +885,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).expect("should parse");
+    let workflow: yunta_core::Workflow = yunta_core::yaml::parse(yaml).expect("should parse");
     assert_eq!(workflow.inputs.len(), 6);
 
     assert!(workflow.inputs["idea"].is_required());
@@ -951,9 +951,9 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let first: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
-    let re_serialized = serde_norway::to_string(&first).unwrap();
-    let second: yunta_core::Workflow = serde_norway::from_str(&re_serialized).unwrap();
+    let first: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
+    let re_serialized = yunta_core::yaml::to_string(&first).unwrap();
+    let second: yunta_core::Workflow = yunta_core::yaml::parse(&re_serialized).unwrap();
     assert_eq!(first, second);
 }
 
@@ -966,7 +966,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
     assert!(workflow.inputs.is_empty());
 }
 
@@ -984,7 +984,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
     match &workflow.inputs["plan"] {
         yunta_core::InputSpec::Document {
             kind,
@@ -1015,7 +1015,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let error = serde_norway::from_str::<yunta_core::Workflow>(yaml)
+    let error = yunta_core::yaml::parse::<yunta_core::Workflow>(yaml)
         .expect_err("a document input names the kind it is read as");
     let text = error.to_string();
     assert!(text.contains("kind"), "the refusal names the key: {text}");
@@ -1036,7 +1036,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let error = serde_norway::from_str::<yunta_core::Workflow>(yaml)
+    let error = yunta_core::yaml::parse::<yunta_core::Workflow>(yaml)
         .expect_err("`required: true` and a `default` contradict each other");
     assert!(
         error.to_string().contains("contradict each other"),
@@ -1068,7 +1068,7 @@ on_finish:
   - cleanup: worktree
   - distill: [{ node: plan, kind: tasks }]
 "#;
-    let wf: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
+    let wf: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(
         wf.yunta_schema
             .as_ref()
@@ -1094,8 +1094,8 @@ on_finish:
     );
 
     // Round-trip: serialize and re-parse to the same tree.
-    let reserialized = serde_norway::to_string(&wf).unwrap();
-    let reparsed: yunta_core::Workflow = serde_norway::from_str(&reserialized).unwrap();
+    let reserialized = yunta_core::yaml::to_string(&wf).unwrap();
+    let reparsed: yunta_core::Workflow = yunta_core::yaml::parse(&reserialized).unwrap();
     assert_eq!(wf, reparsed);
 }
 
@@ -1110,7 +1110,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let wf: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
+    let wf: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(
         wf.node_defaults.unwrap().skills,
         vec![yunta_core::SkillName::from("conventions")]
@@ -1129,7 +1129,7 @@ nodes:
     assignee: lead
     options: ["go ahead", abort]
 "#;
-    let error = serde_norway::from_str::<Workflow>(yaml)
+    let error = yunta_core::yaml::parse::<Workflow>(yaml)
         .expect_err("an option that is not an identifier is refused");
     let text = error.to_string();
     assert!(
@@ -1151,7 +1151,7 @@ nodes:
     prompt: do the thing
     scope: ["src/[unclosed"]
 "#;
-    let error = serde_norway::from_str::<Workflow>(yaml)
+    let error = yunta_core::yaml::parse::<Workflow>(yaml)
         .expect_err("a scope that does not compile should not parse");
 
     let text = error.to_string();
@@ -1195,7 +1195,7 @@ nodes:
   - { id: a, kind: bash, run: \"true\" }
   - { id: a, kind: bash, run: \"false\" }
 ";
-        assert!(serde_norway::from_str::<yunta_core::Workflow>(two_of_one).is_ok());
+        assert!(yunta_core::yaml::parse::<yunta_core::Workflow>(two_of_one).is_ok());
         let text = refuse(two_of_one);
         assert!(
             text.contains("duplicate-id") || text.contains("already carries this id"),

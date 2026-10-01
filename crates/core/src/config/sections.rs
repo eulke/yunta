@@ -247,9 +247,9 @@ pub struct PricingEntry {
 /// lives here and nowhere else. Budgets are advisory ceilings the engine
 /// enforces by escalation/diagnostic, never OS enforcement.
 ///
-/// Canonical integer form is `2000000` — the YAML parser (YAML 1.2) resolves
-/// `2_000_000` as a *string*, which fails the parse loudly instead of
-/// silently becoming an unlimited run.
+/// A limit is an integer: `2000000`, or `2_000_000` with its digits
+/// grouped, which reads as the same number — never as a string that
+/// leaves a run without its limit.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LimitsConfig {

@@ -71,7 +71,7 @@ fn children_finished(events: &[StoredEvent]) -> Vec<(RunId, TerminalState)> {
 /// The manifest a run froze at birth, read from its run directory.
 fn manifest_of(runs_root: &Path, run_id: &RunId) -> Manifest {
     let path = runs_root.join(run_id.as_str()).join("manifest.yaml");
-    serde_norway::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
+    yunta_core::yaml::parse(&std::fs::read_to_string(&path).unwrap()).unwrap()
 }
 
 /// The root a child run's tree goes under: the `runs` sibling
@@ -404,7 +404,7 @@ nodes:
     // `evolving@current`.
     let pinned = manifest_of(&first.runs_root, &first_child);
     assert_eq!(pinned.workflow_hash, v1_hash);
-    let v1_workflow: Workflow = serde_norway::from_str(CHILD_V1).unwrap();
+    let v1_workflow: Workflow = yunta_core::yaml::parse(CHILD_V1).unwrap();
     assert_eq!(pinned.workflow.nodes[0], v1_workflow.nodes[0]);
 }
 

@@ -295,7 +295,7 @@ mod tests {
         let mode: ModeName = "standard".into();
         let next: ModeName = "ship".into();
         let declared_id = OptionId::from_static("ship-it");
-        let target = |yaml: &str| -> yunta_core::Node { serde_norway::from_str(yaml).unwrap() };
+        let target = |yaml: &str| -> yunta_core::Node { yunta_core::yaml::parse(yaml).unwrap() };
         let bash = target("{ id: fix-lint, kind: bash, run: \"true\" }");
         let prompt = target("{ id: plan, kind: prompt, prompt: \"plan it\" }");
         vec![

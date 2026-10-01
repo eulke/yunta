@@ -18,7 +18,7 @@ async fn a_repo_origin_workflow_freezes_no_pack_provenance() {
     let workflow_dir = repo.path().join(".yunta/workflows");
     std::fs::create_dir_all(&workflow_dir).unwrap();
 
-    let workflow = serde_norway::from_str(LEAF).unwrap();
+    let workflow = yunta_core::yaml::parse(LEAF).unwrap();
     let manifest = build_manifest(
         &workflow,
         &ConfigLayer::default(),
@@ -47,7 +47,7 @@ async fn a_pack_origin_workflow_freezes_publisher_name_and_version() {
     );
     write(&pack_dir.join("review.yaml"), LEAF);
 
-    let workflow = serde_norway::from_str(LEAF).unwrap();
+    let workflow = yunta_core::yaml::parse(LEAF).unwrap();
     let manifest = build_manifest(
         &workflow,
         &ConfigLayer::default(),
@@ -86,7 +86,7 @@ async fn a_pack_origin_workflow_also_freezes_the_locked_commit_when_one_exists()
          commit: abcdef0123456789abcdef0123456789abcdef01\n    content_hash: 4862f447f2c7f272fa2f4aaf89dadb3b1ac09105bd5864f8d1a0c9452bb0a226\n",
     );
 
-    let workflow = serde_norway::from_str(LEAF).unwrap();
+    let workflow = yunta_core::yaml::parse(LEAF).unwrap();
     let manifest = build_manifest(
         &workflow,
         &ConfigLayer::default(),
@@ -120,7 +120,7 @@ async fn a_pack_with_no_readable_manifest_freezes_no_provenance_rather_than_fail
     let pack_dir = repo.path().join(".yunta/packs/acme/review-pack");
     std::fs::create_dir_all(&pack_dir).unwrap();
 
-    let workflow = serde_norway::from_str(LEAF).unwrap();
+    let workflow = yunta_core::yaml::parse(LEAF).unwrap();
     let manifest = build_manifest(
         &workflow,
         &ConfigLayer::default(),

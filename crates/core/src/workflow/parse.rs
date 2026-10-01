@@ -101,6 +101,5 @@ pub(super) fn describe(value: &Value) -> &'static str {
         Value::String(_) => "a string",
         Value::Sequence(_) => "a list",
         Value::Mapping(_) => "a mapping",
-        Value::Tagged(_) => "a tagged value",
     }
 }

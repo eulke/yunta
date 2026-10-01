@@ -160,7 +160,7 @@ mod tests {
         Manifest {
             schema_version: 1,
             yunta_version: "0.0.0".to_string(),
-            workflow: serde_norway::from_str("name: paced\nnodes: []\n")
+            workflow: yunta_core::yaml::parse("name: paced\nnodes: []\n")
                 .expect("a workflow with no nodes parses"),
             config: ConfigLayer::default(),
             inputs: std::collections::BTreeMap::new(),

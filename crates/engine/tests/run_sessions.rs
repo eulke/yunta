@@ -214,8 +214,8 @@ async fn distill_copies_declared_artifacts_with_provenance_and_commits() {
     let copied = std::fs::read_to_string(dest.join("plan.md")).expect("the artifact must land");
     assert_eq!(copied, "DISTILLED-MARKER: the durable decision\n");
 
-    let provenance: serde_norway::Value =
-        serde_norway::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
+    let provenance: yunta_core::yaml::Value =
+        yunta_core::yaml::parse(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
             .unwrap();
     assert_eq!(
         provenance["source_run"].as_str(),
@@ -309,8 +309,8 @@ sessions:
     assert!(finding.title.contains("notes.md"), "got: {finding:?}");
     assert_eq!(finding.severity, yunta_core::events::FindingSeverity::Minor);
 
-    let provenance: serde_norway::Value =
-        serde_norway::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
+    let provenance: yunta_core::yaml::Value =
+        yunta_core::yaml::parse(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
             .unwrap();
     let listed: Vec<&str> = provenance["artifacts"]
         .as_sequence()
@@ -1048,8 +1048,8 @@ on_finish:
 
     let held = bench.accepted();
     assert_eq!(held.len(), 1, "{held:?}");
-    let provenance: serde_norway::Value =
-        serde_norway::from_str(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
+    let provenance: yunta_core::yaml::Value =
+        yunta_core::yaml::parse(&std::fs::read_to_string(dest.join("provenance.yaml")).unwrap())
             .unwrap();
     assert_eq!(
         provenance["artifacts"][0]["content_hash"].as_str(),

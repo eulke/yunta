@@ -100,8 +100,8 @@ impl Bench {
         workflow_yaml: &str,
         config_yaml: &str,
     ) -> yunta_core::Manifest {
-        let workflow: Workflow = serde_norway::from_str(workflow_yaml).expect("parse workflow");
-        let config: ConfigLayer = serde_norway::from_str(config_yaml).expect("parse config");
+        let workflow: Workflow = yunta_core::yaml::parse(workflow_yaml).expect("parse workflow");
+        let config: ConfigLayer = yunta_core::yaml::parse(config_yaml).expect("parse config");
         self.freeze(&workflow, &config).await.manifest
     }
 

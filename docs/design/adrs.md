@@ -118,7 +118,7 @@ lista.
 **D109 — Capa `org` de knowledge: unión de los knowledge packs instalados; colisión entre packs = error (cierra la pregunta de precedencia de DI-31; completa el criterio org de T6.5 sobre el mecanismo de M11).** `accepted` → [`adr/D109-capa-org-de-knowledge-union-de-los-knowledge.md`](adr/D109-capa-org-de-knowledge-union-de-los-knowledge.md)
 **D110 — Claves desconocidas: rechazo en todo YAML de autor, tolerancia solo en lo persistido.** `revised` *(Revisada por D168.)* → [`adr/D110-claves-desconocidas-rechazo-en-todo-yaml.md`](adr/D110-claves-desconocidas-rechazo-en-todo-yaml.md)
 **D111 — Windows sale de los targets de release hasta que la capa de procesos sea portable.** `accepted` → [`adr/D111-windows-sale-de-los-targets-de-release-hasta.md`](adr/D111-windows-sale-de-los-targets-de-release-hasta.md)
-**D112 — Reemplazo de `serde_yaml` por `serde_norway`, un fork mantenido con la misma API.** `accepted` → [`adr/D112-reemplazo-de-serde-yaml-por-serde-norway.md`](adr/D112-reemplazo-de-serde-yaml-por-serde-norway.md)
+**D112 — Reemplazo de `serde_yaml` por `serde_norway`, un fork mantenido con la misma API.** `revised` *(Revisada por D218.)* → [`adr/D112-reemplazo-de-serde-yaml-por-serde-norway.md`](adr/D112-reemplazo-de-serde-yaml-por-serde-norway.md)
 **D113 — Ids: ULID para runs; hijos y sucesores con id propio y vínculo en el log.** `accepted` → [`adr/D113-ids-ulid-para-runs-hijos-y-sucesores-con-id.md`](adr/D113-ids-ulid-para-runs-hijos-y-sucesores-con-id.md)
 **D114 — `runner` en pack manifests, payloads y JSON; `role` solo en prosa.** `accepted` → [`adr/D114-runner-en-pack-manifests-payloads-y-json-role.md`](adr/D114-runner-en-pack-manifests-payloads-y-json-role.md)
 **D115 — `fresh_context` se retira del schema.** `accepted` → [`adr/D115-fresh-context-se-retira-del-schema.md`](adr/D115-fresh-context-se-retira-del-schema.md)
@@ -224,3 +224,4 @@ lista.
 **D215 — Output is built from tones and inked once per stream.** `accepted` → [`adr/D215-output-is-built-from-tones-and-inked-once-per-stream.md`](adr/D215-output-is-built-from-tones-and-inked-once-per-stream.md)
 **D216 — A line is laid out to its stream's width, between a floor and a ceiling.** `accepted` → [`adr/D216-a-line-is-laid-out-to-its-streams-width.md`](adr/D216-a-line-is-laid-out-to-its-streams-width.md)
 **D217 — A run is called by the end of its id, and every command finds it by any unambiguous part.** `accepted` → [`adr/D217-a-run-is-called-by-the-end-of-its-id.md`](adr/D217-a-run-is-called-by-the-end-of-its-id.md)
+**D218 — YAML is read, written and located by one library.** `accepted` → [`adr/D218-yaml-is-read-and-written-by-one-library.md`](adr/D218-yaml-is-read-and-written-by-one-library.md)

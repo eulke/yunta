@@ -249,7 +249,7 @@ tasks:
     notes: "Ver Contrato del Run."
 "#;
     let tasks: TasksFile =
-        serde_norway::from_str(yaml).expect("reference tasks document should parse");
+        yunta_core::yaml::parse(yaml).expect("reference tasks document should parse");
     assert_eq!(tasks.tasks.len(), 2);
     // Overlapping scope with its own dependency ancestor is fine; the
     // registration should be clean.
@@ -293,7 +293,7 @@ fn a_plan_a_person_reviews_names_every_piece_of_its_explanation_it_lacks() {
 
 #[test]
 fn a_plan_that_creates_no_shape_and_risks_nothing_is_still_explained() {
-    let tasks: TasksFile = serde_norway::from_str(
+    let tasks: TasksFile = yunta_core::yaml::parse(
         r#"
 summary: "Write the greeting"
 description: "The project greets whoever opens it."
@@ -327,7 +327,7 @@ fn the_published_example_is_a_plan_a_person_can_review() {
 
 /// The codes `yaml` breaks, as `check` reports them.
 fn broken_codes(yaml: &str) -> Vec<String> {
-    let tasks: TasksFile = serde_norway::from_str(yaml).unwrap();
+    let tasks: TasksFile = yunta_core::yaml::parse(yaml).unwrap();
     check(&tasks)
         .iter()
         .map(|diagnostic| match &diagnostic.problem {
@@ -415,7 +415,7 @@ fn a_shape_or_a_decision_declared_twice_is_refused() {
 
 #[test]
 fn a_decision_a_person_reviews_says_why() {
-    let tasks: TasksFile = serde_norway::from_str(
+    let tasks: TasksFile = yunta_core::yaml::parse(
         r#"
 summary: s
 description: d

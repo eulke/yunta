@@ -81,8 +81,8 @@ fn curator_bench(run_id: &str) -> Bench {
 
 #[test]
 fn the_reference_workflow_passes_static_check() {
-    let workflow: Workflow = serde_norway::from_str(WORKFLOW).unwrap();
-    let config: ConfigLayer = serde_norway::from_str(CONFIG).unwrap();
+    let workflow: Workflow = yunta_core::yaml::parse(WORKFLOW).unwrap();
+    let config: ConfigLayer = yunta_core::yaml::parse(CONFIG).unwrap();
     let errors = check(&workflow, &config, &|_| None);
     assert!(errors.is_empty(), "{errors:?}");
 }
@@ -107,7 +107,7 @@ async fn an_approved_gate_publishes_the_new_version() {
     ));
 
     let pack_yaml = std::fs::read_to_string(bench.worktree.join("pack.yaml")).unwrap();
-    let pack: serde_norway::Value = serde_norway::from_str(&pack_yaml).unwrap();
+    let pack: yunta_core::yaml::Value = yunta_core::yaml::parse(&pack_yaml).unwrap();
     assert_eq!(pack["version"].as_str(), Some("1.1.0"));
     let tags = git_output(&bench.worktree, &["tag", "--list"]);
     assert_eq!(tags, "v1.1.0");

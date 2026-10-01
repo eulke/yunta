@@ -10,7 +10,7 @@ use yunta_core::ConfigLayer;
 use yunta_engine::{resolve_runner, RunnerError};
 
 fn config(yaml: &str) -> ConfigLayer {
-    serde_norway::from_str(yaml).unwrap()
+    yunta_core::yaml::parse(yaml).unwrap()
 }
 
 const CONFIG: &str = r#"
