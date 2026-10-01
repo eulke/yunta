@@ -15,6 +15,16 @@ cargo xtask schema                     # regenerates crates/core/schemas/ after 
 cargo run -p xtask -- smells --check   # the measured smell counts have not risen
 ```
 
+A golden test compares a surface's whole output with a file under the crate's
+`goldens/`, one per case and environment, escapes written as `␛`. When a change
+means to change what a surface prints, write the new files and review them in
+the diff:
+
+```bash
+YUNTA_BLESS=1 cargo test -p yunta golden
+git diff -- crates/cli/goldens
+```
+
 The toolchain is pinned in `rust-toolchain.toml`. See
 `.github/workflows/ci.yml` for the current CI checks.
 

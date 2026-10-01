@@ -120,8 +120,9 @@ fn outside(root: &Path, marks: &[Mark], owners: &[&str]) -> usize {
 /// Color only repeats what the words say, and the module that writes it
 /// is what proves a painted line reads the same once the color is gone.
 /// An escape written anywhere else is color nothing holds to that. The
-/// prompt's bracketed-paste switch is a terminal mode, not paint, and a
-/// test that types keys into a terminal sends what a keyboard sends.
+/// prompt's bracketed-paste switch is a terminal mode, not paint, a test
+/// that types keys into a terminal sends what a keyboard sends, and a
+/// golden shows paint rather than making it.
 fn count_sgr_outside_ink(root: &Path) -> usize {
     outside(
         root,
@@ -131,6 +132,9 @@ fn count_sgr_outside_ink(root: &Path) -> usize {
             "crates/cli/src/ask/keys.rs",
             "crates/cli/tests/",
             "crates/testkit/src/terminal.rs",
+            // A golden writes the paint a surface printed where a
+            // reviewer can read it, and its test paints to prove that.
+            "crates/testkit/src/golden.rs",
         ],
     )
 }
@@ -237,6 +241,9 @@ fn count_env_read_outside_boundary(root: &Path) -> usize {
             // `PATH` is, and where the real program lives, is the whole
             // of what it does.
             "crates/testkit/src/stubs.rs",
+            // Blessing a golden is what a person asks of a test run, and
+            // reading that request is what the module is for.
+            "crates/testkit/src/golden.rs",
         ],
     )
 }

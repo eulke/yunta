@@ -21,6 +21,7 @@ mod child;
 mod corpus;
 mod events;
 mod frames;
+mod golden;
 mod interaction;
 mod observer;
 mod owner;
@@ -47,6 +48,7 @@ pub use events::{
     accepted, baselines, status_changed_carrying, task_registered, task_status_changed, SourceLog,
 };
 pub use frames::{child_link, moment, node_frame, run_frame};
+pub use golden::{assert_golden, visible, Environment, ENVIRONMENTS};
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use observer::{Frame, RecordingObserver};
 pub use owner::Owner;
