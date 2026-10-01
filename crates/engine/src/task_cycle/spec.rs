@@ -76,7 +76,7 @@ pub(super) async fn laid(
 
 /// The files the run's spec gives `task`: none when the run holds no
 /// spec, or its spec gives the task none.
-pub(super) fn files<'a>(setup: &'a SessionSetup, task: &Task) -> &'a [TestFile] {
+pub(crate) fn files<'a>(setup: &'a SessionSetup, task: &Task) -> &'a [TestFile] {
     setup
         .spec
         .as_deref()

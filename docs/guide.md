@@ -301,9 +301,9 @@ the missing behavior shows before anyone approves it.
 A loop holds each task to the spec the run holds. The task's files are written into
 the tree its work starts from and its tests join its criteria, so it closes only
 when they pass; the suite the run measured answers for that tree before the tests
-are in it. Its work may never change those files: its session's fence refuses the
-write, `yunta_task` lists them as denied, and a change the audit finds keeps the
-task open. Neither may any other session of the run — another task, a node after
+are in it. Its work may never change those files: its session is told which they
+are, its fence refuses the write, `yunta_task` lists them as denied, and a change
+the audit finds keeps the task open. Neither may any other session of the run — another task, a node after
 the loop, one scoped to what the run changed: every file of the spec is denied to
 all of them, as the project's own denies are. A test the implementer believes is
 wrong is a departure from the plan — `yunta_declare_deviation` on that criterion —

@@ -63,9 +63,21 @@ pub(crate) fn submission_notice(
 pub(crate) fn task_notice(
     session: Option<&RunToolsSession>,
     task: Option<&super::host::TaskAccess>,
+    tests: &[yunta_core::TestFile],
 ) -> Option<String> {
     let session = session?;
     let task = task?;
+    let approved = match tests.is_empty() {
+        true => String::new(),
+        false => format!(
+            " The tests a person approved for this task are in your checkout — {} — and are \
+             not yours to change: the engine refuses a write to them. One you believe is \
+             wrong is a departure from the plan: declare it on that criterion with \
+             `{depart}`, and a person decides whether it is written again.",
+            yunta_core::text::listed(tests.iter().map(|file| file.path.as_str())),
+            depart = session.called(RunTool::DeclareDeviation),
+        ),
+    };
     let plan = match task.plan {
         Some(_) => format!(
             " It also carries the plan the task belongs to: the design the task names, and \
@@ -79,7 +91,7 @@ pub(crate) fn task_notice(
     Some(format!(
         "\n\nRead this task's scope, criteria and notes with `{read}` before you change \
          anything — the tasks document is not in your checkout, and the same call shows \
-         what earlier attempts left red.{plan} When your session ends the engine runs every \
+         what earlier attempts left red.{plan}{approved} When your session ends the engine runs every \
          criterion and rejects any change outside the scope; `{check}` judges your work \
          exactly that way, so call it before you finish.",
         read = session.called(RunTool::Task),

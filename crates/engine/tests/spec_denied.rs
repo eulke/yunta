@@ -224,3 +224,65 @@ async fn a_spec_that_names_a_file_the_run_already_holds_is_refused_saying_which(
     assert_eq!(refused(&bench), [vec!["test-file-exists".to_string()]]);
     assert_eq!(at_head(&bench, "tests/greet.sh"), "echo the project's own");
 }
+
+/// The task session's own prompt, from what the mock was asked.
+fn task_prompt(bench: &Bench) -> String {
+    bench
+        .mock()
+        .requests_seen()
+        .into_iter()
+        .find(|request| request.prompt.contains("Implement your task"))
+        .expect("a task session opened")
+        .prompt
+}
+
+#[tokio::test]
+async fn a_task_held_to_tests_is_told_they_are_denied_and_how_to_dispute_one() {
+    let bench = Bench::new();
+    bench
+        .run(
+            &specified_loop(),
+            &building("      - { path: greeting.txt, content: Hello }\n"),
+        )
+        .await;
+
+    let prompt = task_prompt(&bench);
+    for told in [
+        "The tests a person approved for this task are in your checkout — `tests/greet.sh` — \
+         and are not yours to change",
+        "declare it on that criterion with `yunta_declare_deviation`, and a person decides \
+         whether it is written again",
+    ] {
+        assert!(prompt.contains(told), "`{told}` is missing from:\n{prompt}");
+    }
+}
+
+#[tokio::test]
+async fn a_task_without_tests_hears_nothing_of_them() {
+    let workflow = r#"
+name: unspecified
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    prompt: "Write the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [plan]
+    until: all_tasks_complete
+    prompt: "Implement your task."
+"#;
+    let fixture = common::plan_session(PLAN)
+        + "  - match_prompt_contains: \"Implement your task\"
+    effects:
+      - { path: greeting.txt, content: Hello }
+    outcome: { type: completed, summary: built }
+";
+    let bench = Bench::new();
+    bench.run(workflow, &fixture).await;
+
+    assert!(!task_prompt(&bench).contains("tests a person approved"));
+}

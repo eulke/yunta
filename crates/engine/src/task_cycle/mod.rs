@@ -47,6 +47,7 @@ pub(crate) use session::{Dispatched, Opening, Resume};
 
 pub use answer::{Answer, Continuing, RespecifiedTask, Respecify, Review};
 pub use error::TaskCycleError;
+pub(crate) use spec::files as spec_files;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CriterionRun {

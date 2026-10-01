@@ -317,7 +317,13 @@ fn told(
     let notices = [
         crate::run_tools::naming_notice(run_tools),
         crate::run_tools::submission_notice(run_tools, declared, setup.artifact_dir.as_deref()),
-        crate::run_tools::task_notice(run_tools, task),
+        crate::run_tools::task_notice(
+            run_tools,
+            task,
+            task.map_or(&[][..], |task| {
+                crate::task_cycle::spec_files(setup, &task.task)
+            }),
+        ),
     ];
     for notice in notices.into_iter().flatten() {
         prompt.push_str(&notice);

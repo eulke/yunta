@@ -159,7 +159,9 @@ fn task_tool() -> Tool {
         RunTool::Task.name(),
         "Read the task this session works, from the run's tasks document: its id, title \
          and notes; `scope`, the globs every change must stay inside (what the task declared \
-         plus what was granted to it); and `criteria`, the commands that must all exit 0 \
+         plus what was granted to it); `denied`, what no change may touch whatever the scope \
+         — what the project denies, and the files of every test a person approved, this \
+         task's own among them; and `criteria`, the commands that must all exit 0 \
          when your session ends — a criterion is red before the work starts, and a `guard` \
          is green before it and must stay green; each may say what it `proves`. When the run \
          measured its suite green before changing anything, that suite is among the guards: \
