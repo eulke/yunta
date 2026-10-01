@@ -1,8 +1,11 @@
 //! What a review found, as the person deciding reads it on a terminal:
 //! how many of each severity, then each finding, the most severe first —
 //! what is wrong, where, and in the reviewer's own words what goes wrong
-//! and when.
+//! and when. The run's findings read the same way, each with the node
+//! that found it and what other nodes answered.
 
+use yunta_core::events::findings::{RunFindings, StandingFinding};
+use yunta_core::events::FindingSeverity;
 use yunta_core::{FindingEntry, FindingsFile};
 
 use crate::render::markdown::{hanging, markdown};
@@ -14,25 +17,14 @@ const BODY: &str = "    ";
 pub(super) fn findings(file: &FindingsFile, of: &str, width: usize) -> Vec<String> {
     let mut found: Vec<&FindingEntry> = file.findings.iter().collect();
     found.sort_by_key(|finding| finding.severity);
-    let counts: Vec<String> = found
-        .chunk_by(|a, b| a.severity == b.severity)
-        .filter_map(|same| {
-            let severity = same.first()?.severity;
-            Some(format!("{} {}", same.len(), severity.as_str()))
-        })
-        .collect();
+    let counts = counted(found.iter().map(|finding| finding.severity));
     let mut lines = vec![match counts.is_empty() {
         true => format!("the findings{of} — none"),
         false => format!("the findings{of} — {}", counts.join(", ")),
     }];
     for finding in found {
         lines.push(String::new());
-        lines.extend(hanging(
-            INDENT,
-            &format!("{} — ", finding.severity.as_str()),
-            &finding.title,
-            width,
-        ));
+        lines.extend(headline(finding.severity, &finding.title, width));
         lines.extend(hanging(
             BODY,
             "",
@@ -42,4 +34,65 @@ pub(super) fn findings(file: &FindingsFile, of: &str, width: usize) -> Vec<Strin
         lines.extend(markdown(&finding.detail, BODY, width));
     }
     lines
+}
+
+/// Every finding standing in the run: how many of each severity and how
+/// many another node answered, then each, the most severe first — which
+/// node found it where, what goes wrong, and each answer it got.
+pub(super) fn run_findings(view: &RunFindings, width: usize) -> Vec<String> {
+    let mut found: Vec<&StandingFinding> = view.findings.iter().collect();
+    found.sort_by_key(|standing| standing.finding.severity);
+    let counts = counted(found.iter().map(|standing| standing.finding.severity));
+    let answered = found
+        .iter()
+        .filter(|standing| !standing.answers.is_empty())
+        .count();
+    let mut lines = vec![match (counts.is_empty(), answered) {
+        (true, _) => "the run's findings — none".to_string(),
+        (false, 0) => format!("the run's findings — {}", counts.join(", ")),
+        (false, _) => format!(
+            "the run's findings — {}; {answered} answered",
+            counts.join(", ")
+        ),
+    }];
+    for standing in found {
+        let finding = &standing.finding;
+        let found_by = match &standing.node {
+            Some(node) => format!("{} of `{node}`, at {}", finding.id, finding.location),
+            None => format!("{}, the run's own, at {}", finding.id, finding.location),
+        };
+        lines.push(String::new());
+        lines.extend(headline(finding.severity, &finding.title, width));
+        lines.extend(hanging(BODY, "", &found_by, width));
+        lines.extend(markdown(&finding.detail, BODY, width));
+        for answer in &standing.answers {
+            let by = answer
+                .by
+                .as_ref()
+                .map(|node| format!(" by `{node}`"))
+                .unwrap_or_default();
+            lines.extend(hanging(
+                BODY,
+                &format!("{}{by} — ", answer.answer.as_str()),
+                &answer.why,
+                width,
+            ));
+        }
+    }
+    lines
+}
+
+/// A finding's first line: how severe, and what is wrong.
+fn headline(severity: FindingSeverity, title: &str, width: usize) -> Vec<String> {
+    hanging(INDENT, &format!("{} — ", severity.as_str()), title, width)
+}
+
+/// How many of each severity `severities` holds, the most severe first;
+/// `severities` comes sorted.
+fn counted(severities: impl Iterator<Item = FindingSeverity>) -> Vec<String> {
+    let severities: Vec<FindingSeverity> = severities.collect();
+    severities
+        .chunk_by(|a, b| a == b)
+        .filter_map(|same| Some(format!("{} {}", same.len(), same.first()?.as_str())))
+        .collect()
 }

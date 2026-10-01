@@ -33,6 +33,7 @@ mod escalation;
 mod exec;
 mod executor_exec;
 mod gate_exec;
+pub(crate) mod gate_findings;
 mod hooks_exec;
 mod internal_gate;
 mod loop_exec;

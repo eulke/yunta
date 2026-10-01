@@ -9,7 +9,7 @@
 
 use super::*;
 use yunta_core::events::ArtifactId;
-use yunta_core::workflow::reads::artifact_reads;
+use yunta_core::workflow::reads::{artifact_reads, ReadSite};
 use yunta_core::{ArtifactKind, ArtifactRefId, ContextSpec, ModeName, MountSpec};
 
 /// A read nothing in the run can answer: what it asks for, and who asks.
@@ -281,6 +281,9 @@ fn run_references(node: &Node) -> Vec<(String, ArtifactId)> {
     let mut references: Vec<(String, ArtifactId)> = artifact_reads(node)
         .into_iter()
         .filter(|read| read.node.is_none() && literal_ref(read.id))
+        // A gate showing the run's findings shows a view the log
+        // derives, whatever node did or did not report one.
+        .filter(|read| !(read.site == ReadSite::Shows && is_findings(read.id)))
         .map(|read| (read.site.of(&node.id), ArtifactId::from(read.id)))
         .collect();
     if let NodeKind::Gate {
@@ -408,6 +411,14 @@ fn declares(node: &Node, wanted: &ArtifactId) -> bool {
 
 /// Whether a reference names its artifact as written, rather than with a
 /// template only the run renders.
+/// Whether `id` names the `findings` kind.
+fn is_findings(id: &ArtifactRefId) -> bool {
+    ArtifactId::from(id)
+        == ArtifactId::Interpreted {
+            kind: ArtifactKind::Findings,
+        }
+}
+
 fn literal_ref(id: &ArtifactRefId) -> bool {
     match id {
         ArtifactRefId::Kind { .. } => true,

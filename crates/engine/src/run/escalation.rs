@@ -176,7 +176,7 @@ pub fn current_escalation(manifest: &Manifest, state: &RunState) -> Option<(Node
         Decision::ResolveInternalGate { node } => {
             let node = super::find_node(&manifest.workflow, &node).ok()?;
             let escalation = super::internal_gate::InternalGate::of(node)?
-                .escalation(&manifest.workflow, &state.artifacts)
+                .escalation(&manifest.workflow, state)
                 .ok()?;
             Some((node.id.clone(), escalation))
         }

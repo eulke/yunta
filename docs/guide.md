@@ -513,6 +513,12 @@ what the plan said, what was built instead and why, and what they said accepting
 it. A gate that shows a `spec` reads it task by task — what each test proves, then
 the files the tests live in, whole — and one that shows a `findings` document
 reads it the most severe finding first, each with where it is and what goes wrong.
+A gate that shows `{ kind: findings }` without naming a node shows the run's
+findings: every finding standing in it — each reviewer's, the engine's own, those a
+node reported without declaring a findings document — with the node that found it
+and every answer another node gave it. It is a view the log derives, pinned by the
+hash of its bytes like any document, so a decision recorded from another process
+names the same findings, and it needs no node to produce it.
 
 A plan a gate shows has to say those things. Next to `tasks:` it carries a
 `summary`, a Markdown `description` (code blocks and `mermaid` diagrams welcome), a

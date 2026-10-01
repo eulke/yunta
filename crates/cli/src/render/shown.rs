@@ -9,7 +9,9 @@
 //! the commands that prove it stay in the whole plan, one open away. A
 //! diagram has no room on a terminal either, so it is named here and
 //! drawn there. A spec is read task by task, with its tests' files
-//! whole; what a review found, the most severe first.
+//! whole; what a review found, the most severe first; the run's findings
+//! the same way, each with the node that found it and how others
+//! answered it.
 
 use yunta_core::events::ArtifactId;
 use yunta_engine::{ShownContent, ShownDocument};
@@ -35,6 +37,10 @@ pub(crate) fn shown(document: &ShownDocument, width: usize) -> Vec<String> {
         ShownContent::Findings(file) => (
             super::findings::findings(file, &of, width),
             "the whole document",
+        ),
+        ShownContent::RunFindings(view) => (
+            super::findings::run_findings(view, width),
+            "every finding, whole",
         ),
         ShownContent::Text(text) => (
             self::text(text, &document.shown.artifact, &of, width),
@@ -302,6 +308,55 @@ tasks:
         assert!(
             drawn.iter().all(|line| cell_width(line) <= 60),
             "{drawn:#?}"
+        );
+    }
+
+    #[test]
+    fn a_review_shown_after_it_was_answered_reads_each_answer_under_its_finding() {
+        let view: yunta_core::events::findings::RunFindings = serde_norway::from_str(
+            r#"
+findings:
+  - node: review
+    id: halfway
+    severity: blocking
+    title: "The greeting stops halfway"
+    location: "greeting.txt"
+    detail: "It never says good night."
+    answers:
+      - { by: fix, answer: fixed, why: "it says good night now" }
+  - id: cleanup
+    severity: minor
+    title: "A cleanup did not finish"
+    location: "run:scratch"
+    detail: "Left behind."
+"#,
+        )
+        .unwrap();
+        let drawn = shown(
+            &document(
+                ShownContent::RunFindings(view),
+                ArtifactId::Interpreted {
+                    kind: ArtifactKind::Findings,
+                },
+            ),
+            60,
+        );
+        assert_eq!(
+            drawn,
+            vec![
+                "the run's findings — 1 blocking, 1 minor; 1 answered",
+                "",
+                "  blocking — The greeting stops halfway",
+                "    halfway of `review`, at greeting.txt",
+                "    It never says good night.",
+                "    fixed by `fix` — it says good night now",
+                "",
+                "  minor — A cleanup did not finish",
+                "    cleanup, the run's own, at run:scratch",
+                "    Left behind.",
+                "",
+                "every finding, whole: /runs/r/artifacts/plan/tasks.md",
+            ]
         );
     }
 

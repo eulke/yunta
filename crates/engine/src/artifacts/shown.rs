@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use yunta_core::events::findings::RunFindings;
 use yunta_core::events::{AcceptedDeparture, ArtifactId, Shown, TaskLedger};
 use yunta_core::{ArtifactKind, TasksFile};
 
@@ -37,6 +38,12 @@ pub(crate) async fn documents(
         // from wherever they stand and not from the run's directory.
         let path = run_dir.join(view_of(shown));
         let content = match &shown.artifact {
+            _ if crate::run::gate_findings::shows_view(shown) => {
+                match yunta_core::yaml::parse_bytes::<RunFindings>(&bytes) {
+                    Ok(findings) => ShownContent::RunFindings(findings),
+                    Err(_) => ShownContent::Text(String::from_utf8_lossy(&bytes).into_owned()),
+                }
+            }
             ArtifactId::Interpreted {
                 kind: ArtifactKind::Tasks,
             } => {

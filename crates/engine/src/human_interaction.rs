@@ -52,6 +52,9 @@ pub enum ShownContent {
     Spec(yunta_core::SpecFile),
     /// What a review found, read into its findings.
     Findings(yunta_core::FindingsFile),
+    /// Every finding standing in the run, each with the node that
+    /// reported it and how other nodes answered it.
+    RunFindings(yunta_core::events::findings::RunFindings),
     Text(String),
 }
 

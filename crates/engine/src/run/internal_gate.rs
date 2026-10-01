@@ -13,6 +13,7 @@ use yunta_core::{ArtifactContextRef, Node, NodeId, NodeKind, NonEmpty, OptionId,
 use super::gate_exec::{emit_started, GateStep};
 use super::node_close::{fail, finish_node};
 use super::{RunCtx, RunError};
+use crate::replay::RunState;
 use crate::reserved::{offers, ReservedOption};
 
 /// A gate a person answers here, read once out of its node.
@@ -34,6 +35,8 @@ pub(crate) enum GateEscalationError {
     /// has a log that says otherwise.
     #[error("it shows the {artifact}{of}, which the run does not hold")]
     NotHeld { artifact: ArtifactId, of: String },
+    #[error("the run's findings it shows could not be written: {0}")]
+    View(#[from] yunta_core::yaml::YamlError),
 }
 
 impl<'a> InternalGate<'a> {
@@ -73,7 +76,7 @@ impl<'a> InternalGate<'a> {
     pub(crate) fn escalation(
         &self,
         workflow: &Workflow,
-        artifacts: &ArtifactLedger,
+        state: &RunState,
     ) -> Result<Escalation, GateEscalationError> {
         let declared: Vec<OptionId> = if self.options.is_empty() {
             vec![ReservedOption::Approve.id()]
@@ -110,14 +113,24 @@ impl<'a> InternalGate<'a> {
             vec![Fact::labelled("assignee", self.assignee)].into(),
             NonEmpty::from((first, rest)),
         )?
-        .showing(self.shown(artifacts)?))
+        .showing(self.shown(state)?))
     }
 
-    /// Each document the gate shows, as the run holds it now.
-    fn shown(&self, artifacts: &ArtifactLedger) -> Result<Vec<Shown>, GateEscalationError> {
+    /// Whether the gate shows the run's findings.
+    fn shows_the_run_findings(&self) -> bool {
+        self.shows.iter().any(super::gate_findings::is_view)
+    }
+
+    /// Each document the gate shows, as the run holds it now; the run's
+    /// findings as the view the log derives.
+    fn shown(&self, state: &RunState) -> Result<Vec<Shown>, GateEscalationError> {
+        let artifacts: &ArtifactLedger = &state.artifacts;
         self.shows
             .iter()
             .map(|reference| {
+                if super::gate_findings::is_view(reference) {
+                    return Ok(super::gate_findings::shown(state)?);
+                }
                 let artifact = ArtifactId::from(&reference.id);
                 let held = artifacts
                     .latest(&artifact, reference.node.as_ref())
@@ -165,8 +178,11 @@ pub(super) async fn resolve(ctx: &RunCtx<'_>, node: &Node) -> Result<GateStep, R
         .ok_or_else(|| broken("the scheduler chose it as an internal gate".to_string()))?;
     let state = ctx.run_view().await?.state;
     let escalation = gate
-        .escalation(&ctx.manifest.workflow, &state.artifacts)
+        .escalation(&ctx.manifest.workflow, &state)
         .map_err(|source| broken(source.to_string()))?;
+    if gate.shows_the_run_findings() {
+        super::gate_findings::keep(ctx, &state).await?;
+    }
     // A decision `resolve_gate` pre-seeded onto the log while this run
     // was parked is consumed here — never re-asked, and its escalation
     // pair is already recorded. Re-validated against the re-derived
