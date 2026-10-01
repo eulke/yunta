@@ -366,10 +366,10 @@ fn child_words(happening: &children::happening::Happening) -> (Option<StateWord>
     use children::happening::Happening as H;
     match happening {
         H::Born(run_id) => (Some(StateWord::Run), format!("child run {run_id} opened")),
-        H::Closed { run_id, terminal } => (
-            Some(StateWord::Done),
-            format!("child run {run_id} {}", view::closed_as(*terminal)),
-        ),
+        H::Closed { run_id, terminal } => {
+            let (mark, closed) = view::child_standing(Some(*terminal));
+            (Some(mark), format!("child run {run_id} {closed}"))
+        }
         H::Iteration { iteration } => (None, format!("iteration {iteration}")),
     }
 }

@@ -152,6 +152,37 @@ mod tests {
         )))
     }
 
+    /// A child that failed or was cancelled is not marked as one that
+    /// finished: the mark repeats how it closed.
+    #[test]
+    fn a_closed_child_is_marked_by_how_it_closed() {
+        use yunta_core::events::{ChildEvent, ChildRunFinishedPayload, TerminalState};
+        for (terminal, mark) in [
+            (TerminalState::Done, StateWord::Done),
+            (TerminalState::Failed, StateWord::Fail),
+            (TerminalState::Cancelled, StateWord::Fail),
+            (TerminalState::Promoted, StateWord::Wait),
+        ] {
+            let events = vec![StoredEvent {
+                seq: 1.into(),
+                run_id: "01JQ0000000000000000000000".into(),
+                node_id: Some("compose".into()),
+                timestamp: chrono::DateTime::UNIX_EPOCH,
+                body: EventBody::Known(EventPayload::Children(ChildEvent::Finished(
+                    ChildRunFinishedPayload {
+                        child_run_id: "01JQ0000000000000000000001".into(),
+                        child_workflow_hash: yunta_core::sha256_hex(b"child"),
+                        terminal_state: terminal,
+                        tokens: TokenUsage::default(),
+                    },
+                ))),
+            }];
+            let moments = derive_chronicle(&events);
+            let said = say(moments.first().expect("one moment"));
+            assert_eq!(said.word, Some(mark), "{terminal:?}: {}", said.text);
+        }
+    }
+
     #[test]
     fn a_reroute_with_a_cause_reads_as_the_target_and_the_cause() {
         assert_eq!(

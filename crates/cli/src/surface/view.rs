@@ -157,7 +157,7 @@ fn children_of<'a>(frame: &'a RunFrame, node: &NodeId) -> Vec<&'a ChildLink> {
 /// A child the parent's log has no close for is open and nothing more:
 /// how far it has got is on the child's own log, which this run never
 /// opens.
-fn child_standing(terminal: Option<TerminalState>) -> (StateWord, &'static str) {
+pub(super) fn child_standing(terminal: Option<TerminalState>) -> (StateWord, &'static str) {
     match terminal {
         None => (StateWord::Run, "still open"),
         Some(TerminalState::Done) => (StateWord::Done, closed_as(TerminalState::Done)),
