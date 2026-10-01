@@ -11,7 +11,8 @@
 use std::path::Path;
 
 use yunta_testkit::{
-    git, run_id_from, stderr, stdout, write, yunta_in, yunta_on_terminal, Checkout, Terminal,
+    git, run_id_from, stderr, stdout, write, yunta_at, yunta_in, yunta_on_terminal, Checkout,
+    Terminal,
 };
 
 /// A repo with `wf.yaml` written and committed, and the state root to run
@@ -177,6 +178,24 @@ fn a_run_read_back_from_a_pipe_says_what_a_watched_terminal_kept() {
         );
         assert!(written.contains(&kept), "and the pipe wrote it:\n{written}");
     }
+}
+
+/// The branch the closing block names is the one the run's commits are
+/// on: a reader who checks it out finds the work.
+#[test]
+fn the_closing_block_names_a_branch_git_has() {
+    let checkout = Checkout::new().workflow("wf", TWO_NODES).committed();
+    let run = yunta_at!(&checkout, &["run", "wf.yaml"]);
+    assert!(run.status.success(), "{}", stderr(&run));
+    let text = stdout(&run);
+    let branch = text
+        .lines()
+        .find_map(|line| line.trim_start().strip_prefix("branch"))
+        .and_then(|row| row.split_whitespace().next())
+        .unwrap_or_else(|| panic!("a branch row: {text}"))
+        .to_string();
+    // Fails, naming git's own answer, when the branch is not there.
+    git(&checkout.repo, &["rev-parse", "--verify", &branch]);
 }
 
 /// `NO_COLOR` asks for no color, and the region is plain text already:

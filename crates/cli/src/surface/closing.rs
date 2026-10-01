@@ -258,8 +258,8 @@ impl Closing {
     fn branch(&self) -> String {
         match self.isolation {
             Isolation::Worktree => format!(
-                "yunta/{} off {}, in {}",
-                self.run_id,
+                "{} off {}, in {}",
+                yunta_engine::run_branch(&self.run_id),
                 self.base_branch,
                 self.worktree.display()
             ),
