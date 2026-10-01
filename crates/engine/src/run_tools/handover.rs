@@ -76,15 +76,24 @@ impl SessionTools {
             .await
             .map_err(|source| RunToolError::Plan { source })?
             .map(|held| held.document);
+        // A spec written again because a person accepted that a task's
+        // tests are wrong answers for those tasks' tests alone: the others
+        // stand as they were, and a task already done passes its own.
+        let state = crate::replay::derive(&events);
+        let owed: Vec<TaskId> = crate::tasks::respecifications_owed(&state)
+            .into_iter()
+            .map(|(task, _)| task.clone())
+            .collect();
+        let asked = |one: &&Spec| owed.is_empty() || owed.contains(&one.task);
         let (checkout, base) = self.handover_checkout().await?;
         let supervision = self.host.supervision(&self.stop);
-        let broken = already_held(&checkout, &base, spec, supervision).await?;
+        let broken = already_held(&checkout, &base, spec, &asked, supervision).await?;
         write_test_files(&checkout, spec).await?;
         let mut proven = SpecProven {
             broken,
             failing: Vec::new(),
         };
-        for (index, one) in spec.specs.iter().enumerate() {
+        for (index, one) in spec.specs.iter().enumerate().filter(|(_, one)| asked(one)) {
             let (broken, runs) = self.tested(index, one, plan.as_ref(), &checkout).await?;
             proven.broken.extend(broken);
             proven
@@ -180,10 +189,11 @@ async fn already_held(
     checkout: &Path,
     base: &CommitSha,
     spec: &SpecFile,
+    asked: &(dyn Fn(&&Spec) -> bool + Sync),
     supervision: crate::process::Supervision<'_>,
 ) -> Result<Vec<Diagnostic>, RunToolError> {
     let mut found = Vec::new();
-    for (index, one) in spec.specs.iter().enumerate() {
+    for (index, one) in spec.specs.iter().enumerate().filter(|(_, one)| asked(one)) {
         for file in &one.files {
             let at = format!("{}:{}", base.as_str(), file.in_repo());
             let held = crate::git::success(checkout, &["cat-file", "-e", at.as_str()], supervision)

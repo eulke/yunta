@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::events::node::payloads::{Criterion, CriterionResult};
 use crate::glob::ScopeGlob;
 use crate::hash::CommitSha;
-use crate::ids::{Seq, SessionId, TaskId};
+use crate::ids::{NodeId, Seq, SessionId, TaskId};
 
 /// Exact variant names are provisional.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -194,4 +194,8 @@ pub struct DeviationResolvedPayload {
     /// What the person said, when they said anything.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub said: Option<String>,
+    /// The node that writes the task's tests again, when the person
+    /// accepted departing from a test the run's spec gave it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub respecified_by: Option<NodeId>,
 }

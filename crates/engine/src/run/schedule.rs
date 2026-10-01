@@ -619,7 +619,8 @@ fn failure_step(board: &Board<'_>) -> Option<Decision> {
 
         match rerouted_for_this_failure {
             None => {
-                if let Some(decision) = unrerouted(board, node, failure, record.reroutes) {
+                if let Some(decision) = unrerouted(board, node, failure, record.on_failure_reroutes)
+                {
                     return Some(decision);
                 }
             }

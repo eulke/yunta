@@ -69,7 +69,7 @@ pub(super) async fn laid(
     let unit = overlaid(task, unit, files, setup, supervision).await?;
     // Carried work brings the files with it, so they go in after it.
     if !carried {
-        write(task, &unit, files).await?;
+        write(task, &unit, setup).await?;
     }
     Ok(Some(Laid { unit, guarded }))
 }
@@ -110,13 +110,22 @@ async fn overlaid(
     })
 }
 
-/// Writes `files` into `unit`'s checkout, over whatever is there.
+/// Writes the files the run's spec gives `task` into `unit`'s checkout,
+/// over whatever is there, once the files only an earlier spec gave it
+/// are out of it.
 pub(super) async fn write(
     task: &Task,
     unit: &Unit,
-    files: &[TestFile],
+    setup: &SessionSetup,
 ) -> Result<(), TaskCycleError> {
-    crate::worktree::write_files(&unit.worktree, files)
+    let gone = setup
+        .superseded
+        .get(&task.id)
+        .map_or(&[][..], Vec::as_slice);
+    crate::worktree::remove_files(&unit.worktree, gone)
+        .await
+        .map_err(|source| failed(task, source))?;
+    crate::worktree::write_files(&unit.worktree, files(setup, task))
         .await
         .map_err(|source| failed(task, source))
 }

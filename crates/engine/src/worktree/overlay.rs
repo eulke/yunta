@@ -73,6 +73,28 @@ pub async fn tree_with(
         })
 }
 
+/// Takes `paths` out of `worktree`; one already gone is out.
+pub async fn remove_files(
+    worktree: &Path,
+    paths: &[std::path::PathBuf],
+) -> Result<(), WorktreeError> {
+    for path in paths {
+        let at = worktree.join(path);
+        match tokio::fs::remove_file(&at).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(WorktreeError::Io {
+                    action: "take out a test file an earlier spec gave".to_string(),
+                    path: at,
+                    source,
+                })
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Writes `files` into `worktree`, each whole, over whatever is there.
 pub async fn write_files(worktree: &Path, files: &[TestFile]) -> Result<(), WorktreeError> {
     for file in files {

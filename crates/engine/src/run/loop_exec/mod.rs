@@ -12,6 +12,7 @@ mod dispatch;
 mod escalate;
 mod integrate;
 mod reopen;
+mod respecify;
 
 use yunta_core::events::{
     EventPayload, Failure, LoopIterationPayload, SessionDeath, StoredEvent, TaskStatus, TokenUsage,
@@ -56,6 +57,11 @@ pub(super) async fn execute_loop(
     };
     loop {
         state.iteration += 1;
+        // Tests a person accepted are wrong are written again before
+        // anything else of this loop is dispatched.
+        if let Some(end) = respecify::send_back(ctx, node, state.tokens).await? {
+            return Ok(end);
+        }
         let view = ctx.run_view().await?;
         let batch = select_batch(&prep.tasks, &view.state, prep.concurrency);
 
@@ -219,6 +225,7 @@ pub(super) async fn execute_loop(
             let holders = depart::Holders {
                 suite: prep.setup.suite.as_deref(),
                 spec: prep.setup.spec.as_deref(),
+                writer: prep.writer.as_ref(),
             };
             if let Some(end) =
                 resolve_departures(ctx, node, departures, &holders, state.tokens).await?
@@ -239,6 +246,8 @@ struct LoopPrep<'a> {
     setup: crate::task_cycle::SessionSetup,
     /// The registered document, as its planner wrote it.
     document: TasksFile,
+    /// The node that writes the run's spec again, when one of it does.
+    writer: Option<yunta_core::NodeId>,
     /// The registered document, each task as the run judges it.
     tasks: TasksFile,
     concurrency: u32,
@@ -363,10 +372,13 @@ async fn prepare_loop<'a>(
         crate::tasks::judged_plan(&held.document, baseline, spec.as_deref(), &view.state.tasks);
     // Every task session reads the plan its task belongs to: the design
     // it names, and the tasks that own what it may not touch.
+    let writer = respecify::writer(ctx, &view.events, &view.state);
+    let superseded = respecify::superseded(ctx.run_dir, &view.events, spec.as_deref()).await?;
     let setup = crate::task_cycle::SessionSetup {
         plan: Some(std::sync::Arc::new(tasks.clone())),
         spec,
         suite: crate::tasks::suite_of(baseline).map(str::to_string),
+        superseded,
         ..setup
     };
 
@@ -391,6 +403,7 @@ async fn prepare_loop<'a>(
         adapter,
         setup,
         document: held.document,
+        writer,
         tasks,
         concurrency,
         scope_expansion,

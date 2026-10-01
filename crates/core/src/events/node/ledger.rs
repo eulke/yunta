@@ -149,6 +149,10 @@ pub struct NodeRecord {
     pub last_failed: Option<Seq>,
     pub last_finished: Option<Seq>,
     pub reroutes: u32,
+    /// The re-routes its own `on_failure` made, which its
+    /// `max_reroutes` counts: a person's choice that sends the run
+    /// somewhere is a decision, not a retry.
+    pub on_failure_reroutes: u32,
     pub last_reroute: Option<Reroute>,
     pub runner: Option<ResolvedRunner>,
     /// What every closed attempt of this node spent.
@@ -451,6 +455,9 @@ impl NodeLedger {
             }
             NodeEvent::Rerouted(p) => {
                 record.reroutes += 1;
+                if p.origin == RerouteOrigin::OnFailure {
+                    record.on_failure_reroutes += 1;
+                }
                 record.last_reroute = Some(Reroute::of(p, meta));
             }
             NodeEvent::RunnerResolved(p) => {

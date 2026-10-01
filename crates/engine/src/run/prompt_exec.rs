@@ -197,16 +197,13 @@ pub(super) async fn execute_prompt(
     .await?;
 
     let staged = adapter.staged_paths(&request);
-    // A fresh session a person's review sent back here is told the
-    // review, and where what the node handed over is: a session picked
-    // back up has both already, and is told only the review.
-    let review = super::continuation::review(ctx, &node.id).await?;
-    let brief = match &review {
-        Some((review, handed)) => format!(
-            "{}{}",
-            request.prompt,
-            crate::run_tools::fresh_review_notice(review, handed)
-        ),
+    // A fresh session a person sent back here is told why — their
+    // review, or the tests it wrote that they accepted are wrong — and
+    // where what the node handed over is: a session picked back up has
+    // both already, and is told only the answer.
+    let sent_back = super::continuation::sent_back(ctx, &node.id).await?;
+    let brief = match &sent_back {
+        Some(notice) => format!("{}{notice}", request.prompt),
         None => request.prompt.clone(),
     };
     let request = match continuing {
@@ -218,7 +215,7 @@ pub(super) async fn execute_prompt(
                 crate::run_tools::Asker::Node,
             ),
         ),
-        None if review.is_some() => super::session_plan::with_prompt(request, brief.clone()),
+        None if sent_back.is_some() => super::session_plan::with_prompt(request, brief.clone()),
         None => request,
     };
     let crate::task_cycle::Dispatched {

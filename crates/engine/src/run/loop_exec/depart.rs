@@ -27,10 +27,39 @@ const ACCEPT: &str = "accept";
 const SEND_BACK: &str = "send-back";
 
 /// What holds a task to its criteria besides its plan, which decides
-/// what accepting a departure from one of them does.
+/// what accepting a departure from one of them does — and the node that
+/// writes the spec again, when one of the run does.
 pub(super) struct Holders<'a> {
     pub(super) suite: Option<&'a str>,
     pub(super) spec: Option<&'a yunta_core::SpecFile>,
+    pub(super) writer: Option<&'a yunta_core::NodeId>,
+}
+
+impl Holders<'_> {
+    /// What holds `departure`'s task to each criterion it departs from.
+    fn of<'d>(&self, departure: &'d PendingDeparture) -> Vec<(&'d str, crate::tasks::HeldBy)> {
+        let task = &departure.task_id;
+        departure
+            .deviations
+            .as_slice()
+            .iter()
+            .filter_map(|deviation| match &deviation.from {
+                DepartsFrom::Criterion(cmd) => Some((
+                    cmd.as_str(),
+                    crate::tasks::held_by(task, cmd, self.suite, self.spec),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Whether `departure` departs from a test the run's spec gave its
+    /// task, which accepting writes again.
+    fn respecifies(&self, departure: &PendingDeparture) -> bool {
+        self.of(departure)
+            .iter()
+            .any(|(_, held)| *held == crate::tasks::HeldBy::Spec)
+    }
 }
 
 /// A task blocked on the departures its session declared.
@@ -93,12 +122,17 @@ pub(super) async fn resolve_departures(
                 continue;
             }
         };
+        let respecified_by = holders
+            .writer
+            .filter(|_| accepted && holders.respecifies(&departure))
+            .cloned();
         ctx.emit(
             Some(&node.id),
             EventPayload::Tasks(TaskEvent::DeviationResolved(DeviationResolvedPayload {
                 task_id: departure.task_id.clone(),
                 accepted,
                 said: choice.free_text.filter(|said| !said.trim().is_empty()),
+                respecified_by,
             })),
         )
         .await?;
@@ -168,7 +202,10 @@ async fn reopened(
 }
 
 /// The question: what the session departed from, in its own words, and
-/// the three answers.
+/// the answers that can change something. A departure from a test the
+/// run's spec gave the task is accepted only where a node of the run
+/// writes the spec again: accepted with nobody to rewrite the test, the
+/// task would stay held to what everyone agreed is wrong.
 fn escalation(
     departure: &PendingDeparture,
     holders: &Holders<'_>,
@@ -183,58 +220,73 @@ fn escalation(
         ));
         facts.push(Fact::labelled("because", deviation.why.clone()));
     }
-    Escalation::new(
-        format!(
-            "task `{}`'s session departs from the plan",
-            departure.task_id
-        ),
-        facts.into(),
-        NonEmpty::from((
+    let send_back = GateOption {
+        id: OptionId::from_static(SEND_BACK),
+        label: "Send it back".to_string(),
+        tradeoff: "Its session picks the work back up with what you say".to_string(),
+        asks: Some("what should it do instead?".to_string()),
+    };
+    let options = match (holders.respecifies(departure), holders.writer) {
+        (true, None) => {
+            facts.push(Fact::labelled(
+                "not offered: accepting",
+                "the tests came with the run, and no node of it writes them again",
+            ));
+            NonEmpty::from((send_back, vec![offers::abort()]))
+        }
+        _ => NonEmpty::from((
             GateOption {
                 id: OptionId::from_static(ACCEPT),
                 label: "Accept the departure".to_string(),
                 tradeoff: accepting(departure, holders),
                 asks: None,
             },
-            vec![
-                GateOption {
-                    id: OptionId::from_static(SEND_BACK),
-                    label: "Send it back".to_string(),
-                    tradeoff: "Its session picks the work back up with what you say".to_string(),
-                    asks: Some("what should it do instead?".to_string()),
-                },
-                offers::abort(),
-            ],
+            vec![send_back, offers::abort()],
         )),
+    };
+    Escalation::new(
+        format!(
+            "task `{}`'s session departs from the plan",
+            departure.task_id
+        ),
+        facts.into(),
+        options,
     )
 }
 
 /// What accepting `departure` does, in the words its option offers: the
-/// task closes on the work it left, and a criterion of its plan it
-/// departs from stops holding it — nothing else can rewrite one.
+/// task closes on the work it left; a criterion of its plan it departs
+/// from stops holding it, since nothing else can rewrite one; and a test
+/// the run's spec gave it is written again by the node that wrote it.
 fn accepting(departure: &PendingDeparture, holders: &Holders<'_>) -> String {
-    let waived: Vec<String> = departure
-        .deviations
-        .as_slice()
-        .iter()
-        .filter_map(|deviation| match &deviation.from {
-            DepartsFrom::Criterion(cmd) => Some(cmd),
-            _ => None,
-        })
-        .filter(|cmd| {
-            crate::tasks::held_by(&departure.task_id, cmd, holders.suite, holders.spec)
-                == crate::tasks::HeldBy::Plan
-        })
-        .cloned()
+    let waived: Vec<&str> = holders
+        .of(departure)
+        .into_iter()
+        .filter(|(_, held)| *held == crate::tasks::HeldBy::Plan)
+        .map(|(cmd, _)| cmd)
         .collect();
-    match waived.is_empty() {
+    let rewritten = holders
+        .writer
+        .filter(|_| holders.respecifies(departure))
+        .map(|writer| {
+            format!(
+                "its tests are written again by `{writer}` from this departure and what you \
+                 say, and it goes on held to the new ones"
+            )
+        });
+    let changes: Vec<String> = (!waived.is_empty())
+        .then(|| format!("stops being held to {}", yunta_core::text::listed(waived)))
+        .into_iter()
+        .chain(rewritten)
+        .collect();
+    match changes.is_empty() {
         true => "The task closes on the work as it stands, if its criteria pass; the rest of \
                  the plan builds on what it did instead"
             .to_string(),
         false => format!(
-            "The task stops being held to {} and closes on the work as it stands, if its \
-             other criteria pass; the rest of the plan builds on what it did instead",
-            yunta_core::text::listed(waived.iter().map(String::as_str))
+            "The task {} and closes on the work as it stands, if its other criteria pass; the \
+             rest of the plan builds on what it did instead",
+            changes.join(", and ")
         ),
     }
 }

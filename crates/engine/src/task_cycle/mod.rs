@@ -8,6 +8,7 @@
 //! session reported — an agent that claims success with red criteria
 //! still leaves the task not-done.
 
+mod answer;
 mod attempt;
 mod carry;
 mod criteria;
@@ -44,6 +45,7 @@ pub(crate) use session::dispatch_session;
 pub use session::{DispatchError, RunToolsNeed, SessionObserver, SessionSetup};
 pub(crate) use session::{Dispatched, Opening, Resume};
 
+pub use answer::{Answer, Continuing, RespecifiedTask, Respecify, Review};
 pub use error::TaskCycleError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,35 +152,6 @@ pub struct AttemptEnv<'a> {
     /// it asked for, instead of opening its first session fresh. `None`
     /// for a cycle that starts a conversation of its own.
     pub resume: Option<Continuing>,
-}
-
-/// A session a cycle picks back up, and the answer it is told: what
-/// changed since it stopped, which is the one reason it is continued
-/// rather than started over.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Continuing {
-    pub session: yunta_core::SessionId,
-    pub answer: Answer,
-}
-
-/// What a person answered a session, the one thing that changed for it.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Answer {
-    /// The answer to the scope it asked for.
-    Scope(yunta_core::events::ScopeAnswer),
-    /// A person's review of what it handed over.
-    Review(Review),
-    /// A person's answer to the departure from the plan it declared.
-    Deviation(yunta_core::events::DeviationResolvedPayload),
-}
-
-/// A person's review of what a node handed over: the gate that asked,
-/// the option that sent the run back to the node, and what they said.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Review {
-    pub gate: yunta_core::NodeId,
-    pub option: yunta_core::OptionId,
-    pub said: String,
 }
 
 /// Runs a task through the full cycle: pre-check once, then dispatch →

@@ -194,6 +194,66 @@ pub(crate) fn continuation_notice(
             reviewed(review, "you")
         ),
         crate::task_cycle::Answer::Deviation(answer) => departure_notice(answer),
+        crate::task_cycle::Answer::Respecify(respecify) => {
+            format!("{} {WRITE_AGAIN}", respecified(respecify, "you"))
+        }
+    }
+}
+
+/// What a node that writes the run's spec does with tests a person
+/// accepted are wrong.
+const WRITE_AGAIN: &str = "Write those tasks' tests again, as the departures and the person \
+                           say, and hand the spec over again — every other task's spec as it \
+                           is.";
+
+/// The tests a person accepted are wrong, task by task: what each
+/// session departed from, and what the person said.
+fn respecified(respecify: &crate::task_cycle::Respecify, whose: &str) -> String {
+    let mut text = format!(
+        "A person accepted that tests {whose} wrote are wrong, where a task departed from them:"
+    );
+    for owed in &respecify.owed {
+        for departure in &owed.departures {
+            text.push_str(&format!(
+                "\n  task `{}` departs from {}: the plan says {}; its work instead {}; because {}",
+                owed.task,
+                departure.from,
+                departure.planned.trim(),
+                departure.instead.trim(),
+                departure.why.trim()
+            ));
+        }
+        if let Some(said) = &owed.said {
+            text.push_str(&format!("\n  the person said: {}", said.trim()));
+        }
+    }
+    text
+}
+
+/// What a fresh session of the node that wrote the run's spec is told
+/// when a person accepted that tests it wrote are wrong: the departures,
+/// what they said, and where what the node handed over is.
+pub(crate) fn fresh_respecify_notice(
+    respecify: &crate::task_cycle::Respecify,
+    handed: &[std::path::PathBuf],
+) -> String {
+    format!(
+        "\n\nThis node already ran in this run. {}{} {WRITE_AGAIN}",
+        respecified(respecify, "this node"),
+        handed_at(handed)
+    )
+}
+
+/// Where what a node handed over is, as a sentence; empty when it handed
+/// over nothing.
+fn handed_at(handed: &[std::path::PathBuf]) -> String {
+    let at: Vec<String> = handed
+        .iter()
+        .map(|path| format!("`{}`", path.display()))
+        .collect();
+    match at.is_empty() {
+        true => String::new(),
+        false => format!("\nWhat it handed over is at {}.", at.join(", ")),
     }
 }
 
@@ -205,12 +265,17 @@ fn departure_notice(answer: &yunta_core::events::DeviationResolvedPayload) -> St
         .as_deref()
         .map(|said| format!(": {}", said.trim()))
         .unwrap_or_default();
-    match answer.accepted {
-        true => format!(
+    match (answer.accepted, &answer.respecified_by) {
+        (true, Some(_)) => format!(
+            "A person accepted the departure from the plan you declared{said}, and your task's \
+             tests were written again from it. Finish the task on the work as it stands, held \
+             to its tests as they are now."
+        ),
+        (true, None) => format!(
             "A person accepted the departure from the plan you declared{said}. Finish the \
              task on the work as it stands."
         ),
-        false => format!(
+        (false, _) => format!(
             "A person sent back the departure from the plan you declared{said}. Do what they \
              say — or, where they say nothing more, build what the plan declares; declare a \
              departure again only for what still cannot be built as they ask."

@@ -59,7 +59,7 @@ pub(super) async fn continue_from(
     }
     // The tests the task is held to, as its spec has them, whatever the
     // carried work held of them.
-    super::spec::write(task, unit, super::spec::files(params.setup, task)).await?;
+    super::spec::write(task, unit, params.setup).await?;
     judge_in_place(params, recorder).await
 }
 

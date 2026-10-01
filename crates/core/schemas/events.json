@@ -1153,6 +1153,17 @@
         "accepted": {
           "type": "boolean"
         },
+        "respecified_by": {
+          "description": "The node that writes the task's tests again, when the person\naccepted departing from a test the run's spec gave it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "said": {
           "description": "What the person said, when they said anything.",
           "type": [

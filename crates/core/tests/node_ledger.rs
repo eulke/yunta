@@ -156,3 +156,30 @@ fn a_new_attempt_starts_unmarked() {
     ]);
     assert!(!moved(&ledger, "lint"));
 }
+
+fn rerouted(origin: yunta_core::events::RerouteOrigin) -> NodeEvent {
+    NodeEvent::Rerouted(yunta_core::events::NodeReroutedPayload::new(
+        NodeId::from_static("spec"),
+        yunta_core::events::RerouteCause(yunta_core::events::Failure::message("sent back")),
+        origin,
+        Some(1),
+        Some(1),
+    ))
+}
+
+#[test]
+fn only_a_reroute_its_own_on_failure_made_counts_against_its_max() {
+    use yunta_core::events::RerouteOrigin::{GateChoice, OnFailure};
+    let ledger = fold(vec![
+        failed("sent back"),
+        rerouted(GateChoice),
+        failed("red"),
+        rerouted(OnFailure),
+    ]);
+    let record = ledger.get(&NodeId::from_static("compare")).unwrap();
+    assert_eq!(record.reroutes, 2, "every re-route is one");
+    assert_eq!(
+        record.on_failure_reroutes, 1,
+        "a person's choice that sent the run elsewhere is no retry"
+    );
+}

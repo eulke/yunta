@@ -305,9 +305,16 @@ are in it. Its work may never change those files: its session's fence refuses th
 write, `yunta_task` lists them as denied, and a change the audit finds keeps the
 task open. Neither may any other session of the run — another task, a node after
 the loop, one scoped to what the run changed: every file of the spec is denied to
-all of them, as the project's own denies are. A test the implementer believes is wrong is a departure from the plan —
-`yunta_declare_deviation` on that criterion — for a person to settle. The files
-reach the run's tree with the task's own commit.
+all of them, as the project's own denies are. A test the implementer believes is
+wrong is a departure from the plan — `yunta_declare_deviation` on that criterion —
+for a person to settle. Accepted, the test is written again by the node that wrote
+the spec, never by whoever builds the task: the loop sends the run back to that
+node, which is told the departure and what the person said and may change only
+that task's tests; every node between it and the loop runs again, so a gate that
+approved the tests asks about the new ones; and the task goes on from the work it
+left, held to them. A spec the run was given, which no node of it writes, offers no
+acceptance for such a departure — only sending it back. The files reach the run's
+tree with the task's own commit.
 Nothing else to declare, and an opaque artifact mounts nothing because it has no
 shape to demand.
 

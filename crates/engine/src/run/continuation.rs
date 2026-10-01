@@ -14,7 +14,7 @@ use yunta_core::{Node, NodeId, NodeKind, Seq, Workflow};
 use super::{RunCtx, RunError};
 use crate::replay::RunState;
 use crate::reserved::ReservedOption;
-use crate::task_cycle::{Answer, Continuing, Review};
+use crate::task_cycle::{Answer, Continuing, RespecifiedTask, Respecify, Review};
 
 /// The session a node's attempt picks back up, and the answer it is
 /// told: a person's review of what the node handed over, or a grant of
@@ -39,27 +39,25 @@ pub(super) async fn continuation(
     };
     let answer = match review_of(&ctx.manifest.workflow, &state, &node.id) {
         Some((_, review)) => Answer::Review(review),
-        None => match granted(&state, &node.id) {
-            Some(answer) => answer,
-            None => return Ok(None),
+        None => match respecification_of(&state, &node.id) {
+            Some(respecify) => Answer::Respecify(respecify),
+            None => match granted(&state, &node.id) {
+                Some(answer) => answer,
+                None => return Ok(None),
+            },
         },
     };
     Ok(Some(Continuing { session, answer }))
 }
 
-/// A person's review that sent the run back to `node` since it last
-/// stopped, and where the node's views of what it handed over sit —
-/// what a fresh session of it reads when the session that did the work
-/// cannot be picked back up.
-pub(super) async fn review(
-    ctx: &RunCtx<'_>,
-    node: &NodeId,
-) -> Result<Option<(Review, Vec<PathBuf>)>, RunError> {
+/// What a fresh session of `node` is told when a person sent the run
+/// back to it since it last stopped — a review of what it handed over,
+/// or tests it wrote that they accepted are wrong — with where the
+/// node's views of what it handed over sit, which it reads when the
+/// session that did the work cannot be picked back up.
+pub(super) async fn sent_back(ctx: &RunCtx<'_>, node: &NodeId) -> Result<Option<String>, RunError> {
     let state = ctx.run_view().await?.state;
-    let Some((_, review)) = review_of(&ctx.manifest.workflow, &state, node) else {
-        return Ok(None);
-    };
-    let handed = state
+    let handed: Vec<PathBuf> = state
         .artifacts
         .by_producer(node)
         .map(|held| {
@@ -69,7 +67,32 @@ pub(super) async fn review(
             ))
         })
         .collect();
-    Ok(Some((review, handed)))
+    if let Some((_, review)) = review_of(&ctx.manifest.workflow, &state, node) {
+        return Ok(Some(crate::run_tools::fresh_review_notice(
+            &review, &handed,
+        )));
+    }
+    Ok(respecification_of(&state, node)
+        .map(|respecify| crate::run_tools::fresh_respecify_notice(&respecify, &handed)))
+}
+
+/// Every task whose tests `node` wrote and a person accepted are wrong
+/// since `node` last stopped, which it writes again.
+fn respecification_of(state: &RunState, node: &NodeId) -> Option<Respecify> {
+    let stopped = state
+        .nodes
+        .get(node)
+        .and_then(|record| record.last_terminal);
+    let owed: Vec<RespecifiedTask> = crate::tasks::respecifications_owed(state)
+        .into_iter()
+        .filter(|(_, owed)| &owed.by == node && stopped.is_none_or(|stopped| owed.at > stopped))
+        .map(|(task, owed)| RespecifiedTask {
+            task: task.clone(),
+            departures: owed.departures.clone(),
+            said: owed.said.clone(),
+        })
+        .collect();
+    (!owed.is_empty()).then_some(Respecify { owed })
 }
 
 /// The latest choice, at any gate, of an option whose `on:` sends the

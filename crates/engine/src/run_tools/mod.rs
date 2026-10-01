@@ -59,6 +59,7 @@ pub use blackboard::consolidate_blackboard;
 pub use host::{HostOf, NodeScopeAccess, RunToolsAccess, RunToolsHost, TaskAccess};
 pub use listener::{open_session_listener, RunToolsSession};
 pub(crate) use notice::{
-    continuation_notice, fresh_review_notice, naming_notice, submission_notice, task_notice, Asker,
+    continuation_notice, fresh_respecify_notice, fresh_review_notice, naming_notice,
+    submission_notice, task_notice, Asker,
 };
 pub use yunta_core::RunTool;

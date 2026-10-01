@@ -138,6 +138,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
             task_id: "graph-cmd".into(),
             accepted: false,
             said: Some("add `Dot` too".to_string()),
+            respecified_by: None,
         })),
         EventPayload::Node(NodeEvent::ScopeChecked(ScopeCheckedPayload {
             task_id: Some("graph-cmd".into()),

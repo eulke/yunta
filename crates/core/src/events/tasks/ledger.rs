@@ -58,6 +58,9 @@ pub struct TaskRecord {
     /// order they were declared: where the work it did stops being the
     /// plan's.
     pub departures_accepted: Vec<AcceptedDeparture>,
+    /// The last time a person accepted that the task's tests are wrong:
+    /// the node that writes them again, and what it is told.
+    pub respecified: Option<Respecified>,
     /// Whether a session opened for the task since its last status
     /// change. A `running` task without one is having its criteria
     /// checked, or the work it was reopened on judged, before any agent
@@ -70,6 +73,17 @@ pub struct TaskRecord {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AcceptedDeparture {
     pub declared: DeviationDeclaredPayload,
+    pub said: Option<String>,
+}
+
+/// A person's acceptance that a task's tests are wrong: the node that
+/// writes them again, where on the log the person answered, the
+/// departures they accepted and what they said.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Respecified {
+    pub by: NodeId,
+    pub at: Seq,
+    pub departures: Vec<DeviationDeclaredPayload>,
     pub said: Option<String>,
 }
 
@@ -241,7 +255,7 @@ impl TaskLedger {
                 let Some(record) = self.per_task.get_mut(&p.task_id) else {
                     return Err(UnknownTask(p.task_id.clone()));
                 };
-                record.answered(p);
+                record.answered(p, meta.seq);
                 Ok(())
             }
         }
@@ -269,8 +283,16 @@ impl TaskLedger {
 impl TaskRecord {
     /// One answer settles every departure the task owed when it was
     /// asked.
-    fn answered(&mut self, answer: &DeviationResolvedPayload) {
+    fn answered(&mut self, answer: &DeviationResolvedPayload, at: Seq) {
         let answered = std::mem::take(&mut self.departures_owed);
+        if let (true, Some(by)) = (answer.accepted, &answer.respecified_by) {
+            self.respecified = Some(Respecified {
+                by: by.clone(),
+                at,
+                departures: answered.clone(),
+                said: answer.said.clone(),
+            });
+        }
         if answer.accepted {
             self.departures_accepted
                 .extend(answered.into_iter().map(|declared| AcceptedDeparture {
@@ -296,6 +318,7 @@ impl Default for TaskRecord {
             deviation_answer: None,
             departures_owed: Vec::new(),
             departures_accepted: Vec::new(),
+            respecified: None,
             in_session: false,
         }
     }

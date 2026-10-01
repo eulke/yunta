@@ -41,6 +41,10 @@ pub struct SessionSetup {
     /// The suite the run measured green before any work, which holds
     /// every task as a guard. `None` when it holds none.
     pub suite: Option<String>,
+    /// The files a spec the run accepted before gave each task, which the
+    /// spec it holds now does not: work the task did under the earlier
+    /// spec carries them, and they leave it before the current ones go in.
+    pub superseded: std::collections::BTreeMap<yunta_core::TaskId, Vec<PathBuf>>,
     pub skills: Vec<PathBuf>,
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
     pub env: std::collections::HashMap<String, yunta_core::Secret<String>>,
@@ -151,6 +155,7 @@ impl SessionSetup {
             plan: None,
             spec: None,
             suite: None,
+            superseded: Default::default(),
             skills: Vec::new(),
             adapter_settings: serde_json::Map::new(),
             env: std::collections::HashMap::new(),

@@ -104,6 +104,7 @@ fn resolved(task: &str, accepted: bool, said: Option<&str>) -> TaskEvent {
         task_id: task.into(),
         accepted,
         said: said.map(str::to_string),
+        respecified_by: None,
     })
 }
 
@@ -150,5 +151,32 @@ fn a_task_owes_every_departure_declared_until_one_answer_settles_them_all() {
     assert!(
         record.departures_accepted.is_empty(),
         "a departure sent back is not the plan's"
+    );
+}
+
+#[test]
+fn a_task_whose_tests_a_person_accepted_are_wrong_names_who_writes_them_again() {
+    let departed = declared("T001", "Greeting");
+    let mut accepting = resolved("T001", true, Some("say Hi"));
+    if let TaskEvent::DeviationResolved(answer) = &mut accepting {
+        answer.respecified_by = Some(NodeId::from_static("spec"));
+    }
+    let events = [
+        registered("T001"),
+        TaskEvent::DeviationDeclared(departed.clone()),
+        accepting,
+    ];
+
+    let ledger = fold(&events);
+    let respecified = ledger.get("T001").unwrap().respecified.clone().unwrap();
+    assert_eq!(respecified.by.as_str(), "spec");
+    assert_eq!(respecified.at, 3u64.into(), "where the person answered");
+    assert_eq!(respecified.departures, [departed]);
+    assert_eq!(respecified.said.as_deref(), Some("say Hi"));
+
+    let sent_back = fold(&[events[..2].to_vec(), vec![resolved("T001", false, None)]].concat());
+    assert!(
+        sent_back.get("T001").unwrap().respecified.is_none(),
+        "nothing is written again for a departure sent back"
     );
 }

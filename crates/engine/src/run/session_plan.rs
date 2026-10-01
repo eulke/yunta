@@ -62,6 +62,7 @@ pub(crate) async fn resolve_setup(
         plan: None,
         spec: None,
         suite: None,
+        superseded: Default::default(),
         skills,
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         env: SessionSetup::secrets_env(&ctx.manifest.config, ctx.secrets.as_deref()),

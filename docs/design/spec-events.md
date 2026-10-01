@@ -296,6 +296,7 @@ first, or whose answer never reached it.
 | `why` | string | only in `deviation_declared` | — |
 | `accepted` | `bool` | only in `deviation_resolved` | true: the task closes as it stands if its criteria pass, less a criterion of its plan it departed from; false: its session picks the work back up with what the person said |
 | `said` | string | no, in `deviation_resolved` | what the person said |
+| `respecified_by` | `NodeId` | no, in `deviation_resolved` | accepted from a test the run's spec gave the task: the node that writes the task's tests again before the task goes on |
 
 The session's own words are kept here in full: unlike its messages, a
 departure is something it states to the run on purpose. Neither is audit:
