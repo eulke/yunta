@@ -150,6 +150,53 @@ pub(crate) fn truncate(text: &str, width: usize, glyphs: Glyphs) -> String {
     pad(out, width.saturating_sub(cells))
 }
 
+/// The cells a column of `ids` takes: the widest of them, so that no id
+/// in it is cut. An id is what a reader types into the next command, and
+/// a column narrower than one turns two ids that share a prefix — a
+/// fan-out's `review@claude-code` and `review@codex` — into one.
+pub(crate) fn id_column<'a>(ids: impl IntoIterator<Item = &'a str>) -> usize {
+    ids.into_iter().map(cell_width).max().unwrap_or(0)
+}
+
+/// `id` in exactly `width` cells: whole and padded when it fits, and cut
+/// in the middle otherwise — its head, the cut mark, its tail — since the
+/// two ends are where ids that share a prefix or a suffix differ.
+pub(crate) fn middle_cut(id: &str, width: usize, glyphs: Glyphs) -> String {
+    let total = cell_width(id);
+    if total <= width {
+        return pad(id.to_string(), width - total);
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let room = width - 1;
+    let pieces = clusters(id);
+    let mut head = String::new();
+    let mut head_cells = 0;
+    for piece in &pieces {
+        let cells = cell_width(piece);
+        if head_cells + cells > room / 2 {
+            break;
+        }
+        head.push_str(piece);
+        head_cells += cells;
+    }
+    let mut tail: Vec<&str> = Vec::new();
+    let mut tail_cells = 0;
+    for piece in pieces.iter().rev() {
+        let cells = cell_width(piece);
+        if head_cells + tail_cells + cells > room {
+            break;
+        }
+        tail.push(piece);
+        tail_cells += cells;
+    }
+    tail.reverse();
+    let cut = format!("{head}{}{}", glyphs.ellipsis(), tail.concat());
+    let cells = cell_width(&cut);
+    pad(cut, width.saturating_sub(cells))
+}
+
 /// `text` split where a cut may land.
 ///
 /// A piece is a character that takes at least one cell together with
@@ -327,5 +374,21 @@ mod tests {
     fn a_cut_value_closes_with_the_mark_of_its_glyph_set() {
         assert_eq!(truncate("verification", 6, Glyphs::Unicode), "verif…");
         assert_eq!(truncate("verification", 6, Glyphs::Ascii), "verif~");
+    }
+
+    #[test]
+    fn a_node_column_is_as_wide_as_its_longest_id() {
+        assert_eq!(id_column(["plan", "review@reviewer-alt", "lint"]), 19);
+        assert_eq!(id_column([]), 0);
+    }
+
+    #[test]
+    fn two_fan_out_ids_cut_to_a_column_stay_distinct() {
+        let one = middle_cut("review@claude-code", 12, Glyphs::Unicode);
+        let other = middle_cut("review@codex-cli-x", 12, Glyphs::Unicode);
+        assert_eq!(cell_width(&one), 12);
+        assert_ne!(one, other, "{one} / {other}");
+        assert!(one.starts_with("revie") && one.ends_with("e-code"), "{one}");
+        assert_eq!(middle_cut("lint", 6, Glyphs::Ascii), "lint  ");
     }
 }

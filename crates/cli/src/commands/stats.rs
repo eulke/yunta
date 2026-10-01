@@ -21,8 +21,8 @@ use yunta_engine::{
 use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
 use crate::render::{
-    bar, cell_width, format_duration, format_pct, sparkline, truncate, Glyphs, NodeDisplay, INDENT,
-    LABEL_WIDTH, LINE_WIDTH, STATE_WIDTH,
+    bar, cell_width, format_duration, format_pct, id_column, middle_cut, sparkline, truncate,
+    Glyphs, NodeDisplay, INDENT, LABEL_WIDTH, LINE_WIDTH, STATE_WIDTH,
 };
 
 pub async fn stats(
@@ -329,12 +329,13 @@ fn render_nodes(stats: &RunStats, state: &yunta_engine::RunState, glyphs: Glyphs
         .map(|n| n.tokens.total())
         .max()
         .unwrap_or(0);
+    let column = id_column(stats.nodes.iter().map(|node| node.node_id.as_str()));
     let mut out = String::from("\nnodes:\n");
     for node in &stats.nodes {
         let display = NodeDisplay::of(state.nodes.state(&node.node_id));
         out.push_str(&format!(
             "{}\n",
-            node_line(node, max_tokens, &display, glyphs)
+            node_line(node, (max_tokens, column), &display, glyphs)
         ));
     }
     out
@@ -348,19 +349,27 @@ fn render_runners(stats: &RunStats, glyphs: Glyphs) -> String {
         return String::new();
     }
     let max_runner_tokens = by_runner.iter().map(|(_, t)| t.total()).max().unwrap_or(0);
+    let column = id_column(by_runner.iter().map(|(runner, _)| runner.as_str()));
     let mut out = String::from("\nrunners:\n");
     for (runner, tokens) in &by_runner {
         let total = tokens.total();
         out.push_str(&format!(
             "{INDENT}{} {}  {total:>8} tok\n",
-            truncate(runner.as_str(), LABEL_WIDTH, glyphs),
+            middle_cut(runner.as_str(), column, glyphs),
             bar(total, max_runner_tokens, glyphs),
         ));
     }
     out
 }
 
-fn node_line(node: &NodeStat, max_tokens: u64, display: &NodeDisplay, glyphs: Glyphs) -> String {
+/// One node's row, its id in a column `column` cells wide, which is as
+/// wide as the longest id the table holds.
+fn node_line(
+    node: &NodeStat,
+    (max_tokens, column): (u64, usize),
+    display: &NodeDisplay,
+    glyphs: Glyphs,
+) -> String {
     let total = node.tokens.total();
     let blocked = node
         .blocked_fraction()
@@ -370,7 +379,7 @@ fn node_line(node: &NodeStat, max_tokens: u64, display: &NodeDisplay, glyphs: Gl
         "{INDENT}{} {} {} {}  {total:>8} tok  {:>8}  blk:{blocked}",
         glyphs.state(display.word),
         truncate(display.word.short(), STATE_WIDTH, glyphs),
-        truncate(node.node_id.as_str(), LABEL_WIDTH, glyphs),
+        middle_cut(node.node_id.as_str(), column, glyphs),
         bar(total, max_tokens, glyphs),
         format_duration(node.wall_clock()),
     )
