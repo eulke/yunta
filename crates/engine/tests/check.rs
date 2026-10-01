@@ -605,7 +605,7 @@ fn a_single_child_group_never_warns_about_collision() {
 fn every_error_message_names_its_rule() {
     assert_eq!(
         CheckError::DependsOnCycle {
-            path: "a -> b -> a".to_string()
+            cycle: vec!["a".into(), "b".into(), "a".into()]
         }
         .to_string(),
         "cycle in depends_on: a -> b -> a"
@@ -2401,7 +2401,7 @@ nodes:
         matches!(
             errors.as_slice(),
             [CheckError::Unanswerable(Unanswerable::ArtifactNotDeclared { site, node, .. })]
-                if node.as_str() == "a" && site.contains("mounts:")
+                if node.as_str() == "a" && site.to_string().contains("mounts:")
         ),
         "got: {errors:?}"
     );
@@ -2420,7 +2420,7 @@ nodes:
         matches!(
             errors.as_slice(),
             [CheckError::Unanswerable(Unanswerable::ArtifactNotDeclared { site, node, .. })]
-                if node.as_str() == "a" && site.contains("shows:")
+                if node.as_str() == "a" && site.to_string().contains("shows:")
         ),
         "got: {errors:?}"
     );
@@ -2512,7 +2512,7 @@ nodes:
     assert!(
         matches!(
             errors.as_slice(),
-            [CheckError::Unanswerable(Unanswerable::ArtifactFromNowhere { site, .. })] if site.contains("external gate")
+            [CheckError::Unanswerable(Unanswerable::ArtifactFromNowhere { site, .. })] if site.to_string().contains("external gate")
         ),
         "got: {errors:?}"
     );

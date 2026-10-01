@@ -61,7 +61,7 @@ pub enum CheckWarning {
          from an earlier mode — a run started with `--mode {mode}` is refused for it"
     )]
     ReadOnlyThroughPromotion {
-        site: String,
+        site: super::Site,
         what: String,
         mode: yunta_core::ModeName,
     },

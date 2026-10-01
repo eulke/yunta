@@ -9,8 +9,8 @@ use yunta_core::{InputName, SchemaRange, ScopeGlob};
 /// where and what to change.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CheckError {
-    #[error("cycle in depends_on: {path}")]
-    DependsOnCycle { path: String },
+    #[error("cycle in depends_on: {}", super::pointer::arrows(.cycle))]
+    DependsOnCycle { cycle: Vec<NodeId> },
 
     /// A node asks its adapter for something the adapter does not
     /// declare and the engine never emulates. Refused before a run is
@@ -126,7 +126,7 @@ pub enum CheckError {
          it with `kind: {name}` instead; the names {kinds} are not available as file names",
         kinds = yunta_core::ArtifactKind::listed()
     )]
-    ReservedArtifactName { site: String, name: String },
+    ReservedArtifactName { site: Site, name: String },
 
     /// An artifact is written under `run.dir/artifacts/`; a name that
     /// is absolute or climbs with `..` would land somewhere else.
@@ -294,7 +294,7 @@ pub enum CheckError {
          node that produces `questions` leaves answers; read them from the node that asks, or \
          drop the source"
     )]
-    AnswersFromNodeThatNeverAsks { node: NodeId, site: String },
+    AnswersFromNodeThatNeverAsks { node: NodeId, site: Site },
 
     /// Only a `prompt` node holds the session that hands questions over
     /// and the close that waits on them.

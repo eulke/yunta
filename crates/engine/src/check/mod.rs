@@ -43,10 +43,12 @@ mod gates;
 mod graph;
 mod inputs;
 mod packs;
+mod pointer;
 mod programs;
 mod refs;
 mod runners;
 mod scopes;
+mod site;
 mod sources;
 mod unset;
 mod warning;
@@ -59,6 +61,7 @@ pub use gates::UntakenRoute;
 pub(crate) use programs::leading_programs;
 pub use programs::programs_named;
 pub use refs::{check_workflow_refs, RefsCheck};
+pub use site::Site;
 pub use sources::Unanswerable;
 pub use warning::CheckWarning;
 
@@ -224,12 +227,7 @@ pub fn check_mounted(
     check_no_questions_in_parallel(&workflow.nodes, None, &mut errors);
 
     if let Some(cycle) = find_depends_on_cycle(&workflow.nodes) {
-        let path = cycle
-            .iter()
-            .map(NodeId::as_str)
-            .collect::<Vec<_>>()
-            .join(" -> ");
-        errors.push(CheckError::DependsOnCycle { path });
+        errors.push(CheckError::DependsOnCycle { cycle });
     }
 
     check_input_specs(&workflow.inputs, &mut errors);

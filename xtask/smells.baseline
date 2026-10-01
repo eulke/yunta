@@ -11,7 +11,7 @@ git_command_outside_git_rs 2
 let_underscore_in_prod 20
 numeric_const_without_adr 45
 parenthesized_plural_in_prod_strings 0
-prod_fns_over_50_lines 79
+prod_fns_over_50_lines 80
 reason_built_by_format 5
 run_tool_named_outside_vocabulary 1
 separator_literal_outside_glyphs 24

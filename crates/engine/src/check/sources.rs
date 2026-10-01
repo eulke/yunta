@@ -37,7 +37,7 @@ pub enum Unanswerable {
         .artifact.label()
     )]
     ArtifactNotDeclared {
-        site: String,
+        site: Site,
         node: NodeId,
         artifact: yunta_core::events::ArtifactId,
     },
@@ -52,7 +52,7 @@ pub enum Unanswerable {
         in_mode(.mode)
     )]
     ArtifactFromNowhere {
-        site: String,
+        site: Site,
         artifact: yunta_core::events::ArtifactId,
         mode: Option<yunta_core::ModeName>,
     },
@@ -64,7 +64,7 @@ pub enum Unanswerable {
          `{mode}` holds nothing of it; start an earlier mode and promote, or include `{from}`"
     )]
     SourceLeftOut {
-        site: String,
+        site: Site,
         from: NodeId,
         mode: ModeName,
     },
@@ -212,8 +212,12 @@ pub(crate) fn check_reads(workflow: &Workflow, birth: &Birth, start: Option<&Mod
             // A loop reads the run's tasks document before its first
             // session, and cannot be its own source: what it declares
             // lands at its close.
-            let loop_tasks = matches!(node.kind, NodeKind::Loop { .. })
-                .then(|| (format!("loop `{}`", node.id), tasks.clone()));
+            let loop_tasks = matches!(node.kind, NodeKind::Loop { .. }).then(|| {
+                (
+                    Site::new(super::site::node(&node.id), format!("loop `{}`", node.id)),
+                    tasks.clone(),
+                )
+            });
             for (site, wanted) in loop_tasks.into_iter().chain(run_references(node)) {
                 match reach(&wanted, node, &variant, birth) {
                     Reach::Here => {}
@@ -253,7 +257,11 @@ pub(crate) fn check_reads(workflow: &Workflow, birth: &Birth, start: Option<&Mod
                 if kept(&variant.nodes) {
                     continue;
                 }
-                let site = format!("`{field}` of node `{}`", node.id);
+                let key = field.split(':').next().unwrap_or(field).trim();
+                let site = Site::new(
+                    super::site::node(&node.id).key(key),
+                    format!("`{field}` of node `{}`", node.id),
+                );
                 if kept(&variant.earlier) {
                     found.warnings.push(CheckWarning::ReadOnlyThroughPromotion {
                         site,
@@ -277,14 +285,14 @@ pub(crate) fn check_reads(workflow: &Workflow, birth: &Birth, start: Option<&Mod
 
 /// `(site, identity)` for every reference `node` makes to the run's
 /// artifact of an identity, whichever node produced it.
-fn run_references(node: &Node) -> Vec<(String, ArtifactId)> {
-    let mut references: Vec<(String, ArtifactId)> = artifact_reads(node)
+fn run_references(node: &Node) -> Vec<(Site, ArtifactId)> {
+    let mut references: Vec<(Site, ArtifactId)> = artifact_reads(node)
         .into_iter()
         .filter(|read| read.node.is_none() && literal_ref(read.id))
         // A gate showing the run's findings shows a view the log
         // derives, whatever node did or did not report one.
         .filter(|read| !(read.site == ReadSite::Shows && is_findings(read.id)))
-        .map(|read| (read.site.of(&node.id), ArtifactId::from(read.id)))
+        .map(|read| (Site::read(read.site, &node.id), ArtifactId::from(read.id)))
         .collect();
     if let NodeKind::Gate {
         external: Some(external),
@@ -293,7 +301,10 @@ fn run_references(node: &Node) -> Vec<(String, ArtifactId)> {
     {
         for spec in external.artifacts.iter().filter(|spec| literal_spec(spec)) {
             references.push((
-                format!("the external gate of node `{}`", node.id),
+                Site::new(
+                    super::site::node(&node.id).key("external"),
+                    format!("the external gate of node `{}`", node.id),
+                ),
                 ArtifactId::from(spec),
             ));
         }
@@ -370,12 +381,12 @@ pub(crate) fn check_named_artifact_sources(workflow: &Workflow, errors: &mut Vec
 
 /// `(site, node, identity)` for every reference `node` makes that names
 /// the node it reads from.
-fn named_references(node: &Node) -> Vec<(String, &NodeId, &ArtifactRefId)> {
+fn named_references(node: &Node) -> Vec<(Site, &NodeId, &ArtifactRefId)> {
     artifact_reads(node)
         .into_iter()
         .filter_map(|read| {
             read.node
-                .map(|named| (read.site.of(&node.id), named, read.id))
+                .map(|named| (Site::read(read.site, &node.id), named, read.id))
         })
         .collect()
 }
@@ -449,7 +460,7 @@ pub(crate) fn check_answer_sources(workflow: &Workflow, errors: &mut Vec<CheckEr
             .iter_nodes()
             .any(|node| node.id == *named && node.asks())
     };
-    let mut answers_of = |site: String, named: Option<&yunta_core::NodeId>, id: &ArtifactRefId| {
+    let mut answers_of = |site: Site, named: Option<&yunta_core::NodeId>, id: &ArtifactRefId| {
         let ArtifactRefId::Kind { kind } = id else {
             return;
         };
@@ -465,7 +476,7 @@ pub(crate) fn check_answer_sources(workflow: &Workflow, errors: &mut Vec<CheckEr
     };
     for node in workflow.iter_nodes() {
         for read in artifact_reads(node) {
-            answers_of(read.site.of(&node.id), read.node, read.id);
+            answers_of(Site::read(read.site, &node.id), read.node, read.id);
         }
     }
 }

@@ -205,7 +205,7 @@ pub(crate) fn check_distill_paths(workflow: &Workflow, errors: &mut Vec<CheckErr
 /// here rather than left to resolve to nothing at run time, and named
 /// with the form that does work.
 pub(crate) fn check_reserved_artifact_names(workflow: &Workflow, errors: &mut Vec<CheckError>) {
-    let mut reserved = |site: String, name: &str| {
+    let mut reserved = |site: super::Site, name: &str| {
         if name.parse::<yunta_core::ArtifactKind>().is_ok() {
             errors.push(CheckError::ReservedArtifactName {
                 site,
@@ -216,7 +216,7 @@ pub(crate) fn check_reserved_artifact_names(workflow: &Workflow, errors: &mut Ve
     for node in workflow.iter_nodes() {
         for read in yunta_core::workflow::reads::artifact_reads(node) {
             if let yunta_core::ArtifactRefId::Name { name } = read.id {
-                reserved(read.site.of(&node.id), name);
+                reserved(super::Site::read(read.site, &node.id), name);
             }
         }
         // What a mount is called in the child is a name as well.
@@ -224,7 +224,7 @@ pub(crate) fn check_reserved_artifact_names(workflow: &Workflow, errors: &mut Ve
             for mount in mounts {
                 if let Some(name) = &mount.artifact.rename {
                     reserved(
-                        yunta_core::workflow::reads::ReadSite::Mount.of(&node.id),
+                        super::Site::read(yunta_core::workflow::reads::ReadSite::Mount, &node.id),
                         name,
                     );
                 }
@@ -235,7 +235,13 @@ pub(crate) fn check_reserved_artifact_names(workflow: &Workflow, errors: &mut Ve
         if let yunta_core::OnFinishStep::Distill { distill } = step {
             for declaration in distill {
                 if let yunta_core::ArtifactRefId::Name { name } = &declaration.id {
-                    reserved("an `on_finish.distill` entry".to_string(), name);
+                    reserved(
+                        super::Site::new(
+                            yunta_core::yaml::Pointer::root().key("on_finish"),
+                            "an `on_finish.distill` entry".to_string(),
+                        ),
+                        name,
+                    );
                 }
             }
         }
