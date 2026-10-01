@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "yunta spec",
-  "description": "The document — sole top-level key `specs:`.",
+  "description": "The tests a plan's tasks are held to, one spec per task.",
   "type": "object",
   "properties": {
     "specs": {
@@ -21,15 +21,18 @@
       "type": "object",
       "properties": {
         "files": {
+          "description": "The files its tests live in, each new to the repository.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/TestFile"
           }
         },
         "task": {
+          "description": "A task of the run's plan.",
           "$ref": "#/$defs/TaskId"
         },
         "tests": {
+          "description": "The commands that run its tests.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/SpecTest"
@@ -47,9 +50,11 @@
       "type": "object",
       "properties": {
         "cmd": {
+          "description": "The command, run under `sh`: it fails before the task's work and\npasses once the task is done.",
           "type": "string"
         },
         "proves": {
+          "description": "What passing shows, in words a person approving the plan reads.",
           "type": "string"
         }
       },
@@ -69,9 +74,11 @@
       "type": "object",
       "properties": {
         "content": {
+          "description": "The file, whole.",
           "type": "string"
         },
         "path": {
+          "description": "Where the file goes, relative to the repository and outside `.git`.",
           "type": "string"
         }
       },

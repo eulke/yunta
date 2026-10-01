@@ -16,7 +16,7 @@
   ],
   "$defs": {
     "Answer": {
-      "description": "One answer: the question's `id` and the human's value, as\ntext — a `boolean` answer is the string `true`/`false`, a `choice`\none of the declared `values`. Strings deliberately, not a typed enum\nper answer kind: the artifact is what a *following node's session*\nreads — meant to be consumed by whatever node comes next — and text\nis the only shape every consumer shares.",
+      "description": "One answer: the question's `id` and the person's value, as text — a\n`boolean` answer is the string `true`/`false`, a `choice` one of the\ndeclared `values`.",
       "type": "object",
       "properties": {
         "id": {

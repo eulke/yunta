@@ -134,3 +134,51 @@ fn a_run_id_is_described_as_a_string_and_a_seq_as_a_positive_integer() {
     assert_eq!(json["$defs"]["Seq"]["type"], "integer");
     assert_eq!(json["$defs"]["Seq"]["minimum"], 1);
 }
+
+/// Every `description` in `value`, with the path that carries it.
+fn descriptions<'a>(value: &'a Value, at: &str, found: &mut Vec<(String, &'a str)>) {
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                match (key.as_str(), child) {
+                    ("description", Value::String(text)) => found.push((at.to_string(), text)),
+                    _ => descriptions(child, &format!("{at}/{key}"), found),
+                }
+            }
+        }
+        Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                descriptions(child, &format!("{at}/{index}"), found);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn a_published_document_says_nothing_of_the_code_that_reads_it() {
+    // What a writer of the document reads: a session in its tool's
+    // arguments, a person through `yunta schema`. The words that only a
+    // maintainer of the parser has use for stay in the code.
+    let code_words = ["[`", "serde", "event log", "mirroring", "verbatim"];
+    for (name, schema) in [
+        ("tasks", yunta_core::schema::tasks()),
+        ("spec", yunta_core::schema::spec()),
+        ("findings", yunta_core::schema::findings()),
+        ("questions", yunta_core::schema::questions()),
+        ("answers", yunta_core::schema::answers()),
+        ("withdrawal", yunta_core::schema::withdrawal()),
+    ] {
+        let json = rendered(schema);
+        let mut found = Vec::new();
+        descriptions(&json, name, &mut found);
+        for (at, text) in found {
+            for word in code_words {
+                assert!(
+                    !text.contains(word),
+                    "{at} speaks of the code with `{word}`: {text}"
+                );
+            }
+        }
+    }
+}

@@ -14,7 +14,7 @@ use crate::{Criterion, TaskId};
 
 mod rules;
 
-/// The document — sole top-level key `specs:`.
+/// The tests a plan's tasks are held to, one spec per task.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SpecFile {
@@ -32,9 +32,12 @@ impl SpecFile {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Spec {
+    /// A task of the run's plan.
     pub task: TaskId,
+    /// The files its tests live in, each new to the repository.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<TestFile>,
+    /// The commands that run its tests.
     pub tests: Vec<SpecTest>,
 }
 
@@ -54,7 +57,9 @@ impl Spec {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TestFile {
+    /// Where the file goes, relative to the repository and outside `.git`.
     pub path: String,
+    /// The file, whole.
     pub content: String,
 }
 
@@ -62,7 +67,10 @@ pub struct TestFile {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SpecTest {
+    /// The command, run under `sh`: it fails before the task's work and
+    /// passes once the task is done.
     pub cmd: String,
+    /// What passing shows, in words a person approving the plan reads.
     pub proves: String,
 }
 

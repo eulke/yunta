@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "yunta findings",
-  "description": "The artifact's document — sole top-level key `findings:`, mirroring\na tasks document's `tasks:`-only shape.",
+  "description": "What a review found: one entry per finding.",
   "type": "object",
   "properties": {
     "findings": {
@@ -17,19 +17,22 @@
   ],
   "$defs": {
     "FindingEntry": {
-      "description": "One finding as the artifact declares it.",
+      "description": "One finding: where it is, how much it matters, and what goes wrong.",
       "type": "object",
       "properties": {
         "detail": {
+          "description": "What goes wrong, and when: the input or the sequence that shows it.",
           "type": "string"
         },
         "id": {
+          "description": "Unique among the findings one node reports.",
           "$ref": "#/$defs/FindingId"
         },
         "location": {
           "$ref": "#/$defs/Location"
         },
         "proposed_criterion": {
+          "description": "A command that fails now and passes once the finding is fixed.",
           "anyOf": [
             {
               "$ref": "#/$defs/ProposedCriterionEntry"
@@ -43,6 +46,7 @@
           "$ref": "#/$defs/FindingSeverity"
         },
         "title": {
+          "description": "What goes wrong, in one line.",
           "type": "string"
         }
       },
@@ -61,7 +65,7 @@
       "minLength": 1
     },
     "FindingSeverity": {
-      "description": "`severity`: `blocking | major | minor | note` — confirmed against the\n`kind: findings` schema, not inferred. Ordered the way the ladder\nreads, the most severe first.",
+      "description": "How much a finding matters, from `blocking` down to `note`.",
       "type": "string",
       "enum": [
         "blocking",
@@ -80,6 +84,7 @@
       "type": "object",
       "properties": {
         "cmd": {
+          "description": "The command, run under `sh` on the run's tree; it passes when it\nexits 0.",
           "type": "string"
         }
       },

@@ -14,11 +14,10 @@ use crate::TaskId;
 
 /// A tasks document: the tasks the engine runs, and what a person who
 /// reviews the plan reads about it — what changes and why, the shapes it
-/// creates or changes, and what it leaves out. Nothing about the brief,
-/// the mode or the run: that context lives in the manifest and the log.
-///
-/// One document for both readers, so what a person approves is what the
-/// engine executes.
+/// creates or changes, and what it leaves out. What a person approves is
+/// what the engine executes.
+// Nothing about the brief, the mode or the run: that context lives in the
+// manifest and the log. One document for both readers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TasksFile {
@@ -43,10 +42,13 @@ pub struct TasksFile {
     /// file it lives in, by the one task that builds it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shapes: Vec<Shape>,
+    /// What could go wrong that a person approving the plan should weigh.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub risks: Vec<String>,
+    /// What the plan deliberately leaves out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_scope: Vec<String>,
+    /// The work, one task per independently verifiable unit.
     pub tasks: Vec<Task>,
 }
 
@@ -127,15 +129,20 @@ impl TasksFile {
     }
 }
 
-/// One criterion as the tasks document declares it: a command, and whether it
-/// is a `guard` (passes before and after the work) or an ordinary
-/// criterion (red before, green after). The event log freezes it as
-/// [`events::Criterion`], which reads what a later writer adds; this
-/// type refuses it, because an agent wrote it.
+/// One criterion: a command, and whether it is a `guard` (passes before
+/// and after the work) or an ordinary criterion (fails before the work,
+/// passes after).
+// The event log freezes it as [`events::Criterion`], which reads what a
+// later writer adds; this type refuses it, because an agent wrote it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Criterion {
+    /// The command, run under `sh` in the task's checkout; it passes when
+    /// it exits 0.
     pub cmd: String,
+    /// `guard` for a command that passes before the work and must keep
+    /// passing; left out for one that fails before the work and passes
+    /// once it is done.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub r#type: Option<CriterionType>,
     /// What passing shows, in words a person reviewing the plan reads.
@@ -159,20 +166,30 @@ impl From<&Criterion> for events::Criterion {
     }
 }
 
-/// One task. `id` is a `TaskId`, so an ill-formed one is a problem of
-/// reading the document: the report names the path that carries it
-/// (`tasks[0].id`) and what an id is, never a raw serde error. The rules
-/// that only hold across the whole document, uniqueness among them, run
-/// once it parses.
+/// One task: a unit of work its criteria verify on their own, the paths
+/// it may change, and what a person reviewing the plan reads about it.
+// `id` is a `TaskId`, so an ill-formed one is a problem of reading the
+// document: the report names the path that carries it (`tasks[0].id`) and
+// what an id is, never a raw serde error. The rules that only hold across
+// the whole document, uniqueness among them, run once it parses.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Task {
+    /// How the plan's shapes and other tasks refer to it.
     pub id: TaskId,
+    /// What the task does, in one line.
     pub title: String,
+    /// The only paths the task may change.
     pub scope: Vec<ScopeGlob>,
+    /// The commands that must all pass for the task to be done.
     pub criteria: Vec<Criterion>,
+    /// The tasks whose work this one starts from. Tasks with no
+    /// dependency between them run at the same time and may not share a
+    /// path.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<TaskId>,
+    /// What the session building the task should know that nothing else
+    /// here says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     /// What the task does and why, in Markdown, for a person reviewing

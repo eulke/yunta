@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use crate::events::{self, FindingSeverity};
 use crate::ids::FindingId;
 
-/// The artifact's document — sole top-level key `findings:`, mirroring
-/// a tasks document's `tasks:`-only shape.
+/// What a review found: one entry per finding.
+// Sole top-level key `findings:`, as a tasks document has only `tasks:`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindingsFile {
@@ -30,24 +30,27 @@ impl FindingsFile {
     }
 }
 
-/// One finding as the artifact declares it.
+/// One finding: where it is, how much it matters, and what goes wrong.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FindingEntry {
+    /// Unique among the findings one node reports.
     pub id: FindingId,
     pub severity: FindingSeverity,
+    /// What goes wrong, in one line.
     pub title: String,
     pub location: Location,
+    /// What goes wrong, and when: the input or the sequence that shows it.
     pub detail: String,
+    /// A command that fails now and passes once the finding is fixed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proposed_criterion: Option<ProposedCriterionEntry>,
 }
 
 /// Taking one finding back: which, and why.
-///
-/// A document like any other — strict about its keys, with a rule of its
-/// own — because it reaches the engine the same way a finding does, and
-/// a withdrawal nobody can explain is a finding that disappeared.
+// A document like any other — strict about its keys, with a rule of its
+// own — because it reaches the engine the same way a finding does, and a
+// withdrawal nobody can explain is a finding that disappeared.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Withdrawal {
@@ -59,6 +62,8 @@ pub struct Withdrawal {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProposedCriterionEntry {
+    /// The command, run under `sh` on the run's tree; it passes when it
+    /// exits 0.
     pub cmd: String,
 }
 

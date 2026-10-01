@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "yunta tasks",
-  "description": "A tasks document: the tasks the engine runs, and what a person who\nreviews the plan reads about it — what changes and why, the shapes it\ncreates or changes, and what it leaves out. Nothing about the brief,\nthe mode or the run: that context lives in the manifest and the log.\n\nOne document for both readers, so what a person approves is what the\nengine executes.",
+  "description": "A tasks document: the tasks the engine runs, and what a person who\nreviews the plan reads about it — what changes and why, the shapes it\ncreates or changes, and what it leaves out. What a person approves is\nwhat the engine executes.",
   "type": "object",
   "properties": {
     "decisions": {
@@ -26,12 +26,14 @@
       ]
     },
     "out_of_scope": {
+      "description": "What the plan deliberately leaves out.",
       "type": "array",
       "items": {
         "type": "string"
       }
     },
     "risks": {
+      "description": "What could go wrong that a person approving the plan should weigh.",
       "type": "array",
       "items": {
         "type": "string"
@@ -52,6 +54,7 @@
       ]
     },
     "tasks": {
+      "description": "The work, one task per independently verifiable unit.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/Task"
@@ -83,10 +86,11 @@
       ]
     },
     "Criterion": {
-      "description": "One criterion as the tasks document declares it: a command, and whether it\nis a `guard` (passes before and after the work) or an ordinary\ncriterion (red before, green after). The event log freezes it as\n[`events::Criterion`], which reads what a later writer adds; this\ntype refuses it, because an agent wrote it.",
+      "description": "One criterion: a command, and whether it is a `guard` (passes before\nand after the work) or an ordinary criterion (fails before the work,\npasses after).",
       "type": "object",
       "properties": {
         "cmd": {
+          "description": "The command, run under `sh` in the task's checkout; it passes when\nit exits 0.",
           "type": "string"
         },
         "proves": {
@@ -97,6 +101,7 @@
           ]
         },
         "type": {
+          "description": "`guard` for a command that passes before the work and must keep\npassing; left out for one that fails before the work and passes\nonce it is done.",
           "anyOf": [
             {
               "$ref": "#/$defs/CriterionType"
@@ -191,7 +196,7 @@
       ]
     },
     "Task": {
-      "description": "One task. `id` is a `TaskId`, so an ill-formed one is a problem of\nreading the document: the report names the path that carries it\n(`tasks[0].id`) and what an id is, never a raw serde error. The rules\nthat only hold across the whole document, uniqueness among them, run\nonce it parses.",
+      "description": "One task: a unit of work its criteria verify on their own, the paths\nit may change, and what a person reviewing the plan reads about it.",
       "type": "object",
       "properties": {
         "changes": {
@@ -202,12 +207,14 @@
           }
         },
         "criteria": {
+          "description": "The commands that must all pass for the task to be done.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/Criterion"
           }
         },
         "depends_on": {
+          "description": "The tasks whose work this one starts from. Tasks with no\ndependency between them run at the same time and may not share a\npath.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/TaskId"
@@ -221,6 +228,7 @@
           ]
         },
         "id": {
+          "description": "How the plan's shapes and other tasks refer to it.",
           "$ref": "#/$defs/TaskId"
         },
         "invariants": {
@@ -231,6 +239,7 @@
           }
         },
         "notes": {
+          "description": "What the session building the task should know that nothing else\nhere says.",
           "type": [
             "string",
             "null"
@@ -244,12 +253,14 @@
           ]
         },
         "scope": {
+          "description": "The only paths the task may change.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/ScopeGlob"
           }
         },
         "title": {
+          "description": "What the task does, in one line.",
           "type": "string"
         },
         "uses": {

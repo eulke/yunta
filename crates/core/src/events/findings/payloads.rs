@@ -7,9 +7,10 @@ use crate::events::scope::payloads::ProposedCriterion;
 use crate::findings::Location;
 use crate::ids::FindingId;
 
-/// `severity`: `blocking | major | minor | note` — confirmed against the
-/// `kind: findings` schema, not inferred. Ordered the way the ladder
-/// reads, the most severe first.
+/// How much a finding matters, from `blocking` down to `note`.
+// Confirmed against the `kind: findings` schema, not inferred. Declared
+// the way the ladder reads, the most severe first, which is what `Ord`
+// follows.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
 )]
