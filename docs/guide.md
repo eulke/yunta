@@ -288,9 +288,11 @@ A `spec` is the tests a plan's tasks are held to, written before any task is
 built and by someone other than whoever builds it: per task, the files its tests
 live in, whole, and the commands that run them, each saying what it proves. It
 arrives through `yunta_submit_spec` and is proven against the run the moment it
-does: every task it names is the plan's, and in a checkout of the run's tree with
-every one of its files written in, each test runs and fails — a test that already
-passes holds the work to nothing, and the session hears which in the same call.
+does: every task it names is the plan's, every file is new to the run's tree — one
+that is not would replace what the project holds and deny it to the work — and in
+a checkout of the run's tree with every one of its files written in, each test runs
+and fails: a test that already passes holds the work to nothing, and the session
+hears which in the same call.
 
 A loop holds each task to the spec the run holds. The task's files are written into
 the tree its work starts from and its tests join its criteria, so it closes only

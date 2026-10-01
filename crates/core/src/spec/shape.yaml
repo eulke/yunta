@@ -11,7 +11,9 @@ specs:                                  # required
     files:                              # the files its tests live in
       - path: tests/theme.sh            # required: relative, inside the
                                         #   repository and outside `.git`,
-                                        #   and named once in the document
+                                        #   named once in the document, and
+                                        #   new: the run's tree holds
+                                        #   nothing there
         content: |                      # required: the file, whole
           #!/bin/sh
           # A new user starts in light; the switch turns dark on.

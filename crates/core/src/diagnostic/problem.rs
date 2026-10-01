@@ -110,6 +110,8 @@ rule_codes! {
     DuplicateTestFile => "duplicate-test-file",
     /// A spec names a task the run's plan does not declare.
     UnknownSpecTask => "unknown-spec-task",
+    /// A spec's file names a path the run's tree already holds.
+    TestFileExists => "test-file-exists",
     /// A criterion's command never answers where the engine runs
     /// criteria: it is not found, not executable, or never returns.
     CriterionCannotRun => "criterion-cannot-run",

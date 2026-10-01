@@ -12,15 +12,17 @@
 //! the same answers from the cache.
 //!
 //! A spec is proven the same way, against the plan the run holds: every
-//! task it names is the plan's, and in a checkout of the run's tree with
-//! every one of its files written in, each test runs and fails — a test
-//! that passes before the work holds the work to nothing.
+//! task it names is the plan's, every file is new to the run's tree — one
+//! that is not would replace what the tree holds, and deny it to the work
+//! — and in a checkout of that tree with every one of its files written
+//! in, each test runs and fails: a test that passes before the work holds
+//! the work to nothing.
 
 use std::path::{Path, PathBuf};
 
 use yunta_core::diagnostic::{Diagnostic, Named, Problem, RuleCode, Subject};
 use yunta_core::events::ExecutionEnvironment;
-use yunta_core::{SpecFile, Task, TasksFile};
+use yunta_core::{CommitSha, Spec, SpecFile, Task, TasksFile};
 
 use super::session::{RunToolError, SessionTools};
 use crate::task_cycle::{probe, CriterionRun};
@@ -38,7 +40,7 @@ impl SessionTools {
         let events = self.events().await?;
         let prior = crate::tasks::prior_registrations(&events);
         let current = crate::replay::derive(&events).tasks;
-        let checkout = self.handover_checkout().await?;
+        let (checkout, _) = self.handover_checkout().await?;
         let supervision = self.host.supervision(&self.stop);
         // A plan a gate shows a person says what it changes and why.
         let mut found = match crate::tasks::plan_reviewed(&self.host.workflow, &events, &self.node)
@@ -69,48 +71,57 @@ impl SessionTools {
             .await
             .map_err(|source| RunToolError::Plan { source })?
             .map(|held| held.document);
-        let checkout = self.handover_checkout().await?;
-        write_test_files(&checkout, spec).await?;
+        let (checkout, base) = self.handover_checkout().await?;
         let supervision = self.host.supervision(&self.stop);
-        let mut found = Vec::new();
+        let mut found = already_held(&checkout, &base, spec, supervision).await?;
+        write_test_files(&checkout, spec).await?;
         for (index, one) in spec.specs.iter().enumerate() {
-            let subject = || Subject::Spec(Named::new(one.task.clone(), index));
-            let Some(task) = plan
-                .as_ref()
-                .and_then(|plan| plan.tasks.iter().find(|task| task.id == one.task))
-            else {
-                found.push(Diagnostic::new(
-                    subject(),
-                    Problem::rule(
-                        RuleCode::UnknownSpecTask,
-                        unplanned(&one.task, plan.as_ref()),
-                    ),
-                ));
-                continue;
-            };
-            let tested = Task {
-                criteria: one.criteria().collect(),
-                depends_on: Vec::new(),
-                ..task.clone()
-            };
-            let probes = probe(&tested, &checkout, &self.host.memo, supervision)
-                .await
-                .map_err(|source| RunToolError::Check { source })?;
-            found.extend(
-                judged(index, &tested, &probes, self.host.environment.as_ref())
-                    .into_iter()
-                    .map(|diagnostic| Diagnostic::new(subject(), diagnostic.problem)),
-            );
+            found.extend(self.tested(index, one, plan.as_ref(), &checkout).await?);
         }
         Ok(found)
     }
 
+    /// What one spec breaks where its tests run: a task the plan does
+    /// not declare, or a test that cannot run or already passes in
+    /// `checkout`, which holds every file of the document.
+    async fn tested(
+        &self,
+        index: usize,
+        one: &Spec,
+        plan: Option<&TasksFile>,
+        checkout: &Path,
+    ) -> Result<Vec<Diagnostic>, RunToolError> {
+        let subject = || Subject::Spec(Named::new(one.task.clone(), index));
+        let Some(task) = plan.and_then(|plan| plan.tasks.iter().find(|task| task.id == one.task))
+        else {
+            return Ok(vec![Diagnostic::new(
+                subject(),
+                Problem::rule(RuleCode::UnknownSpecTask, unplanned(&one.task, plan)),
+            )]);
+        };
+        let tested = Task {
+            criteria: one.criteria().collect(),
+            depends_on: Vec::new(),
+            ..task.clone()
+        };
+        let supervision = self.host.supervision(&self.stop);
+        let probes = probe(&tested, checkout, &self.host.memo, supervision)
+            .await
+            .map_err(|source| RunToolError::Check { source })?;
+        Ok(
+            judged(index, &tested, &probes, self.host.environment.as_ref())
+                .into_iter()
+                .map(|diagnostic| Diagnostic::new(subject(), diagnostic.problem))
+                .collect(),
+        )
+    }
+
     /// A checkout of the run's tree as it stands, for this node's
-    /// handed-over documents alone: made once, and put back to the run's
-    /// tree before each later submission. What its builds leave in
-    /// ignored directories stays, so a second submission does not pay a
-    /// cold build again.
-    async fn handover_checkout(&self) -> Result<PathBuf, RunToolError> {
+    /// handed-over documents alone, and the commit it holds: made once,
+    /// and put back to the run's tree before each later submission. What
+    /// its builds leave in ignored directories stays, so a second
+    /// submission does not pay a cold build again.
+    async fn handover_checkout(&self) -> Result<(PathBuf, CommitSha), RunToolError> {
         let supervision = self.host.supervision(&self.stop);
         let base = crate::worktree::head_commit(&self.host.worktree, supervision)
             .await
@@ -146,8 +157,45 @@ impl SessionTools {
             .map_err(|failed| failed.to_string())
         };
         reset.map_err(|detail| RunToolError::Handover { detail })?;
-        Ok(checkout)
+        Ok((checkout, base))
     }
+}
+
+/// Every file of `spec` whose path the run's tree holds at `base`: written
+/// in, it would replace what is there and deny it to the work. Asked of
+/// the commit rather than the checkout, whose ignored files an earlier
+/// submission may have left.
+async fn already_held(
+    checkout: &Path,
+    base: &CommitSha,
+    spec: &SpecFile,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<Vec<Diagnostic>, RunToolError> {
+    let mut found = Vec::new();
+    for (index, one) in spec.specs.iter().enumerate() {
+        for file in &one.files {
+            let at = format!("{}:{}", base.as_str(), file.in_repo());
+            let held = crate::git::success(checkout, &["cat-file", "-e", at.as_str()], supervision)
+                .await
+                .map_err(|failed| RunToolError::Handover {
+                    detail: failed.detail(),
+                })?;
+            if held {
+                found.push(Diagnostic::new(
+                    Subject::Spec(Named::new(one.task.clone(), index)),
+                    Problem::rule(
+                        RuleCode::TestFileExists,
+                        format!(
+                            "`{}` is a file the run's tree already holds; a test lives in a \
+                             new file, beside the project's own tests",
+                            file.path
+                        ),
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(found)
 }
 
 /// What one task's probed criteria break. A task with no `depends_on`
@@ -215,7 +263,7 @@ fn cannot_run(run: &CriterionRun, environment: Option<&ExecutionEnvironment>) ->
 /// tests run as they will once each task's work starts from them.
 async fn write_test_files(checkout: &Path, spec: &SpecFile) -> Result<(), RunToolError> {
     for test_file in spec.specs.iter().flat_map(|one| &one.files) {
-        let path = checkout.join(&test_file.path);
+        let path = checkout.join(test_file.in_repo());
         let written = match path.parent() {
             Some(parent) => tokio::fs::create_dir_all(parent).await,
             None => Ok(()),

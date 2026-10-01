@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use common::spec::*;
 use yunta_core::events::{EventPayload, Failure, NodeEvent, StoredEvent, TaskStatus};
 use yunta_engine::{RunReport, RunTerminal};
-use yunta_testkit::{git_output, Bench, MOCK_CONFIG};
+use yunta_testkit::{git, git_output, write, Bench, MOCK_CONFIG};
 
 /// Each failure of `node`.
 fn failures(events: &[StoredEvent], node: &str) -> Vec<Failure> {
@@ -198,4 +198,29 @@ async fn in_a_run_without_its_own_worktree_the_loop_that_lays_its_tests_is_not_r
 
     assert_eq!(terminal, RunTerminal::Finished, "{state:?}");
     assert_eq!(state.tasks.status("greet"), Some(TaskStatus::Done));
+}
+
+#[tokio::test]
+async fn a_spec_that_names_a_file_the_run_already_holds_is_refused_saying_which() {
+    let bench = Bench::new();
+    write(
+        &bench.worktree.join("tests/greet.sh"),
+        "echo the project's own\n",
+    );
+    git(&bench.worktree, &["add", "tests/greet.sh"]);
+    git(
+        &bench.worktree,
+        &["commit", "-q", "-m", "a test of the project's"],
+    );
+    let over = spec_of("greet", GREETS, "sh tests/greet.sh");
+    let beside = format!(
+        "{{ specs: [{{ task: greet, files: [{{ path: tests/greeting.sh, content: {GREETS:?} }}], \
+         tests: [{{ cmd: \"sh tests/greeting.sh\", proves: \"the greeting says hello\" }}] }}] }}"
+    );
+    let fixture = common::plan_session(PLAN) + &specifying(&[(&over, false), (&beside, true)]);
+    let RunReport { terminal, .. } = bench.run(WORKFLOW, &fixture).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(refused(&bench), [vec!["test-file-exists".to_string()]]);
+    assert_eq!(at_head(&bench, "tests/greet.sh"), "echo the project's own");
 }

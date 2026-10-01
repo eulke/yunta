@@ -2,9 +2,9 @@
 //! spec per task, every file named once and inside the repository, and
 //! every spec with a test that says what it proves.
 //!
-//! Whether its tasks are the plan's, and whether each test fails before
-//! the work, is the engine's to check when the document is submitted:
-//! only the run holds the plan and the tree.
+//! Whether its tasks are the plan's, whether its files are new, and
+//! whether each test fails before the work, is the engine's to check when
+//! the document is submitted: only the run holds the plan and the tree.
 
 use std::collections::HashSet;
 use std::path::{Component, Path};
@@ -38,13 +38,17 @@ pub(super) const RULES: &[Rule] = &[
 ];
 
 /// What the engine demands where it runs the tests: the run's plan
-/// declares every task a spec names, and in a checkout of the run's tree
-/// with every file of the document written into it, each test runs and
-/// fails.
+/// declares every task a spec names, every file is new to the run's tree,
+/// and in a checkout of that tree with every file of the document written
+/// into it, each test runs and fails.
 pub(super) const RUN_RULES: &[Rule] = &[
     Rule {
         code: RuleCode::UnknownSpecTask,
         demand: "`task` names a task of the run's plan",
+    },
+    Rule {
+        code: RuleCode::TestFileExists,
+        demand: "every file is new: the run's tree holds nothing at its `path`",
     },
     Rule {
         code: RuleCode::CriterionCannotRun,
@@ -62,7 +66,7 @@ pub(super) const RUN_RULES: &[Rule] = &[
 pub(super) fn check(file: &SpecFile) -> Vec<Diagnostic> {
     let mut broken = Vec::new();
     let mut tasks = HashSet::new();
-    let mut paths = HashSet::new();
+    let mut paths: HashSet<String> = HashSet::new();
     for (index, spec) in file.specs.iter().enumerate() {
         let mut problems = Vec::new();
         if !tasks.insert(&spec.task) {
@@ -99,8 +103,9 @@ pub(super) fn check(file: &SpecFile) -> Vec<Diagnostic> {
 }
 
 /// What `spec`'s files break: a path outside the repository, or one an
-/// earlier file of the document already has — `seen` holds those.
-fn files<'a>(spec: &'a Spec, seen: &mut HashSet<&'a str>) -> Vec<(RuleCode, String)> {
+/// earlier file of the document already has, however it is spelled —
+/// `seen` holds those as git names them.
+fn files(spec: &Spec, seen: &mut HashSet<String>) -> Vec<(RuleCode, String)> {
     let mut problems = Vec::new();
     for test_file in &spec.files {
         if !inside(&test_file.path) {
@@ -113,7 +118,7 @@ fn files<'a>(spec: &'a Spec, seen: &mut HashSet<&'a str>) -> Vec<(RuleCode, Stri
                 ),
             ));
         }
-        if !seen.insert(test_file.path.as_str()) {
+        if !seen.insert(test_file.in_repo()) {
             problems.push((
                 RuleCode::DuplicateTestFile,
                 format!(

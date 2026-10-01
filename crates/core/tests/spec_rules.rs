@@ -98,3 +98,14 @@ fn a_file_two_tests_name_is_refused() {
         ["duplicate-test-file"]
     );
 }
+
+#[test]
+fn one_file_under_two_spellings_is_named_twice() {
+    assert_eq!(
+        broken(vec![
+            spec("dark", &["./tests/theme.sh"], &["one"]),
+            spec("light", &["tests/theme.sh"], &["two"]),
+        ]),
+        ["duplicate-test-file"]
+    );
+}

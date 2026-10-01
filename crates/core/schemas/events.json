@@ -3330,6 +3330,11 @@
           "const": "unknown-spec-task"
         },
         {
+          "description": "A spec's file names a path the run's tree already holds.",
+          "type": "string",
+          "const": "test-file-exists"
+        },
+        {
           "description": "A criterion's command never answers where the engine runs\ncriteria: it is not found, not executable, or never returns.",
           "type": "string",
           "const": "criterion-cannot-run"
