@@ -23,6 +23,8 @@ use crate::diagnostic::{
     Diagnostic, DocumentKind, DocumentRef, Named, Problem, Report, RuleCode, Subject,
 };
 use crate::glob::might_overlap;
+
+pub use super::expand::{expand_implicit_dependencies, expand_runner_fanout};
 use crate::{ModeInclude, Node, NodeId, NodeKind, Workflow};
 
 /// Every rule a workflow is held to by the file alone, stated for
@@ -69,21 +71,82 @@ pub const RULES: &[crate::diagnostic::Rule] = &[
 /// one — the graph a run would build — because that is the graph the
 /// rules are about and the graph every reader needs.
 pub fn read(bytes: &str, path: &Path) -> Result<Workflow, Report> {
+    match read_all(bytes, path) {
+        (Some(workflow), report) if report.is_empty() => Ok(workflow),
+        (_, report) => Err(report),
+    }
+}
+
+/// Every problem the file has, in the order the file has them, and the
+/// workflow it declares once the keys nothing reads are taken out —
+/// when what is left reads at all.
+///
+/// For a reader that reports every problem a person has to fix in one
+/// round, `yunta check` among them: it judges the rest of what the file
+/// says as the person meant it. A run reads with [`read`], which refuses
+/// a file with any problem.
+pub fn read_all(bytes: &str, path: &Path) -> (Option<Workflow>, Report) {
     let document = DocumentRef::new(DocumentKind::Workflow, path.display().to_string());
-    let mut workflow: Workflow = crate::yaml::parse(bytes).map_err(|error| {
-        let (path, message, at) = match error {
-            crate::yaml::YamlError::Parse { path, message, at } => (path, message, at),
-            other => (String::new(), other.to_string(), None),
-        };
-        Report::new(
-            document.clone(),
-            vec![Diagnostic::new(Subject::Document, Problem::parse(path, message)).at(at)],
-        )
-        .located(bytes)
-    })?;
-    // This is the authored frontier. A persisted manifest reads the
-    // same Node type after fan-out and legitimately contains `@`.
-    let authored_ids: Vec<_> = workflow
+    let finish = |broken: Vec<Diagnostic>| {
+        let mut report = Report::new(document.clone(), broken).located(bytes);
+        report.diagnostics.sort_by_key(|diagnostic| {
+            diagnostic
+                .at
+                .map_or((usize::MAX, 0), |at| (at.line, at.col))
+        });
+        report
+    };
+    let document_value = match crate::yaml::parse::<crate::yaml::Value>(bytes) {
+        Ok(value) => value,
+        Err(error) => return (None, finish(vec![unread(error)])),
+    };
+    let audit = super::audit::audit(document_value, bytes);
+    let mut broken = audit.broken;
+    // Read from the text itself when nothing was taken out of it, so a
+    // file with nothing wrong reads exactly as the parser reads it.
+    let read = match broken.is_empty() {
+        true => crate::yaml::parse::<Workflow>(bytes),
+        false => crate::yaml::from_value::<Workflow>(audit.repaired),
+    };
+    let workflow = match read {
+        Ok(workflow) => Some(workflow),
+        Err(error) => {
+            broken.push(unread(error));
+            None
+        }
+    };
+    let workflow = workflow.and_then(|mut workflow| {
+        // This is the authored frontier. A persisted manifest reads the
+        // same Node type after fan-out and legitimately contains `@`.
+        let authored = authored_fan_out(&workflow);
+        if !authored.is_empty() {
+            broken.extend(authored);
+            return None;
+        }
+        // Fan-out declarations are about the shape as written, so they
+        // are read before the expansion multiplies them; every rule after
+        // sees the graph that will actually run.
+        expand_runner_fanout(&mut workflow);
+        expand_implicit_dependencies(&mut workflow);
+        broken.extend(check(&workflow));
+        Some(workflow)
+    });
+    (workflow, finish(broken))
+}
+
+/// A refusal of the parser's, as a problem the document has.
+fn unread(error: crate::yaml::YamlError) -> Diagnostic {
+    let (path, message, at) = match error {
+        crate::yaml::YamlError::Parse { path, message, at } => (path, message, at),
+        other => (String::new(), other.to_string(), None),
+    };
+    Diagnostic::new(Subject::Document, Problem::parse(path, message)).at(at)
+}
+
+/// Every authored node id that spells a fan-out sibling's: `@` is
+/// reserved for the ids `runners:` generates.
+fn authored_fan_out(workflow: &Workflow) -> Vec<Diagnostic> {
+    workflow
         .iter_nodes()
         .enumerate()
         .filter(|(_, node)| node.id.is_fan_out())
@@ -96,22 +159,7 @@ pub fn read(bytes: &str, path: &Path) -> Result<Workflow, Report> {
                 ),
             )
         })
-        .collect();
-    if !authored_ids.is_empty() {
-        return Err(Report::new(document, authored_ids).located(bytes));
-    }
-    // Fan-out declarations are about the shape as written, so they are
-    // read before the expansion multiplies them; every rule after sees
-    // the graph that will actually run.
-    expand_runner_fanout(&mut workflow);
-    expand_implicit_dependencies(&mut workflow);
-
-    let broken = check(&workflow);
-    if broken.is_empty() {
-        Ok(workflow)
-    } else {
-        Err(Report::new(document, broken).located(bytes))
-    }
+        .collect()
 }
 
 /// Every rule the file alone decides, collected rather than stopped at
@@ -185,36 +233,45 @@ fn declared_once(workflow: &Workflow) -> Declared<'_> {
 fn references_reach(workflow: &Workflow, ids: &HashSet<&NodeId>) -> Vec<Diagnostic> {
     let mut broken = Vec::new();
     for (index, node) in workflow.nodes.iter().enumerate() {
-        let mut reaches = |field: &str, target: &NodeId| {
+        let mut reaches = |field: &str, target: &NodeId, at: crate::yaml::Pointer| {
             if !ids.contains(target) {
-                broken.push(about(
-                    index,
-                    &node.id,
-                    RuleCode::UnknownDependency,
-                    format!(
-                        "`{field}` names `{target}`, and no node carries that id{}",
-                        crate::text::did_you_mean(
-                            target.as_str(),
-                            ids.iter().map(|id| id.as_str())
-                        )
-                    ),
-                ));
+                broken.push(
+                    about(
+                        index,
+                        &node.id,
+                        RuleCode::UnknownDependency,
+                        format!(
+                            "`{field}` names `{target}`, and no node carries that id{}",
+                            crate::text::did_you_mean(
+                                target.as_str(),
+                                ids.iter().map(|id| id.as_str())
+                            )
+                        ),
+                    )
+                    .within(at),
+                );
             }
         };
-        for dep in &node.depends_on {
-            reaches("depends_on", dep);
+        let at = crate::yaml::Pointer::root;
+        for (position, dep) in node.depends_on.iter().enumerate() {
+            reaches("depends_on", dep, at().key("depends_on").index(position));
         }
         if let Some(on_failure) = &node.on_failure {
-            reaches("on_failure.goto", &on_failure.goto);
+            reaches(
+                "on_failure.goto",
+                &on_failure.goto,
+                at().key("on_failure").key("goto"),
+            );
         }
         if let NodeKind::Gate { on, .. } = &node.kind {
-            for target in on.values() {
-                reaches("on", target);
+            for (option, target) in on {
+                reaches("on", target, at().key("on").key(option.as_str()));
             }
         }
         for read in super::reads::artifact_reads(node) {
             if let Some(producer) = read.node {
-                reaches(read.site.field(), producer);
+                let key = read.site.field().split(':').next().unwrap_or_default();
+                reaches(read.site.field(), producer, at().key(key));
             }
         }
     }
@@ -381,99 +438,4 @@ pub(super) fn about(index: usize, id: &NodeId, code: RuleCode, detail: String) -
         Subject::Node(Named::new(id.clone(), index)),
         Problem::rule(code, detail),
     )
-}
-
-/// `context: [{ artifact: { node, name } }]` creates an *implicit*
-/// `depends_on` edge onto `node` — folded into the ordinary field here,
-/// once, so `check`'s cycle detection and the scheduler's own readiness
-/// calculation (both already only ever read `Node.depends_on`) need zero
-/// awareness of `context:` existing at all. [`read`] calls this on its own copy, so a cycle created purely
-/// by two nodes' context-artifact references is still caught where the
-/// file is read rather than deadlocking a real run. Idempotent: a
-/// node that already lists the referenced node explicitly gets no
-/// duplicate.
-/// A node with `runners: [a, b]` becomes one `<id>@<runner>`
-/// node per runner — **statically, in the manifest**, before anything
-/// runs: the fan-out is visible in `status`, each expanded node
-/// resolves its own runner and renders its own `{{runner.name}}`, and
-/// the scheduler needs zero fan-out awareness. Every reference to the
-/// original id follows the expansion: downstream `depends_on` rewires
-/// onto all siblings, and mode include lists name them all (so a mode
-/// that covered `review` still covers the whole review). Re-route and
-/// gate targets onto a fan-out node are check errors — there is no
-/// unambiguous "return control to review" once review is many nodes —
-/// so this function never sees one.
-pub fn expand_runner_fanout(workflow: &mut Workflow) {
-    let mut expansion: std::collections::HashMap<NodeId, Vec<NodeId>> =
-        std::collections::HashMap::new();
-    let mut nodes = Vec::with_capacity(workflow.nodes.len());
-    for node in workflow.nodes.drain(..) {
-        if node.runners.is_empty() {
-            nodes.push(node);
-            continue;
-        }
-        let mut expanded_ids = Vec::new();
-        for runner in &node.runners {
-            let mut sibling = node.clone();
-            sibling.id = NodeId::fan_out(&node.id, runner);
-            sibling.runner = Some(runner.clone());
-            sibling.runners = Vec::new();
-            expanded_ids.push(sibling.id.clone());
-            nodes.push(sibling);
-        }
-        expansion.insert(node.id.clone(), expanded_ids);
-    }
-    for node in &mut nodes {
-        let mut rewired = Vec::with_capacity(node.depends_on.len());
-        for dep in node.depends_on.drain(..) {
-            match expansion.get(&dep) {
-                Some(siblings) => rewired.extend(siblings.iter().cloned()),
-                None => rewired.push(dep),
-            }
-        }
-        node.depends_on = rewired;
-    }
-    if let Some(modes) = &mut workflow.modes {
-        for spec in modes.values_mut() {
-            if let crate::ModeInclude::Nodes(included) = &mut spec.include {
-                let mut rewritten = Vec::with_capacity(included.len());
-                for id in included.drain(..) {
-                    match expansion.get(&id) {
-                        Some(siblings) => rewritten.extend(siblings.iter().cloned()),
-                        None => rewritten.push(id),
-                    }
-                }
-                *included = rewritten;
-            }
-        }
-    }
-    workflow.nodes = nodes;
-}
-
-pub fn expand_implicit_dependencies(workflow: &mut Workflow) {
-    for node in &mut workflow.nodes {
-        expand_implicit_dependencies_in(node);
-    }
-}
-
-fn expand_implicit_dependencies_in(node: &mut Node) {
-    if let NodeKind::Parallel { nodes, .. } = &mut node.kind {
-        for child in nodes {
-            expand_implicit_dependencies_in(child);
-        }
-    }
-    // Every artifact a node names of another node orders it behind that
-    // node: a context source reads it, a mount copies it into a child
-    // born after it, a gate shows it to the person deciding. A node-less
-    // reference reads this run's own artifacts — no producer to order
-    // behind.
-    let implied: Vec<NodeId> = super::reads::artifact_reads(node)
-        .into_iter()
-        .filter_map(|read| read.node.cloned())
-        .collect();
-    for referenced in implied {
-        if !node.depends_on.contains(&referenced) {
-            node.depends_on.push(referenced);
-        }
-    }
 }

@@ -9,8 +9,10 @@
 //! missing or wrong, instead of reporting that nothing matched.
 
 mod artifacts;
+mod audit;
 mod command;
 mod context;
+mod expand;
 mod hooks;
 mod node;
 mod node_kind;

@@ -371,11 +371,11 @@ fn placed(report: &Report) -> Vec<Option<(usize, usize)>> {
 #[test]
 fn a_diagnostic_read_from_text_carries_its_location() {
     // Parsed, then broken: a dependency on a node nobody declares is
-    // placed where the node that declares it is written.
+    // placed on the name in the list that names it.
     let workflow = "name: w\nnodes:\n  - id: lint\n    kind: bash\n    run: \"true\"\n  - id: fix\n    kind: bash\n    run: \"true\"\n    depends_on: [lnt]\n";
     let report = yunta_core::workflow::read::read(workflow, std::path::Path::new("w.yaml"))
         .expect_err("`lnt` is declared nowhere");
-    assert_eq!(placed(&report), [Some((6, 5))], "{report}");
+    assert_eq!(placed(&report), [Some((9, 18))], "{report}");
 
     // Not parsed at all: placed where the parser stopped.
     let unread = "name: w\nnodes:\n  - id: lint\n    kind: bash\n    rn: x\n";

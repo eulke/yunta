@@ -124,11 +124,15 @@ pub(crate) fn suggestions(errors: &[yunta_engine::CheckError], detected: &Detect
 }
 
 /// The runners `errors` say a node names and the config does not
-/// declare, or declares with no candidate — each once, in order.
+/// declare, or declares with no candidate — each once, in order. A name
+/// one slip from a runner the config declares is a typo to fix, not a
+/// runner to declare.
 fn runners_wanted(errors: &[yunta_engine::CheckError]) -> Vec<RunnerName> {
     let mut roles: Vec<RunnerName> = Vec::new();
     for error in errors {
-        if let yunta_engine::CheckError::UnknownRunner { runner, .. }
+        if let yunta_engine::CheckError::UnknownRunner {
+            runner, near: None, ..
+        }
         | yunta_engine::CheckError::RunnerHasNoCandidates { runner, .. } = error
         {
             if !roles.contains(runner) {

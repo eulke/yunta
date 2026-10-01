@@ -21,6 +21,10 @@ workflow.yaml: 1 error
 
 A name one or two typos away from one the workflow or the config declares — a
 key, a node id, a runner, a command — is suggested at the end of the sentence.
+`check` reads past a key it does not know — as the key it is one typo from, when
+the node does not write that key already — so every problem in the file is
+listed at once, in the order the file has them, and one round of edits fixes
+them all. `yunta run` refuses a file with any of them.
 
 - **``node `x` references runner `y`, which `runners:` does not define``** —
   add the runner under `runners:` in `.yunta/config.yaml` (see

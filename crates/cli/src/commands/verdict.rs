@@ -38,6 +38,9 @@ pub(crate) struct Verdict {
     warnings: Vec<String>,
     /// The file the workflow was read from, which its refusals quote.
     path: PathBuf,
+    /// What the file itself breaks, when the workflow judged is the one it
+    /// declares once its unread keys are taken out.
+    in_file: Vec<yunta_core::diagnostic::Diagnostic>,
 }
 
 /// What `workflow`, read from `path`, gets here under `config`.
@@ -83,6 +86,7 @@ pub(crate) async fn verdict(
         errors,
         warnings,
         path: path.to_path_buf(),
+        in_file: Vec::new(),
     }
 }
 
@@ -126,7 +130,18 @@ pub(crate) fn layer_conflicts(cwd: &Path) -> Result<Vec<String>, CliError> {
 impl Verdict {
     /// Whether nothing stops the workflow.
     pub(crate) fn passes(&self) -> bool {
-        self.conflicts.is_empty() && self.errors.is_empty()
+        self.conflicts.is_empty() && self.errors.is_empty() && self.in_file.is_empty()
+    }
+
+    /// This verdict with what the file itself breaks beside what the
+    /// workflow it declares is refused for: one report, in the order the
+    /// file has them.
+    pub(crate) fn with_file_problems(
+        mut self,
+        in_file: Vec<yunta_core::diagnostic::Diagnostic>,
+    ) -> Self {
+        self.in_file = in_file;
+        self
     }
 
     /// Says what does not stop the workflow but should be heard before it
@@ -161,15 +176,26 @@ impl Verdict {
     async fn problems(&self, ctx: &Context, heading: impl Display) -> String {
         let text = tokio::fs::read_to_string(&self.path).await.ok();
         let map = text.as_deref().map(SourceMap::read).unwrap_or_default();
-        let all: Vec<(String, Option<Location>)> = self
-            .conflicts
+        let mut all: Vec<(String, Option<Location>)> = self
+            .in_file
             .iter()
-            .map(|conflict| (conflict.clone(), None))
+            .map(|problem| match problem.at {
+                Some(at) => (problem.said(), Some(at)),
+                None => (problem.to_string(), None),
+            })
             .chain(self.errors.iter().map(|error| {
                 let at = error.pointer().and_then(|pointer| map.place(&pointer));
                 (error.to_string(), at)
             }))
             .collect();
+        // In the order the file has them; what has no place in it — a
+        // config layer's conflict among them — after.
+        all.sort_by_key(|(_, at)| at.map_or((usize::MAX, 0), |at| (at.line, at.col)));
+        all.extend(
+            self.conflicts
+                .iter()
+                .map(|conflict| (conflict.clone(), None)),
+        );
         let shown = self.path.display().to_string();
         let mut said = located(&heading.to_string(), &all, &shown, text.as_deref());
         let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision())

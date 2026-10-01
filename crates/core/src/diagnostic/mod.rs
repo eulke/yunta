@@ -125,6 +125,12 @@ pub struct Diagnostic {
     /// over as a structured value has no text, and no place in it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at: Option<Location>,
+    /// Where inside the entry the subject names a broken rule is, when
+    /// the rule knows the key it is about — what places it in the text.
+    /// The subject is what a reader is told; this is never written down.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub within: Option<Pointer>,
 }
 
 impl Diagnostic {
@@ -133,7 +139,15 @@ impl Diagnostic {
             subject,
             problem,
             at: None,
+            within: None,
         }
+    }
+
+    /// This diagnostic, about the key `within` of the entry its subject
+    /// names.
+    pub fn within(mut self, within: Pointer) -> Self {
+        self.within = Some(within);
+        self
     }
 
     /// This diagnostic, placed at `at` in its document's text.
@@ -148,7 +162,10 @@ impl Diagnostic {
         let entry = self.subject.pointer(kind);
         match &self.problem {
             Problem::Parse { path, .. } => entry.join(Pointer::parse_path(path)),
-            Problem::Rule { .. } => entry,
+            Problem::Rule { .. } => match &self.within {
+                Some(within) => entry.join(within.clone()),
+                None => entry,
+            },
         }
     }
 

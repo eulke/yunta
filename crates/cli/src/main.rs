@@ -141,6 +141,26 @@ pub(crate) fn load_workflow(path: &Path) -> Result<yunta_core::Workflow, CliErro
     })
 }
 
+/// The workflow at `path` read in one pass: every problem the file has,
+/// and the workflow it declares once the keys nothing reads are taken
+/// out, when what is left reads. `yunta check` judges that workflow too,
+/// so a person fixes every problem in one round; nothing runs it.
+pub(crate) fn audit_workflow(
+    path: &Path,
+) -> Result<
+    (
+        Option<yunta_core::Workflow>,
+        yunta_core::diagnostic::Report,
+        String,
+    ),
+    CliError,
+> {
+    let contents = std::fs::read_to_string(path)
+        .map_err(|source| CliError::io("read workflow at", path.display(), source))?;
+    let (workflow, report) = yunta_core::workflow::read::read_all(&contents, path);
+    Ok((workflow, report, contents))
+}
+
 /// Reads and parses a YAML file into `T`, naming what it was reading and
 /// where when it can't — the loader for everything that is neither a
 /// workflow nor a persisted document.

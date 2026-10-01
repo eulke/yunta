@@ -154,7 +154,7 @@ impl Node {
 
 /// The keys every node accepts at its own level; `kind` and the keys
 /// that belong to the kind are [`NodeKind`]'s.
-const NODE_KEYS: &[&str] = &[
+pub(super) const NODE_KEYS: &[&str] = &[
     "id",
     "depends_on",
     "scope",
@@ -176,7 +176,7 @@ const NODE_KEYS: &[&str] = &[
 
 /// Keys an author reaches for that no node accepts, each with the key
 /// that expresses the intent.
-const RETIRED_NODE_KEYS: &[(&str, &str)] = &[
+pub(super) const RETIRED_NODE_KEYS: &[(&str, &str)] = &[
     ("role", "a node names its runner with `runner:`"),
     (
         "interactive",

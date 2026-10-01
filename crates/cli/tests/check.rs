@@ -284,3 +284,30 @@ fn check_points_at_the_line_and_column_of_an_unknown_runner() {
         "{said}"
     );
 }
+
+#[test]
+fn three_unknown_keys_and_a_bad_runner_are_reported_together() {
+    let project = Checkout::new()
+        .file(
+            ".yunta/config.yaml",
+            "runners:\n  implementer:\n    - { adapter: mock, model: m }\n",
+        )
+        .file(
+            "workflow.yaml",
+            "name: fixture\nnodes:\n  - id: lint\n    kind: bash\n    rn: \"true\"\n    run: \"true\"\n  - id: fix\n    kind: prompt\n    promt: p\n    runner: implementr\n    descripton: d\n",
+        );
+
+    let output = yunta_at!(project, &["check", "workflow.yaml"]);
+    assert!(!output.status.success());
+    let said = stderr(&output);
+    let placed: Vec<&str> = said
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("--> workflow.yaml:"))
+        .collect();
+    assert_eq!(placed, ["5:5", "9:5", "10:13", "11:5"], "{said}");
+    assert!(said.starts_with("workflow.yaml: 4 errors"), "{said}");
+    assert!(
+        !said.contains("implementr:\n"),
+        "a typo of a declared runner is not offered as one to declare: {said}"
+    );
+}
