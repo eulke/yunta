@@ -24,6 +24,7 @@ use crate::commands::advice;
 use crate::context::Context;
 use crate::error::note;
 use crate::error::{CliError, Outcome};
+use crate::render::state::RunWord;
 use crate::render::{indent, NodeDisplay, CHILD_DEPTH, INDENT};
 
 pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
@@ -31,6 +32,7 @@ pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let open = ctx.open_run(run_id).await?;
     let events = open.events;
     let run_dir = open.run_dir;
+    let engine = yunta_engine::engine_liveness(&run_dir, &yunta_engine::lock::SystemProbe);
     // What this binary did not understand in a file a later one wrote:
     // said, because a reader acting on a manifest whose newer half is
     // invisible to them should know that is what they are doing.
@@ -47,14 +49,15 @@ pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let now = ctx.clock.now();
     if json {
         return crate::json::print_json(&crate::json::RunDocument::of(
-            run_id, &events, &manifest, now,
+            run_id, &events, &manifest, now, engine,
         ));
     }
 
     let frame = progress::frame(run_id, &manifest, &events, now);
     let state = yunta_engine::derive(&events);
-    println!("run {run_id}: {}", progress::summary(&frame));
+    println!("run {run_id}: {}", progress::summary(&frame, engine));
     print_derived(&frame, &state, &run_dir);
+    print_stall(run_id, &frame.phase, engine);
     let tree = ctx.project.run_tree(&manifest, run_id, &ctx.cwd);
     print_decision((run_id, &manifest, &tree), &events, &frame.phase);
     Ok(Outcome::Success)
@@ -123,6 +126,24 @@ fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState, run_dir: &Pat
             crate::render::format_duration(slept)
         );
     }
+}
+
+/// What a run whose engine is gone needs, printed where a parked run's
+/// decision goes: nothing moves it again until a person hands it back
+/// to an engine, or stops it where it is.
+fn print_stall(run_id: &RunId, phase: &RunPhase, engine: yunta_engine::EngineLiveness) {
+    if RunWord::observed(phase, engine) != RunWord::Stalled {
+        return;
+    }
+    println!("no process is driving this run: the engine that ran it is gone");
+    println!(
+        "{INDENT}{}   continues it from its log",
+        advice::resume(run_id)
+    );
+    println!(
+        "{INDENT}{}   records where it stopped",
+        advice::cancel(run_id)
+    );
 }
 
 /// What a parked run is waiting on, printed last because it is what the

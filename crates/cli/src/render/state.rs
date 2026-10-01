@@ -244,7 +244,7 @@ mod tests {
 
 /// What a run's derived phase is called, wherever a surface says it.
 ///
-/// Eight words for the eight answers a reader acts on. A listing, a
+/// Nine words for the nine answers a reader acts on. A listing, a
 /// status page, a closing block and a JSON document each used to reach
 /// into [`RunPhase`] and choose a word, so one stop could be called
 /// four things — and whether the command succeeded was decided a third
@@ -255,6 +255,9 @@ mod tests {
 pub(crate) enum RunWord {
     Created,
     Running,
+    /// Its log says it is moving, and the engine that drove it is gone:
+    /// nothing moves it until a person resumes it.
+    Stalled,
     /// Stopped until a person acts.
     Paused,
     Finished,
@@ -270,9 +273,10 @@ impl RunWord {
     /// proves each has a group in the listing, and one that proves each
     /// reads as itself.
     #[cfg(test)]
-    pub(crate) const ALL: [RunWord; 8] = [
+    pub(crate) const ALL: [RunWord; 9] = [
         RunWord::Created,
         RunWord::Running,
+        RunWord::Stalled,
         RunWord::Paused,
         RunWord::Finished,
         RunWord::Failed,
@@ -292,6 +296,22 @@ impl RunWord {
             RunPhase::Cancelled => RunWord::Cancelled,
             RunPhase::Promoted { .. } => RunWord::Promoted,
             RunPhase::Broken { .. } => RunWord::Broken,
+        }
+    }
+
+    /// What a run read from outside the process driving it is called:
+    /// [`RunWord::of`] its phase, except that a run whose log says it is
+    /// moving while the engine its registry names is gone is stalled.
+    ///
+    /// Only a dead engine is proof. No registry at all is also what a
+    /// run looks like for the instant it is handed to another process,
+    /// and calling that stalled would be wrong for exactly that instant.
+    pub(crate) fn observed(phase: &RunPhase, engine: yunta_engine::EngineLiveness) -> Self {
+        match (RunWord::of(phase), engine) {
+            (RunWord::Created | RunWord::Running, yunta_engine::EngineLiveness::Dead) => {
+                RunWord::Stalled
+            }
+            (word, _) => word,
         }
     }
 
@@ -317,6 +337,7 @@ impl RunWord {
         match self {
             RunWord::Created => "created",
             RunWord::Running => "running",
+            RunWord::Stalled => "stalled",
             RunWord::Paused => "paused",
             RunWord::Finished => "finished",
             RunWord::Failed => "failed",
@@ -331,7 +352,7 @@ impl RunWord {
     pub(crate) fn mark(self) -> StateWord {
         match self {
             RunWord::Created | RunWord::Running => StateWord::Run,
-            RunWord::Paused | RunWord::Promoted => StateWord::Wait,
+            RunWord::Stalled | RunWord::Paused | RunWord::Promoted => StateWord::Wait,
             RunWord::Finished => StateWord::Done,
             RunWord::Failed | RunWord::Cancelled | RunWord::Broken => StateWord::Fail,
         }
@@ -375,6 +396,7 @@ impl RunWord {
             RunWord::Finished
             | RunWord::Created
             | RunWord::Running
+            | RunWord::Stalled
             | RunWord::Paused
             | RunWord::Failed
             | RunWord::Cancelled

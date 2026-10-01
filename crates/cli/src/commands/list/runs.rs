@@ -13,7 +13,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use yunta_core::events::StoredEvent;
 use yunta_core::{Clock, Manifest, ModeName, RunId, WorkflowName};
-use yunta_engine::RunFrame;
+use yunta_engine::{EngineLiveness, RunFrame};
 use yunta_storage::Storage;
 
 use crate::commands::status::progress;
@@ -50,6 +50,10 @@ enum Standing {
     /// Stopped until a person acts: a decision to answer, or a log that
     /// stopped making sense.
     NeedsYou,
+    /// Its log says it is moving and the engine that drove it is gone:
+    /// it waits on a person as surely as a decision does, but what it
+    /// takes is a resume, not an answer.
+    Stalled,
     /// Moving on its own, or created and not yet started.
     InFlight,
     /// Closed, however it closed.
@@ -58,7 +62,12 @@ enum Standing {
 
 impl Standing {
     /// Every group, in printing order.
-    const ALL: [Standing; 3] = [Standing::NeedsYou, Standing::InFlight, Standing::Closed];
+    const ALL: [Standing; 4] = [
+        Standing::NeedsYou,
+        Standing::Stalled,
+        Standing::InFlight,
+        Standing::Closed,
+    ];
 
     /// Which group a run called `word` belongs in. A log that stopped
     /// making sense needs a person as much as a decision does: nothing
@@ -70,6 +79,7 @@ impl Standing {
     fn of(word: RunWord) -> Self {
         match word {
             RunWord::Paused | RunWord::Broken => Standing::NeedsYou,
+            RunWord::Stalled => Standing::Stalled,
             RunWord::Created | RunWord::Running => Standing::InFlight,
             RunWord::Finished | RunWord::Failed | RunWord::Cancelled | RunWord::Promoted => {
                 Standing::Closed
@@ -83,6 +93,7 @@ impl Standing {
     fn heading(self) -> &'static str {
         match self {
             Self::NeedsYou => "needs you",
+            Self::Stalled => "stalled",
             Self::InFlight => "in flight",
             Self::Closed => "closed",
         }
@@ -179,14 +190,14 @@ fn push_heading(out: &mut String, heading: &str, runs: usize) {
 impl RunRow {
     /// One row from the run's own frame: which group it belongs in, what
     /// the run is, and the line `yunta status` prints for it.
-    fn of(frame: &RunFrame, age: Duration) -> Self {
+    fn of(frame: &RunFrame, engine: EngineLiveness, age: Duration) -> Self {
         RunRow {
             run_id: frame.run_id.clone(),
-            standing: Standing::of(RunWord::of(&frame.phase)),
+            standing: Standing::of(RunWord::observed(&frame.phase, engine)),
             workflow: frame.workflow.clone(),
             mode: frame.mode.clone(),
             age,
-            summary: progress::summary(frame),
+            summary: progress::summary(frame, engine),
         }
     }
 
@@ -255,6 +266,7 @@ fn run_row(
         })?;
     Ok(RunRow::of(
         &progress::frame(&run_id, &manifest, &events, now),
+        yunta_engine::engine_liveness(&run_dir, &yunta_engine::lock::SystemProbe),
         time_in_state(&events, now),
     ))
 }

@@ -151,20 +151,23 @@ pub(crate) struct RunDocument {
 
 impl RunDocument {
     /// The run as its own log describes it at `now`, which the caller's
-    /// injected clock decides.
+    /// injected clock decides, and as `engine` — what the run's registry
+    /// says about the process driving it — qualifies a run that looks
+    /// like it is moving.
     pub(crate) fn of(
         run_id: &RunId,
         events: &[StoredEvent],
         manifest: &Manifest,
         now: DateTime<Utc>,
+        engine: yunta_engine::EngineLiveness,
     ) -> Self {
         let state = yunta_engine::derive(events);
         let frame = progress::frame(run_id, manifest, events, now);
         RunDocument {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.to_string(),
-            outcome: RunWord::of(&frame.phase),
-            summary: progress::summary(&frame),
+            outcome: RunWord::observed(&frame.phase, engine),
+            summary: progress::summary(&frame, engine),
             reason: reason(&frame.phase),
             budget_warning: None,
             context_warnings: Vec::new(),

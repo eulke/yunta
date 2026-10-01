@@ -91,7 +91,7 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         }
     };
 
-    if engine_is_alive(&registry) == Liveness::Alive {
+    if registry.liveness(&yunta_engine::lock::SystemProbe) == Liveness::Alive {
         // Case 1 — the engine handles the rest itself.
         println!(
             "run {run_id}: signalling the live engine (pid {})",
@@ -174,25 +174,6 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         yunta_core::text::counted(registry.process_groups.len(), "orphaned process group")
     );
     Ok(Outcome::Success)
-}
-
-/// Whether the engine the registry names is still that engine.
-///
-/// A live pid is not enough. The engine may have died and the host may
-/// have handed its number to something else entirely — signalling that
-/// would interrupt a process that has nothing to do with this run. The
-/// registry wrote down when the engine started, so the answer is the
-/// same one the isolation lock asks of its own holder.
-fn engine_is_alive(registry: &yunta_engine::EngineProcessFile) -> Liveness {
-    yunta_engine::lock::holder_state(
-        &yunta_engine::lock::LockOwner {
-            schema_version:
-                <yunta_engine::lock::LockOwner as yunta_core::persisted::Persisted>::SCHEMA_VERSION,
-            pid: registry.engine_pid,
-            started_at: registry.started_at,
-        },
-        &yunta_engine::lock::SystemProbe,
-    )
 }
 
 /// SIGKILL to every process group the engine registered. A group that is

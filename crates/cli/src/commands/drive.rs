@@ -387,7 +387,12 @@ async fn documented(
     warnings: PreRunWarnings,
 ) -> Result<crate::json::RunDocument, CliError> {
     let events = storage.events_for_run(run_id.clone()).await?;
-    Ok(crate::json::RunDocument::of(run_id, &events, manifest, ctx.clock.now()).warnings(warnings))
+    // This invocation is the engine that drove the run.
+    let engine = yunta_engine::EngineLiveness::Alive;
+    Ok(
+        crate::json::RunDocument::of(run_id, &events, manifest, ctx.clock.now(), engine)
+            .warnings(warnings),
+    )
 }
 
 /// Prints the run as the one versioned document `run --json`,

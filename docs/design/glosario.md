@@ -147,6 +147,13 @@ superficie tiene que leer una ausencia para saber si un nodo no corre o todavía
 no arrancó.
 _Evitar_: estado del nodo, pendiente, nodo sin estado.
 
+**Stalled**:
+Un run cuyo log dice que avanza y cuyo engine ya no existe: el registro del run
+(`scratch/engine.json`) nombra un proceso que terminó, o un pid que el host le dio
+después a otro proceso. Es una lectura, no un evento; sin registro no se afirma,
+porque un run que pasa de un proceso a otro tampoco tiene uno por un instante.
+_Evitar_: colgado, huérfano, zombie.
+
 **Crónica**:
 Qué pasó, en orden, derivada del mismo log y con los mismos tipos que el frame:
 un **momento** por evento. Lo que el frame dice que un nodo *es*, un momento

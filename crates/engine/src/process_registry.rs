@@ -18,6 +18,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use yunta_core::persisted::Persisted;
+use yunta_core::process::signal::Liveness;
 use yunta_core::{Pid, RelativePath};
 
 impl Persisted for EngineProcessFile {
@@ -242,6 +243,63 @@ pub fn read_registry(run_dir: &Path) -> Registry {
     }
 }
 
+impl EngineProcessFile {
+    /// Whether the engine this registry names is still the process that
+    /// wrote it.
+    ///
+    /// A live pid is not enough. The engine may have died and the host
+    /// may have handed its number to something else entirely, so the
+    /// answer is the one the isolation lock asks of its own holder: the
+    /// process has to have started no later than the registry says the
+    /// engine did.
+    pub fn liveness(&self, probe: &dyn crate::lock::OwnerProbe) -> Liveness {
+        crate::lock::holder_state(
+            &crate::lock::LockOwner {
+                schema_version: <crate::lock::LockOwner as Persisted>::SCHEMA_VERSION,
+                pid: self.engine_pid,
+                started_at: self.started_at,
+            },
+            probe,
+        )
+    }
+}
+
+/// Whether a live engine is driving a run, as far as the run's own
+/// registry can prove.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineLiveness {
+    /// The process the registry names is the one that wrote it.
+    Alive,
+    /// The registry names a process that is gone, or a number the host
+    /// has since given to another process: nothing drives the run.
+    Dead,
+    /// No registry. No engine is driving the run now — one deletes it on
+    /// every way out, a pause included — or one is about to write it: a
+    /// run handed to a detached process has none for an instant.
+    Unrecorded,
+    /// A registry this binary cannot read, or a process the host cannot
+    /// tell about.
+    Unknown,
+}
+
+/// What the registry under `run_dir` says about the engine driving it.
+///
+/// Only [`EngineLiveness::Dead`] is proof that nothing drives the run: an
+/// absent registry is also what a run being handed between processes
+/// looks like, and a reader that called that stalled would be wrong for
+/// the instant it lasts.
+pub fn engine_liveness(run_dir: &Path, probe: &dyn crate::lock::OwnerProbe) -> EngineLiveness {
+    match read_registry(run_dir) {
+        Registry::Absent => EngineLiveness::Unrecorded,
+        Registry::Corrupt(_) => EngineLiveness::Unknown,
+        Registry::Read(registry) => match registry.doc.liveness(probe) {
+            Liveness::Alive => EngineLiveness::Alive,
+            Liveness::Dead => EngineLiveness::Dead,
+            Liveness::Unknown => EngineLiveness::Unknown,
+        },
+    }
+}
+
 /// The pid of a spawned child, or `None` once it has been reaped.
 pub fn child_pid(child: &tokio::process::Child) -> Option<Pid> {
     child.id().and_then(|id| Pid::try_from(id).ok())
@@ -251,4 +309,91 @@ fn lock(state: &Mutex<EngineProcessFile>) -> std::sync::MutexGuard<'_, EnginePro
     state
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lock::OwnerProbe;
+
+    /// A host whose process table holds one process, started at a fixed
+    /// instant, under every pid.
+    struct Host {
+        alive: Liveness,
+        started: Option<DateTime<Utc>>,
+    }
+
+    impl OwnerProbe for Host {
+        fn liveness(&self, _pid: Pid) -> Liveness {
+            self.alive
+        }
+        fn started(&self, _pid: Pid) -> Option<DateTime<Utc>> {
+            self.started
+        }
+    }
+
+    /// A registry the way a crashed engine leaves one: written, and never
+    /// cleared.
+    fn left_behind(run_dir: &Path, started_at: DateTime<Utc>) {
+        let pid = Pid::try_from(4321u32).expect("a pid");
+        std::fs::create_dir_all(registry_path(run_dir).parent().expect("a parent")).unwrap();
+        std::mem::forget(ProcessRegistry::create(run_dir, pid, started_at).expect("registry"));
+    }
+
+    #[test]
+    fn an_engine_record_naming_a_process_that_exited_reads_as_dead() {
+        let run = tempfile::tempdir().unwrap();
+        left_behind(
+            run.path(),
+            DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
+        );
+        let gone = Host {
+            alive: Liveness::Dead,
+            started: None,
+        };
+        assert_eq!(engine_liveness(run.path(), &gone), EngineLiveness::Dead);
+    }
+
+    #[test]
+    fn a_reused_pid_that_started_after_the_record_reads_as_dead() {
+        let run = tempfile::tempdir().unwrap();
+        let recorded = DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        left_behind(run.path(), recorded);
+        let stranger = Host {
+            alive: Liveness::Alive,
+            started: Some(recorded + chrono::Duration::hours(1)),
+        };
+        assert_eq!(engine_liveness(run.path(), &stranger), EngineLiveness::Dead);
+        let engine = Host {
+            alive: Liveness::Alive,
+            started: Some(recorded),
+        };
+        assert_eq!(engine_liveness(run.path(), &engine), EngineLiveness::Alive);
+    }
+
+    #[test]
+    fn a_run_with_no_engine_record_is_never_called_dead() {
+        let run = tempfile::tempdir().unwrap();
+        let gone = Host {
+            alive: Liveness::Dead,
+            started: None,
+        };
+        assert_eq!(
+            engine_liveness(run.path(), &gone),
+            EngineLiveness::Unrecorded
+        );
+    }
+
+    #[test]
+    fn a_registry_that_does_not_read_proves_nothing() {
+        let run = tempfile::tempdir().unwrap();
+        let path = registry_path(run.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "not json").unwrap();
+        let gone = Host {
+            alive: Liveness::Dead,
+            started: None,
+        };
+        assert_eq!(engine_liveness(run.path(), &gone), EngineLiveness::Unknown);
+    }
 }

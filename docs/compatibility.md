@@ -296,8 +296,12 @@ it is the state it can account for.
 `yunta list --runs` orders runs by the timestamp of their first event.
 
 `yunta list --runs` groups runs by what can be done about them — what needs a
-person, what is in flight, what has closed, and last the runs whose log or
-manifest does not read back. The first three groups are ordered by how long a
+person, what stalled, what is in flight, what has closed, and last the runs whose
+log or manifest does not read back. A run is stalled when its log says it is
+moving and the engine its registry (`scratch/engine.json`) names is gone: a
+process that exited, or a pid the host has since given to a process that started
+later. Nothing else is called stalled — a run with no registry at all may be
+between two processes. The first four groups are ordered by how long a
 run has been where it is, longest first; two runs that have been there equally
 long are ordered by run id, which for a minted one is the order they were
 created in. A run in the last group has no derived state to have been in, so
@@ -313,8 +317,8 @@ run document changed shape.
 `workflow_status` all emit one document. It is derived from the run's own event
 log, so the command that drove a run to its stop and the command that reads that
 run afterwards publish the same answer, field for field. `outcome` is the word
-every text surface prints for the run — `created`, `running`, `paused`,
-`finished`, `failed`, `cancelled`, `promoted`, `broken` — so a reader who greps a
+every text surface prints for the run — `created`, `running`, `stalled`,
+`paused`, `finished`, `failed`, `cancelled`, `promoted`, `broken` — so a reader who greps a
 terminal for what `status` said finds the same word in the document. A failed or
 broken run carries `reason`; a parked one carries `waiting_on` and, when its
 pause reconstructs a menu, `decision`. `yunta run --detach --json` publishes that

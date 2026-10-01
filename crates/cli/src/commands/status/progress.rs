@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 
 use yunta_core::events::StoredEvent;
 use yunta_core::{Manifest, RunId};
-use yunta_engine::{Counter, RunFrame, RunPhase};
+use yunta_engine::{Counter, EngineLiveness, RunFrame, RunPhase};
 
 use crate::commands::advice;
 
@@ -46,7 +46,11 @@ pub(crate) fn frame(
 /// The counters and the phase on one line: two levels — flow (the DAG's
 /// nodes, over what this run's mode schedules) and task (ledger tasks
 /// done over registered) — each a counter with context.
-pub(crate) fn summary(frame: &RunFrame) -> String {
+///
+/// `engine` is what the run's registry says about the process driving
+/// it, which is what tells a run that is moving from one whose engine is
+/// gone.
+pub(crate) fn summary(frame: &RunFrame, engine: EngineLiveness) -> String {
     let mut summary = format!("{}/{} nodes", terminated(&frame.flow), frame.flow.total);
     if let Some(mode) = &frame.flow.skipped_by {
         summary.push_str(&format!(" · {} skipped (mode: {mode})", frame.flow.skipped));
@@ -63,7 +67,7 @@ pub(crate) fn summary(frame: &RunFrame) -> String {
     summary.push_str(&format!(
         " · {} reroutes · {}",
         frame.reroutes,
-        phase_label(&frame.phase)
+        phase_label(&frame.phase, engine)
     ));
     if let Some(note) = crate::commands::unknown_kinds_note(&frame.unknown_kinds) {
         summary.push_str(&format!(" · {note}"));
@@ -81,8 +85,11 @@ fn terminated(flow: &Counter) -> usize {
 
 /// The phase on one line, for the end of a summary: the word every
 /// surface calls it by, and what qualifies it when something does.
-fn phase_label(phase: &RunPhase) -> String {
-    let word = RunWord::of(phase);
+fn phase_label(phase: &RunPhase, engine: EngineLiveness) -> String {
+    let word = RunWord::observed(phase, engine);
+    if word == RunWord::Stalled {
+        return format!("{word} — no process is driving it");
+    }
     match phase {
         // A parked run is waiting on a person, not stuck, and what it is
         // parked on is the thing a reader acts on next.
