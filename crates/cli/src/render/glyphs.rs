@@ -1,7 +1,7 @@
 //! The characters a terminal surface draws with, and the policy that
 //! decides which of the two sets this process may use.
 
-use super::state::StateWord;
+use super::state::Mark;
 
 /// The environment variable that decides the set outright: `unicode` or
 /// `ascii`, case and surrounding space ignored.
@@ -135,22 +135,26 @@ impl Glyphs {
         }
     }
 
-    /// The mark that sits beside a state's word. It repeats the word for
+    /// The glyph a mark is drawn with. It repeats the word beside it for
     /// the eye; the word is what says it.
-    pub(crate) fn state(self, word: StateWord) -> char {
-        match (self, word) {
-            (Self::Unicode, StateWord::Done) => '✓',
-            (Self::Unicode, StateWord::Fail) => '✗',
-            (Self::Unicode, StateWord::Run) => '●',
-            (Self::Unicode, StateWord::Wait) => '◆',
-            (Self::Unicode, StateWord::Skip) => '○',
-            (Self::Unicode, StateWord::Todo) => '·',
-            (Self::Ascii, StateWord::Done) => '+',
-            (Self::Ascii, StateWord::Fail) => 'x',
-            (Self::Ascii, StateWord::Run) => '>',
-            (Self::Ascii, StateWord::Wait) => '?',
-            (Self::Ascii, StateWord::Skip) => '-',
-            (Self::Ascii, StateWord::Todo) => '.',
+    pub(crate) fn mark(self, mark: Mark) -> char {
+        match (self, mark) {
+            (Self::Unicode, Mark::Done) => '✓',
+            (Self::Unicode, Mark::Failed) => '✗',
+            (Self::Unicode, Mark::Running) => '●',
+            (Self::Unicode, Mark::NeedsYou) => '◆',
+            (Self::Unicode, Mark::Skipped) => '○',
+            (Self::Unicode, Mark::Pending) => '·',
+            (Self::Unicode, Mark::Reroute) => '↻',
+            (Self::Unicode, Mark::Caution) => '▲',
+            (Self::Ascii, Mark::Done) => '+',
+            (Self::Ascii, Mark::Failed) => 'x',
+            (Self::Ascii, Mark::Running) => '>',
+            (Self::Ascii, Mark::NeedsYou) => '?',
+            (Self::Ascii, Mark::Skipped) => '-',
+            (Self::Ascii, Mark::Pending) => '.',
+            (Self::Ascii, Mark::Reroute) => '~',
+            (Self::Ascii, Mark::Caution) => '!',
         }
     }
 }
@@ -250,7 +254,7 @@ mod tests {
             let mut drawn: Vec<char> =
                 vec![glyphs.bar_filled(), glyphs.bar_empty(), glyphs.ellipsis()];
             drawn.extend(glyphs.ramp());
-            drawn.extend(crate::render::state::ALL_WORDS.map(|word| glyphs.state(word)));
+            drawn.extend(crate::render::state::ALL_MARKS.map(|mark| glyphs.mark(mark)));
             for ch in drawn {
                 assert_eq!(
                     crate::render::cell_width(&ch.to_string()),

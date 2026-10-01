@@ -57,7 +57,7 @@ pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let state = yunta_engine::derive(&events);
     println!("run {run_id}: {}", progress::summary(&frame, engine));
     print_derived(&frame, &state, &run_dir);
-    print_stall(run_id, &frame.phase, engine);
+    print_stall(run_id, &frame, engine);
     let tree = ctx.project.run_tree(&manifest, run_id, &ctx.cwd);
     print_decision((run_id, &manifest, &tree), &events, &frame.phase);
     Ok(Outcome::Success)
@@ -131,8 +131,8 @@ fn print_derived(frame: &RunFrame, state: &yunta_engine::RunState, run_dir: &Pat
 /// What a run whose engine is gone needs, printed where a parked run's
 /// decision goes: nothing moves it again until a person hands it back
 /// to an engine, or stops it where it is.
-fn print_stall(run_id: &RunId, phase: &RunPhase, engine: yunta_engine::EngineLiveness) {
-    if RunWord::observed(phase, engine) != RunWord::Stalled {
+fn print_stall(run_id: &RunId, frame: &RunFrame, engine: yunta_engine::EngineLiveness) {
+    if RunWord::observed(frame, engine) != RunWord::Stalled {
         return;
     }
     println!("no process is driving this run: the engine that ran it is gone");

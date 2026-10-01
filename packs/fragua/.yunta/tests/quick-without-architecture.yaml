@@ -8,7 +8,7 @@ inputs: { idea: "add dark mode" }
 worktree: worktrees/no-architecture
 fixture: fixtures/build-feature.yaml
 expect:
-  final_state: paused
+  final_state: needs you
   nodes:
     grill: finished
     brief: finished

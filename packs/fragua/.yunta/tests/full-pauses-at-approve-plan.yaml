@@ -6,7 +6,7 @@ inputs: { idea: "add dark mode" }
 worktree: worktrees/library
 fixture: fixtures/up-to-the-plan.yaml
 expect:
-  final_state: paused
+  final_state: needs you
   nodes:
     grill: finished
     brief: finished

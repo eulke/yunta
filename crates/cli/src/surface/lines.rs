@@ -55,8 +55,8 @@ impl Lines {
     pub(super) fn moment(&mut self, moment: &Moment, glyphs: Glyphs) {
         let said = chronicle::say(moment);
         let mark = said
-            .word
-            .map(|word| format!("{} ", glyphs.state(word)))
+            .mark
+            .map(|mark| format!("{} ", glyphs.mark(mark)))
             .unwrap_or_default();
         write_line(
             &mut self.out,

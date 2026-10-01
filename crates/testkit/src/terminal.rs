@@ -268,6 +268,12 @@ impl Terminal {
         self.ended.is_some_and(|status| status.success())
     }
 
+    /// The code the run's process exited with, once it has ended with
+    /// one.
+    pub fn exit_code(&self) -> Option<i32> {
+        self.ended.and_then(|status| status.code())
+    }
+
     /// Waits for the run's process to end and returns everything it
     /// drew. Fails, rather than hanging, on a run that never ends.
     pub fn ended(&mut self) -> String {

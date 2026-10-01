@@ -379,7 +379,7 @@ expect:
     // The words a case file is written with, not a Rust enum's `Debug`.
     assert!(
         text.lines()
-            .any(|l| l == "  final_state: expected finished, got paused"),
+            .any(|l| l == "  final_state: expected finished, got needs you"),
         "the mismatch names the field, the expected state and the actual one: {text}"
     );
     // And the reason sits on its own line under it, unquoted and
@@ -688,12 +688,12 @@ nodes:
     );
 
     let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
-    assert!(stdout(&run).contains("paused"), "got: {}", stdout(&run));
+    assert!(stdout(&run).contains("needs you"), "got: {}", stdout(&run));
     let run_id = run_id_from(&run);
 
     let resume = yunta_in!(&repo, &home, &["resume", &run_id]);
     assert!(
-        stdout(&resume).contains("paused"),
+        stdout(&resume).contains("needs you"),
         "got: {}",
         stdout(&resume)
     );
@@ -1130,7 +1130,7 @@ nodes:
     let run_id = run_id_from(&output);
     assert!(
         text.lines()
-            .any(|l| l.starts_with(&format!("run {run_id}: ")) && l.contains("paused")),
+            .any(|l| l.starts_with(&format!("run {run_id}: ")) && l.contains("needs you")),
         "a gate with no TTY degrades to a paused run instead of hanging: {text}"
     );
     assert!(
@@ -1240,7 +1240,11 @@ fn a_second_run_over_max_concurrent_runs_is_refused_while_one_is_paused() {
     // A paused run exits non-zero (it needs attention) but leaves its
     // slot occupied — that's the state the second invocation must see.
     let first = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
-    assert!(stdout(&first).contains("paused"), "got: {}", stdout(&first));
+    assert!(
+        stdout(&first).contains("needs you"),
+        "got: {}",
+        stdout(&first)
+    );
 
     let second = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
@@ -2688,7 +2692,7 @@ nodes:
 
     let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(
-        stdout(&run).contains("paused"),
+        stdout(&run).contains("needs you"),
         "expected the exhausted re-route to pause the run, got: {}\nstderr: {}",
         stdout(&run),
         String::from_utf8_lossy(&run.stderr)
@@ -2762,7 +2766,7 @@ nodes:
 
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     assert!(
-        stdout(&status).contains("paused"),
+        stdout(&status).contains("needs you"),
         "an invalid option must not touch the run's state: {}",
         stdout(&status)
     );

@@ -54,7 +54,7 @@ pub(crate) fn summary(frame: &RunFrame, engine: EngineLiveness) -> String {
     let mut summary = format!(
         "{} · {}",
         crate::render::counter::line(frame),
-        phase_label(&frame.phase, engine)
+        phase_label(frame, engine)
     );
     if let Some(note) = crate::commands::unknown_kinds_note(&frame.unknown_kinds) {
         summary.push_str(&format!(" · {note}"));
@@ -64,12 +64,12 @@ pub(crate) fn summary(frame: &RunFrame, engine: EngineLiveness) -> String {
 
 /// The phase on one line, for the end of a summary: the word every
 /// surface calls it by, and what qualifies it when something does.
-fn phase_label(phase: &RunPhase, engine: EngineLiveness) -> String {
-    let word = RunWord::observed(phase, engine);
+fn phase_label(frame: &RunFrame, engine: EngineLiveness) -> String {
+    let word = RunWord::observed(frame, engine);
     if word == RunWord::Stalled {
         return format!("{word} — no process is driving it");
     }
-    match phase {
+    match &frame.phase {
         // A parked run is waiting on a person, not stuck, and what it is
         // parked on is the thing a reader acts on next.
         RunPhase::Waiting { on } => format!("{word} — {}", advice::parked_on(on)),

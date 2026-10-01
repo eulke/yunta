@@ -253,6 +253,19 @@ pub(crate) struct Settling<'a> {
 /// command that executes a run shares, so `run` and `resume` cannot
 /// report the same stop differently.
 pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> {
+    let interrupted = settling.cancelled;
+    let outcome = reported(settling).await?;
+    // A person who interrupted the invocation is told so by its exit
+    // code, as a shell tells it of any process SIGINT ended, whatever
+    // the run reached on its way out.
+    Ok(match interrupted {
+        true => crate::render::state::RunExit::Interrupted.outcome(),
+        false => outcome,
+    })
+}
+
+/// How the run ended, said the way this invocation was asked to say it.
+async fn reported(settling: Settling<'_>) -> Result<Outcome, CliError> {
     released(&settling).await?;
     if settling.json {
         return Ok(report_run_json(

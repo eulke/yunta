@@ -377,8 +377,8 @@ fn node_line(
         .unwrap_or_else(|| " n/a".to_string());
     format!(
         "{INDENT}{} {} {} {}  {total:>8} tok  {:>8}  blk:{blocked}",
-        glyphs.state(display.word),
-        truncate(display.word.short(), STATE_WIDTH, glyphs),
+        glyphs.mark(display.word.mark()),
+        truncate(display.word.word(), STATE_WIDTH, glyphs),
         middle_cut(node.node_id.as_str(), column, glyphs),
         bar(total, max_tokens, glyphs),
         format_duration(node.wall_clock()),

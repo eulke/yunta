@@ -8,27 +8,54 @@
 //! [`RunWord`] is the same thing for the run as a whole: what its
 //! derived phase is called, wherever a surface says it.
 
-use yunta_engine::{NodeStanding, NodeState, NodeWait, RunPhase};
-
-/// The cells the short word gets in a column of them. Four, the width of
-/// the longest of the six.
-pub(crate) const STATE_WIDTH: usize = 4;
+use yunta_engine::{NodeStanding, NodeState, NodeWait, RunFrame, RunPhase};
 
 /// The state a node is in, as a surface says it.
 ///
-/// Six words for the six answers a reader acts on: it is done, it
+/// Six words for the six answers a reader acts on: it finished, it
 /// failed, it is running, it waits on a person, this run leaves it out,
-/// it has not started. The word carries all of that on its own — a glyph
-/// beside it repeats it for the eye, and color repeats it again, so a
-/// line stripped of both still says the same thing.
+/// it never ran. The word carries all of that on its own — a mark beside
+/// it repeats it for the eye, and color repeats it again, so a line
+/// stripped of both still says the same thing. One vocabulary: the
+/// column of a table and the sentence of a page say the same word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StateWord {
-    Done,
-    Fail,
-    Run,
-    Wait,
-    Skip,
-    Todo,
+    Finished,
+    Failed,
+    Running,
+    Waiting,
+    Skipped,
+    NeverRan,
+}
+
+/// Every word, in the order a reader meets them.
+pub(crate) const ALL_WORDS: [StateWord; 6] = [
+    StateWord::Finished,
+    StateWord::Failed,
+    StateWord::Running,
+    StateWord::Waiting,
+    StateWord::Skipped,
+    StateWord::NeverRan,
+];
+
+/// The cells a column of state words takes: as wide as the widest word,
+/// so a column of them stays a column. Derived from the words, so a word
+/// added or renamed sizes the column with it.
+pub(crate) const STATE_WIDTH: usize = widest(&ALL_WORDS);
+
+const fn widest(words: &[StateWord]) -> usize {
+    match words {
+        [] => 0,
+        [first, rest @ ..] => {
+            let own = first.word().len();
+            let others = widest(rest);
+            if own > others {
+                own
+            } else {
+                others
+            }
+        }
+    }
 }
 
 impl StateWord {
@@ -37,51 +64,73 @@ impl StateWord {
     /// wants named.
     pub(crate) fn of(state: Option<&NodeState>) -> Self {
         match state {
-            None => Self::Todo,
-            Some(NodeState::Running { .. }) => Self::Run,
-            Some(NodeState::Finished { .. }) => Self::Done,
-            Some(NodeState::Failed { .. }) => Self::Fail,
-            Some(NodeState::Waiting { .. }) => Self::Wait,
+            None => Self::NeverRan,
+            Some(NodeState::Running { .. }) => Self::Running,
+            Some(NodeState::Finished { .. }) => Self::Finished,
+            Some(NodeState::Failed { .. }) => Self::Failed,
+            Some(NodeState::Waiting { .. }) => Self::Waiting,
         }
     }
 
-    /// The word for a fixed-width column, [`STATE_WIDTH`] cells or
-    /// narrower, so a column of them stays a column.
-    pub(crate) fn short(self) -> &'static str {
+    /// The word: what `yunta status` prints, what a table's column holds
+    /// and what a `yunta test` case's `expect.nodes` is written in.
+    pub(crate) const fn word(self) -> &'static str {
         match self {
-            Self::Done => "done",
-            Self::Fail => "fail",
-            Self::Run => "run",
-            Self::Wait => "wait",
-            Self::Skip => "skip",
-            Self::Todo => "todo",
+            Self::Finished => "finished",
+            Self::Failed => "failed",
+            Self::Running => "running",
+            Self::Waiting => "waiting",
+            Self::Skipped => "skipped",
+            Self::NeverRan => "never ran",
         }
     }
 
-    /// The word for a line with room for a sentence: what `yunta status`
-    /// prints and what a `yunta test` case's `expect.nodes` is written
-    /// in.
-    pub(crate) fn word(self) -> &'static str {
+    /// The mark that repeats the word for the eye.
+    pub(crate) fn mark(self) -> Mark {
         match self {
-            Self::Done => "finished",
-            Self::Fail => "failed",
-            Self::Run => "running",
-            Self::Wait => "waiting",
-            Self::Skip => "skipped",
-            Self::Todo => "never ran",
+            Self::Finished => Mark::Done,
+            Self::Failed => Mark::Failed,
+            Self::Running => Mark::Running,
+            Self::Waiting => Mark::NeedsYou,
+            Self::Skipped => Mark::Skipped,
+            Self::NeverRan => Mark::Pending,
         }
     }
 }
 
-/// Every word, for a test that has to hold all six at once.
+/// What a line is marked with, before its word: a glyph the eye finds
+/// first, and the color a terminal that draws one paints it.
+///
+/// Each mark means one thing. `NeedsYou` is for a person and nothing
+/// else — a reader who learns that mark learns where they are wanted —
+/// so a re-route and a caution have marks of their own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Mark {
+    Done,
+    Failed,
+    Running,
+    /// Something waits on a person.
+    NeedsYou,
+    Skipped,
+    Pending,
+    /// Control went somewhere else: a re-route, a promotion.
+    Reroute,
+    /// Worth a reader's attention, and nothing anybody has to answer: a
+    /// run nobody drives, findings that still block, a red baseline.
+    Caution,
+}
+
+/// Every mark, for a test that has to hold all of them at once.
 #[cfg(test)]
-pub(crate) const ALL_WORDS: [StateWord; 6] = [
-    StateWord::Done,
-    StateWord::Fail,
-    StateWord::Run,
-    StateWord::Wait,
-    StateWord::Skip,
-    StateWord::Todo,
+pub(crate) const ALL_MARKS: [Mark; 8] = [
+    Mark::Done,
+    Mark::Failed,
+    Mark::Running,
+    Mark::NeedsYou,
+    Mark::Skipped,
+    Mark::Pending,
+    Mark::Reroute,
+    Mark::Caution,
 ];
 
 /// A node's state as a surface shows it: the word that carries the
@@ -125,7 +174,7 @@ impl NodeDisplay {
         match standing {
             NodeStanding::Skipped => Self::skipped(),
             NodeStanding::LeftOut(because) => Self {
-                word: StateWord::Skip,
+                word: StateWord::Skipped,
                 modifier: detail(&format!("not in this run: {because}")),
             },
             NodeStanding::ToGo => Self::of(None),
@@ -137,7 +186,7 @@ impl NodeDisplay {
     /// to start: this run never reaches it, and a reader who cannot tell
     /// the two apart goes looking for a node that is never coming.
     pub(crate) fn skipped() -> Self {
-        Self::plain(StateWord::Skip)
+        Self::plain(StateWord::Skipped)
     }
 
     /// One line: the word, then what qualifies it after a dash.
@@ -170,10 +219,25 @@ mod tests {
     use yunta_core::events::{Failure, TokenUsage};
 
     #[test]
-    fn every_short_word_fits_the_column_it_is_written_for() {
+    fn every_state_word_fits_the_state_column() {
         for word in ALL_WORDS {
-            assert!(cell_width(word.short()) <= STATE_WIDTH, "{word:?}");
+            assert!(cell_width(word.word()) <= STATE_WIDTH, "{word:?}");
         }
+        assert_eq!(STATE_WIDTH, "never ran".len());
+    }
+
+    #[test]
+    fn only_a_person_waiting_is_drawn_with_the_person_mark() {
+        let person: Vec<StateWord> = ALL_WORDS
+            .into_iter()
+            .filter(|word| word.mark() == Mark::NeedsYou)
+            .collect();
+        assert_eq!(person, vec![StateWord::Waiting]);
+        let runs: Vec<RunWord> = RunWord::ALL
+            .into_iter()
+            .filter(|word| word.mark() == Mark::NeedsYou)
+            .collect();
+        assert_eq!(runs, vec![RunWord::NeedsYou]);
     }
 
     #[test]
@@ -183,7 +247,7 @@ mod tests {
             tokens: TokenUsage::default(),
         };
         let display = NodeDisplay::of(Some(&state));
-        assert_eq!(display.word, StateWord::Done);
+        assert_eq!(display.word, StateWord::Finished);
         assert_eq!(display.label(), "finished — exit 0 with a second line");
     }
 
@@ -244,13 +308,13 @@ mod tests {
 
 /// What a run's derived phase is called, wherever a surface says it.
 ///
-/// Nine words for the nine answers a reader acts on. A listing, a
-/// status page, a closing block and a JSON document each used to reach
-/// into [`RunPhase`] and choose a word, so one stop could be called
-/// four things — and whether the command succeeded was decided a third
-/// time, somewhere else again. The word is decided here; what qualifies
-/// it (what a run waits on, what broke it, which mode it promoted to)
-/// stays on the phase, because that is detail rather than vocabulary.
+/// Ten words for the ten answers a reader acts on. A listing, a status
+/// page, a closing block and a JSON document each used to reach into
+/// [`RunPhase`] and choose a word, so one stop could be called four
+/// things — and whether the command succeeded was decided a third time,
+/// somewhere else again. The word is decided here; what qualifies it
+/// (what a run waits on, what broke it, which mode it promoted to) stays
+/// on the phase, because that is detail rather than vocabulary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RunWord {
     Created,
@@ -258,9 +322,12 @@ pub(crate) enum RunWord {
     /// Its log says it is moving, and the engine that drove it is gone:
     /// nothing moves it until a person resumes it.
     Stalled,
-    /// Stopped until a person acts.
-    Paused,
+    /// Stopped on a person: a decision, a question, a budget, a scope.
+    NeedsYou,
     Finished,
+    /// Finished holding findings that block it: work nobody has
+    /// accepted.
+    Reported,
     Failed,
     Cancelled,
     Promoted,
@@ -268,29 +335,52 @@ pub(crate) enum RunWord {
     Broken,
 }
 
+/// The exit codes a run's word maps to beyond success and failure — what
+/// a script that started the run reads instead of parsing its output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub(crate) enum RunExit {
+    /// The run stopped on a person.
+    NeedsYou = 3,
+    /// The run finished holding blocking findings.
+    Reported = 4,
+    /// A person interrupted the invocation, as a shell reports a process
+    /// SIGINT ended.
+    Interrupted = 130,
+}
+
+impl RunExit {
+    pub(crate) fn outcome(self) -> crate::error::Outcome {
+        crate::error::Outcome::Code(self as u8)
+    }
+}
+
 impl RunWord {
     /// Every word, for the tests that hold the set closed: one that
     /// proves each has a group in the listing, and one that proves each
     /// reads as itself.
     #[cfg(test)]
-    pub(crate) const ALL: [RunWord; 9] = [
+    pub(crate) const ALL: [RunWord; 10] = [
         RunWord::Created,
         RunWord::Running,
         RunWord::Stalled,
-        RunWord::Paused,
+        RunWord::NeedsYou,
         RunWord::Finished,
+        RunWord::Reported,
         RunWord::Failed,
         RunWord::Cancelled,
         RunWord::Promoted,
         RunWord::Broken,
     ];
 
-    /// What `phase` is called.
-    pub(crate) fn of(phase: &RunPhase) -> Self {
-        match phase {
+    /// What the run `frame` derives is called: its phase, and for a run
+    /// that finished, whether findings still block it.
+    pub(crate) fn of(frame: &RunFrame) -> Self {
+        match &frame.phase {
             RunPhase::Created => RunWord::Created,
             RunPhase::Running => RunWord::Running,
-            RunPhase::Waiting { .. } => RunWord::Paused,
+            RunPhase::Waiting { .. } => RunWord::NeedsYou,
+            RunPhase::Finished if frame.blocking_findings > 0 => RunWord::Reported,
             RunPhase::Finished => RunWord::Finished,
             RunPhase::Failed { .. } => RunWord::Failed,
             RunPhase::Cancelled => RunWord::Cancelled,
@@ -300,33 +390,18 @@ impl RunWord {
     }
 
     /// What a run read from outside the process driving it is called:
-    /// [`RunWord::of`] its phase, except that a run whose log says it is
+    /// [`RunWord::of`] its frame, except that a run whose log says it is
     /// moving while the engine its registry names is gone is stalled.
     ///
     /// Only a dead engine is proof. No registry at all is also what a
     /// run looks like for the instant it is handed to another process,
     /// and calling that stalled would be wrong for exactly that instant.
-    pub(crate) fn observed(phase: &RunPhase, engine: yunta_engine::EngineLiveness) -> Self {
-        match (RunWord::of(phase), engine) {
+    pub(crate) fn observed(frame: &RunFrame, engine: yunta_engine::EngineLiveness) -> Self {
+        match (RunWord::of(frame), engine) {
             (RunWord::Created | RunWord::Running, yunta_engine::EngineLiveness::Dead) => {
                 RunWord::Stalled
             }
             (word, _) => word,
-        }
-    }
-
-    /// What a run this invocation drove reached.
-    ///
-    /// The other way one arrives at the same word: a run in flight
-    /// reports a terminal rather than a derived phase, and the two are
-    /// the same vocabulary — so `yunta run` and `yunta status` call one
-    /// stop the same thing.
-    pub(crate) fn of_terminal(terminal: &yunta_engine::RunTerminal) -> Self {
-        match terminal {
-            yunta_engine::RunTerminal::Finished => RunWord::Finished,
-            yunta_engine::RunTerminal::Paused { .. } => RunWord::Paused,
-            yunta_engine::RunTerminal::Failed { .. } => RunWord::Failed,
-            yunta_engine::RunTerminal::Promoted { .. } => RunWord::Promoted,
         }
     }
 
@@ -338,8 +413,9 @@ impl RunWord {
             RunWord::Created => "created",
             RunWord::Running => "running",
             RunWord::Stalled => "stalled",
-            RunWord::Paused => "paused",
+            RunWord::NeedsYou => "needs you",
             RunWord::Finished => "finished",
+            RunWord::Reported => "reported",
             RunWord::Failed => "failed",
             RunWord::Cancelled => "cancelled",
             RunWord::Promoted => "promoted",
@@ -347,14 +423,34 @@ impl RunWord {
         }
     }
 
-    /// The mark that repeats the word for the eye, in the same
-    /// vocabulary a node's state uses.
-    pub(crate) fn mark(self) -> StateWord {
+    /// The mark that repeats the word for the eye.
+    pub(crate) fn mark(self) -> Mark {
         match self {
-            RunWord::Created | RunWord::Running => StateWord::Run,
-            RunWord::Stalled | RunWord::Paused | RunWord::Promoted => StateWord::Wait,
-            RunWord::Finished => StateWord::Done,
-            RunWord::Failed | RunWord::Cancelled | RunWord::Broken => StateWord::Fail,
+            RunWord::Created | RunWord::Running => Mark::Running,
+            RunWord::NeedsYou => Mark::NeedsYou,
+            RunWord::Stalled | RunWord::Reported => Mark::Caution,
+            RunWord::Finished => Mark::Done,
+            RunWord::Failed | RunWord::Cancelled | RunWord::Broken => Mark::Failed,
+            RunWord::Promoted => Mark::Reroute,
+        }
+    }
+
+    /// How the invocation that drove a run to this word exits: 0 for a
+    /// run that finished, 3 for one that stopped on a person, 4 for one
+    /// that finished holding blocking findings, 1 for every other stop.
+    /// One mapping, because "did the command succeed" is one question.
+    pub(crate) fn exit(self) -> crate::error::Outcome {
+        match self {
+            RunWord::Finished => crate::error::Outcome::Success,
+            RunWord::NeedsYou => RunExit::NeedsYou.outcome(),
+            RunWord::Reported => RunExit::Reported.outcome(),
+            RunWord::Created
+            | RunWord::Running
+            | RunWord::Stalled
+            | RunWord::Failed
+            | RunWord::Cancelled
+            | RunWord::Promoted
+            | RunWord::Broken => crate::error::Outcome::Reported,
         }
     }
 }
@@ -377,31 +473,5 @@ impl serde::Serialize for RunWord {
 impl std::fmt::Display for RunWord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.word())
-    }
-}
-
-impl RunWord {
-    /// Whether the invocation that reached this word reports success.
-    ///
-    /// One mapping, because "did the command succeed" is one question —
-    /// and it takes two facts to answer. A run that finished is the
-    /// only word that can say yes, and it says yes only when nothing is
-    /// still holding the work: a run that finished carrying blocking
-    /// findings is work nobody has accepted, and the block above the
-    /// exit code says exactly that. Every other word is a stop that
-    /// needs a decision, and the block already says which.
-    pub(crate) fn verdict(self, blocking_findings: usize) -> crate::error::Outcome {
-        match self {
-            RunWord::Finished if blocking_findings == 0 => crate::error::Outcome::Success,
-            RunWord::Finished
-            | RunWord::Created
-            | RunWord::Running
-            | RunWord::Stalled
-            | RunWord::Paused
-            | RunWord::Failed
-            | RunWord::Cancelled
-            | RunWord::Promoted
-            | RunWord::Broken => crate::error::Outcome::Reported,
-        }
     }
 }

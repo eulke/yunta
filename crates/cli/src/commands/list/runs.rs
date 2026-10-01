@@ -80,12 +80,14 @@ impl Standing {
     /// one answer rather than two readings of a phase.
     fn of(word: RunWord) -> Self {
         match word {
-            RunWord::Paused | RunWord::Broken => Standing::NeedsYou,
+            RunWord::NeedsYou | RunWord::Broken => Standing::NeedsYou,
             RunWord::Stalled => Standing::Stalled,
             RunWord::Created | RunWord::Running => Standing::InFlight,
-            RunWord::Finished | RunWord::Failed | RunWord::Cancelled | RunWord::Promoted => {
-                Standing::Closed
-            }
+            RunWord::Finished
+            | RunWord::Reported
+            | RunWord::Failed
+            | RunWord::Cancelled
+            | RunWord::Promoted => Standing::Closed,
         }
     }
 
@@ -260,7 +262,7 @@ impl RunRow {
     fn of(frame: &RunFrame, engine: EngineLiveness, age: Duration) -> Self {
         RunRow {
             run_id: frame.run_id.clone(),
-            standing: Standing::of(RunWord::observed(&frame.phase, engine)),
+            standing: Standing::of(RunWord::observed(frame, engine)),
             workflow: frame.workflow.clone(),
             mode: frame.mode.clone(),
             age,
@@ -397,7 +399,7 @@ mod tests {
     fn the_word_a_run_is_called_by_decides_the_group_it_is_listed_under() {
         // A log that stopped making sense needs a person as much as a
         // decision does: nothing moves it on its own again.
-        for word in [RunWord::Paused, RunWord::Broken] {
+        for word in [RunWord::NeedsYou, RunWord::Broken] {
             assert_eq!(Standing::of(word), Standing::NeedsYou, "{word}");
         }
         for word in [RunWord::Created, RunWord::Running] {
@@ -405,6 +407,7 @@ mod tests {
         }
         for word in [
             RunWord::Finished,
+            RunWord::Reported,
             RunWord::Failed,
             RunWord::Cancelled,
             RunWord::Promoted,

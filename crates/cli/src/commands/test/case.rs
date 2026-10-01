@@ -73,8 +73,7 @@ struct Expect {
 /// laid out under it. `Debug` would wrap the reason in quotes and escape
 /// every one it contains — noise added to a message already written for
 /// a reader.
-fn terminal_label(terminal: &RunTerminal) -> String {
-    let word = RunWord::of_terminal(terminal);
+fn terminal_label(word: RunWord, terminal: &RunTerminal) -> String {
     match terminal {
         RunTerminal::Paused { reason } | RunTerminal::Failed { reason } => {
             format!("{word}\n    {}", yunta_core::text::hanging(reason, "    "))
@@ -84,16 +83,44 @@ fn terminal_label(terminal: &RunTerminal) -> String {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(try_from = "String")]
 enum FinalState {
     Finished,
-    Paused,
+    /// The run stopped on a person: a decision, a question, a budget.
+    NeedsYou,
+    /// The run finished holding findings that block it.
+    Reported,
     /// The run closed as failed — a node failed under
     /// `defaults.on_failure: abort | continue`.
     Failed,
     /// The run closed by promoting to a later mode — reached by a case
     /// whose `decisions:` answers the gate that offers `promote`.
     Promoted,
+}
+
+impl TryFrom<String> for FinalState {
+    type Error = String;
+
+    /// The word a case writes, in the vocabulary every surface reports a
+    /// run in. `paused` is a word that vocabulary retired, and the case
+    /// is told the one that replaced it.
+    fn try_from(word: String) -> Result<Self, String> {
+        match word.as_str() {
+            "finished" => Ok(FinalState::Finished),
+            "needs you" => Ok(FinalState::NeedsYou),
+            "reported" => Ok(FinalState::Reported),
+            "failed" => Ok(FinalState::Failed),
+            "promoted" => Ok(FinalState::Promoted),
+            "paused" => Err(
+                "`paused` is called `needs you` now: a run stopped on a person needs you"
+                    .to_string(),
+            ),
+            other => Err(format!(
+                "`{other}` is not a final state; one of: finished, needs you, reported, \
+                 failed, promoted"
+            )),
+        }
+    }
 }
 
 impl FinalState {
@@ -104,7 +131,8 @@ impl FinalState {
     fn word(self) -> RunWord {
         match self {
             FinalState::Finished => RunWord::Finished,
-            FinalState::Paused => RunWord::Paused,
+            FinalState::NeedsYou => RunWord::NeedsYou,
+            FinalState::Reported => RunWord::Reported,
             FinalState::Failed => RunWord::Failed,
             FinalState::Promoted => RunWord::Promoted,
         }
@@ -232,16 +260,10 @@ pub(crate) async fn run_case(
                 .join(", ")
         ));
     }
-    let expected_word = case.expect.final_state.word();
-    if RunWord::of_terminal(&report.terminal) != expected_word {
-        problems.push(format!(
-            "final_state: expected {expected_word}, got {}",
-            terminal_label(&report.terminal)
-        ));
-    }
-    // Where each node stands is read off the run's frame, the one place
-    // that tells a node the run's mode leaves out from one it has not
-    // reached — so a case says `skipped` exactly where `status` does.
+    // Where the run and each node stand is read off the run's frame, the
+    // one place that tells a node the run's mode leaves out from one it
+    // has not reached and a run that finished from one findings still
+    // block — so a case says what `status` says.
     let events = storage.events_for_run(prepared.run_id.clone()).await?;
     let read_at = events
         .last()
@@ -249,6 +271,14 @@ pub(crate) async fn run_case(
         .unwrap_or_default();
     let frame =
         yunta_engine::run_frame(&prepared.run_id, &manifest.workflow, &events, None, read_at);
+    let expected_word = case.expect.final_state.word();
+    let reached = RunWord::of(&frame);
+    if reached != expected_word {
+        problems.push(format!(
+            "final_state: expected {expected_word}, got {}",
+            terminal_label(reached, &report.terminal)
+        ));
+    }
     for (node_id, expected) in &case.expect.nodes {
         // A node that fans out to several runners runs as one node per
         // runner (`review@reviewer`, ...): the id the workflow declares
@@ -378,7 +408,7 @@ mod tests {
              mode: quick\n\
              inputs: { idea: add dark mode, retries: 3, dry_run: true }\n\
              fixture: fixtures/quick.yaml\n\
-             expect:\n  final_state: paused\n",
+             expect:\n  final_state: needs you\n",
         )
         .unwrap();
         assert_eq!(
@@ -420,9 +450,19 @@ mod tests {
     }
 
     #[test]
+    fn a_case_written_with_paused_is_refused_naming_needs_you() {
+        let refused = yunta_core::yaml::parse::<TestCase>(
+            "workflow: review\nfixture: fixtures/review.yaml\nexpect:\n  final_state: paused\n",
+        )
+        .expect_err("`paused` is a retired word");
+        let said = yunta_core::describe(&refused);
+        assert!(said.contains("`needs you`"), "{said}");
+    }
+
+    #[test]
     fn a_case_that_answers_no_gate_parks_on_the_first_one() {
         let case: TestCase = yunta_core::yaml::parse(
-            "workflow: review\nfixture: fixtures/review.yaml\nexpect:\n  final_state: paused\n",
+            "workflow: review\nfixture: fixtures/review.yaml\nexpect:\n  final_state: needs you\n",
         )
         .unwrap();
         assert!(case.decisions.is_empty());

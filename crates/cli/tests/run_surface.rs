@@ -261,7 +261,7 @@ fn the_closing_block_leads_with_the_decision_a_parked_run_waits_on() {
     let run_id = run_id_from(&run);
     let text = stdout(&run);
 
-    assert!(text.contains("paused"), "the outcome, as a word: {text}");
+    assert!(text.contains("needs you"), "the outcome, as a word: {text}");
     assert!(
         text.contains("waiting on node `lint`"),
         "what it waits on: {text}"
@@ -284,6 +284,40 @@ fn the_closing_block_leads_with_the_decision_a_parked_run_waits_on() {
     let decision = text.find("waiting on node").expect("the decision block");
     let counters = text.find("progress ").expect("the counters row");
     assert!(decision < counters, "{text}");
+}
+
+/// A run parked on a decision exits 3 from every way of running it: the
+/// live view, `--json`, `--quiet`, and the resume that parks it again.
+#[test]
+fn a_run_parked_on_a_gate_exits_3_from_run_resume_json_and_quiet() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = project(root.path(), EXHAUSTED);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert_eq!(run.status.code(), Some(3), "{}", stdout(&run));
+    let run_id = run_id_from(&run);
+    for args in [
+        vec!["resume", run_id.as_str()],
+        vec!["resume", run_id.as_str(), "--json"],
+        vec!["resume", run_id.as_str(), "--quiet"],
+    ] {
+        let again = yunta_in!(&repo, &home, &args);
+        assert_eq!(again.status.code(), Some(3), "{args:?}: {}", stdout(&again));
+    }
+    let status = yunta_in!(&repo, &home, &["status", &run_id]);
+    assert_eq!(
+        status.status.code(),
+        Some(0),
+        "status reports a run, whatever the run says"
+    );
+}
+
+/// A usage mistake is told apart from a run that failed: clap's own 2.
+#[test]
+fn a_usage_error_exits_2() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = project(root.path(), TWO_NODES);
+    let output = yunta_in!(&repo, &home, &["status"]);
+    assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
 }
 
 /// The block that closes a run and the page `status` prints for it count
@@ -327,7 +361,7 @@ fn resume_reports_exactly_what_run_reports() {
     let resumed = yunta_in!(&repo, &home, &["resume", &run_id]);
     let text = stdout(&resumed);
     assert!(
-        text.contains("paused on a decision") && text.contains("waiting on node `lint`"),
+        text.contains("needs you on a decision") && text.contains("waiting on node `lint`"),
         "{text}"
     );
     for label in ["progress", "tokens", "branch", "artifacts", "next"] {
@@ -592,7 +626,7 @@ fn a_parked_run_is_called_the_same_thing_on_every_surface() {
     // it: a reader who met `paused` on the block that closed the run
     // meets `paused` again on the status page, in both documents a
     // program reads, and in the listing's own grouping.
-    const WORD: &str = "paused";
+    const WORD: &str = "needs you";
 
     let root = tempfile::tempdir().unwrap();
     let (repo, home) = project(root.path(), EXHAUSTED);
@@ -719,12 +753,13 @@ fn a_run_that_finished_holding_blocking_findings_is_not_a_success() {
     );
     let text = stdout(&run);
     assert!(
-        text.contains("finished, holding 1 blocking finding"),
+        text.contains("reported — finished holding 1 blocking finding"),
         "the block says what is holding it: {text}\nstderr: {}",
         stderr(&run)
     );
-    assert!(
-        !run.status.success(),
+    assert_eq!(
+        run.status.code(),
+        Some(4),
         "and the exit code says the same thing: {text}"
     );
     let run_id = run_id_from(&run);
@@ -734,7 +769,7 @@ fn a_run_that_finished_holding_blocking_findings_is_not_a_success() {
     let status = yunta_in!(&repo, &home, &["status", &run_id, "--json"]);
     let document: serde_json::Value = serde_json::from_str(&stdout(&status))
         .unwrap_or_else(|e| panic!("status --json emits JSON: {e}"));
-    assert_eq!(document["outcome"], "finished", "{document:#}");
+    assert_eq!(document["outcome"], "reported", "{document:#}");
     assert_eq!(document["blocking_findings"], 1, "{document:#}");
 }
 
@@ -756,7 +791,7 @@ nodes:
 /// sits before it either way. The separator is part of the needle
 /// because `sweep` is a prefix of `sweep-a`.
 fn headline(id: &str) -> String {
-    format!("run {id} ·")
+    format!("running {id} ·")
 }
 
 /// The rows of the last painting carrying a row for every one of `ids`,
@@ -788,7 +823,7 @@ fn painting_with(drawn: &str, headlines: &[String]) -> Option<Vec<String>> {
 }
 
 #[test]
-fn the_live_view_indents_a_groups_children_under_it() {
+fn the_live_view_indents_a_groups_children_under_it_and_an_interrupt_exits_130() {
     let root = tempfile::tempdir().unwrap();
     let (repo, home) = project(root.path(), GROUPED);
     let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
@@ -823,8 +858,9 @@ fn the_live_view_indents_a_groups_children_under_it() {
 
     terminal.interrupt();
     let drawn = terminal.ended();
-    assert!(
-        !terminal.ran_to_the_end(),
-        "a run stopped by a person is not a success:\n{drawn}"
+    assert_eq!(
+        terminal.exit_code(),
+        Some(130),
+        "a run a person interrupted exits as an interrupted process does:\n{drawn}"
     );
 }

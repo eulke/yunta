@@ -206,7 +206,7 @@ nodes:
             .unwrap_or_else(|| panic!("no row for `{id}` in: {text}"))
             .to_string()
     };
-    assert!(row("passes").contains("done"), "got: {}", row("passes"));
+    assert!(row("passes").contains("finished"), "got: {}", row("passes"));
     assert!(row("breaks").contains("fail"), "got: {}", row("breaks"));
 }
 

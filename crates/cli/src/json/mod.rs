@@ -58,7 +58,7 @@ impl PreRunWarnings {
 /// One number covers every `--json` document together, so a bump earned
 /// by one of them re-stamps all of them: a document whose own shape did
 /// not change still carries the new number.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// Serializes a DTO as pretty JSON to stdout — the one place a `--json`
 /// command prints its document, reporting a serialization failure as the
@@ -166,7 +166,7 @@ impl RunDocument {
         RunDocument {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.to_string(),
-            outcome: RunWord::observed(&frame.phase, engine),
+            outcome: RunWord::observed(&frame, engine),
             summary: progress::summary(&frame, engine),
             reason: reason(&frame.phase),
             budget_warning: None,
@@ -203,7 +203,7 @@ impl RunDocument {
     /// What an invocation that drove this run to this word reports, by
     /// the one mapping every surface uses.
     pub(crate) fn verdict(&self) -> Outcome {
-        self.outcome.verdict(self.blocking_findings)
+        self.outcome.exit()
     }
 }
 

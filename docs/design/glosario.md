@@ -147,6 +147,16 @@ superficie tiene que leer una ausencia para saber si un nodo no corre o todavía
 no arrancó.
 _Evitar_: estado del nodo, pendiente, nodo sin estado.
 
+**Needs you**:
+La palabra de un run detenido en una persona —una decisión, una pregunta, un
+presupuesto, un scope—, en todas las superficies y en el JSON; su marca, `◆`, es
+la única que dice "una persona", y no marca nada más. Sale con código 3.
+_Evitar_: paused, parked (como palabra de superficie).
+
+**Reported**:
+La palabra de un run que terminó sosteniendo findings bloqueantes: el trabajo
+está hecho y nadie lo aceptó. Sale con código 4.
+
 **Correcting**:
 Un nodo que falló y fue mandado a corregir —por su propio `on_failure`, o porque
 una persona eligió reintentarlo— en un run que sigue abierto: su falla se está

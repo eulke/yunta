@@ -321,18 +321,40 @@ long are ordered by run id, which for a minted one is the order they were
 created in. A run in the last group has no derived state to have been in, so
 that group is ordered by run id alone.
 
+## Exit codes
+
+`yunta run` and `yunta resume` — with or without `--json` and `--quiet` — exit
+with what the run reached, so a script that starts one reads the outcome without
+parsing what it printed:
+
+| Code | The run |
+|---|---|
+| 0 | finished |
+| 1 | failed, was cancelled, promoted, stalled or broke — or the command itself failed |
+| 2 | was never started: the command line did not parse |
+| 3 | needs you: it stopped on a person — a decision, a question, a budget, a scope |
+| 4 | reported: it finished holding findings that block it |
+| 130 | was interrupted by a person in this invocation (Ctrl-C) |
+
+`yunta status` and `yunta close` exit 0 whatever the run says: they report a
+run, they do not drive it. `yunta test` writes a case's `final_state` in the same
+words: `finished`, `needs you`, `reported`, `failed`, `promoted`; a case written
+with `paused` is refused, naming `needs you`.
+
 ## The JSON surfaces
 
-`stats --json`, `status --json` and `run --json` carry `schema_version: 5`. The
+`stats --json`, `status --json` and `run --json` carry `schema_version: 6`. The
 three share one stamp, so all of them carry the new number even though only the
-run document changed shape.
+run document changed shape: from 6 on, a run stopped on a person is `needs you`
+rather than `paused`, and a run that finished holding blocking findings is
+`reported` rather than `finished`.
 
 `run --json`, `resume --json`, `status --json` and the control plane's
 `workflow_status` all emit one document. It is derived from the run's own event
 log, so the command that drove a run to its stop and the command that reads that
 run afterwards publish the same answer, field for field. `outcome` is the word
 every text surface prints for the run — `created`, `running`, `stalled`,
-`paused`, `finished`, `failed`, `cancelled`, `promoted`, `broken` — so a reader who greps a
+`needs you`, `finished`, `reported`, `failed`, `cancelled`, `promoted`, `broken` — so a reader who greps a
 terminal for what `status` said finds the same word in the document. A failed or
 broken run carries `reason`; a parked one carries `waiting_on` and, when its
 pause reconstructs a menu, `decision`. `yunta run --detach --json` publishes that

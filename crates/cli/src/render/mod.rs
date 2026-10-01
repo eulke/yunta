@@ -33,7 +33,7 @@ pub(crate) mod width;
 pub(crate) use bars::{bar, sparkline};
 pub(crate) use escalation::{evidence, option_headline, option_tradeoff};
 pub(crate) use glyphs::Glyphs;
-pub(crate) use state::{NodeDisplay, StateWord, STATE_WIDTH};
+pub(crate) use state::{Mark, NodeDisplay, StateWord, STATE_WIDTH};
 pub(crate) use units::{format_duration, format_pct};
 pub(crate) use width::{
     cell_width, cut, id_column, indent, middle_cut, truncate, wrap, CHILD_DEPTH, INDENT,

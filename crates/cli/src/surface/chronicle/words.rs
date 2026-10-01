@@ -16,12 +16,12 @@ use yunta_core::NonEmpty;
 use yunta_engine::{Happening, NodeState, NodeWait};
 
 use super::super::view;
-use crate::render::{format_duration, NodeDisplay, StateWord};
+use crate::render::{format_duration, Mark, NodeDisplay, StateWord};
 use tasks::happening as tasks_happening;
 
 /// What the moment carries beyond its subject, and the state it is
 /// marked with.
-pub(super) fn carried(happening: &Happening) -> (Option<StateWord>, String) {
+pub(super) fn carried(happening: &Happening) -> (Option<Mark>, String) {
     match happening {
         Happening::Run(it) => run_words(it),
         Happening::Node(it) => node_words(it),
@@ -33,13 +33,13 @@ pub(super) fn carried(happening: &Happening) -> (Option<StateWord>, String) {
         Happening::Gates(it) => gate_words(it),
         Happening::Children(it) => child_words(it),
         Happening::Unknown { kind } => (
-            Some(StateWord::Wait),
+            Some(Mark::Caution),
             format!("`{kind}`, a kind this binary does not read"),
         ),
     }
 }
 
-fn run_words(happening: &run::happening::Happening) -> (Option<StateWord>, String) {
+fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
     use run::happening::Happening as H;
     let said = match happening {
         H::Created { mode, base_branch } => format!("created — mode `{mode}` off {base_branch}"),
@@ -69,7 +69,7 @@ fn run_words(happening: &run::happening::Happening) -> (Option<StateWord>, Strin
 /// Whose measurement the run holds, and — when the suite was already
 /// failing — that nothing this run does can be compared against it, which
 /// a person watching must learn before trusting a comparison that passes.
-fn baseline_words(origin: &BaselineOrigin, red: Option<i32>) -> (Option<StateWord>, String) {
+fn baseline_words(origin: &BaselineOrigin, red: Option<i32>) -> (Option<Mark>, String) {
     let held = match origin {
         BaselineOrigin::Measured => "baseline measured".to_string(),
         BaselineOrigin::Inherited { run } => format!("baseline inherited from run {run}"),
@@ -77,7 +77,7 @@ fn baseline_words(origin: &BaselineOrigin, red: Option<i32>) -> (Option<StateWor
     match red {
         None => (None, held),
         Some(exit_code) => (
-            Some(StateWord::Wait),
+            Some(Mark::Caution),
             format!(
                 "{held}, already red (exit {exit_code}): no comparison can find a regression, \
                  and no task is held to it"
@@ -86,7 +86,7 @@ fn baseline_words(origin: &BaselineOrigin, red: Option<i32>) -> (Option<StateWor
     }
 }
 
-fn node_words(happening: &node::happening::Happening) -> (Option<StateWord>, String) {
+fn node_words(happening: &node::happening::Happening) -> (Option<Mark>, String) {
     use node::happening::Happening as H;
     match happening {
         H::RunnerResolved(it) => (
@@ -98,10 +98,13 @@ fn node_words(happening: &node::happening::Happening) -> (Option<StateWord>, Str
             let worked = elapsed
                 .map(|elapsed| format!(" · {}", format_duration(elapsed)))
                 .unwrap_or_default();
-            (Some(display.word), format!("{}{worked}", display.label()))
+            (
+                Some(display.word.mark()),
+                format!("{}{worked}", display.label()),
+            )
         }
         H::Rerouted(it) => (
-            Some(StateWord::Wait),
+            Some(Mark::Reroute),
             detailed(format!("rerouted to `{}`", it.to), &one_line(&it.cause)),
         ),
         H::HookRan { phase, exit_code } => {
@@ -331,15 +334,15 @@ fn artifact_words(happening: &artifacts::happening::Happening) -> String {
     }
 }
 
-fn gate_words(happening: &gates::happening::Happening) -> (Option<StateWord>, String) {
+fn gate_words(happening: &gates::happening::Happening) -> (Option<Mark>, String) {
     use gates::happening::Happening as H;
     match happening {
-        H::Escalated(payload) => (Some(StateWord::Wait), payload.summary().to_string()),
-        H::Resolved(payload) => (Some(StateWord::Done), resolution(payload)),
+        H::Escalated(payload) => (Some(Mark::NeedsYou), payload.summary().to_string()),
+        H::Resolved(payload) => (Some(Mark::Done), resolution(payload)),
         // The node's own label, so the chronicle and `status` say a
         // node that asked with the same bytes by construction.
         H::Asked { questions } => (
-            Some(StateWord::Wait),
+            Some(Mark::NeedsYou),
             match NonEmpty::new(questions.clone()) {
                 Some(asked) => NodeDisplay::of(Some(&NodeState::Waiting {
                     on: NodeWait::Questions { asked },
@@ -349,11 +352,11 @@ fn gate_words(happening: &gates::happening::Happening) -> (Option<StateWord>, St
                 // binary never wrote — its constructor refuses one — so
                 // the chronicle says what it has rather than a list it
                 // would be inventing.
-                None => StateWord::Wait.word().to_string(),
+                None => StateWord::Waiting.word().to_string(),
             },
         ),
         H::Answered { channel, responder } => (
-            Some(StateWord::Done),
+            Some(Mark::Done),
             match responder {
                 Some(by) => format!("answered by {by} via {}", channel.as_str()),
                 None => format!("answered via {}", channel.as_str()),
@@ -362,10 +365,10 @@ fn gate_words(happening: &gates::happening::Happening) -> (Option<StateWord>, St
     }
 }
 
-fn child_words(happening: &children::happening::Happening) -> (Option<StateWord>, String) {
+fn child_words(happening: &children::happening::Happening) -> (Option<Mark>, String) {
     use children::happening::Happening as H;
     match happening {
-        H::Born(run_id) => (Some(StateWord::Run), format!("child run {run_id} opened")),
+        H::Born(run_id) => (Some(Mark::Running), format!("child run {run_id} opened")),
         H::Closed { run_id, terminal } => {
             let (mark, closed) = view::child_standing(Some(*terminal));
             (Some(mark), format!("child run {run_id} {closed}"))

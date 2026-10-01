@@ -19,15 +19,16 @@ use yunta_core::text::{aside, one_line};
 use yunta_engine::{Happening, Moment};
 
 use super::view;
-use crate::render::{indent, Glyphs, StateWord, CHILD_DEPTH};
+use crate::render::{indent, Glyphs, Mark, CHILD_DEPTH};
 use words::carried;
 
 /// One moment as a surface says it, before any layout decides where it
 /// goes.
 pub(super) struct Said {
-    /// The state this moment is marked with, when it is about
-    /// something reaching one; `None` for a moment that only reports.
-    pub(super) word: Option<StateWord>,
+    /// What this moment is marked with, when it is about something
+    /// reaching a state, asking a person or changing course; `None` for a
+    /// moment that only reports.
+    pub(super) mark: Option<Mark>,
     pub(super) text: String,
 }
 
@@ -37,9 +38,9 @@ pub(super) fn say(moment: &Moment) -> Said {
         Some(node) => node.to_string(),
         None => "run".to_string(),
     };
-    let (word, carried) = carried(&moment.happening);
+    let (mark, carried) = carried(&moment.happening);
     Said {
-        word,
+        mark,
         text: aside(subject, &one_line(&carried)),
     }
 }
@@ -95,8 +96,8 @@ pub(super) fn kept(happening: &Happening) -> bool {
 pub(super) fn graduation(moment: &Moment, glyphs: Glyphs) -> Vec<String> {
     let said = say(moment);
     let mark = said
-        .word
-        .map(|word| format!("{} ", glyphs.state(word)))
+        .mark
+        .map(|mark| format!("{} ", glyphs.mark(mark)))
         .unwrap_or_default();
     let mut rows = vec![format!("{mark}{}", said.text)];
     let Happening::Node(node::happening::Happening::Reached { children, .. }) = &moment.happening
@@ -158,10 +159,10 @@ mod tests {
     fn a_closed_child_is_marked_by_how_it_closed() {
         use yunta_core::events::{ChildEvent, ChildRunFinishedPayload, TerminalState};
         for (terminal, mark) in [
-            (TerminalState::Done, StateWord::Done),
-            (TerminalState::Failed, StateWord::Fail),
-            (TerminalState::Cancelled, StateWord::Fail),
-            (TerminalState::Promoted, StateWord::Wait),
+            (TerminalState::Done, Mark::Done),
+            (TerminalState::Failed, Mark::Failed),
+            (TerminalState::Cancelled, Mark::Failed),
+            (TerminalState::Promoted, Mark::Reroute),
         ] {
             let events = vec![StoredEvent {
                 seq: 1.into(),
@@ -179,7 +180,7 @@ mod tests {
             }];
             let moments = derive_chronicle(&events);
             let said = say(moments.first().expect("one moment"));
-            assert_eq!(said.word, Some(mark), "{terminal:?}: {}", said.text);
+            assert_eq!(said.mark, Some(mark), "{terminal:?}: {}", said.text);
         }
     }
 

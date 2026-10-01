@@ -27,7 +27,7 @@ use yunta_engine::{run_frame, NodeFrame, PriorEstimation, RunFrame, RunPhase};
 use crate::commands::status::decision::{self, Layout};
 use crate::commands::{advice, unknown_kinds_note};
 use crate::error::Outcome;
-use crate::render::{format_duration, indent, truncate, Glyphs, StateWord, INDENT, LABEL_WIDTH};
+use crate::render::{format_duration, indent, truncate, Glyphs, Mark, INDENT, LABEL_WIDTH};
 use yunta_core::text::counted;
 
 use super::view;
@@ -94,7 +94,7 @@ impl Closing {
     /// does: a paused, failed, cancelled or promoted run ran to a stop
     /// that needs a decision, and its detail is already on this block.
     pub(crate) fn outcome(&self) -> Outcome {
-        RunWord::of(&self.frame.phase).verdict(self.blocking)
+        RunWord::of(&self.frame).exit()
     }
 
     /// The whole block, ready to print.
@@ -103,7 +103,7 @@ impl Closing {
         let mut out = format!(
             "run {}: {} {}\n",
             self.run_id,
-            glyphs.state(verdict.word),
+            glyphs.mark(verdict.mark),
             verdict.text
         );
         if let Some((node, escalation)) = &self.decision {
@@ -154,15 +154,14 @@ impl Closing {
     /// The outcome, as the word a reader acts on and the mark that
     /// repeats it.
     fn verdict(&self) -> Verdict {
-        let word = RunWord::of(&self.frame.phase);
+        let word = RunWord::of(&self.frame);
         let (mark, said) = match &self.frame.phase {
-            // A run that finished holding blocking findings finished,
-            // and a reader still has something to do — so the word
-            // stands and the mark is the one that says "you".
+            // A run that finished holding blocking findings is reported:
+            // the work is done and nobody has accepted it.
             RunPhase::Finished if self.blocking > 0 => (
-                StateWord::Wait,
+                word.mark(),
                 format!(
-                    "{word}, holding {}",
+                    "{word} — finished holding {}",
                     counted(self.blocking, "blocking finding")
                 ),
             ),
@@ -307,13 +306,13 @@ impl Closing {
 
 /// The outcome word and the mark that repeats it.
 struct Verdict {
-    word: StateWord,
+    mark: Mark,
     text: String,
 }
 
 impl Verdict {
-    fn new(word: StateWord, text: String) -> Self {
-        Self { word, text }
+    fn new(mark: Mark, text: String) -> Self {
+        Self { mark, text }
     }
 }
 

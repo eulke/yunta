@@ -67,7 +67,7 @@ fn a_pack_update_while_a_run_is_paused_never_changes_what_resume_does() {
 
     let run_out = yunta_in!(&repo, &home, &["run", "acme/review"]);
     assert!(
-        stdout(&run_out).contains("paused"),
+        stdout(&run_out).contains("needs you"),
         "expected the exhausted re-route to pause the run: {}\nstderr: {}",
         stdout(&run_out),
         stderr(&run_out)

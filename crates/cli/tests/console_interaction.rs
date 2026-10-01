@@ -209,7 +209,7 @@ fn an_interrupt_at_an_open_prompt_stops_the_run_and_the_process_with_it() {
     // it, the checkout it held is unlocked, and its process tree is no
     // longer registered as running.
     assert!(
-        drawn.contains("paused on a decision") && drawn.contains("waiting on node `lint`"),
+        drawn.contains("needs you on a decision") && drawn.contains("waiting on node `lint`"),
         "the run's own close never reached the person who stopped it:\n{drawn}"
     );
     assert!(

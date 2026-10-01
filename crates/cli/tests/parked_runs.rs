@@ -405,12 +405,12 @@ fn the_menu_a_person_reads_is_the_menu_a_program_reads() {
         "a fact that names itself carries no label invented for it: {state:#}"
     );
 
-    assert_eq!(state["schema_version"], 5, "{state:#}");
+    assert_eq!(state["schema_version"], 6, "{state:#}");
     assert!(
         state["summary"]
             .as_str()
             .unwrap_or_default()
-            .contains("paused — node `lint` failed"),
+            .contains("needs you — node `lint` failed"),
         "{state:#}"
     );
     assert!(
@@ -617,7 +617,7 @@ fn the_listing_puts_a_waiting_run_above_a_running_one() {
         "a row names the workflow and the mode, not only the id: {text}"
     );
     assert!(
-        text.contains("paused — node `lint` failed"),
+        text.contains("needs you — node `lint` failed"),
         "the row says what the wait is for, in words: {text}"
     );
     for line in text.lines() {
@@ -670,7 +670,7 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
 
     let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
     assert!(
-        text.contains("1 waiting · paused — node `ask`"),
+        text.contains("1 waiting · needs you — node `ask`"),
         "the summary counts the parked node and names it: {text}"
     );
     assert!(
@@ -684,7 +684,7 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
 
     let list = stdout(&yunta_in!(&repo, &home, &["list", "--runs"]));
     assert!(
-        list.contains("needs you (1)") && list.contains("paused — node `ask`"),
+        list.contains("needs you (1)") && list.contains("needs you — node `ask`"),
         "the listing groups it with what needs a person, under the same words: {list}"
     );
 }

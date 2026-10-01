@@ -13,7 +13,7 @@ use yunta_engine::{ChildLink, NodeFrame, NodeStanding, RunFrame};
 use yunta_core::{NodeId, RunId};
 
 use crate::commands::advice;
-use crate::render::{format_duration, indent, Glyphs, NodeDisplay, StateWord, CHILD_DEPTH};
+use crate::render::{format_duration, indent, Glyphs, Mark, NodeDisplay, CHILD_DEPTH};
 
 /// How deep a node's detail sits under the node's own row, in steps of
 /// [`indent`] — the step every surface here shares, so the detail lines
@@ -118,7 +118,7 @@ pub(super) fn child_row(child: &ChildLink, glyphs: Glyphs) -> String {
     let standing = child_standing(child.terminal);
     format!(
         "{} {} · child run {}",
-        glyphs.state(standing.0),
+        glyphs.mark(standing.0),
         standing.1,
         child.run_id
     )
@@ -157,13 +157,13 @@ fn children_of<'a>(frame: &'a RunFrame, node: &NodeId) -> Vec<&'a ChildLink> {
 /// A child the parent's log has no close for is open and nothing more:
 /// how far it has got is on the child's own log, which this run never
 /// opens.
-pub(super) fn child_standing(terminal: Option<TerminalState>) -> (StateWord, &'static str) {
+pub(super) fn child_standing(terminal: Option<TerminalState>) -> (Mark, &'static str) {
     match terminal {
-        None => (StateWord::Run, "still open"),
-        Some(TerminalState::Done) => (StateWord::Done, closed_as(TerminalState::Done)),
-        Some(TerminalState::Failed) => (StateWord::Fail, closed_as(TerminalState::Failed)),
-        Some(TerminalState::Cancelled) => (StateWord::Fail, closed_as(TerminalState::Cancelled)),
-        Some(TerminalState::Promoted) => (StateWord::Wait, closed_as(TerminalState::Promoted)),
+        None => (Mark::Running, "still open"),
+        Some(TerminalState::Done) => (Mark::Done, closed_as(TerminalState::Done)),
+        Some(TerminalState::Failed) => (Mark::Failed, closed_as(TerminalState::Failed)),
+        Some(TerminalState::Cancelled) => (Mark::Failed, closed_as(TerminalState::Cancelled)),
+        Some(TerminalState::Promoted) => (Mark::Reroute, closed_as(TerminalState::Promoted)),
     }
 }
 
@@ -191,8 +191,8 @@ fn headline(node: &NodeFrame, glyphs: Glyphs) -> String {
     let state = NodeDisplay::standing(&node.state);
     let mut row = format!(
         "{} {} {}",
-        glyphs.state(state.word),
-        state.word.short(),
+        glyphs.mark(state.word.mark()),
+        state.word.word(),
         node.id
     );
     if let Some(runner) = &node.runner {

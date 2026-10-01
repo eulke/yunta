@@ -89,12 +89,12 @@ fn status_lists_every_declared_node_in_declaration_order_with_children_under_the
 /// The `--json` document carries the same list, in the same order,
 /// under the schema version that says its shape changed.
 #[test]
-fn status_json_lists_every_declared_node_in_order_under_schema_version_five() {
+fn status_json_lists_every_declared_node_in_order() {
     let (project, run_id) = shaped_run();
     let document: serde_json::Value =
         serde_json::from_str(&status(&project, &run_id, &["--json"])).expect("a JSON document");
 
-    assert_eq!(document["schema_version"], 5);
+    assert_eq!(document["schema_version"], 6);
     let nodes = document["nodes"].as_array().expect("a list of nodes");
     assert_eq!(
         nodes
