@@ -43,7 +43,9 @@ are valid there. A mistyped key never silently becomes a default.
 - **`gate`** — a human decision. `assignee:`, `options: [...]`, and `on: {option:
   target}` to re-route on a choice exactly like `on_failure.goto` does; every node
   between the target and the gate runs again, in order, before the gate asks
-  again, so it never asks about a plan beside work made from the one it sent back. Renders
+  again, so it never asks about a plan beside work made from the one it sent back.
+  A gate between a re-route's target and the node it re-routed asks again in its
+  turn, about what was made again, before that node retries. Renders
   through the console when attended, or as the same structured escalation object via
   `yunta mcp` / `yunta resolve-gate` when it isn't — no surface-specific logic. `external: { kind: pull_request, artifacts: [...], branch: "..." }` turns it
   into a forge round-trip instead: `artifacts:` names artifacts of this run the same

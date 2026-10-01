@@ -710,11 +710,12 @@ fn after_reroute(
         // before the failed node does — a gate never asks about a plan
         // alongside what was made from the one it sent back.
         match stale_between(board, to, &node.id, corrected) {
+            // A gate among them asks again, the way any gate is driven.
             Some(Stale::Rerun(id)) => {
-                return Some(Decision::Execute(vec![(
-                    id.clone(),
-                    board.next_attempt(&id),
-                )]))
+                return Some(match board.nodes.iter().find(|n| n.id == id) {
+                    Some(gate) if is_gate(gate) => board.drive_gate(gate),
+                    _ => Decision::Execute(vec![(id.clone(), board.next_attempt(&id))]),
+                })
             }
             // Its own failure is its own to resolve, on its turn.
             Some(Stale::Failed) => return None,
