@@ -12,7 +12,7 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 36 rows and **45 `kind` names**.
+The current Run Contract event table has 37 rows and **46 `kind` names**.
 It had 32 rows and 39 kinds before `host_suspended` was added. The table
 defines the normative set; this document specifies each payload.
 
@@ -26,7 +26,7 @@ Todo evento comparte la misma tupla persistida:
 | `seq` | `u64` | orden monotónico dentro del run — define el orden de replay |
 | `timestamp` | `DateTime<Utc>` | reloj inyectado (`Clock` trait, nunca `SystemTime::now()` directo) |
 | `node_id` | `Option<NodeId>` | ausente para eventos de alcance run (`run_created`, `run_paused`, ...) |
-| `kind` | string | One of the 45 names in this document, with a `_vN` suffix beyond v1. |
+| `kind` | string | One of the 46 names in this document, with a `_vN` suffix beyond v1. |
 | `payload_json` | JSON | específico de cada `kind` — detallado más abajo, campo por campo |
 | `schema_version` | `u32` | versión *del payload de ese kind*, no global — ver la política de versionado más abajo |
 
@@ -114,7 +114,7 @@ atribuidos al adapter: `agent_session_opened` y
 Si esta lectura no es la intención original, es exactamente el tipo de cosa a
 corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
-## 5. Los 45 tipos de evento, campo por campo
+## 5. Los 46 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -536,6 +536,24 @@ log. Un rechazo no cambia ningún hallazgo.
 | `operation` | enum | sí | `post` \| `update` \| `withdraw` |
 | `id` | `Option<string>` | no | el id que la llamada nombró, cuando nombró uno que parsea |
 | `report` | objeto | sí | el documento y cada problema, con la forma de §5.15 |
+
+### 5.21.3a `finding_answered` — engine
+**Fuente:** el nodo que responde (envelope), el hallazgo que responde y la respuesta
+
+Un nodo responde un hallazgo que reportó otro: su trabajo lo arregló
+(`fixed`) o declina hacerlo (`declined`), siempre con un porqué. La
+respuesta queda al lado del hallazgo, nunca adentro: el hallazgo sigue
+siendo lo que se encontró, y solo el nodo que lo reportó lo actualiza o
+lo retira. Una respuesta vale mientras el hallazgo esté en pie —una
+actualización o un retiro la descartan—, y la del mismo nodo reemplaza a
+la anterior. No cambia ningún conteo: es lo que dice un nodo.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `node` | `NodeId` | sí | el nodo que reportó el hallazgo |
+| `id` | string | sí | el id del hallazgo, como lo reportó ese nodo |
+| `answer` | enum | sí | `fixed` \| `declined` |
+| `why` | string | sí | no vacío |
 
 ### 5.21.4 `artifact_submitted` — engine
 **Fuente:** node_id, el artifact que una sesión entregó y el veredicto

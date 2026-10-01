@@ -132,6 +132,36 @@ pub(super) enum RunToolError {
         #[source]
         source: serde_json::Error,
     },
+    #[error(
+        "invalid answer — requires `node` and `id`, the finding answered as its node reported \
+         it, `answer` (`fixed` or `declined`) and `why`: {source}"
+    )]
+    InvalidAnswer {
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("an answer says why — `why` is empty")]
+    EmptyAnswer,
+    #[error(
+        "`{id}` is a finding this node reported: change it with `{update}`, or take it back \
+         with `{withdraw}`, saying why"
+    )]
+    OwnFinding {
+        id: yunta_core::FindingId,
+        update: String,
+        withdraw: String,
+    },
+    #[error("node `{node}` reported no finding `{id}` on this run")]
+    NoSuchFinding {
+        node: NodeId,
+        id: yunta_core::FindingId,
+    },
+    #[error("node `{node}` took its finding `{id}` back — {reason}; there is nothing to answer")]
+    WithdrawnFinding {
+        node: NodeId,
+        id: yunta_core::FindingId,
+        reason: String,
+    },
     #[error("a departure says what it is — `{field}` is empty")]
     EmptyDeparture { field: &'static str },
     #[error("the plan holds no {from} — it holds {known}")]
@@ -279,6 +309,7 @@ impl ServerHandler for SessionTools {
             Some(RunTool::PostFinding) => self.post_finding(args).await,
             Some(RunTool::UpdateFinding) => self.update_finding(args).await,
             Some(RunTool::WithdrawFinding) => self.withdraw_finding(args).await,
+            Some(RunTool::AnswerFinding) => self.answer_finding(args).await,
             Some(RunTool::GetBlackboard) => self.get_blackboard().await,
             Some(RunTool::TaskStatus) => self.task_status().await,
             Some(RunTool::Task) => self.task().await,

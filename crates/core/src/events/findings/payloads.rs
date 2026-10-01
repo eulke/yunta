@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::events::scope::payloads::ProposedCriterion;
 use crate::findings::Location;
-use crate::ids::FindingId;
+use crate::ids::{FindingId, NodeId};
 
 /// How much a finding matters, from `blocking` down to `note`.
 // Confirmed against the `kind: findings` schema, not inferred. Declared
@@ -71,6 +71,36 @@ pub struct FindingUpdatedPayload {
 pub struct FindingWithdrawnPayload {
     pub id: FindingId,
     pub reason: String,
+}
+
+/// What a node answered about a finding another node reported: its work
+/// fixed it, or it declines to, and why. The answering node is the
+/// envelope's own `node_id`; `node` and `id` name the finding answered.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FindingAnsweredPayload {
+    pub node: NodeId,
+    pub id: FindingId,
+    pub answer: FindingAnswer,
+    pub why: String,
+}
+
+/// What an answer says of a finding: fixed by the answering node's work,
+/// or declined.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FindingAnswer {
+    Fixed,
+    Declined,
+}
+
+impl FindingAnswer {
+    /// The word this answer is named by, as the log spells it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FindingAnswer::Fixed => "fixed",
+            FindingAnswer::Declined => "declined",
+        }
+    }
 }
 
 /// Which of the three a refused call was making.

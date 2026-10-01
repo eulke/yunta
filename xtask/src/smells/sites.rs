@@ -316,6 +316,7 @@ fn count_run_tool_named_outside_vocabulary(root: &Path) -> usize {
             Text("yunta_post_finding"),
             Text("yunta_update_finding"),
             Text("yunta_withdraw_finding"),
+            Text("yunta_answer_finding"),
             Text("yunta_submit_"),
         ],
         &[

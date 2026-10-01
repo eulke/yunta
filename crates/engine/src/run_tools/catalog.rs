@@ -57,6 +57,7 @@ impl RunToolCatalog for RunTool {
             RunTool::PostFinding => post_finding_tool(session),
             RunTool::UpdateFinding => update_finding_tool(session),
             RunTool::WithdrawFinding => withdraw_finding_tool(),
+            RunTool::AnswerFinding => answer_finding_tool(session),
             RunTool::Submit(kind) => submit_tool(self.name(), kind),
         }
     }
@@ -142,6 +143,33 @@ fn withdraw_finding_tool() -> Tool {
          but the log keeps it and the reason. Withdrawal is final: a finding that \
          comes back is a new id.",
         withdrawal_schema(),
+    )
+}
+
+fn answer_finding_tool(session: &SessionTools) -> Tool {
+    Tool::new(
+        RunTool::AnswerFinding.name(),
+        format!(
+            "Answer a finding another node reported: `fixed` when your work fixed it, \
+             `declined` when it is wrong or its fix belongs to another change — always saying \
+             `why`. Name it by the node that reported it and its id. The answer stands beside \
+             the finding for a person to read, and answering it again replaces what you \
+             answered before. A finding your own node reported is yours to change with \
+             `{update}` or take back with `{withdraw}`.",
+            update = session.called(RunTool::UpdateFinding),
+            withdraw = session.called(RunTool::WithdrawFinding),
+        ),
+        object(json!({
+            "type": "object",
+            "properties": {
+                "node": {"type": "string", "description": "The node that reported the finding."},
+                "id": {"type": "string", "description": "The finding's id, as its node reported it."},
+                "answer": {"type": "string", "enum": ["fixed", "declined"]},
+                "why": {"type": "string"},
+            },
+            "required": ["node", "id", "answer", "why"],
+            "additionalProperties": false,
+        })),
     )
 }
 

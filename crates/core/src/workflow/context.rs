@@ -250,8 +250,9 @@ pub struct RunEventsParams {
 
 /// The `run-events` filters the resolver knows. Absent (`None`) means
 /// the whole log; `Failed` narrows it to `node_failed` events, `Findings`
-/// to `finding_posted` events (what a corrective node reads to act on
-/// what an earlier node found), `Deviations` to the departures from the
+/// to what happened to findings — posted, updated, withdrawn, answered —
+/// (what a corrective node reads to act on what an earlier node found),
+/// `Deviations` to the departures from the
 /// plan task sessions declared and the answers people gave them (what a
 /// node that holds the work to the plan reads to tell an accepted
 /// departure from one nobody declared).

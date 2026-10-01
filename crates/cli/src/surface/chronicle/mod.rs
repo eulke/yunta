@@ -72,7 +72,9 @@ pub(super) fn kept(happening: &Happening) -> bool {
         | Happening::Gates(gates::happening::Happening::Answered { .. }) => true,
         Happening::Findings(findings::happening::Happening::Finding { change, .. }) => matches!(
             change,
-            findings::happening::Change::Posted | findings::happening::Change::Withdrawn { .. }
+            findings::happening::Change::Posted
+                | findings::happening::Change::Withdrawn { .. }
+                | findings::happening::Change::Answered { .. }
         ),
         Happening::Children(children::happening::Happening::Closed { .. }) => true,
         Happening::Children(_) => false,

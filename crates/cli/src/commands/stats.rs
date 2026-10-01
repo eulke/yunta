@@ -300,8 +300,9 @@ fn submissions_line(submissions: &yunta_engine::Submissions) -> String {
 /// numbers draws the wrong conclusion from either.
 fn findings_line(activity: &yunta_engine::FindingActivity, effective: u64) -> String {
     format!(
-        "findings: {} posted, {} updated, {} withdrawn, {} refused — {effective} standing",
-        activity.posted, activity.updated, activity.withdrawn, activity.refused
+        "findings: {} posted, {} updated, {} withdrawn, {} refused, {} answered — {effective} \
+         standing",
+        activity.posted, activity.updated, activity.withdrawn, activity.refused, activity.answered
     )
 }
 
@@ -847,6 +848,7 @@ mod tests {
                 updated: 1,
                 withdrawn: 1,
                 refused: 0,
+                answered: 2,
             },
             findings_by_node: Default::default(),
             findings_effective: 4,
@@ -864,7 +866,9 @@ mod tests {
             "what the run handed over: {text}"
         );
         assert!(
-            text.contains("findings: 5 posted, 1 updated, 1 withdrawn, 0 refused — 4 standing"),
+            text.contains(
+                "findings: 5 posted, 1 updated, 1 withdrawn, 0 refused, 2 answered — 4 standing"
+            ),
             "what it found, and what still stands: {text}"
         );
         assert!(

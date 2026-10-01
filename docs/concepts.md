@@ -72,6 +72,8 @@ declared is the whole identity. Findings are finer-grained
 still: each one is reported on its own with `yunta_post_finding`, corrected with
 `yunta_update_finding` and taken back with `yunta_withdraw_finding`, and the engine
 derives the node's findings document at its close from everything that still stands.
+Another node answers one with `yunta_answer_finding` — fixed, or declined, and why —
+and the answer stands beside it.
 
 The answer comes back in the same call. An acceptance says what the engine
 understood and takes the document into the run — the canonical bytes under

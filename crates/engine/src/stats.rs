@@ -118,14 +118,16 @@ pub struct Submissions {
     pub refused: u64,
 }
 
-/// Finding calls a log carries, by what the engine answered: the three
-/// accepted forms, and the calls it turned down.
+/// Finding calls a log carries, by what the engine answered: the
+/// accepted forms — a node's own finding posted, updated or withdrawn,
+/// and another node's answered — and the calls it turned down.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct FindingActivity {
     pub posted: u64,
     pub updated: u64,
     pub withdrawn: u64,
     pub refused: u64,
+    pub answered: u64,
 }
 
 /// One run's derived stats — everything `yunta stats <run_id>`
@@ -541,6 +543,9 @@ impl Activity {
                 }
                 Some(EventPayload::Findings(FindingEvent::Refused(_))) => {
                     activity.count_finding(node, |f| &mut f.refused)
+                }
+                Some(EventPayload::Findings(FindingEvent::Answered(_))) => {
+                    activity.count_finding(node, |f| &mut f.answered)
                 }
                 _ => {}
             }

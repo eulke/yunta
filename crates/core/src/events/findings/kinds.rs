@@ -2,13 +2,16 @@
 
 use super::payloads::*;
 
-/// What a session reported about work that is not its own to fix: posted, — one variant per kind.
+/// What a session reported about work that is not its own to fix —
+/// posted, updated, withdrawn, refused, or answered by another node: one
+/// variant per kind.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FindingEvent {
     Posted(FindingPostedPayload),
     Updated(FindingUpdatedPayload),
     Withdrawn(FindingWithdrawnPayload),
     Refused(FindingRefusedPayload),
+    Answered(FindingAnsweredPayload),
 }
 
 impl FindingEvent {
@@ -18,6 +21,7 @@ impl FindingEvent {
         "finding_updated",
         "finding_withdrawn",
         "finding_refused",
+        "finding_answered",
     ];
 
     /// The persisted `kind` string of this fact.
@@ -27,6 +31,7 @@ impl FindingEvent {
             Self::Updated(_) => "finding_updated",
             Self::Withdrawn(_) => "finding_withdrawn",
             Self::Refused(_) => "finding_refused",
+            Self::Answered(_) => "finding_answered",
         }
     }
 
@@ -43,6 +48,7 @@ impl FindingEvent {
             Self::Updated(_) => false,
             Self::Withdrawn(_) => false,
             Self::Refused(_) => true,
+            Self::Answered(_) => false,
         }
     }
 

@@ -270,7 +270,11 @@ whole `finding`; `finding_updated` carries the whole finding again, under the sa
 id, as its new state; `finding_withdrawn` carries the `id` and the `reason` its node
 gave. `finding_refused` carries the `operation` (`post`, `update` or `withdraw`), the
 `report`, and the `id` the call named when it named one that parses — the field is
-absent otherwise.
+absent otherwise. Another node's answer is `finding_answered`: the `node` and `id` of
+the finding answered, `answer` (`fixed` or `declined`) and `why`, with the answering
+node in the envelope. An older binary keeps it as a kind it does not know. A run
+tool a newer binary serves can reach a log as `run_tool_failed.tool`, which an older
+binary reads as corrupt — a log written by a newer binary is read by a binary as new.
 
 Which findings a run holds is the last state of each `(node, id)` pair, minus the
 withdrawn ones, in the order each was first posted. A log that carries only

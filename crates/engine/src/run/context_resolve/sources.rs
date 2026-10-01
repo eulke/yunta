@@ -230,15 +230,16 @@ fn kept(filter: yunta_core::RunEventsFilter, event: &StoredEvent) -> bool {
             matches!(payload, Some(EventPayload::Node(NodeEvent::Failed(_))))
         }
         // History, not state: a session that mounts events wants what
-        // happened, and a finding that was rewritten or taken back is
-        // part of that. A session that wants the set standing now mounts
-        // the findings artifact.
+        // happened, and a finding that was rewritten, taken back or
+        // answered is part of that. A session that wants the set
+        // standing now reads it through the run's tools.
         yunta_core::RunEventsFilter::Findings => matches!(
             payload,
             Some(
                 EventPayload::Findings(FindingEvent::Posted(_))
                     | EventPayload::Findings(FindingEvent::Updated(_))
                     | EventPayload::Findings(FindingEvent::Withdrawn(_))
+                    | EventPayload::Findings(FindingEvent::Answered(_))
             )
         ),
         yunta_core::RunEventsFilter::Deviations => matches!(

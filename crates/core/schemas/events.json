@@ -1861,6 +1861,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "finding_answered"
+            }
+          },
+          "$ref": "#/$defs/FindingAnsweredPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "artifact_submitted"
             }
           },
@@ -2303,6 +2316,38 @@
         "title",
         "location",
         "detail"
+      ]
+    },
+    "FindingAnswer": {
+      "description": "What an answer says of a finding: fixed by the answering node's work,\nor declined.",
+      "type": "string",
+      "enum": [
+        "fixed",
+        "declined"
+      ]
+    },
+    "FindingAnsweredPayload": {
+      "description": "What a node answered about a finding another node reported: its work\nfixed it, or it declines to, and why. The answering node is the\nenvelope's own `node_id`; `node` and `id` name the finding answered.",
+      "type": "object",
+      "properties": {
+        "answer": {
+          "$ref": "#/$defs/FindingAnswer"
+        },
+        "id": {
+          "$ref": "#/$defs/FindingId"
+        },
+        "node": {
+          "$ref": "#/$defs/NodeId"
+        },
+        "why": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "node",
+        "id",
+        "answer",
+        "why"
       ]
     },
     "FindingId": {
@@ -3599,6 +3644,7 @@
         "yunta_post_finding",
         "yunta_update_finding",
         "yunta_withdraw_finding",
+        "yunta_answer_finding",
         "yunta_submit_tasks",
         "yunta_submit_spec",
         "yunta_submit_questions",

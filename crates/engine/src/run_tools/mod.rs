@@ -41,6 +41,7 @@
 //! and the two text modules hold every sentence a session reads:
 //! [`notice`] before it calls anything, [`verdicts`] in answer to a call.
 
+mod answer;
 mod blackboard;
 pub mod catalog;
 mod deviation;

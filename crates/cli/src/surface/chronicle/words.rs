@@ -291,6 +291,10 @@ fn finding_words(happening: &findings::happening::Happening) -> String {
         Change::Posted => detailed(format!("{named}{severity}"), &one_line(title)),
         Change::Updated => detailed(format!("{named} updated{severity}"), &one_line(title)),
         Change::Withdrawn { reason } => detailed(format!("{named} withdrawn"), &one_line(reason)),
+        Change::Answered { of, answer, why } => detailed(
+            format!("{named} of `{of}` answered {}", answer.as_str()),
+            &one_line(why),
+        ),
         Change::Refused {
             operation,
             problems,

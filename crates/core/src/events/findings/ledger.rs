@@ -15,11 +15,17 @@
 //! not find — and those carry no node. They stand like any other and
 //! are counted like any other; what they have no owner for is being
 //! updated or withdrawn, which nothing does to them.
+//!
+//! Another node may answer a finding — its work fixed it, or it declines
+//! to — and the answer stands beside the finding it answers, never in
+//! it: an answer is what a node says, and the finding is still what was
+//! found. An answer lasts while what it answered does: an update replaces
+//! the finding it was about, and a withdrawal takes it away.
 
 use std::collections::BTreeMap;
 
 use crate::events::FindingEvent;
-use crate::events::{EventPayload, Finding, StoredEvent};
+use crate::events::{EventPayload, Finding, FindingAnswer, StoredEvent};
 use crate::ids::{FindingId, NodeId};
 
 /// A finding as the run holds it now, and which node holds it — `None`
@@ -28,6 +34,15 @@ use crate::ids::{FindingId, NodeId};
 pub struct PostedFinding {
     pub node: Option<NodeId>,
     pub finding: Finding,
+}
+
+/// What one node answered about a finding: the node, `None` for an
+/// answer the log carries without one, what it answered and why.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnswerGiven {
+    pub by: Option<NodeId>,
+    pub answer: FindingAnswer,
+    pub why: String,
 }
 
 /// Where one id stands.
@@ -51,6 +66,9 @@ pub struct FindingLedger {
     /// effective set reads in: an update moves nothing, so a reviewer
     /// sees their findings where they left them.
     first_post: Vec<(Option<NodeId>, FindingId)>,
+    /// What other nodes answered about each finding that stands, one
+    /// answer per answering node, in the order they first answered.
+    answers: BTreeMap<(Option<NodeId>, FindingId), Vec<AnswerGiven>>,
 }
 
 impl FindingLedger {
@@ -90,12 +108,14 @@ impl FindingLedger {
             FindingEvent::Updated(p) => {
                 let key = (node, p.finding.id.clone());
                 if matches!(self.slots.get(&key), Some(Slot::Live(_))) {
+                    self.answers.remove(&key);
                     self.slots.insert(key, Slot::Live(p.finding.clone()));
                 }
             }
             FindingEvent::Withdrawn(p) => {
                 let key = (node, p.id.clone());
                 if matches!(self.slots.get(&key), Some(Slot::Live(_))) {
+                    self.answers.remove(&key);
                     self.slots.insert(
                         key,
                         Slot::Withdrawn {
@@ -108,7 +128,35 @@ impl FindingLedger {
             // is in the event and nowhere else, and nothing a run holds
             // changed.
             FindingEvent::Refused(_) => {}
+            FindingEvent::Answered(p) => self.answered(node, p),
         }
+    }
+
+    /// Folds one answer: kept beside the finding it answers while that
+    /// finding stands, and replacing what the same node answered before.
+    fn answered(&mut self, by: Option<NodeId>, answer: &crate::events::FindingAnsweredPayload) {
+        let key = (Some(answer.node.clone()), answer.id.clone());
+        if !matches!(self.slots.get(&key), Some(Slot::Live(_))) {
+            return;
+        }
+        let given = AnswerGiven {
+            by,
+            answer: answer.answer,
+            why: answer.why.clone(),
+        };
+        let answers = self.answers.entry(key).or_default();
+        match answers.iter_mut().find(|earlier| earlier.by == given.by) {
+            Some(earlier) => *earlier = given,
+            None => answers.push(given),
+        }
+    }
+
+    /// What other nodes answered about the finding `id` that `node`
+    /// reported, while it stands.
+    pub fn answers(&self, node: Option<&NodeId>, id: &FindingId) -> &[AnswerGiven] {
+        self.answers
+            .get(&(node.cloned(), id.clone()))
+            .map_or(&[], Vec::as_slice)
     }
 
     /// Where `id` stands for `node`, or `None` if that node never posted

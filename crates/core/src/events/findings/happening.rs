@@ -1,7 +1,7 @@
 //! What a finding event says happened, read as a person reads it.
 
-use crate::events::{FindingEvent, FindingOperation, FindingSeverity};
-use crate::FindingId;
+use crate::events::{FindingAnswer, FindingEvent, FindingOperation, FindingSeverity};
+use crate::{FindingId, NodeId};
 
 /// One thing that happened to one finding.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +27,12 @@ pub enum Change {
     Refused {
         operation: FindingOperation,
         problems: usize,
+    },
+    /// Another node answered it.
+    Answered {
+        of: NodeId,
+        answer: FindingAnswer,
+        why: String,
     },
 }
 
@@ -60,6 +66,16 @@ impl From<&FindingEvent> for Happening {
                 change: Change::Refused {
                     operation: p.operation,
                     problems: p.report.diagnostics.len(),
+                },
+            },
+            FindingEvent::Answered(p) => Happening::Finding {
+                id: Some(p.id.clone()),
+                severity: None,
+                title: String::new(),
+                change: Change::Answered {
+                    of: p.node.clone(),
+                    answer: p.answer,
+                    why: p.why.clone(),
                 },
             },
         }

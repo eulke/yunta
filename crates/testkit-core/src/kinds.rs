@@ -288,6 +288,12 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 ],
             ),
         })),
+        EventPayload::Findings(FindingEvent::Answered(FindingAnsweredPayload {
+            node: "only".into(),
+            id: "f-1".into(),
+            answer: FindingAnswer::Fixed,
+            why: "the call returns its error now".to_string(),
+        })),
         EventPayload::Artifacts(ArtifactEvent::Submitted(ArtifactSubmittedPayload {
             name: "plan.yaml".to_string(),
             artifact_kind: yunta_core::ArtifactKind::Tasks,

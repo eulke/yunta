@@ -1522,6 +1522,7 @@ fn assert_serves_the_session_tools(result: &serde_json::Value) {
         "yunta_post_finding",
         "yunta_update_finding",
         "yunta_withdraw_finding",
+        "yunta_answer_finding",
         "yunta_task_status",
     ] {
         assert!(
@@ -1663,11 +1664,11 @@ fn the_catalog_and_the_dispatch_name_the_same_tools() {
     }
     assert_eq!(yunta_engine::RunTool::parse("yunta_nonesuch"), None);
 
-    // And the set is exactly the submittable kinds plus the eleven fixed
+    // And the set is exactly the submittable kinds plus the twelve fixed
     // tools, so a kind that gains a submission tool gains its tool here.
     let submissions = yunta_core::ArtifactKind::ALL
         .into_iter()
         .filter(|kind| kind.submit_tool().is_some())
         .count();
-    assert_eq!(yunta_engine::RunTool::all().len(), 11 + submissions);
+    assert_eq!(yunta_engine::RunTool::all().len(), 12 + submissions);
 }

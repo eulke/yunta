@@ -17,6 +17,7 @@ pub enum RunTool {
     PostFinding,
     UpdateFinding,
     WithdrawFinding,
+    AnswerFinding,
     Submit(ArtifactKind),
 }
 
@@ -54,6 +55,7 @@ impl RunTool {
             Self::PostFinding,
             Self::UpdateFinding,
             Self::WithdrawFinding,
+            Self::AnswerFinding,
         ];
         all.extend(
             ArtifactKind::ALL
@@ -86,6 +88,7 @@ impl RunTool {
             Self::PostFinding => ArtifactKind::POST_FINDING_TOOL,
             Self::UpdateFinding => ArtifactKind::UPDATE_FINDING_TOOL,
             Self::WithdrawFinding => ArtifactKind::WITHDRAW_FINDING_TOOL,
+            Self::AnswerFinding => "yunta_answer_finding",
             Self::Submit(kind) => kind.submit_tool().unwrap_or_default(),
         }
     }

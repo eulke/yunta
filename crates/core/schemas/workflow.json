@@ -1433,7 +1433,7 @@
       ]
     },
     "RunEventsFilter": {
-      "description": "The `run-events` filters the resolver knows. Absent (`None`) means\nthe whole log; `Failed` narrows it to `node_failed` events, `Findings`\nto `finding_posted` events (what a corrective node reads to act on\nwhat an earlier node found), `Deviations` to the departures from the\nplan task sessions declared and the answers people gave them (what a\nnode that holds the work to the plan reads to tell an accepted\ndeparture from one nobody declared).",
+      "description": "The `run-events` filters the resolver knows. Absent (`None`) means\nthe whole log; `Failed` narrows it to `node_failed` events, `Findings`\nto what happened to findings — posted, updated, withdrawn, answered —\n(what a corrective node reads to act on what an earlier node found),\n`Deviations` to the departures from the\nplan task sessions declared and the answers people gave them (what a\nnode that holds the work to the plan reads to tell an accepted\ndeparture from one nobody declared).",
       "type": "string",
       "enum": [
         "failed",
