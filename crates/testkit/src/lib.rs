@@ -98,4 +98,13 @@ macro_rules! yunta_on_terminal {
             $args,
         )
     };
+    ($dir:expr, $home:expr, $args:expr, $vars:expr) => {
+        $crate::Terminal::open_with(
+            ::std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
+            $dir,
+            $home,
+            $args,
+            $vars,
+        )
+    };
 }

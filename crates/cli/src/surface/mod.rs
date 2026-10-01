@@ -57,7 +57,6 @@ pub(crate) use turns::Curtain;
 /// never a guess about the terminal at the other end.
 const NOT_A_TERMINAL: &str = "stderr is not a terminal";
 const DUMB_TERMINAL: &str = "TERM=dumb";
-const COLOR_REFUSED: &str = "NO_COLOR is set";
 /// Not a property of the environment but of this binary: the region's own
 /// row template is a constant it carries, and a build where that constant
 /// does not parse still owes the reader every event.
@@ -98,11 +97,12 @@ pub(crate) enum Delivery {
 impl Delivery {
     /// The delivery `env` allows, with `quiet` settling it outright.
     ///
-    /// Three signals decide the rest, in the order a reader would: a
-    /// stream that is not a terminal has nowhere to pin a region; a
+    /// Two signals decide the rest, in the order a reader would: a
+    /// stream that is not a terminal has nowhere to pin a region, and a
     /// terminal that declares itself dumb has said it draws nothing
-    /// beyond text; and a reader who asked for no color asked for output
-    /// that reads the same however it is captured.
+    /// beyond text. A reader who asked for no color asked for exactly
+    /// that: the region is plain text already, so `NO_COLOR` takes away
+    /// the color and leaves the region.
     pub(crate) fn choose(quiet: bool, env: &TerminalEnv) -> Self {
         if quiet {
             return Self::Quiet;
@@ -115,11 +115,6 @@ impl Delivery {
         if env.term.as_deref() == Some("dumb") {
             return Self::Lines {
                 reason: DUMB_TERMINAL,
-            };
-        }
-        if env.no_color.as_deref().is_some_and(|set| !set.is_empty()) {
-            return Self::Lines {
-                reason: COLOR_REFUSED,
             };
         }
         Self::Live
@@ -463,15 +458,16 @@ mod tests {
         for (env, reason) in [
             (env(false, Some("xterm"), None), NOT_A_TERMINAL),
             (env(true, Some("dumb"), None), DUMB_TERMINAL),
-            (env(true, Some("xterm"), Some("1")), COLOR_REFUSED),
         ] {
             assert_eq!(Delivery::choose(false, &env), Delivery::Lines { reason });
         }
     }
 
     #[test]
-    fn an_empty_no_color_is_not_a_reader_asking_for_anything() {
-        let terminal = env(true, Some("xterm"), Some(""));
-        assert_eq!(Delivery::choose(false, &terminal), Delivery::Live);
+    fn no_color_takes_the_color_away_and_leaves_the_region() {
+        for no_color in [Some("1"), Some("")] {
+            let terminal = env(true, Some("xterm"), no_color);
+            assert_eq!(Delivery::choose(false, &terminal), Delivery::Live);
+        }
     }
 }

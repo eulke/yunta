@@ -58,6 +58,19 @@ impl Terminal {
     /// rather than calling this directly — it fills in the binary path
     /// from the calling crate's `CARGO_BIN_EXE_yunta`.
     pub fn open(bin: &Path, dir: &Path, home: &Path, args: &[&str]) -> Self {
+        Self::open_with(bin, dir, home, args, &[])
+    }
+
+    /// [`Terminal::open`], with `vars` set on top of the hermetic
+    /// environment — for a test about what a variable the reader set
+    /// changes.
+    pub fn open_with(
+        bin: &Path,
+        dir: &Path,
+        home: &Path,
+        args: &[&str],
+        vars: &[(&str, &str)],
+    ) -> Self {
         let screen = Winsize {
             ws_row: Self::ROWS,
             ws_col: Self::COLUMNS,
@@ -73,6 +86,7 @@ impl Terminal {
         };
         let mut command = Command::new(bin);
         crate::bin::hermetic(&mut command, dir, home);
+        command.envs(vars.iter().copied());
         let child = command
             .args(args)
             .stdin(slave("stdin"))

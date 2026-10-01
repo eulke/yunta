@@ -179,6 +179,25 @@ fn a_run_read_back_from_a_pipe_says_what_a_watched_terminal_kept() {
     }
 }
 
+/// `NO_COLOR` asks for no color, and the region is plain text already:
+/// a reader who set it keeps the region.
+#[test]
+fn a_terminal_with_no_color_set_still_draws_the_live_region() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = project(root.path(), TWO_NODES);
+    let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"], &[("NO_COLOR", "1")]);
+    let drawn = terminal.ended();
+    assert!(terminal.ran_to_the_end(), "{drawn}");
+    assert!(
+        !drawn.contains("live view off"),
+        "the region stood down for NO_COLOR:\n{drawn}"
+    );
+    assert!(
+        drawn.contains("nothing needs you"),
+        "the region, which only a terminal is drawn, was drawn:\n{drawn}"
+    );
+}
+
 #[test]
 fn the_closing_block_names_a_finished_run_and_what_to_do_with_it() {
     let root = tempfile::tempdir().unwrap();

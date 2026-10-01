@@ -3,7 +3,7 @@ number: D162
 title: "La vista viva es el default de `yunta run`, y no toma la terminal"
 status: revised
 revises: [D45, D46]
-revised_by: [D164]
+revised_by: [D164, D211]
 ---
 
 # D162 — La vista viva es el default de `yunta run`, y no toma la terminal

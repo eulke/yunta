@@ -168,7 +168,7 @@ lista.
 **D159 — Un run se hace cargo de las tareas de todo documento de tareas que adquiere; de otro run cruza lo hecho cuyo trabajo el árbol receptor ya tiene.** `accepted` → [`adr/D159-un-run-se-hace-cargo-de-las-tareas-de-todo.md`](adr/D159-un-run-se-hace-cargo-de-las-tareas-de-todo.md)
 **D160 — La rama de un worktree de tarea nombra su run, y las dos familias de rama son hermanas bajo prefijos fijos.** `accepted` → [`adr/D160-la-rama-de-un-worktree-de-tarea-nombra-su-run.md`](adr/D160-la-rama-de-un-worktree-de-tarea-nombra-su-run.md)
 **D161 — Un resultado que el engine construye cumple la revisión más nueva que el servidor anuncia; un cliente anterior ignora lo que no entiende.** `accepted` → [`adr/D161-un-resultado-que-el-engine-construye-cumple.md`](adr/D161-un-resultado-que-el-engine-construye-cumple.md)
-**D162 — La vista viva es el default de `yunta run`, y no toma la terminal.** `revised` *(Revisada por D164.)* → [`adr/D162-la-vista-viva-es-el-default-de-yunta-run.md`](adr/D162-la-vista-viva-es-el-default-de-yunta-run.md)
+**D162 — La vista viva es el default de `yunta run`, y no toma la terminal.** `revised` *(Revisada por D164, D211.)* → [`adr/D162-la-vista-viva-es-el-default-de-yunta-run.md`](adr/D162-la-vista-viva-es-el-default-de-yunta-run.md)
 **D163 — La `evidence` de una escalación son hechos etiquetados, no prosa.** `accepted` → [`adr/D163-la-evidence-de-una-escalacion-son-hechos.md`](adr/D163-la-evidence-de-una-escalacion-son-hechos.md)
 **D164 — El run se lee como una crónica derivada, y cada superficie la dispone.** `accepted` → [`adr/D164-cronica-derivada.md`](adr/D164-cronica-derivada.md)
 **D165 — El puerto de adapters lo define quien lo consume, en `yunta_core::port`.** `accepted` → [`adr/D165-el-puerto-vive-en-core.md`](adr/D165-el-puerto-vive-en-core.md)
@@ -217,3 +217,4 @@ lista.
 **D208 — A run measures its suite only when it reads the measurement.** `accepted` → [`adr/D208-a-run-measures-its-suite-only-when-it-reads-the-measurement.md`](adr/D208-a-run-measures-its-suite-only-when-it-reads-the-measurement.md)
 **D209 — A failed command carries what it printed.** `accepted` → [`adr/D209-a-failed-command-carries-what-it-printed.md`](adr/D209-a-failed-command-carries-what-it-printed.md)
 **D210 — A run whose engine is gone reads as stalled.** `accepted` → [`adr/D210-a-run-whose-engine-is-gone-reads-as-stalled.md`](adr/D210-a-run-whose-engine-is-gone-reads-as-stalled.md)
+**D211 — NO_COLOR takes the color away and leaves the region.** `accepted` → [`adr/D211-no-color-takes-color-away-and-leaves-the-region.md`](adr/D211-no-color-takes-color-away-and-leaves-the-region.md)
