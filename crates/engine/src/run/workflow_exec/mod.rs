@@ -115,10 +115,10 @@ pub(super) async fn execute_workflow(
             ctx,
             node,
             format!(
-                "creating child workflow `{use_name}` would nest {} level(s) deep but \
+                "creating child workflow `{use_name}` would nest {} deep but \
                  `limits.max_workflow_depth` is {max_depth} — flatten the composition or \
                  raise the limit",
-                ctx.depth + 1
+                yunta_core::text::counted(ctx.depth as usize + 1, "level")
             ),
             false,
         )

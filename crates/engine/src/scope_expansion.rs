@@ -302,7 +302,8 @@ async fn evaluate_rules(
         .collect();
     if !outside.is_empty() {
         return Ok(Decision::Denied(format!(
-            "requested path(s) fall outside the declared `within` ceiling: {}",
+            "requested {} outside the declared `within` ceiling: {}",
+            yunta_core::text::agreeing(outside.len(), "path falls", "paths fall"),
             yunta_core::listed_globs(&outside)
         )));
     }
@@ -320,8 +321,8 @@ async fn evaluate_rules(
         .collect();
     if matched.len() > max_expansion_files {
         return Ok(Decision::Denied(format!(
-            "diff at the requested paths touches {} file(s), over the {max_expansion_files}-file bound",
-            matched.len()
+            "diff at the requested paths touches {}, over the {max_expansion_files}-file bound",
+            yunta_core::text::counted(matched.len(), "file")
         )));
     }
 

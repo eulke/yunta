@@ -28,7 +28,10 @@ mod thresholds;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use shape::{functions_over, has_inner_space_run, production_only, strip_noise, sync_fs_in_async};
+use shape::{
+    functions_over, has_inner_space_run, has_parenthesized_plural, production_only, strip_noise,
+    sync_fs_in_async,
+};
 use thresholds::numeric_consts_without_decision;
 
 /// Where the committed baseline lives, next to this crate.
@@ -217,6 +220,16 @@ fn measure() -> BTreeMap<String, usize> {
         prod.iter()
             .flat_map(|text| text.lines())
             .filter(|line| has_inner_space_run(line))
+            .count(),
+    );
+
+    // A count hedged with `(s)` while its number stands beside it: the
+    // message says `3 file(s)` where it knows to say `3 files`.
+    counts.insert(
+        "parenthesized_plural_in_prod_strings".to_string(),
+        prod.iter()
+            .flat_map(|text| text.lines())
+            .filter(|line| has_parenthesized_plural(line))
             .count(),
     );
 

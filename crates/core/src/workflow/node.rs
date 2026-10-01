@@ -284,7 +284,8 @@ impl<'de> Deserialize<'de> for Node {
                 .copied()
                 .collect();
             let mut message = format!(
-                "{subject}: unknown key(s) {} for a `{kind_name}` node; valid keys: {}",
+                "{subject}: unknown {} {} for a `{kind_name}` node; valid keys: {}",
+                crate::text::agreeing(unknown.len(), "key", "keys"),
                 list(&unknown),
                 list(&valid)
             );

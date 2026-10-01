@@ -50,7 +50,9 @@ pub(crate) fn build_reroute_escalation(
     // above it.
     Escalation::new(
         format!(
-            "node `{node}` failed and its {max_reroutes} re-route(s) to `{goto}` are exhausted"
+            "node `{node}` failed and its {} to `{goto}` {} exhausted",
+            yunta_core::text::counted(max_reroutes as usize, "re-route"),
+            yunta_core::text::agreeing(max_reroutes as usize, "is", "are")
         ),
         failure_facts(&cause.0).into(),
         NonEmpty::from((retry, rest)),

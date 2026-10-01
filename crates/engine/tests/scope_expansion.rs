@@ -141,7 +141,7 @@ async fn rules_mode_denies_a_path_outside_within() {
     match decision {
         Decision::Denied(reason) => assert_eq!(
             reason,
-            "requested path(s) fall outside the declared `within` ceiling: outside.rs"
+            "requested path falls outside the declared `within` ceiling: outside.rs"
         ),
         other => panic!("expected Denied, got {other:?}"),
     }
@@ -196,7 +196,7 @@ async fn rules_mode_denies_a_request_touching_too_many_files() {
     match decision {
         Decision::Denied(reason) => assert_eq!(
             reason,
-            "diff at the requested paths touches 10 file(s), over the 5-file bound"
+            "diff at the requested paths touches 10 files, over the 5-file bound"
         ),
         other => panic!("expected Denied, got {other:?}"),
     }

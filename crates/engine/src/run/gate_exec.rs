@@ -246,8 +246,8 @@ async fn resolve_from_poll(
                 ctx,
                 node,
                 format!(
-                    "changes requested by {by} at {reviewed_sha} ({} comment(s))",
-                    comments.len()
+                    "changes requested by {by} at {reviewed_sha} ({})",
+                    yunta_core::text::counted(comments.len(), "comment")
                 ),
                 true,
             )

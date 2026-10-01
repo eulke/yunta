@@ -526,7 +526,7 @@ nodes:
     match terminal {
         RunTerminal::Paused { reason } => assert_eq!(
             reason,
-            "node `gate` failed: 1 finding(s) at or above Major: f1"
+            "node `gate` failed: 1 finding at or above Major: f1"
         ),
         other => panic!("expected the gate to pause the run, got {other:?}"),
     }

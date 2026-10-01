@@ -124,10 +124,7 @@ async fn no_runner_declared(ctx: &Context) -> bool {
         false => format!(
             "runners: none declared, and {} {} one",
             yunta_core::text::listed(names.iter().copied()),
-            match names.len() {
-                1 => "needs",
-                _ => "need",
-            }
+            yunta_core::text::agreeing(names.len(), "needs", "need")
         ),
     };
     match names.is_empty() {

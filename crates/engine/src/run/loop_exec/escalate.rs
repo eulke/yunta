@@ -212,8 +212,14 @@ fn expansion_escalation(
         None => "no criterion proposed".to_string(),
     };
     let cap = match max_per_run {
-        Some(cap) => format!("{granted_so_far}/{cap} grant(s) used"),
-        None => format!("{granted_so_far} grant(s) so far, no cap declared"),
+        Some(cap) => format!(
+            "{granted_so_far}/{cap} {} used",
+            yunta_core::text::agreeing(cap as usize, "grant", "grants")
+        ),
+        None => format!(
+            "{} so far, no cap declared",
+            yunta_core::text::counted(granted_so_far as usize, "grant")
+        ),
     };
     let mode_name = match mode {
         yunta_core::ScopeExpansionMode::Rules => "rules",

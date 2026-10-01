@@ -147,12 +147,11 @@ fn criteria_checked(
     checked: usize,
     red: &[node::happening::Red],
 ) -> String {
-    // Not `text::counted`: "criterion" is the one noun here whose
-    // plural is not its `-s`.
-    let mut said = match checked {
-        1 => format!("{task} {}: 1 criterion", phase.as_str()),
-        n => format!("{task} {}: {n} criteria", phase.as_str()),
-    };
+    let mut said = format!(
+        "{task} {}: {}",
+        phase.as_str(),
+        yunta_core::text::counted_as(checked, "criterion", "criteria")
+    );
     if !red.is_empty() {
         let named: Vec<String> = red
             .iter()

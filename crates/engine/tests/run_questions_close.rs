@@ -162,7 +162,7 @@ async fn a_node_failed_after_a_questions_artifact_derives_failed_not_waiting() {
             "grill",
             EventPayload::Node(NodeEvent::Failed(
                 yunta_core::events::NodeFailedPayload::new(
-                    yunta_core::events::Failure::message("scope violated: 1 file(s) outside"),
+                    yunta_core::events::Failure::message("scope violated: 1 file outside"),
                     false,
                     Default::default(),
                 ),

@@ -413,9 +413,10 @@ fn render_workflow_history(
     out.push_str("\nmodes:\n");
     for (mode, runs, median_cptv, median_tokens) in mode_table(history) {
         out.push_str(&format!(
-            "{INDENT}{} {:>3} runs   median CPTV {}   median tokens {}\n",
+            "{INDENT}{} {:>3} {:<4}   median CPTV {}   median tokens {}\n",
             truncate(mode.as_str(), LABEL_WIDTH, look.glyphs),
             runs,
+            yunta_core::text::agreeing(runs, "run", "runs"),
             median_cptv
                 .map(|v| Tokens::rounded(v).figure())
                 .unwrap_or_else(|| "n/a".to_string()),

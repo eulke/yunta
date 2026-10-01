@@ -231,7 +231,11 @@ fn write_unmet(
     red: &[CriterionRun],
     outside: &[PathBuf],
 ) -> std::fmt::Result {
-    write!(f, "not done after {attempts} attempt(s)")?;
+    write!(
+        f,
+        "not done after {}",
+        yunta_core::text::counted(attempts as usize, "attempt")
+    )?;
     let outside: Vec<String> = outside
         .iter()
         .map(|path| path.display().to_string())

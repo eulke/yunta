@@ -332,8 +332,8 @@ impl fmt::Display for Failure {
             Failure::ScopeViolated { outside_scope } => {
                 write!(
                     f,
-                    "scope violated: {} file(s) outside the declared globs — ",
-                    outside_scope.len()
+                    "scope violated: {} outside the declared globs — ",
+                    crate::text::counted(outside_scope.len(), "file")
                 )?;
                 for (position, path) in outside_scope.iter().enumerate() {
                     if position > 0 {

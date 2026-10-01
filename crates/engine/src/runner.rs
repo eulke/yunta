@@ -19,7 +19,8 @@ pub enum RunnerError {
     UnknownRunner { runner: RunnerName },
 
     #[error(
-        "runner `{runner}` has no available candidate — tried adapter(s): {}",
+        "runner `{runner}` has no available candidate — tried {}: {}",
+        yunta_core::text::agreeing(tried.len(), "adapter", "adapters"),
         list(tried)
     )]
     NoCandidateAvailable {

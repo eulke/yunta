@@ -264,7 +264,7 @@ fn an_escalation_says_what_happened_above_the_options_it_offers() {
     );
     let drawn = terminal.drawn();
     let happened = drawn
-        .find("re-route(s) to `fix` are exhausted")
+        .find("re-routes to `fix` are exhausted")
         .expect("a decision opens with the account of what raised it");
     let options = drawn.find("tradeoff:").unwrap_or_default();
     assert!(
@@ -288,7 +288,7 @@ fn an_escalation_says_the_record_behind_its_claim_once_and_under_its_own_heading
     // second, which only works while the account they are reading is
     // not two copies of one sentence.
     assert!(
-        drawn.contains("re-route(s) to `fix` are exhausted"),
+        drawn.contains("re-routes to `fix` are exhausted"),
         "the account of what raised the decision never reached the console:\n{drawn}"
     );
     assert!(

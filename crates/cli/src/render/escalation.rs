@@ -90,7 +90,7 @@ mod tests {
     #[test]
     fn a_fact_that_names_itself_is_shown_without_a_label_invented_for_it() {
         let exhausted = escalation(
-            "node `lint` failed and its 0 re-route(s) to `fix-lint` are exhausted",
+            "node `lint` failed and its 0 re-routes to `fix-lint` are exhausted",
             vec![Fact::bare("exit 1")].into(),
         );
         assert_eq!(evidence(&exhausted), vec!["exit 1"]);

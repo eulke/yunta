@@ -119,9 +119,16 @@ pub fn counted(n: usize, noun: &str) -> String {
 /// `n` things, named by a noun whose plural is not a plain `-s`:
 /// `1 capability the adapter lacks`, `2 capabilities the adapter lacks`.
 pub fn counted_as(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", agreeing(n, one, many))
+}
+
+/// The word that agrees with a count of `n`: `one` for exactly one,
+/// `many` otherwise — for a sentence whose count is a list rather than a
+/// number (`unknown keys `a`, `b``), or a verb that follows one.
+pub fn agreeing<'a>(n: usize, one: &'a str, many: &'a str) -> &'a str {
     match n {
-        1 => format!("1 {one}"),
-        n => format!("{n} {many}"),
+        1 => one,
+        _ => many,
     }
 }
 

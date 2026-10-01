@@ -161,7 +161,7 @@ nodes:
         .await;
 
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(reason, "node(s) `only` were running with no terminal event when the engine last stopped — `on_interrupt: fail_if_uncertain` refuses to guess whether they finished; verify manually before resuming"),
+        RunTerminal::Paused { reason } => assert_eq!(reason, "a node was running with no terminal event when the engine last stopped: `only` — `on_interrupt: fail_if_uncertain` refuses to guess how each ended; verify manually before resuming"),
         other => panic!("expected Paused, got {other:?}"),
     }
     // Never restarted: no second node_started attempt was ever emitted.

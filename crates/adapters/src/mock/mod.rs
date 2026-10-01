@@ -316,10 +316,10 @@ impl MockAdapter {
                 .ok_or_else(|| AdapterError::Adapter {
                     adapter: ID.clone(),
                     message: format!(
-                        "fixture exhausted: {} scripted session(s), none left unconsumed and \
-                     matching this request — add a session to the fixture for every \
-                     session the run opens",
-                        self.fixture.sessions.len(),
+                        "fixture exhausted: {}, none left unconsumed and matching this \
+                         request — add a session to the fixture for every session the run \
+                         opens",
+                        yunta_core::text::counted(self.fixture.sessions.len(), "scripted session"),
                     ),
                 })?,
         };

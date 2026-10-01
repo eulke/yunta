@@ -8,6 +8,7 @@
 
 use super::{BaselineSummary, DiagnosticCount, EventChainStatus, Receipt, RunnerUsage};
 use yunta_core::events::BaselineOrigin;
+use yunta_core::text::counted;
 use yunta_core::units::Tokens;
 use yunta_core::NodeId;
 
@@ -56,21 +57,26 @@ pub fn render_markdown(receipt: &Receipt) -> String {
             .map(|count| format!("`{}` ×{}", count.kind, count.events))
             .collect();
         out.push_str(&format!(
-            "- {} event kind(s) this binary does not know — interpreted partially: {}\n",
+            "- {} {} this binary does not know — interpreted partially: {}\n",
             mark(false),
+            counted(receipt.unknown_kinds.len(), "event kind"),
             kinds.join(", ")
         ));
     }
     if !receipt.diagnostics.is_empty() {
-        let counted: Vec<String> = receipt
+        let kinds: Vec<String> = receipt
             .diagnostics
             .iter()
             .map(DiagnosticCount::to_string)
             .collect();
         out.push_str(&format!(
-            "- {} artifact problem(s) reported during the run: {}\n",
+            "- {} {} reported during the run: {}\n",
             mark(false),
-            counted.join(", ")
+            counted(
+                receipt.diagnostics.iter().map(|d| d.occurrences).sum(),
+                "artifact problem"
+            ),
+            kinds.join(", ")
         ));
     }
     match &receipt.baseline {
@@ -78,29 +84,29 @@ pub fn render_markdown(receipt: &Receipt) -> String {
         None => out.push_str("- baseline: not used by this workflow\n"),
     }
     out.push_str(&format!(
-        "- {} scope: {} file(s) touched, {} violation(s)\n",
+        "- {} scope: {} touched, {}\n",
         mark(receipt.scope.violations.is_empty()),
-        receipt.scope.files_touched,
-        receipt.scope.violations.len()
+        counted(receipt.scope.files_touched, "file"),
+        counted(receipt.scope.violations.len(), "violation")
     ));
     let groups = fan_out_groups(&receipt.runners);
     if groups.is_empty() {
         out.push_str(&format!(
-            "- {} runner(s) used, no fan-out review\n",
-            receipt.runners.len()
+            "- {} used, no fan-out review\n",
+            counted(receipt.runners.len(), "runner")
         ));
     } else {
         for (base, members) in &groups {
             let adapters: Vec<&str> = members.iter().map(|m| m.adapter.as_str()).collect();
             out.push_str(&format!(
-                "- ✓ Reviewed by {} independent runner(s) via `{base}` ({})\n",
-                members.len(),
+                "- ✓ Reviewed by {} via `{base}` ({})\n",
+                counted(members.len(), "independent runner"),
                 adapters.join(", ")
             ));
         }
     }
     out.push_str(&format!(
-        "- cost: {} ({} in / {} out){} · {} reroute(s)\n",
+        "- cost: {} ({} in / {} out){} · {}\n",
         Tokens(receipt.cost.tokens.total()),
         Tokens(receipt.cost.tokens.input).figure(),
         Tokens(receipt.cost.tokens.output).figure(),
@@ -108,11 +114,12 @@ pub fn render_markdown(receipt: &Receipt) -> String {
             Some(cptv) => format!(" · CPTV: {} per task", Tokens::rounded(cptv)),
             None => String::new(),
         },
-        receipt.cost.reroutes,
+        counted(receipt.cost.reroutes, "reroute"),
     ));
     match &receipt.event_chain {
         EventChainStatus::Intact { events } => out.push_str(&format!(
-            "- ✓ event chain: {events} event(s), hash-linked, replayable\n"
+            "- ✓ event chain: {}, hash-linked, replayable\n",
+            counted(*events, "event")
         )),
         EventChainStatus::Broken { seq, detail } => out.push_str(&format!(
             "{}\n",
@@ -153,18 +160,20 @@ fn baseline_line(b: &BaselineSummary) -> String {
     let hash = b.hash.as_str().get(..12).unwrap_or_default();
     match b.red {
         Some(exit_code) => format!(
-            "- {} baseline was already red when measured (exit {exit_code}): none of {} \
-             comparison(s) could find a regression (suite `{}`, hash `{hash}`{measured_by})\n",
+            "- {} baseline was already red when measured (exit {exit_code}): {} could find a \
+             regression (suite `{}`, hash `{hash}`{measured_by})\n",
             mark(false),
-            b.compared,
+            match b.compared {
+                1 => "the one comparison never".to_string(),
+                n => format!("none of {n} comparisons"),
+            },
             b.suite,
         ),
         None => format!(
-            "- {} {} regression(s) vs baseline across {} comparison(s) (suite `{}`, hash \
-             `{hash}`{measured_by})\n",
+            "- {} {} vs baseline across {} (suite `{}`, hash `{hash}`{measured_by})\n",
             mark(b.regressions == 0),
-            b.regressions,
-            b.compared,
+            counted(b.regressions, "regression"),
+            counted(b.compared, "comparison"),
             b.suite,
         ),
     }

@@ -820,7 +820,7 @@ fn a_scope_violation_says_which_files_fell_outside() {
         Failure::scope_violated(vec!["crates/cli/Cargo.toml".into(), "clippy.toml".into()]);
     assert_eq!(
         failure.to_string(),
-        "scope violated: 2 file(s) outside the declared globs — crates/cli/Cargo.toml, clippy.toml"
+        "scope violated: 2 files outside the declared globs — crates/cli/Cargo.toml, clippy.toml"
     );
     assert_eq!(failure.outside_scope().len(), 2);
     assert!(

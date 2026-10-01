@@ -93,10 +93,10 @@ impl ArtifactIntegrity {
             .map(|fault| format!("`{}`: {}", fault.artifact, fault.error))
             .collect();
         Some(format!(
-            "run `{run_id}` no longer holds the bytes its log accepted for {} of the {} \
-             artifact(s) it names: {}",
+            "run `{run_id}` no longer holds the bytes its log accepted for {} of the {} it \
+             names: {}",
             self.faults.len(),
-            self.verified + self.faults.len(),
+            yunta_core::text::counted(self.verified + self.faults.len(), "artifact"),
             faults.join("; ")
         ))
     }
@@ -106,13 +106,12 @@ impl ArtifactIntegrity {
     pub fn unverifiable_detail(&self) -> Option<String> {
         (self.unverifiable > 0).then(|| {
             format!(
-                "{} artifact(s) of this run are named by `artifact_written`, written before a run \
-                 kept the bytes of its artifacts under `{}/`: no object answers for them and none \
-                 ever did, so they are left unchecked and the {} artifact(s) the log accepted are \
-                 the ones verified",
-                self.unverifiable,
+                "left unchecked: {} of this run, named by `artifact_written` before a run kept \
+                 the bytes of its artifacts under `{}/` — no object answers for such an \
+                 artifact, and none ever did; verified: {} the log accepted",
+                yunta_core::text::counted(self.unverifiable, "artifact"),
                 super::store::OBJECTS_DIR,
-                self.verified,
+                yunta_core::text::counted(self.verified, "artifact"),
             )
         })
     }

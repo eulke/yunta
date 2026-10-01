@@ -300,9 +300,10 @@ impl std::fmt::Display for PauseReason {
             PauseReason::ExternalGate { url } => write!(f, "waiting on external gate: {url}"),
             PauseReason::UncertainOrphans(nodes) => write!(
                 f,
-                "node(s) {} were running with no terminal event when the engine last \
-                 stopped — `on_interrupt: fail_if_uncertain` refuses to guess whether they \
-                 finished; verify manually before resuming",
+                "{} running with no terminal event when the engine last stopped: {} — \
+                 `on_interrupt: fail_if_uncertain` refuses to guess how each ended; verify \
+                 manually before resuming",
+                crate::text::agreeing(nodes.len(), "a node was", "nodes were"),
                 crate::text::listed(nodes.iter().map(NodeId::as_str))
             ),
             PauseReason::NodeFailed { node, failure } => {

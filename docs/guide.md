@@ -322,7 +322,7 @@ shape to demand.
 
 The tool answers in the same call, with the verdict the node's close reaches: the
 engine reads the object into the same type and runs the same rules. An acceptance
-reports what the engine understood — `tasks.yaml — accepted. 6 task(s)
+reports what the engine understood — `tasks.yaml — accepted. 6 tasks
 registered: ...` — and puts the canonical document into the run: the bytes under
 `objects/`, the acceptance on the log. A refusal lists every
 rule the document breaks, all at once — or, when the

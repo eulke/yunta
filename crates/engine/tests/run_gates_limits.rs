@@ -240,7 +240,7 @@ async fn a_gate_with_no_live_interaction_degrades_to_pausing_exactly_as_before()
         RunTerminal::Paused { reason } => {
             assert_eq!(
                 reason,
-                "node `lint` failed and its 1 re-route(s) to `fix-lint` are exhausted — exit 1"
+                "node `lint` failed and its 1 re-route to `fix-lint` is exhausted — exit 1"
             );
         }
         other => panic!("expected Paused, got {other:?}"),

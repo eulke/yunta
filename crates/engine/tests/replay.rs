@@ -406,7 +406,7 @@ fn a_log_written_before_origins_derives_the_artifacts_a_newer_one_does() {
             .node(
                 "ask",
                 EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
-                    Failure::message("scope violated: 1 file(s) outside the declared globs"),
+                    Failure::message("scope violated: 1 file outside the declared globs"),
                     false,
                     tokens(0, 0),
                 ))),

@@ -127,10 +127,10 @@ fn enforce_publisher_allowed(policy: &PackPolicy, publisher: &Publisher) -> Resu
     }
     Err(CliError::msg(format!(
         "publisher `{publisher}` is not in `permissions.packs.publishers.allow` \
-         (declared by the {} config layer{}) — allowed: {}. Add the publisher there, or \
+         (declared by the {} config {}) — allowed: {}. Add the publisher there, or \
          install a pack from an allowed publisher.",
         declared_by.join("/"),
-        if declared_by.len() == 1 { "" } else { "s" },
+        yunta_core::text::agreeing(declared_by.len(), "layer", "layers"),
         allow
             .iter()
             .map(ToString::to_string)

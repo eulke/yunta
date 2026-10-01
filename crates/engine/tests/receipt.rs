@@ -102,11 +102,11 @@ const EXPECTED_MARKDOWN_INTACT: &str = "\
 workflow: `release-cycle` · mode: `default` · state: Done
 
 - ✓ 3/3 criteria green (commands + exit codes below)
-- ✓ 0 regression(s) vs baseline across 2 comparison(s) (suite `make test`, hash `22cc66aa7d26`)
-- ✓ scope: 4 file(s) touched, 0 violation(s)
-- ✓ Reviewed by 2 independent runner(s) via `review` (claude-code, codex)
-- cost: 1.54k tokens (1.2k in / 340 out) · CPTV: 770 tokens per task · 2 reroute(s)
-- ✓ event chain: 342 event(s), hash-linked, replayable
+- ✓ 0 regressions vs baseline across 2 comparisons (suite `make test`, hash `22cc66aa7d26`)
+- ✓ scope: 4 files touched, 0 violations
+- ✓ Reviewed by 2 independent runners via `review` (claude-code, codex)
+- cost: 1.54k tokens (1.2k in / 340 out) · CPTV: 770 tokens per task · 2 reroutes
+- ✓ event chain: 342 events, hash-linked, replayable
 
 ## Criteria
 
@@ -170,10 +170,10 @@ workflow: `release-cycle` · mode: `default` · state: Done
 
 - ✓ 3/3 criteria green (commands + exit codes below)
 - baseline: not used by this workflow
-- ✓ scope: 4 file(s) touched, 0 violation(s)
-- ✓ Reviewed by 2 independent runner(s) via `review` (claude-code, codex)
-- cost: 1.54k tokens (1.2k in / 340 out) · CPTV: 770 tokens per task · 2 reroute(s)
-- ✓ event chain: 10 event(s), hash-linked, replayable
+- ✓ scope: 4 files touched, 0 violations
+- ✓ Reviewed by 2 independent runners via `review` (claude-code, codex)
+- cost: 1.54k tokens (1.2k in / 340 out) · CPTV: 770 tokens per task · 2 reroutes
+- ✓ event chain: 10 events, hash-linked, replayable
 
 ## Criteria
 
@@ -210,7 +210,7 @@ fn the_receipt_names_the_run_that_measured_an_inherited_baseline() {
     });
     assert!(
         render_receipt_markdown(&receipt).contains(
-            "0 regression(s) vs baseline across 2 comparison(s) (suite `make test`, \
+            "0 regressions vs baseline across 2 comparisons (suite `make test`, \
              hash `22cc66aa7d26`, measured by run run-2026-08-21-0001)"
         ),
         "{}",
@@ -235,15 +235,12 @@ fn a_receipt_over_a_red_measurement_certifies_no_comparison() {
     let markdown = render_receipt_markdown(&receipt);
     assert!(
         markdown.contains(
-            "- ✗ baseline was already red when measured (exit 2): none of 2 comparison(s) \
+            "- ✗ baseline was already red when measured (exit 2): none of 2 comparisons \
              could find a regression (suite `make test`, hash `22cc66aa7d26`)"
         ),
         "{markdown}"
     );
-    assert!(
-        !markdown.contains("regression(s) vs baseline"),
-        "{markdown}"
-    );
+    assert!(!markdown.contains("regressions vs baseline"), "{markdown}");
 }
 
 // --- derivation: build_receipt over a real run's own log --------------------
@@ -400,7 +397,7 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     // relies on.
     let markdown = render_receipt_markdown(&receipt);
     assert!(
-        markdown.contains("Reviewed by 2 independent runner(s)"),
+        markdown.contains("Reviewed by 2 independent runners"),
         "got: {markdown}"
     );
     render_receipt_json(&receipt).unwrap();
@@ -468,7 +465,7 @@ fn the_receipt_counts_artifact_problems_by_their_stable_code() {
     let markdown = render_receipt_markdown(&receipt);
     assert!(
         markdown.contains(
-            "artifact problem(s) reported during the run: `parse` in the tasks document \u{d7}2, \
+            "3 artifact problems reported during the run: `parse` in the tasks document \u{d7}2, \
              `no-criteria` in the tasks document \u{d7}1"
         ),
         "{markdown}"

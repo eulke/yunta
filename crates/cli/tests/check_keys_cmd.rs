@@ -34,7 +34,7 @@ fn check_names_every_unknown_key_of_a_node_with_the_key_that_replaces_it() {
         "the file is named: {stderr}"
     );
     let unknown_clause = stderr
-        .split_once("unknown key(s) ")
+        .split_once("unknown keys ")
         .and_then(|(_, rest)| rest.split_once("; valid keys:"))
         .map(|(clause, _)| clause);
     assert_eq!(

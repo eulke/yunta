@@ -295,7 +295,7 @@ mod tests {
     const PAGE: Layout = Layout::Page { width: LINE_WIDTH };
 
     fn escalation() -> GateWaitingPayload {
-        escalation_saying("node `lint` failed and its 0 re-route(s) to `fix-lint` are exhausted")
+        escalation_saying("node `lint` failed and its 0 re-routes to `fix-lint` are exhausted")
     }
 
     /// The same escalation with a claim of the caller's choosing — for
@@ -424,7 +424,7 @@ mod tests {
     #[test]
     fn an_escalation_with_nothing_attached_heads_no_record() {
         let bare = Escalation::new(
-            "node `lint` failed and its 0 re-route(s) to `fix-lint` are exhausted",
+            "node `lint` failed and its 0 re-routes to `fix-lint` are exhausted",
             Evidence::none(),
             NonEmpty::from((
                 GateOption {

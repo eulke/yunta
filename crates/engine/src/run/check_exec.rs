@@ -335,8 +335,8 @@ async fn execute_findings_gate(
             ctx,
             node,
             format!(
-                "{} finding(s) at or above {max_severity:?}: {}",
-                offending.len(),
+                "{} at or above {max_severity:?}: {}",
+                yunta_core::text::counted(offending.len(), "finding"),
                 offending.join(", ")
             ),
             false,

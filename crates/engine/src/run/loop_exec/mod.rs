@@ -84,7 +84,10 @@ pub(super) async fn execute_loop(
                     ctx,
                     node,
                     Close::new(
-                        format!("{} task(s) done", prep.tasks.tasks.len()),
+                        format!(
+                            "{} done",
+                            yunta_core::text::counted(prep.tasks.tasks.len(), "task")
+                        ),
                         state.tokens,
                     ),
                 )

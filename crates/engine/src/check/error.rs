@@ -467,8 +467,9 @@ pub enum CheckError {
     /// the reference graph (the runtime guard at child birth enforces
     /// the same limit over what actually loads).
     #[error(
-        "workflow composition {chain} nests {depth} level(s) deep but \
-         `limits.max_workflow_depth` is {max} — flatten the composition or raise the limit"
+        "workflow composition {chain} nests {} deep but `limits.max_workflow_depth` is \
+         {max} — flatten the composition or raise the limit",
+        yunta_core::text::counted(*depth as usize, "level")
     )]
     WorkflowRefTooDeep { chain: String, depth: u32, max: u32 },
 

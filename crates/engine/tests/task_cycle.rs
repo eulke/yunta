@@ -496,7 +496,7 @@ sessions:
     };
     assert_eq!(
         cause.to_string(),
-        "not done after 1 attempt(s): `echo checking; echo 'output.txt is missing' >&2; \
+        "not done after 1 attempt: `echo checking; echo 'output.txt is missing' >&2; \
          test -f output.txt` still exits 1 — output.txt is missing",
         "whoever decides reads why it fails, not only that it does"
     );

@@ -115,6 +115,28 @@ pub fn has_inner_space_run(line: &str) -> bool {
     false
 }
 
+/// Whether `line` hedges a count with `(s)` — `3 file(s)` — where the
+/// number beside it already says how many: a word written just before
+/// `(s)`, after a space or at the start of a continued line, which is
+/// prose and never a call (`Some(s)`, `str::trim(s)`). Comment lines are
+/// not messages.
+pub fn has_parenthesized_plural(line: &str) -> bool {
+    if line.trim_start().starts_with("//") {
+        return false;
+    }
+    line.match_indices("(s)").any(|(at, _)| {
+        let before = &line[..at];
+        let word = before
+            .trim_end_matches(|c: char| c.is_ascii_lowercase() || c == '-')
+            .len();
+        word < at
+            && before[..word]
+                .chars()
+                .last()
+                .is_none_or(char::is_whitespace)
+    })
+}
+
 /// How many function bodies in `source` exceed `max` lines, measured from
 /// the line after the body's opening `{` to its matching `}` — the span a
 /// reader scrolls. String and char literals and comments are blanked first
@@ -359,6 +381,24 @@ mod tests {
         ));
         assert!(!has_inner_space_run("    // a          comment"));
         assert!(!has_inner_space_run("    let x = 1;"));
+    }
+
+    #[test]
+    fn a_parenthesized_plural_in_a_string_counts_and_one_in_a_comment_does_not() {
+        assert!(has_parenthesized_plural(
+            r#"    "scope violated: {} file(s) outside the declared globs","#
+        ));
+        // A continued line of a message opens on the word.
+        assert!(has_parenthesized_plural(
+            r#"             artifact(s) it names: {}","#
+        ));
+        assert!(has_parenthesized_plural(r#"    "{} re-route(s)","#));
+        assert!(!has_parenthesized_plural("    // every file(s) it names"));
+        assert!(!has_parenthesized_plural(
+            "    Value::String(s) => s.clone(),"
+        ));
+        assert!(!has_parenthesized_plural("    let t = str::trim(s);"));
+        assert!(!has_parenthesized_plural("    let t = Some(s);"));
     }
 
     #[test]

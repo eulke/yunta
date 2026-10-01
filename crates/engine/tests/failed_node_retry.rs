@@ -273,7 +273,7 @@ async fn a_blocked_task_says_what_its_attempt_left_red() {
     let facts = format!("{:?}", escalation.evidence());
     assert!(
         facts.contains("task `T001` blocked")
-            && facts.contains("not done after 1 attempt(s): `test -f made.txt` still exits 1"),
+            && facts.contains("not done after 1 attempt: `test -f made.txt` still exits 1"),
         "the decision names the criterion still red: {facts}"
     );
 }

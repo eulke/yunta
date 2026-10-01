@@ -27,8 +27,8 @@ pub enum InputsError {
     /// Every `--input` name the workflow does not declare, sorted, so
     /// one run of the command reports them all.
     #[error(
-        "unknown input{} `{}` — this workflow declares {}",
-        if names.len() > 1 { "s" } else { "" },
+        "unknown {} `{}` — this workflow declares {}",
+        yunta_core::text::agreeing(names.len(), "input", "inputs"),
         listed(names, "`, `"),
         if declared.is_empty() { "no inputs".to_string() } else { format!("only: {}", listed(declared, ", ")) }
     )]

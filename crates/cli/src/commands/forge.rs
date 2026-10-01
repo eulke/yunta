@@ -85,10 +85,7 @@ fn unset_token(ctx: &crate::context::Context, named: &str, token_env: &str) -> b
     println!(
         "{unset}, and {} {} a pull request through it — export {token_env} to reach it",
         yunta_core::text::listed(opening.iter().map(String::as_str)),
-        match opening.len() {
-            1 => "opens",
-            _ => "open",
-        },
+        yunta_core::text::agreeing(opening.len(), "opens", "open"),
     );
     false
 }

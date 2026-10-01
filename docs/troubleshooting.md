@@ -118,7 +118,7 @@ that summary. The failed call is diagnostic context: the session may recover
 and finish, and a node failure can have another cause. Arguments, responses,
 tokens and CLI error text are not stored in this event or summary.
 
-## A node failed with "scope violated: N file(s) outside the declared globs"
+## A node failed with "scope violated: N files outside the declared globs"
 
 The session edited something outside the node's `scope:` globs, and the
 failure names each of those paths. This is a hard post-check, not a warning.
@@ -307,7 +307,7 @@ opens at all.
 - **`publisher "x" is not in permissions.packs.publishers.allow`** — your
   config (the layer is named in the error) restricts which publishers can be
   installed. Add the publisher there, or get the pack from an allowed one.
-- **`this pack declares N executor(s) ...`** — `permissions.packs.executors`
+- **`this pack declares N executors ...`** — `permissions.packs.executors`
   is `prompt` (the default) and needs `--yes` after you've reviewed the
   printed audit, or is `deny` and refuses outright regardless of `--yes`.
   See [packs](packs.md#installing-and-using-a-pack).
@@ -316,7 +316,7 @@ opens at all.
 
 ```
 run is broken: run `01J...` no longer holds the bytes its log accepted for 1
-of the 3 artifact(s) it names: `artifacts/plan/tasks.yaml`: object
+of the 3 artifacts it names: `artifacts/plan/tasks.yaml`: object
 `a1b2...` holds content that hashes to `c3d4...` — the bytes under
 `objects/` are not the bytes the run accepted
 ```
