@@ -215,6 +215,41 @@ expect:
     );
 }
 
+/// A node the case's mode leaves out is `skipped`, the word `status`
+/// prints for it, and a case can say so.
+#[test]
+fn a_case_expecting_a_node_its_mode_leaves_out_to_be_skipped_passes() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/workflows/narrow.yaml"),
+        "name: narrow\nmodes:\n  short: { include: [first] }\n  long: { include: all }\nnodes:\n  \
+         - { id: first, kind: bash, run: \"true\" }\n  \
+         - { id: second, kind: bash, run: \"true\", depends_on: [first] }\n",
+    );
+    write(
+        &repo.join(".yunta/tests/fixtures/none.yaml"),
+        "sessions: []\n",
+    );
+    write(
+        &repo.join(".yunta/tests/short-skips-second.yaml"),
+        "workflow: narrow\nmode: short\nfixture: fixtures/none.yaml\nexpect:\n  \
+         final_state: finished\n  nodes:\n    first: finished\n    second: skipped\n",
+    );
+
+    let output = yunta_in!(&repo, &home, &["test"]);
+    let text = stdout(&output);
+    assert!(
+        output.status.success(),
+        "stdout: {text}\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(text.contains("case short-skips-second ... ok"), "{text}");
+}
+
 #[test]
 fn a_document_input_gives_a_loop_its_tasks_with_no_node_producing_them() {
     let root = tempfile::tempdir().unwrap();

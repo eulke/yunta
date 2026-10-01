@@ -19,7 +19,7 @@ expect:
     fix-lint: never ran
     tests: finished
     conform: finished
-    review: never ran
+    review: skipped
     pr: never ran
   tasks:
     T001: done

@@ -23,7 +23,7 @@ use crate::context::Context;
 use crate::error::CliError;
 use crate::load_yaml;
 use crate::render::state::RunWord;
-use crate::render::StateWord;
+use crate::render::NodeDisplay;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -239,10 +239,42 @@ pub(crate) async fn run_case(
             terminal_label(&report.terminal)
         ));
     }
+    // Where each node stands is read off the run's frame, the one place
+    // that tells a node the run's mode leaves out from one it has not
+    // reached — so a case says `skipped` exactly where `status` does.
+    let events = storage.events_for_run(prepared.run_id.clone()).await?;
+    let read_at = events
+        .last()
+        .map(|event| event.timestamp)
+        .unwrap_or_default();
+    let frame =
+        yunta_engine::run_frame(&prepared.run_id, &manifest.workflow, &events, None, read_at);
     for (node_id, expected) in &case.expect.nodes {
-        let got = StateWord::of(report.state.nodes.state(node_id.as_str())).word();
-        if got != expected {
-            problems.push(format!("node {node_id}: expected {expected}, got {got}"));
+        // A node that fans out to several runners runs as one node per
+        // runner (`review@reviewer`, ...): the id the workflow declares
+        // names all of them, and each has to stand where the case says.
+        let named: Vec<_> = frame
+            .nodes
+            .iter()
+            .filter(|node| {
+                node.id == node_id.as_str()
+                    || node
+                        .id
+                        .as_str()
+                        .strip_prefix(node_id.as_str())
+                        .is_some_and(|runner| runner.starts_with('@'))
+            })
+            .collect();
+        if named.is_empty() {
+            problems.push(format!(
+                "node {node_id}: expected {expected}, and the workflow declares no such node"
+            ));
+        }
+        for node in named {
+            let got = NodeDisplay::standing(&node.state).word.word();
+            if got != expected {
+                problems.push(format!("node {}: expected {expected}, got {got}", node.id));
+            }
         }
     }
     for (task_id, expected) in &case.expect.tasks {
