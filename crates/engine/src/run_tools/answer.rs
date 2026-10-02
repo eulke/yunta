@@ -14,6 +14,7 @@ use yunta_core::{FindingId, NodeId};
 
 use super::catalog::RunTool;
 use super::session::{RunToolError, SessionTools};
+use super::verdicts::{json, Reply};
 
 /// What the session answers.
 #[derive(Deserialize)]
@@ -29,7 +30,7 @@ impl SessionTools {
     /// The findings standing in the run, as the one view a gate shows.
     pub(super) async fn findings_standing(&self) -> Result<String, RunToolError> {
         let standing = FindingLedger::of(&self.events().await?).standing();
-        serde_json::to_string_pretty(&standing).map_err(|source| RunToolError::Render { source })
+        json(&standing)
     }
 
     pub(super) async fn answer_finding(
@@ -63,13 +64,19 @@ impl SessionTools {
             },
         )))
         .await?;
-        Ok(format!(
+        let reply = Reply::new(format!(
             "your answer to `{node}`'s finding `{id}` — {} — is recorded: a person reads it \
-             beside the finding, which stands until its own node takes it back. Answered \
-             fixed, the criterion it proposes runs on the tree you leave, and passing \
-             settles it",
+             beside the finding, which stands until its own node takes it back",
             answer.as_str()
-        ))
+        ));
+        Ok(match answer {
+            FindingAnswer::Fixed => reply.next(
+                "leave the fix in the tree you hand back: a criterion the finding proposes \
+                 runs on it, and passing settles the finding",
+            ),
+            FindingAnswer::Declined => reply,
+        }
+        .text())
     }
 }
 

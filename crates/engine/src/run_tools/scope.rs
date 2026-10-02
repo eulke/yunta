@@ -13,8 +13,9 @@ use serde::Serialize;
 use serde_json::Value;
 use yunta_core::ScopeGlob;
 
+use super::catalog::RunTool;
 use super::session::{RunToolError, SessionTools};
-use super::tasks::render;
+use super::verdicts::{json, Reply};
 
 impl SessionTools {
     /// What this node's close would find outside its scope if the
@@ -44,7 +45,7 @@ impl SessionTools {
         )
         .await
         .map_err(|source| RunToolError::Audit { source })?;
-        render(&ScopeVerdict {
+        json(&ScopeVerdict {
             within: result.violations.is_empty(),
             scope: &access.scope,
             outside_scope: result.violations,
@@ -81,15 +82,23 @@ impl SessionTools {
                 path: path.clone(),
                 source,
             })?;
-        Ok(if answered_by_a_person {
-            "request recorded — when this attempt ends a person decides whether to widen \
-             this node's scope; finish what you can within it and do not write the paths \
-             you asked for"
-        } else {
-            "request recorded — it is evaluated when this attempt ends (the engine \
-             or a person decides; a denial becomes a finding); re-attempt the work after"
-        }
-        .to_string())
+        let reply = match answered_by_a_person {
+            true => Reply::new(
+                "request recorded — when this attempt ends a person decides whether to widen \
+                 this node's scope",
+            )
+            .next(format!(
+                "finish what you can within the scope you have, without writing the paths \
+                 you asked for; `{}` tells you whether what you changed is within it",
+                self.called(RunTool::CheckScope)
+            )),
+            false => Reply::new(
+                "request recorded — it is decided when this attempt ends, by the engine or a \
+                 person, and a denial becomes a finding",
+            )
+            .next("end this attempt; the work is attempted again once the request is decided"),
+        };
+        Ok(reply.text())
     }
 }
 

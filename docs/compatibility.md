@@ -468,6 +468,12 @@ on every later request. Which tools a per-session server lists depends on that
 session — its node, its task and the documents it declares — never on the revision
 the client speaks.
 
+A call to a tool the server does not serve is refused by the protocol, with
+`-32602` (invalid params), on both servers: no tool ran. Every text a per-session
+tool answers with opens on its verdict, numbers what stands in the way, and ends
+on a line opening `Next:` when there is something to call or do next; what a tool
+answers as data is JSON.
+
 `run --json` carries `budget_warning` when the declared cap sits under the
 workflow's historical p90 — the same sentence that goes to stderr, undecorated,
 because how a caution looks is the terminal's word and not the document's.

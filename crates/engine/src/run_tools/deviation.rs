@@ -16,6 +16,7 @@ use yunta_core::events::{DepartsFrom, DeviationDeclaredPayload, EventPayload, Ta
 use super::catalog::RunTool;
 use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
+use super::verdicts::Reply;
 
 /// What the session declares.
 #[derive(Deserialize)]
@@ -55,12 +56,15 @@ impl SessionTools {
         };
         self.append(EventPayload::Tasks(TaskEvent::DeviationDeclared(declared)))
             .await?;
-        Ok(
+        Ok(Reply::new(
             "departure recorded — your task does not close on it: when this session ends a \
-             person accepts it or sends it back with what to do instead. Finish the rest of \
-             the task as the plan says."
-                .to_string(),
+             person accepts it or sends it back with what to do instead",
         )
+        .next(format!(
+            "finish the rest of the task as the plan says; `{}` tells you whether it closes",
+            self.called(RunTool::CheckTask)
+        ))
+        .text())
     }
 }
 

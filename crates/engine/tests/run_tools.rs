@@ -1747,3 +1747,71 @@ fn the_catalog_and_the_dispatch_name_the_same_tools() {
         .count();
     assert_eq!(yunta_engine::RunTool::all().len(), 13 + submissions);
 }
+
+// --- one shape for every answer ------------------------------------------------
+
+#[tokio::test]
+async fn a_recorded_finding_says_so_then_names_the_tools_that_change_it() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let (is_error, text) = call(
+        &client,
+        "yunta_post_finding",
+        json!({
+            "id": "shaped",
+            "severity": "note",
+            "title": "an answer in one shape",
+            "location": "src/lib.rs:1",
+            "detail": "the verdict first, what to call next last",
+        }),
+    )
+    .await;
+    assert!(!is_error, "got: {text}");
+    assert_eq!(
+        text,
+        "finding `shaped` recorded\n\n\
+         Next: `yunta_update_finding` changes it and `yunta_withdraw_finding` takes it back, \
+         saying why"
+    );
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_call_it_cannot_read_names_its_cause_once() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let (is_error, text) = call(&client, "yunta_answer_finding", json!({"why": "x"})).await;
+    assert!(is_error);
+    assert!(
+        text.starts_with("invalid answer — requires `node` and `id`"),
+        "{text}"
+    );
+    assert_eq!(
+        text.matches("missing field").count(),
+        1,
+        "the cause is said once: {text}"
+    );
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_tool_the_server_never_offered_is_refused_by_the_protocol() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("solo", None).await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let refused = client
+        .call_tool(CallToolRequestParams::new("yunta_no_such_tool".to_string()))
+        .await
+        .expect_err("an unknown tool is not a call that ran");
+    let rmcp::ServiceError::McpError(error) = refused else {
+        panic!("a protocol error, got {refused:?}");
+    };
+    assert_eq!(error.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert!(error.message.contains("yunta_no_such_tool"), "{error:?}");
+    client.cancel().await.unwrap();
+}

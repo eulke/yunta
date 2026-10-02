@@ -68,11 +68,10 @@ impl SessionTools {
         // Siblings' posts arrive through the group's post-join
         // consolidation, never through here.
         let own: Vec<Finding> = FindingLedger::of(&self.events().await?).effective_of(&self.node);
-        serde_json::to_string_pretty(&json!({
+        super::verdicts::json(&json!({
             "note": "your own posts only — siblings' posts become readable after the \
                      group's join, through its consolidated output",
             "findings": own,
         }))
-        .map_err(|source| RunToolError::Render { source })
     }
 }

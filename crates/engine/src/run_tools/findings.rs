@@ -20,8 +20,9 @@ use yunta_core::events::{
 };
 use yunta_core::{ArtifactKind, FindingEntry, FindingId, Withdrawal};
 
+use super::catalog::RunTool;
 use super::session::{RunToolError, SessionTools};
-use super::verdicts::refusal;
+use super::verdicts::{refusal, Reply};
 use yunta_core::events::FindingEvent;
 
 impl SessionTools {
@@ -37,7 +38,13 @@ impl SessionTools {
             },
         )))
         .await?;
-        Ok(format!("finding `{id}` recorded"))
+        Ok(Reply::new(format!("finding `{id}` recorded"))
+            .next(format!(
+                "`{}` changes it and `{}` takes it back, saying why",
+                self.called(RunTool::UpdateFinding),
+                self.called(RunTool::WithdrawFinding)
+            ))
+            .text())
     }
 
     pub(super) async fn update_finding(
@@ -52,7 +59,7 @@ impl SessionTools {
             },
         )))
         .await?;
-        Ok(format!("finding `{id}` updated"))
+        Ok(Reply::new(format!("finding `{id}` updated")).text())
     }
 
     pub(super) async fn withdraw_finding(
@@ -79,7 +86,7 @@ impl SessionTools {
             },
         )))
         .await?;
-        Ok(format!("finding `{id}` withdrawn"))
+        Ok(Reply::new(format!("finding `{id}` withdrawn")).text())
     }
 
     /// The finding a `post` or an `update` offers, once it has passed the

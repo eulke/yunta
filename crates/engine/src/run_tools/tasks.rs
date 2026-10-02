@@ -22,6 +22,7 @@ use yunta_core::{ScopeGlob, TaskId};
 use super::catalog::RunTool;
 use super::host::TaskAccess;
 use super::session::{RunToolError, SessionTools};
+use super::verdicts::json;
 use crate::task_cycle::{could_not_run, judge, CriterionRun, Judgement, Work};
 
 impl SessionTools {
@@ -37,8 +38,7 @@ impl SessionTools {
             .into_iter()
             .map(|(id, status)| (id, Value::String(status)))
             .collect();
-        serde_json::to_string_pretty(&Value::Object(map))
-            .map_err(|source| RunToolError::Render { source })
+        json(&Value::Object(map))
     }
 
     /// This session's task as the cycle judges it — its scope, criteria
@@ -57,7 +57,7 @@ impl SessionTools {
             runs_under: self.host.environment.as_ref().filter(|_| any_unrunnable),
             ..sheet
         };
-        render(&sheet)
+        json(&sheet)
     }
 
     /// The judgement this session's attempt would get if it ended now.
@@ -110,7 +110,7 @@ impl SessionTools {
             .criteria
             .iter()
             .any(|run| run.could_not_run().is_some());
-        render(&Verdict {
+        json(&Verdict {
             closes: judgement.closes(),
             criteria: judgement
                 .criteria
@@ -126,7 +126,9 @@ impl SessionTools {
     pub(super) fn task_access(&self, tool: RunTool) -> Result<&TaskAccess, RunToolError> {
         self.task
             .as_deref()
-            .ok_or(RunToolError::NotATaskSession { tool: tool.name() })
+            .ok_or_else(|| RunToolError::NotATaskSession {
+                tool: self.called(tool),
+            })
     }
 }
 
@@ -432,8 +434,4 @@ fn cycles_of(events: &[StoredEvent], task: &TaskId) -> Vec<Cycle> {
         }
     }
     cycles
-}
-
-pub(super) fn render(answer: &impl Serialize) -> Result<String, RunToolError> {
-    serde_json::to_string_pretty(answer).map_err(|source| RunToolError::Render { source })
 }

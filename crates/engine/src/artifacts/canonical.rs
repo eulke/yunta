@@ -53,9 +53,8 @@ impl std::fmt::Display for SubmitError {
             ),
             SubmitError::Accumulated => write!(
                 f,
-                "a findings artifact is not submitted whole: report each finding with \
-                 `{tool}` and the engine writes the file",
-                tool = ArtifactKind::POST_FINDING_TOOL
+                "a findings artifact is not submitted whole: the engine writes it from the \
+                 findings reported one at a time"
             ),
             SubmitError::Refused(report) => write!(f, "{report}"),
             SubmitError::File { path, problem } => {

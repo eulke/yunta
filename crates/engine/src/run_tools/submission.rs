@@ -23,8 +23,9 @@ use yunta_core::{ArtifactKind, ArtifactSpec};
 
 use crate::artifacts::{accept, VerifiedArtifact};
 
+use super::catalog::RunTool;
 use super::session::{RunToolError, SessionTools};
-use super::verdicts::{failure_heading, numbered, read_as, submission_refusal};
+use super::verdicts::{failure_heading, numbered, read_as, submission_refusal, Reply};
 use yunta_core::events::ArtifactEvent;
 
 impl SessionTools {
@@ -220,11 +221,7 @@ impl SessionTools {
                     Err(RunToolError::Refused { text }),
                 )
             }
-            Err(other) => {
-                return Err(RunToolError::Refused {
-                    text: other.to_string(),
-                })
-            }
+            Err(other) => return Err(self.not_submitted(other)),
         };
         self.append(EventPayload::Artifacts(ArtifactEvent::Submitted(
             ArtifactSubmittedPayload {
@@ -235,6 +232,22 @@ impl SessionTools {
         )))
         .await?;
         answer
+    }
+
+    /// Why a submission never became a document to judge, told the way
+    /// this session calls the tool that does take it.
+    fn not_submitted(&self, error: crate::artifacts::SubmitError) -> RunToolError {
+        let reply = Reply::new(error.to_string());
+        let text = match error {
+            crate::artifacts::SubmitError::Accumulated => reply
+                .next(format!(
+                    "report each finding with `{}`",
+                    self.called(RunTool::PostFinding)
+                ))
+                .text(),
+            _ => reply.text(),
+        };
+        RunToolError::Refused { text }
     }
 
     /// Whether this node declares a document of `kind` — which is

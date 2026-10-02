@@ -117,7 +117,7 @@ pub(super) enum RunToolError {
     InvalidSubmission { names: String, detail: String },
     #[error(
         "invalid request — requires paths (list) and reason, with an optional \
-         proposed_criterion {{cmd}}: {source}"
+         proposed_criterion {{cmd}}"
     )]
     InvalidRequest {
         #[source]
@@ -126,7 +126,7 @@ pub(super) enum RunToolError {
     #[error(
         "invalid departure — requires `from` (one of `{{\"shape\": name}}`, \
          `{{\"decision\": id}}`, `{{\"change\": at}}`, `{{\"criterion\": cmd}}` or \
-         `\"outcome\"`), `planned`, `instead` and `why`: {source}"
+         `\"outcome\"`), `planned`, `instead` and `why`"
     )]
     InvalidDeparture {
         #[source]
@@ -134,7 +134,7 @@ pub(super) enum RunToolError {
     },
     #[error(
         "invalid answer — requires `node` and `id`, the finding answered as its node reported \
-         it, `answer` (`fixed` or `declined`) and `why`: {source}"
+         it, `answer` (`fixed` or `declined`) and `why`"
     )]
     InvalidAnswer {
         #[source]
@@ -204,7 +204,7 @@ pub(super) enum RunToolError {
         "`{tool}` answers about a task, and this session works none — only a loop's task \
          sessions are served it"
     )]
-    NotATaskSession { tool: &'static str },
+    NotATaskSession { tool: String },
     #[error("the criteria could not be run where the engine runs them: {detail}")]
     Handover { detail: String },
     #[error("the run's plan could not be read")]
@@ -243,8 +243,6 @@ pub(super) enum RunToolError {
         #[source]
         source: std::io::Error,
     },
-    #[error("unknown tool `{name}`")]
-    UnknownTool { name: String },
     #[error("node `{node}` declares no artifacts, so there is nothing to check")]
     NoArtifacts { node: NodeId },
     #[error("`{name}` is not an artifact this node declares; it declares {declared}")]
@@ -325,9 +323,14 @@ impl ServerHandler for SessionTools {
             Some(RunTool::RequestScopeExpansion) => self.request_scope_expansion(args).await,
             Some(RunTool::DeclareDeviation) => self.declare_deviation(args).await,
             Some(RunTool::Submit(kind)) => self.submit(kind, args).await,
-            None => Err(RunToolError::UnknownTool {
-                name: request.name.to_string(),
-            }),
+            // A tool this server never offered is a call the protocol
+            // refuses, not a tool that ran and failed.
+            None => {
+                return Err(McpError::invalid_params(
+                    format!("unknown tool `{}`", request.name),
+                    None,
+                ))
+            }
         };
         Ok(match outcome {
             Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]).into(),
