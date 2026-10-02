@@ -87,12 +87,16 @@ fn changes(task: &Task, plan: &TasksFile, judged: Option<&TaskReview>) -> Vec<Bl
                 }
                 .into();
             }
-            let shape = plan
-                .shapes
-                .iter()
-                .find(|shape| shape.owner == task.id && shape.file == change.file());
-            match shape {
-                Some(shape) => Code::whole(at, Some(change.what.clone()), &shape.code).into(),
+            // The change's own code, or the shape its task declares in
+            // that file: how the work will look, beside what it is about.
+            let code = change.code.as_deref().or_else(|| {
+                plan.shapes
+                    .iter()
+                    .find(|shape| shape.owner == task.id && shape.file == change.file())
+                    .map(|shape| shape.code.as_str())
+            });
+            match code {
+                Some(code) => Code::whole(at, Some(change.what.clone()), code).into(),
                 None => Code {
                     at,
                     what: Some(change.what.clone()),

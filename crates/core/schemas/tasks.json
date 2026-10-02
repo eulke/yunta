@@ -74,6 +74,13 @@
           "description": "A file, or a file and what in it: `src/theme.rs::Theme`.",
           "type": "string"
         },
+        "code": {
+          "description": "The change as it will read once made: the signature it changes or\nthe lines it adds — so a person reviewing the plan sees how the\nwork will look, not only what it is about.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "what": {
           "description": "What changes there, in words.",
           "type": "string"
@@ -134,6 +141,17 @@
             "type": "string"
           }
         },
+        "answers": {
+          "description": "The question of the run this decision restates, when a person\nalready answered it: the plan carries their answer and does not\ndecide it again.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuestionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "choice": {
           "description": "What the plan chose.",
           "type": "string"
@@ -160,6 +178,11 @@
         "question",
         "choice"
       ]
+    },
+    "QuestionId": {
+      "description": "A question id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
     },
     "ScopeGlob": {
       "description": "a scope glob: a path pattern where `*` stays within one directory and `**` recurses",

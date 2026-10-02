@@ -39,7 +39,7 @@ ejecuta, así que lo que una persona aprueba es lo que corre (D195).
 | `depends_on` | lista de ids | no | default vacío |
 | `notes` | string | no | contexto mínimo para un runner sin historial |
 | `description` | Markdown | no; sí cuando un gate muestra el plan (§3.1) | qué hace la tarea y por qué, para quien revisa el plan; nombra las `shapes` que toca en vez de repetirlas. `yunta_task` se la devuelve a la sesión que la implementa |
-| `changes` | lista de `{at, what}` | no; sí cuando un gate muestra el plan (§3.1) | cada lugar que la tarea cambia —un archivo, o un archivo y qué dentro de él (`src/theme.rs::Theme`)— y qué cambia ahí; cada uno dentro de su `scope` (`change-outside-scope`) |
+| `changes` | lista de `{at, what, code?}` | no; sí cuando un gate muestra el plan (§3.1) | cada lugar que la tarea cambia —un archivo, o un archivo y qué dentro de él (`src/theme.rs::Theme`)—, qué cambia ahí y su `code`: la firma que cambia o las líneas que agrega, para que quien revisa vea cómo va a quedar. Cada uno dentro de su `scope` (`change-outside-scope`) |
 | `outcome` | string | no; sí cuando un gate muestra el plan (§3.1) | qué va a observar una persona cuando la tarea esté hecha |
 | `uses` | lista de nombres de `shapes` | no | las formas que la tarea usa sin construirlas; espera a la tarea dueña de cada una (`shape-used-before-its-owner`) |
 | `invariants` | lista de strings | no | lo que el código que toca ya promete y la tarea mantiene |
@@ -66,7 +66,7 @@ declaración.
 |---|---|---|---|
 | `summary` | string | no; sí cuando un gate muestra el plan (§3.1) | qué cambia el plan, en una línea |
 | `description` | Markdown | no; sí cuando un gate muestra el plan (§3.1) | qué cambia, por qué y cómo se encara. Admite bloques de código —un ejemplo, cómo interactúan las piezas— y bloques `mermaid` para diagramas |
-| `decisions` | lista de `{id, question, choice, alternatives?, why?}` | no; `why` sí cuando un gate muestra el plan (§3.1) | cada punto que el brief dejó abierto, cerrado acá y no por quien implementa: qué estaba abierto, qué se eligió, qué no, y por qué |
+| `decisions` | lista de `{id, question, choice, alternatives?, why?, answers?}` | no; `why` sí cuando un gate muestra el plan (§3.1) | cada punto que el brief dejó abierto, cerrado acá y no por quien implementa: qué estaba abierto, qué se eligió, qué no, y por qué. `answers` nombra la pregunta del run que la decisión repite, cuando una persona ya la respondió: el plan lleva esa respuesta y no la decide de nuevo |
 | `shapes` | lista de `{name, owner, file, code}` | no | cada forma que el plan crea o modifica —tipo, interfaz, schema, firma, formato— declarada una sola vez, entera, en el archivo donde vive, por la única tarea que la construye; el `scope` de esa tarea cubre el archivo (`shape-outside-owner-scope`) |
 | `design` | Markdown | no | cómo encajan las partes, en prosa y ejemplos, alrededor de las `shapes` |
 | `risks` | lista de strings | no | — |
@@ -136,6 +136,7 @@ y al cerrar el nodo, si no cumple:
 - `no-outcome` — cada tarea dice qué se va a observar cuando esté hecha.
 - `no-changes` — cada tarea dice qué cambia, lugar por lugar.
 - `unexplained-decision` — cada decisión dice `why`.
+- `change-without-code` — cada cambio muestra su `code`, salvo que la tarea declare una `shape` en ese archivo.
 
 `decisions`, `shapes`, `design`, `risks` y `out_of_scope` no se exigen: un plan
 que solo toca documentación no crea formas ni tiene nada abierto, y uno puede no

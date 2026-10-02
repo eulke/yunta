@@ -89,6 +89,8 @@ nodes:
     depends_on: [brief]
     context:
       - artifact: { node: brief, name: brief.md }
+      - artifact: { node: grill, kind: questions }
+      - artifact: { node: grill, kind: answers }
       - knowledge: {}
       - files: [{ path: docs/architecture.md, optional: true }]
       - command: "git log --oneline -20"

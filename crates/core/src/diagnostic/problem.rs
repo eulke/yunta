@@ -143,6 +143,8 @@ rule_codes! {
     NoChanges => "no-changes",
     /// A decision of a plan a person reviews does not say why.
     UnexplainedDecision => "unexplained-decision",
+    /// A change of a plan a person reviews does not show its code.
+    ChangeWithoutCode => "change-without-code",
     EmptyText => "empty-text",
     EmptyDetail => "empty-detail",
     /// An update or a withdrawal names a finding this node never posted.

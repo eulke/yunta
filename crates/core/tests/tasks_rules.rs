@@ -302,7 +302,7 @@ tasks:
     title: "Write it"
     description: "Adds hello.txt."
     scope: [hello.txt]
-    changes: [{ at: hello.txt, what: "the greeting" }]
+    changes: [{ at: hello.txt, what: "the greeting", code: "hello" }]
     outcome: "Opening the project greets you"
     criteria: [{ cmd: "test -f hello.txt", proves: "the greeting exists" }]
 "#,
@@ -426,11 +426,37 @@ tasks:
     title: t
     description: d
     scope: [a.txt]
-    changes: [{ at: a.txt, what: w }]
+    changes: [{ at: a.txt, what: w, code: c }]
     outcome: o
     criteria: [{ cmd: "test -f a.txt", proves: p }]
 "#,
     )
     .unwrap();
     assert_eq!(unexplained_codes(&tasks), ["unexplained-decision"]);
+}
+
+/// A person reviewing a plan sees how each change will look: its own
+/// code, or the shape its task declares in that file.
+#[test]
+fn a_change_a_person_reviews_shows_its_code() {
+    let tasks: TasksFile = yunta_core::yaml::parse(
+        r#"
+summary: s
+description: d
+shapes:
+  - { name: Store, owner: a, file: src/store.rs, code: "pub struct Store;" }
+tasks:
+  - id: a
+    title: t
+    description: d
+    scope: [src/store.rs, src/cli.rs]
+    changes:
+      - { at: src/store.rs::Store, what: the store }
+      - { at: src/cli.rs, what: the flag }
+    outcome: o
+    criteria: [{ cmd: "cargo test --test store", proves: p }]
+"#,
+    )
+    .unwrap();
+    assert_eq!(unexplained_codes(&tasks), ["change-without-code"]);
 }

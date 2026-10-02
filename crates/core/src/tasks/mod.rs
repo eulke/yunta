@@ -68,6 +68,11 @@ pub struct Decision {
     /// Why this, and not those.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
+    /// The question of the run this decision restates, when a person
+    /// already answered it: the plan carries their answer and does not
+    /// decide it again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answers: Option<crate::QuestionId>,
 }
 
 /// A shape the plan creates or changes, declared once where it lives and
@@ -94,6 +99,11 @@ pub struct Change {
     pub at: String,
     /// What changes there, in words.
     pub what: String,
+    /// The change as it will read once made: the signature it changes or
+    /// the lines it adds — so a person reviewing the plan sees how the
+    /// work will look, not only what it is about.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
 }
 
 impl Change {

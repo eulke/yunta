@@ -25,11 +25,15 @@ pub fn names_file(cmd: &str, path: &str) -> bool {
 /// Each criterion of `task` that passes once a name is written in a file
 /// the task changes, with that file: a `grep` or `rg` reading the file
 /// rather than a pipe, or a `test -f`/`-e` of it that nothing runs after.
+///
+/// A document is the exception: what it says is what it is for, so a
+/// criterion that finds its words checks the work.
 pub fn passes_by_a_name(task: &Task) -> Vec<(String, String)> {
     let changed: Vec<String> = task
         .changes
         .iter()
         .map(|change| crate::in_repo(change.file()))
+        .filter(|file| !documentation(file))
         .collect();
     let mut found = Vec::new();
     for criterion in task
@@ -63,6 +67,15 @@ pub fn passes_by_a_name(task: &Task) -> Vec<(String, String)> {
         }
     }
     found
+}
+
+/// Whether `path` is a document a person reads, whose words are the work.
+fn documentation(path: &str) -> bool {
+    let extension = path.rsplit_once('.').map(|(_, extension)| extension);
+    matches!(
+        extension.map(str::to_ascii_lowercase).as_deref(),
+        Some("md" | "markdown" | "txt" | "rst" | "adoc")
+    )
 }
 
 /// The shell segments of `cmd`: what `&&`, `||` and `;` separate.
@@ -143,5 +156,16 @@ mod tests {
             let found = passes_by_a_name(&task(&format!("[{{ cmd: \"{cmd}\" }}]")));
             assert!(found.is_empty(), "`{cmd}` runs behavior: {found:?}");
         }
+    }
+
+    #[test]
+    fn a_criterion_that_finds_the_words_a_document_says_checks_the_document() {
+        let task: Task = crate::yaml::parse(
+            "id: t\ntitle: T\nscope: [README.md]\n\
+             criteria: [{ cmd: \"grep -q 'dark mode' README.md\" }]\n\
+             changes: [{ at: README.md, what: a section }]\n",
+        )
+        .unwrap();
+        assert!(passes_by_a_name(&task).is_empty());
     }
 }

@@ -19,7 +19,10 @@ they can see what will be built and disagree with it:
 - `decisions`: every point the brief left open, closed here — never left to
   whoever implements a task. Each says what was open, what you chose, what
   you did not choose, and why. A person answers these in seconds; they are
-  what they are most likely to change.
+  what they are most likely to change. A decision that restates a question
+  the person already answered in this run — the questions and answers in
+  your context — names it in `answers` with the question's id: the plan
+  carries their answer and does not decide it again.
 - `shapes`: every type, interface, schema, signature or file format the plan
   creates or changes, declared once and whole, in the file it lives in, and
   owned by the one task that builds it — whose scope covers that file. A
@@ -33,7 +36,10 @@ they can see what will be built and disagree with it:
   - `description`: what it does and why; name the shapes it touches rather
     than repeating them.
   - `changes`: every place it changes, a file or a file and what in it
-    (`src/theme.rs::Theme`), and what changes there — each inside its scope.
+    (`src/theme.rs::Theme`), what changes there — each inside its scope —
+    and its `code`: the signature it changes or the lines it adds, so a
+    person sees how the work will look rather than reading about it. A
+    change in a file where the task declares a shape shows that shape.
   - `outcome`: what a person will observe once it is done. For a change
     someone sees — output, a screen, a message — say what they see before
     and after.

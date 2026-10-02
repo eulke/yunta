@@ -146,6 +146,11 @@ pub(super) const REVIEW_RULES: &[Rule] = &[
         code: RuleCode::UnexplainedDecision,
         demand: "every decision says `why` it chose what it chose",
     },
+    Rule {
+        code: RuleCode::ChangeWithoutCode,
+        demand: "every change shows its `code` — the signature it changes or the lines it \
+                 adds — unless its task declares a shape in that file",
+    },
 ];
 
 /// Every way the plan leaves a person reviewing it without an
@@ -180,8 +185,35 @@ pub(super) fn reviewed(tasks: &TasksFile) -> Vec<Diagnostic> {
     }
     for (index, task) in tasks.tasks.iter().enumerate() {
         broken.extend(task_reviewed(index, task));
+        broken.extend(codeless(index, task, &tasks.shapes));
     }
     broken
+}
+
+/// Each change of `task` a person reviewing the plan could not see the
+/// code of: it shows none, and the task declares no shape in its file.
+fn codeless(index: usize, task: &Task, shapes: &[crate::Shape]) -> Vec<Diagnostic> {
+    task.changes
+        .iter()
+        .filter(|change| !said(&change.code))
+        .filter(|change| {
+            !shapes
+                .iter()
+                .any(|shape| shape.owner == task.id && shape.file == change.file())
+        })
+        .map(|change| {
+            broke(
+                index,
+                &task.id,
+                RuleCode::ChangeWithoutCode,
+                format!(
+                    "the change at `{}` shows no `code`; give the signature it changes or the \
+                     lines it adds, so a person sees how the work will look",
+                    change.at
+                ),
+            )
+        })
+        .collect()
 }
 
 /// Every way one task leaves a person reviewing the plan without an

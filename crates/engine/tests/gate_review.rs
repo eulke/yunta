@@ -50,7 +50,7 @@ sessions:
             summary: "Make it"
             description: "Writes the file the run is about."
             tasks:
-              - {{ id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{{ at: made.txt, what: "the file" }}], outcome: "made.txt exists", criteria: [{{ cmd: "test -f made.txt", proves: "the file exists" }}] }}
+              - {{ id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{{ at: made.txt, what: "the file", code: "the file's first line" }}], outcome: "made.txt exists", criteria: [{{ cmd: "test -f made.txt", proves: "the file exists" }}] }}
     outcome: {{ type: completed, summary: "planned" }}
   - steps:
       - type: run_tool
@@ -60,8 +60,8 @@ sessions:
             summary: "Make it"
             description: "Writes the file the run is about."
             tasks:
-              - {{ id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{{ at: made.txt, what: "the file" }}], outcome: "made.txt exists", criteria: [{{ cmd: "test -f made.txt", proves: "the file exists" }}] }}
-              - {{ id: T002, title: "Say it", description: "Writes said.txt.", scope: [said.txt], changes: [{{ at: said.txt, what: "the file" }}], outcome: "said.txt exists", criteria: [{{ cmd: "test -f said.txt", proves: "it was said" }}] }}
+              - {{ id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{{ at: made.txt, what: "the file", code: "the file's first line" }}], outcome: "made.txt exists", criteria: [{{ cmd: "test -f made.txt", proves: "the file exists" }}] }}
+              - {{ id: T002, title: "Say it", description: "Writes said.txt.", scope: [said.txt], changes: [{{ at: said.txt, what: "the file", code: "the file's first line" }}], outcome: "said.txt exists", criteria: [{{ cmd: "test -f said.txt", proves: "it was said" }}] }}
     outcome: {{ type: completed, summary: "planned again" }}
 "#
     )
@@ -295,7 +295,7 @@ fn unexplained_then_explained(refused: bool) -> String {
             summary: "Make it"
             description: "Writes the file the run is about."
             tasks:
-              - { id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{ at: made.txt, what: "the file" }], outcome: "made.txt exists", criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }"#;
+              - { id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{ at: made.txt, what: "the file", code: "the file's first line" }], outcome: "made.txt exists", criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }"#;
     let steps = match refused {
         true => format!(
             "{}{explained}",

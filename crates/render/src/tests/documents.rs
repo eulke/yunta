@@ -191,6 +191,21 @@ fn a_task_card_shows_the_code_of_its_changes_and_of_its_test() {
     }
 }
 
+/// A change that carries its code shows it, beside what it is about.
+#[test]
+fn a_change_shows_its_own_code() {
+    let mut review = review();
+    let farewell = &mut review.plan.tasks[1];
+    farewell.changes[0].code = Some("pub fn bye(&self) -> String;".to_string());
+    let doc = document(&review, " of `plan`", "7E5PH4", Form::Review);
+    let drawn = Terminal::on(Look::plain()).draw(&doc);
+    let card = &drawn[drawn.find("farewell — Say goodbye").unwrap()..];
+    assert!(
+        card.contains("| pub fn bye(&self) -> String;"),
+        "the change's code is in its card:\n{card}"
+    );
+}
+
 #[test]
 fn a_change_no_session_may_make_is_said_before_any_task() {
     let doc = document(&review(), " of `plan`", "7E5PH4", Form::Review);

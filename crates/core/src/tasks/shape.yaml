@@ -2,7 +2,8 @@
 # Written strictly — any key not listed here is refused.
 #
 # `summary`, `description`, `why` of each decision, and each task's
-# `description`, `changes` and `outcome`, and each criterion's `proves`,
+# `description`, `changes` (each with its `code`, unless a shape of the
+# task lives in its file) and `outcome`, and each criterion's `proves`,
 # are for the person who reviews the plan. They are optional, and required
 # when the workflow has a gate show the plan to that person.
 
@@ -28,6 +29,8 @@ decisions:                              # optional: every point left open, close
     choice: "Light"
     alternatives: ["Dark", "Whatever the operating system uses"]
     why: "Nothing changes for anyone who never opens the setting"
+    # answers: theme                    # optional: the run's question this
+                                        #   restates, when a person answered it
 shapes:                                 # optional: each shape the plan creates or
   - name: Theme                         #   changes, declared once, in its file,
     owner: add-dark-mode                #   by the one task that builds it; its
@@ -54,8 +57,13 @@ tasks:                                  # required, at least one
     changes:                            # every place the task changes, inside
       - at: "src/theme/mod.rs::Theme"   #   its scope: a file, or a file and
         what: "the enum, and the setting that holds it"   # what in it
-      - at: "src/theme/toggle.rs"
+                                        # its code is the shape above
+      - at: "src/theme/toggle.rs::on_toggle"
         what: "the toggle writes the setting"
+        code: |                         # how the change will read: the
+          fn on_toggle(settings: &mut Settings, on: bool) {   # signature it
+              settings.set_theme(if on { Theme::Dark } else { Theme::Light });
+          }                             #   changes or the lines it adds
     outcome: "The settings screen has a dark mode switch, and turning it on darkens every screen"
     invariants:                         # optional: what the code it touches
       - "A screen never reads settings while it draws"   # already promises
@@ -79,6 +87,10 @@ tasks:                                  # required, at least one
     changes:
       - at: "README.md"
         what: "a section on the toggle"
+        code: |
+          ## Dark mode
+
+          Settings › Appearance › Dark mode switches every screen to the dark theme.
     outcome: "The README says where the toggle is and what it changes"
     notes: "Link the screenshot the first task adds."   # optional, one line of
                                         #   context for a runner with no history

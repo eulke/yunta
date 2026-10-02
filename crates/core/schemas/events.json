@@ -3669,6 +3669,11 @@
           "const": "unexplained-decision"
         },
         {
+          "description": "A change of a plan a person reviews does not show its code.",
+          "type": "string",
+          "const": "change-without-code"
+        },
+        {
           "description": "An update or a withdrawal names a finding this node never posted.",
           "type": "string",
           "const": "unknown-id"

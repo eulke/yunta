@@ -13,5 +13,9 @@ Writes the file the run is about.
 
 `made.txt` — the file
 
+```
+the file's first line
+```
+
 - done when: the file exists  
   `$ test -f made.txt`

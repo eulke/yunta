@@ -35,7 +35,7 @@ tasks:
     title: \"Write the greeting\"
     description: \"Writes greeting.txt.\"
     scope: [\"greeting.txt\"]
-    changes: [{ at: greeting.txt, what: \"the greeting\" }]
+    changes: [{ at: greeting.txt, what: \"the greeting\", code: \"hello\" }]
     outcome: \"greeting.txt says good night\"
     criteria:
       - { cmd: \"test -f greeting.txt\", proves: \"the greeting exists\" }

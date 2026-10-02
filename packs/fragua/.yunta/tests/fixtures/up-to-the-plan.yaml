@@ -31,8 +31,8 @@ sessions:
                 description: "Adds the manifest and an empty library."
                 scope: ["Cargo.toml", "src/**"]
                 changes:
-                  - { at: Cargo.toml, what: "the crate's manifest" }
-                  - { at: src/lib.rs, what: "an empty library" }
+                  - { at: Cargo.toml, what: "the crate's manifest", code: "[package] name = 'demo'" }
+                  - { at: src/lib.rs, what: "an empty library", code: "//! The demo library." }
                 outcome: "The project builds as a library crate"
                 criteria:
                   - cmd: "test -f Cargo.toml"

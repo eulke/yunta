@@ -61,7 +61,7 @@ sessions:
                 title: "Document the sandbox crate"
                 description: "Adds the crate's doc comment."
                 scope: ["src/lib.rs"]
-                changes: [{ at: src/lib.rs, what: "the crate's doc comment" }]
+                changes: [{ at: src/lib.rs, what: "the crate's doc comment", code: "//! The crate." }]
                 outcome: "The crate's documentation says it is the sandbox"
                 criteria:
                   - cmd: "grep -q '//! sandbox' src/lib.rs"
