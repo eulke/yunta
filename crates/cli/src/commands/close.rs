@@ -9,6 +9,9 @@ use yunta_engine::EngineLiveness;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::render::blocks::{paint, Headline};
+use crate::render::state::RunWord;
+use crate::render::{wrap, Look, INDENT};
 
 pub async fn close(run_id: &RunId, by: Option<&Responder>) -> Result<Outcome, CliError> {
     let called = run_id.handle();
@@ -27,9 +30,18 @@ pub async fn close(run_id: &RunId, by: Option<&Responder>) -> Result<Outcome, Cl
     yunta_engine::close_run(&storage, run_id, &run_dir, &ctx.clock, engine, by.clone())
         .await
         .map_err(|refusal| CliError::close_refused(run_id, refusal))?;
-    println!(
-        "run {called}: closed as cancelled by {by} — its branch and worktree stay until `yunta gc` \
-         removes them"
-    );
+    let word = RunWord::Cancelled;
+    let headline = Headline {
+        subject: format!("run {called}"),
+        mark: word.mark(),
+        said: word.to_string(),
+    };
+    let look = Look::stdout();
+    print!("{}", paint(&[&headline], &look));
+    let detail =
+        format!("closed by {by} — its branch and worktree stay until `yunta gc` removes them");
+    for line in wrap(&detail, look.width.cells().saturating_sub(INDENT.len())) {
+        println!("{INDENT}{line}");
+    }
     Ok(Outcome::Success)
 }

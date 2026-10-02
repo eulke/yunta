@@ -45,7 +45,7 @@ fn closing_a_parked_run_records_it_cancelled_by_who_closed_it() {
     let close = yunta_at!(&checkout, &["close", &run_id, "--by", "lead"]);
     assert!(close.status.success(), "{}", stderr(&close));
     assert!(
-        stdout(&close).contains("closed as cancelled by lead"),
+        stdout(&close).contains("cancelled\n  closed by lead"),
         "{}",
         stdout(&close)
     );
