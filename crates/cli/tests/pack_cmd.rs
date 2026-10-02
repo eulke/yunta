@@ -138,14 +138,9 @@ fn list_reports_every_locked_pack_and_verifies_it_against_the_lock() {
     let list_out = yunta_in!(&repo, &home, &["pack", "list"]);
     assert!(list_out.status.success(), "{}", stderr(&list_out));
     let listed = stdout(&list_out);
+    let row = yunta_testkit::checked(&listed, "acme/review-pack").unwrap_or_default();
     assert!(
-        listed.contains(&format!("acme/review-pack @ {INITIAL_BRANCH}")),
-        "{listed}"
-    );
-    assert!(
-        listed
-            .lines()
-            .any(|l| l.starts_with("acme/review-pack @ ") && l.ends_with(") — ok")),
+        row.starts_with(&format!("{INITIAL_BRANCH} (")) && row.ends_with("as its lock records it"),
         "the vendored pack verifies clean against the lock: {listed}"
     );
 
@@ -159,7 +154,9 @@ fn list_reports_every_locked_pack_and_verifies_it_against_the_lock() {
     .unwrap();
     let list_after_tamper = yunta_in!(&repo, &home, &["pack", "list"]);
     assert!(
-        stdout(&list_after_tamper).contains("MODIFIED"),
+        yunta_testkit::checked(&stdout(&list_after_tamper), "acme/review-pack")
+            .unwrap_or_default()
+            .contains("modified: its files no longer match its lock"),
         "{}",
         stdout(&list_after_tamper)
     );

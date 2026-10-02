@@ -62,16 +62,16 @@ fn add_shows_the_full_inventory_before_vendoring() {
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert!(
-        text.lines().any(|l| l == "pack: acme/review-pack @ 1.0.0"),
+        text.lines().any(|l| l == "pack acme/review-pack @ 1.0.0"),
+        "{text}"
+    );
+    assert!(text.lines().any(|l| l == "    node `noop` bash"), "{text}");
+    assert!(
+        text.lines().any(|l| l == "      command      true"),
         "{text}"
     );
     assert!(
-        text.lines().any(|l| l == "  node `noop` (kind: bash)"),
-        "{text}"
-    );
-    assert!(text.lines().any(|l| l == "    command: true"), "{text}");
-    assert!(
-        text.lines().any(|l| l == "  node `brief` (kind: prompt)"),
+        text.lines().any(|l| l == "    node `brief` prompt"),
         "{text}"
     );
     assert!(
@@ -97,12 +97,12 @@ fn audit_on_demand_reports_the_same_inventory_for_an_installed_pack() {
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert!(
-        text.lines().any(|l| l == "pack: acme/review-pack @ 1.0.0"),
+        text.lines().any(|l| l == "pack acme/review-pack @ 1.0.0"),
         "{text}"
     );
     assert!(
         text.lines()
-            .any(|l| l == "    names repository paths: src/**, **/*.rs"),
+            .any(|l| l == "      paths        src/**, **/*.rs"),
         "{text}"
     );
     assert!(

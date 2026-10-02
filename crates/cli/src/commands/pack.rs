@@ -26,6 +26,8 @@ use crate::pack::{
     packs_root, read_manifest, save_lock, split_source_and_ref, staging_dir, vendor_dir,
     vendor_into_place,
 };
+use crate::render::blocks::{Checklist, Fields, Found};
+use crate::render::doc::Doc;
 
 /// The merged `permissions.packs` verdicts, with the layers that
 /// declare each restriction kept by name — a refusal that can't say
@@ -157,11 +159,12 @@ fn enforce_executor_policy(
         PackExecutorPolicy::Allow => Ok(()),
         PackExecutorPolicy::Deny => Err(CliError::msg(format!(
             "this pack declares {} and `permissions.packs.executors` \
-             is `deny` (declared by the {} config) — `--yes` cannot override a \
+             is `deny` (declared by the {} config {}) — `--yes` cannot override a \
              permissions ceiling. Change the policy there, or {verb} a pack \
              without executors.",
             yunta_core::text::counted(manifest.declares.executors.len(), "executor"),
             policy.executors_declared_by.join("/"),
+            yunta_core::text::agreeing(policy.executors_declared_by.len(), "layer", "layers"),
         ))),
         PackExecutorPolicy::Prompt => {
             if confirmed {
@@ -268,12 +271,13 @@ pub async fn add(
     }
 
     println!(
-        "installed {}/{} @ {} ({}) -> {}",
+        "installed {}/{} @ {} ({}) {} {}",
         manifest.publisher,
         manifest.name,
         manifest.version,
         commit.abbreviated(),
-        dest.display()
+        crate::render::glyphs().arrow(),
+        crate::render::paths::shown(&dest, &cwd, None)
     );
     super::pack_needs::report(&ctx, &dest, &manifest).await;
 
@@ -404,7 +408,10 @@ pub fn list() -> Result<Outcome, CliError> {
     let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let lock = load_lock(&cwd)?;
     if lock.packs.is_empty() {
-        println!("no packs installed under {}", packs_root(&cwd).display());
+        println!(
+            "no packs installed under {}",
+            crate::render::paths::shown(&packs_root(&cwd), &cwd, None)
+        );
         return Ok(Outcome::Success);
     }
 
@@ -412,20 +419,36 @@ pub fn list() -> Result<Outcome, CliError> {
     // re-hash what's actually vendored on disk and say so when it no
     // longer matches what the lock recorded, rather than just trusting
     // the lock's own numbers back at the user.
+    let mut checks = Checklist::default();
     for (key, entry) in &lock.packs {
         let dest = vendor_dir(&cwd, key);
-        let status = match hash_tree(&dest) {
-            Ok(hash) if hash == entry.content_hash => "ok".to_string(),
-            Ok(_) => "MODIFIED (vendored content no longer matches the lock)".to_string(),
-            Err(_) => "MISSING (vendored directory not found)".to_string(),
+        let installed = format!("{} ({})", entry.r#ref, entry.commit.abbreviated());
+        let (found, said) = match hash_tree(&dest) {
+            Ok(hash) if hash == entry.content_hash => {
+                (Found::Holds, format!("{installed}, as its lock records it"))
+            }
+            Ok(_) => (
+                Found::Caution,
+                format!("{installed}, modified: its files no longer match its lock"),
+            ),
+            Err(_) => (
+                Found::Problem,
+                format!("{installed}, missing: its directory is not there"),
+            ),
         };
-        println!(
-            "{key} @ {} ({}) — {status}",
-            entry.r#ref,
-            entry.commit.abbreviated()
-        );
+        checks.push(found, key.to_string(), said);
     }
-    println!("lock: {}", lock_path(&cwd).display());
+    let look = crate::render::stdout_look();
+    let lock_file = crate::render::paths::shown(&lock_path(&cwd), &cwd, None);
+    print!(
+        "{}",
+        crate::render::draw(
+            Doc::new()
+                .with(checks)
+                .with(Fields::new().push_if("lock", lock_file)),
+            &look
+        )
+    );
     Ok(Outcome::Success)
 }
 
