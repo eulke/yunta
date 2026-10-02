@@ -82,12 +82,70 @@ pub type Result<T> = std::result::Result<T, AdapterError>;
 /// what an edge prints, so no cause is lost when a typed error is
 /// rendered once.
 pub fn describe(error: &dyn std::error::Error) -> String {
-    let mut text = error.to_string();
+    with_causes(error.to_string(), error)
+}
+
+/// `said`, then each cause behind `error` that it does not already state.
+///
+/// An error that names its cause in its own sentence and also hands it on
+/// as its source would otherwise say it twice; a sentence an edge wrote
+/// for an error, in place of the error's own, still carries what caused it.
+pub fn with_causes(said: String, error: &dyn std::error::Error) -> String {
+    let mut text = said;
     let mut cause = error.source();
     while let Some(next) = cause {
-        text.push_str(": ");
-        text.push_str(&next.to_string());
+        let stated = next.to_string();
+        if !stated.is_empty() && !text.contains(&stated) {
+            text.push_str(": ");
+            text.push_str(&stated);
+        }
         cause = next.source();
     }
     text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An error that names its cause in its sentence and hands it on.
+    #[derive(Debug, thiserror::Error)]
+    #[error("cannot read the plan: {source}")]
+    struct Embeds {
+        #[source]
+        source: std::io::Error,
+    }
+
+    /// An error that leaves its cause to whoever reads the chain.
+    #[derive(Debug, thiserror::Error)]
+    #[error("the run cannot go on")]
+    struct Hands {
+        #[source]
+        source: Embeds,
+    }
+
+    fn missing() -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "no such file")
+    }
+
+    #[test]
+    fn a_cause_the_sentence_already_states_is_not_said_again() {
+        let error = Embeds { source: missing() };
+        assert_eq!(describe(&error), "cannot read the plan: no such file");
+    }
+
+    #[test]
+    fn every_cause_behind_an_error_is_said_once_in_order() {
+        let error = Hands {
+            source: Embeds { source: missing() },
+        };
+        assert_eq!(
+            describe(&error),
+            "the run cannot go on: cannot read the plan: no such file"
+        );
+        assert_eq!(
+            with_causes("not resumed".to_string(), &error),
+            "not resumed: cannot read the plan: no such file"
+        );
+    }
 }

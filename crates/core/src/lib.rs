@@ -73,7 +73,7 @@ pub use diagnostic::{
     ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, Rule, RuleCode,
     Subject,
 };
-pub use error::{describe, AdapterError, Result, Unbuildable};
+pub use error::{describe, with_causes, AdapterError, Result, Unbuildable};
 pub use findings::{
     FindingEntry, FindingsFile, InvalidLocation, LineRange, Location, ProposedCriterionEntry,
     RelativePath, Withdrawal,

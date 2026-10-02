@@ -95,12 +95,7 @@ impl ServerHandler for YuntaMcpServer {
         let args = request.arguments.unwrap_or_default();
         let cwd = match std::env::current_dir() {
             Ok(cwd) => cwd,
-            Err(e) => {
-                return Ok(CallToolResult::error(vec![ContentBlock::text(format!(
-                    "cannot determine the current directory: {e}"
-                ))])
-                .into());
-            }
+            Err(source) => return Ok(tool_result(Err(CliError::Cwd { source }))),
         };
         let outcome = match request.name.as_ref() {
             "list_workflows" => tool_list_workflows(&cwd, self.interrupt.shared()).await,
@@ -175,11 +170,11 @@ fn tool_definitions() -> Vec<Tool> {
     vec![
         Tool::new(
             "document_shape",
-            "The exact shape of a document Yunta reads and validates. Call this BEFORE \
-             writing a tasks document, a spec, a findings artifact or a questions artifact — they are \
-             validated strictly, a key that is not in the shape fails the node that produced \
-             it, and there is no other way to learn the format. Returns a complete, valid \
-             example with every field annotated.",
+            "The exact shape of a document Yunta reads and validates. Call it before you \
+             write a tasks document, a spec, a findings artifact or a questions artifact: \
+             they are validated strictly, a key that is not in the shape fails the node that \
+             produced it, and this is the one place the format is written down. Returns a \
+             complete, valid example with every field annotated.",
             json!({
                 "type": "object",
                 "properties": {
@@ -197,10 +192,10 @@ fn tool_definitions() -> Vec<Tool> {
         ),
         Tool::new(
             "list_workflows",
-            "Lists this repo's own catalog of workflows (name, description, declared \
-             inputs) — call this BEFORE writing ad-hoc code for a task a workflow might \
-             already cover verified. A workflow's criteria and scope checks give a \
-             mechanical guarantee free-form edits never do.",
+            "Lists this repository's own catalog of workflows (name, description, declared \
+             inputs). Call it before you write ad-hoc code for a task a workflow may already \
+             cover: a workflow's criteria and scope checks give a mechanical guarantee \
+             free-form edits never do.",
             empty_schema(),
         ),
         Tool::new(
@@ -213,7 +208,7 @@ fn tool_definitions() -> Vec<Tool> {
                 "type": "object",
                 "properties": {
                     "workflow": {"type": "string", "description": "catalog name, as listed by list_workflows"},
-                    "inputs": {"type": "object", "description": "declared input name -> value", "additionalProperties": {"type": "string"}},
+                    "inputs": {"type": "object", "description": "each declared input's name, with its value", "additionalProperties": {"type": "string"}},
                     "adapter": {"type": "string", "description": "override runners: resolution"},
                     "mode": {"type": "string", "description": "workflow mode; omit for the floor mode"},
                 },
@@ -259,7 +254,7 @@ fn tool_definitions() -> Vec<Tool> {
                 "properties": {
                     "run_id": {"type": "string"},
                     "option": {"type": "string", "description": "the chosen option id"},
-                    "by": {"type": "string", "description": "who's answering, for the audit trail"},
+                    "by": {"type": "string", "description": "who answers, for the audit trail"},
                     "text": {"type": "string", "description": "free-form context alongside the choice"},
                 },
                 "required": ["run_id", "option"],
@@ -291,11 +286,53 @@ fn tool_definitions() -> Vec<Tool> {
                             "required": ["id", "value"],
                         },
                     },
-                    "by": {"type": "string", "description": "who's answering, for the audit trail"},
+                    "by": {"type": "string", "description": "who answers, for the audit trail"},
                 },
                 "required": ["run_id", "node", "answers"],
             })
             .as_object().cloned().unwrap_or_default(),
         ),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every description a client reads: each tool's, and each of its
+    /// parameters'.
+    fn descriptions() -> Vec<String> {
+        fn within(value: &Value, found: &mut Vec<String>) {
+            match value {
+                Value::Object(map) => {
+                    if let Some(Value::String(text)) = map.get("description") {
+                        found.push(text.clone());
+                    }
+                    map.values().for_each(|inner| within(inner, found));
+                }
+                Value::Array(items) => items.iter().for_each(|inner| within(inner, found)),
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        for tool in tool_definitions() {
+            found.extend(tool.description.as_deref().map(str::to_string));
+            within(&Value::Object((*tool.input_schema).clone()), &mut found);
+        }
+        found
+    }
+
+    #[test]
+    fn tool_descriptions_use_no_capitals_or_arrows() {
+        let descriptions = descriptions();
+        assert!(descriptions.len() > 7, "{descriptions:?}");
+        for text in descriptions {
+            assert!(!text.contains("->"), "an arrow where words go: {text}");
+            assert!(!text.contains("'s answering"), "a contraction: {text}");
+            let shouted = text
+                .split(|c: char| !c.is_alphanumeric())
+                .find(|word| word.len() > 4 && word.chars().all(|c| c.is_ascii_uppercase()));
+            assert_eq!(shouted, None, "a word in capitals: {text}");
+        }
+    }
 }

@@ -280,14 +280,15 @@ pub enum Reader {
 }
 
 impl CliError {
-    /// The refusal as `reader` reads it: a run's advice names it by its
-    /// handle for a person, by its whole id for an agent.
+    /// The refusal as `reader` reads it, with what caused it: a run's
+    /// advice names it by its handle for a person, by its whole id for
+    /// an agent.
     pub fn said_to(&self, reader: Reader) -> String {
         let id = |run_id: &RunId| match reader {
             Reader::Person => run_id.handle().to_string(),
             Reader::Agent => run_id.to_string(),
         };
-        match self {
+        let said = match self {
             CliError::NotPaused { run_id, refusal } => format!(
                 "{refusal} — `{}` shows where it is",
                 crate::commands::advice::status(&id(run_id))
@@ -300,7 +301,10 @@ impl CliError {
                 format!("{refusal}{}", close_advice(&id(run_id), refusal))
             }
             other => other.to_string(),
-        }
+        };
+        // What caused it goes with it, to a person and an agent alike: a
+        // refusal that stops at its own sentence hides why.
+        yunta_core::with_causes(said, self)
     }
 
     /// What a person is told beside the refusal: where it looked, and the
