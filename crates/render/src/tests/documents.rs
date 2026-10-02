@@ -380,3 +380,22 @@ fn a_task_with_no_guard_says_only_the_suite_checks_what_it_keeps() {
         "{drawn}"
     );
 }
+
+#[test]
+fn a_card_shows_each_test_whole_and_folds_what_only_sets_it_up() {
+    let mut review = review();
+    let spec = review.spec.as_mut().unwrap();
+    spec.specs[0].files[0].content = "fn run(args: &[&str]) -> String {\n    let out = greet(args);\n    out.trim().to_string()\n}\n\n#[test]\nfn the_greeting_names_the_person() {\n    assert_eq!(run(&[\"ana\"]), \"hello, ana\");\n}\n".to_string();
+    let draw =
+        |form| Terminal::on(Look::plain()).draw(&document(&review, " of `plan`", "7E5PH4", form));
+
+    let reviewed = draw(Form::Review);
+    assert!(
+        reviewed.contains("fn run(args: &[&str]) -> String { ... 2 lines }")
+            && reviewed.contains("assert_eq!(run(&[\"ana\"]), \"hello, ana\");")
+            && reviewed.contains("3 lines more — yunta status 7E5PH4 --node spec"),
+        "{reviewed}"
+    );
+    let whole = draw(Form::Whole);
+    assert!(whole.contains("out.trim().to_string()"), "{whole}");
+}

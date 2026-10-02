@@ -89,6 +89,28 @@ impl Code {
         }
     }
 
+    /// `code`, the file at `at`, as a review shows it: each test whole and
+    /// each function that only sets one up folded to its signature, at
+    /// most `shown` lines, and where the whole file is whenever any of it
+    /// is hidden. Its size is the file's own.
+    pub fn reviewed(
+        at: impl Into<String>,
+        what: Option<String>,
+        code: &str,
+        shown: usize,
+        whole_at: impl Into<String>,
+    ) -> Self {
+        let at = at.into();
+        let whole_at = whole_at.into();
+        let folded = crate::fold::folded(&at, code);
+        let mut reviewed = Code::whole(at, what, &folded).cut(shown, whole_at.clone());
+        reviewed.whole = code.trim_end().lines().count();
+        if reviewed.whole > reviewed.lines.len() {
+            reviewed.rest.get_or_insert(whole_at);
+        }
+        reviewed
+    }
+
     /// `code` with at most `shown` of its lines, and where the rest is.
     pub fn cut(mut self, shown: usize, rest: impl Into<String>) -> Self {
         if self.lines.len() > shown {

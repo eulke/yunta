@@ -217,14 +217,16 @@ fn tests_run(
                 .find(|test| test.path == file.path)
                 .map(|test| test.content.as_str())
                 .unwrap_or_default();
-            let code = Code::whole(
-                file.path.as_str(),
-                Some("the spec wrote it, and this command runs it".to_string()),
-                content,
-            );
+            let what = Some("the spec wrote it, and this command runs it".to_string());
             match form {
-                Form::Review => code.cut(CODE_SHOWN, format!("yunta status {run} --node spec")),
-                Form::Whole => code,
+                Form::Review => Code::reviewed(
+                    file.path.as_str(),
+                    what,
+                    content,
+                    CODE_SHOWN,
+                    format!("yunta status {run} --node spec"),
+                ),
+                Form::Whole => Code::whole(file.path.as_str(), what, content),
             }
             .into()
         })

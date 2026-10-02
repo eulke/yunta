@@ -30,11 +30,18 @@ pub fn document(file: &SpecFile, of: &str, run: &str, form: Form) -> Doc<'static
         }
         let mut blocks = vec![fields.into()];
         for test_file in &spec.files {
-            let code = Code::whole(test_file.path.as_str(), None, &test_file.content);
+            let path = test_file.path.as_str();
+            let content = &test_file.content;
             blocks.push(
                 match form {
-                    Form::Review => code.cut(CODE_SHOWN, format!("yunta status {run} --node spec")),
-                    Form::Whole => code,
+                    Form::Review => Code::reviewed(
+                        path,
+                        None,
+                        content,
+                        CODE_SHOWN,
+                        format!("yunta status {run} --node spec"),
+                    ),
+                    Form::Whole => Code::whole(path, None, content),
                 }
                 .into(),
             );

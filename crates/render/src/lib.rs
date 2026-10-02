@@ -24,6 +24,7 @@ pub mod color;
 pub mod doc;
 pub mod escalation;
 mod findings;
+mod fold;
 pub mod glyphs;
 pub mod ink;
 pub mod line_width;
