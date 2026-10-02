@@ -1,6 +1,10 @@
 ␛[1mplan of `plan`␛[0m: 2 tasks in 2 steps, held to 1 test from its spec
   Greet a person by name, and say goodbye too.
 
+  ␛[1mtasks␛[0m
+    ␛[33m▲␛[0m 1  greet     1 spec test     ␛[33mcode 1/2␛[0m  Greet by name
+    ␛[33m▲␛[0m 2  farewell  ␛[33m`greet`'s test␛[0m  ␛[33mcode 0/1␛[0m  Say goodbye
+
   ␛[33m1 task plans to change a test the spec wrote, and no session may write one␛[0m
     ␛[33m▲␛[0m greet — tests/greet.rs
 

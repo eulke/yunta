@@ -11,7 +11,7 @@
 
 use crate::blocks::{
     Checklist, Code, Decision, Evidence, FailureDetail, Fields, Headline, Marked, Next, NodeTable,
-    Prose, Section,
+    Prose, Section, Table,
 };
 use crate::ink::Line;
 
@@ -19,7 +19,8 @@ use crate::ink::Line;
 pub enum Block<'a> {
     Headline(Headline),
     Fields(Fields),
-    NodeTable(NodeTable),
+    /// Rows under named columns; a run's nodes are one.
+    Table(Table),
     Evidence(Evidence),
     Failure(FailureDetail<'a>),
     Decision(Decision),
@@ -54,7 +55,7 @@ macro_rules! block_from {
 block_from!(
     Headline(Headline),
     Fields(Fields),
-    NodeTable(NodeTable),
+    Table(Table),
     Evidence(Evidence),
     Failure(FailureDetail<'a>),
     Decision(Decision),
@@ -66,6 +67,12 @@ block_from!(
     Code(Code),
     Lines(Vec<Line>),
 );
+
+impl<'a> From<NodeTable> for Block<'a> {
+    fn from(nodes: NodeTable) -> Self {
+        Block::Table(nodes.table())
+    }
+}
 
 /// What a surface says: its blocks, in the order a reader reads them.
 #[derive(Default)]

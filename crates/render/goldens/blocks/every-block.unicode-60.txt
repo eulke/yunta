@@ -1,6 +1,8 @@
 run 7E5PH4: ◆ needs you on a decision
   ✗ failed    lint      exit 101
   · never ran fix-lint
+  ▲ 1  cli-global  no test runs its spec  Global and projec…
+    2  docs        1 spec test            The guide says wh…
   │ line 4
   │ line 5
   │ line 6

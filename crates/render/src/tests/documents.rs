@@ -254,3 +254,26 @@ fn a_review_s_findings_match_their_golden() {
         crate::Mark::Failed
     );
 }
+
+#[test]
+fn a_task_whose_spec_no_test_runs_is_marked_on_the_plan_s_map() {
+    let mut review = review();
+    review.tasks[0].files[0].run_by.clear();
+    let look = Look::of(&ENVIRONMENTS[0]);
+    let drawn = Terminal::on(Look {
+        ink: crate::ink::Ink::Plain,
+        ..look
+    })
+    .draw(&document(&review, " of `plan`", "7E5PH4", Form::Review));
+
+    let row = drawn
+        .lines()
+        .find(|line| line.contains(" greet "))
+        .expect("the map has a row for `greet`");
+    assert!(row.contains("no test runs its spec"), "{row}");
+    assert!(
+        row.trim_start()
+            .starts_with(look.glyphs.mark(crate::Mark::Caution)),
+        "{row}"
+    );
+}

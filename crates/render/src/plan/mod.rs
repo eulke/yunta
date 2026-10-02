@@ -1,5 +1,6 @@
-//! A plan as the person deciding on it reads it: what it changes, what
-//! of it cannot be done as written, why it changes what it does, the
+//! A plan as the person deciding on it reads it: what it changes, its
+//! tasks at a glance with what proves each, what of it cannot be done as
+//! written, why it changes what it does, the
 //! choices it makes, what it risks and leaves out, then step by step each
 //! task — what a person sees once it is done, what it touches and keeps,
 //! the code of each change it makes and what proves it done, with the
@@ -21,6 +22,7 @@ use crate::ink::{Line, Tone};
 use crate::Mark;
 
 mod card;
+mod map;
 
 use card::card;
 
@@ -53,6 +55,7 @@ pub fn document(review: &PlanReview, of: &str, run: &str, form: Form) -> Doc<'st
     if let Some(summary) = said(&plan.summary) {
         doc = doc.with(Prose(summary.to_string()));
     }
+    doc = doc.with(titled("tasks", vec![map::map(review, &steps).into()]));
     doc = cannot_be_done(doc, review);
     if !review.departed.is_empty() {
         doc = doc.with(departures(&review.departed));

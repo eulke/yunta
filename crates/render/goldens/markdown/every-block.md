@@ -5,6 +5,11 @@
 | ✗ failed | `lint` | exit 101 |
 | · never ran | `fix-lint` |  |
 
+| step | task | proven by | |
+|---|---|---|---|
+| ▲ 1 | `cli-global` | no test runs its spec | Global and project flags for every pack command |
+| 2 | `docs` | 1 spec test | The guide says where a pack installs |
+
 ```
 line 4
 line 5

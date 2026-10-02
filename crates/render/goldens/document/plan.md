@@ -2,6 +2,13 @@
 
 Greet a person by name, and say goodbye too.
 
+### tasks
+
+| step | task | proven by | code | |
+|---|---|---|---|---|
+| ▲ 1 | `greet` | 1 spec test | code 1/2 | Greet by name |
+| ▲ 2 | `farewell` | `greet`'s test | code 0/1 | Say goodbye |
+
 ### 1 task plans to change a test the spec wrote, and no session may write one
 
 - ▲ greet — tests/greet.rs

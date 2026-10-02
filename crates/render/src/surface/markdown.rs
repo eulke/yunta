@@ -6,7 +6,7 @@
 use super::Surface;
 use crate::blocks::{
     Check, Checklist, Code, Decision, Evidence, FailureDetail, FailureSays, Fields, Headline,
-    Marked, Next, NodeTable, Section, Whole,
+    Holds, Marked, Next, Section, Table, Whole,
 };
 use crate::doc::{Block, Doc};
 use crate::ink::{Line, Tone};
@@ -48,7 +48,7 @@ fn block(block: &Block<'_>, depth: usize) -> String {
     match block {
         Block::Headline(headline) => self::headline(headline),
         Block::Fields(fields) => self::fields(fields),
-        Block::NodeTable(table) => self::table(table),
+        Block::Table(table) => self::table(table),
         Block::Evidence(evidence) => self::evidence(evidence),
         Block::Failure(failure) => self::failure(failure),
         Block::Decision(decision) => self::decision(decision),
@@ -149,16 +149,29 @@ fn code(code: &Code) -> String {
     out
 }
 
-fn table(table: &NodeTable) -> String {
-    let mut out = String::from("| | node | |\n|---|---|---|");
+/// A table with its header: an id as code, a row's mark in front of its
+/// first cell.
+fn table(table: &Table) -> String {
+    let mut out = String::from("|");
+    for column in &table.columns {
+        match column.title {
+            "" => out.push_str(" |"),
+            title => out.push_str(&format!(" {title} |")),
+        }
+    }
+    out.push_str(&format!("\n|{}", "---|".repeat(table.columns.len())));
     for row in &table.rows {
-        out.push_str(&format!(
-            "\n| {} {} | `{}` | {} |",
-            GLYPHS.mark(row.mark),
-            row.word,
-            row.id,
-            cell(&row.note)
-        ));
+        out.push_str("\n|");
+        for (at, (said, column)) in row.cells.iter().zip(&table.columns).enumerate() {
+            let mut said = match column.holds {
+                Holds::Id => format!("`{}`", said.text),
+                Holds::State | Holds::Words | Holds::Rest => cell(&said.text),
+            };
+            if let (0, Some(mark)) = (at, row.mark) {
+                said = format!("{} {said}", GLYPHS.mark(mark));
+            }
+            out.push_str(&format!(" {said} |"));
+        }
     }
     out
 }

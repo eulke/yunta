@@ -1,9 +1,9 @@
 //! A run's nodes, one to a row: the mark and word for where each stands,
 //! its id, and a note.
 
-use super::Drawn;
+use super::{Cell, Column, Drawn, Holds, Row, Table};
 use crate::ink::{Line, Tone};
-use crate::{cell_width, id_column, middle_cut, truncate, Look, Mark, INDENT, STATE_WIDTH};
+use crate::{Look, Mark};
 
 /// One node's row.
 pub struct NodeRow {
@@ -23,31 +23,43 @@ pub struct NodeTable {
     pub rows: Vec<NodeRow>,
 }
 
+impl NodeTable {
+    /// The nodes as the table every surface draws: where each stands, its
+    /// id, and its note in what the line leaves.
+    pub fn table(&self) -> Table {
+        Table {
+            columns: vec![
+                Column {
+                    title: "",
+                    holds: Holds::State,
+                },
+                Column {
+                    title: "node",
+                    holds: Holds::Id,
+                },
+                Column {
+                    title: "",
+                    holds: Holds::Rest,
+                },
+            ],
+            rows: self
+                .rows
+                .iter()
+                .map(|row| Row {
+                    mark: Some(row.mark),
+                    cells: vec![
+                        Cell::toned(Tone::of(row.mark), row.word),
+                        Cell::plain(row.id.as_str()),
+                        Cell::toned(Tone::Muted, row.note.as_str()),
+                    ],
+                })
+                .collect(),
+        }
+    }
+}
+
 impl Drawn for NodeTable {
     fn lines(&self, look: &Look) -> Vec<Line> {
-        let width = look.width.cells();
-        let column = id_column(self.rows.iter().map(|row| row.id.as_str())).min(width / 3);
-        let fixed = cell_width(INDENT) + 2 + STATE_WIDTH + 1 + column + 2;
-        let room = width.saturating_sub(fixed);
-        self.rows
-            .iter()
-            .map(|row| {
-                let tone = Tone::of(row.mark);
-                let id = middle_cut(&row.id, column, look.glyphs);
-                let line = Line::new()
-                    .plain(INDENT)
-                    .push(tone, look.glyphs.mark(row.mark).to_string())
-                    .plain(" ")
-                    .push(tone, format!("{:<STATE_WIDTH$}", row.word))
-                    .plain(" ");
-                match row.note.trim().is_empty() {
-                    true => line.plain(id.trim_end()),
-                    false => line.plain(id).plain("  ").push(
-                        Tone::Muted,
-                        truncate(&row.note, room, look.glyphs).trim_end(),
-                    ),
-                }
-            })
-            .collect()
+        self.table().lines(look)
     }
 }

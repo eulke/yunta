@@ -1,6 +1,8 @@
 ␛[1mrun 7E5PH4␛[0m: ␛[1;35m◆␛[0m ␛[1;35mneeds you on a decision␛[0m
   ␛[31m✗␛[0m ␛[31mfailed   ␛[0m lint      ␛[2mexit 101␛[0m
   ␛[2m·␛[0m ␛[2mnever ran␛[0m fix-lint
+  ␛[33m▲␛[0m 1  cli-global  ␛[33mno test runs its spec␛[0m  Global and project flags for every pack command
+    2  docs        1 spec test            The guide says where a pack installs
 ␛[2m  │ ␛[0mline 4
 ␛[2m  │ ␛[0mline 5
 ␛[2m  │ ␛[0mline 6

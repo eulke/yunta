@@ -18,6 +18,7 @@ mod fields;
 mod headline;
 mod next;
 mod node_table;
+mod table;
 
 pub use checklist::{Check, Checklist, Found};
 pub use decision::{Chosen, Decision, DecisionOption};
@@ -28,6 +29,7 @@ pub use fields::Fields;
 pub use headline::Headline;
 pub use next::Next;
 pub use node_table::{NodeRow, NodeTable};
+pub use table::{Cell, Column, Holds, Row, Table};
 
 use super::ink::Line;
 use super::Look;

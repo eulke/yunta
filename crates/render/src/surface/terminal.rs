@@ -36,7 +36,7 @@ impl Terminal {
         match block {
             Block::Headline(block) => block.lines(look),
             Block::Fields(block) => block.lines(look),
-            Block::NodeTable(block) => block.lines(look),
+            Block::Table(block) => block.lines(look),
             Block::Evidence(block) => block.lines(look),
             Block::Failure(block) => block.lines(look),
             Block::Decision(block) => block.lines(look),

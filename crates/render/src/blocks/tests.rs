@@ -191,6 +191,65 @@ fn a_path_is_a_link_only_when_links_are_on() {
     }
 }
 
+/// Two tasks of a plan in a table: a mark on the one that cannot be
+/// proven, words read whole, and a title in what the line leaves.
+fn tasks() -> Table {
+    let column = |title, holds| Column { title, holds };
+    Table {
+        columns: vec![
+            column("step", Holds::Words),
+            column("task", Holds::Id),
+            column("proven by", Holds::Words),
+            column("", Holds::Rest),
+        ],
+        rows: vec![
+            Row {
+                mark: Some(Mark::Caution),
+                cells: vec![
+                    Cell::plain("1"),
+                    Cell::plain("cli-global"),
+                    Cell::toned(crate::ink::Tone::Caution, "no test runs its spec"),
+                    Cell::plain("Global and project flags for every pack command"),
+                ],
+            },
+            Row {
+                mark: None,
+                cells: vec![
+                    Cell::plain("2"),
+                    Cell::plain("docs"),
+                    Cell::plain("1 spec test"),
+                    Cell::plain("The guide says where a pack installs"),
+                ],
+            },
+        ],
+    }
+}
+
+#[test]
+fn a_table_fits_its_line_and_cuts_what_the_line_leaves_first() {
+    for cells in [36, 60, 100] {
+        let look = Look {
+            width: crate::Width::of(Some(100), None).within(cells),
+            ..Look::plain()
+        };
+        let drawn: Vec<String> = tasks()
+            .lines(&look)
+            .iter()
+            .map(|line| look.ink.paint(line))
+            .collect();
+        assert!(
+            drawn.iter().all(|line| crate::cell_width(line) <= cells),
+            "{cells}: {drawn:?}"
+        );
+        assert!(drawn[0].contains(" 1  cli-global  "), "{cells}: {drawn:?}");
+        assert!(drawn[1].starts_with("    2  docs  "), "{cells}: {drawn:?}");
+        assert!(
+            cells < 60 || drawn[0].contains("  no test runs its spec  Global"),
+            "words are cut only once the title has no room: {cells}: {drawn:?}"
+        );
+    }
+}
+
 /// Every block with something to say, as one surface would put them.
 fn every_block() -> Doc<'static> {
     let headline = Headline {
@@ -232,6 +291,7 @@ fn every_block() -> Doc<'static> {
     Doc::new()
         .with(headline)
         .with(table)
+        .with(tasks())
         .with(printed)
         .with(decision())
         .with(fields)
