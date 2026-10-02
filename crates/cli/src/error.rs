@@ -289,7 +289,7 @@ pub fn warn(message: impl Display) {
 
 /// `warning`, as stderr is painted.
 pub(crate) fn warning_word() -> String {
-    crate::render::ink::Ink::stderr().word(crate::render::ink::Tone::Caution, "warning")
+    crate::render::stderr_ink().word(crate::render::ink::Tone::Caution, "warning")
 }
 
 /// An informational block to stderr — verification findings and the

@@ -227,3 +227,4 @@ lista.
 **D218 — YAML is read, written and located by one library.** `accepted` → [`adr/D218-yaml-is-read-and-written-by-one-library.md`](adr/D218-yaml-is-read-and-written-by-one-library.md)
 **D219 — A diagnostic says where in its text it is, beside the entry it names.** `accepted` → [`adr/D219-a-diagnostic-says-where-in-its-text-it-is.md`](adr/D219-a-diagnostic-says-where-in-its-text-it-is.md)
 **D220 — The run list names the ten newest closed runs and counts the rest.** `accepted` → [`adr/D220-the-run-list-names-ten-closed-runs-and-counts-the-rest.md`](adr/D220-the-run-list-names-ten-closed-runs-and-counts-the-rest.md)
+**D221 — The words and blocks a reader is told things in are their own crate, below the engine.** `accepted` → [`adr/D221-the-words-a-reader-is-told-things-in-are-their-own-crate.md`](adr/D221-the-words-a-reader-is-told-things-in-are-their-own-crate.md)

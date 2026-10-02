@@ -169,7 +169,7 @@ impl RunDocument {
             schema_version: SCHEMA_VERSION,
             run_id: run_id.to_string(),
             handle: run_id.handle().to_string(),
-            outcome: RunWord::observed(&frame, engine),
+            outcome: crate::render::observed_word(&frame, engine),
             // A document reads the same whichever terminal asked for it.
             summary: progress::summary(&frame, engine, crate::render::Glyphs::Unicode),
             reason: reason(&frame.phase),
@@ -207,7 +207,7 @@ impl RunDocument {
     /// What an invocation that drove this run to this word reports, by
     /// the one mapping every surface uses.
     pub(crate) fn verdict(&self) -> Outcome {
-        self.outcome.exit()
+        crate::render::exit(self.outcome)
     }
 }
 

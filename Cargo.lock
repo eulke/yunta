@@ -3106,6 +3106,7 @@ dependencies = [
  "yunta-adapters",
  "yunta-core",
  "yunta-engine",
+ "yunta-render",
  "yunta-storage",
  "yunta-testkit",
  "yunta-testkit-core",
@@ -3197,6 +3198,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "yunta-render"
+version = "0.0.5"
+dependencies = [
+ "clap",
+ "serde",
+ "unicode-width",
+ "yunta-core",
+ "yunta-testkit-core",
+]
+
+[[package]]
 name = "yunta-storage"
 version = "0.0.5"
 dependencies = [
@@ -3237,6 +3249,7 @@ dependencies = [
  "chrono",
  "futures",
  "serde_json",
+ "tempfile",
  "tokio",
  "yunta-core",
 ]

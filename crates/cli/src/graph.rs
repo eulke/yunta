@@ -19,7 +19,6 @@ use yunta_core::{Clock, NodeId, RunId, Workflow};
 use crate::commands::{resolve_workflow_ref, verdict};
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::render::NodeDisplay;
 use yunta_engine::RunFrame;
 
 type Labels = HashMap<NodeId, String>;
@@ -115,7 +114,12 @@ fn derived_labels(frame: &RunFrame) -> Option<Labels> {
         frame
             .nodes
             .iter()
-            .map(|node| (node.id.clone(), NodeDisplay::standing(&node.state).label()))
+            .map(|node| {
+                (
+                    node.id.clone(),
+                    crate::render::standing(&node.state).label(),
+                )
+            })
             .collect(),
     )
 }

@@ -18,7 +18,7 @@ use std::io::Write;
 use yunta_engine::Moment;
 
 use crate::render::ink::Ink;
-use crate::render::{duration, Glyphs, Look, Width};
+use crate::render::{duration, Glyphs, Look};
 
 use super::{chronicle, write_line};
 
@@ -39,7 +39,7 @@ impl Lines {
         );
         Self {
             out,
-            ink: Ink::stderr(),
+            ink: crate::render::stderr_ink(),
         }
     }
 
@@ -64,7 +64,7 @@ impl Lines {
         let look = Look {
             glyphs,
             ink: self.ink,
-            width: Width::stderr(),
+            width: crate::render::stderr_width(),
         };
         let said = self.ink.paint(&chronicle::line(moment, &look));
         write_line(

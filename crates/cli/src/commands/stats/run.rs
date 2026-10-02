@@ -440,7 +440,14 @@ mod tests {
         for environment in &ENVIRONMENTS {
             assert_golden(
                 &environment.golden(&goldens, "run"),
-                &render_run_stats(&RUN, "default", &run, &state, None, &Look::of(environment)),
+                &render_run_stats(
+                    &RUN,
+                    "default",
+                    &run,
+                    &state,
+                    None,
+                    &crate::render::look_of(environment),
+                ),
             );
         }
     }

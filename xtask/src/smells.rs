@@ -129,6 +129,12 @@ fn measure() -> BTreeMap<String, usize> {
         .flat_map(|dir| rs_files(dir))
         .collect();
     let cli_src = rs_files(&root.join("crates/cli/src"));
+    // What a person reads on a terminal is drawn by the command line and
+    // the crate it draws with.
+    let drawn_src: Vec<PathBuf> = ["crates/cli/src", "crates/render/src"]
+        .iter()
+        .flat_map(|dir| rs_files(&root.join(dir)))
+        .collect();
 
     // Production text (unit-test modules blanked) for the counters the audit
     // measured outside tests.
@@ -200,9 +206,9 @@ fn measure() -> BTreeMap<String, usize> {
     // glyph set would have printed what that terminal can draw.
     counts.insert(
         "separator_literal_outside_glyphs".to_string(),
-        cli_src
+        drawn_src
             .iter()
-            .filter(|path| !path.ends_with("render/glyphs.rs") && !path.ends_with("tests.rs"))
+            .filter(|path| !path.ends_with("render/src/glyphs.rs") && !path.ends_with("tests.rs"))
             .filter_map(|path| std::fs::read_to_string(path).ok())
             .map(|text| {
                 production_only(&text)

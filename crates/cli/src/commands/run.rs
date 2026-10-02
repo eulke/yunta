@@ -334,7 +334,7 @@ async fn estimate(
         if !(quiet || json) {
             println!(
                 "{}",
-                super::stats::format_estimation_line(estimation, crate::render::Glyphs::settled())
+                super::stats::format_estimation_line(estimation, crate::render::glyphs())
             );
         }
     }

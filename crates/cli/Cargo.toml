@@ -17,6 +17,7 @@ path = "src/main.rs"
 [dependencies]
 yunta-core.workspace = true
 yunta-engine.workspace = true
+yunta-render = { workspace = true, features = ["clap"] }
 yunta-adapters.workspace = true
 yunta-storage.workspace = true
 clap = { workspace = true, features = ["derive"] }

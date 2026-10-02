@@ -6,7 +6,7 @@
 use yunta_core::events::{CommandExit, Failure, SessionDeath, SessionEnd};
 use yunta_engine::{NodeFrame, NodeStanding, NodeState, NodeWait};
 
-use crate::render::state::{NodeDisplay, StateWord};
+use crate::render::state::StateWord;
 
 /// What one waiting node waits on — the same vocabulary the run-level
 /// `waiting_on` uses, so the document says "waiting" one way.
@@ -80,7 +80,7 @@ pub(crate) struct RunToolFailureJson {
 
 impl NodeJson {
     pub(super) fn of(node: &NodeFrame, record: Option<&yunta_core::events::NodeRecord>) -> Self {
-        let display = NodeDisplay::standing(&node.state);
+        let display = crate::render::standing(&node.state);
         NodeJson {
             id: node.id.to_string(),
             state: display.word,

@@ -11,7 +11,7 @@ use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::render::blocks::{paint, Headline};
 use crate::render::state::RunWord;
-use crate::render::{wrap, Look, INDENT};
+use crate::render::{wrap, INDENT};
 
 pub async fn close(run_id: &RunId, by: Option<&Responder>) -> Result<Outcome, CliError> {
     let called = run_id.handle();
@@ -36,7 +36,7 @@ pub async fn close(run_id: &RunId, by: Option<&Responder>) -> Result<Outcome, Cl
         mark: word.mark(),
         said: word.to_string(),
     };
-    let look = Look::stdout();
+    let look = crate::render::stdout_look();
     print!("{}", paint(&[&headline], &look));
     let detail =
         format!("closed by {by} — its branch and worktree stay until `yunta gc` removes them");

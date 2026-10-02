@@ -206,7 +206,7 @@ fn the_closing_block_matches_its_goldens() {
         for environment in &ENVIRONMENTS {
             assert_golden(
                 &environment.golden(&goldens(), case),
-                &closing.render(&Look::of(environment)),
+                &closing.render(&crate::render::look_of(environment)),
             );
         }
     }

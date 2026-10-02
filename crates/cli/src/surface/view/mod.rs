@@ -20,7 +20,7 @@ pub(super) use children::{child_row, child_standing, children_by_node, closed_as
 
 use crate::commands::advice;
 use crate::render::ink::{Line, Tone};
-use crate::render::{duration, indent, Glyphs, Mark, NodeDisplay, Tokens, CHILD_DEPTH};
+use crate::render::{duration, indent, Glyphs, Mark, Tokens, CHILD_DEPTH};
 
 /// How deep a node's detail sits under the node's own row, in steps of
 /// [`indent`] — the step every surface here shares, so the detail lines
@@ -153,7 +153,7 @@ pub(super) fn node_rows(frame: &RunFrame, node: &NodeFrame, glyphs: Glyphs) -> V
 /// with the adapter and model behind it, how long it has been working,
 /// and how long ago it last said anything.
 fn headline(node: &NodeFrame, glyphs: Glyphs) -> Line {
-    let state = NodeDisplay::standing(&node.state);
+    let state = crate::render::standing(&node.state);
     let mark = state.word.mark();
     let tone = Tone::of(mark);
     let mut rest = Vec::new();

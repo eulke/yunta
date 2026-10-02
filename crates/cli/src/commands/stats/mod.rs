@@ -21,7 +21,7 @@ use yunta_engine::{compute_run_stats, run_summary, RunSummary};
 
 use crate::context::{Context, Opened};
 use crate::error::{CliError, Outcome};
-use crate::render::{duration, Look, Tokens};
+use crate::render::{duration, Tokens};
 use json::{RunStatsJson, WorkflowHistoryJson};
 use run::render_run_stats;
 pub(crate) use workflow::render_verification_findings;
@@ -66,7 +66,7 @@ async fn stats_run(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
             &run_stats,
             &yunta_engine::derive(&events),
             pricing.as_ref(),
-            &Look::stdout(),
+            &crate::render::stdout_look(),
         )
     );
     Ok(Outcome::Success)
@@ -96,7 +96,7 @@ async fn stats_workflow(workflow_name: &WorkflowName, json: bool) -> Result<Outc
     }
     print!(
         "{}",
-        render_workflow_history(workflow_name, &history, Look::stdout())
+        render_workflow_history(workflow_name, &history, crate::render::stdout_look())
     );
     if let Some(findings) = &findings {
         let text = render_verification_findings(findings);

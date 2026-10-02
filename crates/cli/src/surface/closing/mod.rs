@@ -15,7 +15,6 @@
 //! child under the node that bore it and never averaged into a figure of
 //! its own.
 
-use crate::render::state::RunWord;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -111,7 +110,7 @@ impl Closing {
     /// does: a paused, failed, cancelled or promoted run ran to a stop
     /// that needs a decision, and its detail is already on this block.
     pub(crate) fn outcome(&self) -> Outcome {
-        RunWord::of(&self.frame).exit()
+        crate::render::exit(crate::render::run_word(&self.frame))
     }
 
     /// The whole block, ready to print on a stream with `look`.
@@ -142,7 +141,7 @@ impl Closing {
     /// The outcome as a word, and under it what holds the run — the
     /// verdict a reader came for, before anything else.
     fn head(&self, look: &Look) -> Vec<Line> {
-        let word = RunWord::of(&self.frame);
+        let word = crate::render::run_word(&self.frame);
         let mut lines = Headline {
             subject: format!("run {}", self.run_id.handle()),
             mark: word.mark(),
@@ -322,7 +321,11 @@ impl Closing {
     /// to read the whole of it.
     fn next(&self) -> Next {
         let handle = self.run_id.handle();
-        let mut steps = advice::after(RunWord::of(&self.frame), handle, self.decision.is_some());
+        let mut steps = advice::after(
+            crate::render::run_word(&self.frame),
+            handle,
+            self.decision.is_some(),
+        );
         steps.push((advice::status(handle), "shows the whole run"));
         Next { steps }
     }

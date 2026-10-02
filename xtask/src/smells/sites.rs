@@ -128,13 +128,13 @@ fn count_sgr_outside_ink(root: &Path) -> usize {
         root,
         &[Text("\\x1b[")],
         &[
-            "crates/cli/src/render/ink.rs",
+            "crates/render/src/ink.rs",
             "crates/cli/src/ask/keys.rs",
             "crates/cli/tests/",
             "crates/testkit/src/terminal.rs",
             // A golden writes the paint a surface printed where a
             // reviewer can read it, and its test paints to prove that.
-            "crates/testkit/src/golden.rs",
+            "crates/testkit-core/src/golden.rs",
         ],
     )
 }
@@ -243,7 +243,7 @@ fn count_env_read_outside_boundary(root: &Path) -> usize {
             "crates/testkit/src/stubs.rs",
             // Blessing a golden is what a person asks of a test run, and
             // reading that request is what the module is for.
-            "crates/testkit/src/golden.rs",
+            "crates/testkit-core/src/golden.rs",
         ],
     )
 }

@@ -73,7 +73,7 @@ impl Presentation {
     fn of(quiet: bool) -> Self {
         Self {
             delivery: Delivery::choose(quiet, TerminalEnv::settled()),
-            glyphs: Glyphs::settled(),
+            glyphs: crate::render::glyphs(),
         }
     }
 }
@@ -259,7 +259,7 @@ pub(crate) async fn settle(settling: Settling<'_>) -> Result<Outcome, CliError> 
     // code, as a shell tells it of any process SIGINT ended, whatever
     // the run reached on its way out.
     Ok(match interrupted {
-        true => crate::render::state::RunExit::Interrupted.outcome(),
+        true => crate::render::RunExit::Interrupted.outcome(),
         false => outcome,
     })
 }
@@ -390,7 +390,7 @@ pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliErr
     });
     let look = crate::render::Look {
         glyphs: closed.glyphs,
-        ..crate::render::Look::stdout()
+        ..crate::render::stdout_look()
     };
     print!("{}", closing.render(&look));
     Ok(closing.outcome())

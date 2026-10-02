@@ -16,7 +16,6 @@ use crate::ask::{ask_line, Console, Escape};
 use crate::error::{warn, CliError, Outcome};
 use crate::interrupt::Interrupt;
 use crate::render::blocks::{paint, Checklist, Fields, Found, Next};
-use crate::render::Look;
 use crate::surface::Diagnostics;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
@@ -346,7 +345,7 @@ struct Wrote<'a> {
 /// into the project's CLAUDE.md; and the runner to declare, because no
 /// agent node runs until one is.
 fn report(init: &Wrote<'_>) -> String {
-    let look = Look::stdout();
+    let look = crate::render::stdout_look();
     let detected = init.detected;
     let ecosystem = match &detected.ecosystem {
         Some(ecosystem) => format!(

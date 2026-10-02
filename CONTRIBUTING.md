@@ -21,8 +21,8 @@ means to change what a surface prints, write the new files and review them in
 the diff:
 
 ```bash
-YUNTA_BLESS=1 cargo test -p yunta golden
-git diff -- crates/cli/goldens
+YUNTA_BLESS=1 cargo test -p yunta -p yunta-render golden
+git diff -- crates/cli/goldens crates/render/goldens
 ```
 
 The toolchain is pinned in `rust-toolchain.toml`. See

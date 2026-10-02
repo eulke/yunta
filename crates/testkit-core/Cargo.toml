@@ -28,3 +28,7 @@ futures.workspace = true
 # A scripted CLI announces its grandchild's pid through a fifo the test
 # opens without blocking the runtime it is asserting on.
 tokio = { workspace = true, features = ["rt", "fs", "io-util", "time"] }
+
+[dev-dependencies]
+# A golden's own tests write and compare files in a directory of their own.
+tempfile.workspace = true

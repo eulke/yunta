@@ -21,7 +21,7 @@ use std::collections::BTreeSet;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
 use crate::render::blocks::{paint, Checklist, Found, Next};
-use crate::render::{Look, INDENT};
+use crate::render::INDENT;
 use yunta_core::port::ProbeReport;
 use yunta_core::AdapterId;
 
@@ -42,7 +42,7 @@ pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
         probe_sessions(&ctx, &healthy, &mut checks).await;
     }
 
-    let look = Look::stdout();
+    let look = crate::render::stdout_look();
     let mut out = paint(&[&checks], &look);
     if !steps.is_empty() {
         out.push('\n');

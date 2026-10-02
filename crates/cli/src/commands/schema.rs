@@ -17,7 +17,6 @@ use yunta_core::ArtifactKind;
 
 use crate::error::{CliError, Outcome};
 use crate::render::blocks::{paint, Fields, Next};
-use crate::render::Look;
 
 /// Prints one kind's shape, or lists the kinds when none is named.
 pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
@@ -53,7 +52,7 @@ pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
 /// The catalog, one kind per row with what it is for, and the two
 /// commands that show a kind's shape.
 fn list() -> String {
-    let look = Look::stdout();
+    let look = crate::render::stdout_look();
     let kinds = ArtifactKind::ALL
         .into_iter()
         .fold(Fields::new(), |fields, kind| {

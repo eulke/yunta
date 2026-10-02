@@ -14,7 +14,7 @@ use crate::render::blocks::{
 };
 use crate::render::ink::{Line, Tone};
 use crate::render::state::RunWord;
-use crate::render::{indent, prose, truncate, Look, NodeDisplay, Tokens, INDENT};
+use crate::render::{indent, prose, truncate, Look, Tokens, INDENT};
 
 /// What the page is drawn from.
 pub(super) struct Page<'a> {
@@ -33,15 +33,15 @@ impl Page<'_> {
     /// The word the run is called by, and the sentence that says what
     /// holds it: the verdict a reader came for, in two lines.
     pub(super) fn head(&self) -> Vec<Line> {
-        let word = RunWord::observed(self.frame, self.engine);
+        let word = crate::render::observed_word(self.frame, self.engine);
         let mut lines = Headline {
             subject: format!("run {}", self.run_id),
             mark: word.mark(),
             said: word.word().to_string(),
         }
-        .lines(&Look::stdout());
+        .lines(&crate::render::stdout_look());
         let (tone, said) = self.holds(word);
-        let look = Look::stdout();
+        let look = crate::render::stdout_look();
         let room = look.width.cells().saturating_sub(INDENT.len());
         lines.push(
             Line::new()
@@ -78,13 +78,13 @@ impl Page<'_> {
     /// Every node the frozen workflow declares, in declaration order, a
     /// group's children one step under it.
     pub(super) fn nodes(&self) -> NodeTable {
-        let look = Look::stdout();
+        let look = crate::render::stdout_look();
         let rows = self
             .frame
             .nodes
             .iter()
             .map(|node| {
-                let display = NodeDisplay::standing(&node.state);
+                let display = crate::render::standing(&node.state);
                 let note = display
                     .modifier
                     .map(|said| prose::first_sentence(&said, look.width.cells(), look.glyphs))
@@ -126,7 +126,7 @@ impl Page<'_> {
     /// what a command printed and where the rest is, the problems of each
     /// document it refused, the paths it should not have touched.
     pub(super) fn evidence(&self) -> Vec<Line> {
-        let look = Look::stdout();
+        let look = crate::render::stdout_look();
         let mut lines = Vec::new();
         for node in &self.frame.nodes {
             let Some(NodeState::Failed { failure, .. }) = self.state.nodes.state(&node.id) else {
@@ -196,7 +196,7 @@ impl Page<'_> {
         let tokens = self.state.total_tokens();
         let mut tasks: Vec<_> = self.state.tasks.iter().collect();
         tasks.sort_by(|a, b| a.0.cmp(b.0));
-        let sep = format!(" {} ", Look::stdout().glyphs.sep());
+        let sep = format!(" {} ", crate::render::stdout_look().glyphs.sep());
         let tasks = tasks
             .into_iter()
             .map(|(id, record)| format!("{id} {}", super::task_status_label(record.status)))
@@ -217,7 +217,7 @@ impl Page<'_> {
         Fields::new()
             .push_if(
                 "progress",
-                crate::render::counter::line(self.frame, Look::stdout().glyphs),
+                crate::render::counter::line(self.frame, crate::render::stdout_look().glyphs),
             )
             .push_if("tokens", spent(tokens))
             .push_if("tasks", tasks)
@@ -238,7 +238,7 @@ impl Page<'_> {
 
     /// What a person types next, for where the run stands.
     pub(super) fn next(&self, menu: bool) -> Next {
-        let word = RunWord::observed(self.frame, self.engine);
+        let word = crate::render::observed_word(self.frame, self.engine);
         Next {
             steps: advice::after(word, self.run_id.handle(), menu),
         }

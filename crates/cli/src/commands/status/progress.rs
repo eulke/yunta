@@ -67,7 +67,7 @@ pub(crate) fn summary(frame: &RunFrame, engine: EngineLiveness, glyphs: Glyphs) 
 /// The phase on one line, for the end of a summary: the word every
 /// surface calls it by, and what qualifies it when something does.
 fn phase_label(frame: &RunFrame, engine: EngineLiveness) -> String {
-    let word = RunWord::observed(frame, engine);
+    let word = crate::render::observed_word(frame, engine);
     if word == RunWord::Stalled {
         return format!("{word} — no process is driving it");
     }

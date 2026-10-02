@@ -50,7 +50,10 @@ pub async fn list_runs(all: bool) -> Result<Outcome, CliError> {
     if rows.is_empty() && unreadable.is_empty() {
         println!("no runs in this repository");
     } else {
-        print!("{}", render_runs(rows, unreadable, &Look::stdout()));
+        print!(
+            "{}",
+            render_runs(rows, unreadable, &crate::render::stdout_look())
+        );
     }
     if elsewhere > 0 {
         println!(

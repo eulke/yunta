@@ -167,12 +167,7 @@ impl Surface {
             Delivery::Lines { reason } => Draw::Lines(Lines::open(stderr(), reason)),
             Delivery::Live => {
                 let screen = Screen::watched(Term::buffered_stderr());
-                match Region::open(
-                    screen,
-                    env.glyphs,
-                    crate::render::ink::Ink::stderr(),
-                    stderr(),
-                ) {
+                match Region::open(screen, env.glyphs, crate::render::stderr_ink(), stderr()) {
                     Ok(region) => Draw::Live(Box::new(region)),
                     Err(_) => Draw::Lines(Lines::open(stderr(), ROW_TEMPLATE)),
                 }

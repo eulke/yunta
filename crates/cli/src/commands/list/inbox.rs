@@ -229,7 +229,7 @@ impl RunRow {
     /// the run is, what holds it and what moves it. `menu` says whether
     /// the run stopped on a decision whose options `yunta status` lists.
     fn of(frame: &RunFrame, engine: EngineLiveness, age: Duration, menu: bool) -> Self {
-        let word = RunWord::observed(frame, engine);
+        let word = crate::render::observed_word(frame, engine);
         let handle = frame.run_id.handle();
         let (reason, command) = match (word, &frame.phase) {
             (RunWord::Stalled, _) => (
@@ -248,10 +248,7 @@ impl RunRow {
                 Some(advice::verify(handle)),
             ),
             (_, RunPhase::Created | RunPhase::Running) => (
-                Some(crate::render::counter::line(
-                    frame,
-                    crate::render::Glyphs::settled(),
-                )),
+                Some(crate::render::counter::line(frame, crate::render::glyphs())),
                 None,
             ),
             (

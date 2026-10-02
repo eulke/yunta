@@ -26,7 +26,7 @@ use yunta_core::RunId;
 use yunta_engine::RunFrame;
 
 use crate::render::ink::{Ink, Line};
-use crate::render::{Glyphs, Width};
+use crate::render::Glyphs;
 
 use super::scrollback::Scrollback;
 use super::{view, Screen};
@@ -188,7 +188,7 @@ impl Region {
         crate::render::Look {
             glyphs: self.glyphs,
             ink: self.ink,
-            width: Width::row(usize::from(self.screen.width())),
+            width: crate::render::row_width(usize::from(self.screen.width())),
         }
     }
 
@@ -220,7 +220,7 @@ impl Region {
     /// row wraps, which is the tear [`Region::fit`] exists to prevent.
     /// Asked on every redraw, so a window resized mid-run is followed.
     fn width(&self) -> usize {
-        Width::row(usize::from(self.screen.width())).cells()
+        crate::render::row_width(usize::from(self.screen.width())).cells()
     }
 }
 
@@ -396,7 +396,7 @@ mod tests {
                 &RUN,
                 true,
             );
-            let room = Width::row(usize::from(columns)).cells();
+            let room = crate::render::row_width(usize::from(columns)).cells();
             let drawn = rows(&term);
             assert_eq!(
                 drawn.len(),

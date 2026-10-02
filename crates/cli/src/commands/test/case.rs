@@ -23,7 +23,6 @@ use crate::context::Context;
 use crate::error::CliError;
 use crate::load_yaml;
 use crate::render::state::RunWord;
-use crate::render::NodeDisplay;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -272,7 +271,7 @@ pub(crate) async fn run_case(
     let frame =
         yunta_engine::run_frame(&prepared.run_id, &manifest.workflow, &events, None, read_at);
     let expected_word = case.expect.final_state.word();
-    let reached = RunWord::of(&frame);
+    let reached = crate::render::run_word(&frame);
     if reached != expected_word {
         problems.push(format!(
             "final_state: expected {expected_word}, got {}",
@@ -301,7 +300,7 @@ pub(crate) async fn run_case(
             ));
         }
         for node in named {
-            let got = NodeDisplay::standing(&node.state).word.word();
+            let got = crate::render::standing(&node.state).word.word();
             if got != expected {
                 problems.push(format!("node {}: expected {expected}, got {got}", node.id));
             }

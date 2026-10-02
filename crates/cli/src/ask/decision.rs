@@ -123,7 +123,7 @@ fn present(
         console.say("what you are deciding on")?;
         let width = console.width().saturating_sub(INDENT_WIDTH);
         console.block(
-            &crate::render::shown::shown(document, width).join("\n"),
+            &crate::render::shown::shown(document, look.glyphs, width).join("\n"),
             INDENT,
         )?;
     }

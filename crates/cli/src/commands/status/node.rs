@@ -13,7 +13,7 @@ use crate::commands::advice;
 use crate::error::CliError;
 use crate::render::blocks::{paint, Block, FailureDetail, Fields, Headline, Next, Whole};
 use crate::render::ink::{Line, Tone};
-use crate::render::{duration, paths, wrap, Look, NodeDisplay, Tokens, INDENT};
+use crate::render::{duration, paths, wrap, Look, Tokens, INDENT};
 
 /// What the page is drawn from.
 pub(super) struct NodePage<'a> {
@@ -38,7 +38,7 @@ impl NodePage<'_> {
                 yunta_core::text::did_you_mean(id.as_str(), declared)
             )));
         };
-        let display = NodeDisplay::standing(&node.state);
+        let display = crate::render::standing(&node.state);
         let headline = Headline {
             subject: format!("node {id} of run {}", self.run_id.handle()),
             mark: display.word.mark(),

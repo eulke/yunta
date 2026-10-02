@@ -73,7 +73,7 @@ pub async fn test(dir: Option<&Path>) -> Result<Outcome, CliError> {
         .map(|path| crate::render::cell_width(&case_name(path)))
         .max()
         .unwrap_or(0);
-    let look = crate::render::Look::stdout();
+    let look = crate::render::stdout_look();
     let mut failures = 0usize;
     for case_path in &case_paths {
         if !report(&root, case_path, interrupt.shared(), (column, &look)).await {

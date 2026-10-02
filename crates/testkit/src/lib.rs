@@ -21,7 +21,6 @@ mod child;
 mod corpus;
 mod events;
 mod frames;
-mod golden;
 mod interaction;
 mod observer;
 mod owner;
@@ -49,7 +48,6 @@ pub use events::{
     accepted, baselines, status_changed_carrying, task_registered, task_status_changed, SourceLog,
 };
 pub use frames::{child_link, moment, node_frame, run_frame};
-pub use golden::{assert_golden, visible, Environment, ENVIRONMENTS};
 pub use interaction::{ApproveEverything, ScriptedInteraction};
 pub use observer::{Frame, RecordingObserver};
 pub use owner::Owner;
@@ -59,6 +57,7 @@ pub use tasks::tasks_document;
 pub use terminal::{runs_root, Terminal};
 pub use tools::{tools_environment, ToolsHost};
 pub use wait::{wait_for, wait_for_async, wait_until, wait_until_async, WAIT_DEADLINE};
+pub use yunta_testkit_core::golden::{assert_golden, visible, Environment, ENVIRONMENTS};
 
 /// Runs the `yunta` binary in a [`Checkout`], with whatever that
 /// checkout says about its state root and its org layer:

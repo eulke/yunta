@@ -17,7 +17,7 @@ use crate::ask::{Console, Escape, NoAnswer};
 use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::render::state::RunExit;
+use crate::render::RunExit;
 use crate::surface::Diagnostics;
 
 /// Records the decision and hands the run back, returning the sentence

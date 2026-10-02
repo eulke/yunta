@@ -50,9 +50,9 @@ fn main() -> ExitCode {
     let template = help::template(&command);
     let matches = command.help_template(template).get_matches();
     let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
-    render::ink::settle(color_policy(cli.color));
-    render::line_width::settle(columns());
-    render::glyphs::settle(&render::glyphs::GlyphEnv::from_process());
+    render::settle_color(color_policy(cli.color));
+    render::settle_columns(columns());
+    render::settle_glyphs(&glyph_env());
     surface::terminal::settle();
     tracing::debug!("yunta starting");
 
@@ -68,7 +68,7 @@ fn main() -> ExitCode {
         Ok(Outcome::Reported) => ExitCode::FAILURE,
         Ok(Outcome::Code(code)) => ExitCode::from(code),
         Err(error) => {
-            let said = render::ink::Ink::stderr().word(render::ink::Tone::Failed, "error");
+            let said = crate::render::stderr_ink().word(render::ink::Tone::Failed, "error");
             eprintln!("{said}: {error}");
             ExitCode::FAILURE
         }
@@ -108,6 +108,18 @@ fn links(set: &dyn Fn(&str) -> Option<String>) -> render::ink::Links {
     match announced {
         true => Links::Announced,
         false => Links::Unknown,
+    }
+}
+
+/// The three values the glyph policy reads, as this process was started
+/// with them.
+fn glyph_env() -> render::glyphs::GlyphEnv {
+    render::glyphs::GlyphEnv {
+        explicit: std::env::var(render::glyphs::OVERRIDE_VAR).ok(),
+        locale: ["LC_ALL", "LC_CTYPE", "LANG"]
+            .iter()
+            .find_map(|name| std::env::var(name).ok().filter(|v| !v.is_empty())),
+        term: std::env::var("TERM").ok(),
     }
 }
 

@@ -19,9 +19,9 @@ revised_by: [D216, D217, D220]
 | `MIN_SAMPLES_FOR_ESTIMATION` | 3 | `engine/src/history.rs` | debajo de tres runs una mediana y un p90 no dicen nada |
 | `SLOWEST` | 3 | `cli/src/surface/closing/mod.rs` | nodos más lentos que el bloque de cierre nombra |
 | `SHOWN` | 4 | `cli/src/surface/view/mod.rs` | llamadas recientes que una fila de la región muestra |
-| `Width::FLOOR` | 60 celdas | `cli/src/render/line_width.rs` | ancho mínimo al que se dispone una línea: debajo, una columna de nombres y lo que va al lado ya no comparten fila (D216) |
-| `Width::CEILING` | 120 celdas | `cli/src/render/line_width.rs` | ancho máximo: más larga, una línea ya no se lee de un barrido (D216) |
-| `QUOTED` | 6 líneas | `cli/src/render/blocks/evidence.rs` | líneas de salida que cita la evidencia: el final, donde un compilador o un runner de tests dice qué falló; el resto queda a un comando o una ruta (D216) |
+| `Width::FLOOR` | 60 celdas | `render/src/line_width.rs` | ancho mínimo al que se dispone una línea: debajo, una columna de nombres y lo que va al lado ya no comparten fila (D216) |
+| `Width::CEILING` | 120 celdas | `render/src/line_width.rs` | ancho máximo: más larga, una línea ya no se lee de un barrido (D216) |
+| `QUOTED` | 6 líneas | `render/src/blocks/evidence.rs` | líneas de salida que cita la evidencia: el final, donde un compilador o un runner de tests dice qué falló; el resto queda a un comando o una ruta (D216) |
 | `NEAR` | 2 ediciones | `core/src/text.rs` | distancia a la que un nombre escrito se toma por un error de tipeo de uno declarado y se sugiere: una tecla de más o de menos, o dos letras cambiadas (D219) |
 | `CLOSED_SHOWN` | 10 | `cli/src/commands/list/runs.rs` | runs cerrados que `yunta list --runs` nombra, los más nuevos; el resto se cuenta, así el listado abre en lo que espera a alguien (D220) |
 | `RunId::HANDLE_CHARS` | 6 | `core/src/ids.rs` | caracteres del id con que se llama a un run: treinta bits, una colisión en una máquina que nadie encuentra, y pocos para leer en una línea y tipear en la siguiente (D217) |

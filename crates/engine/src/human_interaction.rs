@@ -14,8 +14,8 @@
 //! `resolve_gate` tool, not built here.
 
 use async_trait::async_trait;
-use yunta_core::events::{Channel, GateWaitingPayload, HumanChoice, Shown};
-use yunta_core::{Answer, QuestionsFile, Responder, TasksFile};
+use yunta_core::events::{Channel, GateWaitingPayload, HumanChoice};
+use yunta_core::{Answer, QuestionsFile, Responder};
 
 /// What a decision is asked with, beside the escalation the log records:
 /// the documents the escalation shows, read from the run for the person
@@ -24,35 +24,7 @@ pub struct Asking<'a> {
     pub shown: &'a [ShownDocument],
 }
 
-/// One document an escalation shows, as the run holds it: what the log
-/// names, where its view sits, and what it says.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ShownDocument {
-    pub shown: Shown,
-    pub path: std::path::PathBuf,
-    pub content: ShownContent,
-}
-
-/// A shown document's content: a tasks document read into its tasks, a
-/// spec into its specs, a findings document into its findings, any other
-/// as its text.
-#[derive(Debug, Clone, PartialEq)]
-pub enum ShownContent {
-    /// A plan, with every departure from it a person accepted while its
-    /// tasks were built — where the work stops being what the plan says.
-    Tasks {
-        plan: TasksFile,
-        departed: Vec<yunta_core::events::AcceptedDeparture>,
-    },
-    /// The tests a plan's tasks are held to, read into its specs.
-    Spec(yunta_core::SpecFile),
-    /// What a review found, read into its findings.
-    Findings(yunta_core::FindingsFile),
-    /// Every finding standing in the run, each with the node that
-    /// reported it and how other nodes answered it.
-    RunFindings(yunta_core::events::findings::RunFindings),
-    Text(String),
-}
+pub use yunta_core::shown::{ShownContent, ShownDocument};
 
 /// One surface's reply to a `kind: questions` artifact:
 /// the answers plus which channel produced them and who answered — the

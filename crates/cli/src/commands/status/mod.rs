@@ -28,7 +28,7 @@ use crate::error::note;
 use crate::error::{CliError, Outcome};
 use crate::render::blocks::Block;
 use crate::render::ink::Line;
-use crate::render::{Look, Width, INDENT};
+use crate::render::INDENT;
 
 /// Prints where `run_id` stands — or, with `node`, that one node whole.
 pub async fn status(
@@ -70,7 +70,7 @@ pub async fn status(
             cwd: &ctx.cwd,
             home: ctx.env.home.as_deref(),
         };
-        print!("{}", page.render(node, &Look::stdout())?);
+        print!("{}", page.render(node, &crate::render::stdout_look())?);
         return Ok(Outcome::Success);
     }
     let state = yunta_engine::derive(&events);
@@ -83,7 +83,7 @@ pub async fn status(
         cwd: &ctx.cwd,
         home: ctx.env.home.as_deref(),
     };
-    let look = Look::stdout();
+    let look = crate::render::stdout_look();
     let paint = |lines: Vec<Line>| -> String {
         lines
             .iter()
@@ -142,7 +142,7 @@ fn decision_page(
     let state = yunta_engine::derive(events);
     Some(match yunta_engine::current_escalation(manifest, &state) {
         Some((node, escalation)) => {
-            let look = Look::stdout();
+            let look = crate::render::stdout_look();
             // The page's second line made the claim, and a failed
             // node's evidence is quoted above.
             let beside = decision::Beside {
@@ -168,7 +168,7 @@ fn decision_page(
             text: decision::without_menu(
                 run_id,
                 &advice::parked_in_full(waiting),
-                Width::stdout().cells(),
+                crate::render::stdout_width().cells(),
             ),
             menu: false,
         },

@@ -375,7 +375,7 @@ pub async fn update(
 
     println!(
         "updated {pack} {} {new_ref} ({})",
-        crate::render::Glyphs::settled().arrow(),
+        crate::render::glyphs().arrow(),
         commit.abbreviated()
     );
     Ok(Outcome::Success)
