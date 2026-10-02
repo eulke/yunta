@@ -8,7 +8,6 @@
 
 use yunta_core::events::AcceptedDeparture;
 use yunta_core::{ScopeGlob, Task, TasksFile};
-use yunta_engine::PlanView;
 
 use crate::render::markdown::{hanging, markdown};
 use crate::render::{cell_width, INDENT};
@@ -27,8 +26,7 @@ pub(super) fn plan(
     of: &str,
     width: usize,
 ) -> Vec<String> {
-    let view = PlanView::of(file);
-    let steps = view.steps();
+    let steps = file.steps();
     let tasks = yunta_core::text::counted(file.tasks.len(), "task");
     let mut lines = vec![match steps.len() {
         0 | 1 => format!("the plan{of} — {tasks}"),

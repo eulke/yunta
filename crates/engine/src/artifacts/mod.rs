@@ -227,7 +227,7 @@ fn plan_view(artifact: &ArtifactId, bytes: &[u8]) -> Option<String> {
     };
     let file =
         yunta_core::shape::read::<yunta_core::TasksFile>(bytes, artifact.view_name()).ok()?;
-    Some(crate::tasks::view::PlanView::of(&file).markdown())
+    Some(crate::tasks::view::markdown(&file))
 }
 
 /// What one run holds, as its own log states it: the artifacts it has
