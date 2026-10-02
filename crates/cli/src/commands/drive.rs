@@ -241,8 +241,8 @@ pub(crate) struct Settling<'a> {
     pub(crate) cancelled: bool,
     pub(crate) prior: Option<&'a PriorEstimation>,
     /// The pre-run warnings, for the document this invocation prints.
-    /// Empty on a `resume`: they are said to whoever *creates* a run
-    /// (§8.6), and a resume picks one up.
+    /// Empty on a `resume`: they are said to whoever *creates* a run,
+    /// and a resume picks one up.
     pub(crate) warnings: PreRunWarnings,
     pub(crate) glyphs: Glyphs,
     pub(crate) quiet: bool,

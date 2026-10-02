@@ -26,7 +26,7 @@ pub(super) struct Detaching<'a> {
     pub(super) adapter: Option<&'a AdapterId>,
     pub(super) mode: Option<&'a ModeName>,
     /// `--quiet`: the run id and nothing else on stdout. The budget
-    /// warning §8.6 of the run contract keeps actionable still goes out.
+    /// warning, which asks for a decision, still goes out.
     pub(super) quiet: bool,
     /// `--json`: one versioned document on stdout and nothing else.
     pub(super) json: bool,
@@ -37,8 +37,8 @@ pub(super) struct Detaching<'a> {
 ///
 /// The estimation happens here, between freezing the manifest and
 /// creating the run, because this invocation is the only one that can
-/// carry it: §8.6 of the run contract gives the distribution — and the
-/// budget warning derived from it — to whoever *creates* a run, and a
+/// carry it: the distribution — and the budget warning derived from it —
+/// is said to whoever *creates* a run, and a
 /// `yunta resume`, detached or not, picks one up instead. A warning that
 /// asks whether a cap is worth starting under is worth nothing once the
 /// child is already spending, so it goes out before the child exists.
@@ -88,8 +88,8 @@ pub(super) async fn detached(detaching: Detaching<'_>) -> Result<Outcome, CliErr
 /// `yunta run --detach` uses, so both reach a run identically.
 ///
 /// Says nothing about what this workflow has cost before: an agent client
-/// reads the run id this returns, and §8.6 of the run contract hands that
-/// client the same distribution through `list_workflows` — the surface it
+/// reads the run id this returns, and that client gets the same
+/// distribution through `list_workflows` — the surface it
 /// consults while it is still choosing a workflow.
 pub(crate) async fn start_detached(
     ctx: &Context,
@@ -116,7 +116,7 @@ pub(crate) async fn start_detached(
 /// reader about it.
 pub(crate) struct Started {
     pub(crate) run_id: RunId,
-    /// What was said before the first token: §8.6's warning, when this
+    /// What was said before the first token: the budget warning, when this
     /// workflow's history has one to give, and the `files:` a node reads
     /// that the run would not find. A client that starts runs is the one
     /// deciding whether the run is worth starting, and it never sees

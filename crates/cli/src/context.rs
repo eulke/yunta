@@ -31,7 +31,7 @@ pub struct Context {
     /// rather than from the process below: the user state root and the
     /// variables layered onto every subprocess.
     pub env: yunta_core::Env,
-    /// What stops this invocation, in two stages (D181). Private: every
+    /// What stops this invocation, in two stages. Private: every
     /// command reaches it through the getters below, so nothing below
     /// the shell decides which stage it answers to.
     interrupt: Interrupt,

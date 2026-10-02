@@ -51,7 +51,7 @@ pub(super) fn say(moment: &Moment, glyphs: Glyphs) -> Said {
 /// Whether a terminal a person is watching keeps this above its region.
 ///
 /// What it keeps is what closed something or asked something of a
-/// person (D164): the rest is the run working, and the region already
+/// person: the rest is the run working, and the region already
 /// shows that while it is true. A run's own close is the one thing that
 /// closes and is not kept — the block that reports it is its record,
 /// and a line above the region would say it twice.

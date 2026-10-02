@@ -1,4 +1,4 @@
-//! What trips this invocation's cancellation, in two stages (D181).
+//! What trips this invocation's cancellation, in two stages.
 //!
 //! The first interrupt stops the work: every subprocess the invocation
 //! spawned to do something answers to it. The second aborts what
@@ -40,7 +40,7 @@ impl Interrupt {
 
     /// No source at all: the tokens exist and nothing ever trips them.
     /// What a test builds when the interruption is not what it is
-    /// asserting about — every real invocation has a source (D181).
+    /// asserting about — every real invocation has a source.
     #[cfg(test)]
     pub(crate) fn never() -> Self {
         Interrupt {

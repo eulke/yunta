@@ -242,9 +242,13 @@ fn references_reach(workflow: &Workflow, ids: &HashSet<&NodeId>) -> Vec<Diagnost
                         RuleCode::UnknownDependency,
                         format!(
                             "`{field}` names `{target}`, and no node carries that id{}",
+                            // Never the node's own id: a node that named
+                            // itself would be a cycle, not a slip.
                             crate::text::did_you_mean(
                                 target.as_str(),
-                                ids.iter().map(|id| id.as_str())
+                                ids.iter()
+                                    .filter(|id| ***id != node.id)
+                                    .map(|id| id.as_str())
                             )
                         ),
                     )

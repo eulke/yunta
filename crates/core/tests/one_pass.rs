@@ -82,3 +82,18 @@ fn the_audit_knows_every_key_a_workflow_accepts_at_its_top() {
         .expect("the parser lists what it accepts");
     assert!(audited.contains(expected), "{audited}\nparser: {error}");
 }
+
+#[test]
+fn a_near_miss_is_never_the_node_that_names_it() {
+    // `tests2` is one slip from `tests`, the node that names it — and a
+    // node depending on itself is a cycle, not what anyone meant.
+    let said = said(
+        "name: wf\nnodes:\n  - id: lint\n    kind: bash\n    run: \"true\"\n  \
+         - id: tests\n    kind: bash\n    depends_on: [lint, tests2]\n    run: \"true\"\n",
+    );
+    let (problem, _) = said
+        .iter()
+        .find(|(problem, _)| problem.contains("`tests2`"))
+        .expect("the reference that reaches no node is reported");
+    assert!(!problem.contains("did you mean `tests`"), "{problem}");
+}

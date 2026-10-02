@@ -42,7 +42,7 @@ pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
         // generating it would pull `schemars` and the whole
         // schema-building machinery into the shipped binary — around
         // 100 KB, reachable from this one flag — against a recorded
-        // binary-size ceiling (D124).
+        // binary-size ceiling.
         print!("{}", yunta_core::schema::json(kind));
     } else {
         print!("{}", contract(kind));

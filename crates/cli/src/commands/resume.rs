@@ -80,8 +80,8 @@ pub async fn resume(run_id: &RunId, quiet: bool, json: bool) -> Result<Outcome, 
         // start one.
         adapter_override: None,
         prior: None,
-        // §8.6 gives the pre-run estimation to whoever creates a run;
-        // this picks one up.
+        // The pre-run estimation is said to whoever creates a run; this
+        // picks one up.
         warnings: Default::default(),
         quiet,
         json,

@@ -219,14 +219,7 @@ impl Page<'_> {
                 "progress",
                 crate::render::counter::line(self.frame, Look::stdout().glyphs),
             )
-            .push_if(
-                "tokens",
-                format!(
-                    "{} in / {} out",
-                    Tokens(tokens.input).figure(),
-                    Tokens(tokens.output).figure()
-                ),
-            )
+            .push_if("tokens", spent(tokens))
             .push_if("tasks", tasks)
             .push_if(
                 "environment",
@@ -249,5 +242,17 @@ impl Page<'_> {
         Next {
             steps: advice::after(word, self.run_id.handle(), menu),
         }
+    }
+}
+
+/// What a run spent, in and out — nothing for a run that spent none.
+fn spent(tokens: yunta_core::events::TokenUsage) -> String {
+    match tokens.total() {
+        0 => String::new(),
+        _ => format!(
+            "{} in / {} out",
+            Tokens(tokens.input).figure(),
+            Tokens(tokens.output).figure()
+        ),
     }
 }

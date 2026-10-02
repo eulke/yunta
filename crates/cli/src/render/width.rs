@@ -29,7 +29,7 @@ pub(crate) const INDENT_WIDTH: usize = INDENT.len();
 
 /// How deep a thing that belongs to a node sits under it: a child run
 /// under the node that bore it, a `parallel` group's children under the
-/// group. One step, fixed by D179 — a surface that indented one of them
+/// group. One step — a surface that indented one of them
 /// further would say they belong to different things.
 pub(crate) const CHILD_DEPTH: usize = 1;
 

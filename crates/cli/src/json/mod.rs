@@ -34,8 +34,8 @@ use crate::render::state::RunWord;
 /// the control plane, is watching nothing else.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PreRunWarnings {
-    /// §8.6: the declared cap sits under what this workflow has
-    /// historically spent.
+    /// The declared cap sits under what this workflow has historically
+    /// spent.
     pub(crate) budget: Option<String>,
     /// A `files:` path a node reads that the run would not find.
     pub(crate) context_files: Vec<String>,
@@ -101,8 +101,8 @@ pub(crate) struct RunDocument {
     /// finished one has nothing to add.
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
-    /// The one piece of the pre-run estimation §8.6 of the run contract
-    /// makes actionable: the declared cap sits under what this workflow
+    /// The one piece of the pre-run estimation a person can act on: the
+    /// declared cap sits under what this workflow
     /// has historically spent. Carried only by the invocation that
     /// *created* the run, which is the only one that has it — a reader
     /// of the log alone never does.

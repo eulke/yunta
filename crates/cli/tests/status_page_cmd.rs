@@ -55,3 +55,14 @@ fn status_quotes_why_a_node_failed() {
         "and how much came before it, and where the rest is: {parked:#?}"
     );
 }
+
+#[test]
+fn a_run_that_spent_no_tokens_has_no_tokens_row() {
+    let lines = page(FINISHES);
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.trim_start().starts_with("tokens ")),
+        "a `bash` run spends nothing, and a row saying so says nothing: {lines:#?}"
+    );
+}

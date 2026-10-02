@@ -6,7 +6,7 @@
 //! derives for it (`yunta_engine::derive`). No agent involved in
 //! producing the graph itself, same shape as `status`.
 //!
-//! Exactly one source (D179): a path or a catalog name reads the
+//! Exactly one source: a path or a catalog name reads the
 //! workflow off disk, `--run` draws the one that run froze into its
 //! manifest. Naming both is refused — a run's diagram is of the run,
 //! and the file beside it may say something else by now.
