@@ -30,6 +30,7 @@ pub(crate) mod markdown;
 pub(crate) mod paths;
 mod plan;
 pub(crate) mod prose;
+mod run_word;
 pub(crate) mod shown;
 mod spec;
 pub(crate) mod state;

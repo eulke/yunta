@@ -320,16 +320,20 @@ their own branch in it — and ends with how many runs on the machine belong to
 other projects; `--all`, or running it outside a repository, lists every run.
 
 `yunta list --runs` groups runs by what can be done about them — what needs a
-person, what stalled, what is in flight, what has closed, and last the runs whose
+person, what stalled, what is running, what has closed, and last the runs whose
 log or manifest does not read back. A run is stalled when its log says it is
 moving and the engine its registry (`scratch/engine.json`) names is gone: a
 process that exited, or a pid the host has since given to a process that started
 later. Nothing else is called stalled — a run with no registry at all may be
-between two processes. The first four groups are ordered by how long a
-run has been where it is, longest first; two runs that have been there equally
-long are ordered by run id, which for a minted one is the order they were
-created in. A run in the last group has no derived state to have been in, so
-that group is ordered by run id alone.
+between two processes. Each row says what the run is called, its handle, its
+workflow and mode, and how long it has been where it is; a run that needs
+someone, or stalled, carries what holds it and the command that moves it under
+its row. The first three groups are ordered by how long a run has been where it
+is, longest first; two runs that have been there equally long are ordered by run
+id, which for a minted one is the order they were created in. Closed runs are
+listed newest first, and only the ten newest are named — the rest are counted
+(`2 older closed runs not listed`). A run in the last group has no derived state
+to have been in, so that group is ordered by run id alone.
 
 ## Exit codes
 

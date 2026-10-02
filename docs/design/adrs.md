@@ -176,7 +176,7 @@ lista.
 **D167 — Lo prometido y no construido se construye o se registra; nunca queda como comentario.** `revised` *(Revisada por D172, D176.)* → [`adr/D167-build-or-register.md`](adr/D167-build-or-register.md)
 **D168 — `task-ledger` se acepta solo al leer lo persistido; en YAML de autor y en el CLI se rechaza nombrando `tasks`.** `accepted` → [`adr/D168-task-ledger-solo-en-lo-persistido.md`](adr/D168-task-ledger-solo-en-lo-persistido.md)
 **D169 — Un run que cierra con findings bloqueantes reporta `Reported`, no `Success`.** `accepted` → [`adr/D169-findings-bloqueantes-no-son-exito.md`](adr/D169-findings-bloqueantes-no-son-exito.md)
-**D170 — Los umbrales de la superficie y del arnés son estos, y cambiarlos es revisar esta decisión.** `revised` *(Revisada por D216, D217.)* → [`adr/D170-umbrales-de-superficie-y-arnes.md`](adr/D170-umbrales-de-superficie-y-arnes.md)
+**D170 — Los umbrales de la superficie y del arnés son estos, y cambiarlos es revisar esta decisión.** `revised` *(Revisada por D216, D217, D220.)* → [`adr/D170-umbrales-de-superficie-y-arnes.md`](adr/D170-umbrales-de-superficie-y-arnes.md)
 **D171 — Ocho correcciones de comportamiento van antes de la fase 0, cada una como el mecanismo aplicado a un solo sitio.** `accepted` → [`adr/D171-los-ocho-fixes-antes-de-la-fase-cero.md`](adr/D171-los-ocho-fixes-antes-de-la-fase-cero.md)
 **D172 — El cerco: un juez en core, un nivel por adapter, una cobertura por sesión, y el post-check como garantía.** `accepted` → [`adr/D172-el-cerco.md`](adr/D172-el-cerco.md)
 **D173 — Un nodo que pregunta, pregunta: el hecho es `questions_asked`, el nodo espera entre preguntar y responder, lo que depende de las respuestas es del nodo siguiente, e `interactive` se retira.** `accepted` → [`adr/D173-un-nodo-que-pregunta-pregunta.md`](adr/D173-un-nodo-que-pregunta-pregunta.md)
@@ -226,3 +226,4 @@ lista.
 **D217 — A run is called by the end of its id, and every command finds it by any unambiguous part.** `accepted` → [`adr/D217-a-run-is-called-by-the-end-of-its-id.md`](adr/D217-a-run-is-called-by-the-end-of-its-id.md)
 **D218 — YAML is read, written and located by one library.** `accepted` → [`adr/D218-yaml-is-read-and-written-by-one-library.md`](adr/D218-yaml-is-read-and-written-by-one-library.md)
 **D219 — A diagnostic says where in its text it is, beside the entry it names.** `accepted` → [`adr/D219-a-diagnostic-says-where-in-its-text-it-is.md`](adr/D219-a-diagnostic-says-where-in-its-text-it-is.md)
+**D220 — The run list names the ten newest closed runs and counts the rest.** `accepted` → [`adr/D220-the-run-list-names-ten-closed-runs-and-counts-the-rest.md`](adr/D220-the-run-list-names-ten-closed-runs-and-counts-the-rest.md)

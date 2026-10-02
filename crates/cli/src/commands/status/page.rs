@@ -52,10 +52,7 @@ impl Page<'_> {
     /// What holds the run, or that nothing does.
     fn holds(&self, word: RunWord) -> (Tone, String) {
         match (word, &self.frame.phase) {
-            (RunWord::Stalled, _) => (
-                Tone::Caution,
-                "no process is driving it: the engine that ran it is gone".to_string(),
-            ),
+            (RunWord::Stalled, _) => (Tone::Caution, advice::STALLED.to_string()),
             (_, RunPhase::Waiting { on }) => (Tone::NeedsYou, advice::parked_in_full(on)),
             (_, RunPhase::Broken { diagnostic }) => {
                 (Tone::Failed, yunta_core::text::one_line(diagnostic))

@@ -12,9 +12,10 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use yunta_core::events::StoredEvent;
 use yunta_core::{Clock, Manifest, ModeName, RunId, WorkflowName};
-use yunta_engine::{EngineLiveness, RunFrame};
+use yunta_engine::{EngineLiveness, RunFrame, RunPhase};
 use yunta_storage::Storage;
 
+use crate::commands::advice;
 use crate::commands::status::progress;
 use crate::context::Context;
 use crate::error::CliError;
@@ -79,7 +80,7 @@ impl Standing {
         match self {
             Self::NeedsYou => "needs you",
             Self::Stalled => "stalled",
-            Self::InFlight => "in flight",
+            Self::InFlight => "running",
             Self::Closed => "closed",
         }
     }
@@ -89,12 +90,18 @@ impl Standing {
 pub(crate) struct RunRow {
     pub(crate) run_id: RunId,
     pub(crate) standing: Standing,
+    /// What the run is called, as every surface calls it.
+    pub(crate) word: RunWord,
     pub(crate) workflow: WorkflowName,
     pub(crate) mode: ModeName,
     /// How long the run has been where it is — what the rows of a group
     /// are ordered by.
     pub(crate) age: Duration,
-    pub(crate) summary: String,
+    /// What holds the run where it is, said whole; `None` for a run
+    /// nothing holds.
+    pub(crate) reason: Option<String>,
+    /// The command that moves it on, when a person has one to run.
+    pub(crate) command: Option<String>,
 }
 
 /// A run the listing can name but not derive: its log or the manifest it
@@ -219,15 +226,53 @@ impl Here {
 
 impl RunRow {
     /// One row from the run's own frame: which group it belongs in, what
-    /// the run is, and the line `yunta status` prints for it.
-    fn of(frame: &RunFrame, engine: EngineLiveness, age: Duration) -> Self {
+    /// the run is, what holds it and what moves it. `menu` says whether
+    /// the run stopped on a decision whose options `yunta status` lists.
+    fn of(frame: &RunFrame, engine: EngineLiveness, age: Duration, menu: bool) -> Self {
+        let word = RunWord::observed(frame, engine);
+        let handle = frame.run_id.handle();
+        let (reason, command) = match (word, &frame.phase) {
+            (RunWord::Stalled, _) => (
+                Some(advice::STALLED.to_string()),
+                Some(advice::resume(handle)),
+            ),
+            (_, RunPhase::Waiting { on }) => (
+                Some(advice::parked_in_full(on)),
+                Some(match menu {
+                    true => advice::status(handle),
+                    false => advice::resume(handle),
+                }),
+            ),
+            (_, RunPhase::Broken { diagnostic }) => (
+                Some(yunta_core::text::one_line(diagnostic)),
+                Some(advice::verify(handle)),
+            ),
+            (_, RunPhase::Created | RunPhase::Running) => {
+                (Some(crate::render::counter::line(frame)), None)
+            }
+            (
+                _,
+                RunPhase::Failed {
+                    failure: Some(failure),
+                },
+            ) => (Some(failure.headline()), None),
+            (
+                _,
+                RunPhase::Finished
+                | RunPhase::Failed { failure: None }
+                | RunPhase::Cancelled
+                | RunPhase::Promoted { .. },
+            ) => (None, None),
+        };
         RunRow {
             run_id: frame.run_id.clone(),
-            standing: Standing::of(RunWord::observed(frame, engine)),
+            standing: Standing::of(word),
+            word,
             workflow: frame.workflow.clone(),
             mode: frame.mode.clone(),
             age,
-            summary: progress::summary(frame, engine),
+            reason,
+            command,
         }
     }
 }
@@ -267,10 +312,16 @@ fn run_row(
                 ),
             )
         })?;
+    let frame = progress::frame(&run_id, &manifest, &events, now);
+    // Only a parked run has a menu to rebuild, and rebuilding one is a
+    // walk of the log.
+    let menu = matches!(frame.phase, RunPhase::Waiting { .. })
+        && yunta_engine::current_escalation(&manifest, &yunta_engine::derive(&events)).is_some();
     let row = RunRow::of(
-        &progress::frame(&run_id, &manifest, &events, now),
+        &frame,
         yunta_engine::engine_liveness(&run_dir, &yunta_engine::lock::SystemProbe),
         time_in_state(&events, now),
+        menu,
     );
     Ok((row, manifest.project.map(|project| project.git_common_dir)))
 }

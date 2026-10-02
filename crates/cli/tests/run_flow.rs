@@ -947,16 +947,16 @@ fn list_runs_groups_a_run_under_what_can_be_done_about_it() {
     );
     let row = lines.next().unwrap_or_default();
     assert!(
-        row.starts_with(&format!(
-            "  {}  only-node (default)",
+        row.contains(&format!(
+            "finished   {}  only-node (default)",
             yunta_testkit::handle(&run_id)
         )),
-        "the row names the workflow and the mode, not only the id: {text}"
+        "the row says how the run closed and names the workflow and the mode: {text}"
     );
     assert_eq!(
         lines.next(),
-        Some("    nodes 1/1 · finished"),
-        "under it, the same summary `yunta status` prints: {text}"
+        None,
+        "a run that finished has nothing under it to act on: {text}"
     );
 }
 

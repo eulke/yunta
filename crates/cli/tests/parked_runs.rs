@@ -555,7 +555,7 @@ fn the_listing_puts_a_waiting_run_above_a_running_one() {
     let text = stdout(&list);
 
     let needs_you = position(&text, "needs you (1)");
-    let in_flight = position(&text, "in flight (1)");
+    let in_flight = position(&text, "running (1)");
     assert!(
         needs_you < in_flight,
         "what waits on a person comes first: {text}"
@@ -569,7 +569,7 @@ fn the_listing_puts_a_waiting_run_above_a_running_one() {
         "a row names the workflow and the mode, not only the id: {text}"
     );
     assert!(
-        text.contains("needs you — node `lint` failed"),
+        text.contains("node `lint` failed and its 0 re-routes to `fix-lint` are exhausted"),
         "the row says what the wait is for, in words: {text}"
     );
     for line in text.lines() {
@@ -638,8 +638,8 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
 
     let list = stdout(&yunta_in!(&repo, &home, &["list", "--runs"]));
     assert!(
-        list.contains("needs you (1)") && list.contains("needs you — node `ask`"),
-        "the listing groups it with what needs a person, under the same words: {list}"
+        list.contains("needs you (1)") && list.contains("node `ask` asked 1 question: `summary`"),
+        "the listing groups it with what needs a person, under the words the page uses: {list}"
     );
 }
 

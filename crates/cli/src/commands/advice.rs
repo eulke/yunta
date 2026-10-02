@@ -20,6 +20,9 @@ use yunta_engine::{NodeWait, RunPhase, WaitingOn};
 
 use crate::render::state::RunWord;
 
+/// What holds a run whose log says it is moving and whose engine is gone.
+pub(crate) const STALLED: &str = "no process is driving it: the engine that ran it is gone";
+
 /// What a run is parked on, or `None` for a run nobody has to touch —
 /// the one answer that decides whether a surface says anything about a
 /// decision at all.
