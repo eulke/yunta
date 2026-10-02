@@ -62,8 +62,8 @@ pub struct GateWaitingPayload {
     summary: String,
     /// The record `summary` is audited against, attached by the engine
     /// straight from the log.
-    evidence: Evidence,
-    options: Vec<GateOption>,
+    pub(super) evidence: Evidence,
+    pub(super) options: Vec<GateOption>,
     /// The forge's own handle for this gate — a PR URL,
     /// today — `None` for the internal escalation case (exhausted
     /// re-routes) this payload already covered before external
@@ -77,6 +77,10 @@ pub struct GateWaitingPayload {
     /// them. Empty for an escalation about something that happened.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     shows: Vec<Shown>,
+    /// The options the gate does not offer, each with why: what stands
+    /// against them is part of the decision.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) withheld: Vec<super::Withheld>,
 }
 
 /// Why an answer does not count as a decision on an escalation.
@@ -88,6 +92,9 @@ pub enum Refusal {
     /// The option asks for words, and the answer has none.
     #[error("`{chosen}` asks \"{asks}\", and the answer says nothing")]
     Unsaid { chosen: OptionId, asks: String },
+    /// The gate withholds the option, for the reason it gives.
+    #[error("`{chosen}` is withheld: {because}")]
+    Withheld { chosen: OptionId, because: String },
 }
 
 /// Why an escalation was refused before it reached anyone.
@@ -111,7 +118,7 @@ pub enum EscalationError {
 /// every answer it is given. Here the split is decided once and the
 /// menu cannot be empty by type.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Escalation(GateWaitingPayload);
+pub struct Escalation(pub(super) GateWaitingPayload);
 
 impl Escalation {
     /// One escalation, refused if its claim repeats its own record.
@@ -130,6 +137,7 @@ impl Escalation {
             options: options.into_vec(),
             external_ref: None,
             shows: Vec::new(),
+            withheld: Vec::new(),
         }))
     }
 
@@ -156,6 +164,7 @@ impl Escalation {
             options: Vec::new(),
             external_ref: Some(external_ref.into()),
             shows: Vec::new(),
+            withheld: Vec::new(),
         }))
     }
 
@@ -231,6 +240,9 @@ impl GateWaitingPayload {
     /// option on its menu, with words when the option asks for them.
     /// The one test every answer passes, whichever surface gave it.
     pub fn accepts(&self, choice: &HumanChoice) -> Result<(), Refusal> {
+        if let Some(withheld) = self.refused_as_withheld(&choice.option) {
+            return Err(withheld);
+        }
         let Some(option) = self.options.iter().find(|o| o.id == choice.option) else {
             return Err(Refusal::OffMenu {
                 chosen: choice.option.clone(),

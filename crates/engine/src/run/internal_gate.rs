@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use yunta_core::events::artifacts::ArtifactLedger;
 use yunta_core::events::{
     ArtifactId, Escalation, EscalationError, EventPayload, Fact, GateEvent, GateResolvedPayload,
-    HumanChoice, NodeEvent, PauseReason, Shown, TokenUsage,
+    HumanChoice, NodeEvent, PauseReason, Shown, TokenUsage, Withheld,
 };
 use yunta_core::{ArtifactContextRef, Node, NodeId, NodeKind, NonEmpty, OptionId, Seq, Workflow};
 
@@ -71,9 +71,9 @@ impl<'a> InternalGate<'a> {
     /// `abort` is always the engine's: declaring it only places it on the
     /// menu, and choosing it pauses the run wherever it sits.
     ///
-    /// The one builder of it: a `resolve_gate` call from a process that
-    /// never paused this run rebuilds the identical object from the log.
-    pub(crate) fn escalation(
+    /// The menu before what it shows is read: [`InternalGate::asked`] is
+    /// the one way to the escalation a person gets.
+    fn escalation(
         &self,
         workflow: &Workflow,
         state: &RunState,
@@ -131,13 +131,51 @@ impl<'a> InternalGate<'a> {
     /// later rebuild of its menu come by it. What could not be read is
     /// the outer error; a menu that cannot be built from what was read,
     /// the inner one.
+    ///
+    /// A plan that cannot be proven as it is written is never offered to
+    /// go on with: the options that take the run past the gate are
+    /// withheld, with why, and what is left sends it back or stops it.
     pub(crate) async fn asked(
         &self,
         workflow: &Workflow,
-        _run_dir: &std::path::Path,
+        run_dir: &std::path::Path,
         state: &RunState,
     ) -> Result<Result<Escalation, GateEscalationError>, RunError> {
-        Ok(self.escalation(workflow, state))
+        let escalation = match self.escalation(workflow, state) {
+            Ok(escalation) => escalation,
+            Err(unbuilt) => return Ok(Err(unbuilt)),
+        };
+        // A plan is proven by itself and its spec: the run's findings, a
+        // view the gate writes only once it asks, prove nothing about it.
+        let read: Vec<Shown> = escalation
+            .shows()
+            .iter()
+            .filter(|shown| !super::gate_findings::shows_view(shown))
+            .cloned()
+            .collect();
+        let documents = crate::artifacts::shown::documents(run_dir, &read, state).await?;
+        let flaws = super::flawed::unprovable(&documents);
+        let because = super::flawed::withheld_because(flaws.iter().map(|(_, flaw)| flaw));
+        Ok(Ok(self.withholding(escalation, because)))
+    }
+
+    /// `escalation` without the options that go on past the gate, when
+    /// what it shows cannot be proven, `because` says why: what is left
+    /// is each option `on:` sends back, and `abort`.
+    fn withholding(&self, escalation: Escalation, because: Option<String>) -> Escalation {
+        let Some(because) = because else {
+            return escalation;
+        };
+        let withheld = escalation
+            .options()
+            .iter()
+            .filter(|option| !aborts(&option.id) && !self.on.contains_key(&option.id))
+            .map(|option| Withheld {
+                option: option.id.clone(),
+                because: because.clone(),
+            })
+            .collect();
+        escalation.withholding(withheld)
     }
 
     /// Whether the gate shows the run's findings.

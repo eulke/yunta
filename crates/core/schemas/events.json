@@ -2724,6 +2724,13 @@
         "summary": {
           "description": "The claim: what happened, in the words of whoever escalated.\nIt ends where the record begins — a summary that quotes what\n`evidence` holds leaves every surface printing it twice.",
           "type": "string"
+        },
+        "withheld": {
+          "description": "The options the gate does not offer, each with why: what stands\nagainst them is part of the decision.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Withheld"
+          }
         }
       },
       "required": [
@@ -4633,6 +4640,22 @@
       "required": [
         "since",
         "failure"
+      ]
+    },
+    "Withheld": {
+      "description": "An option the gate withholds, and the reason it gives.",
+      "type": "object",
+      "properties": {
+        "because": {
+          "type": "string"
+        },
+        "option": {
+          "$ref": "#/$defs/OptionId"
+        }
+      },
+      "required": [
+        "option",
+        "because"
       ]
     },
     "WriteRefusedPayload": {

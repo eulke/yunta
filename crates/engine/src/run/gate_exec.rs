@@ -11,14 +11,10 @@
 //! words reach the fixing session without an intermediate summary.
 //!
 //! **No forge, no credentials: degrades to console.** Both entry points
-//! fall back to the exact same `HumanInteraction` escalation
-//! `GateExhaustedReroutes` already uses — same object, same "`None`
-//! means pause, never guess" rule — building a synthetic PR-less
-//! decision instead of a forge round-trip. Nothing is ever recorded as
-//! published while degraded (no `gate_waiting` without a resolved
-//! answer alongside it, mirroring `GateExhaustedReroutes`'s own pattern
-//! exactly), so a still-unresolved degraded gate asks fresh on every
-//! wake rather than remembering a decision that was never really made.
+//! fall back to [`console_gate`](super::console_gate), which asks here
+//! with the same escalation vocabulary every other menu uses. A plan that
+//! cannot be proven as it is written is never published:
+//! [`flawed`](super::flawed) sends it back instead.
 
 use yunta_core::events::{
     Escalation, EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity,
@@ -27,13 +23,12 @@ use yunta_core::events::{
 use yunta_core::port::{
     Forge, GateDecision, PolledGate, PublishRequest, PullRequestRef, ReviewOutcome,
 };
-use yunta_core::{CommitSha, ExternalGate, FindingId, Node, NonEmpty, Responder};
+use yunta_core::{CommitSha, ExternalGate, FindingId, Node, Responder};
 
 use super::node_close::{fail, finish_node};
 use super::node_exec::template_vars;
 use super::step::{GateRender, Step};
 use super::{RunCtx, RunError};
-use crate::reserved::{offers, ReservedOption};
 use yunta_core::events::{FindingEvent, GateEvent, NodeEvent};
 use yunta_core::{Location, RelativePath};
 
@@ -54,7 +49,7 @@ pub(super) async fn publish_gate(
     forge: Option<&dyn Forge>,
 ) -> Result<GateStep, RunError> {
     let Some(forge) = forge else {
-        return degrade_to_console(
+        return super::console_gate::degrade_to_console(
             ctx,
             node,
             format!(
@@ -76,6 +71,10 @@ pub(super) async fn publish_gate(
     };
     let state = ctx.run_view().await?.state;
     let shown = crate::artifacts::shown::documents(ctx.run_dir, &shows, &state).await?;
+    let flaws = super::flawed::unprovable(&shown);
+    if !flaws.is_empty() {
+        return super::flawed::send_back(ctx, node, &flaws).await;
+    }
 
     let summary = format!(
         "node `{}` is waiting on external review (assignee: {assignee})",
@@ -187,7 +186,7 @@ pub(super) async fn poll_gate(
     forge: Option<&dyn Forge>,
 ) -> Result<GateStep, RunError> {
     let Some(forge) = forge else {
-        return degrade_to_console(
+        return super::console_gate::degrade_to_console(
             ctx,
             node,
             format!(
@@ -417,60 +416,6 @@ fn decode_ref(external_ref: &str) -> Result<PullRequestRef, RunError> {
     serde_json::from_str(external_ref).map_err(|e| RunError::Broken {
         diagnostic: format!("gate_waiting.external_ref `{external_ref}` isn't valid: {e}"),
     })
-}
-
-/// The escalation object, reused verbatim for the no-forge
-/// degradation — two options wide enough to cover every review mapping
-/// a human can decide from the console: approve (finishes the node) or
-/// reject (fails it, retryable — so a declared `on_failure.goto` still
-/// gets a chance, same as a real "changes requested").
-async fn degrade_to_console(
-    ctx: &RunCtx<'_>,
-    node: &Node,
-    summary: String,
-) -> Result<GateStep, RunError> {
-    let escalation = Escalation::new(
-        summary.clone(),
-        vec![Fact::bare("no forge reachable from this machine")].into(),
-        NonEmpty::from((
-            offers::approve_from_console(),
-            vec![offers::reject_from_console()],
-        )),
-    )
-    .map_err(|source| RunError::Broken {
-        diagnostic: format!("node `{}`'s gate: {source}", node.id),
-    })?;
-    let Some(choice) = ctx.ask_human(&escalation).await? else {
-        return Ok(GateStep::Waiting(PauseReason::Escalation(Box::new(
-            escalation,
-        ))));
-    };
-
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Gates(GateEvent::Waiting(escalation.into_payload())),
-    )
-    .await?;
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(
-            choice.clone(),
-        ))),
-    )
-    .await?;
-    emit_started(ctx, node).await?;
-    if ReservedOption::of(&choice.option) == Some(ReservedOption::Approve) {
-        finish_node(
-            ctx,
-            node,
-            format!("approved from the console by {}", choice.by),
-            TokenUsage::default(),
-        )
-        .await?;
-    } else {
-        fail(ctx, node, "rejected from the console".to_string(), true).await?;
-    }
-    Ok(GateStep::Resolved)
 }
 
 /// Renders `external.branch`'s template, or fails the *run* the same

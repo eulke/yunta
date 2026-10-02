@@ -299,6 +299,7 @@ pub async fn resolve_gate(
                 declared: offered,
             },
             Refusal::Unsaid { chosen, asks } => ResolveGateError::Unsaid { chosen, asks },
+            Refusal::Withheld { chosen, because } => ResolveGateError::Withheld { chosen, because },
         })?;
     let resolution = GateResolvedPayload::Chosen(choice);
     storage
@@ -417,6 +418,9 @@ pub enum ResolveGateError {
     /// asks for are the one thing that session would get.
     #[error("option `{chosen}` asks \"{asks}\" — say it with the choice")]
     Unsaid { chosen: OptionId, asks: String },
+    /// The gate does not offer the option, and says why.
+    #[error("option `{chosen}` is withheld: {because}")]
+    Withheld { chosen: OptionId, because: String },
     #[error(transparent)]
     Storage(#[from] yunta_storage::StorageError),
     /// What the gate shows could not be read, so its menu cannot be

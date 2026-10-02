@@ -34,7 +34,7 @@ pub use failure::{
     TAIL_LINES,
 };
 pub use findings::{payloads::*, FindingEvent};
-pub use gates::{ledger::*, payloads::*, GateEvent};
+pub use gates::{ledger::*, payloads::*, GateEvent, Withheld};
 pub use meta::EventMeta;
 pub use node::{ledger::*, payloads::*, NodeEvent};
 pub use run::{ledger::*, payloads::*, RunEvent, Suspension, Suspensions};

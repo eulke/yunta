@@ -93,6 +93,14 @@ impl Evidence {
         }
     }
 
+    /// `fact`, after every fact already attached; an older log's prose
+    /// becomes the one fact it reads as.
+    pub(crate) fn push(&mut self, fact: Fact) {
+        let mut facts = self.facts();
+        facts.push(fact);
+        *self = Evidence::Facts(facts);
+    }
+
     /// One rendered line per fact, for a surface with room to list
     /// them.
     pub fn lines(&self) -> Vec<String> {

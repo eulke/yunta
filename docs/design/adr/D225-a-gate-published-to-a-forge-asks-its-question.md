@@ -1,9 +1,9 @@
 ---
 number: D225
 title: "A gate published to a forge asks its question, says how a review answers it, and asks again after changes"
-status: accepted
+status: revised
 revises: [D66]
-revised_by: []
+revised_by: [D227]
 ---
 
 # D225 — A gate published to a forge asks its question, says how a review answers it, and asks again after changes

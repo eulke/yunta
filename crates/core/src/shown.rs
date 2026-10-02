@@ -148,6 +148,40 @@ impl Flaw {
             | Flaw::JudgedByAnotherTasksTest { task, .. } => task,
         }
     }
+
+    /// What the flaw means for the decision.
+    pub fn so(&self) -> String {
+        match self {
+            Flaw::PassesByAName { .. } => {
+                "it passes once the name is written, whatever the code does".to_string()
+            }
+            Flaw::HollowSpecTest { .. } => {
+                "it judges the task by tests the task writes itself".to_string()
+            }
+            Flaw::UnrunSpecFile { .. } => "the file holds the task to nothing".to_string(),
+            Flaw::ChangesASpecTest { .. } => {
+                "no session may write it, so the task cannot be done as planned".to_string()
+            }
+            Flaw::JudgedByAnotherTasksTest { owner, .. } => {
+                format!("it passes once `{owner}` is done, whatever this task does")
+            }
+        }
+    }
+
+    /// What the plan or its spec has to change for the flaw to go.
+    pub fn fix(&self) -> &'static str {
+        match self {
+            Flaw::PassesByAName { .. } => "run the test that observes the behavior",
+            Flaw::HollowSpecTest { .. } => {
+                "run a file the spec wrote — or give the task no spec, and say why"
+            }
+            Flaw::UnrunSpecFile { .. } => "name it in the command of the test that runs it",
+            Flaw::ChangesASpecTest { .. } => {
+                "leave the test as the spec wrote it, and change the code it tests"
+            }
+            Flaw::JudgedByAnotherTasksTest { .. } => "judge the task by a test of its own",
+        }
+    }
 }
 
 impl std::fmt::Display for Flaw {
