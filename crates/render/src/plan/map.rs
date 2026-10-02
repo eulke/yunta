@@ -27,7 +27,7 @@ pub(super) fn map(review: &PlanReview, steps: &[Vec<&Task>]) -> Table {
                 cells: vec![
                     Cell::plain(step.to_string()),
                     Cell::plain(task.id.as_str()),
-                    proven(review, judged),
+                    proven(judged),
                     coded(task, review),
                     Cell::plain(task.title.as_str()),
                 ],
@@ -64,7 +64,7 @@ pub(super) fn map(review: &PlanReview, steps: &[Vec<&Task>]) -> Table {
 /// What proves a task: the spec's tests that run a file the spec wrote,
 /// another task's test when it borrows one, or the plan's own checks
 /// when the spec holds the task to nothing.
-fn proven(review: &PlanReview, judged: Option<&TaskReview>) -> Cell {
+fn proven(judged: Option<&TaskReview>) -> Cell {
     let Some(judged) = judged else {
         return Cell::plain("");
     };
@@ -78,26 +78,20 @@ fn proven(review: &PlanReview, judged: Option<&TaskReview>) -> Cell {
     if let Some(owner) = borrowed {
         return Cell::toned(Tone::Caution, format!("`{owner}`'s test"));
     }
-    let held_to = |from: fn(&HeldTo) -> bool| {
-        judged
-            .criteria
-            .iter()
-            .filter(|criterion| from(&criterion.from))
-            .filter(|criterion| {
-                !matches!(criterion.from, HeldTo::Spec)
-                    || judged
-                        .files
-                        .iter()
-                        .any(|file| file.run_by.contains(&criterion.cmd))
-            })
-            .count()
-    };
-    let specified = review.spec.is_some() && !judged.files.is_empty();
-    match (specified, held_to(|from| matches!(from, HeldTo::Spec))) {
+    let specified = judged
+        .criteria
+        .iter()
+        .any(|criterion| matches!(criterion.from, HeldTo::Spec))
+        || !judged.files.is_empty();
+    match (specified, judged.spec_tests_that_run()) {
         (true, 0) => Cell::toned(Tone::Caution, "no test runs its spec"),
         (true, tests) => Cell::plain(counted(tests, "spec test")),
         (false, _) => Cell::plain(counted(
-            held_to(|from| matches!(from, HeldTo::Plan)),
+            judged
+                .criteria
+                .iter()
+                .filter(|criterion| matches!(criterion.from, HeldTo::Plan))
+                .count(),
             "plan check",
         )),
     }

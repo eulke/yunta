@@ -12,8 +12,8 @@
 //! from the task it explains.
 
 use yunta_core::events::AcceptedDeparture;
-use yunta_core::shown::PlanReview;
-use yunta_core::text::counted;
+use yunta_core::shown::{Answered, HeldTo, PlanReview, TaskReview};
+use yunta_core::text::{agreeing, counted};
 use yunta_core::{Decision, ScopeGlob, Task, TasksFile};
 
 use crate::blocks::{Fields, Marked, Next, Prose, Section};
@@ -63,6 +63,7 @@ pub fn document(review: &PlanReview, of: &str, run: &str, form: Form) -> Doc<'st
     if let Some(description) = said(&plan.description) {
         doc = described(doc.with(blank()), description, form);
     }
+    doc = decisions(doc, review);
     doc = designed(doc, plan, &steps);
     doc = bounded(doc, review);
     let total = steps.len();
@@ -116,19 +117,38 @@ fn bounded(mut doc: Doc<'static>, review: &PlanReview) -> Doc<'static> {
 }
 
 /// How big the plan is, in one line: its tasks and steps, and the tests
-/// the spec holds them to.
+/// the spec holds them to — only those that run what the spec wrote.
 fn sized(plan: &TasksFile, steps: usize, review: &PlanReview) -> String {
     let tasks = counted(plan.tasks.len(), "task");
     let mut said = match steps {
         0 | 1 => tasks,
         n => format!("{tasks} in {n} steps"),
     };
-    if let Some(spec) = &review.spec {
-        let tests: usize = spec.specs.iter().map(|spec| spec.tests.len()).sum();
-        said.push_str(&format!(
-            ", held to {} from its spec",
-            counted(tests, "test")
-        ));
+    if review.spec.is_some() {
+        let tests: usize = review
+            .tasks
+            .iter()
+            .map(|task| {
+                task.criteria
+                    .iter()
+                    .filter(|criterion| matches!(criterion.from, HeldTo::Spec))
+                    .count()
+            })
+            .sum();
+        let running: usize = review
+            .tasks
+            .iter()
+            .map(TaskReview::spec_tests_that_run)
+            .sum();
+        let idle = tests - running;
+        said.push_str(&match idle {
+            0 => format!(", held to {} from its spec", counted(tests, "test")),
+            _ => format!(
+                ", held to {running} of its {}: {idle} {} nothing the spec wrote",
+                counted(tests, "spec test"),
+                agreeing(idle, "runs", "run")
+            ),
+        });
     }
     said
 }
@@ -215,18 +235,39 @@ fn described(doc: Doc<'static>, description: &str, form: Form) -> Doc<'static> {
     }
 }
 
-/// What the plan decided, and how it is built: each decision, the design,
-/// and where each shape's code is.
-fn designed(mut doc: Doc<'static>, plan: &TasksFile, steps: &[Vec<&Task>]) -> Doc<'static> {
-    if !plan.decisions.is_empty() {
-        let blocks = plan
-            .decisions
-            .iter()
-            .enumerate()
-            .map(|(at, decision)| decided(at + 1, decision).into())
-            .collect();
-        doc = doc.with(titled("decided for you", blocks));
+/// What the plan decided: what a person answered, and what the plan
+/// decided for them.
+fn decisions(mut doc: Doc<'static>, review: &PlanReview) -> Doc<'static> {
+    let plan = &review.plan;
+    let answer_of = |decision: &Decision| {
+        let id = decision.answers.as_ref()?;
+        review.answered.iter().find(|answered| answered.id == *id)
+    };
+    let yours: Vec<Block<'static>> = plan
+        .decisions
+        .iter()
+        .filter_map(|decision| Some((decision, answer_of(decision)?)))
+        .enumerate()
+        .map(|(at, (decision, answered))| restated(at + 1, decision, answered).into())
+        .collect();
+    if !yours.is_empty() {
+        doc = doc.with(titled("you answered", yours));
     }
+    let ours: Vec<Block<'static>> = plan
+        .decisions
+        .iter()
+        .filter(|decision| answer_of(decision).is_none())
+        .enumerate()
+        .map(|(at, decision)| decided(at + 1, decision).into())
+        .collect();
+    if !ours.is_empty() {
+        doc = doc.with(titled("decided for you", ours));
+    }
+    doc
+}
+
+/// How the plan is built: the design, and where each shape's code is.
+fn designed(doc: Doc<'static>, plan: &TasksFile, steps: &[Vec<&Task>]) -> Doc<'static> {
     if said(&plan.design).is_none() && plan.shapes.is_empty() {
         return doc;
     }
@@ -278,6 +319,19 @@ fn decided(at: usize, decision: &Decision) -> Section<'static> {
         mark: None,
         title: Line::new().push(Tone::Strong, format!("{at}  {}", decision.question)),
         blocks: vec![fields.into()],
+    }
+}
+
+/// A decision that restates what a person answered: their words, and
+/// what the plan does with them.
+fn restated(at: usize, decision: &Decision, answered: &Answered) -> Section<'static> {
+    Section {
+        mark: None,
+        title: Line::new().push(Tone::Strong, format!("{at}  {}", answered.question)),
+        blocks: vec![Fields::new()
+            .push_if("you said", answered.answer.as_str())
+            .push_if("the plan", decision.choice.as_str())
+            .into()],
     }
 }
 

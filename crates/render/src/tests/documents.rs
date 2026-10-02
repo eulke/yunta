@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::events::FindingSeverity;
 use yunta_core::shown::{
-    DeniedChange, HeldTo, JudgedCriterion, PlanReview, SpecFileReview, TaskReview,
+    Answered, DeniedChange, HeldTo, JudgedCriterion, PlanReview, SpecFileReview, TaskReview,
 };
 use yunta_core::{FindingsFile, SpecFile, TasksFile};
 use yunta_testkit_core::golden::{assert_golden, ENVIRONMENTS};
@@ -36,6 +36,10 @@ decisions:
     choice: It greets `world`.
     alternatives: [Refuse to run, Ask for a name]
     why: A program run with no arguments should still say something.
+  - id: greeting-word
+    question: Which word greets?
+    choice: It says `hello`.
+    answers: greeting-word
 shapes:
   - name: Greeter
     owner: greet
@@ -74,11 +78,16 @@ tasks:
     criteria:
       - cmd: cargo test --test greet
         proves: the program also says goodbye
+      - cmd: cargo test --test greet_alone
+        proves: the greeting still reads as it did
+        type: guard
     changes:
       - at: src/greet.rs::Greeter::bye
         what: the goodbye, beside the greeting
     uses: [Greeter]
     outcome: "`hello ana` prints a goodbye after the greeting."
+    invariants:
+      - The greeting reads as it did.
 "#;
 
 const SPEC: &str = r#"
@@ -149,10 +158,19 @@ fn review() -> PlanReview {
                 }],
                 denied: Vec::new(),
                 files: Vec::new(),
-                guards: Vec::new(),
+                guards: vec![JudgedCriterion {
+                    cmd: "cargo test --test greet_alone".to_string(),
+                    proves: Some("the greeting still reads as it did".to_string()),
+                    from: HeldTo::Plan,
+                }],
             },
         ],
         handed_over: None,
+        answered: vec![Answered {
+            id: "greeting-word".into(),
+            question: "Which word should the greeting use?".to_string(),
+            answer: "hello".to_string(),
+        }],
     }
 }
 
@@ -275,5 +293,82 @@ fn a_task_whose_spec_no_test_runs_is_marked_on_the_plan_s_map() {
         row.trim_start()
             .starts_with(look.glyphs.mark(crate::Mark::Caution)),
         "{row}"
+    );
+}
+
+/// `review` as a reader at a wide, plain terminal sees it.
+fn read(review: &PlanReview) -> String {
+    let look = Look {
+        ink: crate::ink::Ink::Plain,
+        ..Look::of(&ENVIRONMENTS[0])
+    };
+    Terminal::on(look).draw(&document(review, " of `plan`", "7E5PH4", Form::Review))
+}
+
+#[test]
+fn a_spec_file_no_test_runs_is_never_said_to_test_the_task() {
+    let mut review = review();
+    review.tasks[0].files[0].run_by.clear();
+
+    let drawn = read(&review);
+
+    assert!(
+        !drawn.contains("the spec wrote it, and this command runs it"),
+        "{drawn}"
+    );
+    assert!(
+        drawn.contains("tests/greet.rs — written by the spec; none of its tests runs it"),
+        "{drawn}"
+    );
+    assert!(
+        drawn
+            .lines()
+            .next()
+            .is_some_and(|title| title
+                .ends_with("held to 0 of its 1 spec test: 1 runs nothing the spec wrote")),
+        "{drawn}"
+    );
+}
+
+#[test]
+fn a_decision_that_restates_an_answer_says_you_answered_it() {
+    let drawn = read(&review());
+
+    let yours = drawn
+        .find("you answered")
+        .expect("a section of what you answered");
+    let ours = drawn
+        .find("decided for you")
+        .expect("a section of what the plan decided");
+    let answered = drawn
+        .find("Which word should the greeting use?")
+        .expect("the question as the run asked it");
+    assert!(yours < answered && answered < ours, "{drawn}");
+    assert!(drawn.contains("you said     hello"), "{drawn}");
+    assert!(
+        !drawn[ours..].contains("Which word greets?"),
+        "a decision a person answered is not one the plan made for them: {drawn}"
+    );
+}
+
+#[test]
+fn a_task_with_no_guard_says_only_the_suite_checks_what_it_keeps() {
+    let drawn = read(&review());
+
+    let greet = drawn.find("greet — Greet by name").expect("greet's card");
+    let farewell = drawn
+        .find("farewell — Say goodbye")
+        .expect("farewell's card");
+    assert!(
+        drawn[greet..farewell].contains("checked by   nothing but the suite"),
+        "{drawn}"
+    );
+    assert!(
+        drawn[farewell..].contains("checked by   the greeting still reads as it did"),
+        "{drawn}"
+    );
+    assert!(
+        drawn[farewell..].contains("$ cargo test --test greet_alone"),
+        "{drawn}"
     );
 }

@@ -30,6 +30,7 @@ pub fn review(
         suite: suite.map(str::to_string),
         tasks,
         handed_over: None,
+        answered: Vec::new(),
     }
 }
 

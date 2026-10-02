@@ -40,6 +40,7 @@ async fn held_documents(
     state: &RunState,
 ) -> Result<Vec<ShownDocument>, super::HeldError> {
     let store = ObjectStore::at(run_dir);
+    let answered = answered(&store, state).await?;
     let mut documents = Vec::with_capacity(shows.len());
     for shown in shows {
         let bytes = store.get(&shown.content_hash).await?;
@@ -55,7 +56,11 @@ async fn held_documents(
             }
             ArtifactId::Interpreted {
                 kind: ArtifactKind::Tasks,
-            } => ShownContent::Tasks(Box::new(plan_reviewed(shown, &bytes, &path, state)?)),
+            } => {
+                let mut review = plan_reviewed(shown, &bytes, &path, state)?;
+                review.answered = answered.clone();
+                ShownContent::Tasks(Box::new(review))
+            }
             ArtifactId::Interpreted {
                 kind: ArtifactKind::Spec,
             } => ShownContent::Spec(yunta_core::shape::read::<yunta_core::SpecFile>(
@@ -143,6 +148,51 @@ fn plan_reviewed(
     Ok(review)
 }
 
+/// Each question the run asked that a person answered, from the latest
+/// questions and answers it holds.
+async fn answered(
+    store: &ObjectStore<'_>,
+    state: &RunState,
+) -> Result<Vec<yunta_core::shown::Answered>, super::HeldError> {
+    let (Some(questions), Some(answers)) = (
+        held::<yunta_core::QuestionsFile>(store, state).await?,
+        held::<yunta_core::AnswersFile>(store, state).await?,
+    ) else {
+        return Ok(Vec::new());
+    };
+    Ok(answers
+        .answers
+        .into_iter()
+        .filter_map(|answer| {
+            let asked = questions
+                .questions
+                .iter()
+                .find(|question| question.id == answer.id)?;
+            Some(yunta_core::shown::Answered {
+                question: asked.text.clone(),
+                id: answer.id,
+                answer: answer.value,
+            })
+        })
+        .collect())
+}
+
+/// The latest document of its kind the run holds, read from its bytes.
+async fn held<T: yunta_core::shape::Document>(
+    store: &ObjectStore<'_>,
+    state: &RunState,
+) -> Result<Option<T>, super::HeldError> {
+    let kind = ArtifactId::Interpreted { kind: T::KIND };
+    let Some(held) = state.artifacts.latest(&kind, None) else {
+        return Ok(None);
+    };
+    let bytes = store.get(&held.content_hash).await?;
+    Ok(Some(yunta_core::shape::read::<T>(
+        &bytes,
+        held.artifact.view_name(),
+    )?))
+}
+
 /// `documents` with a spec shown beside a plan read on the plan's tasks:
 /// its tests are what judges them, and a second document after the plan
 /// would put each test a screen away from the task it holds.
@@ -161,14 +211,17 @@ fn beside_its_plan(mut documents: Vec<ShownDocument>) -> Vec<ShownDocument> {
     };
     for document in &mut documents {
         if let ShownContent::Tasks(review) = &mut document.content {
-            let handed_over = review.handed_over.take();
-            **review = crate::tasks::plan_review(
+            let read = crate::tasks::plan_review(
                 review.plan.clone(),
                 Some(spec.clone()),
                 review.suite.as_deref(),
                 review.departed.clone(),
             );
-            review.handed_over = handed_over;
+            **review = yunta_core::shown::PlanReview {
+                handed_over: review.handed_over.take(),
+                answered: std::mem::take(&mut review.answered),
+                ..read
+            };
         }
     }
     documents

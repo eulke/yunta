@@ -11,6 +11,12 @@
   The program says nothing today. It will greet whoever runs it by name, and say goodbye.
   ␛[2mdiagram     ␛[0m in the whole plan
 
+  ␛[1myou answered␛[0m
+
+    ␛[1m1  Which word should the greeting use?␛[0m
+      ␛[2myou said    ␛[0m hello
+      ␛[2mthe plan    ␛[0m It says `hello`.
+
   ␛[1mdecided for you␛[0m
 
     ␛[1m1  What does it say when no name is given?␛[0m
@@ -39,6 +45,7 @@
       ␛[2myou will see␛[0m `hello ana` prints `hello, ana`.
       ␛[2mtouches     ␛[0m src/{greet.rs, main.rs}, tests/greet.rs
       ␛[2mkeeps       ␛[0m With no name it still greets `world`.
+      ␛[2mchecked by  ␛[0m nothing but the suite
 
       ␛[1msrc/greet.rs › Greeter␛[0m                                                                 ␛[2m7 lines␛[0m
         the type that holds the name and words the greeting
@@ -55,7 +62,7 @@
       ␛[2mdone when   ␛[0m the greeting names the person
       ␛[2m            ␛[0m ␛[1m$ cargo test --test greet␛[0m
       ␛[1mtests/greet.rs␛[0m                                                                         ␛[2m5 lines␛[0m
-        the test the spec wrote for this task
+        the spec wrote it, and this command runs it
         ␛[2m│ ␛[0m#[test]
         ␛[2m│ ␛[0mfn the_greeting_names_the_person() {
         ␛[2m│ ␛[0m    let said = run(&["ana"]);
@@ -68,6 +75,9 @@
       ␛[2myou will see␛[0m `hello ana` prints a goodbye after the greeting.
       ␛[2mtouches     ␛[0m src/greet.rs, tests/greet.rs
       ␛[2muses        ␛[0m Greeter (from greet)
+      ␛[2mkeeps       ␛[0m The greeting reads as it did.
+      ␛[2mchecked by  ␛[0m the greeting still reads as it did
+      ␛[2m            ␛[0m ␛[1m$ cargo test --test greet_alone␛[0m
       ␛[2mafter       ␛[0m greet
 
       ␛[1msrc/greet.rs › Greeter › bye␛[0m

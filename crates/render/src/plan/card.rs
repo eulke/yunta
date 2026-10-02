@@ -16,7 +16,7 @@ use crate::Mark;
 /// for it; then what proves it done, with the code of the test.
 pub(super) fn card(task: &Task, review: &PlanReview, form: Form, run: &str) -> Section<'static> {
     let judged = review.tasks.iter().find(|judged| judged.task == task.id);
-    let mut blocks: Vec<Block<'static>> = vec![facts(task, &review.plan).into()];
+    let mut blocks: Vec<Block<'static>> = vec![facts(task, &review.plan, judged).into()];
     for change in changes(task, &review.plan, judged) {
         blocks.push(blank());
         blocks.push(change);
@@ -25,6 +25,27 @@ pub(super) fn card(task: &Task, review: &PlanReview, form: Form, run: &str) -> S
         for criterion in &judged.criteria {
             blocks.push(blank());
             blocks.extend(proved(criterion, judged, review, form, run));
+        }
+        let unrun: Vec<String> = judged
+            .files
+            .iter()
+            .filter(|file| file.run_by.is_empty())
+            .map(|file| {
+                format!(
+                    "{} — written by the spec; none of its tests runs it",
+                    file.path
+                )
+            })
+            .collect();
+        if !unrun.is_empty() {
+            blocks.push(blank());
+            blocks.push(
+                Marked {
+                    mark: Mark::Caution,
+                    items: unrun,
+                }
+                .into(),
+            );
         }
     }
     Section {
@@ -36,8 +57,9 @@ pub(super) fn card(task: &Task, review: &PlanReview, form: Form, run: &str) -> S
     }
 }
 
-/// What a task's card says in words.
-fn facts(task: &Task, plan: &TasksFile) -> Fields {
+/// What a task's card says in words: what it keeps beside what checks
+/// that it does.
+fn facts(task: &Task, plan: &TasksFile, judged: Option<&TaskReview>) -> Fields {
     let mut fields = Fields::new();
     if let Some(outcome) = said(&task.outcome) {
         fields = fields.push_if("you will see", outcome);
@@ -59,9 +81,34 @@ fn facts(task: &Task, plan: &TasksFile) -> Fields {
     for (n, invariant) in task.invariants.iter().enumerate() {
         fields = fields.push_if(if n == 0 { "keeps" } else { "" }, invariant.as_str());
     }
+    fields = checked(fields, task, judged);
     if !task.depends_on.is_empty() {
         let after: Vec<&str> = task.depends_on.iter().map(|id| id.as_str()).collect();
         fields = fields.push_if("after", after.join(", "));
+    }
+    fields
+}
+
+/// What checks that a task keeps what it promises: each of its guards,
+/// or that only the suite does.
+fn checked(mut fields: Fields, task: &Task, judged: Option<&TaskReview>) -> Fields {
+    let guards = judged
+        .map(|judged| judged.guards.as_slice())
+        .unwrap_or_default();
+    if guards.is_empty() {
+        if !task.invariants.is_empty() {
+            fields = fields.push_if("checked by", "nothing but the suite");
+        }
+        return fields;
+    }
+    for (n, guard) in guards.iter().enumerate() {
+        let label = if n == 0 { "checked by" } else { "" };
+        fields = match guard.proves.as_deref() {
+            Some(proves) => fields
+                .push_if(label, proves)
+                .push_command("", format!("$ {}", guard.cmd)),
+            None => fields.push_command(label, format!("$ {}", guard.cmd)),
+        };
     }
     fields
 }
@@ -172,7 +219,7 @@ fn tests_run(
                 .unwrap_or_default();
             let code = Code::whole(
                 file.path.as_str(),
-                Some("the test the spec wrote for this task".to_string()),
+                Some("the spec wrote it, and this command runs it".to_string()),
                 content,
             );
             match form {

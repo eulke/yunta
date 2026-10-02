@@ -4,7 +4,7 @@
 use crate::events::artifacts::HandedOver;
 use crate::events::findings::RunFindings;
 use crate::events::{AcceptedDeparture, Shown};
-use crate::{FindingsFile, SpecFile, TaskId, TasksFile};
+use crate::{FindingsFile, QuestionId, SpecFile, TaskId, TasksFile};
 
 /// One document an escalation shows, as the run holds it: what the log
 /// names, where its view sits, and what it says.
@@ -52,6 +52,17 @@ pub struct PlanReview {
     pub tasks: Vec<TaskReview>,
     /// How its planner handed it over, when the run's log says.
     pub handed_over: Option<HandedOver>,
+    /// Each question the run asked that a person answered: a decision
+    /// that `answers` one restates what they said.
+    pub answered: Vec<Answered>,
+}
+
+/// A question the run asked, and what a person answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Answered {
+    pub id: QuestionId,
+    pub question: String,
+    pub answer: String,
 }
 
 impl PlanReview {
@@ -225,6 +236,26 @@ pub struct TaskReview {
     /// The task's own guards — what checks what it keeps — the suite
     /// aside.
     pub guards: Vec<JudgedCriterion>,
+}
+
+impl TaskReview {
+    /// How many of the spec's tests the task is held to run a file the
+    /// spec wrote — every one of them when the spec wrote none. A test
+    /// that runs none of the spec's files holds the task to nothing the
+    /// spec says.
+    pub fn spec_tests_that_run(&self) -> usize {
+        self.criteria
+            .iter()
+            .filter(|criterion| matches!(criterion.from, HeldTo::Spec))
+            .filter(|criterion| {
+                self.files.is_empty()
+                    || self
+                        .files
+                        .iter()
+                        .any(|file| file.run_by.contains(&criterion.cmd))
+            })
+            .count()
+    }
 }
 
 /// A file the spec wrote for a task, and the commands of its tests that

@@ -20,6 +20,13 @@ graph LR
   Name --> Greeting
 ```
 
+### you answered
+
+#### 1  Which word should the greeting use?
+
+- you said: hello
+- the plan: It says `hello`.
+
 ### decided for you
 
 #### 1  What does it say when no name is given?
@@ -55,6 +62,7 @@ graph LR
 - you will see: `hello ana` prints `hello, ana`.
 - touches: src/{greet.rs, main.rs}, tests/greet.rs
 - keeps: With no name it still greets `world`.
+- checked by: nothing but the suite
 
 `src/greet.rs › Greeter` — the type that holds the name and words the greeting
 
@@ -73,7 +81,7 @@ impl Greeter {
 - done when: the greeting names the person  
   `$ cargo test --test greet`
 
-`tests/greet.rs` — the test the spec wrote for this task
+`tests/greet.rs` — the spec wrote it, and this command runs it
 
 ```rust
 #[test]
@@ -90,6 +98,9 @@ fn the_greeting_names_the_person() {
 - you will see: `hello ana` prints a goodbye after the greeting.
 - touches: src/greet.rs, tests/greet.rs
 - uses: Greeter (from greet)
+- keeps: The greeting reads as it did.
+- checked by: the greeting still reads as it did  
+  `$ cargo test --test greet_alone`
 - after: greet
 
 `src/greet.rs › Greeter › bye` — the goodbye, beside the greeting
