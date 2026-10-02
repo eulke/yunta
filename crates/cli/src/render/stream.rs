@@ -18,8 +18,20 @@ static GLYPHS: OnceLock<Glyphs> = OnceLock::new();
 
 /// Fixes this process's color policy. `main` calls it once, before
 /// anything is printed; a later call changes nothing.
+///
+/// The menu a prompt draws is drawn by a library that decides color for
+/// itself, from the environment alone: it is told here what this policy
+/// decided for stderr, so `--color never` and `NO_COLOR` reach the menu
+/// as they reach every other line.
 pub(crate) fn settle_color(policy: ColorPolicy) {
+    dialoguer::console::set_colors_enabled_stderr(paints(&policy, std::io::stderr().is_terminal()));
     POLICY.get_or_init(|| policy);
+}
+
+/// Whether a stream that is a terminal or not, under `policy`, gets
+/// paint at all.
+fn paints(policy: &ColorPolicy, terminal: bool) -> bool {
+    policy.ink(terminal) != Ink::Plain
 }
 
 /// Fixes the width this process's reader asked for — `COLUMNS`, when it
@@ -106,4 +118,29 @@ pub(crate) fn stdout_look() -> Look {
 /// How wide `term` is, when it is a terminal at all.
 fn measured(term: &Term) -> Option<usize> {
     term.size_checked().map(|(_, columns)| usize::from(columns))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_menu_is_painted_exactly_when_the_stream_it_draws_on_is() {
+        let never = ColorPolicy {
+            when: ColorWhen::Never,
+            ..ColorPolicy::default()
+        };
+        let no_color = ColorPolicy {
+            no_color: true,
+            ..ColorPolicy::default()
+        };
+        let always = ColorPolicy {
+            when: ColorWhen::Always,
+            ..ColorPolicy::default()
+        };
+        assert!(!paints(&never, true));
+        assert!(!paints(&no_color, true));
+        assert!(paints(&always, false));
+        assert!(paints(&ColorPolicy::default(), true));
+    }
 }
