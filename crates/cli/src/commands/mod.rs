@@ -337,6 +337,19 @@ pub(crate) async fn context_files_at_head(
     context_files(ctx, workflow, None, isolation, &base).await
 }
 
+/// The line a run starts with: its whole id — the record a script and a
+/// log keep — what is happening to it, and the command that follows it
+/// by its handle. Under `--quiet`, the id and nothing else.
+pub(crate) fn started(run_id: &yunta_core::RunId, doing: &str, quiet: bool) {
+    match quiet {
+        true => println!("{run_id}"),
+        false => println!(
+            "run {run_id}: {doing} — `{}` follows it",
+            advice::status(run_id.handle())
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

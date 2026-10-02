@@ -10,7 +10,7 @@ use std::path::Path;
 use yunta_core::ConfigLayer;
 
 use crate::context::Context;
-use crate::error::{note, CliError, Outcome};
+use crate::error::{CliError, Outcome};
 use crate::{load_yaml, project};
 
 pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<Outcome, CliError> {
@@ -49,12 +49,13 @@ pub async fn check(workflow_path: &Path, config_path: Option<&Path>) -> Result<O
     let opened = super::stats::history(&ctx, &workflow.name).await;
     let (history, _) = super::stats::raw_history(&opened);
     let findings = yunta_engine::analyze_verification_effectiveness(&workflow, &history);
-    let text = super::stats::render_verification_findings(&findings);
-    if !text.is_empty() {
-        note(format!("\n{text}"));
+    let outcome = verdict.report(&ctx, workflow_path.display()).await;
+    // Advice after the verdict, which is what was asked for.
+    if let Some(advice) = super::stats::verification_findings(&findings) {
+        let look = crate::render::stdout_look();
+        print!("\n{}", crate::render::draw(advice, &look));
     }
-
-    Ok(verdict.report(&ctx, workflow_path.display()).await)
+    Ok(outcome)
 }
 
 /// The config `check` judges against, and what its layers refuse among

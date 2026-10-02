@@ -6,6 +6,9 @@ use yunta_core::{ModeName, WorkflowName};
 use yunta_engine::{prior_estimation, RunSummary};
 
 use super::format_estimation_line;
+use crate::render::blocks::{Checklist, Found};
+use crate::render::doc::{Block, Doc};
+use crate::render::ink::{Line, Tone};
 use crate::render::{cell_width, sparkline, truncate, Look, Tokens, INDENT, LABEL_WIDTH};
 
 /// The whole `yunta stats --workflow <name>` block, ready to print.
@@ -76,61 +79,88 @@ fn cptv_line(history: &[RunSummary], Look { glyphs, width, .. }: Look) -> String
 }
 
 /// Verification-effectiveness findings — advisory only, never a reason
-/// `stats` or `check` exits non-zero: these are suggestions for a
-/// person to weigh,
-/// not errors. Returns the rendered text (empty if there's nothing to
-/// say) so each caller can send it to stdout (`stats`) or stderr
-/// (`check`, alongside its own warnings) without duplicating the
-/// wording.
-pub(crate) fn render_verification_findings(
+/// `stats` or `check` exits non-zero: these are suggestions for a person
+/// to weigh, not errors, each a caution row. `None` when there is
+/// nothing to say, so each caller says nothing at all.
+pub(crate) fn verification_findings(
     findings: &yunta_engine::VerificationFindings,
-) -> String {
+) -> Option<Doc<'static>> {
     if findings.is_empty() {
-        return String::new();
+        return None;
     }
-    let mut out = String::new();
-    out.push_str("verification performance — advisory, nothing here is acted on automatically:\n");
+    Some(
+        Doc::new()
+            .with(Block::Title(
+                Line::new()
+                    .push(Tone::Strong, "how its checks performed")
+                    .push(Tone::Muted, ": advice, nothing here is acted on"),
+            ))
+            .with(advice(findings)),
+    )
+}
+
+/// One caution row per thing a workflow's history says about its checks.
+fn advice(findings: &yunta_engine::VerificationFindings) -> Checklist {
+    let runs = |n| yunta_core::text::counted(n, "run");
+    let mut checks = Checklist::default();
     for c in &findings.never_red_criteria {
-        out.push_str(&format!(
-            "{INDENT}criterion `{}` was never red in pre-check across {} — \
-             either redundant, or mis-written (both readings shown, never just one)\n",
-            c.cmd,
-            yunta_core::text::counted(c.sample_count, "run")
-        ));
+        checks.push(
+            Found::Caution,
+            format!("criterion `{}`", c.cmd),
+            format!(
+                "never red in pre-check across {} — either redundant, or mis-written",
+                runs(c.sample_count)
+            ),
+        );
     }
     for r in &findings.never_triggered_reroutes {
-        out.push_str(&format!(
-            "{INDENT}node `{}`'s re-route to `{}` never fired across {} — \
-             the prior flow is more reliable than expected\n",
-            r.node,
-            r.goto,
-            yunta_core::text::counted(r.sample_count, "run")
-        ));
+        checks.push(
+            Found::Caution,
+            format!("node `{}`", r.node),
+            format!(
+                "its re-route to `{}` never fired across {} — the flow before it is more \
+                 reliable than expected",
+                r.goto,
+                runs(r.sample_count)
+            ),
+        );
     }
+    habits(&mut checks, findings);
+    checks
+}
+
+/// What the history says about a workflow's gates, tasks and modes.
+fn habits(checks: &mut Checklist, findings: &yunta_engine::VerificationFindings) {
     for g in &findings.always_approved_gates {
-        out.push_str(&format!(
-            "{INDENT}gate `{}` was approved without adjustment across {} — \
-             still adding value, or become ritual?\n",
-            g.node,
-            yunta_core::text::counted(g.sample_count, "resolution")
-        ));
+        checks.push(
+            Found::Caution,
+            format!("gate `{}`", g.node),
+            format!(
+                "approved without adjustment across {} — still adding value, or become ritual?",
+                yunta_core::text::counted(g.sample_count, "resolution")
+            ),
+        );
     }
     if let Some(t) = &findings.always_first_try_tasks {
-        out.push_str(&format!(
-            "{INDENT}every task passed on its first try across {} — \
-             the plan may be cutting too fine\n",
-            yunta_core::text::counted(t.sample_count, "task instance")
-        ));
+        checks.push(
+            Found::Caution,
+            "every task",
+            format!(
+                "passed on its first try across {} — the plan may be cutting too fine",
+                yunta_core::text::counted(t.sample_count, "task instance")
+            ),
+        );
     }
     for m in &findings.unused_modes {
-        out.push_str(&format!(
-            "{INDENT}mode `{}` was never chosen across {} — \
-             still worth declaring?\n",
-            m.name,
-            yunta_core::text::counted(m.runs_observed, "run")
-        ));
+        checks.push(
+            Found::Caution,
+            format!("mode `{}`", m.name),
+            format!(
+                "never chosen across {} — still worth declaring?",
+                yunta_core::text::counted(m.runs_observed, "run")
+            ),
+        );
     }
-    out
 }
 
 /// Median CPTV/tokens per mode — a plain historical comparison, not a

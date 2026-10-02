@@ -88,6 +88,30 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
+/// `text` wrapped like [`wrap`], except that a word wider than the column
+/// is never cut: it takes a line of its own, whole, and runs past the
+/// edge. For a value a reader copies — a path, a branch, a command —
+/// where a cut leaves two halves nobody can open.
+pub fn wrap_unbroken(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let spaced = usize::from(!line.is_empty());
+        if cell_width(&line) + spaced + cell_width(word) > width && !line.is_empty() {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() || lines.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
 /// `line` in pieces that each occupy `width` display cells or fewer, cut
 /// between clusters and nowhere else — for text whose spacing is its
 /// meaning, like a line of code, which [`wrap`] would re-flow.
@@ -246,6 +270,13 @@ fn pad(mut text: String, cells: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_path_wider_than_the_column_is_never_cut() {
+        let path = "~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4/and/deeper";
+        let lines = wrap_unbroken(&format!("off main, in {path}"), 30);
+        assert_eq!(lines, vec!["off main, in", path]);
+    }
 
     /// Ten cells is the column; each name below asks for it and, counted
     /// in characters instead of cells, takes a different number.

@@ -98,9 +98,10 @@ fn quiet_prints_one_line_and_lets_the_exit_code_carry_the_verdict() {
         "quiet is one line and nothing else, got: {text:?}"
     );
     let run_id = run_id_from(&run);
-    assert!(
-        text.starts_with(&format!("run {run_id}:")),
-        "the line every run-based test reads the id from: {text:?}"
+    assert_eq!(
+        text.trim_end(),
+        run_id,
+        "the run's id and nothing else, as its help says: {text:?}"
     );
     assert_eq!(
         stderr(&run),
@@ -140,9 +141,10 @@ fn resume_is_quiet_on_the_same_terms_run_is() {
         "one line from either command, got: {:?}",
         stdout(&resumed)
     );
-    assert!(
-        stdout(&resumed).starts_with(&format!("run {run_id}:")),
-        "carrying the run id: {:?}",
+    assert_eq!(
+        stdout(&resumed).trim_end(),
+        run_id,
+        "the run id and nothing else, as from `run`: {:?}",
         stdout(&resumed)
     );
     assert_eq!(

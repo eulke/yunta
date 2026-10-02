@@ -2,7 +2,8 @@
 
 use super::Drawn;
 use crate::ink::{Line, Tone};
-use crate::{cell_width, wrap, Look, INDENT, LABEL_WIDTH};
+use crate::width::wrap_unbroken;
+use crate::{cell_width, Look, INDENT, LABEL_WIDTH};
 
 /// Labelled rows. A fact with nothing to say is not a row: a label over
 /// an empty value tells a reader to look for something that is not
@@ -53,7 +54,7 @@ impl Drawn for Fields {
         let room = look.width.cells().saturating_sub(cell_width(&under));
         let mut lines = Vec::new();
         for (label, value, tone) in &self.rows {
-            for (at, part) in wrap(value, room).into_iter().enumerate() {
+            for (at, part) in wrap_unbroken(value, room).into_iter().enumerate() {
                 lines.push(match at {
                     0 => Line::new()
                         .plain(INDENT)

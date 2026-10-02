@@ -78,7 +78,7 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
         // because only one of them is a broken file on their disk.
         yunta_engine::Registry::Corrupt(error) => {
             return Err(CliError::msg(format!(
-                "run `{called}`: its `engine.json` is there and this binary cannot read it \
+                "run {called}: its `engine.json` is there and this binary cannot read it \
                  ({}) — `{}` recovers the run once its process has stopped.",
                 describe(&error),
                 advice::resume(run_id.handle())
@@ -96,7 +96,7 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
                 return Ok(Outcome::Success);
             }
             return Err(CliError::msg(format!(
-                "run `{called}` has a node in progress but no `engine.json` to signal \
+                "run {called} has a node in progress but no `engine.json` to signal \
                  through — the engine that ran it predates this build, or its scratch \
                  directory is gone. `{}` recovers the run once its process has stopped.",
                 advice::resume(run_id.handle())

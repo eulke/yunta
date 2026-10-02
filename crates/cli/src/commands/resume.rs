@@ -61,7 +61,7 @@ pub async fn resume(run_id: &RunId, quiet: bool, json: bool) -> Result<Outcome, 
     } = parked(&ctx, run_id).await?;
     let storage = ctx.async_storage().await?;
     if !json {
-        println!("run {run_id}: resuming at {}", run_dir.display());
+        super::started(run_id, "resuming", quiet);
     }
     let prepared = Prepared {
         run_id: run_id.clone(),

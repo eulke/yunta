@@ -24,8 +24,8 @@ use crate::error::{CliError, Outcome};
 use crate::render::{duration, Tokens};
 use json::{RunStatsJson, WorkflowHistoryJson};
 use run::render_run_stats;
-pub(crate) use workflow::render_verification_findings;
 use workflow::render_workflow_history;
+pub(crate) use workflow::verification_findings;
 
 pub async fn stats(
     run_id: Option<&RunId>,
@@ -98,11 +98,9 @@ async fn stats_workflow(workflow_name: &WorkflowName, json: bool) -> Result<Outc
         "{}",
         render_workflow_history(workflow_name, &history, crate::render::stdout_look())
     );
-    if let Some(findings) = &findings {
-        let text = render_verification_findings(findings);
-        if !text.is_empty() {
-            println!("\n{text}");
-        }
+    if let Some(advice) = findings.as_ref().and_then(verification_findings) {
+        let look = crate::render::stdout_look();
+        print!("\n{}", crate::render::draw(advice, &look));
     }
     Ok(Outcome::Success)
 }

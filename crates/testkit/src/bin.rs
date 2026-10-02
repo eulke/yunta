@@ -126,7 +126,8 @@ pub fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
-/// The run id `yunta run` prints, parsed from a `run <id>: …` line — the
+/// The run id `yunta run` prints, parsed from a `run <id>: …` line or the
+/// id alone `--quiet` prints — the
 /// handle every follow-up command (`status`, `receipt`, `graph --run`)
 /// needs. Panics if no such line is present, naming what it saw.
 pub fn run_id_from(output: &Output) -> String {
@@ -172,6 +173,16 @@ pub fn full_run_id(home: &Path, called: &str) -> String {
 
 fn find_run_id(text: &str) -> Option<String> {
     text.lines().find_map(|line| {
+        // `--quiet` prints the id alone: a ULID, 26 characters of
+        // Crockford base32.
+        let alone = line.trim();
+        if alone.len() == 26
+            && alone
+                .bytes()
+                .all(|b| b.is_ascii_digit() || b.is_ascii_uppercase())
+        {
+            return Some(alone.to_string());
+        }
         line.strip_prefix("run ")
             .and_then(|rest| rest.split(':').next())
             .map(str::to_string)

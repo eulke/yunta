@@ -58,11 +58,7 @@ pub(super) async fn attached(attaching: Attaching<'_>) -> Result<Outcome, CliErr
     // rest of the run needs is the manifest.
     let manifest = frozen.manifest;
     if !json {
-        println!(
-            "run {}: created at {}",
-            prepared.run_id,
-            prepared.run_dir.display()
-        );
+        super::super::started(&prepared.run_id, "created", quiet);
     }
 
     let adapters = match mock_fixture {
