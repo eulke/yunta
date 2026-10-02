@@ -185,6 +185,7 @@ work held to its plan, PR).
 | `yunta pack audit <publisher>/<name>` | Prints a full static inventory of a pack's own workflows — every command, context source, per-node permission, agent, mcp server, executor and full untrimmed prompt — plus whether it ships tests and whether they pass. `add` runs this automatically before vendoring. |
 | `yunta mcp` | Runs the MCP control plane over stdio: `document_shape`, `list_workflows`, `run_workflow`, `workflow_status`, `resume_run`, `resolve_gate`, `answer_questions`. |
 | `yunta gc [--dry-run]` | Removes orphaned run and worktree directories, respecting `storage.retention_days`. |
+| `yunta completions <shell>` | Prints the script that completes `yunta`'s commands and flags in `bash`, `zsh`, `fish`, `powershell` or `elvish` — e.g. `yunta completions zsh > ~/.zfunc/_yunta`. |
 
 Every command takes `--color auto|always|never`. `auto` colors a stream that is a
 terminal, unless `NO_COLOR` is set or `CLICOLOR=0`; `CLICOLOR_FORCE` colors a pipe

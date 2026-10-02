@@ -37,6 +37,7 @@ axum = { version = "0.8", default-features = false }
 base64 = "0.22"
 chrono = "0.4"
 clap = "4"
+clap_complete = "4"
 futures = "0.3"
 globset = "0.4"
 dialoguer = { version = "0.12", default-features = false }

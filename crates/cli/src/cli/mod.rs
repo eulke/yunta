@@ -312,6 +312,15 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Print a shell's completion script.
+    ///
+    /// Prints the script that completes `yunta`'s commands and flags in
+    /// `shell`: source it from the shell's startup file, or write it
+    /// where the shell loads completions from.
+    Completions {
+        /// The shell to complete in.
+        shell: clap_complete::Shell,
+    },
     /// Write a new workflow from a skeleton.
     ///
     /// Writes `.yunta/workflows/<name>.yaml` from a commented schema

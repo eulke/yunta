@@ -20,6 +20,7 @@ yunta-engine.workspace = true
 yunta-adapters.workspace = true
 yunta-storage.workspace = true
 clap = { workspace = true, features = ["derive"] }
+clap_complete.workspace = true
 chrono.workspace = true
 serde = { workspace = true, features = ["derive"] }
 # `yunta stats --json` — already a transitive dependency of every crate

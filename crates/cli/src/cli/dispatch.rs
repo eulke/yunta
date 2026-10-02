@@ -11,6 +11,16 @@ use crate::graph;
 /// caller turns into a line on stderr and a failing exit code.
 pub(super) async fn dispatch(command: Command) -> Result<Outcome, CliError> {
     match command {
+        Command::Completions { shell } => {
+            use clap::CommandFactory;
+            clap_complete::generate(
+                shell,
+                &mut super::Cli::command(),
+                "yunta",
+                &mut std::io::stdout(),
+            );
+            Ok(Outcome::Success)
+        }
         Command::Check { workflow, config } => {
             commands::check::check(&workflow, config.as_deref()).await
         }
