@@ -373,7 +373,11 @@ pub async fn update(
     );
     save_lock(&cwd, &lock)?;
 
-    println!("updated {pack} -> {new_ref} ({})", commit.abbreviated());
+    println!(
+        "updated {pack} {} {new_ref} ({})",
+        crate::render::Glyphs::from_env().arrow(),
+        commit.abbreviated()
+    );
     Ok(Outcome::Success)
 }
 

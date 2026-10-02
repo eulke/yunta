@@ -209,9 +209,12 @@ expect:
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
-        text.trim_end(),
-        "case happy-path ... ok\n1 case, 0 failed",
-        "the one case runs against the mock adapter and every expectation holds"
+        (
+            yunta_testkit::checked(&text, "happy-path").as_deref(),
+            text.lines().last()
+        ),
+        (Some("ok"), Some("1 case, 0 failed")),
+        "the one case runs against the mock adapter and every expectation holds: {text}"
     );
 }
 
@@ -247,7 +250,11 @@ fn a_case_expecting_a_node_its_mode_leaves_out_to_be_skipped_passes() {
         "stdout: {text}\nstderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(text.contains("case short-skips-second ... ok"), "{text}");
+    assert_eq!(
+        yunta_testkit::checked(&text, "short-skips-second").as_deref(),
+        Some("ok"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -330,9 +337,12 @@ expect:
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(
-        text.trim_end(),
-        "case from-a-document ... ok\n1 case, 0 failed",
-        "the loop finds the tasks the input brought in"
+        (
+            yunta_testkit::checked(&text, "from-a-document").as_deref(),
+            text.lines().last()
+        ),
+        (Some("ok"), Some("1 case, 0 failed")),
+        "the loop finds the tasks the input brought in: {text}"
     );
 }
 
@@ -372,14 +382,14 @@ expect:
     assert!(!output.status.success());
     let text = stdout(&output);
     assert!(
-        text.lines()
-            .any(|l| l == "case wrong-expect ... FAILED: 1 error"),
+        yunta_testkit::checked(&text, "wrong-expect")
+            .is_some_and(|said| said.starts_with("failed: 1 error")),
         "the verdict counts the problems listed under it: {text}"
     );
     // The words a case file is written with, not a Rust enum's `Debug`.
     assert!(
         text.lines()
-            .any(|l| l == "  final_state: expected finished, got needs you"),
+            .any(|l| l.trim_start() == "final_state: expected finished, got needs you"),
         "the mismatch names the field, the expected state and the actual one: {text}"
     );
     // And the reason sits on its own line under it, unquoted and
@@ -3166,7 +3176,7 @@ expect:
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
-        stdout(&out).contains("case promotes ... ok"),
+        yunta_testkit::checked(&stdout(&out), "promotes").as_deref() == Some("ok"),
         "{}",
         stdout(&out)
     );
@@ -3249,7 +3259,7 @@ fn yunta_test_and_yunta_run_execute_the_same_recipe() {
     let cased = yunta_in!(&repo, &home, &["test"]);
     assert!(cased.status.success(), "{}", stdout(&cased));
     assert!(
-        stdout(&cased).contains("case recipe ... ok"),
+        yunta_testkit::checked(&stdout(&cased), "recipe").as_deref() == Some("ok"),
         "{}",
         stdout(&cased)
     );

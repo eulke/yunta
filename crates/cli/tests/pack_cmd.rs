@@ -194,7 +194,8 @@ fn update_revendors_at_the_new_ref_and_keeps_the_remembered_source() {
     );
     assert!(update_out.status.success(), "{}", stderr(&update_out));
     assert!(
-        stdout(&update_out).contains("updated acme/review-pack -> v2.0.0"),
+        ["->", "→"].iter().any(|arrow| stdout(&update_out)
+            .contains(&format!("updated acme/review-pack {arrow} v2.0.0"))),
         "{}",
         stdout(&update_out)
     );

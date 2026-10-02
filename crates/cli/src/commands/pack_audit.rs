@@ -44,13 +44,15 @@ pub fn print_report(report: &PackAudit) {
     let m = &report.manifest;
     println!("pack: {}/{} @ {}", m.publisher, m.name, m.version);
     println!(
-        "declares: permissions={:?} network={} executors={}",
-        m.declares.permissions,
-        m.declares.network,
-        if m.declares.executors.is_empty() {
-            "none".to_string()
-        } else {
-            m.declares.executors.join(", ")
+        "declares: permissions {}, network {}, executors {}",
+        m.declares.permissions.as_str(),
+        match m.declares.network {
+            true => "used",
+            false => "none",
+        },
+        match m.declares.executors.is_empty() {
+            true => "none".to_string(),
+            false => m.declares.executors.join(", "),
         }
     );
     if !m.requires.runners.is_empty() {
@@ -59,7 +61,7 @@ pub fn print_report(report: &PackAudit) {
             .runners
             .iter()
             .map(|r| match &r.permissions {
-                Some(p) => format!("{}({:?})", r.name, p),
+                Some(p) => format!("{} ({})", r.name, p.as_str()),
                 None => r.name.to_string(),
             })
             .collect();
@@ -83,7 +85,7 @@ pub fn print_report(report: &PackAudit) {
 fn print_workflow(workflow: &WorkflowAudit) {
     println!("\nworkflow: {}", workflow.declared_path);
     if let Some(error) = &workflow.error {
-        println!("  ERROR: {error}");
+        println!("  does not read: {error}");
         return;
     }
     for node in &workflow.nodes {
@@ -126,7 +128,7 @@ fn print_node(node: &NodeAudit) {
             println!("    prompt:");
             println!("{}", yunta_core::text::indent(text, "      "));
         }
-        Some(Err(error)) => println!("    prompt: UNREADABLE — {}", yunta_core::describe(error)),
+        Some(Err(error)) => println!("    prompt: unreadable — {}", yunta_core::describe(error)),
     }
 }
 

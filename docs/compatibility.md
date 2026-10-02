@@ -573,8 +573,9 @@ that report it: `2 unknown event kinds, interpreted partially: <kind> ×<count>,
 and `1 unknown event kind` for one. `yunta status` folds that into its
 `·`-separated summary; `yunta stats` gives it a line of its own.
 
-`yunta test` closes a case with what it found: `case <name> ... FAILED: 2 errors`,
-`case <name> ... ERROR: 1 error`, and `case <name> ... ok` on its own. The tally
+`yunta test` gives each case a row — its mark, its name, and what it found:
+`failed: 2 errors`, `could not run: 1 error`, or `ok` — with each problem on the
+lines under it. The tally
 under them counts cases — `4 cases, 1 failed`, `1 case, 1 failed` — and carries no
 error count, unlike every other heading that introduces problems: `failed` counts
 cases while the lines beneath it count problems, and one failing case contributes

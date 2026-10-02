@@ -16,7 +16,8 @@ use yunta_core::shape::contract;
 use yunta_core::ArtifactKind;
 
 use crate::error::{CliError, Outcome};
-use crate::render::{INDENT, LABEL_WIDTH};
+use crate::render::blocks::{paint, Fields, Next};
+use crate::render::Look;
 
 /// Prints one kind's shape, or lists the kinds when none is named.
 pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
@@ -49,19 +50,27 @@ pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
     Ok(Outcome::Success)
 }
 
-/// The catalog, one kind per line with what it is for.
+/// The catalog, one kind per row with what it is for, and the two
+/// commands that show a kind's shape.
 fn list() -> String {
-    let mut out = String::from("Documents Yunta reads and validates:\n");
-    for kind in ArtifactKind::ALL {
-        out.push_str(&format!(
-            "{INDENT}{:<LABEL_WIDTH$} {}\n",
-            kind.as_str(),
-            kind.label()
-        ));
-    }
-    out.push_str(
-        "\nRun `yunta schema <kind>` for the shape to write, or add `--json` for the \
-         JSON Schema an editor can validate against.",
-    );
-    out
+    let look = Look::stdout();
+    let kinds = ArtifactKind::ALL
+        .into_iter()
+        .fold(Fields::new(), |fields, kind| {
+            fields.push_if(kind.as_str(), kind.purpose())
+        });
+    let next = Next {
+        steps: vec![
+            ("yunta schema <kind>".to_string(), "the shape to write"),
+            (
+                "yunta schema <kind> --json".to_string(),
+                "the JSON Schema an editor validates against",
+            ),
+        ],
+    };
+    format!(
+        "Documents Yunta reads and validates:\n{}\n{}",
+        paint(&[&kinds], &look),
+        paint(&[&next], &look).trim_end()
+    )
 }

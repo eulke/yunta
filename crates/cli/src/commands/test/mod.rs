@@ -40,6 +40,7 @@ use std::sync::Arc;
 use yunta_adapters::{MockAdapter, MockFixture, RunPaths, MOCK_ID};
 
 use crate::error::{CliError, Outcome};
+use crate::render::{Mark, INDENT};
 
 pub(crate) use case::run_case;
 
@@ -65,9 +66,17 @@ pub async fn test(dir: Option<&Path>) -> Result<Outcome, CliError> {
         )));
     }
 
+    // Every case's name is known before the first one runs, so the
+    // verdicts line up in one column as each case finishes.
+    let column = case_paths
+        .iter()
+        .map(|path| crate::render::cell_width(&case_name(path)))
+        .max()
+        .unwrap_or(0);
+    let look = crate::render::Look::stdout();
     let mut failures = 0usize;
     for case_path in &case_paths {
-        if !report(&root, case_path, interrupt.shared()).await {
+        if !report(&root, case_path, interrupt.shared(), (column, &look)).await {
             failures += 1;
         }
     }
@@ -220,29 +229,54 @@ pub(crate) fn copy_dir_all(from: &Path, into: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Runs one case and prints its line. `true` when it passed.
-///
-/// A case that could not run at all is one problem like any other: the
-/// verdict column says which kind of failure it was, and one block
-/// under it counts and lists what went wrong.
-async fn report(root: &Path, case_path: &Path, interrupt: crate::interrupt::Interrupt) -> bool {
-    let name = case_path
+/// What a case is called: its file's stem.
+fn case_name(case_path: &Path) -> String {
+    case_path
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| case_path.display().to_string());
-    let (verdict, problems) = match run_case(root, case_path, interrupt).await {
-        Ok(problems) if problems.is_empty() => {
-            println!("case {name} ... ok");
-            return true;
-        }
-        Ok(problems) => ("FAILED", problems),
-        Err(error) => ("ERROR", vec![error.to_string()]),
+        .unwrap_or_else(|| case_path.display().to_string())
+}
+
+/// Runs one case and prints its row — its mark, its name in a column
+/// `column` cells wide, and what it found — with each problem under it.
+/// `true` when it passed.
+///
+/// A case that could not run at all is one problem like any other: the
+/// row says which kind of failure it was, and the lines under it list
+/// what went wrong.
+async fn report(
+    root: &Path,
+    case_path: &Path,
+    interrupt: crate::interrupt::Interrupt,
+    (column, look): (usize, &crate::render::Look),
+) -> bool {
+    let name = case_name(case_path);
+    let (mark, said, problems) = match run_case(root, case_path, interrupt).await {
+        Ok(problems) if problems.is_empty() => (Mark::Done, "ok".to_string(), Vec::new()),
+        Ok(problems) => (
+            Mark::Failed,
+            format!(
+                "failed: {}",
+                yunta_core::text::counted(problems.len(), "error")
+            ),
+            problems,
+        ),
+        Err(error) => (
+            Mark::Failed,
+            "could not run: 1 error".to_string(),
+            vec![error.to_string()],
+        ),
     };
+    let gap = " ".repeat(column.saturating_sub(crate::render::cell_width(&name)) + 2);
     println!(
-        "{}",
-        yunta_core::text::problems(format!("case {name} ... {verdict}"), &problems)
+        "{INDENT}{} {name}{gap}{said}",
+        look.ink.mark(look.glyphs, mark)
     );
-    false
+    let margin = format!("{INDENT}{INDENT}{INDENT}");
+    for problem in &problems {
+        println!("{}", yunta_core::text::indent(problem, &margin));
+    }
+    problems.is_empty()
 }
 
 /// Turns the sandbox worktree into a repository whose initial commit

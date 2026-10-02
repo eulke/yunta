@@ -244,6 +244,22 @@ impl ArtifactKind {
         }
     }
 
+    /// What the kind is for, in the words its own contract opens with:
+    /// the line a catalog of kinds prints beside each name.
+    pub fn purpose(self) -> &'static str {
+        match self {
+            ArtifactKind::Tasks => "the plan: one task per independently verifiable unit of work",
+            ArtifactKind::Spec => {
+                "the tests a plan's tasks are held to, written before any task is built"
+            }
+            ArtifactKind::Findings => {
+                "what a review found, as data the engine counts and carries forward"
+            }
+            ArtifactKind::Questions => "what a node needs a person to decide",
+            ArtifactKind::Answers => "what a person replied, as the engine records it",
+        }
+    }
+
     /// The value `kind:` carries in a workflow, and the argument
     /// `yunta schema` takes. Tied to what serde derives by a test, so
     /// the two spellings of these three names cannot drift apart. The
