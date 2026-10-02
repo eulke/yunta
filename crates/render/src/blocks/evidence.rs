@@ -38,6 +38,20 @@ pub struct Evidence {
     pub whole: Option<Whole>,
 }
 
+impl Evidence {
+    /// The lines quoted: the last [`QUOTED`] of the tail, where a
+    /// compiler or a test runner says what failed.
+    pub fn quoted(&self) -> &[String] {
+        let skipped = self.tail.len().saturating_sub(QUOTED);
+        self.tail.get(skipped..).unwrap_or_default()
+    }
+
+    /// How many lines of the tail are left above what is quoted.
+    pub fn above(&self) -> usize {
+        self.tail.len() - self.quoted().len()
+    }
+}
+
 impl Drawn for Evidence {
     /// The last [`QUOTED`] lines, each hanging from the gutter and cut to
     /// the line rather than wrapped — what a command printed keeps its
@@ -45,11 +59,10 @@ impl Drawn for Evidence {
     fn lines(&self, look: &Look) -> Vec<Line> {
         let gutter = format!("{INDENT}{} ", look.glyphs.gutter());
         let room = look.width.cells().saturating_sub(cell_width(&gutter));
-        let skipped = self.tail.len().saturating_sub(QUOTED);
+        let skipped = self.above();
         let mut lines: Vec<Line> = self
-            .tail
+            .quoted()
             .iter()
-            .skip(skipped)
             .map(|said| {
                 Line::new()
                     .push(Tone::Muted, gutter.as_str())

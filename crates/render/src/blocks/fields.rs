@@ -27,6 +27,15 @@ impl Fields {
     }
 }
 
+impl Fields {
+    /// Each row: its label, and what it says.
+    pub fn rows(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.rows
+            .iter()
+            .map(|(label, value)| (*label, value.as_str()))
+    }
+}
+
 impl Drawn for Fields {
     /// Each value wrapped to what the label column leaves of the line,
     /// its later lines under its first.

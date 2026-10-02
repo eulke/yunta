@@ -21,7 +21,7 @@ mod node_table;
 pub use checklist::{Check, Checklist, Found};
 pub use decision::{Decision, DecisionOption};
 pub use evidence::{Evidence, Whole};
-pub use failure::FailureDetail;
+pub use failure::{FailureDetail, FailureSays};
 pub use fields::Fields;
 pub use headline::Headline;
 pub use next::Next;

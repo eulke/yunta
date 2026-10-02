@@ -5,7 +5,7 @@ use yunta_testkit_core::golden::{assert_golden, ENVIRONMENTS};
 use super::*;
 use crate::doc::Doc;
 use crate::ink::strip_sgr;
-use crate::surface::{Surface, Terminal};
+use crate::surface::{Markdown, Surface, Terminal};
 use crate::Mark;
 
 fn plain(block: &dyn Drawn) -> Vec<String> {
@@ -189,8 +189,8 @@ fn a_path_is_a_link_only_when_links_are_on() {
     }
 }
 
-#[test]
-fn blocks_match_their_goldens() {
+/// Every block with something to say, as one surface would put them.
+fn every_block() -> Doc<'static> {
     let headline = Headline {
         subject: "run 7E5PH4".to_string(),
         mark: Mark::NeedsYou,
@@ -227,13 +227,18 @@ fn blocks_match_their_goldens() {
          reported at src/lib.rs:3:5 by the compiler"
             .to_string(),
     );
-    let blocks = Doc::new()
+    Doc::new()
         .with(headline)
         .with(table)
         .with(printed)
         .with(decision())
         .with(fields)
-        .with(next);
+        .with(next)
+}
+
+#[test]
+fn blocks_match_their_goldens() {
+    let blocks = every_block();
     for environment in &ENVIRONMENTS {
         let look = Look::of(environment);
         assert_golden(
@@ -241,6 +246,37 @@ fn blocks_match_their_goldens() {
             &paint(&blocks, &look),
         );
     }
+}
+
+#[test]
+fn markdown_matches_its_golden() {
+    assert_golden(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/markdown/every-block.md"),
+        &Markdown.draw(&every_block()),
+    );
+}
+
+/// The words of `text` once markup, glyphs and the padding of columns
+/// are gone: what carries the meaning, whichever medium drew it.
+fn words(text: &str) -> std::collections::BTreeSet<String> {
+    text.split_whitespace()
+        .map(|token| token.trim_matches(|c| matches!(c, '*' | '`' | '|' | ':')))
+        .filter(|token| token.chars().any(char::is_alphanumeric))
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn markdown_says_every_word_the_terminal_does() {
+    let look = Look {
+        glyphs: crate::Glyphs::Unicode,
+        ink: crate::ink::Ink::Plain,
+        width: crate::Width::of(Some(120), None),
+    };
+    let terminal = words(&paint(&every_block(), &look));
+    let markdown = words(&Markdown.draw(&every_block()));
+    let lost: Vec<&String> = terminal.difference(&markdown).collect();
+    assert!(lost.is_empty(), "Markdown dropped {lost:?}");
 }
 
 #[test]

@@ -18,28 +18,34 @@ pub struct FailureDetail<'a> {
     pub whole: Option<Whole>,
 }
 
-impl Drawn for FailureDetail<'_> {
-    fn lines(&self, look: &Look) -> Vec<Line> {
-        let text = |said: String| {
-            said.lines()
-                .map(|line| Line::new().plain(INDENT).plain(line.to_string()))
-                .collect::<Vec<_>>()
-        };
-        let listed = |heading: &str, paths: &[PathBuf]| {
-            let mut lines = text(heading.to_string());
-            lines.extend(paths.iter().map(|path| {
-                Line::new()
-                    .plain(indent(2))
-                    .plain(path.display().to_string())
-            }));
-            lines
+/// What a failure's detail says, whatever medium draws it.
+pub enum FailureSays {
+    /// The end of what a command printed, and where the rest is.
+    Evidence(Evidence),
+    /// Lines that say it whole.
+    Text(Vec<String>),
+    /// A heading, and each path it names.
+    Listed {
+        heading: String,
+        paths: Vec<PathBuf>,
+    },
+    /// Nothing beyond the node's own row.
+    Nothing,
+}
+
+impl FailureDetail<'_> {
+    /// What this failure says beyond its node's row.
+    pub fn says(&self) -> FailureSays {
+        let text = |said: String| FailureSays::Text(said.lines().map(str::to_string).collect());
+        let listed = |heading: &str, paths: &[PathBuf]| FailureSays::Listed {
+            heading: heading.to_string(),
+            paths: paths.to_vec(),
         };
         match self.failure {
-            Failure::Exited { exited } => Evidence {
+            Failure::Exited { exited } => FailureSays::Evidence(Evidence {
                 tail: exited.tail.clone(),
                 whole: self.whole.clone(),
-            }
-            .lines(look),
+            }),
             Failure::SessionDied { died } => {
                 let tail: Vec<String> = died
                     .exit
@@ -47,14 +53,22 @@ impl Drawn for FailureDetail<'_> {
                     .flat_map(|exit| exit.stderr_tail.clone())
                     .collect();
                 match tail.is_empty() {
-                    true => Vec::new(),
-                    false => Evidence { tail, whole: None }.lines(look),
+                    true => FailureSays::Nothing,
+                    false => FailureSays::Evidence(Evidence { tail, whole: None }),
                 }
             }
-            Failure::Artifacts { artifacts } => artifacts
-                .iter()
-                .flat_map(|artifact| text(artifact.to_string()))
-                .collect(),
+            Failure::Artifacts { artifacts } => FailureSays::Text(
+                artifacts
+                    .iter()
+                    .flat_map(|artifact| {
+                        artifact
+                            .to_string()
+                            .lines()
+                            .map(str::to_string)
+                            .collect::<Vec<_>>()
+                    })
+                    .collect(),
+            ),
             Failure::ScopeViolated { outside_scope } if outside_scope.len() > 1 => {
                 listed("outside the declared globs:", outside_scope)
             }
@@ -69,7 +83,25 @@ impl Drawn for FailureDetail<'_> {
             | Failure::PathsDenied { .. }
             | Failure::Message { .. }
             | Failure::ScopeRequested { .. }
-            | Failure::Unset { .. } => Vec::new(),
+            | Failure::Unset { .. } => FailureSays::Nothing,
+        }
+    }
+}
+
+impl Drawn for FailureDetail<'_> {
+    fn lines(&self, look: &Look) -> Vec<Line> {
+        let text = |said: &str| Line::new().plain(INDENT).plain(said.to_string());
+        match self.says() {
+            FailureSays::Evidence(evidence) => evidence.lines(look),
+            FailureSays::Text(lines) => lines.iter().map(|said| text(said)).collect(),
+            FailureSays::Listed { heading, paths } => std::iter::once(text(&heading))
+                .chain(paths.iter().map(|path| {
+                    Line::new()
+                        .plain(indent(2))
+                        .plain(path.display().to_string())
+                }))
+                .collect(),
+            FailureSays::Nothing => Vec::new(),
         }
     }
 }

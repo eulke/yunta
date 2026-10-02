@@ -17,7 +17,8 @@ pub enum Found {
 }
 
 impl Found {
-    fn mark(self) -> Mark {
+    /// The mark a finding of this kind is drawn with.
+    pub fn mark(self) -> Mark {
         match self {
             Found::Holds => Mark::Done,
             Found::Caution => Mark::Caution,
@@ -60,6 +61,11 @@ impl Checklist {
     }
 
     /// Whether nothing on the list stops a run.
+    /// Each check, in the order it was made.
+    pub fn checks(&self) -> impl Iterator<Item = &Check> {
+        self.checks.iter()
+    }
+
     pub fn holds(&self) -> bool {
         self.checks
             .iter()

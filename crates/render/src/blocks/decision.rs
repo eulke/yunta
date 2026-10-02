@@ -25,6 +25,18 @@ pub struct Decision {
     pub options: Vec<DecisionOption>,
 }
 
+impl Decision {
+    /// The command that chooses `option`, with the words it asks for
+    /// left for the reader to write.
+    pub fn command(&self, option: &DecisionOption) -> String {
+        let text = match option.asks {
+            Some(_) => " --text \"<answer>\"",
+            None => "",
+        };
+        format!("yunta resolve-gate {} {}{text}", self.handle, option.id)
+    }
+}
+
 impl Drawn for Decision {
     fn lines(&self, look: &Look) -> Vec<Line> {
         let under = format!("{INDENT}{INDENT}");
@@ -43,14 +55,11 @@ impl Drawn for Decision {
             for part in said.iter().flat_map(|text| wrap(text, room)) {
                 lines.push(Line::new().plain(under.as_str()).push(Tone::Muted, part));
             }
-            let text = match option.asks {
-                Some(_) => " --text \"<answer>\"",
-                None => "",
-            };
-            lines.push(Line::new().plain(under.as_str()).push(
-                Tone::Strong,
-                format!("yunta resolve-gate {} {}{text}", self.handle, option.id),
-            ));
+            lines.push(
+                Line::new()
+                    .plain(under.as_str())
+                    .push(Tone::Strong, self.command(option)),
+            );
         }
         lines
     }
