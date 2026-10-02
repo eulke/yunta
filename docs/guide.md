@@ -605,7 +605,10 @@ metrics to certify until `run_finished` lands.
 Each check is marked by what it found: `✓` it holds, `✗` it failed, `▲` worth a
 look though nothing failed (a baseline that was already red, an event kind this
 binary does not read), and `·` nothing to check — a workflow that declared no
-criteria is never crossed out for it. On a terminal the receipt is laid out for the
+criteria is never crossed out for it. A run that did not finish names each node
+that stands failed, with the sentence its failure is told in, the end of what it
+printed and the `yunta status <run> --node <node>` that shows the rest — in
+`receipt.json` as `failed`, each `{node, failure}`. On a terminal the receipt is laid out for the
 screen; `receipt.md` holds the same document as Markdown, and `receipt.json` the
 same data for a program. Both files are written to the run's own directory,
 alongside `manifest.yaml`. A `pull_request` node puts the same document in the pull

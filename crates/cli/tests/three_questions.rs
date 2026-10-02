@@ -117,6 +117,10 @@ fn a_person_learns_why_it_failed_on_every_surface() {
                 &["status", &run_id, "--node", "build"]
             )),
         ),
+        (
+            "the receipt",
+            stdout(&yunta_in!(&repo, &home, &["receipt", &run_id])),
+        ),
     ] {
         assert!(
             text.contains(PRINTED),

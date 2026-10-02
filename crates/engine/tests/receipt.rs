@@ -2,8 +2,8 @@
 //!
 //! Two concerns, tested separately: the **formatters**
 //! (`render_markdown`/`render_json`) against a hand-built [`Receipt`] —
-//! golden byte-for-byte output, same style `tests/progress.rs` and
-//! `tests/stats.rs` use — and the **derivation**
+//! golden byte-for-byte output, kept as files under `goldens/receipt/`
+//! — and the **derivation**
 //! (`build_receipt`) against a real run's own log, executed end to end
 //! with the mock adapter (same style `tests/run.rs` uses), asserted
 //! field by field rather than as one giant string so a fixture tweak
@@ -23,6 +23,7 @@ use yunta_engine::{
     RunnerUsage, ScopeSummary,
 };
 use yunta_testkit::Bench;
+use yunta_testkit_core::golden::assert_golden;
 use yunta_testkit_core::FixedClock;
 
 // --- formatters: golden output over a hand-built Receipt --------------------
@@ -93,6 +94,7 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
         event_chain,
         unknown_kinds: Vec::new(),
         diagnostics: Vec::new(),
+        failed: Vec::new(),
     }
 }
 
@@ -102,33 +104,30 @@ fn render_receipt_markdown(receipt: &yunta_engine::Receipt) -> String {
     yunta_render::surface::Markdown.draw(&yunta_render::receipt::document(receipt))
 }
 
-const EXPECTED_MARKDOWN_INTACT: &str = "\
-# receipt for run 1-0001: ✓ finished
-
-- workflow: release-cycle
-- mode: default
-- run: run-2026-08-21-0001
-- cost: 1.54k tokens (1.2k in / 340 out) · CPTV: 770 tokens per task · 2 reroutes
-
-- ✓ **criteria** 3/3 green, each command below
-- ✓ **baseline** 0 regressions across 2 comparisons (suite `make test`, hash `22cc66aa7d26`)
-- ✓ **scope** 4 files touched, none outside it
-- ✓ **review** by 2 independent runners via `review` (claude-code, codex)
-- ✓ **event chain** 342 events, hash-linked, replayable
-
-### criteria
-
-- ✓ **T001** `test -f hello.txt` exits 0
-- ✓ **T002** `cargo test -p yunta-core` exits 0
-- ✓ **T002** `cargo clippy --workspace -- -D warnings` exits 0
-
-- `yunta verify 1-0001` — checks this run's evidence again
-";
+/// The golden file `case` is checked against.
+fn golden(case: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("goldens/receipt")
+        .join(format!("{case}.md"))
+}
 
 #[test]
 fn renders_the_markdown_receipt_byte_for_byte() {
     let receipt = sample_receipt(EventChainStatus::Intact { events: 342 });
-    assert_eq!(render_receipt_markdown(&receipt), EXPECTED_MARKDOWN_INTACT);
+    assert_golden(&golden("finished"), &render_receipt_markdown(&receipt));
+}
+
+/// A run that failed says which node failed and why, under what it held
+/// its work to.
+#[test]
+fn a_failed_run_s_receipt_says_what_failed() {
+    let mut receipt = sample_receipt(EventChainStatus::Intact { events: 40 });
+    receipt.terminal_state = Some(TerminalState::Failed);
+    receipt.failed = vec![yunta_engine::FailedNode {
+        node: NodeId::from("build"),
+        failure: Failure::message("`cargo build` exited 101: cannot find value `x`"),
+    }];
+    assert_golden(&golden("failed"), &render_receipt_markdown(&receipt));
 }
 
 #[test]
@@ -173,37 +172,11 @@ fn renders_the_json_receipt_as_pretty_printed_structured_data() {
     }
 }
 
-const EXPECTED_MARKDOWN_NO_BASELINE: &str = "\
-# receipt for run 1-0001: ✓ finished
-
-- workflow: release-cycle
-- mode: default
-- run: run-2026-08-21-0001
-- cost: 1.54k tokens (1.2k in / 340 out) · CPTV: 770 tokens per task · 2 reroutes
-
-- ✓ **criteria** 3/3 green, each command below
-- · **baseline** not used by this workflow
-- ✓ **scope** 4 files touched, none outside it
-- ✓ **review** by 2 independent runners via `review` (claude-code, codex)
-- ✓ **event chain** 10 events, hash-linked, replayable
-
-### criteria
-
-- ✓ **T001** `test -f hello.txt` exits 0
-- ✓ **T002** `cargo test -p yunta-core` exits 0
-- ✓ **T002** `cargo clippy --workspace -- -D warnings` exits 0
-
-- `yunta verify 1-0001` — checks this run's evidence again
-";
-
 #[test]
 fn baseline_absent_never_invents_a_zero_regression_line() {
     let mut receipt = sample_receipt(EventChainStatus::Intact { events: 10 });
     receipt.baseline = None;
-    assert_eq!(
-        render_receipt_markdown(&receipt),
-        EXPECTED_MARKDOWN_NO_BASELINE
-    );
+    assert_golden(&golden("no-baseline"), &render_receipt_markdown(&receipt));
 }
 
 /// A run of a lineage compares against a measurement another run took,

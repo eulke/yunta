@@ -8,15 +8,18 @@
 
 use yunta_core::events::{BaselineOrigin, TerminalState};
 use yunta_core::receipt::{
-    BaselineSummary, DiagnosticCount, EventChainStatus, Receipt, RunnerUsage,
+    BaselineSummary, DiagnosticCount, EventChainStatus, FailedNode, Receipt, RunnerUsage,
 };
 use yunta_core::text::counted;
 use yunta_core::units::Tokens;
 use yunta_core::NodeId;
 
-use crate::blocks::{Checklist, Fields, Found, Headline, Next, Prose};
+use crate::blocks::{
+    Checklist, FailureDetail, Fields, Found, Headline, Next, Prose, Section, Whole,
+};
 use crate::doc::{Block, Doc};
-use crate::RunWord;
+use crate::ink::{Line, Tone};
+use crate::{Mark, RunWord};
 
 /// Fan-out siblings share their base id (`<base>@<runner>`, see
 /// `manifest.rs`) — grouped here purely for the receipt's review check; the JSON receipt exposes the flat
@@ -44,7 +47,7 @@ pub fn fan_out_groups(runners: &[RunnerUsage]) -> Vec<(NodeId, Vec<&RunnerUsage>
 /// per thing the run held its work to — a cross only for what failed, a
 /// `·` for what was never asked for — then each criterion and each path
 /// outside the scope, and the command that checks it all again.
-pub fn document(receipt: &Receipt) -> Doc<'static> {
+pub fn document(receipt: &Receipt) -> Doc<'_> {
     let handle = receipt.run_id.handle();
     // A run still open is read as its last step begins: it is running,
     // and its receipt says so before anything it found.
@@ -68,6 +71,9 @@ pub fn document(receipt: &Receipt) -> Doc<'static> {
                 .push_if("cost", cost(receipt)),
         )
         .with(checks(receipt));
+    for failed in &receipt.failed {
+        doc = doc.with(failed_node(failed, handle));
+    }
     if let Some(criteria) = criteria(receipt) {
         doc = doc
             .with(Block::Heading("criteria".to_string()))
@@ -84,6 +90,25 @@ pub fn document(receipt: &Receipt) -> Doc<'static> {
             "checks this run's evidence again",
         )],
     })
+}
+
+/// A node that stands failed: its id and the sentence its failure is
+/// told in, then what it printed and the command that shows the rest.
+fn failed_node<'a>(failed: &'a FailedNode, handle: &str) -> Section<'a> {
+    let node = &failed.node;
+    Section {
+        mark: Some(Mark::Failed),
+        title: Line::new()
+            .push(Tone::Strong, format!("node `{node}`"))
+            .plain(" — ")
+            .plain(failed.failure.headline()),
+        blocks: vec![Block::Failure(FailureDetail {
+            failure: &failed.failure,
+            whole: Some(Whole::Command(format!(
+                "yunta status {handle} --node {node}"
+            ))),
+        })],
+    }
 }
 
 /// Each criterion the run ran, by the task it judged, when it ran any.

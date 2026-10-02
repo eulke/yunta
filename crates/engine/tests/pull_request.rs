@@ -9,6 +9,7 @@ use yunta_core::events::{run_left_out, EventPayload, NodeEvent, StoredEvent};
 use yunta_core::{ConfigKey, ConfigLayer, Workflow};
 use yunta_engine::{CheckError, RunReport, RunTerminal};
 use yunta_testkit::{bare_origin, git_output, Bench, INITIAL_BRANCH, MOCK_CONFIG};
+use yunta_testkit_core::golden::assert_golden;
 
 const FORGE: &str = "forge:\n  github: { repo: acme/web, token_env: ACME_TOKEN }\n";
 
@@ -195,6 +196,24 @@ async fn a_pull_request_carries_the_receipt_of_the_run_that_opened_it() {
         body.trim_end()
             .ends_with(&format!("<!-- yunta run_id: {} -->", bench.run_id)),
         "the marker last, out of what a reviewer reads: {body}"
+    );
+}
+
+/// The body a reviewer reads, byte for byte: the author's words, the
+/// receipt as the run's last step begins, and the marker out of sight.
+#[tokio::test]
+async fn the_pull_request_body_reads_as_its_golden() {
+    let state = MockForgeState::new();
+    let bench =
+        Bench::with_run_id("run-pr-golden").with_forge(Arc::new(MockForge::new(state.clone())));
+    bare_origin(&bench.worktree);
+    let RunReport { terminal, .. } = bench
+        .run_with_config(WRITES_THEN_OPENS, "sessions: []\n", &config(""))
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_golden(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/forge/pull-request.md"),
+        &state.pull_requests()[0].body,
     );
 }
 

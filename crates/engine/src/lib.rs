@@ -124,8 +124,8 @@ pub use process_registry::{
 };
 pub use receipt::{
     build_receipt, render_json as render_receipt_json, BaselineSummary, CostSummary,
-    CriteriaSummary, CriterionEntry, DiagnosticCount, EventChainStatus, Receipt, ReceiptError,
-    RunnerUsage, ScopeSummary,
+    CriteriaSummary, CriterionEntry, DiagnosticCount, EventChainStatus, FailedNode, Receipt,
+    ReceiptError, RunnerUsage, ScopeSummary,
 };
 pub use replay::{
     dedup_findings, derive, unknown_kind_counts, NodeState, NodeWait, RunState, UnknownKindCount,

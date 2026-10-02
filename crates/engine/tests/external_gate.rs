@@ -13,6 +13,7 @@ use yunta_adapters::{MockForge, MockForgeState};
 use yunta_core::events::{FindingEvent, GateEvent, NodeEvent};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::Bench;
+use yunta_testkit_core::golden::assert_golden;
 
 const GATE_ONLY_WORKFLOW: &str = r#"
 name: gate-scenario
@@ -421,6 +422,11 @@ async fn a_published_gate_asks_its_question_and_publishes_the_plan_to_read() {
         drawn.contains("test -f made.txt"),
         "the plan is published whole, with what proves each task: {drawn}"
     );
+
+    // What a reviewer reads, byte for byte.
+    let goldens = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/forge");
+    assert_golden(&goldens.join("gate.md"), &prs[0].body);
+    assert_golden(&goldens.join("gate-tasks.md"), &drawn);
 }
 
 #[tokio::test]

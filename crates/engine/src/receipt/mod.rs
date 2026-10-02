@@ -19,7 +19,7 @@ use yunta_core::events::{NodeEvent, RunEvent};
 
 pub use yunta_core::receipt::{
     BaselineSummary, CostSummary, CriteriaSummary, CriterionEntry, DiagnosticCount,
-    EventChainStatus, Receipt, RunnerUsage, ScopeSummary,
+    EventChainStatus, FailedNode, Receipt, RunnerUsage, ScopeSummary,
 };
 
 /// The receipt as a program reads it: the same data a person's document
@@ -171,7 +171,8 @@ fn receipt(
     let baseline = baseline_summary(manifest, events);
     let scope = scope_summary(events);
     let runners = runner_usage(events);
-    let unknown_kinds = unknown_kind_counts(&crate::replay::derive(events));
+    let state = crate::replay::derive(events);
+    let unknown_kinds = unknown_kind_counts(&state);
     let reroutes = events
         .iter()
         .filter(|e| {
@@ -199,7 +200,23 @@ fn receipt(
         event_chain,
         unknown_kinds,
         diagnostics: diagnostic_counts(events),
+        failed: failed_nodes(manifest, &state),
     }
+}
+
+/// Each node that stands failed, in the order the workflow declares it.
+fn failed_nodes(manifest: &Manifest, state: &crate::replay::RunState) -> Vec<FailedNode> {
+    manifest
+        .workflow
+        .iter_nodes()
+        .filter_map(|node| match state.nodes.state(&node.id) {
+            Some(crate::replay::NodeState::Failed { failure, .. }) => Some(FailedNode {
+                node: node.id.clone(),
+                failure: failure.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The latest post-check `criteria_checked` per task — a retried task's

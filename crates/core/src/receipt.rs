@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 
 use crate::diagnostic::{DiagnosticCode, DocumentKind};
-use crate::events::{BaselineOrigin, TerminalState, TokenUsage, UnknownKindCount};
+use crate::events::{BaselineOrigin, Failure, TerminalState, TokenUsage, UnknownKindCount};
 use crate::{
     AdapterId, ContentHash, ModeName, ModelName, NodeId, RunId, RunnerName, Seq, WorkflowName,
 };
@@ -114,6 +114,18 @@ pub struct Receipt {
     /// is one rule asked of three documents, so three broken tasks documents and
     /// one of each are different facts and count separately.
     pub diagnostics: Vec<DiagnosticCount>,
+    /// Each node that stands failed, in the order the workflow declares
+    /// them, with why — the question a person brings to a run that did
+    /// not finish. Absent while nothing stands failed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<FailedNode>,
+}
+
+/// A node that stands failed, and why, as the log recorded it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FailedNode {
+    pub node: NodeId,
+    pub failure: Failure,
 }
 
 /// One kind of problem in one kind of document, and how many times the
