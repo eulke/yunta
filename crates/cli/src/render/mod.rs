@@ -36,7 +36,7 @@ pub(crate) mod state;
 pub(crate) mod width;
 
 pub(crate) use bars::{bar, sparkline};
-pub(crate) use escalation::{evidence, option_headline, option_tradeoff};
+pub(crate) use escalation::{evidence, label};
 pub(crate) use glyphs::Glyphs;
 pub(crate) use line_width::Width;
 pub(crate) use look::Look;

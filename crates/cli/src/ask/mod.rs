@@ -253,7 +253,17 @@ impl Console {
     /// line here gets, never past the terminal's edge, since a prompt
     /// redraws its rows in place.
     pub(crate) fn width(&self) -> usize {
-        crate::render::Width::row(usize::from(self.term.size().1)).cells()
+        self.look().width.cells()
+    }
+
+    /// How a line drawn on this terminal looks: the paint stderr gets,
+    /// and rows no wider than [`Console::width`].
+    pub(crate) fn look(&self) -> crate::render::Look {
+        crate::render::Look {
+            glyphs: crate::render::Glyphs::from_env(),
+            ink: crate::render::ink::Ink::stderr(),
+            width: crate::render::Width::row(usize::from(self.term.size().1)),
+        }
     }
 
     /// Redraws the row a line is being typed on: `prompt`, then `text`,

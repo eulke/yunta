@@ -33,11 +33,11 @@ use yunta_core::{NodeId, RunId};
 use crate::commands::advice;
 use crate::render::blocks::{Block, Decision, DecisionOption};
 use crate::render::ink::{Line, Tone};
-use crate::render::{cell_width, evidence, indent, wrap, Look, Width, INDENT};
+use crate::render::{cell_width, evidence, indent, label, wrap, Look, Width, INDENT};
 
-/// Where a run works, on the one line every surface says it with: the
-/// path whole — it is copied into another terminal, never wrapped — and
-/// what it means for a decision about the run.
+/// Where a run works, as the page says it above a decision: the path
+/// whole — it is copied into another terminal, never wrapped — and what
+/// it means for a decision about the run.
 pub(crate) fn run_tree_line(tree: &Path) -> String {
     yunta_core::text::detailed(
         "the run works in",
@@ -68,38 +68,56 @@ pub(crate) fn lines(
     beside: Beside,
     look: &Look,
 ) -> Vec<Line> {
-    let under = indent(2);
-    let room = look.width.cells().saturating_sub(cell_width(&under));
-    let wrapped = |text: &str, tone: Tone| -> Vec<Line> {
-        wrap(text, room)
-            .into_iter()
-            .filter(|line| !line.is_empty())
-            .map(|line| Line::new().plain(under.as_str()).push(tone, line))
-            .collect()
-    };
     let mut lines = vec![Line::new()
         .plain(INDENT)
         .push(Tone::Strong, format!("decision on node `{node}`"))];
-    if !beside.claim {
-        lines.extend(wrapped(escalation.summary(), Tone::Plain));
-    }
-    if !beside.evidence {
-        for fact in evidence(escalation) {
-            lines.extend(wrapped(&fact, Tone::Muted));
-        }
-    }
+    lines.extend(account(escalation, beside, 2, look));
     for shown in escalation.shows() {
         let about = format!("about: {}", yunta_engine::view_of(shown).display());
-        lines.extend(wrapped(&about, Tone::Plain));
+        lines.extend(under(&about, Tone::Plain, 2, look));
     }
     if let Some(external_ref) = escalation.external_ref() {
-        lines.extend(wrapped(
+        lines.extend(under(
             &format!("published at {external_ref}"),
             Tone::Plain,
+            2,
+            look,
         ));
     }
     lines.extend(menu(run_id, escalation, look));
     lines
+}
+
+/// What a decision says happened, `depth` steps under its heading: the
+/// claim, and the record the engine attached to audit it against — less
+/// what the surface already says beside it.
+pub(crate) fn account(
+    escalation: &GateWaitingPayload,
+    beside: Beside,
+    depth: usize,
+    look: &Look,
+) -> Vec<Line> {
+    let mut lines = Vec::new();
+    if !beside.claim {
+        lines.extend(under(escalation.summary(), Tone::Plain, depth, look));
+    }
+    if !beside.evidence {
+        for fact in evidence(escalation) {
+            lines.extend(under(&fact, Tone::Muted, depth, look));
+        }
+    }
+    lines
+}
+
+/// `text` in `tone`, wrapped `depth` steps in.
+fn under(text: &str, tone: Tone, depth: usize, look: &Look) -> Vec<Line> {
+    let margin = indent(depth);
+    let room = look.width.cells().saturating_sub(cell_width(&margin));
+    wrap(text, room)
+        .into_iter()
+        .filter(|line| !line.is_empty())
+        .map(|line| Line::new().plain(margin.as_str()).push(tone, line))
+        .collect()
 }
 
 /// Every option of a decision, one step in: what it costs and the
@@ -112,8 +130,7 @@ fn menu(run_id: &RunId, escalation: &GateWaitingPayload, look: &Look) -> Vec<Lin
             .iter()
             .map(|option| DecisionOption {
                 id: option.id.to_string(),
-                // An option whose label is its id says it once.
-                label: (option.label != option.id.as_str()).then(|| option.label.clone()),
+                label: label(option).map(str::to_string),
                 tradeoff: option.tradeoff.clone(),
                 asks: option.asks.clone(),
             })

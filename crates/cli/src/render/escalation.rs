@@ -8,17 +8,11 @@
 
 use yunta_core::events::{GateOption, GateWaitingPayload};
 
-/// The line an option is chosen by: the id a person answers with, and
-/// the label that says what choosing it does.
-pub(crate) fn option_headline(option: &GateOption) -> String {
-    format!("{} — {}", option.id, option.label)
-}
-
-/// What choosing an option costs, on the line under it. Every option
-/// carries one, because it is what makes the choice a decision rather
-/// than a guess.
-pub(crate) fn option_tradeoff(option: &GateOption) -> String {
-    yunta_core::text::detailed("tradeoff", &option.tradeoff)
+/// What an option does, when that says more than its id: an older log
+/// labelled a declared option with its own id, and a menu that prints
+/// both says one word twice.
+pub(crate) fn label(option: &GateOption) -> Option<&str> {
+    (option.label != option.id.as_str()).then_some(option.label.as_str())
 }
 
 /// The lines the engine's own record is shown on, one fact to a line.
@@ -47,22 +41,22 @@ mod tests {
             .into_payload()
     }
 
-    #[test]
-    fn an_option_reads_as_the_id_that_answers_it_and_what_it_does() {
-        let option = GateOption {
-            id: yunta_core::OptionId::from_static("retry"),
-            label: "Re-route to `fix-lint` once more".to_string(),
+    fn option(id: &'static str, label: &str) -> GateOption {
+        GateOption {
+            id: yunta_core::OptionId::from_static(id),
+            label: label.to_string(),
             tradeoff: "Uses one extra correction attempt".to_string(),
             asks: None,
-        };
+        }
+    }
+
+    #[test]
+    fn an_option_is_labelled_only_by_what_its_id_does_not_say() {
         assert_eq!(
-            option_headline(&option),
-            "retry — Re-route to `fix-lint` once more"
+            label(&option("retry", "Re-route to `fix-lint` once more")),
+            Some("Re-route to `fix-lint` once more")
         );
-        assert_eq!(
-            option_tradeoff(&option),
-            "tradeoff: Uses one extra correction attempt"
-        );
+        assert_eq!(label(&option("approve", "approve")), None);
     }
 
     #[test]

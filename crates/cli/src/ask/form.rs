@@ -89,11 +89,7 @@ fn picked(
     mut choices: Vec<Choice<Option<String>>>,
 ) -> Answered<Option<String>> {
     if !question.required {
-        choices.push(Choice {
-            head: SKIP.to_string(),
-            detail: None,
-            value: None,
-        });
+        choices.push(Choice::named(SKIP, None));
     }
     let value = choose(console, "answer", choices)?;
     console.say(&format!("{ANSWER}{}", value.as_deref().unwrap_or(SKIP)))?;
@@ -105,22 +101,14 @@ fn values(question: &Question) -> Vec<Choice<Option<String>>> {
     question
         .values
         .iter()
-        .map(|value| Choice {
-            head: value.clone(),
-            detail: None,
-            value: Some(value.clone()),
-        })
+        .map(|value| Choice::named(value.as_str(), Some(value.clone())))
         .collect()
 }
 
 /// One of the two answers a `boolean` question takes: read as a word,
 /// recorded as the literal the artifact carries.
 fn shown(value: bool) -> Choice<Option<String>> {
-    Choice {
-        head: if value { "yes" } else { "no" }.to_string(),
-        detail: None,
-        value: Some(value.to_string()),
-    }
+    Choice::named(if value { "yes" } else { "no" }, Some(value.to_string()))
 }
 
 /// What the engine's own rules say about this one answer.
@@ -187,7 +175,7 @@ mod tests {
     #[test]
     fn a_boolean_is_read_as_a_word_and_recorded_as_a_literal() {
         let yes = shown(true);
-        assert_eq!(yes.head, "yes");
+        assert_eq!(yes.name, "yes");
         assert_eq!(yes.value, Some("true".to_string()));
         let answered = Answer {
             id: "env".into(),

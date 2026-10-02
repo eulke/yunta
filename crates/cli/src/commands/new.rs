@@ -150,11 +150,7 @@ nodes:
 fn picked(console: &Console) -> Shape {
     let choices = Shape::all()
         .into_iter()
-        .map(|shape| Choice {
-            head: shape.label().to_string(),
-            detail: None,
-            value: shape,
-        })
+        .map(|shape| Choice::named(shape.label(), shape))
         .collect();
     choose(console, "choose a shape", choices).unwrap_or(Shape::OneNode)
 }

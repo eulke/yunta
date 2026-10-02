@@ -112,9 +112,36 @@ fn a_plan_is_reviewed_at_its_gate_and_a_correction_sends_it_back_with_the_words(
     );
     // `approve`, the first option, with nothing to add.
     terminal.keys("\r");
-    terminal.wait_for("anything to add?", "approving asked nothing further");
+    terminal.wait_for(
+        "enter records it, n adds a note",
+        "approving asked for words it does not need",
+    );
     terminal.keys("\r");
 
     let drawn = terminal.ended();
     assert!(terminal.ran_to_the_end(), "{drawn}");
+}
+
+#[test]
+fn an_option_that_asks_requires_its_words() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = reviewing(root.path());
+    terminal.wait_for("3  abort", "the gate never put its options on the console");
+    // `adjust` sends the plan back to the session that wrote it, and the
+    // words are what it picks its work back up with.
+    terminal.keys("\x1b[B\r");
+    terminal.wait_for(
+        "what should change?",
+        "the correction never asked for words",
+    );
+    terminal.keys("\r");
+    terminal.wait_for(
+        "this option needs an answer",
+        "an empty correction was taken as an answer",
+    );
+    let drawn = terminal.drawn();
+    assert!(
+        !drawn.contains("enter records it"),
+        "an option that needs words is never settled with a key:\n{drawn}"
+    );
 }

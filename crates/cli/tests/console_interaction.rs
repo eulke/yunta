@@ -12,8 +12,15 @@
 
 use std::path::Path;
 
+use yunta_core::events::{EventPayload, GateEvent, GateResolvedPayload, HumanChoice};
 use yunta_core::text::indent;
 use yunta_testkit::{runs_root, wait_until, yunta_on_terminal, Checkout, Terminal};
+
+/// What a decision put to a person opens with.
+const DECISION: &str = "decision: ";
+
+/// What settles an option that asks for nothing.
+const SETTLE: &str = "enter records it, n adds a note";
 
 /// A node that asks: the session hands the questions over and ends, and
 /// the round with the person happens after it closes.
@@ -63,6 +70,20 @@ fn home(root: &Path) -> std::path::PathBuf {
 fn answers(root: &Path) -> Option<String> {
     let run = run_dir(root)?;
     std::fs::read_to_string(run.join("artifacts/ask/answers.yaml")).ok()
+}
+
+/// The choice the run started under `root` recorded at its gate, or
+/// `None` while it has recorded none.
+fn recorded(root: &Path) -> Option<HumanChoice> {
+    let run_id = run_dir(root)?.file_name()?.to_str()?.parse().ok()?;
+    let storage = yunta_storage::Storage::open(&home(root).join("yunta.db")).ok()?;
+    let events = storage.events_for_run(&run_id).ok()?;
+    events.iter().find_map(|event| match event.payload() {
+        Some(EventPayload::Gates(GateEvent::Resolved(GateResolvedPayload::Chosen(choice)))) => {
+            Some(choice.clone())
+        }
+        _ => None,
+    })
 }
 
 /// The directory the run started under `root` keeps its own state in,
@@ -155,13 +176,49 @@ fn a_console_prompt_does_not_stall_the_run_tools_listener() {
 }
 
 #[test]
-fn a_decision_on_the_console_says_where_the_run_works() {
+fn the_prompt_names_no_worktree() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
-    terminal.wait_for(
-        "the run works in",
-        "the decision never said where a node run again would start from",
-    );
+    terminal.wait_for("> 1  retry", "the gate never put its menu on the console");
+    // Where the run works is a fact about the run, which `yunta status`
+    // says; the prompt says what the decision is about and what each
+    // option costs.
+    let drawn = terminal.drawn();
+    let prompt = &drawn[drawn.find(DECISION).expect("the prompt never opened")..];
+    assert!(!prompt.contains("the run works in"), "{prompt}");
+}
+
+#[test]
+fn choosing_an_option_that_asks_nothing_records_it_with_one_key() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = approving(root.path());
+    terminal.wait_for("> 1  approve", "the gate never put its menu on the console");
+    terminal.keys("\r");
+    terminal.wait_for(SETTLE, "choosing never said how the choice is recorded");
+    terminal.keys("\r");
+
+    let drawn = terminal.ended();
+    assert!(terminal.ran_to_the_end(), "{drawn}");
+    let choice = recorded(root.path()).expect("the run recorded no choice");
+    assert_eq!(choice.option.as_str(), "approve");
+    assert_eq!(choice.free_text, None, "nothing was added to the choice");
+}
+
+#[test]
+fn pressing_n_adds_a_note() {
+    let root = tempfile::tempdir().unwrap();
+    let mut terminal = approving(root.path());
+    terminal.wait_for("> 1  approve", "the gate never put its menu on the console");
+    terminal.keys("\r");
+    terminal.wait_for(SETTLE, "choosing never said how the choice is recorded");
+    terminal.keys("n");
+    terminal.wait_for("note > ", "`n` never opened a line for the note");
+    terminal.keys("ship it after lunch\r");
+
+    let drawn = terminal.ended();
+    assert!(terminal.ran_to_the_end(), "{drawn}");
+    let choice = recorded(root.path()).expect("the run recorded no choice");
+    assert_eq!(choice.free_text.as_deref(), Some("ship it after lunch"));
 }
 
 #[test]
@@ -169,16 +226,13 @@ fn the_live_region_comes_off_the_terminal_before_a_prompt_draws_on_it() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
     terminal.wait_for("nodes ", "the run never pinned its region to the terminal");
-    terminal.wait_for(
-        "a decision is needed",
-        "the gate never put its decision on the console",
-    );
+    terminal.wait_for(DECISION, "the gate never put its decision on the console");
 
     // The region and the prompt write to the same stream, and the one
     // that draws second lands on what the other put there. So the
     // region comes down first, and stays down until the prompt ends.
     assert!(
-        terminal.cleared_before("nodes ", "a decision is needed"),
+        terminal.cleared_before("nodes ", DECISION),
         "the region was still pinned to the terminal the prompt drew on:\n{}",
         terminal.drawn()
     );
@@ -259,14 +313,14 @@ fn an_escalation_says_what_happened_above_the_options_it_offers() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
     terminal.wait_for(
-        "tradeoff:",
-        "the gate never put its options, or what they cost, on the console",
+        "> 1  retry",
+        "the gate never put its options on the console",
     );
     let drawn = terminal.drawn();
     let happened = drawn
         .find("re-routes to `fix` are exhausted")
         .expect("a decision opens with the account of what raised it");
-    let options = drawn.find("tradeoff:").unwrap_or_default();
+    let options = drawn.find("retry — ").unwrap_or_default();
     assert!(
         happened < options,
         "what happened is read before what to do about it, not after it:\n{drawn}"
@@ -274,12 +328,12 @@ fn an_escalation_says_what_happened_above_the_options_it_offers() {
 }
 
 #[test]
-fn an_escalation_says_the_record_behind_its_claim_once_and_under_its_own_heading() {
+fn an_escalation_says_the_record_behind_its_claim_once() {
     let root = tempfile::tempdir().unwrap();
     let terminal = gated(root.path());
     terminal.wait_for(
-        "tradeoff:",
-        "the gate never put its options, or what they cost, on the console",
+        "> 1  retry",
+        "the gate never put its options on the console",
     );
     let drawn = terminal.drawn();
 
@@ -291,15 +345,11 @@ fn an_escalation_says_the_record_behind_its_claim_once_and_under_its_own_heading
         drawn.contains("re-routes to `fix` are exhausted"),
         "the account of what raised the decision never reached the console:\n{drawn}"
     );
-    assert!(
-        drawn.contains("evidence, attached by the engine"),
-        "the record behind the claim reached the console under no heading:\n{drawn}"
-    );
     // Scoped to the decision itself: the node's own failure line said
     // `exit 1` too, and that is a different surface reporting a
     // different thing, not this block saying one thing twice.
     let decision = &drawn[drawn
-        .find("a decision is needed")
+        .find(DECISION)
         .expect("the prompt never opened its block")..];
     assert_eq!(
         decision.matches("exit 1").count(),
@@ -313,8 +363,8 @@ fn an_escalation_draws_the_evidence_the_engine_attached_above_the_options() {
     let root = tempfile::tempdir().unwrap();
     let terminal = approving(root.path());
     terminal.wait_for(
-        "tradeoff:",
-        "the gate never put its options, or what they cost, on the console",
+        "> 1  approve",
+        "the gate never put its options on the console",
     );
     let drawn = terminal.drawn();
 
@@ -323,16 +373,16 @@ fn an_escalation_draws_the_evidence_the_engine_attached_above_the_options() {
     // asks for a decision on a claim nobody checked, so the record is
     // read first — and this gate's record says what its summary never
     // does, which is who is being asked.
-    let heading = drawn
-        .find("evidence, attached by the engine")
-        .unwrap_or_else(|| panic!("the prompt drew no evidence at all:\n{drawn}"));
+    let claim = drawn
+        .find("Ship what is on the branch?")
+        .unwrap_or_else(|| panic!("the prompt never said what it asks:\n{drawn}"));
     let attached = drawn
         .find("assignee: the release lead")
-        .unwrap_or_else(|| panic!("the evidence was headed and left empty:\n{drawn}"));
-    let options = drawn.find("tradeoff:").unwrap_or_default();
+        .unwrap_or_else(|| panic!("the prompt drew no evidence at all:\n{drawn}"));
+    let options = drawn.find("  1  approve").unwrap_or_default();
     assert!(
-        heading < attached,
-        "the heading promised the engine's record and nothing under it is one:\n{drawn}"
+        claim < attached,
+        "the record is read under the claim it audits:\n{drawn}"
     );
     assert!(
         attached < options,

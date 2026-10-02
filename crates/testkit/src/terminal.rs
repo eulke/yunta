@@ -109,12 +109,17 @@ impl Terminal {
         }
     }
 
-    /// Everything the run has drawn so far, escape sequences and all.
+    /// Everything the run has drawn so far, as a person reads it: the
+    /// sequences that move the cursor and clear rows are kept, because
+    /// they are how a drawing is read here, and paint is not, because a
+    /// color changes how a word looks and never which word it is.
     pub fn drawn(&self) -> String {
-        self.drawn
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone()
+        unpainted(
+            &self
+                .drawn
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
     }
 
     /// Waits until `needle` has been drawn, failing with `what` and
@@ -336,8 +341,46 @@ fn collect(mut screen: std::fs::File, into: Arc<Mutex<String>>) -> std::thread::
     })
 }
 
+/// `text` without the sequences that paint it (`ESC [ … m`).
+fn unpainted(text: &str) -> String {
+    const INTRODUCER: &str = "\u{1b}[";
+    let mut kept = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(INTRODUCER) {
+        kept.push_str(&rest[..at]);
+        let after = &rest[at + INTRODUCER.len()..];
+        let parameters = after
+            .find(|character: char| !(character.is_ascii_digit() || character == ';'))
+            .unwrap_or(after.len());
+        rest = match after[parameters..].strip_prefix('m') {
+            Some(painted) => painted,
+            None => {
+                kept.push_str(INTRODUCER);
+                after
+            }
+        };
+    }
+    kept.push_str(rest);
+    kept
+}
+
 /// Where a run under [`Terminal`] keeps its runs, so a test can read
 /// what one produced: `YUNTA_HOME/runs/<id>/`.
 pub fn runs_root(home: &Path) -> PathBuf {
     home.join("runs")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paint_is_dropped_and_what_moves_the_cursor_is_kept() {
+        let drawn =
+            format!("\u{1b}[1mdecision\u{1b}[0m: \u{1b}[35mneeds you\u{1b}[0m{CLEAR_ROW}\u{1b}[2A");
+        assert_eq!(
+            unpainted(&drawn),
+            format!("decision: needs you{CLEAR_ROW}\u{1b}[2A")
+        );
+    }
 }

@@ -13,18 +13,14 @@
 //! concrete UI and never writes to the console itself); the MCP one is a
 //! `resolve_gate` tool, not built here.
 
-use std::path::Path;
-
 use async_trait::async_trait;
 use yunta_core::events::{Channel, GateWaitingPayload, HumanChoice, Shown};
 use yunta_core::{Answer, QuestionsFile, Responder, TasksFile};
 
 /// What a decision is asked with, beside the escalation the log records:
-/// the tree the run works in, and the documents the escalation shows,
-/// read from the run for the person to see. The escalation names them
-/// by hash; this is their content.
+/// the documents the escalation shows, read from the run for the person
+/// to see. The escalation names them by hash; this is their content.
 pub struct Asking<'a> {
-    pub tree: &'a Path,
     pub shown: &'a [ShownDocument],
 }
 
@@ -86,10 +82,8 @@ pub trait HumanInteraction: Send + Sync {
     /// that answers off the menu is a bug, not a decision.
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice>;
 
-    /// [`resolve`](Self::resolve), with what the asking knows: the tree
-    /// a node's next attempt starts from, which is where a person changes
-    /// what a node failed on before choosing to run it again, and the
-    /// documents the escalation shows. Both are the asking's context, not
+    /// [`resolve`](Self::resolve), with what the asking knows: the
+    /// documents the escalation shows. They are the asking's context, not
     /// the escalation's — the escalation is what the log records and a
     /// parked run rebuilds. A surface with nowhere to show them answers
     /// as `resolve` does.

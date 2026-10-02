@@ -8,33 +8,30 @@
 //! person, a budget or loop cap — they differ in what they say, never
 //! in how they are answered.
 
-use std::path::Path;
-
 use yunta_core::events::{GateWaitingPayload, HumanChoice};
 use yunta_core::OptionId;
 use yunta_engine::ShownDocument;
 
 use super::field::ask_line;
+use super::keys::{Stroke, Strokes};
 use super::menu::{choose, Choice};
-use super::{attributed, Answered, Console, ANSWER};
-use crate::commands::status::decision::run_tree_line;
-use crate::render::{evidence, option_headline, option_tradeoff, INDENT, INDENT_WIDTH};
+use super::{attributed, Answered, Console, NoAnswer, ANSWER};
+use crate::commands::status::decision::{account, Beside};
+use crate::render::blocks::{Block, Headline};
+use crate::render::{label, Mark, INDENT, INDENT_WIDTH};
 
-/// Free text is offered on every decision, whatever was on the menu:
-/// the menu is there to make the common answer quick, never to be the
-/// only answer available.
-const ASIDE: &str = "anything to add?";
+/// What settles an option that asks for nothing: the decision as it
+/// stands, or a note sent with it.
+const SETTLE: &str = "enter records it, n adds a note";
 
 /// Puts `escalation` to the person, with the documents it shows, and
-/// returns what they decided, saying where the run works when the
-/// caller knows.
+/// returns what they decided.
 pub(crate) fn decide(
     console: &Console,
     escalation: &GateWaitingPayload,
     shown: &[ShownDocument],
-    tree: Option<&Path>,
 ) -> Answered<HumanChoice> {
-    present(console, escalation, shown, tree)?;
+    present(console, escalation, shown)?;
     let option = choose(console, "choose", options(escalation))?;
     console.say(&format!("chose `{option}`"))?;
     let asks = escalation
@@ -43,20 +40,14 @@ pub(crate) fn decide(
         .find(|offered| offered.id == option)
         .and_then(|offered| offered.asks.as_deref());
     let said = match asks {
-        Some(asks) => required(console, asks)?,
-        None => {
-            console.say(&format!(
-                "{ASIDE} (enter records the decision as it stands, {})",
-                console.escape().said()
-            ))?;
-            ask_line(console, ANSWER)?.value
-        }
+        Some(asks) => Some(required(console, asks)?),
+        None => noted(console)?,
     };
     let by = attributed(console)?;
     Ok(HumanChoice {
         option,
         by,
-        free_text: (!said.is_empty()).then_some(said),
+        free_text: said,
     })
 }
 
@@ -74,29 +65,59 @@ fn required(console: &Console, asks: &str) -> Answered<String> {
     }
 }
 
-/// Draws what the decision is about.
+/// What a person adds to an option that asks for nothing: one key
+/// records the decision as it stands, and `n` opens a line for a note
+/// sent with it. Nothing asked for words, so the common answer costs a
+/// key rather than a line left empty.
+fn noted(console: &Console) -> Answered<Option<String>> {
+    console.say(&format!("{SETTLE}, {}", console.escape().said()))?;
+    let mut strokes = Strokes::default();
+    loop {
+        match strokes.read(console.read_key()?) {
+            Stroke::Enter => return Ok(None),
+            Stroke::Insert('n' | 'N') => {
+                let note = ask_line(console, &format!("note {ANSWER}"))?.value;
+                return Ok((!note.is_empty()).then_some(note));
+            }
+            Stroke::Decline => return Err(NoAnswer::Declined),
+            Stroke::Interrupt => {
+                console.interrupt();
+                return Err(NoAnswer::Interrupted);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Draws what the decision is about: that it needs the person, the
+/// claim, the record the engine attached to audit it against, and the
+/// documents it shows.
 ///
-/// The evidence goes above the options because it is what the summary
-/// is audited against: the summary is an agent's account of what
-/// happened and the evidence is the engine's own record of it, so a
-/// menu offered without the evidence asks for a decision on a claim
-/// nobody checked. An escalation whose summary already quotes that
-/// record has nothing left to audit it against, and a heading over a
-/// second copy of one sentence costs more room at a prompt someone is
-/// waiting at than it gives them.
-///
-/// The run's tree goes last: it is not evidence of what happened but
-/// where to act on it, which is what a person reads before choosing to
-/// run a node again.
+/// The record goes above the options because a menu offered without it
+/// asks for a decision on a claim nobody checked. It is drawn as it is
+/// on every surface that shows the decision, so a person who reads the
+/// same run's page later reads the same block.
 fn present(
     console: &Console,
     escalation: &GateWaitingPayload,
     shown: &[ShownDocument],
-    tree: Option<&Path>,
 ) -> std::io::Result<()> {
+    let look = console.look();
+    let mut lines = Headline {
+        subject: "decision".to_string(),
+        mark: Mark::NeedsYou,
+        said: "needs you".to_string(),
+    }
+    .lines(&look);
+    let nothing_beside = Beside {
+        claim: false,
+        evidence: false,
+    };
+    lines.extend(account(escalation, nothing_beside, 1, &look));
     console.say("")?;
-    console.say("a decision is needed")?;
-    console.block(escalation.summary(), INDENT)?;
+    for line in &lines {
+        console.say(&look.ink.paint(line))?;
+    }
     for document in shown {
         console.say("")?;
         console.say("what you are deciding on")?;
@@ -106,30 +127,19 @@ fn present(
             INDENT,
         )?;
     }
-    let attached = evidence(escalation);
-    if !attached.is_empty() {
-        console.say("")?;
-        console.say("evidence, attached by the engine from the run's own log")?;
-        for fact in &attached {
-            console.block(fact, INDENT)?;
-        }
-    }
-    if let Some(tree) = tree {
-        console.say("")?;
-        console.say(&run_tree_line(tree))?;
-    }
     console.say("")
 }
 
-/// The menu, an option to a line with what it trades off underneath.
+/// The menu: every option by its id, with what it does and what
+/// choosing it costs read above the list.
 fn options(escalation: &GateWaitingPayload) -> Vec<Choice<OptionId>> {
     escalation
         .options()
         .iter()
         .map(|option| Choice {
-            head: option_headline(option),
-            detail: Some(option_tradeoff(option)),
-            value: option.id.clone(),
+            label: label(option).map(str::to_string),
+            detail: Some(option.tradeoff.clone()),
+            ..Choice::named(option.id.as_str(), option.id.clone())
         })
         .collect()
 }
@@ -160,14 +170,17 @@ mod tests {
     }
 
     #[test]
-    fn an_option_carries_its_tradeoff_as_the_line_under_it() {
+    fn an_option_is_named_by_its_id_and_carries_what_it_does_and_costs() {
         let drawn = options(&escalation());
-        let first = drawn.first().map(|choice| &choice.detail);
+        let first = drawn.first().expect("the menu offers the option");
+        assert_eq!(first.name, "approve");
         assert_eq!(
-            first,
-            Some(&Some(
-                "tradeoff: Unblocks now; one more task in the document".to_string()
-            )),
+            first.label.as_deref(),
+            Some("Add an in-memory session store")
+        );
+        assert_eq!(
+            first.detail.as_deref(),
+            Some("Unblocks now; one more task in the document"),
             "every option declares what it trades off, and the menu shows it"
         );
     }

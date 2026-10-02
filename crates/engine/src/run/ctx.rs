@@ -245,8 +245,8 @@ impl<'a> RunCtx<'a> {
         Ok(self.log().events().await?)
     }
 
-    /// Puts `escalation` to the run's human surface, with the tree this
-    /// run works in and the documents it shows, and returns its choice,
+    /// Puts `escalation` to the run's human surface, with the documents
+    /// it shows, and returns its choice,
     /// verified against the menu the surface was shown. `None` keeps its
     /// meaning: no surface can answer right now. An answer the
     /// escalation does not accept is refused as
@@ -263,10 +263,7 @@ impl<'a> RunCtx<'a> {
         };
         let shown =
             crate::artifacts::shown::documents(self.run_dir, escalation.shows(), &tasks).await?;
-        let asking = crate::Asking {
-            tree: self.worktree,
-            shown: &shown,
-        };
+        let asking = crate::Asking { shown: &shown };
         let Some(choice) = self.human_interaction.resolve_in(escalation, &asking).await else {
             return Ok(None);
         };

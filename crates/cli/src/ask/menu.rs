@@ -12,10 +12,11 @@
 //! `abort`) share their first letter, so an initial is neither
 //! declarable nor derivable.
 //!
-//! What an option carries underneath — on a decision, what choosing it
-//! trades off — is read above the list, under the same number the list
-//! is picked by. The list itself is one short row per option, because
-//! that is the only shape it redraws correctly. It clears what it wrote
+//! What an option says beyond its name — on a decision, what it does
+//! and what choosing it costs — is read once, above the list, under the
+//! same number the list is picked by. The list itself is one short row
+//! per option, its name, because that is the only shape it redraws
+//! correctly and the name is what a person picks it by. It clears what it wrote
 //! by adding two counts: the line breaks its own drawing carries, and a
 //! correction for a row it takes the terminal to have wrapped, measured
 //! against the terminal's width in bytes. An option drawn as a block
@@ -38,14 +39,37 @@ use crate::render::{wrap, INDENT, INDENT_WIDTH};
 /// The keys a list answers to, named above every one of them.
 const KEYS: &str = "arrows move, type to filter, enter chooses";
 
-/// One option: what it is, what choosing it means, and what the caller
-/// gets back for it.
+/// One option: what it is called, what choosing it means, and what the
+/// caller gets back for it.
 pub(crate) struct Choice<T> {
-    /// The option in one line.
-    pub(crate) head: String,
+    /// What the option is picked by — the row the list holds.
+    pub(crate) name: String,
+    /// What it does, beside its name, when the name does not say it.
+    pub(crate) label: Option<String>,
     /// What is read under it, when the option carries something.
     pub(crate) detail: Option<String>,
     pub(crate) value: T,
+}
+
+impl<T> Choice<T> {
+    /// An option its name says all of.
+    pub(crate) fn named(name: impl Into<String>, value: T) -> Self {
+        Choice {
+            name: name.into(),
+            label: None,
+            detail: None,
+            value,
+        }
+    }
+
+    /// The option in one line: its name, and what it does when that is
+    /// said apart from it.
+    fn head(&self) -> String {
+        match &self.label {
+            Some(label) => format!("{} — {label}", self.name),
+            None => self.name.clone(),
+        }
+    }
 }
 
 /// Puts `choices` to the person — `verb` says what picking one does —
@@ -54,9 +78,9 @@ pub(crate) fn choose<T>(console: &Console, verb: &str, choices: Vec<Choice<T>>) 
     let width = console.width();
     let read = read(&choices, width);
     let rows = rows(&choices, width);
-    // What is read above the list is whatever the list's own rows have
-    // no space for: what an option carries underneath, and a head a row
-    // had to cut. An option a row holds whole is read on that row.
+    // What is read above the list is whatever the list's own rows do
+    // not say: what an option does and carries underneath, and a name a
+    // row had to cut. An option a row holds whole is read on that row.
     if read
         .iter()
         .zip(&rows)
@@ -101,7 +125,7 @@ fn read<T>(choices: &[Choice<T>], width: usize) -> Vec<String> {
         .enumerate()
         .map(|(index, choice)| {
             let mut lines: Vec<String> = Vec::new();
-            let text = wrap(&choice.head, room)
+            let text = wrap(&choice.head(), room)
                 .into_iter()
                 .chain(choice.detail.iter().flat_map(|detail| wrap(detail, room)));
             for line in text {
@@ -115,7 +139,7 @@ fn read<T>(choices: &[Choice<T>], width: usize) -> Vec<String> {
         .collect()
 }
 
-/// Every option as the list holds it: its position and its text on one
+/// Every option as the list holds it: its position and its name on one
 /// row, inside `width` bytes.
 ///
 /// Cut by bytes and not by cells because that is what the list measures
@@ -128,7 +152,7 @@ fn rows<T>(choices: &[Choice<T>], width: usize) -> Vec<String> {
         .enumerate()
         .map(|(index, choice)| {
             within(
-                &format!("{:>digits$}{INDENT}{}", index + 1, choice.head),
+                &format!("{:>digits$}{INDENT}{}", index + 1, choice.name),
                 width.saturating_sub(INDENT_WIDTH + 1),
             )
         })
@@ -190,10 +214,9 @@ mod tests {
         ["approve", "adjust", "abort"]
             .iter()
             .enumerate()
-            .map(|(index, head)| Choice {
-                head: (*head).to_string(),
-                detail: details.then(|| format!("what {head} costs")),
-                value: index as u8,
+            .map(|(index, name)| Choice {
+                detail: details.then(|| format!("what {name} costs")),
+                ..Choice::named(*name, index as u8)
             })
             .collect()
     }
@@ -216,13 +239,13 @@ mod tests {
         // is half again as wide as a line has room for.
         let block = read(
             &[Choice {
-                head: "retry — Re-route to `fix` once more".to_string(),
+                label: Some("Re-route to `fix` once more".to_string()),
                 detail: Some(
-                    "tradeoff: Uses one extra correction attempt beyond the declared \
-                 max_reroutes (0); escalates again if `fix` doesn't fix it"
+                    "Uses one extra correction attempt beyond the declared \
+                     max_reroutes (0); escalates again if `fix` doesn't fix it"
                         .to_string(),
                 ),
-                value: 0u8,
+                ..Choice::named("retry", 0u8)
             }],
             LINE_WIDTH,
         );
@@ -263,9 +286,8 @@ mod tests {
         const TERMINAL: usize = 40;
         let rows = rows(
             &[Choice {
-                head: format!("retry — {}", "é".repeat(ROOM)),
-                detail: Some("tradeoff: no room for this on a row".to_string()),
-                value: 0u8,
+                detail: Some("no room for this on a row".to_string()),
+                ..Choice::named(format!("retry-{}", "é".repeat(ROOM)), 0u8)
             }],
             TERMINAL,
         );
@@ -285,19 +307,33 @@ mod tests {
     #[test]
     fn what_a_row_leaves_out_is_read_whole_above_the_list() {
         let long = Choice {
-            head: "retry — Re-route to `fix` once more".to_string(),
-            detail: Some("tradeoff: one more attempt".to_string()),
-            value: 0u8,
+            detail: Some("one more attempt".to_string()),
+            ..Choice::named("re-route-to-fix-once-more", 0u8)
         };
         let rows = rows(std::slice::from_ref(&long), 20);
         let read = read(std::slice::from_ref(&long), LINE_WIDTH);
         let row = rows.first().map(String::as_str).unwrap_or_default();
         let block = read.first().map(String::as_str).unwrap_or_default();
         assert!(row.len() < 20 - INDENT_WIDTH, "{row:?}");
-        assert!(block.contains(&long.head), "{block:?}");
+        assert!(block.contains(&long.name), "{block:?}");
         assert!(
-            block.contains("tradeoff: one more attempt"),
+            block.contains("one more attempt"),
             "what the row had no space for is read above it: {block:?}"
         );
+    }
+
+    #[test]
+    fn what_an_option_does_is_read_once_above_the_row_that_names_it() {
+        let retry = Choice {
+            label: Some("Re-route to `fix` once more".to_string()),
+            detail: Some("one more attempt".to_string()),
+            ..Choice::named("retry", 0u8)
+        };
+        let read = read(std::slice::from_ref(&retry), LINE_WIDTH);
+        assert_eq!(
+            read,
+            ["  1  retry — Re-route to `fix` once more\n     one more attempt"]
+        );
+        assert_eq!(rows(std::slice::from_ref(&retry), LINE_WIDTH), ["1  retry"]);
     }
 }
