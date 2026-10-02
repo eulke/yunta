@@ -44,9 +44,14 @@ async fn a_plain_failure_reconstructs_a_retry_and_abort_escalation() {
     // who fixes its cause needs a way to hand the node back, and a resume
     // alone would find it failed and pause again.
     let bench = parked(FAILS_UNTIL_FIXED_WORKFLOW, "sessions: []\n").await;
-    let (node, escalation) =
-        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events()))
-            .expect("a failed node is a pause with a menu");
+    let (node, escalation) = current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events()),
+    )
+    .await
+    .unwrap()
+    .expect("a failed node is a pause with a menu");
     assert_eq!(node.as_str(), "broken");
     assert_eq!(escalation.summary(), "node `broken` failed");
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
@@ -67,9 +72,14 @@ async fn a_failure_on_the_frozen_config_offers_no_retry_and_names_the_way_out() 
         "sessions: []\n",
     )
     .await;
-    let (node, escalation) =
-        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events()))
-            .expect("a failed node is a pause with a menu");
+    let (node, escalation) = current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events()),
+    )
+    .await
+    .unwrap()
+    .expect("a failed node is a pause with a menu");
     assert_eq!(node.as_str(), "gate");
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["abort"]);
@@ -137,9 +147,14 @@ async fn a_retry_that_fails_again_asks_again_for_the_next_attempt() {
         2,
         "one retry runs the node once"
     );
-    let (_, escalation) =
-        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events()))
-            .expect("the second failure is a decision too");
+    let (_, escalation) = current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events()),
+    )
+    .await
+    .unwrap()
+    .expect("the second failure is a decision too");
     assert_eq!(
         escalation.options()[0].label,
         "Run `broken` again (attempt 3)"
@@ -215,9 +230,14 @@ async fn aborting_a_failed_node_pauses_on_the_failure_and_asks_again_on_resume()
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"
     );
-    assert!(
-        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events())).is_some()
-    );
+    assert!(current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events())
+    )
+    .await
+    .unwrap()
+    .is_some());
     assert_eq!(attempts(&bench, "broken"), 1);
 }
 
@@ -267,9 +287,14 @@ async fn a_blocked_task_says_what_its_attempt_left_red() {
         status_of(&bench, "T001"),
         Some(yunta_core::events::TaskStatus::Blocked)
     );
-    let (_, escalation) =
-        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events()))
-            .expect("a loop that failed on a blocked task is a decision");
+    let (_, escalation) = current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events()),
+    )
+    .await
+    .unwrap()
+    .expect("a loop that failed on a blocked task is a decision");
     let facts = format!("{:?}", escalation.evidence());
     assert!(
         facts.contains("task `T001` blocked")
@@ -372,10 +397,15 @@ sessions:
   - outcome: { type: completed, summary: nothing more to do }
 ";
 
-fn options(bench: &Bench) -> Vec<String> {
-    let (_, escalation) =
-        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events()))
-            .expect("a failed loop is a decision");
+async fn options(bench: &Bench) -> Vec<String> {
+    let (_, escalation) = current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events()),
+    )
+    .await
+    .unwrap()
+    .expect("a failed loop is a decision");
     escalation
         .options()
         .iter()
@@ -389,7 +419,7 @@ async fn continuing_a_loop_from_the_work_it_left_closes_the_task_without_a_sessi
     let marker = outside.path().join("provided");
     let bench = parked(&needs_a_person(&marker), DOES_ITS_PART).await;
     assert_eq!(
-        options(&bench),
+        options(&bench).await,
         ["continue-work", "retry", "abort"],
         "the blocked task left work, so continuing from it is offered"
     );
@@ -420,7 +450,7 @@ async fn a_task_blocked_before_any_work_is_only_offered_to_run_again() {
     .await;
 
     assert_eq!(
-        options(&bench),
+        options(&bench).await,
         ["retry", "abort"],
         "the pre-check blocked it before any work, so there is nothing to continue from"
     );

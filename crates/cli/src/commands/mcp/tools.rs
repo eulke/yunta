@@ -57,6 +57,7 @@ pub(super) async fn tool_workflow_status(
     let open = ctx.open_run(&run_id).await?;
     let engine = yunta_engine::engine_liveness(&open.run_dir, &yunta_engine::lock::SystemProbe);
     let (events, manifest) = (open.events, open.manifest.doc);
+    let decision = crate::json::decision_of(&manifest, &open.run_dir, &events).await?;
     // The same versioned DTO `yunta status --json` prints, serialized to
     // the tool result rather than to stdout, and read at this server's
     // own injected clock.
@@ -66,6 +67,7 @@ pub(super) async fn tool_workflow_status(
         &manifest,
         ctx.clock.now(),
         engine,
+        decision,
     ))
     .map_err(CliError::msg)
 }

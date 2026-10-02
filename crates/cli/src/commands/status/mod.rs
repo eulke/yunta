@@ -19,7 +19,7 @@ use std::path::Path;
 
 use yunta_core::events::StoredEvent;
 use yunta_core::Clock;
-use yunta_core::{Manifest, RunId};
+use yunta_core::RunId;
 use yunta_engine::RunPhase;
 
 use crate::commands::advice;
@@ -55,9 +55,10 @@ pub async fn status(
     let manifest = open.manifest.doc;
 
     let now = ctx.clock.now();
+    let decision = crate::json::decision_of(&manifest, &run_dir, &events).await?;
     if json {
         return crate::json::print_json(&crate::json::RunDocument::of(
-            run_id, &events, &manifest, now, engine,
+            run_id, &events, &manifest, now, engine, decision,
         ));
     }
 
@@ -107,7 +108,7 @@ pub async fn status(
         }
     }
     let tree = ctx.project.run_tree(&manifest, run_id, &ctx.cwd);
-    let decided = decision_page((run_id, &manifest, &tree), &events, &frame.phase);
+    let decided = decision_page((run_id, &tree), &events, &frame.phase, decision);
     if let Some(decided) = &decided {
         out.push('\n');
         out.push_str(&decided.text);
@@ -137,13 +138,14 @@ struct Decided {
 /// none — the sentence the frame carries for it and the way back into the
 /// run. `None` for a run that is not parked.
 fn decision_page(
-    (run_id, manifest, tree): (&RunId, &Manifest, &Path),
+    (run_id, tree): (&RunId, &Path),
     events: &[StoredEvent],
     phase: &RunPhase,
+    decision: Option<(yunta_core::NodeId, yunta_core::events::Escalation)>,
 ) -> Option<Decided> {
     let waiting = advice::parked(phase)?;
     let state = yunta_engine::derive(events);
-    Some(match yunta_engine::current_escalation(manifest, &state) {
+    Some(match decision {
         Some((node, escalation)) => {
             let look = crate::render::stdout_look();
             // The page's second line made the claim, with the record

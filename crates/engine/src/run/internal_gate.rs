@@ -126,6 +126,20 @@ impl<'a> InternalGate<'a> {
         .showing(self.shown(state)?))
     }
 
+    /// What the gate asks, read from the documents it shows as the run
+    /// in `run_dir` holds them — the one way both the live prompt and a
+    /// later rebuild of its menu come by it. What could not be read is
+    /// the outer error; a menu that cannot be built from what was read,
+    /// the inner one.
+    pub(crate) async fn asked(
+        &self,
+        workflow: &Workflow,
+        _run_dir: &std::path::Path,
+        state: &RunState,
+    ) -> Result<Result<Escalation, GateEscalationError>, RunError> {
+        Ok(self.escalation(workflow, state))
+    }
+
     /// Whether the gate shows the run's findings.
     fn shows_the_run_findings(&self) -> bool {
         self.shows.iter().any(super::gate_findings::is_view)
@@ -206,7 +220,8 @@ pub(super) async fn resolve(ctx: &RunCtx<'_>, node: &Node) -> Result<GateStep, R
         .ok_or_else(|| broken("the scheduler chose it as an internal gate".to_string()))?;
     let state = ctx.run_view().await?.state;
     let escalation = gate
-        .escalation(&ctx.manifest.workflow, &state)
+        .asked(&ctx.manifest.workflow, ctx.run_dir, &state)
+        .await?
         .map_err(|source| broken(source.to_string()))?;
     if gate.shows_the_run_findings() {
         super::gate_findings::keep(ctx, &state).await?;

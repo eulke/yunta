@@ -121,8 +121,10 @@ async fn no_reroute_is_spent_on_a_command_the_frozen_config_lacks() {
         "{:?}",
         state.nodes.state("fix")
     );
-    let (node, escalation) =
-        current_escalation(&bench.manifest(), &state).expect("the failure is a pause with a menu");
+    let (node, escalation) = current_escalation(&bench.manifest(), &bench.run_dir(), &state)
+        .await
+        .unwrap()
+        .expect("the failure is a pause with a menu");
     assert_eq!(node.as_str(), "lint");
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, ["abort"]);

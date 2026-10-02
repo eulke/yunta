@@ -41,6 +41,7 @@ pub(crate) async fn resolve(
 
     yunta_engine::resolve_gate(
         &manifest,
+        &run_dir,
         &storage,
         run_id,
         &ctx.clock,
@@ -118,7 +119,9 @@ async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
     let open = ctx.open_run(run_id).await?;
     let state = yunta_engine::derive(&open.events);
     let called = run_id.handle();
-    let Some((_, escalation)) = yunta_engine::current_escalation(&open.manifest.doc, &state) else {
+    let decision =
+        crate::json::decision_of(&open.manifest.doc, &open.run_dir, &open.events).await?;
+    let Some((_, escalation)) = decision else {
         return Err(CliError::msg(format!(
             "run {called} waits on no decision — `{}` says where it stands",
             advice::status(called)

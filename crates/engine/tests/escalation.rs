@@ -18,9 +18,13 @@ use common::*;
 async fn paused_manifest_and_events(
     workflow_yaml: &str,
     fixture_yaml: &str,
-) -> (yunta_core::Manifest, Vec<yunta_core::events::StoredEvent>) {
+) -> (
+    yunta_core::Manifest,
+    Vec<yunta_core::events::StoredEvent>,
+    yunta_testkit::Bench,
+) {
     let bench = parked(workflow_yaml, fixture_yaml).await;
-    (bench.manifest(), bench.events())
+    (bench.manifest(), bench.events(), bench)
 }
 
 const HOPELESS_UNTIL_RETRIED_WORKFLOW: &str = r#"
@@ -43,7 +47,7 @@ sessions:
 
 #[tokio::test]
 async fn reconstructs_an_exhausted_reroute_escalation_with_retry_and_abort() {
-    let (manifest, events) = paused_manifest_and_events(
+    let (manifest, events, bench) = paused_manifest_and_events(
         HOPELESS_UNTIL_RETRIED_WORKFLOW,
         HOPELESS_UNTIL_RETRIED_FIXTURE,
     )
@@ -58,8 +62,11 @@ async fn reconstructs_an_exhausted_reroute_escalation_with_retry_and_abort() {
         )))
     )));
 
-    let (node_id, escalation) = current_escalation(&manifest, &yunta_engine::derive(&events))
-        .expect("an exhausted re-route must reconstruct an escalation");
+    let (node_id, escalation) =
+        current_escalation(&manifest, &bench.run_dir(), &yunta_engine::derive(&events))
+            .await
+            .unwrap()
+            .expect("an exhausted re-route must reconstruct an escalation");
     assert_eq!(node_id.as_str(), "lint");
     assert!(escalation.summary().contains("lint"));
     assert!(escalation.summary().contains("fix-lint"));
@@ -85,7 +92,7 @@ nodes:
 
 #[tokio::test]
 async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
-    let (manifest, events) =
+    let (manifest, events, bench) =
         paused_manifest_and_events(INTERNAL_GATE_WORKFLOW, "sessions: []\n").await;
 
     assert!(!events.iter().any(|e| matches!(
@@ -95,8 +102,11 @@ async fn reconstructs_an_internal_gate_escalation_with_its_declared_options() {
         )))
     )));
 
-    let (node_id, escalation) = current_escalation(&manifest, &yunta_engine::derive(&events))
-        .expect("an unresolved internal gate must reconstruct an escalation");
+    let (node_id, escalation) =
+        current_escalation(&manifest, &bench.run_dir(), &yunta_engine::derive(&events))
+            .await
+            .unwrap()
+            .expect("an unresolved internal gate must reconstruct an escalation");
     assert_eq!(node_id.as_str(), "approve");
     assert_eq!(escalation.summary(), "Approve the plan?");
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();

@@ -377,7 +377,8 @@ pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliErr
         events: &events,
         prior: closed.prior,
         now: closed.clock.now(),
-        decision: yunta_engine::current_escalation(closed.manifest, &yunta_engine::derive(&events))
+        decision: crate::json::decision_of(closed.manifest, closed.run_dir, &events)
+            .await?
             .map(|(node, escalation)| (node, escalation.into_payload())),
         outline: Outline {
             run_dir: closed.run_dir,
@@ -414,8 +415,12 @@ async fn documented(
     let events = storage.events_for_run(run_id.clone()).await?;
     // This invocation is the engine that drove the run.
     let engine = yunta_engine::EngineLiveness::Alive;
+    let decision = match ctx.project.run_dir(run_id.as_str()) {
+        Some(run_dir) => crate::json::decision_of(manifest, &run_dir, &events).await?,
+        None => None,
+    };
     Ok(
-        crate::json::RunDocument::of(run_id, &events, manifest, ctx.clock.now(), engine)
+        crate::json::RunDocument::of(run_id, &events, manifest, ctx.clock.now(), engine, decision)
             .warnings(warnings),
     )
 }

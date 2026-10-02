@@ -80,7 +80,7 @@ pub use budget::session_token_budget;
 pub use close::{close_run, CloseRunError};
 pub use create::{create_run, BirthArtifact, BirthOrigin, CreateRunParams};
 pub(crate) use ctx::RunCtx;
-pub use escalation::{current_escalation, resolve_gate, ResolveGateError};
+pub use escalation::{awaits_decision, current_escalation, resolve_gate, ResolveGateError};
 pub(crate) use exec::execute_run_at_depth;
 pub use exec::record_pause_after_crash;
 pub(in crate::run) use exec::{find_node, pause};

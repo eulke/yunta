@@ -228,7 +228,7 @@ impl Painter {
         // a walk of the log — asked exactly when the answer changes what
         // the attention row says.
         let answerable = matches!(frame.phase, yunta_engine::RunPhase::Waiting { .. })
-            && yunta_engine::current_escalation(manifest, &yunta_engine::derive(folded.settled()))
+            && yunta_engine::awaits_decision(manifest, &yunta_engine::derive(folded.settled()))
                 .is_some();
         region.show(&frame, run_id, answerable);
     }

@@ -117,9 +117,14 @@ async fn a_refused_retry_still_offers_retry_and_names_the_attempt_that_ran() {
     let bench = parked_on_a_regression().await;
     retried(&bench).await;
 
-    let (node, escalation) =
-        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events()))
-            .expect("the refusal is a pause with a menu");
+    let (node, escalation) = current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events()),
+    )
+    .await
+    .unwrap()
+    .expect("the refusal is a pause with a menu");
     assert_eq!(node.as_str(), "compare");
     let ids: Vec<&str> = escalation.options().iter().map(|o| o.id.as_str()).collect();
     assert_eq!(ids, vec!["retry", "abort"]);

@@ -236,7 +236,8 @@ impl CliError {
             }
             yunta_engine::ResolveGateError::UnknownOption { .. }
             | yunta_engine::ResolveGateError::Unsaid { .. }
-            | yunta_engine::ResolveGateError::Storage(_) => refusal.into(),
+            | yunta_engine::ResolveGateError::Storage(_)
+            | yunta_engine::ResolveGateError::Documents(_) => refusal.into(),
         }
     }
 }

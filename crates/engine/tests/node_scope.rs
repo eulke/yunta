@@ -48,9 +48,14 @@ async fn a_scope_violation_names_every_path_outside_and_the_decision_shows_them(
         "the failure is the list of paths, not a count: {failure}"
     );
 
-    let (_, escalation) =
-        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events()))
-            .expect("a failed node is a pause with a menu");
+    let (_, escalation) = current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events()),
+    )
+    .await
+    .unwrap()
+    .expect("a failed node is a pause with a menu");
     let evidence = escalation.evidence().lines().join("\n");
     assert!(
         evidence.contains("Cargo.toml"),
@@ -86,10 +91,15 @@ fn attempts(bench: &Bench, node: &str) -> usize {
 }
 
 /// The option ids the decision a parked bench waits on offers.
-fn menu(bench: &Bench) -> Vec<String> {
-    let (_, escalation) =
-        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events()))
-            .expect("a failed node is a pause with a menu");
+async fn menu(bench: &Bench) -> Vec<String> {
+    let (_, escalation) = current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events()),
+    )
+    .await
+    .unwrap()
+    .expect("a failed node is a pause with a menu");
     escalation
         .options()
         .iter()
@@ -101,9 +111,15 @@ fn menu(bench: &Bench) -> Vec<String> {
 async fn a_scope_violation_is_offered_the_grant_that_widens_the_node_by_what_it_wrote() {
     let bench = parked(WRITES_OUTSIDE_WORKFLOW, "sessions: []\n").await;
 
-    assert_eq!(menu(&bench), ["grant", "retry", "abort"]);
-    let (_, escalation) =
-        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events())).unwrap();
+    assert_eq!(menu(&bench).await, ["grant", "retry", "abort"]);
+    let (_, escalation) = current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(
         escalation.options()[0].label,
         "Allow `fix` to also write Cargo.toml and run it again (attempt 2)"
@@ -186,7 +202,7 @@ async fn a_ceiling_that_denies_every_expansion_leaves_retry_and_abort() {
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"
     );
-    assert_eq!(menu(&bench), ["retry", "abort"]);
+    assert_eq!(menu(&bench).await, ["retry", "abort"]);
 }
 
 #[tokio::test]
@@ -265,9 +281,15 @@ async fn a_node_session_that_asks_for_scope_puts_its_request_to_a_person() {
         matches!(failure, Failure::ScopeRequested { .. }),
         "the node's work waits on the answer: {failure}"
     );
-    assert_eq!(menu(&bench), ["grant", "retry", "abort"]);
-    let (_, escalation) =
-        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events())).unwrap();
+    assert_eq!(menu(&bench).await, ["grant", "retry", "abort"]);
+    let (_, escalation) = current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let evidence = escalation.evidence().lines().join("\n");
     assert!(
         evidence.contains("the lint's cause is the manifest"),

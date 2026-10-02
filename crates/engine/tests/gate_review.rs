@@ -149,9 +149,14 @@ async fn the_gate_shows_the_plan_it_asks_about_as_the_run_holds_it() {
 async fn an_option_that_sends_the_plan_back_asks_what_should_change() {
     let bench = parked(REVIEWED_PLAN, &planner(true)).await;
 
-    let (_, escalation) =
-        current_escalation(&bench.manifest(), &yunta_engine::derive(&bench.events()))
-            .expect("the run waits on the gate");
+    let (_, escalation) = current_escalation(
+        &bench.manifest(),
+        &bench.run_dir(),
+        &yunta_engine::derive(&bench.events()),
+    )
+    .await
+    .unwrap()
+    .expect("the run waits on the gate");
     let asks: Vec<(&str, Option<&str>)> = escalation
         .options()
         .iter()

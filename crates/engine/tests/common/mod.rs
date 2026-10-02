@@ -909,6 +909,7 @@ pub async fn answer_parked(
 ) -> Result<(), yunta_engine::ResolveGateError> {
     yunta_engine::resolve_gate(
         &bench.manifest(),
+        &bench.run_dir(),
         &bench.storage.async_handle(),
         &bench.run_id,
         &yunta_testkit_core::FixedClock,

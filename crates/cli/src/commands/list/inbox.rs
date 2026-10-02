@@ -317,7 +317,7 @@ fn run_row(
     // Only a parked run has a menu to rebuild, and rebuilding one is a
     // walk of the log.
     let menu = matches!(frame.phase, RunPhase::Waiting { .. })
-        && yunta_engine::current_escalation(&manifest, &yunta_engine::derive(&events)).is_some();
+        && yunta_engine::awaits_decision(&manifest, &yunta_engine::derive(&events)).is_some();
     let row = RunRow::of(
         &frame,
         yunta_engine::engine_liveness(&run_dir, &yunta_engine::lock::SystemProbe),

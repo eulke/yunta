@@ -342,7 +342,7 @@ async fn answered(
     while !decisions.is_empty() {
         let events = storage.events_for_run(prepared.run_id.clone()).await?;
         let state = yunta_engine::derive(&events);
-        let Some((node, _)) = yunta_engine::current_escalation(manifest, &state) else {
+        let Some(node) = yunta_engine::awaits_decision(manifest, &state) else {
             break;
         };
         let Some(option) = decisions.remove(&node) else {
@@ -350,6 +350,7 @@ async fn answered(
         };
         yunta_engine::resolve_gate(
             manifest,
+            &prepared.run_dir,
             storage,
             &prepared.run_id,
             &ctx.clock,

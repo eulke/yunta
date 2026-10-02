@@ -162,6 +162,7 @@ impl RunDocument {
         manifest: &Manifest,
         now: DateTime<Utc>,
         engine: yunta_engine::EngineLiveness,
+        decision: Option<(yunta_core::NodeId, yunta_core::events::Escalation)>,
     ) -> Self {
         let state = yunta_engine::derive(events);
         let frame = progress::frame(run_id, manifest, events, now);
@@ -187,7 +188,7 @@ impl RunDocument {
                 .map(|(id, record)| (id.to_string(), record.status.as_str()))
                 .collect(),
             diagnostics: node_diagnostics(events),
-            decision: parked_decision(run_id, manifest, events, &frame.phase),
+            decision: parked_decision(run_id, decision, &frame.phase),
             waiting_on: WaitingOnJson::of(&frame.phase),
             tokens: TokensJson {
                 input: state.total_tokens().input,
@@ -236,20 +237,28 @@ fn reason(phase: &RunPhase) -> Option<String> {
 /// pause that reconstructs no menu.
 fn parked_decision(
     run_id: &RunId,
-    manifest: &Manifest,
-    events: &[StoredEvent],
+    decision: Option<(yunta_core::NodeId, yunta_core::events::Escalation)>,
     phase: &RunPhase,
 ) -> Option<decision::DecisionJson> {
     if !matches!(phase, RunPhase::Waiting { .. }) {
         return None;
     }
-    let (node, escalation) =
-        yunta_engine::current_escalation(manifest, &yunta_engine::derive(events))?;
+    let (node, escalation) = decision?;
     Some(decision::DecisionJson::new(
         run_id,
         &node,
         escalation.into_payload(),
     ))
+}
+
+/// The decision a run waits on, rebuilt from its log and the documents its
+/// gate shows — the one reading every surface takes.
+pub(crate) async fn decision_of(
+    manifest: &Manifest,
+    run_dir: &std::path::Path,
+    events: &[StoredEvent],
+) -> Result<Option<(yunta_core::NodeId, yunta_core::events::Escalation)>, crate::error::CliError> {
+    Ok(yunta_engine::current_escalation(manifest, run_dir, &yunta_engine::derive(events)).await?)
 }
 
 /// What a waiting run is waiting on.

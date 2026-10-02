@@ -153,9 +153,57 @@ pub(super) fn failure_facts(failure: &Failure) -> Vec<Fact> {
 /// to — `resolve_gate` needs it to record `gate_waiting`/`gate_resolved`
 /// against the right node, the same one the live pause path would have
 /// used.
-pub fn current_escalation(manifest: &Manifest, state: &RunState) -> Option<(NodeId, Escalation)> {
+///
+/// A gate's menu is built from the documents it shows, read from
+/// `run_dir` as the run holds them — the same reading the live prompt
+/// makes, so the menu a later process rebuilds is the one a person was
+/// put.
+pub async fn current_escalation(
+    manifest: &Manifest,
+    run_dir: &std::path::Path,
+    state: &RunState,
+) -> Result<Option<(NodeId, Escalation)>, RunError> {
+    let mode_name = state.run.mode().clone();
+    let Some(decision) = current_decision(manifest, state, &mode_name) else {
+        return Ok(None);
+    };
+    if let Decision::ResolveInternalGate { node } = &decision {
+        let Ok(node) = super::find_node(&manifest.workflow, node) else {
+            return Ok(None);
+        };
+        let Some(gate) = super::internal_gate::InternalGate::of(node) else {
+            return Ok(None);
+        };
+        return Ok(gate
+            .asked(&manifest.workflow, run_dir, state)
+            .await?
+            .ok()
+            .map(|escalation| (node.id.clone(), escalation)));
+    }
+    Ok(menu_of(manifest, &mode_name, decision))
+}
+
+/// The node a parked run waits on a decision from, if any — without
+/// reading what its gate shows: whether a run needs someone, not what it
+/// asks them.
+pub fn awaits_decision(manifest: &Manifest, state: &RunState) -> Option<NodeId> {
     let mode_name = state.run.mode().clone();
     match current_decision(manifest, state, &mode_name)? {
+        Decision::GateExhaustedReroutes { node, .. }
+        | Decision::EscalateFailure { node, .. }
+        | Decision::ResolveInternalGate { node } => Some(node),
+        _ => None,
+    }
+}
+
+/// The menu of a decision that reads no document: a node's re-routes
+/// exhausted, or a failure to decide on.
+fn menu_of(
+    manifest: &Manifest,
+    mode_name: &ModeName,
+    decision: Decision,
+) -> Option<(NodeId, Escalation)> {
+    match decision {
         Decision::GateExhaustedReroutes {
             node,
             goto,
@@ -164,7 +212,7 @@ pub fn current_escalation(manifest: &Manifest, state: &RunState) -> Option<(Node
         } => {
             let escalation = build_reroute_escalation(
                 &manifest.workflow,
-                &mode_name,
+                mode_name,
                 &node,
                 &goto,
                 max_reroutes,
@@ -184,13 +232,6 @@ pub fn current_escalation(manifest: &Manifest, state: &RunState) -> Option<(Node
                 build_failure_escalation(&node, &failure, next_attempt, (continuable, grantable))
                     .ok()?;
             Some((node, escalation))
-        }
-        Decision::ResolveInternalGate { node } => {
-            let node = super::find_node(&manifest.workflow, &node).ok()?;
-            let escalation = super::internal_gate::InternalGate::of(node)?
-                .escalation(&manifest.workflow, state)
-                .ok()?;
-            Some((node.id.clone(), escalation))
         }
         _ => None,
     }
@@ -233,6 +274,7 @@ fn current_decision(
 /// chosen option must be on the reconstructed escalation's own menu.
 pub async fn resolve_gate(
     manifest: &Manifest,
+    run_dir: &std::path::Path,
     storage: &yunta_storage::AsyncStorage,
     run_id: &RunId,
     clock: &dyn yunta_core::Clock,
@@ -242,7 +284,10 @@ pub async fn resolve_gate(
     if !events.last().is_some_and(is_run_paused) {
         return Err(ResolveGateError::NotPaused);
     }
-    let Some((node, escalation)) = current_escalation(manifest, &crate::replay::derive(&events))
+    let state = crate::replay::derive(&events);
+    let Some((node, escalation)) = current_escalation(manifest, run_dir, &state)
+        .await
+        .map_err(Box::new)?
     else {
         return Err(ResolveGateError::NothingToResolve);
     };
@@ -374,4 +419,8 @@ pub enum ResolveGateError {
     Unsaid { chosen: OptionId, asks: String },
     #[error(transparent)]
     Storage(#[from] yunta_storage::StorageError),
+    /// What the gate shows could not be read, so its menu cannot be
+    /// rebuilt as a person would be shown it.
+    #[error("the documents the decision shows cannot be read")]
+    Documents(#[from] Box<RunError>),
 }
