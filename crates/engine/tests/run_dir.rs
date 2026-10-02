@@ -11,9 +11,8 @@ use std::path::Path;
 
 /// The names `run_dir` owns, and the crates that must not spell them
 /// themselves.
-const OWNED: [&str; 5] = [
+const OWNED: [&str; 4] = [
     "\"manifest.yaml\"",
-    "\"progress.md\"",
     "\"task-worktrees\"",
     "join(\"sessions\")",
     "join(\"artifacts\")",

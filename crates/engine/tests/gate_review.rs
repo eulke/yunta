@@ -140,8 +140,8 @@ async fn the_gate_shows_the_plan_it_asks_about_as_the_run_holds_it() {
         "nothing was built yet to depart from it"
     );
     assert!(
-        shown[0][0].path.ends_with("artifacts/plan/tasks.md"),
-        "a plan points to the view written for the person reviewing it"
+        shown[0][0].path.ends_with("artifacts/plan/tasks.yaml"),
+        "a plan points to the document the engine runs"
     );
 }
 
@@ -360,116 +360,6 @@ async fn a_plan_no_gate_of_the_run_shows_needs_no_explanation() {
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(refusals(&bench).is_empty());
-}
-
-/// A plan with everything a person reviewing it reads: a description
-/// with a diagram, a design, a risk, and two tasks one after the other.
-const EXPLAINED: &str = r#"
-capabilities: { run_tools: true }
-sessions:
-  - steps:
-      - type: run_tool
-        tool: yunta_submit_tasks
-        arguments:
-          document:
-            summary: "Greet and say it"
-            description: |
-              Two files, one after the other.
-
-              ```mermaid
-              graph LR
-                made --> said
-              ```
-            design: |
-              ```text
-              made.txt: one line
-              ```
-            risks: ["The files already exist"]
-            tasks:
-              - { id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{ at: made.txt, what: "the file" }], outcome: "made.txt exists", criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }, { cmd: "true", type: guard, proves: "nothing else breaks" }] }
-              - { id: T002, title: "Say it", description: "Writes said.txt.", depends_on: [T001], scope: [said.txt], changes: [{ at: said.txt, what: "the file" }], outcome: "said.txt exists", criteria: [{ cmd: "test -f said.txt", proves: "it was said" }] }
-    outcome: { type: completed, summary: "planned" }
-"#;
-
-/// The view the engine writes for [`EXPLAINED`], byte for byte.
-const EXPLAINED_VIEW: &str = "# Greet and say it
-
-Two files, one after the other.
-
-```mermaid
-graph LR
-  made --> said
-```
-
-## Design
-
-```text
-made.txt: one line
-```
-
-## At a glance
-
-- **Tasks:** 2
-- **Order:** T001; then T002
-- **Touches:** `made.txt`, `said.txt`
-- **Must keep passing:** `true`
-
-```mermaid
-graph LR
-  T001[\"T001: Make it\"]
-  T002[\"T002: Say it\"]
-  T001 --> T002
-```
-
-## Risks
-
-- The files already exist
-
-## Tasks
-
-### T001 — Make it
-
-Writes made.txt.
-
-**You will see:** made.txt exists
-
-**Changes:**
-
-- `made.txt` — the file
-
-**Touches:** `made.txt`
-
-| Done when | Command |
-|---|---|
-| the file exists | `test -f made.txt` |
-| keeps passing: nothing else breaks | `true` |
-
-### T002 — Say it
-
-Writes said.txt.
-
-**You will see:** said.txt exists
-
-**Changes:**
-
-- `said.txt` — the file
-
-**Touches:** `said.txt`
-
-| Done when | Command |
-|---|---|
-| it was said | `test -f said.txt` |
-
-**After:** T001
-";
-
-#[tokio::test]
-async fn the_plan_is_also_written_for_the_person_who_reviews_it() {
-    let bench = Bench::new().in_mode("pirulo");
-    bench.run(&two_ways(), EXPLAINED).await;
-
-    let view = String::from_utf8(bench.projection(Some("plan"), "tasks.md").unwrap()).unwrap();
-    assert_eq!(view, EXPLAINED_VIEW);
 }
 
 #[tokio::test]

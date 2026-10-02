@@ -65,8 +65,9 @@ pub struct Node {
     /// field is the node's own override of that default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_interrupt: Option<OnInterrupt>,
-    /// One-line summary `progress.md` shows for this node —
-    /// a node without one falls back to its own id. Not the same field as
+    /// One-line summary of what this node does, which the commit it
+    /// leaves on the run's branch is titled with — a node without one
+    /// falls back to its own id. Not the same field as
     /// `Workflow.description` (that one's the whole workflow's own
     /// summary).
     #[serde(default, skip_serializing_if = "Option::is_none")]

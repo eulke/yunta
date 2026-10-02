@@ -615,7 +615,7 @@ run: "true"
 }
 
 #[test]
-fn a_node_can_declare_a_one_line_description_for_progress_md() {
+fn a_node_can_declare_a_one_line_description_of_what_it_does() {
     let yaml = r#"
 id: implement
 kind: bash

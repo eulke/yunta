@@ -450,6 +450,6 @@ never guess from `status` output alone if you suspect this.
 
 `yunta <command> --help` is the source of truth for flags — this doc and the
 [workflow guide](guide.md) cover behavior, not every flag. If a run's
-behavior doesn't match anything here, `yunta status <run>` and the run's
-own `progress.md` (in the run's directory) are both derived straight from
-the event log and are the most reliable place to start.
+behavior doesn't match anything here, `yunta status <run>` — and
+`yunta status <run> --node <id>` for one node whole — are derived straight
+from the event log and are the most reliable place to start.

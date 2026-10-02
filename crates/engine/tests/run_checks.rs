@@ -1,4 +1,4 @@
-//! Verification gates: baseline and coverage compares, findings gates, progress.md, the executor, command-permission denials, and events.jsonl.
+//! Verification gates: baseline and coverage compares, findings gates, how a node's end is recorded, the executor, command-permission denials, and events.jsonl.
 
 use yunta_core::events::{BaselineOrigin, EventPayload, NodeEvent, RunEvent};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
@@ -559,7 +559,7 @@ nodes:
 }
 
 #[tokio::test]
-async fn progress_md_is_regenerated_at_run_dir_after_each_node_finished() {
+async fn each_node_s_end_is_on_the_log_the_moment_it_ends() {
     let bench = Bench::new();
 
     let workflow = r#"
@@ -575,15 +575,22 @@ nodes:
     depends_on: [write]
 "#;
 
-    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);
-
-    let progress = std::fs::read_to_string(bench.run_dir().join("progress.md")).unwrap();
-    assert_eq!(progress, "# Progress\n\n## Finished\n\n- **write** — Writes the output file\n  outcome: exit 0\n- **verify** — verify\n  outcome: exit 0\n\n## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n");
+    for node in ["write", "verify"] {
+        assert!(
+            matches!(
+                state.nodes.state(node),
+                Some(yunta_engine::NodeState::Finished { outcome, .. }) if outcome == "exit 0"
+            ),
+            "{node}: {:?}",
+            state.nodes.state(node)
+        );
+    }
 }
 
 #[tokio::test]
-async fn progress_md_names_a_node_that_failed_as_soon_as_it_fails() {
+async fn a_node_that_failed_is_on_the_log_as_failed_before_anything_else_runs() {
     // What a retry or a corrective node reads next has to know about the
     // failure it follows, even when nothing finished after it.
     let bench = Bench::new();
@@ -594,56 +601,15 @@ nodes:
     kind: bash
     run: "exit 3"
 "#;
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []\n").await;
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []\n").await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "{terminal:?}"
     );
-
-    let progress = tokio::fs::read_to_string(bench.run_dir().join("progress.md"))
-        .await
-        .unwrap();
-    assert_eq!(
-        progress,
-        "# Progress\n\n## Finished\n\n_none yet_\n\n## Failed\n\n- **broken** — `exit 3`\n\n## Next\n\n_nothing pending_\n"
-    );
-}
-
-#[tokio::test]
-async fn progress_md_lists_a_node_s_artifacts_after_it_finishes() {
-    let bench = Bench::new();
-
-    let workflow = r#"
-name: findings-progress
-nodes:
-  - id: review
-    kind: prompt
-    runner: executor
-    prompt: "Review the changes."
-    description: "Reviews the diff for issues"
-    artifacts:
-      produces: [findings]
-"#;
-
-    let fixture = review_session(&[]);
-
-    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
-    assert_eq!(terminal, RunTerminal::Finished);
-
-    // The artifact is named by what it is and by the bytes the run
-    // holds, never by where the file happens to sit.
-    let held = bench.accepted();
-    assert_eq!(held.len(), 1, "{held:?}");
-    let progress = std::fs::read_to_string(bench.run_dir().join("progress.md")).unwrap();
-    assert_eq!(
-        progress,
-        format!(
-            "# Progress\n\n## Finished\n\n- **review** — Reviews the diff for issues\n  \
-             outcome: reviewed\n  artifact: findings · {}\n\n\
-             ## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n",
-            held[0].content_hash.abbreviated()
-        )
-    );
+    let Some(yunta_engine::NodeState::Failed { failure, .. }) = state.nodes.state("broken") else {
+        panic!("{:?}", state.nodes.state("broken"));
+    };
+    assert_eq!(failure.headline(), "exit 3");
 }
 
 #[tokio::test]

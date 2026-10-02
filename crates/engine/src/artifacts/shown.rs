@@ -11,16 +11,10 @@ use yunta_core::{ArtifactKind, TasksFile};
 use super::store::{view_path, ObjectStore};
 use crate::human_interaction::{ShownContent, ShownDocument};
 
-/// The file a person opens to read what an escalation shows: a plan's
-/// view for them, any other document's own.
+/// Where the document an escalation shows sits in the run's directory:
+/// the view of its canonical bytes, as the engine reads it.
 pub fn view_of(shown: &Shown) -> std::path::PathBuf {
-    let name = match &shown.artifact {
-        ArtifactId::Interpreted {
-            kind: ArtifactKind::Tasks,
-        } => crate::tasks::view::VIEW_NAME.to_string(),
-        other => other.view_name(),
-    };
-    view_path(shown.producer.as_ref(), &name)
+    view_path(shown.producer.as_ref(), &shown.artifact.view_name())
 }
 
 /// The documents `shows` names, from the run rooted at `run_dir`: the

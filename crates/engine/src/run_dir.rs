@@ -29,12 +29,6 @@ pub fn manifest_path(run_dir: &Path) -> PathBuf {
     run_dir.join("manifest.yaml")
 }
 
-/// The run's progress note, rewritten at every node close — the file a
-/// person opens to see where a live run is.
-pub fn progress_path(run_dir: &Path) -> PathBuf {
-    run_dir.join("progress.md")
-}
-
 /// Where a session's own transcript directory goes, under the scratch.
 pub fn sessions_root(run_dir: &Path) -> PathBuf {
     run_dir.join(SCRATCH_DIR).join("sessions")

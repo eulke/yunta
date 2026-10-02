@@ -594,7 +594,7 @@ binary does not read), and `·` nothing to check — a workflow that declared no
 criteria is never crossed out for it. On a terminal the receipt is laid out for the
 screen; `receipt.md` holds the same document as Markdown, and `receipt.json` the
 same data for a program. Both files are written to the run's own directory,
-alongside `manifest.yaml` and `progress.md`.
+alongside `manifest.yaml`.
 
 ## MCP
 

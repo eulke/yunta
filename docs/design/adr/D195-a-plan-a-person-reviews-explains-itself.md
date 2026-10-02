@@ -1,9 +1,9 @@
 ---
 number: D195
 title: "A plan a person reviews explains itself, in the same document the engine runs"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D223]
 ---
 
 # D195 — A plan a person reviews explains itself, in the same document the engine runs

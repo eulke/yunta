@@ -4,7 +4,7 @@
 //! translates its answer into the same event vocabulary every other
 //! node kind already uses (`node_started`/`node_finished`/
 //! `node_failed`) — so nothing downstream (`on_failure.goto`,
-//! `progress.md`, `yunta status`) needs to know a gate is different
+//! `yunta status`) needs to know a gate is different
 //! from any other node once it's resolved. Comments on a
 //! changes-requested review become `finding_posted`, mounted for the
 //! corrective node the same way `node-output` already is — a reviewer's

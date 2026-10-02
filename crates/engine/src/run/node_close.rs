@@ -1,5 +1,5 @@
-//! How a node ends: verifying what it declared, recording a failure, and
-//! refreshing `progress.md` either way.
+//! How a node ends: verifying what it declared, and recording how it
+//! finished or why it failed.
 //!
 //! Every kind closes through [`close_node`], so every kind gets the same
 //! after-hooks, the same scope check and the same artifact verification
@@ -192,7 +192,6 @@ pub(super) async fn close_node(
                         EventPayload::Gates(GateEvent::QuestionsAsked(payload)),
                     )
                     .await?;
-                    write_progress(ctx).await?;
                     Ok(NodeEnd::Asked)
                 }
                 // A questions document with no questions asked nothing.
@@ -237,8 +236,7 @@ async fn held_questions(ctx: &RunCtx<'_>, node: &NodeId) -> Result<ContentHash, 
 /// Every way a node reaches its end passes through here — the close that
 /// verified what it declared, and the round that recorded the answer a
 /// node was waiting on — so a node has exactly one terminal however it
-/// got there, and `progress.md` is regenerated in one place rather than
-/// at each site that could finish something.
+/// got there.
 pub(super) async fn finish_node(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -259,7 +257,6 @@ pub(super) async fn finish_node(
         )),
     )
     .await?;
-    write_progress(ctx).await?;
     Ok(NodeEnd::Finished)
 }
 
@@ -376,21 +373,6 @@ pub(super) async fn fail(
     fail_with_tokens(ctx, node, outcome, retryable, TokenUsage::default()).await
 }
 
-/// Regenerates `progress.md` at `run.dir`'s root — the engine's own
-/// call, right after the `node_finished` or `node_failed` that ends a
-/// node, so the next session to read it (a retry, a corrective node)
-/// sees the failure it follows.
-pub(super) async fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
-    let events = ctx.load_events().await?;
-    let markdown = crate::progress::render_progress(&ctx.manifest.workflow, &events);
-    tokio::fs::write(crate::run_dir::progress_path(ctx.run_dir), markdown)
-        .await
-        .map_err(|source| RunError::Io {
-            context: "write progress.md".to_string(),
-            source,
-        })
-}
-
 /// Fails a node with a failure the engine states in one sentence — a
 /// hook's exit code, a budget, a runner that does not resolve. Such a
 /// failure is not missing its diagnostics: it simply is not about a
@@ -438,7 +420,6 @@ async fn emit_failed(
         )),
     )
     .await?;
-    write_progress(ctx).await?;
     Ok(NodeEnd::Failed)
 }
 

@@ -291,10 +291,9 @@ impl<'a> RunCtx<'a> {
     /// Exports the run's whole log to `run.dir/events.jsonl` — called
     /// at every terminal close (`Finish` and `Pause`; see this module's
     /// own doc comment on the trigger decision). Re-exports
-    /// in full each time, same "regenerate from the log" principle
-    /// `progress.md` already follows — a run that pauses, resumes, and
-    /// later finishes just gets the file rewritten with the fuller log,
-    /// never appended to.
+    /// in full each time, regenerated from the log — a run that pauses,
+    /// resumes, and later finishes just gets the file rewritten with the
+    /// fuller log, never appended to.
     pub(crate) async fn export_events_jsonl(&self) -> Result<(), RunError> {
         let events = self.load_events().await?;
         let jsonl = crate::events_export::render_events_jsonl(&events)?;

@@ -1,9 +1,9 @@
 ---
 number: D16
 title: "`progress.md` generado por el engine desde el log"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D223]
 ---
 
 # D16 — `progress.md` generado por el engine desde el log

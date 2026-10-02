@@ -56,7 +56,6 @@ mod pack_requires;
 mod permissions;
 pub mod process;
 mod process_registry;
-mod progress;
 mod receipt;
 mod replay;
 mod reserved;
@@ -123,7 +122,6 @@ pub use process_registry::{
     engine_liveness, read_registry, registry_path, EngineLiveness, EngineProcessFile,
     ProcessRegistry, Registry,
 };
-pub use progress::render_progress;
 pub use receipt::{
     build_receipt, render_json as render_receipt_json, BaselineSummary, CostSummary,
     CriteriaSummary, CriterionEntry, DiagnosticCount, EventChainStatus, Receipt, ReceiptError,

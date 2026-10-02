@@ -844,7 +844,7 @@
           }
         },
         "description": {
-          "description": "One-line summary `progress.md` shows for this node —\na node without one falls back to its own id. Not the same field as\n`Workflow.description` (that one's the whole workflow's own\nsummary).",
+          "description": "One-line summary of what this node does, which the commit it\nleaves on the run's branch is titled with — a node without one\nfalls back to its own id. Not the same field as\n`Workflow.description` (that one's the whole workflow's own\nsummary).",
           "type": [
             "string",
             "null"

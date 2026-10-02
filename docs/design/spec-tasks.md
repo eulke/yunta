@@ -72,12 +72,12 @@ declaración.
 | `risks` | lista de strings | no | — |
 | `out_of_scope` | lista de strings | no | — |
 
-Al aceptar el documento, el engine escribe junto a su vista `tasks.yaml` una vista
-Markdown, `tasks.md`, derivada de los mismos bytes: el resumen, la descripción y el
-diseño tal cual, lo que el engine sabe del plan sin que se lo digan —cuántas tareas,
-en qué orden, qué tocan, qué guards las sostienen, y un diagrama de dependencias— y
-cada tarea con su descripción y una tabla de qué prueba cada criterio. Es lo que un
-gate que muestra el plan señala para leerlo entero.
+El engine no escribe una vista para leer el plan: lo dibuja quien lo muestra, al
+leerlo (D223). Un gate que muestra el plan lo muestra como el run lo va a juzgar
+—cada criterio con lo que lo sostiene, los tests de la spec en la tarjeta de su
+tarea, la suite que guarda todas, y cada cambio sobre un test que ninguna sesión
+puede escribir—, con el código de cada cambio y de cada test. `yunta status <run>
+--node <planner>` lo imprime entero.
 
 ## 3. Validación al registrar
 

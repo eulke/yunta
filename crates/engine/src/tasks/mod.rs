@@ -6,7 +6,6 @@ mod crossing;
 mod judged;
 mod respecified;
 mod review;
-pub(crate) mod view;
 
 use std::collections::BTreeMap;
 
