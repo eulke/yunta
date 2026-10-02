@@ -23,6 +23,7 @@ revised_by: [D216, D217, D220]
 | `Width::CEILING` | 120 celdas | `render/src/line_width.rs` | ancho máximo: más larga, una línea ya no se lee de un barrido (D216) |
 | `QUOTED` | 6 líneas | `render/src/blocks/evidence.rs` | líneas de salida que cita la evidencia: el final, donde un compilador o un runner de tests dice qué falló; el resto queda a un comando o una ruta (D216) |
 | `NEAR` | 2 ediciones | `core/src/text.rs` | distancia a la que un nombre escrito se toma por un error de tipeo de uno declarado y se sugiere: una tecla de más o de menos, o dos letras cambiadas (D219) |
+| `CODE_SHOWN` | 60 líneas | `render/src/plan.rs` | líneas de un archivo que muestra la tarjeta de una tarea al decidir sobre un plan: lo que mide un test de un comportamiento, así la tarjeta muestra qué prueba sin que un archivo empuje las otras tareas fuera de la pantalla; el resto queda a un comando |
 | `CLOSED_SHOWN` | 10 | `cli/src/commands/list/runs.rs` | runs cerrados que `yunta list --runs` nombra, los más nuevos; el resto se cuenta, así el listado abre en lo que espera a alguien (D220) |
 | `RunId::HANDLE_CHARS` | 6 | `core/src/ids.rs` | caracteres del id con que se llama a un run: treinta bits, una colisión en una máquina que nadie encuentra, y pocos para leer en una línea y tipear en la siguiente (D217) |
 | `UNDO_BOUND` | 10 s | `engine/src/worktree/mod.rs` | techo de cada paso del deshacer de un `worktree add` que la cancelación mató: alcanza para un git local con caché fría, y no deja esperando a quien apretó Ctrl-C dos veces |

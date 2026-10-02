@@ -1,0 +1,76 @@
+␛[1mplan of `plan`␛[0m: 2 tasks in 2 steps, held to 1 test from its spec
+  Greet a person by name, and say goodbye too.
+
+  ␛[33m1 task plans to change a test the spec wrote, and no session may write one␛[0m
+    ␛[33m▲␛[0m greet — tests/greet.rs
+
+  The program says nothing today. It will greet whoever runs it by name, and say goodbye.
+  ␛[2mdiagram     ␛[0m in the whole plan
+
+  ␛[1mdecided for you␛[0m
+
+    ␛[1m1  What does it say when no name is given?␛[0m
+      ␛[2mchose       ␛[0m It greets `world`.
+      ␛[2mbecause     ␛[0m A program run with no arguments should still say something.
+      ␛[2mnot         ␛[0m Refuse to run
+      ␛[2m            ␛[0m Ask for a name
+
+  ␛[1mdesign␛[0m
+    `Greeter` owns the words; `main` reads the name and prints.
+    ␛[1mGreeter␛[0m in src/greet.rs␛[2m — its code is in step 1, `greet`␛[0m
+
+  ␛[1mrisks␛[0m
+    ␛[33m▲␛[0m A name with a newline in it breaks the line it is printed on.
+
+  ␛[1mout of scope␛[0m
+    ␛[2m·␛[0m Greeting in other languages.
+
+  ␛[1mevery task keeps passing␛[0m
+    ␛[2mthe suite   ␛[0m green before this run changed anything
+    ␛[2m            ␛[0m ␛[1m$ cargo test␛[0m
+
+  ␛[1mstep 1 of 2␛[0m
+
+    ␛[1mgreet␛[0m — Greet by name
+      ␛[2myou will see␛[0m `hello ana` prints `hello, ana`.
+      ␛[2mtouches     ␛[0m src/{greet.rs, main.rs}, tests/greet.rs
+      ␛[2mkeeps       ␛[0m With no name it still greets `world`.
+
+      ␛[1msrc/greet.rs › Greeter␛[0m                                                                 ␛[2m7 lines␛[0m
+        the type that holds the name and words the greeting
+        ␛[2m│ ␛[0mpub struct Greeter {
+        ␛[2m│ ␛[0m    pub name: String,
+        ␛[2m│ ␛[0m}
+        ␛[2m│␛[0m
+        ␛[2m│ ␛[0mimpl Greeter {
+        ␛[2m│ ␛[0m    pub fn hello(&self) -> String;
+        ␛[2m│ ␛[0m}
+
+      ␛[33m▲␛[0m tests/greet.rs — a test the spec wrote for `greet`; no session may write it
+
+      ␛[2mdone when   ␛[0m the greeting names the person
+      ␛[2m            ␛[0m ␛[1m$ cargo test --test greet␛[0m
+      ␛[1mtests/greet.rs␛[0m                                                                         ␛[2m5 lines␛[0m
+        the test the spec wrote for this task
+        ␛[2m│ ␛[0m#[test]
+        ␛[2m│ ␛[0mfn the_greeting_names_the_person() {
+        ␛[2m│ ␛[0m    let said = run(&["ana"]);
+        ␛[2m│ ␛[0m    assert_eq!(said, "hello, ana\n");
+        ␛[2m│ ␛[0m}
+
+  ␛[1mstep 2 of 2␛[0m
+
+    ␛[1mfarewell␛[0m — Say goodbye
+      ␛[2myou will see␛[0m `hello ana` prints a goodbye after the greeting.
+      ␛[2mtouches     ␛[0m src/greet.rs, tests/greet.rs
+      ␛[2muses        ␛[0m Greeter (from greet)
+      ␛[2mafter       ␛[0m greet
+
+      ␛[1msrc/greet.rs › Greeter › bye␛[0m
+        the goodbye, beside the greeting
+
+      ␛[2mdone when   ␛[0m the program also says goodbye
+      ␛[2m            ␛[0m ␛[1m$ cargo test --test greet␛[0m
+      ␛[2m            ␛[0m the same command as the spec test of `greet`
+
+  ␛[1myunta status 7E5PH4 --node plan␛[0m   ␛[2mthe whole plan, every file whole␛[0m

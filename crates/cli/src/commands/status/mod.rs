@@ -63,12 +63,15 @@ pub async fn status(
 
     let frame = progress::frame(run_id, &manifest, &events, now);
     if let Some(node) = node {
+        let state = yunta_engine::derive(&events);
+        let documents = yunta_engine::produced_documents(&run_dir, node, &state).await?;
         let page = node::NodePage {
             run_id,
             frame: &frame,
             run_dir: &run_dir,
             cwd: &ctx.cwd,
             home: ctx.env.home.as_deref(),
+            documents: &documents,
         };
         print!("{}", page.render(node, &crate::render::stdout_look())?);
         return Ok(Outcome::Success);

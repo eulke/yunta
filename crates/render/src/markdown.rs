@@ -118,8 +118,10 @@ impl Page<'_> {
         self.flush();
         let mermaid = trimmed.trim_start_matches('`').trim() == "mermaid";
         if mermaid {
-            self.lines
-                .push(format!("{}(diagram: in the whole plan)", self.indent));
+            self.lines.push(format!(
+                "{}(a diagram, drawn wherever Markdown is read)",
+                self.indent
+            ));
         }
         self.fence = Some(if mermaid { Fence::Diagram } else { Fence::Code });
     }
@@ -155,7 +157,7 @@ fn list_item(line: &str) -> Option<(&str, &str)> {
         return Some(line.split_at(digits + 2));
     }
     if line.starts_with('#') {
-        return Some(("", line));
+        return Some(("", line.trim_start_matches('#').trim_start()));
     }
     None
 }
@@ -166,7 +168,7 @@ const HANG: &str = "    ";
 /// `line` of code in pieces that each fit `width`: broken after the last
 /// space that fits, and between characters only where no space does —
 /// each piece after the first set [`HANG`] under the line's own indent.
-fn continued(line: &str, width: usize) -> Vec<String> {
+pub fn continued(line: &str, width: usize) -> Vec<String> {
     if cell_width(line) <= width {
         return vec![line.to_string()];
     }

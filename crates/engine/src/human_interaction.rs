@@ -22,6 +22,8 @@ use yunta_core::{Answer, QuestionsFile, Responder};
 /// to see. The escalation names them by hash; this is their content.
 pub struct Asking<'a> {
     pub shown: &'a [ShownDocument],
+    /// The run the decision is in, which a surface names a document by.
+    pub run: &'a yunta_core::RunId,
 }
 
 pub use yunta_core::shown::{ShownContent, ShownDocument};

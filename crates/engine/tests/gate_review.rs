@@ -9,7 +9,7 @@
 use yunta_core::events::{
     ArtifactId, EventPayload, GateEvent, NodeEvent, Refusal, SessionEvent, Shown,
 };
-use yunta_core::{ArtifactKind, TasksFile};
+use yunta_core::ArtifactKind;
 use yunta_engine::{current_escalation, RunError, RunReport, RunTerminal, ShownContent};
 use yunta_testkit::{Bench, MOCK_CONFIG};
 
@@ -125,17 +125,18 @@ async fn the_gate_shows_the_plan_it_asks_about_as_the_run_holds_it() {
         "the decision is recorded against the bytes it was about"
     );
     let shown = interaction.shown();
-    let ShownContent::Tasks {
-        plan: TasksFile { tasks, .. },
-        departed,
-    } = &shown[0][0].content
-    else {
+    let ShownContent::Tasks(review) = &shown[0][0].content else {
         panic!("a tasks document is shown as its tasks: {shown:?}");
     };
-    let ids: Vec<&str> = tasks.iter().map(|task| task.id.as_str()).collect();
+    let ids: Vec<&str> = review
+        .plan
+        .tasks
+        .iter()
+        .map(|task| task.id.as_str())
+        .collect();
     assert_eq!(ids, ["T001"]);
     assert!(
-        departed.is_empty(),
+        review.departed.is_empty(),
         "nothing was built yet to depart from it"
     );
     assert!(

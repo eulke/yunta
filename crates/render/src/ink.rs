@@ -21,8 +21,10 @@ pub use super::color::{ColorPolicy, ColorWhen, Links};
 pub enum Tone {
     /// The body of a line: the terminal's own color.
     Plain,
-    /// What a line is about, and a command to copy.
+    /// What a line is about.
     Strong,
+    /// A command to copy, drawn as strongly as what a line is about.
+    Command,
     /// What a reader skims past: a label, a duration, a path.
     Muted,
     Done,
@@ -52,7 +54,7 @@ impl Tone {
     fn sgr(self) -> Option<&'static str> {
         match self {
             Tone::Plain => None,
-            Tone::Strong => Some("1"),
+            Tone::Strong | Tone::Command => Some("1"),
             Tone::Muted => Some("2"),
             Tone::Done => Some("32"),
             Tone::Failed => Some("31"),

@@ -1,0 +1,83 @@
+plan of `plan`: 2 tasks in 2 steps, held to 1 test from its spec
+  Greet a person by name, and say goodbye too.
+
+  1 task plans to change a test the spec wrote, and no session may write one
+    ▲ greet — tests/greet.rs
+
+  The program says nothing today. It will greet whoever runs
+  it by name, and say goodbye.
+  diagram      in the whole plan
+
+  decided for you
+
+    1  What does it say when no name is given?
+      chose        It greets `world`.
+      because      A program run with no arguments should
+                   still say something.
+      not          Refuse to run
+                   Ask for a name
+
+  design
+    `Greeter` owns the words; `main` reads the name and
+    prints.
+    Greeter in src/greet.rs — its code is in step 1, `greet`
+
+  risks
+    ▲ A name with a newline in it breaks the line it is
+      printed on.
+
+  out of scope
+    · Greeting in other languages.
+
+  every task keeps passing
+    the suite    green before this run changed anything
+                 $ cargo test
+
+  step 1 of 2
+
+    greet — Greet by name
+      you will see `hello ana` prints `hello, ana`.
+      touches      src/{greet.rs, main.rs}, tests/greet.rs
+      keeps        With no name it still greets `world`.
+
+      src/greet.rs › Greeter                         7 lines
+        the type that holds the name and words the greeting
+        │ pub struct Greeter {
+        │     pub name: String,
+        │ }
+        │
+        │ impl Greeter {
+        │     pub fn hello(&self) -> String;
+        │ }
+
+      ▲ tests/greet.rs — a test the spec wrote for `greet`;
+        no session may write it
+
+      done when    the greeting names the person
+                   $ cargo test --test greet
+      tests/greet.rs                                 5 lines
+        the test the spec wrote for this task
+        │ #[test]
+        │ fn the_greeting_names_the_person() {
+        │     let said = run(&["ana"]);
+        │     assert_eq!(said, "hello, ana\n");
+        │ }
+
+  step 2 of 2
+
+    farewell — Say goodbye
+      you will see `hello ana` prints a goodbye after the
+                   greeting.
+      touches      src/greet.rs, tests/greet.rs
+      uses         Greeter (from greet)
+      after        greet
+
+      src/greet.rs › Greeter › bye
+        the goodbye, beside the greeting
+
+      done when    the program also says goodbye
+                   $ cargo test --test greet
+                   the same command as the spec test of
+                   `greet`
+
+  yunta status 7E5PH4 --node plan   the whole plan, every file whole

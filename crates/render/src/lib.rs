@@ -51,3 +51,8 @@ pub use width::{
     INDENT_WIDTH, LABEL_WIDTH, LINE_WIDTH,
 };
 pub use yunta_core::units::{duration, Ratio, Tokens};
+
+#[cfg(test)]
+mod tests {
+    mod documents;
+}

@@ -1,45 +1,41 @@
-//! What a review found, as the person deciding reads it on a terminal:
-//! how many of each severity, then each finding, the most severe first —
-//! what is wrong, where, and in the reviewer's own words what goes wrong
-//! and when. The run's findings read the same way, each with the node
-//! that found it and what other nodes answered.
+//! What a review found, as the person deciding reads it: how many of each
+//! severity, then each finding, the most severe first — what is wrong,
+//! where, and in the reviewer's own words what goes wrong and when. The
+//! run's findings read the same way, each with the node that found it
+//! and what other nodes answered.
 
 use yunta_core::events::findings::{RunFindings, Settled, StandingFinding};
 use yunta_core::events::FindingSeverity;
 use yunta_core::{FindingEntry, FindingsFile};
 
-use crate::markdown::{hanging, markdown};
-use crate::INDENT;
+use crate::blocks::{Fields, Prose, Section};
+use crate::doc::{Block, Doc};
+use crate::ink::{Line, Tone};
+use crate::Mark;
 
-/// Where a finding's facts sit: one step under its headline.
-const BODY: &str = "    ";
-
-pub(super) fn findings(file: &FindingsFile, of: &str, width: usize) -> Vec<String> {
+pub fn document(file: &FindingsFile, of: &str) -> Doc<'static> {
     let mut found: Vec<&FindingEntry> = file.findings.iter().collect();
     found.sort_by_key(|finding| finding.severity);
     let counts = counted(found.iter().map(|finding| finding.severity));
-    let mut lines = vec![match counts.is_empty() {
-        true => format!("the findings{of} — none"),
-        false => format!("the findings{of} — {}", counts.join(", ")),
-    }];
+    let mut doc = Doc::new().with(Block::Title(heading(
+        &format!("findings{of}"),
+        &counts,
+        String::new(),
+    )));
     for finding in found {
-        lines.push(String::new());
-        lines.extend(headline(finding.severity, &finding.title, width));
-        lines.extend(hanging(
-            BODY,
-            "",
-            &format!("{}, at {}", finding.id, finding.location),
-            width,
-        ));
-        lines.extend(markdown(&finding.detail, BODY, width));
+        doc = doc.with(Section {
+            mark: Some(mark(finding.severity)),
+            title: titled(finding.severity, &finding.title),
+            blocks: vec![
+                Prose(format!("{}, at {}", finding.id, finding.location)).into(),
+                Block::Markdown(finding.detail.clone()),
+            ],
+        });
     }
-    lines
+    doc
 }
 
-/// Every finding standing in the run: how many of each severity and how
-/// many another node answered, then each, the most severe first — which
-/// node found it where, what goes wrong, and each answer it got.
-pub(super) fn run_findings(view: &RunFindings, width: usize) -> Vec<String> {
+pub fn run_document(view: &RunFindings) -> Doc<'static> {
     let mut found: Vec<&StandingFinding> = view.findings.iter().collect();
     found.sort_by_key(|standing| standing.finding.severity);
     let counts = counted(found.iter().map(|standing| standing.finding.severity));
@@ -51,63 +47,84 @@ pub(super) fn run_findings(view: &RunFindings, width: usize) -> Vec<String> {
         .iter()
         .filter(|standing| standing.settled.is_some())
         .count();
-    let mut lines = vec![match counts.is_empty() {
-        true => "the run's findings — none".to_string(),
-        false => format!(
-            "the run's findings — {}{}",
-            counts.join(", "),
-            tally(answered, settled)
-        ),
-    }];
+    let mut doc = Doc::new().with(Block::Title(heading(
+        "the run's findings",
+        &counts,
+        tally(answered, settled),
+    )));
     for standing in found {
-        lines.push(String::new());
-        lines.extend(standing_lines(standing, width));
+        doc = doc.with(standing_section(standing));
     }
-    lines
+    doc
 }
 
-/// One standing finding: what is wrong, which node found it where, what
-/// goes wrong, each answer it got and what its proof showed.
-fn standing_lines(standing: &StandingFinding, width: usize) -> Vec<String> {
-    let mut lines = Vec::new();
+/// What a document of findings is, and how many of each severity it
+/// holds.
+fn heading(what: &str, counts: &[String], tally: String) -> Line {
+    let said = match counts.is_empty() {
+        true => ": none".to_string(),
+        false => format!(": {}{tally}", counts.join(", ")),
+    };
+    Line::new().push(Tone::Strong, what).plain(said)
+}
+
+fn standing_section(standing: &StandingFinding) -> Section<'static> {
     let finding = &standing.finding;
     let found_by = match &standing.node {
         Some(node) => format!("{} of `{node}`, at {}", finding.id, finding.location),
         None => format!("{}, the run's own, at {}", finding.id, finding.location),
     };
-    lines.extend(headline(finding.severity, &finding.title, width));
-    lines.extend(hanging(BODY, "", &found_by, width));
-    lines.extend(markdown(&finding.detail, BODY, width));
+    let mut fields = Fields::new();
     for answer in &standing.answers {
         let by = answer
             .by
             .as_ref()
             .map(|node| format!(" by `{node}`"))
             .unwrap_or_default();
-        lines.extend(hanging(
-            BODY,
-            &format!("{}{by} — ", answer.answer.as_str()),
-            &answer.why,
-            width,
-        ));
+        fields = fields.push_if(
+            "answered",
+            format!("{}{by} — {}", answer.answer.as_str(), answer.why),
+        );
     }
     if let Some(proof) = &standing.proof {
-        let verdict = match standing.settled {
-            Some(Settled::Proof { .. }) => "settled — ",
-            _ => "not proved — ",
+        let label = match standing.settled {
+            Some(Settled::Proof { .. }) => "settled",
+            _ => "not proved",
         };
-        let said = format!("`{}` exits {}", proof.cmd, proof.exit_code);
-        lines.extend(hanging(BODY, verdict, &said, width));
+        fields = fields.push_if(label, format!("`{}` exits {}", proof.cmd, proof.exit_code));
     }
     if let Some(Settled::Person { gate }) = &standing.settled {
-        let said = format!("a person went on past `{gate}`");
-        lines.extend(hanging(BODY, "settled — ", &said, width));
+        fields = fields.push_if("settled", format!("a person went on past `{gate}`"));
     }
-    lines
+    Section {
+        mark: Some(mark(finding.severity)),
+        title: titled(finding.severity, &finding.title),
+        blocks: vec![
+            Prose(found_by).into(),
+            Block::Markdown(finding.detail.clone()),
+            fields.into(),
+        ],
+    }
 }
 
-/// What of the run's findings others answered and what settled, after
-/// the severities; empty when neither.
+/// A finding's title, after the mark and the word of its severity.
+fn titled(severity: FindingSeverity, title: &str) -> Line {
+    let mark = mark(severity);
+    Line::new()
+        .push(Tone::of(mark), severity.as_str())
+        .plain(format!(" — {title}"))
+}
+
+/// The mark a severity is drawn with: a cross for what blocks, caution
+/// for what matters, and the quiet mark for the rest.
+pub fn mark(severity: FindingSeverity) -> Mark {
+    match severity {
+        FindingSeverity::Blocking => Mark::Failed,
+        FindingSeverity::Major => Mark::Caution,
+        FindingSeverity::Minor | FindingSeverity::Note => Mark::Pending,
+    }
+}
+
 fn tally(answered: usize, settled: usize) -> String {
     let said: Vec<String> = [(answered, "answered"), (settled, "settled")]
         .into_iter()
@@ -120,13 +137,6 @@ fn tally(answered: usize, settled: usize) -> String {
     }
 }
 
-/// A finding's first line: how severe, and what is wrong.
-fn headline(severity: FindingSeverity, title: &str, width: usize) -> Vec<String> {
-    hanging(INDENT, &format!("{} — ", severity.as_str()), title, width)
-}
-
-/// How many of each severity `severities` holds, the most severe first;
-/// `severities` comes sorted.
 fn counted(severities: impl Iterator<Item = FindingSeverity>) -> Vec<String> {
     let severities: Vec<FindingSeverity> = severities.collect();
     severities

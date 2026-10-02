@@ -84,13 +84,13 @@ fn a_plan_is_reviewed_at_its_gate_and_a_correction_sends_it_back_with_the_words(
     terminal.wait_for("3  abort", "the gate never put its options on the console");
     let drawn = terminal.drawn();
     assert!(
-        drawn.contains("what you are deciding on")
+        drawn.contains("plan of `plan`")
             && drawn.contains("Writes the file the run is about.")
             && drawn.contains("T001 — Make it")
-            && drawn.contains("done when     the file exists")
-            && !drawn.contains("test -f made.txt")
-            && drawn.contains("/artifacts/plan/tasks.md"),
-        "the gate shows the plan it asks about, explained:\n{drawn}"
+            && drawn.contains("done when    the file exists")
+            && drawn.contains("$ test -f made.txt")
+            && drawn.contains("--node plan"),
+        "the gate shows the plan it asks about, as the run judges it:\n{drawn}"
     );
 
     // `adjust`, the second option.
@@ -164,9 +164,28 @@ fn resolve_gate_without_an_option_shows_the_documents_its_gate_shows() {
     );
     let drawn = terminal.drawn();
     assert!(
-        drawn.contains("what you are deciding on")
+        drawn.contains("plan of `plan`")
             && drawn.contains("T001 — Make it")
-            && drawn.contains("done when     the file exists"),
+            && drawn.contains("done when    the file exists"),
         "resolve-gate offered a decision without the plan it decides on:\n{drawn}"
+    );
+}
+
+#[test]
+fn status_node_prints_a_plan_whole() {
+    let root = tempfile::tempdir().unwrap();
+    let checkout = checkout(root.path());
+    let (repo, home) = (&checkout.repo, &checkout.home);
+    let parked = yunta_in!(repo, home, &RUN);
+    let run_id = run_id_from(&parked);
+
+    let shown = yunta_in!(repo, home, &["status", &run_id, "--node", "plan"]);
+    assert!(shown.status.success(), "{}", stderr(&shown));
+    let page = yunta_testkit::stdout(&shown);
+    assert!(
+        page.contains("plan of `plan`")
+            && page.contains("T001 — Make it")
+            && page.contains("$ test -f made.txt"),
+        "the node's page reads the plan it wrote whole:\n{page}"
     );
 }

@@ -525,10 +525,12 @@ nodes:
     shows: [{ node: plan, kind: tasks }]
 ```
 
-At the decision you read the plan the way it is reviewed: what it changes and why,
-the shapes it creates, its risks, then task by task what each does, what it touches
-and what proves it done — and the path to `tasks.md`, the whole plan in Markdown
-with its diagrams and a graph of the order its tasks run in. The log records the
+At the decision you read the plan as the run will judge it: what it changes and
+why, anything in it no session may do — a change to a test the spec wrote — its
+decisions, design and risks, then step by step each task: what you will see once it
+is done, what it touches and keeps, the code of each change it makes, and what
+proves it done with the code of the test that does. `yunta status <run> --node plan`
+prints the whole plan, every file whole. The log records the
 exact version you saw by its hash, so an approval is an approval of those bytes.
 A gate after the work that shows the same plan — before a pull request, say —
 reads first every departure from it a person accepted while its tasks were built:

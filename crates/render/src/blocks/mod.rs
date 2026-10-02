@@ -11,6 +11,7 @@
 mod checklist;
 mod decision;
 pub mod diagnostic;
+mod document;
 mod evidence;
 mod failure;
 mod fields;
@@ -20,6 +21,7 @@ mod node_table;
 
 pub use checklist::{Check, Checklist, Found};
 pub use decision::{Decision, DecisionOption};
+pub use document::{Code, Marked, Prose, Section};
 pub use evidence::{Evidence, Whole};
 pub use failure::{FailureDetail, FailureSays};
 pub use fields::Fields;

@@ -5,8 +5,8 @@
 
 use super::Surface;
 use crate::blocks::{
-    Check, Checklist, Decision, Evidence, FailureDetail, FailureSays, Fields, Headline, Next,
-    NodeTable, Whole,
+    Check, Checklist, Code, Decision, Evidence, FailureDetail, FailureSays, Fields, Headline,
+    Marked, Next, NodeTable, Section, Whole,
 };
 use crate::doc::{Block, Doc};
 use crate::ink::{Line, Tone};
@@ -31,7 +31,8 @@ impl Surface for Markdown {
             .map(|(at, drawn)| match (at, drawn) {
                 // A document's first headline is its title.
                 (0, Block::Headline(headline)) => format!("# {}", said(headline)),
-                _ => block(drawn),
+                (_, Block::Title(title)) => format!("# {}", title.text().trim()),
+                _ => block(drawn, 0),
             })
             .filter(|drawn| !drawn.trim().is_empty())
             .collect();
@@ -42,7 +43,8 @@ impl Surface for Markdown {
     }
 }
 
-fn block(block: &Block<'_>) -> String {
+/// One block, `depth` sections deep.
+fn block(block: &Block<'_>, depth: usize) -> String {
     match block {
         Block::Headline(headline) => self::headline(headline),
         Block::Fields(fields) => self::fields(fields),
@@ -52,7 +54,13 @@ fn block(block: &Block<'_>) -> String {
         Block::Decision(decision) => self::decision(decision),
         Block::Checklist(list) => self::checklist(list),
         Block::Next(next) => self::next(next),
-        Block::Heading(title) => format!("### {title}"),
+        Block::Heading(title) => format!("{} {title}", "#".repeat(3 + depth)),
+        Block::Title(title) => format!("# {}", title.text().trim()),
+        Block::Section(section) => self::section(section, depth),
+        Block::Prose(prose) => prose.0.clone(),
+        Block::Markdown(text) => text.trim().to_string(),
+        Block::Marked(marked) => self::marked(marked),
+        Block::Code(code) => self::code(code),
         Block::Lines(lines) => lines.iter().map(line).collect::<Vec<_>>().join("  \n"),
     }
 }
@@ -72,11 +80,73 @@ fn said(headline: &Headline) -> String {
 }
 
 fn fields(fields: &Fields) -> String {
-    fields
-        .rows()
-        .map(|(label, value)| format!("- {label}: {value}"))
+    let mut items: Vec<String> = Vec::new();
+    for (label, value, tone) in fields.rows() {
+        let value = match tone {
+            Tone::Command => format!("`{value}`"),
+            _ => value.to_string(),
+        };
+        // A row with no label goes on saying what the row above it says.
+        match (label.is_empty(), items.last_mut()) {
+            (true, Some(item)) => item.push_str(&format!("  \n  {value}")),
+            _ => items.push(format!("- {label}: {value}")),
+        }
+    }
+    items.join("\n")
+}
+
+/// A section: its title as a heading a level under the document's, and
+/// each of its blocks a level deeper.
+fn section(section: &Section<'_>, depth: usize) -> String {
+    let mark = section
+        .mark
+        .map(|mark| format!("{} ", GLYPHS.mark(mark)))
+        .unwrap_or_default();
+    let mut parts = vec![format!(
+        "{} {mark}{}",
+        "#".repeat(3 + depth),
+        section.title.text().trim()
+    )];
+    parts.extend(
+        section
+            .blocks
+            .iter()
+            .map(|inner| block(inner, depth + 1))
+            .filter(|drawn| !drawn.trim().is_empty()),
+    );
+    parts.join("\n\n")
+}
+
+fn marked(marked: &Marked) -> String {
+    marked
+        .items
+        .iter()
+        .map(|item| format!("- {} {item}", GLYPHS.mark(marked.mark)))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Code under where it is and what it is there for, fenced in the
+/// language of its file.
+fn code(code: &Code) -> String {
+    let mut out = format!("`{}`", code.at);
+    if let Some(what) = &code.what {
+        out.push_str(&format!(" — {what}"));
+    }
+    if !code.lines.is_empty() {
+        out.push_str(&format!(
+            "\n\n```{}\n{}\n```",
+            code.language(),
+            code.lines.join("\n")
+        ));
+    }
+    if let Some(rest) = &code.rest {
+        out.push_str(&format!(
+            "\n\n{} more — {rest}",
+            yunta_core::text::counted(code.whole - code.lines.len(), "line")
+        ));
+    }
+    out
 }
 
 fn table(table: &NodeTable) -> String {
@@ -177,10 +247,11 @@ fn line(line: &Line) -> String {
         .iter()
         .map(|span| match span.tone {
             Tone::Strong if !span.text.trim().is_empty() => format!("**{}**", span.text.trim()),
+            Tone::Command if !span.text.trim().is_empty() => format!("`{}`", span.text.trim()),
             _ => span.text.clone(),
         })
         .collect::<String>()
-        .trim_end()
+        .trim()
         .to_string()
 }
 

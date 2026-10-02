@@ -18,20 +18,22 @@ use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, NoAnswer, ANSWER};
 use crate::commands::status::decision::{account, Beside};
 use crate::render::blocks::{Drawn, Headline};
-use crate::render::{label, Mark, INDENT, INDENT_WIDTH};
+use crate::render::{label, Mark};
 
 /// What settles an option that asks for nothing: the decision as it
 /// stands, or a note sent with it.
 const SETTLE: &str = "enter records it, n adds a note";
 
 /// Puts `escalation` to the person, with the documents it shows, and
-/// returns what they decided.
+/// returns what they decided. `run` is the handle a document names the
+/// command that shows it whole by.
 pub(crate) fn decide(
     console: &Console,
     escalation: &GateWaitingPayload,
     shown: &[ShownDocument],
+    run: &str,
 ) -> Answered<HumanChoice> {
-    present(console, escalation, shown)?;
+    present(console, escalation, shown, run)?;
     let option = choose(console, "choose", options(escalation))?;
     console.say(&format!("chose `{option}`"))?;
     let asks = escalation
@@ -101,6 +103,7 @@ fn present(
     console: &Console,
     escalation: &GateWaitingPayload,
     shown: &[ShownDocument],
+    run: &str,
 ) -> std::io::Result<()> {
     let look = console.look();
     let mut lines = Headline {
@@ -120,12 +123,10 @@ fn present(
     }
     for document in shown {
         console.say("")?;
-        console.say("what you are deciding on")?;
-        let width = console.width().saturating_sub(INDENT_WIDTH);
-        console.block(
-            &crate::render::shown::shown(document, look.glyphs, width).join("\n"),
-            INDENT,
-        )?;
+        let doc = crate::render::shown::document(document, run, crate::render::shown::Form::Review);
+        for line in crate::render::draw(doc, &look).lines() {
+            console.say(line)?;
+        }
     }
     console.say("")
 }

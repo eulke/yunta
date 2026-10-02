@@ -10,7 +10,8 @@
 //! surface already builds, and changes none of them.
 
 use crate::blocks::{
-    Checklist, Decision, Evidence, FailureDetail, Fields, Headline, Next, NodeTable,
+    Checklist, Code, Decision, Evidence, FailureDetail, Fields, Headline, Marked, Next, NodeTable,
+    Prose, Section,
 };
 use crate::ink::Line;
 
@@ -24,8 +25,18 @@ pub enum Block<'a> {
     Decision(Decision),
     Checklist(Checklist),
     Next(Next),
+    /// What a whole document is, before anything it says.
+    Title(Line),
     /// The title of what follows it, inside a document.
     Heading(String),
+    Section(Section<'a>),
+    Prose(Prose),
+    /// Text already written as Markdown — a planner's description, a
+    /// reviewer's detail — which a file keeps as written and a terminal
+    /// reads as prose and code.
+    Markdown(String),
+    Marked(Marked),
+    Code(Code),
     /// Lines a surface composed itself, each span carrying its role.
     Lines(Vec<Line>),
 }
@@ -49,6 +60,10 @@ block_from!(
     Decision(Decision),
     Checklist(Checklist),
     Next(Next),
+    Section(Section<'a>),
+    Prose(Prose),
+    Marked(Marked),
+    Code(Code),
     Lines(Vec<Line>),
 );
 

@@ -25,6 +25,8 @@ pub(super) struct NodePage<'a> {
     /// the home `~` stands for.
     pub(super) cwd: &'a Path,
     pub(super) home: Option<&'a Path>,
+    /// The documents the node produced, each read whole here.
+    pub(super) documents: &'a [yunta_core::shown::ShownDocument],
 }
 
 impl NodePage<'_> {
@@ -46,10 +48,20 @@ impl NodePage<'_> {
             said: display.word.word().to_string(),
         };
         let mut out = crate::render::draw(Doc::new().with(headline), look);
+        let mut documents = Vec::new();
+        for document in self.documents {
+            let doc = crate::render::shown::document(
+                document,
+                self.run_id.handle(),
+                crate::render::shown::Form::Whole,
+            );
+            documents.extend(crate::render::surface_lines(doc, look));
+        }
         for part in [
             self.said(node, look),
             self.evidence(node, look),
             self.fields(node).lines(look),
+            documents,
             self.next().lines(look),
         ] {
             if !part.is_empty() {

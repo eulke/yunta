@@ -102,7 +102,7 @@ impl ConsoleInteraction {
 impl HumanInteraction for ConsoleInteraction {
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         let escalation = escalation.clone();
-        self.prompted(move |console| decide(console, &escalation, &[]))
+        self.prompted(move |console| decide(console, &escalation, &[], ""))
             .await
     }
 
@@ -115,7 +115,8 @@ impl HumanInteraction for ConsoleInteraction {
     ) -> Option<HumanChoice> {
         let escalation = escalation.clone();
         let shown = asking.shown.to_vec();
-        self.prompted(move |console| decide(console, &escalation, &shown))
+        let run = asking.run.handle().to_string();
+        self.prompted(move |console| decide(console, &escalation, &shown, &run))
             .await
     }
 

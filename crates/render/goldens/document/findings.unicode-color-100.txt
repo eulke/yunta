@@ -1,0 +1,9 @@
+␛[1mfindings of `review`␛[0m: 1 blocking, 1 major
+
+  ␛[31m✗␛[0m ␛[31mblocking␛[0m — An empty argument list panics
+    unwrap, at src/main.rs:2
+    The first argument is read with `unwrap`.
+
+  ␛[33m▲␛[0m ␛[33mmajor␛[0m — A name with a newline breaks the line
+    newline, at src/greet.rs:4
+    `hello` prints the name as given, so `ana\nbob` greets on two lines.

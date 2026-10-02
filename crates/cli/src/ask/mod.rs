@@ -231,11 +231,6 @@ impl Console {
         self.term.write_line(line)
     }
 
-    /// `text` with every line drawn under `indent`.
-    pub(crate) fn block(&self, text: &str, indent: &str) -> std::io::Result<()> {
-        self.say(&yunta_core::text::indent(text, indent))
-    }
-
     /// The terminal the prompt libraries draw their own blocks on.
     pub(crate) fn term(&self) -> &Term {
         &self.term

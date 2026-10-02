@@ -136,9 +136,8 @@ async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
             commands.join("\n")
         )));
     };
-    let shown =
-        yunta_engine::shown_documents(&open.run_dir, escalation.shows(), &state.tasks).await?;
-    match crate::ask::decide(&console, &escalation, &shown) {
+    let shown = yunta_engine::shown_documents(&open.run_dir, escalation.shows(), &state).await?;
+    match crate::ask::decide(&console, &escalation, &shown, called) {
         Ok(choice) => Ok(Chosen::Answered(choice)),
         Err(NoAnswer::Declined) => {
             println!("run {called}: nothing recorded — it still waits on the decision");

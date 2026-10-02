@@ -19,6 +19,12 @@ pub(crate) use words::{exit, observed_word, run_word, standing, RunExit};
 #[cfg(test)]
 pub(crate) use yunta_render::LINE_WIDTH;
 
+/// `doc` laid out for a terminal stream whose lines look like `look`,
+/// unpainted.
+pub(crate) fn surface_lines(doc: doc::Doc<'_>, look: &Look) -> Vec<ink::Line> {
+    yunta_render::surface::Terminal::on(*look).lines(&doc)
+}
+
 /// `doc` drawn on a terminal stream whose lines look like `look`.
 pub(crate) fn draw(doc: doc::Doc<'_>, look: &Look) -> String {
     use yunta_render::surface::Surface;

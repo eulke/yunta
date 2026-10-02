@@ -255,15 +255,20 @@ impl<'a> RunCtx<'a> {
         &self,
         escalation: &GateWaitingPayload,
     ) -> Result<Option<HumanChoice>, RunError> {
-        // A plan is shown with what a person accepted departing from it,
-        // which only the log's tasks hold.
-        let tasks = match escalation.shows().is_empty() {
-            true => Default::default(),
-            false => self.run_view().await?.state.tasks,
+        // A plan is shown as the run judges it — with what a person
+        // accepted departing from it and the suite the run measured,
+        // which only the log holds.
+        let shown = match escalation.shows().is_empty() {
+            true => Vec::new(),
+            false => {
+                let state = self.run_view().await?.state;
+                crate::artifacts::shown::documents(self.run_dir, escalation.shows(), &state).await?
+            }
         };
-        let shown =
-            crate::artifacts::shown::documents(self.run_dir, escalation.shows(), &tasks).await?;
-        let asking = crate::Asking { shown: &shown };
+        let asking = crate::Asking {
+            shown: &shown,
+            run: self.run_id,
+        };
         let Some(choice) = self.human_interaction.resolve_in(escalation, &asking).await else {
             return Ok(None);
         };
