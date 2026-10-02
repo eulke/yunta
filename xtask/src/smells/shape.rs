@@ -115,16 +115,24 @@ pub fn has_inner_space_run(line: &str) -> bool {
     false
 }
 
-/// Whether `line` hedges a count with `(s)` — `3 file(s)` — where the
-/// number beside it already says how many: a word written just before
-/// `(s)`, after a space or at the start of a continued line, which is
-/// prose and never a call (`Some(s)`, `str::trim(s)`). Comment lines are
-/// not messages.
+/// Whether `line` hedges a count with a plural in parentheses —
+/// `3 file(s)`, `2 child(ren)`, `a process(es)` — where the number beside
+/// it already says how many: a word written just before a parenthesis
+/// holding a plural's ending, after a space or at the start of a
+/// continued line, which is prose and never a call (`Some(s)`,
+/// `str::trim(s)`). Comment lines are not messages.
 pub fn has_parenthesized_plural(line: &str) -> bool {
     if line.trim_start().starts_with("//") {
         return false;
     }
-    line.match_indices("(s)").any(|(at, _)| {
+    line.match_indices('(').any(|(at, _)| {
+        let after = &line[at + 1..];
+        let plural = ["s)", "es)", "ies)", "ren)"]
+            .iter()
+            .any(|ending| after.starts_with(ending));
+        if !plural {
+            return false;
+        }
         let before = &line[..at];
         let word = before
             .trim_end_matches(|c: char| c.is_ascii_lowercase() || c == '-')
@@ -393,6 +401,8 @@ mod tests {
             r#"             artifact(s) it names: {}","#
         ));
         assert!(has_parenthesized_plural(r#"    "{} re-route(s)","#));
+        assert!(has_parenthesized_plural(r#"    "{} child(ren) finished","#));
+        assert!(!has_parenthesized_plural(r#"    "call (with care)","#));
         assert!(!has_parenthesized_plural("    // every file(s) it names"));
         assert!(!has_parenthesized_plural(
             "    Value::String(s) => s.clone(),"

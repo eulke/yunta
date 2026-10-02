@@ -671,13 +671,15 @@ fn a_run_parked_on_a_node_names_the_node_and_what_that_node_asked_for() {
     let run_id = run_id_from(&run);
 
     let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    let lines: Vec<&str> = text.lines().collect();
     assert!(
-        text.contains("1 waiting · needs you — node `ask`"),
-        "the summary counts the parked node and names it: {text}"
+        lines[0].ends_with("needs you") && lines[1] == "  node `ask` asked 1 question: `summary`",
+        "the page opens with what the run waits on — the question still unanswered, not \
+         only the node: {text}"
     );
     assert!(
-        text.contains("node `ask` asked 1 question: `summary`"),
-        "the page names the question still unanswered, not only the node: {text}"
+        text.contains("progress     nodes 0/1 · 1 waiting"),
+        "and counts the parked node: {text}"
     );
     assert!(
         text.contains(&format!("yunta resume {}", handle(&run_id))),

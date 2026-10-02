@@ -38,11 +38,16 @@ fn status_says_when_a_wake_runs_commands_in_another_environment() {
     let run = run_id_from(&yunta_in!(&repo, &home, &["run", "wf.yaml"]));
 
     resume_with_path_gaining(&repo, &home, &run, &extra);
-    let status = stdout(&yunta_in!(&repo, &home, &["status", &run]));
+    // The row wraps a long sentence; what it says is read without the
+    // breaks.
+    let status = stdout(&yunta_in!(&repo, &home, &["status", &run]))
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
 
     assert!(
         status.contains(&format!(
-            "environment: commands now run in another environment than the run was born \
+            "environment commands now run in another environment than the run was born \
              in: PATH gained {}",
             extra.display()
         )),

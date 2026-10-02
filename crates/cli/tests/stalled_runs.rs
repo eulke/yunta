@@ -64,8 +64,10 @@ fn a_run_whose_engine_was_killed_is_listed_and_shown_as_stalled() {
     let status = yunta_at!(&checkout, &["status", &run_id]);
     let page = stdout(&status);
     assert!(status.status.success(), "{}", stderr(&status));
+    let lines: Vec<&str> = page.lines().collect();
     assert!(
-        page.contains("stalled — no process is driving it"),
+        lines[0].ends_with("stalled")
+            && lines[1] == "  no process is driving it: the engine that ran it is gone",
         "the page says nothing drives the run:\n{page}"
     );
     assert!(

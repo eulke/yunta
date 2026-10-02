@@ -119,13 +119,13 @@ pub(crate) fn build_failure_escalation(
     )
 }
 
-/// What a failure is attested by: the failure itself and, for a command
-/// that printed something, each line it printed last as a fact of its
-/// own, so every surface lists them a line apiece, in the order the
-/// command wrote them.
+/// What a failure is attested by: the failure's own claim, then each line
+/// of what it says beyond that as a fact of its own — the lines a command
+/// printed last, in the order it wrote them; the problems of a document
+/// that did not close — so every surface lists them a line apiece.
 pub(super) fn failure_facts(failure: &Failure) -> Vec<Fact> {
     std::iter::once(Fact::bare(failure.headline()))
-        .chain(failure.tail().iter().map(Fact::bare))
+        .chain(failure.detail().iter().map(Fact::bare))
         .collect()
 }
 

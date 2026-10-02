@@ -170,13 +170,53 @@ impl Failure {
         match self {
             Failure::Exited { exited } => exited.headline(),
             Failure::Unchanged { unchanged } => unchanged.sentence(&unchanged.failure.headline()),
-            Failure::Artifacts { .. }
-            | Failure::SessionDied { .. }
+            // Each document that did not close, by the heading its own
+            // block opens with: the path and how many problems it has.
+            Failure::Artifacts { artifacts } => artifacts
+                .iter()
+                .filter_map(|artifact| artifact.to_string().lines().next().map(str::to_string))
+                .collect::<Vec<_>>()
+                .join("; "),
+            // How many files, when there are several to list.
+            Failure::ScopeViolated { outside_scope } if outside_scope.len() > 1 => format!(
+                "scope violated: {} outside the declared globs",
+                crate::text::counted(outside_scope.len(), "file")
+            ),
+            Failure::SessionDied { .. }
             | Failure::ScopeViolated { .. }
             | Failure::ScopeRequested { .. }
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
             | Failure::Message { .. } => self.to_string(),
+        }
+    }
+
+    /// What the failure says beyond its [`Failure::headline`], a line
+    /// each: the last lines a command printed, the problems of a document
+    /// that did not close — each document's own block when several did —
+    /// and every path that fell outside a scope when there are several.
+    pub fn detail(&self) -> Vec<String> {
+        match self {
+            Failure::Exited { exited } => exited.tail.clone(),
+            Failure::Unchanged { unchanged } => unchanged.failure.detail(),
+            Failure::Artifacts { artifacts } => {
+                let blocks = artifacts.iter().map(ToString::to_string);
+                let lines: Vec<String> = match artifacts.len() {
+                    1 => blocks.flat_map(|block| own_lines(&block, 1)).collect(),
+                    _ => blocks.flat_map(|block| own_lines(&block, 0)).collect(),
+                };
+                lines
+            }
+            Failure::ScopeViolated { outside_scope } if outside_scope.len() > 1 => outside_scope
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect(),
+            Failure::SessionDied { .. }
+            | Failure::ScopeViolated { .. }
+            | Failure::ScopeRequested { .. }
+            | Failure::Unset { .. }
+            | Failure::PathsDenied { .. }
+            | Failure::Message { .. } => Vec::new(),
         }
     }
 
@@ -370,4 +410,13 @@ impl fmt::Display for Failure {
             }
         }
     }
+}
+
+/// The lines of `block` after its first `skip`, without their indent.
+fn own_lines(block: &str, skip: usize) -> Vec<String> {
+    block
+        .lines()
+        .skip(skip)
+        .map(|line| line.trim().to_string())
+        .collect()
 }

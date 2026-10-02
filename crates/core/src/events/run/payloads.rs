@@ -306,8 +306,10 @@ impl std::fmt::Display for PauseReason {
                 crate::text::agreeing(nodes.len(), "a node was", "nodes were"),
                 crate::text::listed(nodes.iter().map(NodeId::as_str))
             ),
+            // The claim; what a command printed travels as the
+            // escalation's evidence, not inside the one line a pause is.
             PauseReason::NodeFailed { node, failure } => {
-                write!(f, "node `{node}` failed: {failure}")
+                write!(f, "node `{node}` failed: {}", failure.headline())
             }
             PauseReason::Blocked { node, on } => write!(
                 f,

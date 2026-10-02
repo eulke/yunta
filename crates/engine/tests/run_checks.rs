@@ -705,18 +705,23 @@ nodes:
     executor: probe
 "#;
 
-    let RunReport { terminal, state: _ } = bench
+    let RunReport { terminal, state } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert_eq!(
-                reason,
-                "node `probe` failed: executor `probe` exited 1: threshold not met"
-            );
+            assert_eq!(reason, "node `probe` failed: executor `probe` exited 1");
         }
         other => panic!("expected the run to pause, got {other:?}"),
     }
+    let Some(yunta_engine::NodeState::Failed { failure, .. }) = state.nodes.state("probe") else {
+        panic!("`probe` failed: {state:?}");
+    };
+    assert_eq!(
+        failure.tail(),
+        ["threshold not met"],
+        "what it printed is its evidence"
+    );
 }
 
 #[tokio::test]

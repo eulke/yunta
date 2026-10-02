@@ -80,11 +80,7 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let text = stdout(&status);
     assert!(
-        text.lines().any(|line| line == "failures:"),
-        "a failed run says what failed: {text}"
-    );
-    assert!(
-        text.lines().any(|line| line.trim() == "draft:"),
+        text.lines().any(|line| line.trim() == "draft"),
         "the failing node heads its own detail: {text}"
     );
 
@@ -134,22 +130,23 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
         "a finding with an empty `detail` says so: {findings_problems:?}"
     );
 
-    // The node list above stays one line per node, and that one line
-    // still names both documents.
+    // The node list above stays one line per node, cut to the line: it
+    // opens with the first document, and the block under it names every
+    // one.
     let node_line = text
         .lines()
-        .find(|line| line.trim_start().starts_with("draft: failed — "))
+        .find(|line| line.contains("failed") && line.split_whitespace().any(|word| word == "draft"))
         .unwrap_or_else(|| panic!("no one-line verdict for `draft` in:\n{text}"));
     assert!(
-        node_line.contains(&staged("tasks.yaml")) && node_line.contains(&staged("findings.yaml")),
-        "the collapsed line still names every document: {node_line}"
+        node_line.contains(&staged("tasks.yaml")),
+        "the collapsed line names the first document: {node_line}"
     );
 }
 
 #[test]
 fn every_level_of_a_failure_block_hangs_one_step_under_the_line_above_it() {
-    // Three levels deep: the heading, the node that failed, and each
-    // document that node named. The steps come from one value, so a
+    // Three levels deep: the node that failed, each document that node
+    // named, and each problem of that document. The steps come from one value, so a
     // reader follows the nesting by eye instead of measuring it — and a
     // level that started spelling its own margin would show up here as a
     // ladder with an uneven rung.
@@ -160,20 +157,20 @@ fn every_level_of_a_failure_block_hangs_one_step_under_the_line_above_it() {
     let run_id = run_two_documents(&repo, &home);
 
     let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
-    let mut lines = text.lines().skip_while(|line| *line != "failures:");
-    let heading = lines.next().expect("a failed run says what failed");
+    let mut lines = text.lines().skip_while(|line| line.trim() != "draft");
     let node = lines.next().expect("the node that failed heads its detail");
     let named = staged("tasks.yaml");
     let document = lines
         .find(|line| line.trim_start().starts_with(&named))
         .expect("a document the node did not close");
+    let problem = lines.next().expect("the document's problems");
 
-    assert_eq!(indent_of(heading), 0, "{text}");
     let step = indent_of(node);
-    assert!(step > 0, "the node hangs under the heading: {text}");
+    assert!(step > 0, "the node hangs under the page: {text}");
+    assert_eq!(indent_of(document), step * 2, "{text}");
     assert_eq!(
-        indent_of(document),
-        step * 2,
+        indent_of(problem),
+        step * 3,
         "one step per level, the same step every time: {text}"
     );
 }
@@ -293,7 +290,7 @@ fn status_attributes_an_artifact_no_run_holds_to_that_artifact() {
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let text = stdout(&status);
     assert!(
-        text.lines().any(|line| line.trim() == "compose:"),
+        text.lines().any(|line| line.trim() == "compose"),
         "the failing node heads its own detail: {text}"
     );
     assert!(
@@ -485,7 +482,7 @@ fn status_lists_each_path_a_node_wrote_outside_its_scope() {
     let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
     let block: Vec<&str> = text
         .lines()
-        .skip_while(|line| *line != "failures:")
+        .skip_while(|line| line.trim() != "fix")
         .collect();
     for path in ["Cargo.toml", "clippy.toml"] {
         assert!(

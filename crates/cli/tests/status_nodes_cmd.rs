@@ -55,33 +55,47 @@ fn status(project: &Checkout, run_id: &str, extra: &[&str]) -> String {
     stdout(&project.run(std::path::Path::new(env!("CARGO_BIN_EXE_yunta")), &args))
 }
 
+/// What each row of the page's node table says after its mark and its
+/// word: the id — a group's child two cells in — and the row's note. The
+/// table is the block that opens after the page's first two lines.
+fn rows(text: &str) -> Vec<String> {
+    const AFTER_THE_WORD: usize = 14;
+    text.lines()
+        .skip(3)
+        .take_while(|line| !line.is_empty())
+        .map(|line| {
+            line.chars()
+                .skip(AFTER_THE_WORD)
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect()
+}
+
 /// Declaration order, not alphabetical; every declared node, not only
 /// the ones the log named; and a group's children one step under it.
 #[test]
 fn status_lists_every_declared_node_in_declaration_order_with_children_under_their_group() {
     let (project, run_id) = shaped_run();
     let text = status(&project, &run_id, &[]);
-    let listed: Vec<&str> = text
-        .lines()
-        .skip_while(|line| *line != "nodes:")
-        .skip(1)
-        .take_while(|line| line.starts_with(' '))
-        .collect();
+    let listed = rows(&text);
 
     assert_eq!(
         listed
             .iter()
-            .map(|line| line.trim().split(':').next().unwrap_or_default())
+            .map(|row| row.split_whitespace().next().unwrap_or_default())
             .collect::<Vec<_>>(),
         ["zeta", "review", "review-a", "review-b", "alpha", "omega"],
         "the frame's own order, groups with their children: {text}"
     );
     assert!(
-        listed[2].starts_with("    review-a") && listed[1].starts_with("  review"),
+        listed[2].starts_with("  review-a") && listed[1].starts_with("review"),
         "a group's children sit one step under it: {text}"
     );
     assert!(
-        listed[5].contains("skipped"),
+        text.lines()
+            .any(|line| line.contains("skipped") && line.trim_end().ends_with("omega")),
         "a node this mode leaves out is listed and said to be left out: {text}"
     );
 }
@@ -167,7 +181,7 @@ fn status_reports_the_last_failed_run_tool_call_without_making_it_the_run_outcom
     let (project, run_id) = corrected_submission_run();
     let text = status(&project, &run_id, &[]);
     assert!(
-        text.contains("last failed call of attempt: yunta_submit_questions (call_failed)"),
+        text.contains("ask: last failed call of its attempt: yunta_submit_questions (call_failed)"),
         "{text}"
     );
     assert!(
@@ -262,10 +276,12 @@ fn status_says_which_questions_a_node_is_waiting_on() {
     let (project, run_id, _) = asking_run();
 
     let text = status(&project, &run_id, &[]);
-    assert!(
-        text.contains("ask: waiting — asked 1 question: `summary`"),
-        "the node's own line says what it asked: {text}"
+    assert_eq!(
+        rows(&text),
+        ["ask  asked 1 question: `summary`"],
+        "the node's own row says what it asked: {text}"
     );
+    assert!(text.contains("waiting   ask"), "{text}");
 
     let document: serde_json::Value =
         serde_json::from_str(&status(&project, &run_id, &["--json"])).expect("a JSON document");
@@ -288,14 +304,10 @@ fn status_says_which_questions_a_node_is_waiting_on() {
 fn status_lists_the_nodes_the_frame_declares_in_its_order() {
     let (project, run_id) = shaped_run();
 
-    let printed: Vec<String> = status(&project, &run_id, &[])
-        .lines()
-        .skip_while(|line| *line != "nodes:")
-        .skip(1)
-        .take_while(|line| line.starts_with(' '))
-        .map(|line| {
-            line.trim()
-                .split(':')
+    let printed: Vec<String> = rows(&status(&project, &run_id, &[]))
+        .iter()
+        .map(|row| {
+            row.split_whitespace()
                 .next()
                 .unwrap_or_default()
                 .to_string()

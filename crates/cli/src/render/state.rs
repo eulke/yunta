@@ -155,7 +155,9 @@ impl NodeDisplay {
                 None => None,
                 Some(NodeState::Running { attempt }) => Some(format!("attempt {attempt}")),
                 Some(NodeState::Finished { outcome, .. }) => detail(outcome),
-                Some(NodeState::Failed { failure, .. }) => detail(&failure.to_string()),
+                // The claim, not the lines a command printed: those are
+                // evidence, one step away on every surface that has room.
+                Some(NodeState::Failed { failure, .. }) => detail(&failure.headline()),
                 Some(NodeState::Waiting { on }) => match on {
                     NodeWait::Gate { external_ref } => external_ref.as_deref().and_then(detail),
                     // The one sentence for a node that asked: the same

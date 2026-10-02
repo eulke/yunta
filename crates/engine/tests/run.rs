@@ -397,16 +397,24 @@ nodes:
       exit 101
 "#;
 
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
 
+    // The pause names the claim; what the compiler printed is the
+    // failure's own evidence.
     match terminal {
-        RunTerminal::Paused { reason } => assert_eq!(
-            reason,
-            "node `build` failed: exit 101: error[E0425]: cannot find value `x` in this \
-             scope\n --> src/lib.rs:3:5"
-        ),
+        RunTerminal::Paused { reason } => assert_eq!(reason, "node `build` failed: exit 101"),
         other => panic!("expected Paused, got {other:?}"),
     }
+    let Some(NodeState::Failed { failure, .. }) = state.nodes.state("build") else {
+        panic!("`build` failed: {state:?}");
+    };
+    assert_eq!(
+        failure.tail(),
+        [
+            "error[E0425]: cannot find value `x` in this scope",
+            " --> src/lib.rs:3:5"
+        ]
+    );
 }
 
 #[tokio::test]
@@ -424,16 +432,20 @@ nodes:
         - run: "echo installing; echo 'lockfile is out of date' >&2; exit 1"
 "#;
 
-    let RunReport { terminal, .. } = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
 
     match terminal {
         RunTerminal::Paused { reason } => assert_eq!(
             reason,
             "node `only` failed: before hook `echo installing; echo 'lockfile is out of date' \
-             >&2; exit 1` failed: installing\nlockfile is out of date"
+             >&2; exit 1` failed"
         ),
         other => panic!("expected Paused, got {other:?}"),
     }
+    let Some(NodeState::Failed { failure, .. }) = state.nodes.state("only") else {
+        panic!("`only` failed: {state:?}");
+    };
+    assert_eq!(failure.tail(), ["installing", "lockfile is out of date"]);
 }
 
 #[tokio::test]
@@ -1089,9 +1101,12 @@ nodes:
     let RunTerminal::Paused { reason } = &terminal else {
         panic!("the second attempt owes an artifact it never wrote: {terminal:?} {state:?}");
     };
+    let Some(NodeState::Failed { failure, .. }) = state.nodes.state("report") else {
+        panic!("`report` failed: {state:?}");
+    };
     assert!(
-        reason.contains("report.md") && reason.contains("never produced"),
-        "the second attempt is judged on what it produced: {reason}"
+        reason.contains("report.md") && failure.to_string().contains("never produced"),
+        "the second attempt is judged on what it produced: {reason} / {failure}"
     );
     assert_eq!(
         bench.accepted(),

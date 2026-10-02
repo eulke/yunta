@@ -377,19 +377,26 @@ async fn command_exited(
     what: &str,
 ) -> Result<yunta_core::events::Failure, RunError> {
     let printed = crate::process::CommandOutput::of(outcome);
-    let output = crate::artifacts::store::ObjectStore::at(ctx.run_dir)
-        .put_redacted(printed.bytes(), &ctx.redactor)
-        .await
-        .map_err(|source| RunError::Io {
-            context: format!("keep what {what} printed"),
-            source,
-        })?;
+    // A command that printed nothing leaves nothing to keep, and no
+    // pointer to an empty file a reader would open to find nothing.
+    let output = match printed.bytes().is_empty() {
+        true => None,
+        false => Some(
+            crate::artifacts::store::ObjectStore::at(ctx.run_dir)
+                .put_redacted(printed.bytes(), &ctx.redactor)
+                .await
+                .map_err(|source| RunError::Io {
+                    context: format!("keep what {what} printed"),
+                    source,
+                })?,
+        ),
+    };
     Ok(yunta_core::events::Failure::exited(
         yunta_core::events::CommandExit {
             origin,
             code,
             tail: printed.tail(),
-            output: Some(output),
+            output,
         },
     ))
 }

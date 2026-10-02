@@ -890,7 +890,7 @@ async fn a_fresh_session_replacing_an_interrupted_one_opens_on_an_empty_staging(
 sessions:
   - outcome: { type: completed, summary: "started over" }
 "#;
-    let (terminal, _events, adapter) = resume_orphan_with_mock(Orphan {
+    let (terminal, events, adapter) = resume_orphan_with_mock(Orphan {
         workflow: RESUME_ARTIFACT_WORKFLOW,
         fixture,
         session: Some("mock-session-orig"),
@@ -902,9 +902,13 @@ sessions:
     let RunTerminal::Paused { reason } = &terminal else {
         panic!("a fresh session is judged on what it produced: {terminal:?}");
     };
+    let state = yunta_engine::derive(&events);
+    let Some(yunta_engine::NodeState::Failed { failure, .. }) = state.nodes.state("work") else {
+        panic!("`work` failed: {reason}");
+    };
     assert!(
-        reason.contains("report.md") && reason.contains("never produced"),
-        "nothing the replaced session left becomes this session's artifact: {reason}"
+        reason.contains("report.md") && failure.to_string().contains("never produced"),
+        "nothing the replaced session left becomes this session's artifact: {reason} / {failure}"
     );
 }
 

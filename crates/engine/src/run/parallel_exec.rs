@@ -163,7 +163,10 @@ pub(super) async fn execute_parallel(
                 ctx,
                 node,
                 Close::new(
-                    format!("{} child(ren) finished", children.len()),
+                    format!(
+                        "{} finished",
+                        yunta_core::text::counted_as(children.len(), "child", "children")
+                    ),
                     TokenUsage::default(),
                 ),
             )

@@ -203,11 +203,11 @@ fn graph_resolves_a_bare_catalog_name() {
 
 #[test]
 fn labels_are_escaped() {
-    // A node's derived-state label carries the run's own outcome text,
-    // which can hold characters that break a diagram: quotes, `<`/`>`/`&`
-    // (Mermaid renders labels as HTML) and backslashes (DOT). A failed
-    // bash node's outcome is `exit <code>: <stderr tail>`, so its stderr
-    // is a direct, controllable source of those characters.
+    // A node's derived-state label carries what the run's log says about
+    // it, which can hold characters that break a diagram: quotes,
+    // `<`/`>`/`&` (Mermaid renders labels as HTML) and backslashes (DOT).
+    // A node that writes one file outside its scope fails naming that
+    // file, so a file name is a direct, controllable source of them.
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -215,8 +215,8 @@ fn labels_are_escaped() {
     let home = root.path().join("state");
     write(
         &repo.join("wf.yaml"),
-        "name: escaping\nnodes:\n  - id: boom\n    kind: bash\n    \
-         run: \"printf '%s' 'a\\\"b<c>d&e' 1>&2; exit 1\"\n",
+        "name: escaping\nnodes:\n  - id: boom\n    kind: bash\n    scope: [src/**]\n    \
+         run: \"printf x > 'a\\\"b<c>d&e'\"\n",
     );
 
     // The run fails (the node exits non-zero); its events still record the

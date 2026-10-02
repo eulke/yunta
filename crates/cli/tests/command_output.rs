@@ -190,11 +190,18 @@ fn status_quotes_the_tail_of_a_failed_command_and_names_where_the_rest_is() {
         "the reason the compiler gave is on the page:\n{out}"
     );
     let objects = runs_root(&checkout.home).join(&run_id).join("objects");
+    let named = out
+        .lines()
+        .find_map(|line| line.trim_start().strip_prefix("whole output: "))
+        .unwrap_or_else(|| panic!("the page names where the output is kept:\n{out}"));
+    // Shown under `~` when it is under the home the run sees.
+    let named = match named.strip_prefix("~/") {
+        Some(rest) => checkout.home.join(rest),
+        None => std::path::PathBuf::from(named),
+    };
     assert!(
-        out.lines()
-            .any(|line| line.trim_start().starts_with("whole output: ")
-                && line.contains(&objects.display().to_string())),
-        "the page names where everything the command printed is kept:\n{out}"
+        named.starts_with(&objects) && named.is_file(),
+        "the page names the file that holds everything the command printed:\n{out}"
     );
 
     let json = yunta_at!(&checkout, &["status", &run_id, "--json"]);

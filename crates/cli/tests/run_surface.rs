@@ -341,10 +341,10 @@ fn status_and_the_closing_block_print_one_counter_for_one_run() {
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let page = stdout(&status);
     assert!(
-        page.lines()
-            .next()
-            .is_some_and(|line| line.starts_with(&format!("run {run_id}: {counters} · "))),
-        "the page leads with the counters the closing block printed (`{counters}`):\n{page}"
+        page.lines().any(
+            |line| line.trim_start().strip_prefix("progress").map(str::trim) == Some(&counters)
+        ),
+        "the page counts with the row the closing block printed (`{counters}`):\n{page}"
     );
 }
 

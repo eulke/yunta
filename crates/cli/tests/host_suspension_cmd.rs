@@ -58,7 +58,7 @@ fn status_says_how_long_the_host_slept_in_all() {
 
     assert!(
         stdout(&status)
-            .contains("host: suspended 2 times for 1h20m in all — durations leave it out"),
+            .contains("host         suspended 2 times for 1h20m in all — durations leave it out"),
         "{}",
         stdout(&status)
     );
