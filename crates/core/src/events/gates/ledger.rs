@@ -34,7 +34,9 @@ pub struct GateRecord {
     pub waiting: Option<(GateWaitingPayload, Seq)>,
     /// Every resolution, oldest first.
     pub resolved: Vec<(GateResolvedPayload, Seq)>,
-    /// The forge's handle of the latest gate this node published.
+    /// The forge's handle of the gate this node published and a wake
+    /// polls: the latest, until a review asked for changes on it — the
+    /// corrected lap publishes again.
     pub external_ref: Option<String>,
     /// The commit the latest approving review covered.
     pub approved_sha: Option<CommitSha>,
@@ -57,7 +59,7 @@ impl GateLedger {
         self.per_node.get(node)
     }
 
-    /// The forge's handle of the latest gate `node` published.
+    /// The forge's handle of the gate `node` published and a wake polls.
     pub fn last_external_ref(&self, node: &NodeId) -> Option<&str> {
         self.per_node
             .get(node)
@@ -117,8 +119,16 @@ impl GateLedger {
             GateEvent::Resolved(p) => {
                 // A merge is an approval whose evidence is the merge
                 // commit, and the payload already reads it as `Approved`.
-                if let GateResolvedPayload::Approved { sha, .. } = p {
-                    record.approved_sha = Some(sha.clone());
+                match p {
+                    GateResolvedPayload::Approved { sha, .. } => {
+                        record.approved_sha = Some(sha.clone());
+                    }
+                    // Changes requested end that round of review: what
+                    // the correction makes is published, then reviewed.
+                    GateResolvedPayload::ChangesRequested { .. } => record.external_ref = None,
+                    GateResolvedPayload::Chosen(_)
+                    | GateResolvedPayload::Closed
+                    | GateResolvedPayload::Unrecognized(_) => {}
                 }
                 record.resolved.push((p.clone(), meta.seq));
                 record.waiting = None;

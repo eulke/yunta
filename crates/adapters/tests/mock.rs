@@ -14,8 +14,8 @@ use yunta_core::fence::{Advice, Fence};
 use futures::StreamExt;
 use yunta_adapters::{MockAdapter, MockFixture, MockForge, MockForgeState, RunPaths};
 use yunta_core::port::{
-    Adapter, AgentEvent, Forge, ForgeError, ProbeReport, PublishRequest, PullRequestRef,
-    ReviewOutcome, SessionRequest,
+    Adapter, AgentEvent, Forge, ForgeError, GateDecision, ProbeReport, PublishRequest,
+    PullRequestRef, ReviewOutcome, SessionRequest,
 };
 use yunta_core::{Capabilities, SessionId};
 use yunta_testkit_core::adapter::{drain, request};
@@ -474,10 +474,40 @@ fn gate_request(run_id: &str) -> PublishRequest {
     PublishRequest {
         branch: format!("yunta/{run_id}/gate"),
         base_branch: "main".to_string(),
-        run_id: run_id.to_string(),
-        summary: "spec ready for review".to_string(),
+        run_id: run_id.parse().unwrap(),
+        decision: GateDecision {
+            node: "review".into(),
+            question: "Is the spec ready?".to_string(),
+            assignee: "lead".to_string(),
+            then: Vec::new(),
+            corrected_by: None,
+        },
         artifacts: Vec::new(),
+        shown: Vec::new(),
     }
+}
+
+#[tokio::test]
+async fn the_mock_forge_moves_the_head_only_when_what_it_publishes_changes() {
+    let state = MockForgeState::new();
+    let forge = MockForge::new(state.clone());
+    let mut request = gate_request("run-1");
+    request.artifacts = vec![("spec.md".to_string(), b"# spec".to_vec())];
+
+    let published = forge.publish(&request).await.unwrap();
+    let first = forge.poll(&published).await.unwrap().head_sha;
+    forge.publish(&request).await.unwrap();
+    assert_eq!(
+        forge.poll(&published).await.unwrap().head_sha,
+        first,
+        "the same files commit nothing"
+    );
+
+    request.artifacts = vec![("spec.md".to_string(), b"# spec, corrected".to_vec())];
+    forge.publish(&request).await.unwrap();
+    assert_ne!(forge.poll(&published).await.unwrap().head_sha, first);
+    let pr = state.pull_requests().remove(0);
+    assert_eq!(pr.files["spec.md"], b"# spec, corrected");
 }
 
 #[tokio::test]

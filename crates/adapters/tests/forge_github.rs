@@ -14,11 +14,13 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use serde_json::{json, Value};
 use yunta_adapters::GitHubForge;
 use yunta_core::port::{
-    Forge, ForgeError, ForgeProbe, PublishRequest, PullRequestRef, PullRequestRequest,
-    ReviewOutcome,
+    Forge, ForgeError, ForgeProbe, GateDecision, PublishRequest, PullRequestRef,
+    PullRequestRequest, ReviewOutcome,
 };
 use yunta_core::{GitHubRepo, Secret};
 
@@ -48,6 +50,8 @@ struct StubState {
     rate_limited: bool,
     /// Answer every call with this refusal.
     refusal: Option<(u16, &'static str)>,
+    /// What the branch holds, by path, as the Contents API serves it.
+    files: HashMap<String, Vec<u8>>,
 }
 
 #[derive(Clone, Default)]
@@ -265,14 +269,33 @@ async fn get_contents(
     Path((_owner, _repo, path)): Path<(String, String, String)>,
 ) -> Answer {
     record(&stub, "GET", &format!("/contents/{path}"), &HashMap::new());
-    Err(refuse(StatusCode::NOT_FOUND, HeaderMap::new(), "Not Found"))
+    match stub.with(|s| s.files.get(&path).cloned()) {
+        // Inline, base64 in lines, the way the Contents API sends it.
+        Some(content) => {
+            let encoded = STANDARD.encode(&content);
+            let lines: Vec<&str> = encoded
+                .as_bytes()
+                .chunks(60)
+                .map(|chunk| std::str::from_utf8(chunk).unwrap())
+                .collect();
+            Ok(Json(json!({
+                "sha": format!("blob-{}", content.len()),
+                "encoding": "base64",
+                "content": lines.join("\n"),
+            })))
+        }
+        None => Err(refuse(StatusCode::NOT_FOUND, HeaderMap::new(), "Not Found")),
+    }
 }
 
 async fn put_contents(
     State(stub): State<Stub>,
     Path((_owner, _repo, path)): Path<(String, String, String)>,
+    Json(body): Json<Value>,
 ) -> Answer {
     record(&stub, "PUT", &format!("/contents/{path}"), &HashMap::new());
+    let content = STANDARD.decode(body["content"].as_str().unwrap()).unwrap();
+    stub.with(|s| s.files.insert(path.clone(), content));
     Ok(Json(json!({ "content": { "path": path } })))
 }
 
@@ -357,10 +380,88 @@ fn request(branch: &str, run_id: &str) -> PublishRequest {
     PublishRequest {
         branch: branch.to_string(),
         base_branch: "main".to_string(),
-        run_id: run_id.to_string(),
-        summary: "spec ready for review".to_string(),
+        run_id: run_id.parse().unwrap(),
+        decision: GateDecision {
+            node: "approve-spec".into(),
+            question: "Is the spec ready to build on?".to_string(),
+            assignee: "lead".to_string(),
+            then: vec!["build".into(), "docs".into()],
+            corrected_by: Some("spec".into()),
+        },
         artifacts: vec![("spec.md".to_string(), b"# spec".to_vec())],
+        shown: Vec::new(),
     }
+}
+
+/// Every file the stub was asked to commit, in order.
+fn commits(stub: &Stub) -> Vec<String> {
+    stub.requests()
+        .into_iter()
+        .filter(|r| r.starts_with("PUT /contents/"))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_gate_pull_request_asks_its_question_and_says_what_each_review_does() {
+    let stub = Stub::default();
+    let forge = forge_at(serve(stub.clone()).await);
+
+    forge
+        .publish(&request("yunta/run-1/gate", "run-1"))
+        .await
+        .unwrap();
+
+    let pr = stub.with(|s| s.prs[0].clone());
+    assert_eq!(pr.title, "Is the spec ready to build on?");
+    for said in [
+        "Gate `approve-spec` of run `run-1` waits on this pull request, for lead.",
+        "**approve** — approve this pull request, or merge it",
+        "the gate passes, and the run goes on to `build` and `docs`",
+        "each comment reaches `spec` as a finding",
+        "**close** — close this pull request",
+        "`spec.md` — as the run holds it",
+        "`yunta resume run-1`",
+        "`yunta cancel run-1`",
+    ] {
+        assert!(pr.body.contains(said), "{said:?} is not in:\n{}", pr.body);
+    }
+    assert!(
+        !pr.body.contains("resolve-gate"),
+        "no terminal command answers a published gate: {}",
+        pr.body
+    );
+    assert!(
+        pr.body.ends_with("<!-- yunta run_id: run-1 -->"),
+        "{}",
+        pr.body
+    );
+}
+
+#[tokio::test]
+async fn a_later_lap_commits_only_what_changed_to_the_pull_request_it_reuses() {
+    let stub = Stub::default();
+    let forge = forge_at(serve(stub.clone()).await);
+    let mut lap = request("yunta/run-1/gate", "run-1");
+
+    let first = forge.publish(&lap).await.unwrap();
+    assert_eq!(commits(&stub), ["PUT /contents/spec.md?"]);
+
+    let again = forge.publish(&lap).await.unwrap();
+    assert_eq!(again.number, first.number);
+    assert_eq!(
+        commits(&stub).len(),
+        1,
+        "a file the branch already holds is not committed again"
+    );
+
+    lap.artifacts = vec![("spec.md".to_string(), b"# spec, corrected".to_vec())];
+    let corrected = forge.publish(&lap).await.unwrap();
+    assert_eq!(corrected.number, first.number);
+    assert_eq!(commits(&stub).len(), 2);
+    assert_eq!(
+        stub.with(|s| s.files["spec.md"].clone()),
+        b"# spec, corrected"
+    );
 }
 
 #[tokio::test]

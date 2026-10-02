@@ -400,6 +400,7 @@ pub(super) async fn publish_gate(
     let node = find_node(&ctx.manifest.workflow, &node_id)?;
     let yunta_core::NodeKind::Gate {
         assignee,
+        message,
         external: Some(external),
         ..
     } = &node.kind
@@ -411,7 +412,9 @@ pub(super) async fn publish_gate(
             ),
         });
     };
-    let step = gate_exec::publish_gate(ctx, node, assignee, external, ctx.forge).await?;
+    let step =
+        gate_exec::publish_gate(ctx, node, assignee, message.as_deref(), external, ctx.forge)
+            .await?;
     gate_still_waiting(ctx, step).await
 }
 

@@ -20,7 +20,7 @@ mod next;
 mod node_table;
 
 pub use checklist::{Check, Checklist, Found};
-pub use decision::{Decision, DecisionOption};
+pub use decision::{Chosen, Decision, DecisionOption};
 pub use document::{Code, Marked, Prose, Section};
 pub use evidence::{Evidence, Whole};
 pub use failure::{FailureDetail, FailureSays};

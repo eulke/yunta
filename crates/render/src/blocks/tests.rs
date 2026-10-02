@@ -38,7 +38,9 @@ fn evidence(lines: usize) -> Evidence {
 
 fn decision() -> Decision {
     Decision {
-        handle: "7E5PH4".to_string(),
+        chosen: Chosen::Here {
+            handle: "7E5PH4".to_string(),
+        },
         options: vec![
             DecisionOption {
                 id: "retry".to_string(),

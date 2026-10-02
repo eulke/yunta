@@ -14,6 +14,7 @@
 // double has nothing to recover and unwrapping is the honest response.
 #![allow(clippy::unwrap_used)]
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -54,6 +55,8 @@ struct MockPr {
     head_sha: CommitSha,
     open: bool,
     review: Review,
+    /// What the branch holds, by path.
+    files: BTreeMap<String, Vec<u8>>,
 }
 
 /// A pull request the mock opened, as a test reads it back.
@@ -65,6 +68,8 @@ pub struct MockPullRequest {
     pub title: String,
     pub body: String,
     pub open: bool,
+    /// What its branch holds, by path.
+    pub files: BTreeMap<String, Vec<u8>>,
 }
 
 #[derive(Default)]
@@ -178,6 +183,7 @@ impl MockForgeState {
                 title: pr.title.clone(),
                 body: pr.body.clone(),
                 open: pr.open,
+                files: pr.files.clone(),
             })
             .collect()
     }
@@ -199,6 +205,27 @@ pub struct MockForge {
 impl MockForge {
     pub fn new(state: MockForgeState) -> Self {
         Self { state }
+    }
+
+    /// Commits `files` to pull request `number`'s branch. A file that
+    /// changes moves the head, as a commit would; one the branch already
+    /// holds commits nothing.
+    fn commit(&self, number: u64, files: Vec<(String, Vec<u8>)>) {
+        let mut inner = self.state.0.lock().unwrap();
+        let head = inner.fresh_sha();
+        let Some(pr) = inner.prs.iter_mut().find(|pr| pr.number == number) else {
+            return;
+        };
+        let mut moved = false;
+        for (path, content) in files {
+            if pr.files.get(&path) != Some(&content) {
+                pr.files.insert(path, content);
+                moved = true;
+            }
+        }
+        if moved {
+            pr.head_sha = head;
+        }
     }
 
     /// The open pull request `run_id` has on `head`, or a new one saying
@@ -237,6 +264,7 @@ impl MockForge {
             head_sha,
             open: true,
             review: Review::Pending,
+            files: BTreeMap::new(),
         });
         PullRequestRef { url, number }
     }
@@ -245,13 +273,17 @@ impl MockForge {
 #[async_trait]
 impl Forge for MockForge {
     async fn publish(&self, req: &PublishRequest) -> Result<PullRequestRef, ForgeError> {
-        Ok(self.open_or_reuse(
-            &req.run_id,
+        // Titled, written and committed the one way every forge does it,
+        // so a test reads what a reviewer reads.
+        let published = self.open_or_reuse(
+            req.run_id.as_str(),
             &req.branch,
             &req.base_branch,
-            &req.summary,
-            &req.summary,
-        ))
+            &super::gate_title(req),
+            &super::gate_body(req),
+        );
+        self.commit(published.number, super::gate_files(req));
+        Ok(published)
     }
 
     async fn open_pull_request(

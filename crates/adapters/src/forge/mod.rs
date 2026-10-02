@@ -14,7 +14,7 @@ mod mock;
 pub use github::GitHubForge;
 pub use mock::{MockForge, MockForgeState, MockPullRequest};
 
-use yunta_core::port::PullRequestRequest;
+use yunta_core::port::{PublishRequest, PullRequestRequest};
 use yunta_render::surface::{Markdown, Surface};
 
 /// What ties a pull request's body to its run: a comment a forge's page
@@ -53,4 +53,30 @@ pub(crate) fn pull_request_body(req: &PullRequestRequest) -> String {
     }
     body.push_str(&run_marker(&req.run_id));
     body
+}
+
+/// The title a gate's pull request opens with: the question it asks.
+pub(crate) fn gate_title(req: &PublishRequest) -> String {
+    req.decision.question.clone()
+}
+
+/// The body a gate's pull request opens with: how a review answers it
+/// and what each answer does to the run, then the marker.
+pub(crate) fn gate_body(req: &PublishRequest) -> String {
+    let drawn = Markdown.draw(&yunta_render::published::gate(req));
+    format!(
+        "{}\n\n{}",
+        drawn.trim_end(),
+        run_marker(req.run_id.as_str())
+    )
+}
+
+/// Every file a gate's pull request carries: each document a person
+/// reads drawn to read, then each artifact as the run holds it.
+pub(crate) fn gate_files(req: &PublishRequest) -> Vec<(String, Vec<u8>)> {
+    yunta_render::published::drawn(req)
+        .into_iter()
+        .map(|(path, drawn)| (path, drawn.into_bytes()))
+        .chain(req.artifacts.iter().cloned())
+        .collect()
 }

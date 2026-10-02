@@ -12,7 +12,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use thiserror::Error;
 
-use crate::{CommitSha, InvalidId, Responder};
+use crate::shown::ShownDocument;
+use crate::{CommitSha, InvalidId, NodeId, Responder, RunId};
 
 #[derive(Debug, Error)]
 pub enum ForgeError {
@@ -68,6 +69,7 @@ pub enum ForgeError {
 /// What `publish` needs to commit and open a PR. The trait itself does
 /// no filesystem I/O — `artifacts` are already read off disk by the
 /// caller, so a mock forge never needs a real run.dir to be exercised.
+#[derive(Debug, Clone, PartialEq)]
 pub struct PublishRequest {
     pub branch: String,
     pub base_branch: String,
@@ -75,10 +77,33 @@ pub struct PublishRequest {
     /// call for the same gate finds the open PR it already has instead
     /// of opening a duplicate — idempotent across `resume` invocations.
     /// A closed or merged PR is never reused.
-    pub run_id: String,
-    pub summary: String,
+    pub run_id: RunId,
+    /// What the pull request asks, and what each answer does to the run.
+    pub decision: GateDecision,
     /// (path relative to the repo root, raw content).
     pub artifacts: Vec<(String, Vec<u8>)>,
+    /// The documents among `artifacts` a person reads drawn — a plan with
+    /// the tests that hold its tasks, a spec, a review's findings — each
+    /// published beside its bytes.
+    pub shown: Vec<ShownDocument>,
+}
+
+/// What a gate published to a forge asks, and what each answer a review
+/// can give does to the run — the decision as data, drawn by whoever
+/// writes the pull request.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GateDecision {
+    /// The gate that asks.
+    pub node: NodeId,
+    /// What it asks: the author's `message:`, or what the gate needs.
+    pub question: String,
+    /// Who it is addressed to.
+    pub assignee: String,
+    /// What runs once the gate passes, in the workflow's order.
+    pub then: Vec<NodeId>,
+    /// The node a request for changes sends the run back to, with the
+    /// review's comments as its findings; `None` when it fails the gate.
+    pub corrected_by: Option<NodeId>,
 }
 
 /// A pull request's handle — a published gate's, or the one a

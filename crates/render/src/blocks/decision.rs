@@ -17,23 +17,35 @@ pub struct DecisionOption {
     pub asks: Option<String>,
 }
 
-/// A run's decision, every option with the command that chooses it: a
-/// reader copies a line rather than composing one from a menu.
+/// A run's decision, every option with how it is chosen: at a terminal
+/// a reader copies a line rather than composing one from a menu.
 pub struct Decision {
-    /// What the run is called by.
-    pub handle: String,
+    pub chosen: Chosen,
     pub options: Vec<DecisionOption>,
+}
+
+/// Where a decision's options are chosen.
+pub enum Chosen {
+    /// At a terminal, by the command each option names, for the run
+    /// called `handle`.
+    Here { handle: String },
+    /// On the forge holding the pull request: each option's label says
+    /// what to do there, and no command chooses it.
+    OnTheForge,
 }
 
 impl Decision {
     /// The command that chooses `option`, with the words it asks for
-    /// left for the reader to write.
-    pub fn command(&self, option: &DecisionOption) -> String {
+    /// left for the reader to write — when a command chooses it.
+    pub fn command(&self, option: &DecisionOption) -> Option<String> {
+        let Chosen::Here { handle } = &self.chosen else {
+            return None;
+        };
         let text = match option.asks {
             Some(_) => " --text \"<answer>\"",
             None => "",
         };
-        format!("yunta resolve-gate {} {}{text}", self.handle, option.id)
+        Some(format!("yunta resolve-gate {handle} {}{text}", option.id))
     }
 }
 
@@ -55,11 +67,13 @@ impl Drawn for Decision {
             for part in said.iter().flat_map(|text| wrap(text, room)) {
                 lines.push(Line::new().plain(under.as_str()).push(Tone::Muted, part));
             }
-            lines.push(
-                Line::new()
-                    .plain(under.as_str())
-                    .push(Tone::Strong, self.command(option)),
-            );
+            if let Some(command) = self.command(option) {
+                lines.push(
+                    Line::new()
+                        .plain(under.as_str())
+                        .push(Tone::Strong, command),
+                );
+            }
         }
         lines
     }

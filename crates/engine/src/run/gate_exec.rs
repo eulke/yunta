@@ -22,9 +22,11 @@
 
 use yunta_core::events::{
     Escalation, EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity,
-    GateResolvedPayload, NodeStartedPayload, PauseReason, TokenUsage,
+    GateResolvedPayload, NodeStartedPayload, PauseReason, Shown, TokenUsage,
 };
-use yunta_core::port::{Forge, PolledGate, PublishRequest, PullRequestRef, ReviewOutcome};
+use yunta_core::port::{
+    Forge, GateDecision, PolledGate, PublishRequest, PullRequestRef, ReviewOutcome,
+};
 use yunta_core::{CommitSha, ExternalGate, FindingId, Node, NonEmpty, Responder};
 
 use super::node_close::{fail, finish_node};
@@ -47,6 +49,7 @@ pub(super) async fn publish_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
     assignee: &str,
+    message: Option<&str>,
     external: &ExternalGate,
     forge: Option<&dyn Forge>,
 ) -> Result<GateStep, RunError> {
@@ -68,32 +71,11 @@ pub(super) async fn publish_gate(
         Step::Value(rendered) => rendered,
         Step::Ended(step) => return Ok(step),
     };
-
-    // What the reviewer is shown is what the run holds: the acceptance
-    // its log states, with the bytes out of its object store.
-    let events = ctx.load_events().await?;
-    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
-    let mut artifacts = Vec::new();
-    for spec in &external.artifacts {
-        let wanted = yunta_core::events::ArtifactId::from(spec);
-        let Some(artifact) = held.held(&wanted, None) else {
-            emit_started(ctx, node).await?;
-            fail(
-                ctx,
-                node,
-                format!(
-                    "node `{}` publishes the {} with its external gate, and this run holds \
-                     no such artifact — no node produced it",
-                    node.id,
-                    wanted.label()
-                ),
-                false,
-            )
-            .await?;
-            return Ok(GateStep::Resolved);
-        };
-        artifacts.push((wanted.view_name(), held.bytes(artifact).await?));
-    }
+    let Some((artifacts, shows)) = held_for_review(ctx, node, external).await? else {
+        return Ok(GateStep::Resolved);
+    };
+    let state = ctx.run_view().await?.state;
+    let shown = crate::artifacts::shown::documents(ctx.run_dir, &shows, &state).await?;
 
     let summary = format!(
         "node `{}` is waiting on external review (assignee: {assignee})",
@@ -102,9 +84,10 @@ pub(super) async fn publish_gate(
     let request = PublishRequest {
         branch,
         base_branch: ctx.manifest.base_branch.clone(),
-        run_id: ctx.run_id.to_string(),
-        summary: summary.clone(),
+        run_id: ctx.run_id.clone(),
+        decision: decision(ctx, node, assignee, message),
         artifacts,
+        shown,
     };
 
     let published = forge
@@ -133,6 +116,67 @@ pub(super) async fn publish_gate(
     Ok(GateStep::Waiting(PauseReason::ExternalGate {
         url: published.url,
     }))
+}
+
+/// What the reviewer decides on, as the run holds it: each artifact's
+/// bytes under the name its identity gives it, and the log's name for
+/// each. `None` once the node failed for one the run does not hold — a
+/// partial review is never published.
+async fn held_for_review(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    external: &ExternalGate,
+) -> Result<Option<(Vec<(String, Vec<u8>)>, Vec<Shown>)>, RunError> {
+    let events = ctx.load_events().await?;
+    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
+    let mut artifacts = Vec::new();
+    let mut shows = Vec::new();
+    for spec in &external.artifacts {
+        let wanted = yunta_core::events::ArtifactId::from(spec);
+        let Some(artifact) = held.held(&wanted, None) else {
+            emit_started(ctx, node).await?;
+            fail(
+                ctx,
+                node,
+                format!(
+                    "node `{}` publishes the {} with its external gate, and this run holds \
+                     no such artifact — no node produced it",
+                    node.id,
+                    wanted.label()
+                ),
+                false,
+            )
+            .await?;
+            return Ok(None);
+        };
+        artifacts.push((wanted.view_name(), held.bytes(artifact).await?));
+        shows.push(Shown {
+            producer: artifact.producer.clone(),
+            artifact: artifact.artifact.clone(),
+            content_hash: artifact.content_hash.clone(),
+        });
+    }
+    Ok(Some((artifacts, shows)))
+}
+
+/// What the gate's pull request asks, and what each answer a review can
+/// give does to the run: the nodes that wait on it go on once it passes,
+/// and a request for changes goes where its `on_failure` sends it.
+fn decision(ctx: &RunCtx<'_>, node: &Node, assignee: &str, message: Option<&str>) -> GateDecision {
+    GateDecision {
+        node: node.id.clone(),
+        question: super::internal_gate::question(node, message),
+        assignee: assignee.to_string(),
+        then: ctx
+            .manifest
+            .workflow
+            .nodes
+            .iter()
+            .filter(|next| next.depends_on.contains(&node.id))
+            .map(|next| next.id.clone())
+            .collect(),
+        corrected_by: node.on_failure.as_ref().map(|on| on.goto.clone()),
+    }
 }
 
 #[tracing::instrument(skip_all, fields(run_id = %ctx.run_id, node_id = %node.id))]
@@ -210,11 +254,14 @@ async fn resolve_from_poll(
         ReviewOutcome::Merged { by, merge_sha } => {
             resolve_approved(ctx, node, by, merge_sha, format!("merged by {by}")).await
         }
+        // Like an approval, a request for changes decides what it
+        // reviewed: one left on an earlier head waits for a review of
+        // what the correction published.
         ReviewOutcome::ChangesRequested {
             by,
             reviewed_sha,
             comments,
-        } => {
+        } if *reviewed_sha == polled.head_sha => {
             emit_started(ctx, node).await?;
             ctx.emit(
                 Some(&node.id),
@@ -270,10 +317,11 @@ async fn resolve_from_poll(
             .await?;
             Ok(GateStep::Resolved)
         }
-        // Pending, or an approval that no longer covers the current
-        // head — the engine detects that by comparing SHAs — not a
-        // decision.
-        ReviewOutcome::Pending | ReviewOutcome::Approved { .. } => {
+        // Pending, or a review that no longer covers the current head —
+        // the engine detects that by comparing SHAs — not a decision.
+        ReviewOutcome::Pending
+        | ReviewOutcome::Approved { .. }
+        | ReviewOutcome::ChangesRequested { .. } => {
             Ok(GateStep::Waiting(PauseReason::ExternalGate {
                 url: published.url.clone(),
             }))

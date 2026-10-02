@@ -214,14 +214,18 @@ impl GitHubForge {
     /// file that's already there (409 without it) but must omit it to
     /// create a new one — so this looks the file up first. Only a 404
     /// means "no such file"; any other refusal is reported as it is.
-    async fn existing_file_sha(
+    async fn existing_file(
         &self,
         path: &str,
         branch: &str,
-    ) -> Result<Option<String>, ForgeError> {
+    ) -> Result<Option<ExistingFile>, ForgeError> {
         #[derive(Deserialize)]
-        struct ContentsMeta {
+        struct Contents {
             sha: String,
+            #[serde(default)]
+            encoding: Option<String>,
+            #[serde(default)]
+            content: Option<String>,
         }
         let action = "read an artifact's current version";
         let request = self.request(
@@ -230,7 +234,7 @@ impl GitHubForge {
         );
         match self.send(action, request).await {
             Ok(response) => {
-                let meta: ContentsMeta =
+                let found: Contents =
                     response
                         .json()
                         .await
@@ -238,13 +242,31 @@ impl GitHubForge {
                             action,
                             source: Box::new(source),
                         })?;
-                Ok(Some(meta.sha))
+                // A file too large to come inline says `none`: its bytes
+                // are unknown, never taken for empty.
+                let content = match (found.encoding.as_deref(), found.content) {
+                    (Some("base64"), Some(encoded)) => {
+                        let packed: String =
+                            encoded.chars().filter(|c| !c.is_whitespace()).collect();
+                        base64::engine::general_purpose::STANDARD
+                            .decode(packed)
+                            .ok()
+                    }
+                    _ => None,
+                };
+                Ok(Some(ExistingFile {
+                    sha: found.sha,
+                    content,
+                }))
             }
             Err(ForgeError::Http { status: 404, .. }) => Ok(None),
             Err(error) => Err(error),
         }
     }
 
+    /// Commits `content` to `path` on `branch` — unless the file already
+    /// holds it: a commit that changes nothing would move the branch's
+    /// head, and a review of it would no longer cover what it reviewed.
     async fn commit_artifact(
         &self,
         path: &str,
@@ -252,14 +274,20 @@ impl GitHubForge {
         branch: &str,
         message: &str,
     ) -> Result<(), ForgeError> {
-        let existing_sha = self.existing_file_sha(path, branch).await?;
+        let existing = self.existing_file(path, branch).await?;
+        if existing
+            .as_ref()
+            .is_some_and(|file| file.content.as_deref() == Some(content))
+        {
+            return Ok(());
+        }
         let mut body = serde_json::json!({
             "message": message,
             "content": base64::engine::general_purpose::STANDARD.encode(content),
             "branch": branch,
         });
-        if let (Some(sha), Some(object)) = (existing_sha, body.as_object_mut()) {
-            object.insert("sha".to_string(), serde_json::Value::String(sha));
+        if let (Some(file), Some(object)) = (existing, body.as_object_mut()) {
+            object.insert("sha".to_string(), serde_json::Value::String(file.sha));
         }
         let request = self
             .request(
@@ -392,6 +420,13 @@ fn rate_limit(status: u16, headers: &HeaderMap) -> Option<RateLimit> {
     })
 }
 
+/// A file a branch already holds: the blob id an update names, and its
+/// bytes when the forge sent them inline.
+struct ExistingFile {
+    sha: String,
+    content: Option<Vec<u8>>,
+}
+
 fn header(headers: &HeaderMap, name: &str) -> Option<String> {
     headers.get(name)?.to_str().ok().map(str::to_string)
 }
@@ -399,35 +434,34 @@ fn header(headers: &HeaderMap, name: &str) -> Option<String> {
 #[async_trait::async_trait]
 impl Forge for GitHubForge {
     async fn publish(&self, req: &PublishRequest) -> Result<PullRequestRef, ForgeError> {
-        if let Some(existing) = self.find_open_pr(&req.branch, &req.run_id).await? {
-            return Ok(existing);
+        let run_id = req.run_id.as_str();
+        let existing = self.find_open_pr(&req.branch, run_id).await?;
+        if existing.is_none() {
+            let base_sha = self.base_branch_sha(&req.base_branch).await?;
+            self.ensure_branch(&req.branch, &base_sha).await?;
         }
-
-        let base_sha = self.base_branch_sha(&req.base_branch).await?;
-        self.ensure_branch(&req.branch, &base_sha).await?;
-        for (path, content) in &req.artifacts {
-            self.commit_artifact(
-                path,
-                content,
-                &req.branch,
-                &format!("yunta: publish gate artifacts for run {}", req.run_id),
-            )
-            .await?;
-        }
-
-        let body = format!(
-            "{}\n\n---\n{}\n\n_Opened by Yunta — approve or request changes like any other \
-             PR review._",
-            req.summary,
-            super::run_marker(&req.run_id)
+        // Every lap commits what it decides on, so a pull request reused
+        // after a request for changes shows the correction.
+        let message = format!(
+            "publish what gate `{}` of run {run_id} decides on",
+            req.decision.node
         );
-        self.create_pr(
-            &format!("yunta: {}", req.summary),
-            &req.branch,
-            &req.base_branch,
-            &body,
-        )
-        .await
+        for (path, content) in super::gate_files(req) {
+            self.commit_artifact(&path, &content, &req.branch, &message)
+                .await?;
+        }
+        match existing {
+            Some(existing) => Ok(existing),
+            None => {
+                self.create_pr(
+                    &super::gate_title(req),
+                    &req.branch,
+                    &req.base_branch,
+                    &super::gate_body(req),
+                )
+                .await
+            }
+        }
     }
 
     async fn open_pull_request(

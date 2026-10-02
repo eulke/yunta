@@ -1,9 +1,9 @@
 ---
 number: D66
 title: "Gates externos por pull request como sustrato multi-persona de v1 (Contrato §5.6)"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D225]
 ---
 
 # D66 — Gates externos por pull request como sustrato multi-persona de v1 (Contrato §5.6)

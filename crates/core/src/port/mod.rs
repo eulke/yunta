@@ -10,8 +10,8 @@ pub mod policy;
 pub mod session;
 
 pub use forge::{
-    Forge, ForgeError, ForgeProbe, PolledGate, PublishRequest, PullRequestRef, PullRequestRequest,
-    ReviewComment, ReviewOutcome,
+    Forge, ForgeError, ForgeProbe, GateDecision, PolledGate, PublishRequest, PullRequestRef,
+    PullRequestRequest, ReviewComment, ReviewOutcome,
 };
 pub use policy::{absence_of, Absence, POLICY};
 pub use session::{

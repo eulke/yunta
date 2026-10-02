@@ -119,9 +119,7 @@ impl<'a> InternalGate<'a> {
         // An author's own `message:` is the claim; the assignee is the
         // record of who it is addressed to.
         Ok(Escalation::new(
-            self.message
-                .map(str::to_string)
-                .unwrap_or_else(|| format!("gate `{}` needs a decision", self.node.id)),
+            question(self.node, self.message),
             vec![Fact::labelled("assignee", self.assignee)].into(),
             NonEmpty::from((first, rest)),
         )?
@@ -162,6 +160,14 @@ impl<'a> InternalGate<'a> {
             })
             .collect()
     }
+}
+
+/// What `node` asks, wherever it is asked: its author's `message:`, or
+/// that it needs a decision.
+pub(super) fn question(node: &Node, message: Option<&str>) -> String {
+    message
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("gate `{}` needs a decision", node.id))
 }
 
 /// Where on the log the gate's last decision sits.

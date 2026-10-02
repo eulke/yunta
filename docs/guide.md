@@ -53,7 +53,14 @@ are valid there. A mistyped key never silently becomes a default.
   way `produces:` does — a kind, or an opaque file name — and the engine commits the
   bytes the run holds for each to `branch` and opens a PR for review there, under the
   name that artifact's identity gives it. A run that holds none of one fails the node
-  instead of publishing a partial review.
+  instead of publishing a partial review. The PR is titled by the gate's `message:`, and
+  its body says how a review answers it and what each answer does: approving or merging
+  lets the run go on, requesting changes sends each comment to the node `on_failure`
+  names as a finding, closing fails the gate. A plan, a spec or a review's findings is
+  also published drawn to read — `tasks.md` beside `tasks.yaml`. After changes are
+  requested, the corrected lap commits what changed to the same PR and waits for a review
+  of it; a review of an earlier commit decides nothing. The run reads the review the
+  next time it wakes on the machine that holds it (`yunta resume <run>`).
 - **`parallel`** — a named group of child nodes run at once, with `join: all` (any
   child failing fails the group) or `join: any` (first success wins, the rest are
   interrupted). Children needing to compare notes mid-flight (not just after `join`)

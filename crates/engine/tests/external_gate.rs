@@ -336,3 +336,139 @@ async fn with_no_forge_the_gate_degrades_to_console_and_never_publishes() {
         "an unresolved degraded gate must not be recorded as published"
     );
 }
+
+/// A planner, and an external gate that publishes its plan and sends a
+/// request for changes back to it.
+const PLAN_UNDER_REVIEW: &str = r#"
+name: plan-under-review
+nodes:
+  - id: plan
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    prompt: "Hand over the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: approve-plan
+    kind: gate
+    assignee: lead
+    message: "Is this plan the one to build?"
+    depends_on: [plan]
+    on_failure: { goto: plan, max_reroutes: 2 }
+    external:
+      kind: pull_request
+      artifacts: [tasks]
+      branch: "{{run.branch}}"
+"#;
+
+/// The first plan, and the one the review's comments correct it into.
+const PLANNER: &str = r#"
+capabilities: { run_tools: true, resume_session: false }
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            summary: "Make it"
+            description: "Writes the file the run is about."
+            tasks:
+              - { id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{ at: made.txt, what: "the file" }], outcome: "made.txt exists", criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }
+    outcome: { type: completed, summary: "planned" }
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            summary: "Make it"
+            description: "Writes the file the run is about."
+            tasks:
+              - { id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{ at: made.txt, what: "the file" }], outcome: "made.txt exists", criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }
+              - { id: T002, title: "Say it", description: "Writes said.txt.", scope: [said.txt], changes: [{ at: said.txt, what: "the file" }], outcome: "said.txt exists", criteria: [{ cmd: "test -f said.txt", proves: "it was said" }] }
+    outcome: { type: completed, summary: "planned again" }
+"#;
+
+/// The text a file on the run's pull request holds.
+fn published(forge: &MockForgeState, path: &str) -> String {
+    let pr = forge.pull_requests().remove(0);
+    String::from_utf8(pr.files[path].clone()).unwrap()
+}
+
+#[tokio::test]
+async fn a_published_gate_asks_its_question_and_publishes_the_plan_to_read() {
+    let (bench, forge_state) = bench_on_a_forge();
+
+    let RunReport { terminal, .. } = bench.run(PLAN_UNDER_REVIEW, PLANNER).await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+
+    let prs = forge_state.pull_requests();
+    assert_eq!(prs.len(), 1);
+    assert_eq!(prs[0].title, "Is this plan the one to build?");
+    assert!(
+        prs[0]
+            .body
+            .contains("each comment reaches `plan` as a finding"),
+        "{}",
+        prs[0].body
+    );
+    assert!(published(&forge_state, "tasks.yaml").contains("T001"));
+    let drawn = published(&forge_state, "tasks.md");
+    assert!(drawn.contains("Make it"), "{drawn}");
+    assert!(
+        drawn.contains("test -f made.txt"),
+        "the plan is published whole, with what proves each task: {drawn}"
+    );
+}
+
+#[tokio::test]
+async fn changes_requested_publish_the_corrected_plan_on_the_same_pull_request() {
+    let (bench, forge_state) = bench_on_a_forge();
+    bench.run(PLAN_UNDER_REVIEW, PLANNER).await;
+    forge_state.request_changes(
+        bench.run_id.as_str(),
+        &"person-b".into(),
+        vec![yunta_core::port::ReviewComment {
+            author: "person-b".to_string(),
+            body: "split the greeting into its own task".to_string(),
+            path: None,
+        }],
+    );
+
+    // The review sends the run back to the planner, whose correction is
+    // published on the pull request the review was left on — and that
+    // review, of the plan before it, decides nothing about the new one.
+    let RunReport { terminal, state } = bench.wake().await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+    assert!(
+        matches!(
+            state.nodes.state("approve-plan"),
+            Some(NodeState::Waiting { .. })
+        ),
+        "the gate waits on a review of the correction, got {:?}",
+        state.nodes.state("approve-plan")
+    );
+    assert_eq!(forge_state.pull_requests().len(), 1);
+    assert!(published(&forge_state, "tasks.md").contains("Say it"));
+
+    // A wake before anyone reviewed the correction finds the first review
+    // still the last one on the pull request: it waits.
+    let RunReport { state, .. } = bench.wake().await;
+    assert!(
+        matches!(
+            state.nodes.state("approve-plan"),
+            Some(NodeState::Waiting { .. })
+        ),
+        "a review of the plan before the correction decides nothing, got {:?}",
+        state.nodes.state("approve-plan")
+    );
+
+    forge_state.approve(bench.run_id.as_str(), &"person-b".into());
+    let RunReport { terminal, .. } = bench.wake().await;
+    assert_eq!(terminal, RunTerminal::Finished);
+}

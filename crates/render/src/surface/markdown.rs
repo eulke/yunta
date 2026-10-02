@@ -213,7 +213,9 @@ fn decision(decision: &Decision) -> String {
             if let Some(asks) = &option.asks {
                 out.push_str(&format!("  \n  asks: {asks}"));
             }
-            out.push_str(&format!("  \n  `{}`", decision.command(option)));
+            if let Some(command) = decision.command(option) {
+                out.push_str(&format!("  \n  `{command}`"));
+            }
             out
         })
         .collect::<Vec<_>>()

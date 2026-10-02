@@ -31,7 +31,7 @@ use yunta_core::events::GateWaitingPayload;
 use yunta_core::{NodeId, RunId};
 
 use crate::commands::advice;
-use crate::render::blocks::{Decision, DecisionOption, Drawn};
+use crate::render::blocks::{Chosen, Decision, DecisionOption, Drawn};
 use crate::render::ink::{Line, Tone};
 use crate::render::{cell_width, evidence, indent, label, wrap, Look, Width, INDENT};
 
@@ -124,7 +124,9 @@ fn under(text: &str, tone: Tone, depth: usize, look: &Look) -> Vec<Line> {
 /// command that chooses it.
 fn menu(run_id: &RunId, escalation: &GateWaitingPayload, look: &Look) -> Vec<Line> {
     let menu = Decision {
-        handle: run_id.handle().to_string(),
+        chosen: Chosen::Here {
+            handle: run_id.handle().to_string(),
+        },
         options: escalation
             .options()
             .iter()
