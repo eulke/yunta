@@ -263,17 +263,20 @@ fn the_closing_block_leads_with_the_decision_a_parked_run_waits_on() {
 
     assert!(text.contains("needs you"), "the outcome, as a word: {text}");
     assert!(
-        text.contains("waiting on node `lint`"),
+        text.contains("decision on node `lint`"),
         "what it waits on: {text}"
     );
     assert!(
-        text.matches("tradeoff:").count() >= 2,
+        text.contains("Pauses here; nothing further executes")
+            && text.contains("Uses one extra correction attempt"),
         "every option carries the tradeoff that makes it a choice: {text}"
     );
-    assert!(
-        text.contains(&format!("yunta resolve-gate {} <option>", handle(&run_id))),
-        "the exact command, with the option left to the reader: {text}"
-    );
+    for option in ["retry", "abort"] {
+        assert!(
+            text.contains(&format!("yunta resolve-gate {} {option}", handle(&run_id))),
+            "the exact command for every option: {text}"
+        );
+    }
     assert!(
         text.contains("close this terminal whenever you like"),
         "the run holds its own state, and says so: {text}"
@@ -281,7 +284,7 @@ fn the_closing_block_leads_with_the_decision_a_parked_run_waits_on() {
 
     // The decision is above the counters: the most actionable thing is
     // the most prominent thing.
-    let decision = text.find("waiting on node").expect("the decision block");
+    let decision = text.find("decision on node").expect("the decision block");
     let counters = text.find("progress ").expect("the counters row");
     assert!(decision < counters, "{text}");
 }
@@ -361,7 +364,7 @@ fn resume_reports_exactly_what_run_reports() {
     let resumed = yunta_in!(&repo, &home, &["resume", &run_id]);
     let text = stdout(&resumed);
     assert!(
-        text.contains("needs you on a decision") && text.contains("waiting on node `lint`"),
+        text.contains("needs you on a decision") && text.contains("decision on node `lint`"),
         "{text}"
     );
     for label in ["progress", "tokens", "branch", "artifacts", "next"] {

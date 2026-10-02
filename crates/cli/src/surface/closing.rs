@@ -24,11 +24,11 @@ use yunta_core::events::{GateWaitingPayload, StoredEvent};
 use yunta_core::{Isolation, NodeId, RunId, Workflow};
 use yunta_engine::{run_frame, NodeFrame, PriorEstimation, RunFrame, RunPhase};
 
-use crate::commands::status::decision::{self, Layout};
+use crate::commands::status::decision;
 use crate::commands::{advice, unknown_kinds_note};
 use crate::error::Outcome;
 use crate::render::ink::{Ink, Line, Tone};
-use crate::render::{duration, indent, truncate, Glyphs, Mark, Tokens, INDENT, LABEL_WIDTH};
+use crate::render::{duration, indent, truncate, Glyphs, Look, Mark, Tokens, INDENT, LABEL_WIDTH};
 use yunta_core::text::counted;
 
 use super::view;
@@ -113,11 +113,22 @@ impl Closing {
             .plain(verdict.text);
         let mut out = format!("{}\n", Ink::stdout().paint(&headline));
         if let Some((node, escalation)) = &self.decision {
-            out.push_str(&decision::block(
-                Layout::Trailer,
-                &self.run_id,
-                node,
-                escalation,
+            let look = Look {
+                glyphs,
+                ..Look::stdout()
+            };
+            let beside = decision::Beside {
+                claim: false,
+                evidence: false,
+            };
+            for line in decision::lines(&self.run_id, node, escalation, beside, &look) {
+                out.push_str(&format!("{}\n", look.ink.paint(&line)));
+            }
+            // A person who has just watched their terminal stop is the
+            // one who needs telling that nothing holds the answer open.
+            out.push_str(&format!(
+                "{INDENT}the run holds its own state on disk — close this terminal whenever \
+                 you like and answer from anywhere.\n"
             ));
         }
         for (label, value) in self.rows() {

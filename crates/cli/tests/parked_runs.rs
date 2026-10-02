@@ -110,22 +110,39 @@ fn repo_with(root: &Path, workflows: &[(&str, &str)]) -> PathBuf {
     checkout.committed().repo
 }
 
-/// The lines of the `decision needed` block: everything from its heading
-/// to the end of the page.
+/// The decision on a status page: its heading and every line under it,
+/// up to the blank line that closes the block.
 fn decision_block(text: &str) -> Vec<&str> {
     text.lines()
-        .skip_while(|line| !line.starts_with("decision needed"))
+        .skip_while(|line| !line.trim_start().starts_with("decision on node"))
+        .take_while(|line| !line.is_empty())
         .collect()
 }
 
-/// The decision the closing block carries: its `waiting on node`
-/// heading and every line under it, stopping at the labelled rows that
-/// report where the run lived.
+/// The decision the closing block carries: its heading and every line
+/// under it, through the line that says nothing holds the answer open.
 fn closing_decision(text: &str) -> Vec<&str> {
-    text.lines()
-        .skip_while(|line| !line.trim_start().starts_with("waiting on node"))
+    let mut lines: Vec<&str> = text
+        .lines()
+        .skip_while(|line| !line.trim_start().starts_with("decision on node"))
         .take_while(|line| !line.trim_start().starts_with("progress "))
-        .collect()
+        .collect();
+    while lines
+        .last()
+        .is_some_and(|line| !line.contains("close this terminal"))
+    {
+        lines.pop();
+    }
+    lines
+}
+
+/// Whether `block` names every option of an exhausted re-route with what
+/// it does, and the command that chooses each, carrying the run's handle.
+fn names_every_option(block: &str, handle: &str) -> bool {
+    block.contains("retry — Re-route to `fix-lint` once more")
+        && block.contains("abort — Abort the run")
+        && block.contains(&format!("yunta resolve-gate {handle} retry"))
+        && block.contains(&format!("yunta resolve-gate {handle} abort"))
 }
 
 #[test]
@@ -144,33 +161,14 @@ fn status_of_a_parked_run_shows_every_option_and_the_command_that_answers_it() {
     );
     let text = stdout(&status);
 
+    let block = decision_block(&text).join("\n");
     assert!(
-        text.contains("decision needed on node `lint`"),
+        block.starts_with("  decision on node `lint`"),
         "the page says which node the decision belongs to: {text}"
     );
-    // The option ids a person types, each with the tradeoff that makes
-    // choosing one a decision rather than a guess.
-    assert!(
-        text.contains("retry — Re-route to `fix-lint` once more"),
-        "{text}"
-    );
-    assert!(text.contains("abort — Abort the run"), "{text}");
-    assert_eq!(
-        text.matches("tradeoff:").count(),
-        2,
-        "one tradeoff per option: {text}"
-    );
-
-    // The command carries the run's own id and leaves the option open:
-    // an example option is what gets pasted.
-    assert!(
-        text.contains(&format!("yunta resolve-gate {} <option>", handle(&run_id))),
-        "{text}"
-    );
-    assert!(
-        !text.contains(&format!("yunta resolve-gate {} retry", handle(&run_id))),
-        "no option is offered as a command to paste: {text}"
-    );
+    // The option ids a person types, each with what choosing it does and
+    // the command that chooses it.
+    assert!(names_every_option(&block, handle(&run_id)), "{text}");
 
     for line in decision_block(&text) {
         assert!(
@@ -186,11 +184,10 @@ fn status_of_a_parked_run_shows_every_option_and_the_command_that_answers_it() {
 }
 
 #[test]
-fn one_decision_reads_as_a_trailer_when_a_run_stops_and_as_a_page_when_it_is_asked_about() {
+fn one_decision_reads_the_same_where_a_run_stops_and_where_it_is_asked_about() {
     // The block a run leaves on the terminal and the page `yunta status`
-    // prints carry the same escalation: neither drops a part the other
-    // keeps. What differs is the room each part is given and the
-    // headings a page has space for.
+    // prints carry the same decision, the same way: neither drops an
+    // option the other keeps, and every option has its own command.
     let root = tempfile::tempdir().unwrap();
     let repo = repo_with(root.path(), &[("hopeless", EXHAUSTED_REROUTE)]);
     let home = root.path().join("state");
@@ -198,60 +195,21 @@ fn one_decision_reads_as_a_trailer_when_a_run_stops_and_as_a_page_when_it_is_ask
     let run = yunta_in!(&repo, &home, &["run", "hopeless.yaml"]);
     let run_id = run_id_from(&run);
     let closing = stdout(&run);
-    let trailer = closing_decision(&closing);
+    let trailer = closing_decision(&closing).join("\n");
     let page_text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
-    let page = decision_block(&page_text);
+    let page = decision_block(&page_text).join("\n");
 
     for block in [&trailer, &page] {
-        let text = block.join("\n");
-        assert!(text.contains("node `lint`"), "{text}");
-        assert!(
-            text.contains("retry — Re-route to `fix-lint` once more"),
-            "{text}"
-        );
-        assert!(text.contains("abort — Abort the run"), "{text}");
-        assert_eq!(
-            text.matches("tradeoff:").count(),
-            2,
-            "one tradeoff per option: {text}"
-        );
-        assert!(
-            text.contains(&format!("yunta resolve-gate {} <option>", handle(&run_id))),
-            "{text}"
-        );
+        assert!(block.contains("node `lint`"), "{block}");
+        assert!(names_every_option(block, handle(&run_id)), "{block}");
     }
-
-    // A trailer hangs under the outcome above it: each part keeps its
-    // label inline on the one line it gets, and the last word is that
-    // nothing has to stay open for the answer.
-    assert_eq!(
-        trailer.first().copied(),
-        Some("  waiting on node `lint`"),
-        "{trailer:?}"
-    );
-    for heading in ["evidence:", "options:", "answer it with:"] {
-        assert!(
-            !trailer.iter().any(|line| line.trim() == heading),
-            "a trailer has no headings of its own: {trailer:?}"
-        );
-    }
+    // Where a person just watched their terminal stop, the last word is
+    // that nothing has to stay open for the answer; a page nobody is
+    // waiting in front of carries no such aside.
     assert!(
-        trailer
-            .last()
-            .is_some_and(|line| line.contains("close this terminal whenever you like")),
-        "{trailer:?}"
+        trailer.ends_with("close this terminal whenever you like and answer from anywhere."),
+        "{trailer}"
     );
-
-    // A page opens on the decision and hangs every part under its own
-    // heading. It carries no aside: nobody is waiting in front of it.
-    assert_eq!(
-        page.first().copied(),
-        Some("decision needed on node `lint`:"),
-        "{page:?}"
-    );
-    for heading in ["  options:", "  answer it with:"] {
-        assert!(page.contains(&heading), "{page:?}");
-    }
     assert!(!page_text.contains("close this terminal"), "{page_text}");
 }
 
@@ -272,24 +230,19 @@ fn a_decision_says_its_claim_and_the_record_behind_it_each_once() {
     let run_id = run_id_from(&run);
     let closing = stdout(&run);
     let status = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
-    for block in [
-        closing_decision(&closing).join("\n"),
-        decision_block(&status).join("\n"),
-    ] {
-        assert!(
-            block.contains("are exhausted"),
-            "the claim says what happened: {block}"
-        );
-        assert!(
-            block.contains("evidence"),
-            "the record behind it is shown under its own name: {block}"
-        );
-        assert_eq!(
-            block.matches("exit 1").count(),
-            1,
-            "the failure is the record, not also the claim: {block}"
-        );
-    }
+    // Where a run stops, the decision says its claim and its record,
+    // each once.
+    let trailer = closing_decision(&closing).join("\n");
+    assert_eq!(trailer.matches("are exhausted").count(), 1, "{trailer}");
+    assert_eq!(trailer.matches("exit 1").count(), 1, "{trailer}");
+    // A page said both above it — the claim on its second line — so its
+    // decision says neither again.
+    let page = decision_block(&status).join("\n");
+    assert!(
+        !page.contains("are exhausted") && !page.contains("exit 1"),
+        "{status}"
+    );
+    assert_eq!(status.matches("are exhausted").count(), 1, "{status}");
 
     // A gate: the message it asks with never says who is being asked, so
     // the evidence is a part of its own — inline on the trailer, under
@@ -300,18 +253,11 @@ fn a_decision_says_its_claim_and_the_record_behind_it_each_once() {
     let gate_status = stdout(&yunta_in!(&repo, &home, &["status", &gate_id]));
     let trailer = closing_decision(&gate_closing).join("\n");
     let page = decision_block(&gate_status).join("\n");
-    assert!(
-        trailer.contains("evidence: assignee:"),
-        "the trailer keeps the record on its own line: {trailer}"
-    );
-    assert!(
-        page.lines().any(|line| line.trim() == "evidence:"),
-        "the page heads the record: {page}"
-    );
-    assert!(
-        page.contains("assignee:"),
-        "the page shows the record it headed: {page}"
-    );
+    // A gate's record — who it is addressed to — is said nowhere else,
+    // so both carry it.
+    for block in [&trailer, &page] {
+        assert!(block.contains("assignee: lead"), "{block}");
+    }
 }
 
 /// `summary` says what a run is waiting on inside a sentence that also
@@ -438,7 +384,7 @@ fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
     let text = stdout(&status);
 
     assert!(
-        text.contains("decision needed on node `boom`"),
+        text.contains("  decision on node `boom`"),
         "the page says which node the decision belongs to: {text}"
     );
     assert!(
@@ -446,10 +392,12 @@ fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
         "{text}"
     );
     assert!(text.contains("abort — Abort the run"), "{text}");
-    assert!(
-        text.contains(&format!("yunta resolve-gate {} <option>", handle(&run_id))),
-        "{text}"
-    );
+    for option in ["retry", "abort"] {
+        assert!(
+            text.contains(&format!("yunta resolve-gate {} {option}", handle(&run_id))),
+            "every option has its own command: {text}"
+        );
+    }
     assert!(
         text.contains("the run works in") && text.contains(&format!("worktrees/{run_id}")),
         "the page says where to change what the node failed on: {text}"

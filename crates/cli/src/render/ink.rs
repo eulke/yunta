@@ -92,6 +92,20 @@ impl Line {
         self.push(Tone::Plain, text)
     }
 
+    /// The line moved right by `margin`, its spans and their tones kept.
+    pub(crate) fn under(mut self, margin: &str) -> Self {
+        if !margin.is_empty() {
+            self.0.insert(
+                0,
+                Span {
+                    text: margin.to_string(),
+                    tone: Tone::Plain,
+                },
+            );
+        }
+        self
+    }
+
     pub(crate) fn spans(&self) -> &[Span] {
         &self.0
     }
@@ -322,5 +336,13 @@ mod tests {
         );
         assert_eq!(Tone::of(Mark::NeedsYou), Tone::NeedsYou);
         assert_eq!(Tone::of(Mark::Reroute), Tone::Caution);
+    }
+
+    #[test]
+    fn a_line_moved_under_a_margin_keeps_its_tones() {
+        let line = Line::new().push(Tone::Failed, "exit 1").plain(" — lint");
+        let moved = line.clone().under("  ");
+        assert_eq!(Ink::Plain.paint(&moved), "  exit 1 — lint");
+        assert_eq!(&moved.spans()[1..], line.spans());
     }
 }

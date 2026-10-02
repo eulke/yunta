@@ -211,7 +211,7 @@ nodes:
     assert_eq!(
         offered,
         vec![
-            ("aprobar", "resolves this gate; the flow continues"),
+            ("aprobar", "resolves this gate; `ship` runs next"),
             ("abort", "Pauses here; nothing further executes"),
             (
                 "ajustar",

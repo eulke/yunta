@@ -232,7 +232,10 @@ pub(crate) mod offers {
 
     /// An author's own gate option, whose words come from the `on:`
     /// mapping the workflow declared for it: the node it sends the run
-    /// back to, when it sends it back.
+    /// back to, when it sends it back, and otherwise the nodes that wait
+    /// on the gate — `next` — which is where the run goes once it is
+    /// resolved. The label says where the option leads, so a menu never
+    /// reads as an id followed by itself.
     ///
     /// One that sends the run back to a session asks what should change:
     /// the person's words are what that session picks its work back up
@@ -240,22 +243,41 @@ pub(crate) mod offers {
     pub(crate) fn declared(
         id: &yunta_core::OptionId,
         target: Option<&yunta_core::Node>,
+        next: &[&NodeId],
     ) -> GateOption {
         let continues = target.filter(|target| target.kind.opens_resumable_session());
-        GateOption {
-            id: id.clone(),
-            label: id.to_string(),
-            tradeoff: match (target, continues) {
-                (Some(target), Some(_)) => format!(
+        let onward = yunta_core::text::listed(next.iter().map(|id| id.as_str()));
+        let (label, tradeoff) = match (target, continues) {
+            (Some(target), Some(_)) => (
+                format!("Back to `{}`", target.id),
+                format!(
                     "sends what you say back to `{}`, and asks again once it completes",
                     target.id
                 ),
-                (Some(target), None) => format!(
+            ),
+            (Some(target), None) => (
+                format!("Back to `{}`", target.id),
+                format!(
                     "re-routes to `{}` and asks again once it completes",
                     target.id
                 ),
-                (None, _) => "resolves this gate; the flow continues".to_string(),
-            },
+            ),
+            (None, _) if next.is_empty() => (
+                "Resolve the gate".to_string(),
+                "resolves this gate; nothing in the workflow waits on it".to_string(),
+            ),
+            (None, _) => (
+                format!("On to {onward}"),
+                format!(
+                    "resolves this gate; {onward} {} next",
+                    yunta_core::text::agreeing(next.len(), "runs", "run")
+                ),
+            ),
+        };
+        GateOption {
+            id: id.clone(),
+            label,
+            tradeoff,
             asks: continues.map(|_| "what should change?".to_string()),
         }
     }
@@ -313,9 +335,10 @@ mod tests {
             offers::grant("src/session/"),
             offers::grant_to_node(&node, "crates/cli/Cargo.toml", 2),
             offers::deny(),
-            offers::declared(&declared_id, Some(&bash)),
-            offers::declared(&declared_id, Some(&prompt)),
-            offers::declared(&declared_id, None),
+            offers::declared(&declared_id, Some(&bash), &[]),
+            offers::declared(&declared_id, Some(&prompt), &[]),
+            offers::declared(&declared_id, None, &[]),
+            offers::declared(&declared_id, None, &[&node]),
         ]
     }
 

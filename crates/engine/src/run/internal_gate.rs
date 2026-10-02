@@ -83,6 +83,13 @@ impl<'a> InternalGate<'a> {
         } else {
             self.options.to_vec()
         };
+        // Where the run goes once the gate is resolved: the nodes that
+        // wait on it.
+        let next: Vec<&NodeId> = workflow
+            .iter_nodes()
+            .filter(|node| node.depends_on.contains(&self.node.id))
+            .map(|node| &node.id)
+            .collect();
         let mut gate_options: Vec<_> = declared
             .iter()
             .map(|id| {
@@ -94,11 +101,10 @@ impl<'a> InternalGate<'a> {
                         .iter_nodes()
                         .find(|candidate| candidate.id == *target)
                 });
-                let mut option = offers::declared(id, target);
+                let mut option = offers::declared(id, target, &next);
                 if target.is_none() && self.shows_the_run_findings() {
-                    option.tradeoff = "resolves this gate and settles every finding it shows; \
-                                       the flow continues"
-                        .to_string();
+                    option.tradeoff =
+                        format!("{}, and settles every finding it shows", option.tradeoff);
                 }
                 option
             })

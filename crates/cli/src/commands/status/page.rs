@@ -133,7 +133,8 @@ impl Page<'_> {
             let Some(NodeState::Failed { failure, .. }) = self.state.nodes.state(&node.id) else {
                 continue;
             };
-            let said = self.detail(failure, &look);
+            let mut said = self.claim_cut_short(failure, &look);
+            said.extend(self.detail(failure, &look));
             if said.is_empty() {
                 continue;
             }
@@ -142,15 +143,40 @@ impl Page<'_> {
                     .plain(INDENT)
                     .push(Tone::Strong, node.id.as_str()),
             );
-            lines.extend(said.into_iter().map(|line| {
-                let mut indented = Line::new().plain(INDENT);
-                for span in line.spans() {
-                    indented = indented.push(span.tone, span.text.clone());
-                }
-                indented
-            }));
+            lines.extend(said.into_iter().map(|line| line.under(INDENT)));
         }
         lines
+    }
+
+    /// A failure's claim in full, when the node's row has no room for
+    /// it: the row cuts it, and the one sentence that says why a node
+    /// failed is never only seen cut.
+    fn claim_cut_short(&self, failure: &Failure, look: &Look) -> Vec<Line> {
+        // A claim that sums up the lines under it — each refused
+        // document's heading, how many files fell outside the scope — is
+        // said in full by them.
+        if matches!(
+            failure,
+            Failure::Artifacts { .. } | Failure::ScopeViolated { .. }
+        ) {
+            return Vec::new();
+        }
+        let claim = failure.headline();
+        // What a row leaves its note: the indent, the mark, the word and
+        // an id column as wide as the longest id.
+        let ids = crate::render::id_column(self.frame.nodes.iter().map(|node| node.id.as_str()));
+        let room = look
+            .width
+            .cells()
+            .saturating_sub(INDENT.len() + 2 + crate::render::STATE_WIDTH + 1 + ids + 2);
+        if crate::render::cell_width(&claim) <= room {
+            return Vec::new();
+        }
+        let under = INDENT.len() * 2;
+        crate::render::wrap(&claim, look.width.cells().saturating_sub(under))
+            .into_iter()
+            .map(|line| Line::new().plain(INDENT).plain(line))
+            .collect()
     }
 
     /// The lines one failure has beyond the node's own row.

@@ -27,7 +27,7 @@ use crate::error::note;
 use crate::error::{CliError, Outcome};
 use crate::render::blocks::Block;
 use crate::render::ink::Line;
-use crate::render::{Look, Width};
+use crate::render::{Look, Width, INDENT};
 
 pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -122,36 +122,40 @@ fn decision_page(
     phase: &RunPhase,
 ) -> Option<Decided> {
     let waiting = advice::parked(phase)?;
-    Some(
-        match yunta_engine::current_escalation(manifest, &yunta_engine::derive(events)) {
-            Some((node, escalation)) => Decided {
-                // Where a person acts before answering, said once above
-                // the page and whole, so it can be copied into another
-                // terminal.
-                text: format!(
-                    "{}\n{}",
-                    decision::run_tree_line(tree),
-                    decision::block(
-                        decision::Layout::Page {
-                            width: Width::stdout().cells()
-                        },
-                        run_id,
-                        &node,
-                        &escalation
-                    )
+    let state = yunta_engine::derive(events);
+    Some(match yunta_engine::current_escalation(manifest, &state) {
+        Some((node, escalation)) => {
+            let look = Look::stdout();
+            // The page's second line made the claim, and a failed
+            // node's evidence is quoted above.
+            let beside = decision::Beside {
+                claim: true,
+                evidence: matches!(
+                    state.nodes.state(&node),
+                    Some(yunta_engine::NodeState::Failed { .. })
                 ),
+            };
+            let block: String = decision::lines(run_id, &node, &escalation, beside, &look)
+                .iter()
+                .map(|line| format!("{}\n", look.ink.paint(line)))
+                .collect();
+            Decided {
+                // Where a person acts before answering, said once
+                // above the decision and whole, so it can be copied
+                // into another terminal.
+                text: format!("{INDENT}{}\n{block}", decision::run_tree_line(tree)),
                 menu: true,
-            },
-            None => Decided {
-                text: decision::without_menu(
-                    run_id,
-                    &advice::parked_in_full(waiting),
-                    Width::stdout().cells(),
-                ),
-                menu: false,
-            },
+            }
+        }
+        None => Decided {
+            text: decision::without_menu(
+                run_id,
+                &advice::parked_in_full(waiting),
+                Width::stdout().cells(),
+            ),
+            menu: false,
         },
-    )
+    })
 }
 
 /// The event schema's snake_case task-status names — user output never
