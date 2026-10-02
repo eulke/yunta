@@ -26,12 +26,16 @@ impl Draw {
     /// moment is written; a watched terminal keeps above its region
     /// what closed something or asked something of a person, because
     /// the region already shows the rest while it is true.
-    pub(super) fn record(&mut self, moment: &Moment, glyphs: Glyphs) {
+    ///
+    /// `run` is what the run is called by, for the command a quoted
+    /// failure names to read the rest of what it printed.
+    pub(super) fn record(&mut self, moment: &Moment, run: &str, glyphs: Glyphs) {
         match self {
-            Draw::Lines(lines) => lines.moment(moment, glyphs),
+            Draw::Lines(lines) => lines.moment(moment, run, glyphs),
             Draw::Live(region) => {
                 if chronicle::kept(&moment.happening) {
-                    region.record(&chronicle::graduation(moment, glyphs));
+                    let rows = chronicle::graduation(moment, run, &region.look());
+                    region.record(&rows);
                 }
             }
         }
@@ -44,7 +48,8 @@ mod chronicle_tests {
     use yunta_testkit_core::Log;
 
     use super::super::chronicle;
-    use crate::render::Glyphs;
+    use crate::render::ink::Ink;
+    use crate::render::Look;
 
     #[test]
     fn what_a_watched_terminal_keeps_above_its_region_is_what_the_append_only_surface_writes() {
@@ -91,9 +96,11 @@ mod chronicle_tests {
         let history: Vec<String> = moments
             .iter()
             .filter(|moment| chronicle::kept(&moment.happening))
-            .flat_map(|moment| chronicle::graduation(moment, Glyphs::Ascii))
+            .flat_map(|moment| chronicle::graduation(moment, "Y0P5", &Look::plain()))
             .map(|row| {
-                row.trim_start_matches(['x', '+', '>', '!', '?', ' '])
+                Ink::Plain
+                    .paint(&row)
+                    .trim_start_matches(['x', '+', '>', '!', '?', ' '])
                     .to_string()
             })
             .collect();

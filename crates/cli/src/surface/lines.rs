@@ -18,7 +18,7 @@ use std::io::Write;
 use yunta_engine::Moment;
 
 use crate::render::ink::Ink;
-use crate::render::{duration, Glyphs};
+use crate::render::{duration, Glyphs, Look, Width};
 
 use super::{chronicle, write_line};
 
@@ -53,21 +53,27 @@ impl Lines {
     }
 
     /// Writes `moment`'s line: the run's own clock, the mark the
-    /// moment carries, and the words for it.
+    /// moment carries, and the words for it — and under a node that
+    /// failed, what it printed, as a watched terminal keeps it. `run` is
+    /// what the run is called by.
     ///
     /// Every moment, not only the ones a watched terminal keeps: a
     /// reader who arrives after the fact has no region to have watched,
     /// so the log is all there is and it is all written.
-    pub(super) fn moment(&mut self, moment: &Moment, glyphs: Glyphs) {
-        let said = chronicle::say(moment);
-        let mark = said
-            .mark
-            .map(|mark| format!("{} ", self.ink.mark(glyphs, mark)))
-            .unwrap_or_default();
+    pub(super) fn moment(&mut self, moment: &Moment, run: &str, glyphs: Glyphs) {
+        let look = Look {
+            glyphs,
+            ink: self.ink,
+            width: Width::stderr(),
+        };
+        let said = self.ink.paint(&chronicle::line(moment, &look));
         write_line(
             &mut self.out,
-            &format!("[{}] {mark}{}", duration(moment.elapsed), said.text),
+            &format!("[{}] {said}", duration(moment.elapsed)),
         );
+        for line in chronicle::evidence(moment, run, &look) {
+            write_line(&mut self.out, &self.ink.paint(&line));
+        }
     }
 }
 

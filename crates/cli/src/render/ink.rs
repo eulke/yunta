@@ -106,6 +106,32 @@ impl Line {
         self
     }
 
+    /// The line inside `cells`, cut where it passes them and marked with
+    /// the ellipsis `glyphs` draws, each span keeping its tone — so a row
+    /// is cut on what a reader sees and painted after.
+    pub(crate) fn cut(&self, cells: usize, glyphs: super::Glyphs) -> Line {
+        let plain: String = self.0.iter().map(|span| span.text.as_str()).collect();
+        if super::cell_width(&plain) <= cells {
+            return self.clone();
+        }
+        let ellipsis = glyphs.ellipsis();
+        let cut = super::truncate(&plain, cells, glyphs);
+        let kept = cut.trim_end().strip_suffix(ellipsis).unwrap_or_default();
+        let mut line = Line::new();
+        let mut left = kept.len();
+        for span in &self.0 {
+            // The cut lands between characters of the whole line, so it
+            // lands between characters of the span it falls in.
+            let taken = span.text.len().min(left);
+            left -= taken;
+            line = line.push(span.tone, &span.text[..taken]);
+            if left == 0 {
+                return line.push(span.tone, ellipsis.to_string());
+            }
+        }
+        line
+    }
+
     pub(crate) fn spans(&self) -> &[Span] {
         &self.0
     }
@@ -336,6 +362,19 @@ mod tests {
         );
         assert_eq!(Tone::of(Mark::NeedsYou), Tone::NeedsYou);
         assert_eq!(Tone::of(Mark::Reroute), Tone::Caution);
+    }
+
+    #[test]
+    fn a_line_cut_to_fit_keeps_the_tone_of_every_span_it_keeps() {
+        let line = Line::new()
+            .push(Tone::NeedsYou, "needs you")
+            .plain(": ")
+            .push(Tone::Strong, "yunta resolve-gate T1Y0P5 <option>");
+        let cut = line.cut(20, super::super::Glyphs::Ascii);
+        assert_eq!(Ink::Plain.paint(&cut), "needs you: yunta re~");
+        assert_eq!(cut.spans()[0], line.spans()[0]);
+        assert_eq!(cut.spans().last().map(|span| span.tone), Some(Tone::Strong));
+        assert_eq!(line.cut(80, super::super::Glyphs::Ascii), line);
     }
 
     #[test]

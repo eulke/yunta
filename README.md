@@ -115,10 +115,12 @@ yunta run .yunta/workflows/lint-fix.yaml
 ```
 
 `run` shows the run live while it works: a pinned region at the bottom of the
-terminal, with each finished node scrolling above it into your own scrollback, where
-you can still scroll back through it and select text. Piped into a file or running in
-CI, every moment of the run arrives as one line instead, in the words the live view
-uses. `--quiet` cuts it down to
+terminal — a row for each node at work and what its last calls touched, and a footer
+that always says whether the run needs you — with each finished node scrolling above
+it into your own scrollback, where you can still scroll back through it and select
+text. A node that fails brings the end of what it printed with it. Piped into a file
+or running in CI, every moment of the run arrives as one line instead, in the words
+the live view uses. `--quiet` cuts it down to
 the run id, keeping the budget warning that asks you to decide before the run spends.
 
 If `lint` passes clean — likely, for a freshly generated project — the run finishes
@@ -166,7 +168,7 @@ work held to its plan, PR).
 | `yunta new <name> [--shape one-node\|lint-fix\|tasks]` | Writes a commented workflow skeleton to `.yunta/workflows/<name>.yaml` and reports the verdict `check` reaches on it, exit code included. A `lint-fix` skeleton runs the project's own `lint` command when its config declares one. |
 | `yunta schema [<kind>] [--json]` | The shape of a document Yunta reads and validates — `tasks`, `findings`, `questions`, `answers` — as an annotated example to copy, or as JSON Schema for an editor. With no arguments, lists the kinds. Nothing has to be set up first: this is how anyone who has to produce one of these documents, agent or person, learns the shape instead of guessing it. |
 | `yunta check <workflow>` | Validates a workflow statically: cycles, unreachable re-routes, undefined runners, template variables, permission ceilings — no session opened. |
-| `yunta run <workflow> [--input k=v] [--adapter <id>] [--fixture <path>] [--mode] [--quiet] [--detach] [--json]` | Creates a run from a workflow and executes it, showing it live on a terminal: a pinned region of plain text, with finished work scrolling above it into your own scrollback. Without a terminal — a pipe, CI, `TERM=dumb` — every moment of the run arrives as one line, in the words the live view uses, and the first line says why. `--quiet` cuts the output to the run id, keeping the budget warning that asks for a decision before the run spends. `--adapter` runs every session on that adapter (each role resolves to its candidate on it; the log records the candidates passed over); `--adapter mock --fixture <path>` runs against a scripted fixture with no LLM. `--detach` returns the run id immediately and keeps running independent of the calling process; `--json` prints the outcome as one versioned JSON document instead of the live view. |
+| `yunta run <workflow> [--input k=v] [--adapter <id>] [--fixture <path>] [--mode] [--quiet] [--detach] [--json]` | Creates a run from a workflow and executes it, showing it live on a terminal: a pinned region of text, with finished work scrolling above it into your own scrollback. Without a terminal — a pipe, CI, `TERM=dumb` — every moment of the run arrives as one line, in the words the live view uses, and the first line says why. `--quiet` cuts the output to the run id, keeping the budget warning that asks for a decision before the run spends. `--adapter` runs every session on that adapter (each role resolves to its candidate on it; the log records the candidates passed over); `--adapter mock --fixture <path>` runs against a scripted fixture with no LLM. `--detach` returns the run id immediately and keeps running independent of the calling process; `--json` prints the outcome as one versioned JSON document instead of the live view. |
 | `yunta list [--runs [--all]]` | Without `--runs`: the workflow catalog (repo + packs), each workflow with its description, one line per declared input, and an estimate when history supports one. With `--runs`: this repository's runs as an inbox, and how many runs on the machine belong to other projects (`--all` lists them too) — grouped into what needs a person, what is in flight and what has closed, each run named by its workflow and mode over the same summary `status` prints, longest-waiting first. |
 | `yunta status <run>` | A run's derived state: nodes, tasks, tokens — reconstructed from the event log. A run parked on a decision also shows the decision: the evidence, every option with its tradeoff, and the `resolve-gate` command that answers it. |
 | `yunta resume <run> [--quiet] [--json]` | Resumes a run from its event log, restarting orphaned nodes per `on_interrupt`. Shows it exactly as `yunta run` does — the same live region, the same one line per moment without a terminal, the same closing block — and takes the same `--quiet` and `--json`: two commands that execute the same thing report it the same way. |

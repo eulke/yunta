@@ -38,7 +38,7 @@ pub(super) struct Painter {
     /// The manifest the run froze. A promotion successor inherits its
     /// predecessor's workflow whole, so the chain is drawn from this one
     /// — and it is what rebuilds the menu a parked run stopped on, which
-    /// decides the command the demand line offers.
+    /// decides the command the attention row offers.
     manifest: Manifest,
     folded: Folded,
     draw: Draw,
@@ -135,6 +135,7 @@ impl Painter {
             return;
         }
         let Self {
+            run_id,
             folded,
             draw,
             written,
@@ -143,7 +144,7 @@ impl Painter {
         } = self;
         let moments = yunta_engine::chronicle(folded.settled());
         for moment in moments.iter().skip(*written) {
-            draw.record(moment, *glyphs);
+            draw.record(moment, run_id.handle(), *glyphs);
         }
         *written = moments.len();
     }
@@ -225,7 +226,7 @@ impl Painter {
         );
         // Only a parked run has a menu to rebuild, and rebuilding one is
         // a walk of the log — asked exactly when the answer changes what
-        // the demand line says.
+        // the attention row says.
         let answerable = matches!(frame.phase, yunta_engine::RunPhase::Waiting { .. })
             && yunta_engine::current_escalation(manifest, &yunta_engine::derive(folded.settled()))
                 .is_some();

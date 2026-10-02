@@ -71,6 +71,7 @@ mod tests {
         Region::open(
             Screen::immediate(term.clone()),
             Glyphs::Ascii,
+            crate::render::ink::Ink::Plain,
             Box::new(out.clone()),
         )
         .expect("the region's row template parses")
@@ -105,7 +106,7 @@ mod tests {
         // What closed is put here by the chronicle, not deduced by
         // comparing frames: the region shows what is open, and this is
         // what left it.
-        region.record(&["+ plan — finished — exit 0".to_string()]);
+        region.record(&[crate::render::ink::Line::new().plain("+ plan — finished — exit 0")]);
         region.show(&frame(vec![running("build")]), &RUN, false);
         assert!(
             !term.shown().contains("plan"),

@@ -19,7 +19,10 @@ use yunta_core::text::{aside, one_line};
 use yunta_engine::{Happening, Moment};
 
 use super::view;
-use crate::render::{indent, Glyphs, Mark, CHILD_DEPTH};
+use crate::commands::advice;
+use crate::render::blocks::{Block, FailureDetail};
+use crate::render::ink::{Line, Tone};
+use crate::render::{indent, Look, Mark, CHILD_DEPTH};
 use words::carried;
 
 /// One moment as a surface says it, before any layout decides where it
@@ -86,31 +89,55 @@ pub(super) fn kept(happening: &Happening) -> bool {
     }
 }
 
-/// The rows a settled node leaves behind: its own line, and the
-/// children it bore indented under it.
+/// The line one moment is said on, marked when it carries a mark.
+pub(super) fn line(moment: &Moment, look: &Look) -> Line {
+    let said = say(moment);
+    let line = match said.mark {
+        Some(mark) => Line::new()
+            .push(Tone::of(mark), look.glyphs.mark(mark).to_string())
+            .plain(" "),
+        None => Line::new(),
+    };
+    line.plain(said.text)
+}
+
+/// The rows a settled node leaves behind: its own line, what it printed
+/// when it failed, and the children it bore indented under it.
 ///
 /// The children come with it because they leave the region with it. A
 /// node in the region carries its own tree; a node that graduated
 /// carries it into the history, where the run's composition stays
 /// readable after the node that composed it is gone.
-pub(super) fn graduation(moment: &Moment, glyphs: Glyphs) -> Vec<String> {
-    let said = say(moment);
-    let mark = said
-        .mark
-        .map(|mark| format!("{} ", glyphs.mark(mark)))
-        .unwrap_or_default();
-    let mut rows = vec![format!("{mark}{}", said.text)];
+pub(super) fn graduation(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
+    let mut rows = vec![line(moment, look)];
+    rows.extend(evidence(moment, run, look));
     let Happening::Node(node::happening::Happening::Reached { children, .. }) = &moment.happening
     else {
         return rows;
     };
     let under = indent(CHILD_DEPTH);
-    rows.extend(
-        children
-            .iter()
-            .map(|child| format!("{under}{}", view::child_row(child, glyphs))),
-    );
+    rows.extend(children.iter().map(|child| {
+        Line::new()
+            .plain(under.as_str())
+            .plain(view::child_row(child, look.glyphs))
+    }));
     rows
+}
+
+/// What a node that failed printed, quoted under the line that says it
+/// failed, and where the rest of it is — the reason is read where the
+/// failure is, not one command away. `run` is what the run is called
+/// by. Nothing for any other moment.
+pub(super) fn evidence(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
+    let Happening::Node(node::happening::Happening::Reached {
+        state: yunta_core::events::NodeState::Failed { failure, .. },
+        ..
+    }) = &moment.happening
+    else {
+        return Vec::new();
+    };
+    let whole = failure.output().map(|_| advice::status(run));
+    FailureDetail { failure, whole }.lines(look)
 }
 
 #[cfg(test)]

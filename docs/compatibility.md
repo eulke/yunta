@@ -535,8 +535,8 @@ the parenthesis so the count lands directly after the heading.
 `yunta run`'s live view needs a terminal, and where there isn't one it says so on
 its first line and prints one line per event instead: `live view off (<reason>):
 one line per event`, the reason being `stderr is not a terminal` or `TERM=dumb`.
-`NO_COLOR` is not one: it takes the color away and leaves the region, which is
-plain text already. The same shape as the line above — what is off, why in the
+`NO_COLOR` is not one: it takes the color away and leaves the region, whose
+words already say everything its color does. The same shape as the line above — what is off, why in the
 parenthesis, what happens instead after the colon. `--quiet` announces nothing,
 because it has no view to stand down.
 

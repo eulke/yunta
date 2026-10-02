@@ -89,7 +89,7 @@ pub(crate) enum Delivery {
     /// One line per event, appended, never redrawn, each carrying the
     /// run's elapsed time at that event.
     Lines { reason: &'static str },
-    /// A pinned region of plain text at the bottom of the terminal, with
+    /// A pinned region of text at the bottom of the terminal, with
     /// finished work graduating above it into the terminal's own history.
     Live,
 }
@@ -101,8 +101,8 @@ impl Delivery {
     /// stream that is not a terminal has nowhere to pin a region, and a
     /// terminal that declares itself dumb has said it draws nothing
     /// beyond text. A reader who asked for no color asked for exactly
-    /// that: the region is plain text already, so `NO_COLOR` takes away
-    /// the color and leaves the region.
+    /// that: the region's color only repeats its words, so `NO_COLOR`
+    /// takes away the color and leaves the region.
     pub(crate) fn choose(quiet: bool, env: &TerminalEnv) -> Self {
         if quiet {
             return Self::Quiet;
@@ -167,7 +167,12 @@ impl Surface {
             Delivery::Lines { reason } => Draw::Lines(Lines::open(stderr(), reason)),
             Delivery::Live => {
                 let screen = Screen::watched(Term::buffered_stderr());
-                match Region::open(screen, env.glyphs, stderr()) {
+                match Region::open(
+                    screen,
+                    env.glyphs,
+                    crate::render::ink::Ink::stderr(),
+                    stderr(),
+                ) {
                     Ok(region) => Draw::Live(Box::new(region)),
                     Err(_) => Draw::Lines(Lines::open(stderr(), ROW_TEMPLATE)),
                 }
@@ -465,7 +470,7 @@ mod tests {
     #[test]
     fn the_delivery_reads_nothing_about_color() {
         // `NO_COLOR` is the color policy's, never the delivery's: the
-        // region is plain text, and a terminal gets it.
+        // region's words do not need its color, and a terminal gets it.
         let terminal = env(true, Some("xterm"));
         assert_eq!(Delivery::choose(false, &terminal), Delivery::Live);
     }

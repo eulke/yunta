@@ -38,6 +38,37 @@ nodes:
     run: "test -f made.txt"
 "#;
 
+/// A build that fails the way a compiler does: what went wrong is on
+/// stdout, and the exit code says only that it did.
+const COMPILER: &str = r#"
+name: compiler
+nodes:
+  - id: build
+    kind: bash
+    run: |
+      printf 'error[E0425]: cannot find value `x` in this scope\n --> src/lib.rs:3:5\n'
+      exit 101
+"#;
+
+/// A node slow enough for the region to draw it.
+const SLOW: &str = r#"
+name: slow
+nodes:
+  - id: wait
+    kind: bash
+    run: "sleep 1"
+"#;
+
+/// The handle of the one run under `home`.
+fn only_run(home: &Path) -> String {
+    let run = std::fs::read_dir(yunta_testkit::runs_root(home))
+        .expect("the run wrote its directory")
+        .flatten()
+        .next()
+        .expect("one run");
+    handle(&run.file_name().to_string_lossy()).to_string()
+}
+
 /// A node whose re-routes are exhausted the moment it fails: the run
 /// parks on a decision whose menu is rebuildable from the log alone.
 const EXHAUSTED: &str = r#"
@@ -198,7 +229,7 @@ fn the_closing_block_names_a_branch_git_has() {
     git(&checkout.repo, &["rev-parse", "--verify", &branch]);
 }
 
-/// `NO_COLOR` asks for no color, and the region is plain text already:
+/// `NO_COLOR` asks for no color, and the region's words do not need it:
 /// a reader who set it keeps the region.
 #[test]
 fn a_terminal_with_no_color_set_still_draws_the_live_region() {
@@ -865,5 +896,72 @@ fn the_live_view_indents_a_groups_children_under_it_and_an_interrupt_exits_130()
         terminal.exit_code(),
         Some(130),
         "a run a person interrupted exits as an interrupted process does:\n{drawn}"
+    );
+}
+
+#[test]
+fn a_failed_bash_node_leaves_its_tail_above_the_region() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = project(root.path(), COMPILER);
+    let mut terminal = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
+    // A node with nowhere to re-route to asks what to do; Escape parks
+    // the run.
+    terminal.wait_for("> 1  retry", "the failure never asked what to do next");
+    terminal.keys("\x1b");
+    let drawn = terminal.ended();
+    assert_eq!(terminal.exit_code(), Some(3), "{drawn}");
+
+    // The failure's own line, the lines the compiler printed under it,
+    // and where the rest is — in that order, where the failure is read.
+    let lines: Vec<&str> = drawn.lines().collect();
+    let failed = lines
+        .iter()
+        .position(|line| line.contains("build — failed"))
+        .unwrap_or_else(|| panic!("the failure was never kept above the region:\n{drawn}"));
+    let after = &lines[failed..];
+    let quoted = |text: &str| after.iter().position(|line| line.contains(text));
+    let error = quoted("error[E0425]: cannot find value `x` in this scope");
+    let place = quoted(" --> src/lib.rs:3:5");
+    let rest = quoted(&format!("whole output: yunta status {}", only_run(&home)));
+    assert!(
+        error.is_some() && error < place && place < rest,
+        "what the compiler printed is quoted under the failure, then where the rest is:\n{drawn}"
+    );
+}
+
+#[test]
+fn a_failed_bash_node_is_quoted_in_the_lines_a_pipe_gets() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = project(root.path(), COMPILER);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert_eq!(run.status.code(), Some(3), "{}", stderr(&run));
+    let progress = stderr(&run);
+    let failed = progress
+        .find("build — failed")
+        .unwrap_or_else(|| panic!("{progress}"));
+    assert!(
+        progress[failed..].contains("error[E0425]: cannot find value `x` in this scope"),
+        "the pipe quotes what the compiler printed under the failure:\n{progress}"
+    );
+}
+
+#[test]
+fn the_estimate_appears_after_three_runs() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = project(root.path(), SLOW);
+    for _ in 0..2 {
+        let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+        assert!(run.status.success(), "{}", stderr(&run));
+    }
+    // Two runs behind it: too little history to say what is usual.
+    let mut third = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
+    let drawn = third.ended();
+    assert!(third.ran_to_the_end(), "{drawn}");
+    assert!(!drawn.contains("usually"), "{drawn}");
+
+    let fourth = yunta_on_terminal!(&repo, &home, &["run", "wf.yaml"]);
+    fourth.wait_for(
+        "usually ~",
+        "three runs behind it, the footer never said how long this workflow usually takes",
     );
 }

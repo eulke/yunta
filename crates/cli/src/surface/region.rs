@@ -1,11 +1,14 @@
-//! The pinned region: a few rows of plain text held at the bottom of a
-//! terminal while the work that finished scrolls away above them.
+//! The pinned region: a few rows of text held at the bottom of a
+//! terminal while the work that finished scrolls away above them — the
+//! row that asks for the person while something does, a row for each
+//! node at work, and a footer that always says whether the run needs
+//! them.
 //!
 //! It takes no alternate screen, no raw mode and no mouse capture, which
 //! is why the reader keeps their scrollback, their text selection, and a
 //! typed Ctrl-C that still reaches the one cancellation bridge. Nothing
 //! it draws carries meaning a word beside it does not already carry, so
-//! the same rows read with every glyph stripped.
+//! the same rows read with every glyph and every color stripped.
 //!
 //! **Nothing writes past the region except through it.** A line printed
 //! around it lands inside the rows it is redrawing and leaves a torn
@@ -22,7 +25,8 @@ use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle, T
 use yunta_core::RunId;
 use yunta_engine::RunFrame;
 
-use crate::render::{truncate, Glyphs, Width};
+use crate::render::ink::{Ink, Line};
+use crate::render::{Glyphs, Width};
 
 use super::scrollback::Scrollback;
 use super::{view, Screen};
@@ -39,14 +43,17 @@ pub(super) struct Region {
     /// The terminal the rows go on, kept so every redraw cuts them to
     /// the width that terminal has at that moment.
     screen: Screen,
-    /// Always the first row, whatever else the region holds: a reader
-    /// looking for whether they are needed looks in one place.
-    demand: ProgressBar,
+    /// The first row while something needs the person, with the command
+    /// that answers it; absent while nothing does.
+    attention: Option<ProgressBar>,
     /// The working nodes and their detail, rebuilt as nodes come and go.
     body: Vec<ProgressBar>,
-    /// Always the last row.
-    counters: ProgressBar,
+    /// Always the last row, and always answering whether the run needs
+    /// the person: a reader looking for that looks in one place.
+    footer: ProgressBar,
     glyphs: Glyphs,
+    /// How the stream the rows go on is painted.
+    ink: Ink,
     /// The style every row is drawn with, parsed once so adding a row
     /// later cannot fail.
     style: ProgressStyle,
@@ -65,20 +72,21 @@ impl Region {
     pub(super) fn open(
         screen: Screen,
         glyphs: Glyphs,
+        ink: Ink,
         scrollback: Box<dyn Write + Send>,
     ) -> Result<Self, TemplateError> {
         let style = ProgressStyle::with_template(ROW)?;
         let multi = MultiProgress::with_draw_target(screen.target());
-        let demand = multi.add(row(&style));
-        let counters = multi.add(row(&style));
+        let footer = multi.add(row(&style));
         let above = Scrollback::over(&multi, scrollback);
         Ok(Self {
             multi,
             screen,
-            demand,
+            attention: None,
             body: Vec::new(),
-            counters,
+            footer,
             glyphs,
+            ink,
             style,
             above,
         })
@@ -88,11 +96,12 @@ impl Region {
     /// working since the last redraw.
     ///
     /// `answerable` says whether the run stopped on a menu of its own —
-    /// which decides the command the demand line offers, and which only
-    /// the run's frozen manifest can answer.
+    /// which decides the command the attention row offers, and which
+    /// only the run's frozen manifest can answer.
     pub(super) fn show(&mut self, frame: &RunFrame, run_id: &RunId, answerable: bool) {
-        self.demand
-            .set_message(self.fit(&view::demand_line(frame, run_id, answerable)));
+        let attention =
+            view::attention(frame, run_id, answerable, self.glyphs).map(|line| self.fit(&line));
+        self.attend(attention);
         let rows: Vec<String> = view::working(frame)
             .into_iter()
             .flat_map(|node| view::node_rows(frame, node, self.glyphs))
@@ -102,8 +111,26 @@ impl Region {
         for (bar, text) in self.body.iter().zip(rows) {
             bar.set_message(text);
         }
-        self.counters
-            .set_message(self.fit(&crate::render::counter::line(frame)));
+        self.footer
+            .set_message(self.fit(&view::footer(frame, self.glyphs)));
+    }
+
+    /// Puts the attention row at the top while there is something to
+    /// say on it, and takes it off when there is not.
+    fn attend(&mut self, said: Option<String>) {
+        match (said, &self.attention) {
+            (Some(said), Some(bar)) => bar.set_message(said),
+            (Some(said), None) => {
+                let bar = self.multi.insert(0, row(&self.style));
+                bar.set_message(said);
+                self.attention = Some(bar);
+            }
+            (None, _) => {
+                if let Some(bar) = self.attention.take() {
+                    self.multi.remove(&bar);
+                }
+            }
+        }
     }
 
     /// Writes one diagnostic into the terminal's history above the
@@ -150,13 +177,23 @@ impl Region {
     /// surface's: it lays out what it is handed. The rows are cut to
     /// the terminal like the region's own, because a wrapped one would
     /// cost the region the row count it redraws by.
-    pub(super) fn record(&mut self, rows: &[String]) {
+    pub(super) fn record(&mut self, rows: &[Line]) {
         let rows: Vec<String> = rows.iter().map(|row| self.fit(row)).collect();
         self.above.write(&rows);
     }
 
-    /// Grows or shrinks the body to `rows` rows, keeping the demand line
-    /// first and the counters last.
+    /// The look of the rows this region draws, at the width they have
+    /// now.
+    pub(super) fn look(&self) -> crate::render::Look {
+        crate::render::Look {
+            glyphs: self.glyphs,
+            ink: self.ink,
+            width: Width::row(usize::from(self.screen.width())),
+        }
+    }
+
+    /// Grows or shrinks the body to `rows` rows, keeping the attention
+    /// row first and the footer last.
     fn resize(&mut self, rows: usize) {
         while self.body.len() > rows {
             if let Some(spare) = self.body.pop() {
@@ -165,17 +202,17 @@ impl Region {
         }
         while self.body.len() < rows {
             self.body
-                .push(self.multi.insert_before(&self.counters, row(&self.style)));
+                .push(self.multi.insert_before(&self.footer, row(&self.style)));
         }
     }
 
-    /// `text` inside the width this region's rows have, so a row that
-    /// would wrap is cut instead: a wrapped row costs the region its row
-    /// count and leaves the line above it torn.
-    fn fit(&self, text: &str) -> String {
-        truncate(text, self.width(), self.glyphs)
-            .trim_end()
-            .to_string()
+    /// `line` inside the width this region's rows have, painted: a row
+    /// that would wrap is cut instead, because a wrapped row costs the
+    /// region its row count and leaves the line above it torn. It is cut
+    /// on the words and painted after, so the paint never counts as
+    /// width.
+    fn fit(&self, line: &Line) -> String {
+        self.ink.paint(&line.cut(self.width(), self.glyphs))
     }
 
     /// The cells one row of this region may take: the width a line on
@@ -213,6 +250,7 @@ mod tests {
         Region::open(
             Screen::immediate(term.clone()),
             Glyphs::Ascii,
+            crate::render::ink::Ink::Plain,
             Box::new(scrollback.clone()),
         )
         .expect("the region's row template parses")
@@ -251,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn the_demand_line_changes_what_it_says_and_never_where_it_says_it() {
+    fn the_attention_row_opens_the_region_only_while_something_needs_you() {
         let term = Watched::sized(16, 80);
         let scrollback = Captured::default();
         let mut region = region(&term, &scrollback);
@@ -262,10 +300,17 @@ mod tests {
             false,
         );
         let quiet = rows(&term);
-        assert_eq!(
-            quiet.first().map(String::as_str),
-            Some("nothing needs you"),
-            "{quiet:?}"
+        assert!(
+            quiet
+                .first()
+                .is_some_and(|row| row.contains("running plan")),
+            "with nothing to ask, the work opens the region: {quiet:?}"
+        );
+        assert!(
+            quiet
+                .last()
+                .is_some_and(|row| row.ends_with("nothing needs you")),
+            "and the footer says nothing needs you: {quiet:?}"
         );
 
         region.show(
@@ -285,17 +330,18 @@ mod tests {
         let demanded = rows(&term);
         let first = demanded.first().map(String::as_str).unwrap_or_default();
         assert!(
-            first.starts_with("needs you: "),
-            "the demand line stays the first row and says what changed: {demanded:?}"
+            first.contains("needs you: ")
+                && first.contains(&format!("yunta resolve-gate {} <option>", RUN.handle())),
+            "the row that asks opens the region, with the command that answers: {demanded:?}"
         );
-        assert!(
-            first.contains(&format!("yunta resolve-gate {} <option>", RUN.handle())),
-            "it carries the command that answers it, whole: {first}"
+        assert_eq!(demanded.len(), quiet.len() + 1, "{demanded:?}");
+
+        region.show(
+            &frame(RunPhase::Running, vec![running("plan")]),
+            &RUN,
+            false,
         );
-        assert!(
-            first.contains("node `plan`"),
-            "and what it is about: {first}"
-        );
+        assert_eq!(rows(&term), quiet, "and it leaves once it is answered");
     }
 
     #[test]
@@ -427,7 +473,7 @@ mod tests {
     }
 
     #[test]
-    fn the_counters_stay_the_last_row_as_nodes_come_and_go() {
+    fn the_footer_stays_the_last_row_as_nodes_come_and_go() {
         let term = Watched::sized(16, 80);
         let scrollback = Captured::default();
         let mut region = region(&term, &scrollback);

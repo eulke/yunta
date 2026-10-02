@@ -9,7 +9,7 @@ use yunta_core::RunId;
 use yunta_engine::{EngineLiveness, NodeState, RunFrame, RunPhase, RunState};
 
 use crate::commands::advice;
-use crate::render::blocks::{Block, Evidence, Fields, Headline, Next, NodeRow, NodeTable};
+use crate::render::blocks::{Block, FailureDetail, Fields, Headline, Next, NodeRow, NodeTable};
 use crate::render::ink::{Line, Tone};
 use crate::render::state::RunWord;
 use crate::render::{indent, paths, prose, truncate, Look, NodeDisplay, Tokens, INDENT};
@@ -179,65 +179,17 @@ impl Page<'_> {
             .collect()
     }
 
-    /// The lines one failure has beyond the node's own row.
+    /// The lines one failure has beyond the node's own row, with where
+    /// the whole of what a command printed is kept.
     fn detail(&self, failure: &Failure, look: &Look) -> Vec<Line> {
-        let text = |said: String| {
-            said.lines()
-                .map(|line| Line::new().plain(INDENT).plain(line.to_string()))
-                .collect::<Vec<_>>()
-        };
-        let listed = |heading: &str, paths: &[std::path::PathBuf]| {
-            let mut lines = text(heading.to_string());
-            lines.extend(paths.iter().map(|path| {
-                Line::new()
-                    .plain(indent(2))
-                    .plain(path.display().to_string())
-            }));
-            lines
-        };
-        match failure {
-            Failure::Exited { exited } => Evidence {
-                tail: exited.tail.clone(),
-                whole: exited.output.as_ref().map(|output| {
-                    paths::shown(
-                        &yunta_engine::ObjectStore::at(self.run_dir).path_of(output),
-                        self.cwd,
-                        self.home,
-                    )
-                }),
-            }
-            .lines(look),
-            Failure::SessionDied { died } => {
-                let tail: Vec<String> = died
-                    .exit
-                    .iter()
-                    .flat_map(|exit| exit.stderr_tail.clone())
-                    .collect();
-                match tail.is_empty() {
-                    true => Vec::new(),
-                    false => Evidence { tail, whole: None }.lines(look),
-                }
-            }
-            Failure::Artifacts { artifacts } => artifacts
-                .iter()
-                .flat_map(|artifact| text(artifact.to_string()))
-                .collect(),
-            Failure::ScopeViolated { outside_scope } if outside_scope.len() > 1 => {
-                listed("outside the declared globs:", outside_scope)
-            }
-            Failure::PathsDenied { denied_paths } if denied_paths.len() > 1 => listed(
-                "denied to every session of the run — by the project (permissions.paths.deny), \
-                 or as a test a person approved:",
-                denied_paths,
-            ),
-            Failure::Message { outcome } if outcome.contains('\n') => text(outcome.clone()),
-            Failure::Unchanged { .. } => text(failure.to_string()),
-            Failure::ScopeViolated { .. }
-            | Failure::PathsDenied { .. }
-            | Failure::Message { .. }
-            | Failure::ScopeRequested { .. }
-            | Failure::Unset { .. } => Vec::new(),
-        }
+        let whole = failure.output().map(|output| {
+            paths::shown(
+                &yunta_engine::ObjectStore::at(self.run_dir).path_of(output),
+                self.cwd,
+                self.home,
+            )
+        });
+        FailureDetail { failure, whole }.lines(look)
     }
 
     /// The facts a reader checks once they know where the run stands.

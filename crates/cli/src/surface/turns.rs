@@ -235,6 +235,7 @@ mod tests {
                     Region::open(
                         Screen::immediate(screen.clone()),
                         Glyphs::Ascii,
+                        crate::render::ink::Ink::Plain,
                         Box::new(scrollback.clone()),
                     )
                     .expect("the region's row template parses"),

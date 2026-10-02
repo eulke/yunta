@@ -7,8 +7,8 @@
 //! formats a domain type with `Debug`.
 
 use yunta_core::events::{
-    artifacts, children, findings, gates, node, run, scope, session, tasks, BaselineOrigin,
-    GateResolvedPayload, TaskStatus,
+    artifacts, children, findings, gates, node, run, scope, session, tasks, AgentMessageType,
+    BaselineOrigin, GateResolvedPayload, TaskStatus, ToolTarget,
 };
 use yunta_core::fence::Coverage;
 use yunta_core::text::{detailed, one_line};
@@ -16,7 +16,7 @@ use yunta_core::NonEmpty;
 use yunta_engine::{Happening, NodeState, NodeWait};
 
 use super::super::view;
-use crate::render::{duration, Mark, NodeDisplay, StateWord};
+use crate::render::{duration, Mark, NodeDisplay, StateWord, Tokens};
 use tasks::happening as tasks_happening;
 
 /// What the moment carries beyond its subject, and the state it is
@@ -185,11 +185,13 @@ fn session_words(happening: &session::happening::Happening) -> String {
             }
             said
         }
-        H::Called { tool, .. } => match tool {
-            Some(tool) => format!("called {tool}"),
-            None => "called a tool it did not name".to_string(),
-        },
-        H::Message(kind) => kind.as_str().to_string(),
+        H::Called { tool, target } => called(tool.as_deref(), target.as_ref()),
+        H::Message {
+            kind,
+            text,
+            input_tokens,
+            output_tokens,
+        } => message(*kind, text.as_deref(), *input_tokens, *output_tokens),
         H::Degraded {
             capability,
             adapter,
@@ -202,6 +204,40 @@ fn session_words(happening: &session::happening::Happening) -> String {
         H::RunToolFailed { tool, cause } => {
             format!("run tool call failed: {} ({})", tool.name(), cause.as_str())
         }
+    }
+}
+
+/// A tool call, with what it acted on when the log says.
+fn called(tool: Option<&str>, target: Option<&ToolTarget>) -> String {
+    let called = match tool {
+        Some(tool) => format!("called {tool}"),
+        None => "called a tool it did not name".to_string(),
+    };
+    match target {
+        Some(target) => format!("{called} on {}", target.sentence()),
+        None => called,
+    }
+}
+
+/// Any other message a session sent: its kind, what it reported
+/// spending, and what the log kept of it.
+fn message(
+    kind: AgentMessageType,
+    text: Option<&str>,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+) -> String {
+    let mut said = kind.as_str().to_string();
+    if input_tokens.is_some() || output_tokens.is_some() {
+        said.push_str(&format!(
+            " · {} in / {} out",
+            Tokens(input_tokens.unwrap_or_default()).figure(),
+            Tokens(output_tokens.unwrap_or_default()).figure()
+        ));
+    }
+    match text {
+        Some(text) => detailed(said, &one_line(text)),
+        None => said,
     }
 }
 

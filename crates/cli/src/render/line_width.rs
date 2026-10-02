@@ -61,6 +61,11 @@ impl Width {
         Self::of(measured(&Term::stdout()), columns())
     }
 
+    /// The width stderr gets in this process.
+    pub(crate) fn stderr() -> Self {
+        Self::of(measured(&Term::stderr()), columns())
+    }
+
     pub(crate) fn cells(self) -> usize {
         self.0
     }

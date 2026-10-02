@@ -21,7 +21,15 @@ pub enum Happening {
         tool: Option<String>,
         target: Option<ToolTarget>,
     },
-    Message(AgentMessageType),
+    /// Anything else the session said: what kind of message it was,
+    /// what the log kept of it — for a note, its size and digest, never
+    /// its words — and what it reported spending.
+    Message {
+        kind: AgentMessageType,
+        text: Option<String>,
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+    },
     Degraded {
         capability: Capability,
         adapter: AdapterId,
@@ -51,7 +59,12 @@ impl From<&SessionEvent> for Happening {
                     tool: p.tool_name.clone(),
                     target: p.target.clone(),
                 },
-                None => Happening::Message(p.message_type),
+                None => Happening::Message {
+                    kind: p.message_type,
+                    text: p.text.clone(),
+                    input_tokens: p.input_tokens,
+                    output_tokens: p.output_tokens,
+                },
             },
             SessionEvent::CapabilityDegraded(p) => Happening::Degraded {
                 capability: p.capability,

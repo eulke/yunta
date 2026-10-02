@@ -14,6 +14,7 @@
 mod decision;
 pub(crate) mod diagnostic;
 mod evidence;
+mod failure;
 mod fields;
 mod headline;
 mod next;
@@ -21,6 +22,7 @@ mod node_table;
 
 pub(crate) use decision::{Decision, DecisionOption};
 pub(crate) use evidence::Evidence;
+pub(crate) use failure::FailureDetail;
 pub(crate) use fields::Fields;
 pub(crate) use headline::Headline;
 pub(crate) use next::Next;
