@@ -79,6 +79,12 @@ impl CriterionRun {
         self.output.as_ref().and_then(|output| output.last_words())
     }
 
+    /// The line it concluded with, if it printed anything: the last one
+    /// on stdout, where a test runner says what it ran.
+    pub fn concluded(&self) -> Option<String> {
+        self.output.as_ref().and_then(|output| output.concluded())
+    }
+
     /// How its exit code reads to a person: the code, and what it means
     /// when the command never answered.
     pub fn exit_described(&self) -> String {

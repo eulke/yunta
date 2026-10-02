@@ -7,7 +7,11 @@ use super::Outcome;
 /// the event that records it and the verdict a session reads hold one
 /// copy between them.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandOutput(std::sync::Arc<[u8]>);
+pub struct CommandOutput {
+    bytes: std::sync::Arc<[u8]>,
+    /// Where its stdout ends and its stderr begins.
+    stdout: usize,
+}
 
 impl CommandOutput {
     /// What `outcome`'s collected streams hold.
@@ -19,30 +23,38 @@ impl CommandOutput {
         if !stdout.is_empty() && !stdout.ends_with(b"\n") && !stderr.is_empty() {
             bytes.push(b'\n');
         }
+        let stdout = bytes.len();
         bytes.extend_from_slice(stderr);
-        CommandOutput(bytes.into())
+        CommandOutput {
+            bytes: bytes.into(),
+            stdout,
+        }
     }
 
     pub fn bytes(&self) -> &[u8] {
-        &self.0
+        &self.bytes
     }
 
     /// The last non-empty line, cut to a line's worth of characters:
     /// enough to name what failed, never a whole build log.
     pub fn last_words(&self) -> Option<String> {
-        let text = String::from_utf8_lossy(&self.0);
-        let line = text
-            .lines()
-            .rev()
-            .find(|line| !line.trim().is_empty())?
-            .trim();
-        Some(line.chars().take(240).collect())
+        last_line(&self.bytes)
+    }
+
+    /// The last non-empty line it printed on stdout, or on stderr when
+    /// stdout said nothing: where a test runner says what it ran, which
+    /// its progress on stderr would otherwise bury.
+    pub fn concluded(&self) -> Option<String> {
+        self.bytes
+            .get(..self.stdout)
+            .and_then(last_line)
+            .or_else(|| self.last_words())
     }
 
     /// The last [`TAIL_LINES`](yunta_core::events::TAIL_LINES) lines, in
     /// order.
     pub fn tail(&self) -> Vec<String> {
-        let text = String::from_utf8_lossy(&self.0);
+        let text = String::from_utf8_lossy(&self.bytes);
         let mut tail: Vec<String> = text
             .lines()
             .rev()
@@ -52,4 +64,16 @@ impl CommandOutput {
         tail.reverse();
         tail
     }
+}
+
+/// The last non-empty line of `bytes`, cut to a line's worth of
+/// characters.
+fn last_line(bytes: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(bytes);
+    let line = text
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())?
+        .trim();
+    Some(line.chars().take(240).collect())
 }

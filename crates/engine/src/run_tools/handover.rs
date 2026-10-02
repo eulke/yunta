@@ -340,14 +340,23 @@ fn judged(
             } else if independent && !run.is_guard && run.exit_code == 0 {
                 (
                     RuleCode::CriterionAlreadyPasses,
-                    format!("`{}` already exits 0, before any work", run.cmd),
+                    format!(
+                        "`{}` already exits 0, before any work{}. A criterion that passes \
+                         before the work proves nothing: it must fail until the work is done \
+                         — a test filter that matches no test passes, and so does a test \
+                         that checks nothing",
+                        run.cmd,
+                        concluded(run)
+                    ),
                 )
             } else if independent && run.is_guard && run.exit_code != 0 {
                 (
                     RuleCode::GuardAlreadyRed,
                     format!(
-                        "`{}` already exits {}, before any work",
-                        run.cmd, run.exit_code
+                        "`{}` already exits {}, before any work{}",
+                        run.cmd,
+                        run.exit_code,
+                        concluded(run)
                     ),
                 )
             } else {
@@ -362,6 +371,14 @@ fn judged(
             ))
         })
         .collect()
+}
+
+/// What a command that answered concluded with, quoted after its verdict:
+/// the line a writer reads to see why it passed or failed.
+fn concluded(run: &CriterionRun) -> String {
+    run.concluded()
+        .map(|said| format!(" — it said `{said}`"))
+        .unwrap_or_default()
 }
 
 /// Why a criterion could not run, in the words a writer fixes it by:

@@ -1328,6 +1328,32 @@ async fn a_criterion_that_checks_its_file_exists_first_is_accepted() {
     );
 }
 
+/// A runner that ran nothing says so on stdout, under its progress on
+/// stderr: the refusal quotes the line that says it, and what to do.
+#[tokio::test]
+async fn a_criterion_that_runs_no_test_is_refused_quoting_what_it_ran() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let runs_nothing = "printf 'running 0 tests\\ntest result: ok. 0 passed; 0 failed\\n'; \
+                        echo 'Running tests/pack_cmd.rs' >&2";
+
+    let (refused, text) = submitted(
+        &host,
+        json!([{ "id": "t1", "title": "Work", "scope": ["a.txt"],
+                 "criteria": [{ "cmd": runs_nothing }] }]),
+    )
+    .await;
+
+    assert!(refused, "got: {text}");
+    assert!(
+        text.contains("it said `test result: ok. 0 passed; 0 failed`"),
+        "the line that says what it ran, not the progress after it: {text}"
+    );
+    assert!(
+        text.contains("a test filter that matches no test passes"),
+        "the refusal says what to do: {text}"
+    );
+}
+
 #[tokio::test]
 async fn only_a_task_that_starts_from_this_tree_is_refused_for_passing_already() {
     let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
