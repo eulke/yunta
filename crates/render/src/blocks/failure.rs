@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use yunta_core::events::Failure;
 
-use super::{Block, Evidence, Whole};
+use super::{Drawn, Evidence, Whole};
 use crate::ink::Line;
 use crate::{indent, Look, INDENT};
 
@@ -18,7 +18,7 @@ pub struct FailureDetail<'a> {
     pub whole: Option<Whole>,
 }
 
-impl Block for FailureDetail<'_> {
+impl Drawn for FailureDetail<'_> {
     fn lines(&self, look: &Look) -> Vec<Line> {
         let text = |said: String| {
             said.lines()

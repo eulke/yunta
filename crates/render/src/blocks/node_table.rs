@@ -1,7 +1,7 @@
 //! A run's nodes, one to a row: the mark and word for where each stands,
 //! its id, and a note.
 
-use super::Block;
+use super::Drawn;
 use crate::ink::{Line, Tone};
 use crate::{cell_width, id_column, middle_cut, truncate, Look, Mark, INDENT, STATE_WIDTH};
 
@@ -23,7 +23,7 @@ pub struct NodeTable {
     pub rows: Vec<NodeRow>,
 }
 
-impl Block for NodeTable {
+impl Drawn for NodeTable {
     fn lines(&self, look: &Look) -> Vec<Line> {
         let width = look.width.cells();
         let column = id_column(self.rows.iter().map(|row| row.id.as_str())).min(width / 3);

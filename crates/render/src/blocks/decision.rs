@@ -1,7 +1,7 @@
 //! A decision a run waits on: every option, what it costs, and the
 //! command that chooses it.
 
-use super::Block;
+use super::Drawn;
 use crate::ink::{Line, Tone};
 use crate::{cell_width, wrap, Look, INDENT};
 
@@ -25,7 +25,7 @@ pub struct Decision {
     pub options: Vec<DecisionOption>,
 }
 
-impl Block for Decision {
+impl Drawn for Decision {
     fn lines(&self, look: &Look) -> Vec<Line> {
         let under = format!("{INDENT}{INDENT}");
         let room = look.width.cells().saturating_sub(cell_width(&under));

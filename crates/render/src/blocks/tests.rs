@@ -3,12 +3,23 @@ use std::path::{Path, PathBuf};
 use yunta_testkit_core::golden::{assert_golden, ENVIRONMENTS};
 
 use super::*;
+use crate::doc::Doc;
 use crate::ink::strip_sgr;
+use crate::surface::{Surface, Terminal};
 use crate::Mark;
 
-fn plain(block: &dyn Block) -> Vec<String> {
+fn plain(block: &dyn Drawn) -> Vec<String> {
     let look = Look::plain();
-    paint(&[block], &look).lines().map(str::to_string).collect()
+    block
+        .lines(&look)
+        .iter()
+        .map(|line| look.ink.paint(line))
+        .collect()
+}
+
+/// `doc` as a terminal with `look` draws it.
+fn paint(doc: &Doc<'_>, look: &Look) -> String {
+    Terminal::on(*look).draw(doc)
 }
 
 fn goldens() -> PathBuf {
@@ -153,7 +164,7 @@ fn every_block_reads_the_same_once_its_color_is_taken_out() {
         ink: crate::ink::Ink::Linked,
         ..look
     };
-    let blocks: [&dyn Block; 2] = [&decision(), &evidence(3)];
+    let blocks = Doc::new().with(decision()).with(evidence(3));
     assert_eq!(strip_sgr(&paint(&blocks, &look)), paint(&blocks, &flat));
     assert_eq!(strip_sgr(&paint(&blocks, &linked)), paint(&blocks, &flat));
 }
@@ -165,7 +176,7 @@ fn a_path_is_a_link_only_when_links_are_on() {
             ink,
             ..Look::of(&ENVIRONMENTS[0])
         };
-        paint(&[&evidence(3)], &look)
+        paint(&Doc::new().with(evidence(3)), &look)
     };
     let target =
         "\x1b]8;;file:///home/me/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/9f2c\x1b\\";
@@ -216,7 +227,13 @@ fn blocks_match_their_goldens() {
          reported at src/lib.rs:3:5 by the compiler"
             .to_string(),
     );
-    let blocks: [&dyn Block; 6] = [&headline, &table, &printed, &decision(), &fields, &next];
+    let blocks = Doc::new()
+        .with(headline)
+        .with(table)
+        .with(printed)
+        .with(decision())
+        .with(fields)
+        .with(next);
     for environment in &ENVIRONMENTS {
         let look = Look::of(environment);
         assert_golden(

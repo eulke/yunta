@@ -16,7 +16,8 @@ use yunta_core::shape::contract;
 use yunta_core::ArtifactKind;
 
 use crate::error::{CliError, Outcome};
-use crate::render::blocks::{paint, Fields, Next};
+use crate::render::blocks::{Fields, Next};
+use crate::render::doc::Doc;
 
 /// Prints one kind's shape, or lists the kinds when none is named.
 pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
@@ -69,7 +70,7 @@ fn list() -> String {
     };
     format!(
         "Documents Yunta reads and validates:\n{}\n{}",
-        paint(&[&kinds], &look),
-        paint(&[&next], &look).trim_end()
+        crate::render::draw(Doc::new().with(kinds), &look),
+        crate::render::draw(Doc::new().with(next), &look).trim_end()
     )
 }

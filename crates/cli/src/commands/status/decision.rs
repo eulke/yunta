@@ -31,7 +31,7 @@ use yunta_core::events::GateWaitingPayload;
 use yunta_core::{NodeId, RunId};
 
 use crate::commands::advice;
-use crate::render::blocks::{Block, Decision, DecisionOption};
+use crate::render::blocks::{Decision, DecisionOption, Drawn};
 use crate::render::ink::{Line, Tone};
 use crate::render::{cell_width, evidence, indent, label, wrap, Look, Width, INDENT};
 

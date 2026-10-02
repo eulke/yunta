@@ -1,7 +1,7 @@
 //! The line a surface opens with: what it is about, and the word for
 //! where that stands.
 
-use super::Block;
+use super::Drawn;
 use crate::ink::{Line, Tone};
 use crate::{Look, Mark};
 
@@ -12,7 +12,7 @@ pub struct Headline {
     pub said: String,
 }
 
-impl Block for Headline {
+impl Drawn for Headline {
     fn lines(&self, look: &Look) -> Vec<Line> {
         let tone = Tone::of(self.mark);
         vec![Line::new()

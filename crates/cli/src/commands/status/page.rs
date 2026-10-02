@@ -10,7 +10,7 @@ use yunta_engine::{EngineLiveness, NodeState, RunFrame, RunPhase, RunState};
 
 use crate::commands::advice;
 use crate::render::blocks::{
-    Block, FailureDetail, Fields, Headline, Next, NodeRow, NodeTable, Whole,
+    Drawn, FailureDetail, Fields, Headline, Next, NodeRow, NodeTable, Whole,
 };
 use crate::render::ink::{Line, Tone};
 use crate::render::state::RunWord;

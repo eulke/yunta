@@ -11,7 +11,8 @@ use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
 
 use crate::commands::advice;
 use crate::error::CliError;
-use crate::render::blocks::{paint, Block, FailureDetail, Fields, Headline, Next, Whole};
+use crate::render::blocks::{Drawn, FailureDetail, Fields, Headline, Next, Whole};
+use crate::render::doc::Doc;
 use crate::render::ink::{Line, Tone};
 use crate::render::{duration, paths, wrap, Look, Tokens, INDENT};
 
@@ -44,7 +45,7 @@ impl NodePage<'_> {
             mark: display.word.mark(),
             said: display.word.word().to_string(),
         };
-        let mut out = paint(&[&headline], look);
+        let mut out = crate::render::draw(Doc::new().with(headline), look);
         for part in [
             self.said(node, look),
             self.evidence(node, look),

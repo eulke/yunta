@@ -1,6 +1,6 @@
 //! Labelled facts, one to a row, the label in a column of its own.
 
-use super::Block;
+use super::Drawn;
 use crate::ink::{Line, Tone};
 use crate::{cell_width, wrap, Look, INDENT, LABEL_WIDTH};
 
@@ -27,7 +27,7 @@ impl Fields {
     }
 }
 
-impl Block for Fields {
+impl Drawn for Fields {
     /// Each value wrapped to what the label column leaves of the line,
     /// its later lines under its first.
     fn lines(&self, look: &Look) -> Vec<Line> {

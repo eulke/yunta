@@ -26,7 +26,7 @@ use crate::commands::advice;
 use crate::context::Context;
 use crate::error::note;
 use crate::error::{CliError, Outcome};
-use crate::render::blocks::Block;
+use crate::render::blocks::Drawn;
 use crate::render::ink::Line;
 use crate::render::INDENT;
 

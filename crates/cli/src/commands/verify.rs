@@ -19,7 +19,8 @@ use yunta_storage::{ChainVerification, Storage};
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::render::blocks::{paint, Checklist, Found, Headline};
+use crate::render::blocks::{Checklist, Found, Headline};
+use crate::render::doc::Doc;
 use crate::render::Mark;
 
 pub async fn verify(run_id: &RunId) -> Result<Outcome, CliError> {
@@ -43,7 +44,10 @@ pub async fn verify(run_id: &RunId) -> Result<Outcome, CliError> {
     };
     print!(
         "{}",
-        paint(&[&headline, &checks], &crate::render::stdout_look())
+        crate::render::draw(
+            Doc::new().with(headline).with(checks),
+            &crate::render::stdout_look()
+        )
     );
     Ok(match holds {
         true => Outcome::Success,

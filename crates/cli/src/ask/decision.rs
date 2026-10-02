@@ -17,7 +17,7 @@ use super::keys::{Stroke, Strokes};
 use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, NoAnswer, ANSWER};
 use crate::commands::status::decision::{account, Beside};
-use crate::render::blocks::{Block, Headline};
+use crate::render::blocks::{Drawn, Headline};
 use crate::render::{label, Mark, INDENT, INDENT_WIDTH};
 
 /// What settles an option that asks for nothing: the decision as it

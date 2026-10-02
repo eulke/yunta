@@ -1,6 +1,6 @@
 //! What a reader can type next, each command with what it does.
 
-use super::Block;
+use super::Drawn;
 use crate::ink::{Line, Tone};
 use crate::{cell_width, Look, INDENT};
 
@@ -11,7 +11,7 @@ pub struct Next {
     pub steps: Vec<(String, &'static str)>,
 }
 
-impl Block for Next {
+impl Drawn for Next {
     fn lines(&self, _look: &Look) -> Vec<Line> {
         let column = self
             .steps

@@ -1,7 +1,7 @@
 //! What a set of checks found, one row each: the mark that says whether
 //! it holds, what was checked, and what was found.
 
-use super::Block;
+use super::Drawn;
 use crate::ink::{Line, Tone};
 use crate::{cell_width, wrap, Look, Mark, INDENT};
 
@@ -67,7 +67,7 @@ impl Checklist {
     }
 }
 
-impl Block for Checklist {
+impl Drawn for Checklist {
     /// Each check on its row: its mark, what it checked in a column as
     /// wide as the widest subject that fits in half the line, and what it
     /// found, wrapped under itself. A subject wider than that has the

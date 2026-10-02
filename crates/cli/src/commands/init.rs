@@ -15,7 +15,8 @@ use yunta_engine::process::Supervision;
 use crate::ask::{ask_line, Console, Escape};
 use crate::error::{warn, CliError, Outcome};
 use crate::interrupt::Interrupt;
-use crate::render::blocks::{paint, Checklist, Fields, Found, Next};
+use crate::render::blocks::{Checklist, Fields, Found, Next};
+use crate::render::doc::Doc;
 use crate::surface::Diagnostics;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
@@ -399,9 +400,9 @@ fn report(init: &Wrote<'_>) -> String {
         }
     }
     let mut out = format!("yunta init: done in {}\n\n", init.repo.display());
-    out.push_str(&paint(&[&fields], &look));
+    out.push_str(&crate::render::draw(Doc::new().with(fields), &look));
     out.push('\n');
-    out.push_str(&paint(&[&adapters], &look));
+    out.push_str(&crate::render::draw(Doc::new().with(adapters), &look));
     out.push_str(&format!(
         "\nsuggested line for this repo's CLAUDE.md (paste it yourself — Yunta never writes to \
          that file):\n\n{}\n",
@@ -422,6 +423,6 @@ fn report(init: &Wrote<'_>) -> String {
         )],
     };
     out.push('\n');
-    out.push_str(&paint(&[&next], &look));
+    out.push_str(&crate::render::draw(Doc::new().with(next), &look));
     out
 }

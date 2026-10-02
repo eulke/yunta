@@ -25,7 +25,7 @@ use yunta_engine::{run_frame, NodeFrame, NodeStanding, PriorEstimation, RunFrame
 use crate::commands::status::decision;
 use crate::commands::{advice, unknown_kinds_note};
 use crate::error::Outcome;
-use crate::render::blocks::{Block, FailureDetail, Fields, Headline, Next, Whole};
+use crate::render::blocks::{Drawn, FailureDetail, Fields, Headline, Next, Whole};
 use crate::render::ink::{Line, Tone};
 use crate::render::{duration, indent, paths, wrap, Glyphs, Look, Tokens, INDENT};
 use yunta_core::text::counted;

@@ -9,7 +9,8 @@ use yunta_engine::EngineLiveness;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::render::blocks::{paint, Headline};
+use crate::render::blocks::Headline;
+use crate::render::doc::Doc;
 use crate::render::state::RunWord;
 use crate::render::{wrap, INDENT};
 
@@ -37,7 +38,7 @@ pub async fn close(run_id: &RunId, by: Option<&Responder>) -> Result<Outcome, Cl
         said: word.to_string(),
     };
     let look = crate::render::stdout_look();
-    print!("{}", paint(&[&headline], &look));
+    print!("{}", crate::render::draw(Doc::new().with(headline), &look));
     let detail =
         format!("closed by {by} — its branch and worktree stay until `yunta gc` removes them");
     for line in wrap(&detail, look.width.cells().saturating_sub(INDENT.len())) {

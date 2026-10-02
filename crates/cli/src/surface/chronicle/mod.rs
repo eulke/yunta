@@ -20,7 +20,7 @@ use yunta_engine::{Happening, Moment};
 
 use super::view;
 use crate::commands::advice;
-use crate::render::blocks::{Block, FailureDetail, Whole};
+use crate::render::blocks::{Drawn, FailureDetail, Whole};
 use crate::render::ink::{Line, Tone};
 use crate::render::{indent, Glyphs, Look, Mark, CHILD_DEPTH};
 use words::carried;

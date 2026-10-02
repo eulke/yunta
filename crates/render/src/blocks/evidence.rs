@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use super::Block;
+use super::Drawn;
 use crate::ink::{Line, Tone};
 use crate::{cell_width, truncate, Look, INDENT};
 
@@ -38,7 +38,7 @@ pub struct Evidence {
     pub whole: Option<Whole>,
 }
 
-impl Block for Evidence {
+impl Drawn for Evidence {
     /// The last [`QUOTED`] lines, each hanging from the gutter and cut to
     /// the line rather than wrapped — what a command printed keeps its
     /// shape — then how much came before them and where it is.

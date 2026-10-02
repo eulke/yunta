@@ -21,6 +21,7 @@
 pub mod bars;
 pub mod blocks;
 pub mod color;
+pub mod doc;
 pub mod escalation;
 mod findings;
 pub mod glyphs;
@@ -35,6 +36,7 @@ mod run_word;
 pub mod shown;
 mod spec;
 pub mod state;
+pub mod surface;
 pub mod width;
 
 pub use bars::{bar, bar_cells, sparkline};

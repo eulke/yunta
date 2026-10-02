@@ -20,7 +20,8 @@ use std::collections::BTreeSet;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::render::blocks::{paint, Checklist, Found, Next};
+use crate::render::blocks::{Checklist, Found, Next};
+use crate::render::doc::Doc;
 use crate::render::INDENT;
 use yunta_core::port::ProbeReport;
 use yunta_core::AdapterId;
@@ -42,8 +43,9 @@ pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
         probe_sessions(&ctx, &healthy, &mut checks).await;
     }
 
+    let holds = checks.holds();
     let look = crate::render::stdout_look();
-    let mut out = paint(&[&checks], &look);
+    let mut out = crate::render::draw(Doc::new().with(checks), &look);
     if !steps.is_empty() {
         out.push('\n');
         for line in &steps {
@@ -58,11 +60,11 @@ pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
             )],
         };
         out.push('\n');
-        out.push_str(&paint(&[&next], &look));
+        out.push_str(&crate::render::draw(Doc::new().with(next), &look));
     }
     print!("{out}");
 
-    match checks.holds() {
+    match holds {
         true => Ok(Outcome::Success),
         false => Ok(Outcome::Reported),
     }

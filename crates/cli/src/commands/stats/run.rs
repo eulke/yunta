@@ -5,7 +5,8 @@ use yunta_core::units::DURATION_WIDEST;
 use yunta_core::RunId;
 use yunta_engine::{NodeStat, RunStats};
 
-use crate::render::blocks::{paint, Fields};
+use crate::render::blocks::Fields;
+use crate::render::doc::Doc;
 use crate::render::{
     bar, bar_cells, cell_width, duration, id_column, middle_cut, truncate, Glyphs, Look,
     NodeDisplay, Ratio, Tokens, INDENT, STATE_WIDTH,
@@ -76,7 +77,7 @@ pub(super) fn render_run_stats(
             crate::commands::unknown_kinds_note(&stats.unknown_kinds).unwrap_or_default(),
         );
     let mut out = format!("run {run_id} — mode {mode}\n");
-    out.push_str(&paint(&[&fields], look));
+    out.push_str(&crate::render::draw(Doc::new().with(fields), look));
     out.push_str(&render_nodes(stats, state, look));
     out.push_str(&render_runners(stats, look));
     out

@@ -2,10 +2,11 @@
 //!
 //! A surface says, in order, what happened, what needs a person, the
 //! evidence, the detail and what to type next. Each of those is a block
-//! here, laid out once for a stream's [`Look`]: two surfaces that show a
-//! decision show the same block, so a reader who learned it on one reads
-//! it on the next. A block with nothing to say draws nothing — no
-//! heading over an empty list, no row with an empty value.
+//! here — what it says, as data — and laid out once for a terminal's
+//! [`Look`]: two surfaces that show a decision show the same block, so a
+//! reader who learned it on one reads it on the next. A block with
+//! nothing to say draws nothing — no heading over an empty list, no row
+//! with an empty value.
 
 mod checklist;
 mod decision;
@@ -29,18 +30,12 @@ pub use node_table::{NodeRow, NodeTable};
 use super::ink::Line;
 use super::Look;
 
-/// A part of a surface: the lines it takes on a stream with `look`.
-pub trait Block {
+/// How a block is laid out on a terminal: the lines it takes on a stream
+/// with `look`. The [`Terminal`](crate::surface::Terminal) surface draws a
+/// [`Doc`](crate::doc::Doc) through it; another medium draws the same
+/// blocks its own way.
+pub trait Drawn {
     fn lines(&self, look: &Look) -> Vec<Line>;
-}
-
-/// `blocks`, one after another, painted for `look`, every line ended.
-pub fn paint(blocks: &[&dyn Block], look: &Look) -> String {
-    blocks
-        .iter()
-        .flat_map(|block| block.lines(look))
-        .map(|line| format!("{}\n", look.ink.paint(&line)))
-        .collect()
 }
 
 #[cfg(test)]
