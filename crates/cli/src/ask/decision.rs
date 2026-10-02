@@ -91,10 +91,13 @@ fn noted(console: &Console) -> Answered<Option<String>> {
     }
 }
 
-/// Draws what the decision is about: that it needs the person, the
-/// claim, the record the engine attached to audit it against, and the
-/// documents it shows.
+/// Draws what the decision is about: the documents it shows, then that
+/// it needs the person, the claim, and the record the engine attached to
+/// audit it against.
 ///
+/// The documents come first and the question last, beside the menu: on a
+/// terminal the last lines printed are the ones on the screen when the
+/// menu asks, and a plan a screen tall would push the question off it.
 /// The record goes above the options because a menu offered without it
 /// asks for a decision on a claim nobody checked. It is drawn as it is
 /// on every surface that shows the decision, so a person who reads the
@@ -106,6 +109,13 @@ fn present(
     run: &str,
 ) -> std::io::Result<()> {
     let look = console.look();
+    for document in shown {
+        console.say("")?;
+        let doc = crate::render::shown::document(document, run, crate::render::shown::Form::Review);
+        for line in crate::render::draw(doc, &look).lines() {
+            console.say(line)?;
+        }
+    }
     let mut lines = Headline {
         subject: "decision".to_string(),
         mark: Mark::NeedsYou,
@@ -120,13 +130,6 @@ fn present(
     console.say("")?;
     for line in &lines {
         console.say(&look.ink.paint(line))?;
-    }
-    for document in shown {
-        console.say("")?;
-        let doc = crate::render::shown::document(document, run, crate::render::shown::Form::Review);
-        for line in crate::render::draw(doc, &look).lines() {
-            console.say(line)?;
-        }
     }
     console.say("")
 }

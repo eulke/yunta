@@ -189,3 +189,23 @@ fn status_node_prints_a_plan_whole() {
         "the node's page reads the plan it wrote whole:\n{page}"
     );
 }
+
+#[test]
+fn the_question_and_its_options_are_the_last_lines_before_the_menu() {
+    let root = tempfile::tempdir().unwrap();
+    let terminal = reviewing(root.path());
+    terminal.wait_for("3  abort", "the gate never put its options on the console");
+    let drawn = terminal.drawn();
+    let plan = drawn.find("plan of `plan`").expect("the plan was shown");
+    let question = drawn
+        .find("decision: ◆ needs you")
+        .expect("the decision was put");
+    assert!(
+        plan < question,
+        "the plan is read first and the question asked last, beside the menu:\n{drawn}"
+    );
+    assert!(
+        !drawn[question..].contains("T001 — Make it"),
+        "nothing of the plan sits between the question and its options:\n{drawn}"
+    );
+}
