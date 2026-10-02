@@ -17,7 +17,6 @@ use yunta_core::{ModeName, NodeId, OptionId, WorkflowName};
 use yunta_engine::RunTerminal;
 
 use super::{copy_dir_all, init_git, load_mock_fixture, mock_adapters, sandboxed_checkout};
-use crate::commands::status::task_status_label;
 use crate::commands::Adapters;
 use crate::context::Context;
 use crate::error::CliError;
@@ -311,7 +310,7 @@ pub(crate) async fn run_case(
             .state
             .tasks
             .status(task_id.as_str())
-            .map(task_status_label)
+            .map(yunta_core::events::TaskStatus::as_str)
             .unwrap_or("never registered");
         if got != expected {
             problems.push(format!("task {task_id}: expected {expected}, got {got}"));

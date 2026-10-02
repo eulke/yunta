@@ -199,7 +199,7 @@ impl Page<'_> {
         let sep = format!(" {} ", crate::render::stdout_look().glyphs.sep());
         let tasks = tasks
             .into_iter()
-            .map(|(id, record)| format!("{id} {}", super::task_status_label(record.status)))
+            .map(|(id, record)| format!("{id} {}", record.status))
             .collect::<Vec<_>>()
             .join(&sep);
         let suspended = self

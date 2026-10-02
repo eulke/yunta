@@ -274,7 +274,7 @@ pub(super) async fn resolve_tasks(
     let mut lines: Vec<String> = state
         .tasks
         .iter()
-        .map(|(id, status)| format!("{id}: {status:?}"))
+        .map(|(id, record)| task_line(id, record))
         .collect();
     lines.sort();
     Ok(lines.join("\n").into_bytes())
@@ -350,4 +350,17 @@ pub(super) async fn materialize(
     let hash = store.put(content).await?;
     let path = store.path_of(&hash);
     Ok((path, hash))
+}
+
+/// One task as an agent reads it: its status in the word every surface
+/// uses, and how far its attempts got.
+fn task_line(id: &yunta_core::TaskId, record: &yunta_core::events::TaskRecord) -> String {
+    let mut line = format!("{id}: {}", record.status);
+    if record.attempts > 0 {
+        line.push_str(&format!(", attempt {}", record.attempts));
+    }
+    if let Some(commit) = &record.commit {
+        line.push_str(&format!(", committed {}", commit.abbreviated()));
+    }
+    line
 }

@@ -95,6 +95,15 @@ pub enum PackExecutorPolicy {
 }
 
 impl PackExecutorPolicy {
+    /// The value as a config file writes it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PackExecutorPolicy::Allow => "allow",
+            PackExecutorPolicy::Prompt => "prompt",
+            PackExecutorPolicy::Deny => "deny",
+        }
+    }
+
     fn strictness(self) -> u8 {
         match self {
             PackExecutorPolicy::Allow => 0,
@@ -292,7 +301,9 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
                 {
                     if lower_pol.strictness() < higher_pol.strictness() {
                         conflicts.push(format!(
-                            "layer `{lower_name}` loosens `packs.executors` to `{lower_pol:?}` below layer `{higher_name}`'s `{higher_pol:?}` — permissions only narrow"
+                            "layer `{lower_name}` loosens `packs.executors` to `{}` below layer `{higher_name}`'s `{}` — permissions only narrow",
+                            lower_pol.as_str(),
+                            higher_pol.as_str()
                         ));
                     }
                 }

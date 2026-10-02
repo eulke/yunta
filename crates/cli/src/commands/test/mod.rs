@@ -295,10 +295,11 @@ pub(crate) async fn init_git(
     ] {
         let ran = yunta_engine::git::success(dir, &args, supervision)
             .await
-            .map_err(|e| CliError::msg(format!("git {args:?}: {}", e.detail())))?;
+            .map_err(|e| CliError::msg(format!("`git {}`: {}", args.join(" "), e.detail())))?;
         if !ran {
             return Err(CliError::msg(format!(
-                "git {args:?} failed in `{}`",
+                "`git {}` failed in `{}`",
+                args.join(" "),
                 dir.display()
             )));
         }

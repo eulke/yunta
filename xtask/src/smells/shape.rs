@@ -366,6 +366,29 @@ pub fn strip_noise(line: &str, mut in_block: bool) -> (String, bool) {
     (out, in_block)
 }
 
+/// Whether `line` formats a value with its `Debug` form in text that
+/// reaches a reader — a person or an agent. `Debug` is the shape Rust
+/// gives a value for whoever wrote it: `Some(..)`, `TaskRecord { .. }`,
+/// `Major`. An assertion's, a panic's or a trace's message is for the
+/// one who wrote the code, and is not counted.
+pub fn has_debug_format(line: &str) -> bool {
+    let code = line.trim_start();
+    if code.starts_with("//") || !(code.contains(":?}") || code.contains(":#?}")) {
+        return false;
+    }
+    ![
+        "assert",
+        "panic!",
+        "unreachable!",
+        "debug!",
+        "trace!",
+        "tracing::",
+        "todo!",
+    ]
+    .iter()
+    .any(|developer| code.contains(developer))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,6 +412,30 @@ mod tests {
         ));
         assert!(!has_inner_space_run("    // a          comment"));
         assert!(!has_inner_space_run("    let x = 1;"));
+    }
+
+    #[test]
+    fn a_debug_form_in_a_message_counts_and_one_for_a_developer_does_not() {
+        assert!(has_debug_format(
+            r#"        .map(|(id, status)| format!("{id}: {status:?}"))"#
+        ));
+        assert!(has_debug_format(
+            r#"    #[error("failed to read {stream:?} for `{command}`")]"#
+        ));
+        assert!(has_debug_format(
+            r#"                "{} at or above {max_severity:?}: {}","#
+        ));
+        assert!(!has_debug_format(
+            r#"        assert_eq!(a, b, "{drawn:?}");"#
+        ));
+        assert!(!has_debug_format(
+            r#"        other => panic!("expected it, got {other:?}"),"#
+        ));
+        assert!(!has_debug_format(
+            r#"    tracing::debug!("state {state:?}");"#
+        ));
+        assert!(!has_debug_format("    // prints {value:?} for now"));
+        assert!(!has_debug_format(r#"    format!("{value}")"#));
     }
 
     #[test]

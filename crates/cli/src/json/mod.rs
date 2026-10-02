@@ -24,7 +24,7 @@ mod node;
 
 use node::{NodeJson, NodeWaitJson};
 
-use crate::commands::status::{decision, progress, task_status_label};
+use crate::commands::status::{decision, progress};
 use crate::error::{CliError, Outcome};
 use crate::render::state::RunWord;
 
@@ -184,7 +184,7 @@ impl RunDocument {
             tasks: state
                 .tasks
                 .iter()
-                .map(|(id, record)| (id.to_string(), task_status_label(record.status)))
+                .map(|(id, record)| (id.to_string(), record.status.as_str()))
                 .collect(),
             diagnostics: node_diagnostics(events),
             decision: parked_decision(run_id, manifest, events, &frame.phase),

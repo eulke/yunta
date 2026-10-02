@@ -151,8 +151,9 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
             }
             if tokio::time::Instant::now() >= deadline {
                 note(format!(
-                    "run {called}: the engine did not stop within {ENGINE_SHUTDOWN_TIMEOUT:?} \
-                     — escalating to SIGKILL on its process groups"
+                    "run {called}: the engine did not stop within {} — escalating to SIGKILL \
+                     on its process groups",
+                    crate::render::duration(ENGINE_SHUTDOWN_TIMEOUT)
                 ));
                 kill_groups(&registry.process_groups);
                 if let Err(e) = signal_process(registry.engine_pid, Signal::SIGKILL) {

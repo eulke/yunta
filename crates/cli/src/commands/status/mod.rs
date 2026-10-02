@@ -17,7 +17,7 @@ pub(crate) mod progress;
 
 use std::path::Path;
 
-use yunta_core::events::{StoredEvent, TaskStatus};
+use yunta_core::events::StoredEvent;
 use yunta_core::Clock;
 use yunta_core::{Manifest, RunId};
 use yunta_engine::RunPhase;
@@ -173,17 +173,4 @@ fn decision_page(
             menu: false,
         },
     })
-}
-
-/// The event schema's snake_case task-status names — user output never
-/// leaks Rust identifiers.
-pub(crate) fn task_status_label(status: TaskStatus) -> &'static str {
-    match status {
-        TaskStatus::Pending => "pending",
-        TaskStatus::Ready => "ready",
-        TaskStatus::Running => "running",
-        TaskStatus::Done => "done",
-        TaskStatus::Blocked => "blocked",
-        TaskStatus::Failed => "failed",
-    }
 }

@@ -23,6 +23,28 @@ pub enum TaskStatus {
     Failed,
 }
 
+impl TaskStatus {
+    /// The word a task in this status is called by, wherever it is
+    /// said — the token the log writes, so a reader who greps a log
+    /// for what a surface printed finds it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaskStatus::Pending => "pending",
+            TaskStatus::Ready => "ready",
+            TaskStatus::Running => "running",
+            TaskStatus::Done => "done",
+            TaskStatus::Blocked => "blocked",
+            TaskStatus::Failed => "failed",
+        }
+    }
+}
+
+impl std::fmt::Display for TaskStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskRegisteredPayload {
     pub task_id: TaskId,

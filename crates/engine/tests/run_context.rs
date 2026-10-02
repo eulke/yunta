@@ -332,6 +332,10 @@ nodes:
     let sources = context_sources(&events, "audit");
     assert_eq!(sources[0].kind, "tasks");
     assert_materialized(&bench.run_dir(), &sources[0]);
+    // The agent reads each task by the word every surface calls its
+    // status, never a type's debug form.
+    let said = String::from_utf8(bench.object(&sources[0].content_hash).unwrap()).unwrap();
+    assert_eq!(said, "task-x: pending");
 }
 
 #[tokio::test]

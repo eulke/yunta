@@ -302,9 +302,8 @@ fn parse_last_percentage(text: &str) -> Option<f64> {
 /// run — raw, not deduped (`dedup_findings` is a reporting view;
 /// a gate checking "does anything this severe exist" should not risk
 /// under-counting two distinct findings a dedup heuristic conflated) — is
-/// at or above `max_severity`. Ranked by declaration order
-/// (`Blocking` worst, `Note` least) since `FindingSeverity` has no `Ord`
-/// of its own to reuse.
+/// at or above `max_severity`, the ladder's own order (`blocking` worst,
+/// `note` least).
 async fn execute_findings_gate(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -316,7 +315,7 @@ async fn execute_findings_gate(
     let effective = state.unsettled_findings();
     let offending: Vec<&str> = effective
         .iter()
-        .filter(|finding| severity_rank(finding.severity) <= severity_rank(max_severity))
+        .filter(|finding| finding.severity <= max_severity)
         .map(|finding| finding.id.as_str())
         .collect();
 
@@ -325,7 +324,7 @@ async fn execute_findings_gate(
             ctx,
             node,
             Close::new(
-                format!("no finding at or above {max_severity:?}"),
+                format!("no finding at or above {}", max_severity.as_str()),
                 TokenUsage::default(),
             ),
         )
@@ -335,22 +334,14 @@ async fn execute_findings_gate(
             ctx,
             node,
             format!(
-                "{} at or above {max_severity:?}: {}",
+                "{} at or above {}: {}",
                 yunta_core::text::counted(offending.len(), "finding"),
+                max_severity.as_str(),
                 offending.join(", ")
             ),
             false,
         )
         .await
-    }
-}
-
-fn severity_rank(severity: FindingSeverity) -> u8 {
-    match severity {
-        FindingSeverity::Blocking => 0,
-        FindingSeverity::Major => 1,
-        FindingSeverity::Minor => 2,
-        FindingSeverity::Note => 3,
     }
 }
 

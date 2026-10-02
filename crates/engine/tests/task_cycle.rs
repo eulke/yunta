@@ -834,7 +834,7 @@ async fn a_hung_session_is_cut_by_its_timeout() {
     let t = task("timeout", &["output.txt"], vec![cmd("test -f output.txt")]);
     let adapter = MockAdapter::from_yaml("outcome: { type: hang }").unwrap();
     let budget = Budget {
-        timeout: Some(std::time::Duration::from_millis(50)),
+        timeout: Some(std::time::Duration::from_secs(1)),
         ..Default::default()
     };
 
@@ -869,7 +869,7 @@ async fn a_hung_session_is_cut_by_its_timeout() {
 
     match &report.attempts[0].dispatch {
         DispatchOutcome::BudgetExceeded { reason } => {
-            assert_eq!(reason, "exceeded timeout of 50ms")
+            assert_eq!(reason, "exceeded timeout of 1s")
         }
         other => panic!("expected BudgetExceeded, got {other:?}"),
     }

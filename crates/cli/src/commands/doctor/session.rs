@@ -224,7 +224,8 @@ fn verdict(
                 }
             }
             other => Outcome::Refused(format!(
-                "run ended as {other:?} without a complete accepted submission"
+                "the run ended {} without a complete accepted submission",
+                ended(other)
             )),
         },
     }
@@ -302,6 +303,18 @@ fn probe_context(
     }
     probing.project.config.baseline = None;
     probing
+}
+
+/// How a run ended, said the way the rest of a refusal reads.
+fn ended(terminal: &yunta_engine::RunTerminal) -> String {
+    match terminal {
+        yunta_engine::RunTerminal::Finished => "finished".to_string(),
+        yunta_engine::RunTerminal::Paused { reason } => format!("waiting ({reason})"),
+        yunta_engine::RunTerminal::Failed { reason } => format!("failed ({reason})"),
+        yunta_engine::RunTerminal::Promoted { suggested_mode } => {
+            format!("promoted to mode `{suggested_mode}`")
+        }
+    }
 }
 
 #[cfg(test)]

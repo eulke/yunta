@@ -29,8 +29,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use shape::{
-    functions_over, has_inner_space_run, has_parenthesized_plural, production_only, strip_noise,
-    sync_fs_in_async,
+    functions_over, has_debug_format, has_inner_space_run, has_parenthesized_plural,
+    production_only, strip_noise, sync_fs_in_async,
 };
 use thresholds::numeric_consts_without_decision;
 
@@ -255,6 +255,27 @@ fn measure() -> BTreeMap<String, usize> {
             .flat_map(|text| text.lines())
             .filter(|line| has_parenthesized_plural(line))
             .count(),
+    );
+
+    // A value formatted with `Debug` in text a reader is told. Counted
+    // over the crates that ship: a test-support crate talks to the one
+    // who wrote the code.
+    counts.insert(
+        "debug_format_reaching_reader".to_string(),
+        src_files
+            .iter()
+            .filter(|path| {
+                let shown = path.to_string_lossy();
+                !shown.contains("crates/testkit") && !shown.ends_with("tests.rs")
+            })
+            .filter_map(|path| std::fs::read_to_string(path).ok())
+            .map(|text| {
+                production_only(&text)
+                    .lines()
+                    .filter(|line| has_debug_format(line))
+                    .count()
+            })
+            .sum(),
     );
 
     // The shape of a test, the thread an async body holds, the threshold

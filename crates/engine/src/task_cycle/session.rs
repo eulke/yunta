@@ -398,7 +398,10 @@ pub(crate) async fn dispatch_session(
                             Ok(next) => next,
                             Err(_) => {
                                 terminal = Some(DispatchOutcome::BudgetExceeded {
-                                    reason: format!("exceeded timeout of {timeout:?}"),
+                                    reason: format!(
+                                        "exceeded timeout of {}",
+                                        yunta_core::units::duration(timeout)
+                                    ),
                                 });
                                 break;
                             }

@@ -2,6 +2,7 @@ banned_vocabulary 72
 bench_struct_outside_testkit 0
 copied_test_helpers 0
 create_run_outside_testkit 4
+debug_format_reaching_reader 1
 env_mutation_in_tests 0
 env_read_outside_boundary 7
 event_builder_outside_testkit 0

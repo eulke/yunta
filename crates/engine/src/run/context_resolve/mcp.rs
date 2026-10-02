@@ -95,7 +95,7 @@ pub(in crate::run) enum McpQueryError {
     },
     #[error("tool `query` returned an error: {text}")]
     Refused { text: String },
-    #[error("unexpected tools/call response: {response}")]
+    #[error("tool `query` gave no answer: {response}")]
     Unexpected { response: String },
 }
 
@@ -147,8 +147,16 @@ async fn call_mcp_query(
                 Ok(text)
             }
         }
-        other => Err(McpQueryError::Unexpected {
-            response: format!("{other:?}"),
+        rmcp::model::CallToolResponse::InputRequired(_) => Err(McpQueryError::Unexpected {
+            response: "it asked for input before answering, and a context query has none to give"
+                .to_string(),
+        }),
+        rmcp::model::CallToolResponse::Task(_) => Err(McpQueryError::Unexpected {
+            response: "it answered with a task to poll, and a context query does not wait on one"
+                .to_string(),
+        }),
+        _ => Err(McpQueryError::Unexpected {
+            response: "it answered with a kind of response this binary does not know".to_string(),
         }),
     }
 }

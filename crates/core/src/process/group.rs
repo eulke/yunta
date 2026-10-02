@@ -46,9 +46,29 @@ struct Member {
     state: State,
 }
 
+impl State {
+    fn as_str(self) -> &'static str {
+        match self {
+            State::Running => "running",
+            State::Stopped => "stopped",
+            State::Terminated => "terminated",
+        }
+    }
+}
+
+/// `members` as a person reads them: each process and the state it was
+/// last seen in.
+fn listed(members: &[Member]) -> String {
+    members
+        .iter()
+        .map(|member| format!("pid {} {}", member.pid, member.state.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 #[derive(Debug, Error)]
 pub enum GroupError {
-    #[error("failed to signal {signal} to process group {pgid}: {source:?}")]
+    #[error("failed to signal {signal} to process group {pgid}")]
     Signal {
         pgid: Pid,
         signal: Signal,
@@ -65,7 +85,10 @@ pub enum GroupError {
     DidNotStop { pgid: Pid, members: String },
     #[error("process group {pgid} still has executable members after SIGKILL: {members}")]
     DidNotExit { pgid: Pid, members: String },
-    #[error("{cause}; emergency SIGKILL for process group {pgid} also failed: {signal:?}")]
+    #[error(
+        "{cause}; emergency SIGKILL for process group {pgid} also failed: {signal}: {}",
+        signal.source
+    )]
     EmergencyKill {
         pgid: Pid,
         #[source]
@@ -146,7 +169,7 @@ async fn stop_until_stable(pgid: Pid) -> Result<Vec<Member>, GroupError> {
 
     Err(GroupError::DidNotStop {
         pgid,
-        members: format!("{last_members:?}"),
+        members: listed(&last_members),
     })
 }
 
@@ -171,7 +194,7 @@ async fn confirm_group_exit(pgid: Pid) -> Result<(), GroupError> {
 
     Err(GroupError::DidNotExit {
         pgid,
-        members: format!("{last_members:?}"),
+        members: listed(&last_members),
     })
 }
 

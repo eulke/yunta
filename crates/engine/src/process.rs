@@ -222,7 +222,7 @@ pub enum SpawnError {
         source: Box<GroupError>,
         output: Box<CapturedOutput>,
     },
-    #[error("failed to read {stream:?} for `{command}`")]
+    #[error("failed to read the {} of `{command}`", stream.as_str())]
     Read {
         command: String,
         stream: PipeKind,
@@ -230,7 +230,7 @@ pub enum SpawnError {
         source: std::io::Error,
         output: Box<CapturedOutput>,
     },
-    #[error("the {stream:?} task for `{command}` failed")]
+    #[error("the task reading the {} of `{command}` failed", stream.as_str())]
     ReadTask {
         command: String,
         stream: PipeKind,
@@ -257,6 +257,16 @@ pub enum PipeKind {
     Stdin,
     Stdout,
     Stderr,
+}
+impl PipeKind {
+    /// The stream's name, as a reader of a command's output knows it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PipeKind::Stdin => "stdin",
+            PipeKind::Stdout => "stdout",
+            PipeKind::Stderr => "stderr",
+        }
+    }
 }
 
 /// Runs `command` to its end under the engine's governance: in its own

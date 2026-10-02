@@ -273,7 +273,7 @@ fn task_words(happening: &tasks_happening::Happening) -> String {
 /// A task's status in the words the event schema publishes, never a
 /// Rust identifier.
 fn status(status: TaskStatus) -> &'static str {
-    crate::commands::status::task_status_label(status)
+    status.as_str()
 }
 
 fn scope_words(happening: &scope::happening::Happening) -> String {

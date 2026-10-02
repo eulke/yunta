@@ -30,16 +30,7 @@ impl SessionTools {
         let mut tasks: Vec<(String, String)> = state
             .tasks
             .iter()
-            .map(|(id, record)| {
-                let status = record.status;
-                (
-                    id.to_string(),
-                    serde_json::to_value(status)
-                        .ok()
-                        .and_then(|v| v.as_str().map(str::to_string))
-                        .unwrap_or_else(|| format!("{status:?}")),
-                )
-            })
+            .map(|(id, record)| (id.to_string(), record.status.as_str().to_string()))
             .collect();
         tasks.sort();
         let map: serde_json::Map<String, Value> = tasks

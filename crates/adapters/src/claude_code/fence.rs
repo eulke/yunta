@@ -57,7 +57,7 @@ pub(super) fn settings_json(hook: &FenceHook) -> String {
     let command = hook
         .command(&super::ID)
         .iter()
-        .map(|part| format!("{part:?}"))
+        .map(|part| sh_quoted(part))
         .collect::<Vec<_>>()
         .join(" ");
     serde_json::json!({
@@ -75,9 +75,36 @@ pub(super) fn settings_json(hook: &FenceHook) -> String {
     .to_string()
 }
 
+/// `part` as one word of a POSIX shell command line: as written when it
+/// holds nothing the shell would read, and in single quotes otherwise,
+/// where nothing is expanded — a binary under a path with a `$`, a space
+/// or a quote runs as itself.
+fn sh_quoted(part: &str) -> String {
+    let plain = !part.is_empty()
+        && part
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_./=:-@%+,".contains(c));
+    match plain {
+        true => part.to_string(),
+        false => format!("'{}'", part.replace('\'', r"'\''")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_hook_command_survives_a_path_the_shell_would_expand() {
+        let path = "/Users/a b/$HOME/it's/yunta";
+        let quoted = sh_quoted(path);
+        let echoed = std::process::Command::new("sh")
+            .args(["-c", &format!("printf %s {quoted}")])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8(echoed.stdout).unwrap(), path);
+        assert_eq!(sh_quoted("/usr/local/bin/yunta"), "/usr/local/bin/yunta");
+    }
 
     #[test]
     fn a_notebook_edit_names_its_target_by_its_own_field() {
