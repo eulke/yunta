@@ -83,10 +83,14 @@ nodes:
         "got: {}",
         tool_text(&catalog)
     );
+    // An agent reads the catalog as Markdown, the same whatever the
+    // server's terminal or locale: each workflow a heading, and the
+    // command that runs it in code.
+    let said = tool_text(&catalog);
     assert!(
-        tool_text(&catalog).contains("greet"),
-        "got: {}",
-        tool_text(&catalog)
+        said.lines().any(|line| line.starts_with("### greet"))
+            && said.contains("`yunta run greet`"),
+        "got: {said}"
     );
 
     let run = client

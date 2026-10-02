@@ -37,7 +37,14 @@ pub(super) async fn tool_list_workflows(
     // very stream its JSON-RPC replies travel on. Best-effort storage, so
     // a repo with no state root yet still lists, just without estimates.
     let ctx = Context::resolve_in(cwd.to_path_buf(), interrupt).ok();
-    Ok(super::super::list::render_catalog(cwd, ctx.as_ref()).await)
+    // An agent reads the catalog as Markdown: no terminal's width or
+    // locale decides what it is told.
+    let catalog =
+        super::super::list::catalog(cwd, ctx.as_ref(), crate::render::Glyphs::Unicode).await;
+    Ok(yunta_render::surface::Surface::draw(
+        &yunta_render::surface::Markdown,
+        &catalog,
+    ))
 }
 
 pub(super) async fn tool_workflow_status(

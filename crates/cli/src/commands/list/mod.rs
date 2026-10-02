@@ -20,7 +20,10 @@ use yunta_core::InputSpec;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
-use crate::render::INDENT;
+use crate::render::blocks::{Fields, Marked, Prose, Section};
+use crate::render::doc::Doc;
+use crate::render::ink::{Line, Tone};
+use crate::render::Mark;
 
 pub use runs::list_runs;
 
@@ -38,96 +41,121 @@ pub async fn list_workflows() -> Result<Outcome, CliError> {
     // Best-effort — a project with no state root yet (never ran
     // anything) simply shows no estimation, same as "fewer than three
     // runs" does; neither is an error worth refusing the catalog over.
-    print!(
-        "{}",
-        render_catalog(&cwd, Context::load().ok().as_ref()).await
-    );
+    let look = crate::render::stdout_look();
+    let catalog = catalog(&cwd, Context::load().ok().as_ref(), look.glyphs).await;
+    print!("{}", crate::render::draw(catalog, &look));
     Ok(Outcome::Success)
 }
 
-/// Renders the repo catalog — the repo's own `.yunta/workflows/` plus
-/// every installed pack's declared workflows, a pack entry shadowed by a
-/// repo file of the same `publisher/name` — as the text both `yunta list`
-/// prints and the `list_workflows` control-plane tool returns, so the two
-/// never drift. Given a project's storage, each workflow carries its prior
-/// estimation; a broken pack is named, never silently dropped.
-pub(crate) async fn render_catalog(cwd: &Path, history_source: Option<&Context>) -> String {
-    let mut out = String::new();
+/// The repo catalog — the repo's own `.yunta/workflows/` plus every
+/// installed pack's, a pack entry hidden behind a repo file of the same
+/// `publisher/name` — as one document: `yunta list` draws it on the
+/// terminal and the `list_workflows` control-plane tool answers with it
+/// as Markdown, so the two never drift. Given a project's storage, each
+/// workflow carries its prior estimation; a broken pack is named, never
+/// silently dropped. `glyphs` draws the separators of an estimation.
+pub(crate) async fn catalog(
+    cwd: &Path,
+    history_source: Option<&Context>,
+    glyphs: crate::render::Glyphs,
+) -> Doc<'static> {
     let mut entries = repo_catalog_entries(cwd);
     let shadowed: HashSet<String> = entries.iter().map(|e| e.display_name.clone()).collect();
     let (pack_entries, broken_packs) = pack_catalog_entries(cwd);
-    for err in &broken_packs {
-        out.push_str(&format!("{err}\n"));
+    let mut doc = Doc::new();
+    if !broken_packs.is_empty() {
+        doc = doc.with(Marked {
+            mark: Mark::Failed,
+            items: broken_packs.iter().map(ToString::to_string).collect(),
+        });
     }
     entries.extend(
         pack_entries
             .into_iter()
             .filter(|e| !shadowed.contains(&e.display_name)),
     );
-
     if entries.is_empty() {
         if broken_packs.is_empty() {
-            out.push_str(&format!(
-                "no workflows under {} or {}\n",
+            doc = doc.with(Prose(format!(
+                "no workflows under {} or {}",
                 cwd.join(".yunta/workflows").display(),
                 cwd.join(".yunta/packs").display()
-            ));
+            )));
         }
-        return out;
+        return doc;
     }
-
     for entry in entries {
-        let name = &entry.display_name;
-        let contents = match std::fs::read_to_string(&entry.path) {
-            Ok(c) => c,
-            Err(e) => {
-                out.push_str(&format!("{name}: unreadable ({e})\n"));
-                continue;
-            }
-        };
-        let workflow = match yunta_core::workflow::read::read(&contents, &entry.path) {
-            Ok(w) => w,
-            Err(report) => {
-                out.push_str(&format!("{name}: {report}\n"));
-                continue;
-            }
-        };
-        out.push_str(&format!(
-            "{name}: {}\n",
-            workflow
-                .description
-                .as_deref()
-                .unwrap_or("(no description)")
-        ));
-        for (input_name, spec) in &workflow.inputs {
-            let optionality = if spec.is_required() {
-                "required"
-            } else {
-                "optional"
-            };
-            let description = spec.description().unwrap_or("");
-            out.push_str(&format!(
-                "{INDENT}--input {input_name}=... ({}, {optionality}){}\n",
-                input_type_label(spec),
-                if description.is_empty() {
-                    String::new()
-                } else {
-                    format!(" — {description}")
+        doc = doc.with(listed(&entry, history_source, glyphs).await);
+    }
+    doc
+}
+
+/// One workflow the catalog offers: its name and what it does, the
+/// inputs it takes, how its past runs went, and the command that runs it
+/// — or why it does not read.
+async fn listed(
+    entry: &CatalogEntry,
+    history_source: Option<&Context>,
+    glyphs: crate::render::Glyphs,
+) -> Section<'static> {
+    let name = &entry.display_name;
+    let read = std::fs::read_to_string(&entry.path)
+        .map_err(|e| format!("unreadable: {e}"))
+        .and_then(|contents| {
+            yunta_core::workflow::read::read(&contents, &entry.path).map_err(|r| r.to_string())
+        });
+    let workflow = match read {
+        Ok(workflow) => workflow,
+        Err(why) => {
+            return Section {
+                mark: None,
+                title: Line::new().push(Tone::Strong, name.as_str()),
+                blocks: vec![Marked {
+                    mark: Mark::Failed,
+                    items: vec![why],
                 }
-            ));
-        }
-        if let Some(ctx) = history_source {
-            let history =
-                super::stats::summaries(&super::stats::history(ctx, &workflow.name).await);
-            if let Some(estimation) = yunta_engine::prior_estimation(&history) {
-                out.push_str(&format!(
-                    "{INDENT}{}\n",
-                    super::stats::format_estimation_line(&estimation, crate::render::glyphs())
-                ));
+                .into()],
             }
+        }
+    };
+    let mut title = Line::new().push(Tone::Strong, name.as_str());
+    if let Some(description) = workflow.description.as_deref() {
+        title = title.plain(format!(" — {description}"));
+    }
+    let mut fields = Fields::new();
+    for (n, (input_name, spec)) in workflow.inputs.iter().enumerate() {
+        let optionality = if spec.is_required() {
+            "required"
+        } else {
+            "optional"
+        };
+        let description = spec
+            .description()
+            .map(|description| format!(" — {description}"))
+            .unwrap_or_default();
+        fields = fields.push_if(
+            if n == 0 { "inputs" } else { "" },
+            format!(
+                "--input {input_name}=… ({}, {optionality}){description}",
+                input_type_label(spec)
+            ),
+        );
+    }
+    if let Some(ctx) = history_source {
+        let history = super::stats::summaries(&super::stats::history(ctx, &workflow.name).await);
+        if let Some(estimation) = yunta_engine::prior_estimation(&history) {
+            fields = fields.push_if(
+                "usually",
+                super::stats::format_estimation_line(&estimation, glyphs),
+            );
         }
     }
-    out
+    fields = fields.push_command("run", format!("yunta run {name}"));
+    Section {
+        mark: None,
+        title,
+        blocks: vec![fields.into()],
+    }
 }
 
 /// Every workflow the catalog offers that reads back — the repo's own,

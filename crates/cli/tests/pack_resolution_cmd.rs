@@ -92,13 +92,13 @@ fn yunta_list_shows_both_the_repo_catalog_and_installed_pack_workflows() {
     assert!(out.status.success(), "{}", stderr(&out));
     let listed = stdout(&out);
     assert!(
-        listed.lines().any(|l| l == "local: repo-owned"),
+        listed.lines().any(|l| l.trim() == "local — repo-owned"),
         "the repo-owned workflow lists with its description: {listed}"
     );
     assert!(
         listed
             .lines()
-            .any(|l| l == "acme/review: pack-provided review"),
+            .any(|l| l.trim() == "acme/review — pack-provided review"),
         "the pack-provided workflow lists with its namespaced name and description: {listed}"
     );
 }
@@ -120,7 +120,9 @@ fn a_repo_workflow_with_the_same_namespaced_name_shadows_the_pack() {
     assert!(check_out.status.success(), "{}", stderr(&check_out));
     let listed = stdout(&yunta_in!(&repo, &home, &["list"]));
     assert!(
-        listed.lines().any(|l| l == "acme/review: repo override"),
+        listed
+            .lines()
+            .any(|l| l.trim() == "acme/review — repo override"),
         "the repo file shadows the pack's workflow of the same name: {listed}"
     );
     assert!(!listed.contains("pack-provided review"), "{listed}");

@@ -925,8 +925,8 @@ nodes:
     assert!(list.status.success());
     assert_eq!(
         stdout(&list).trim_end(),
-        "greet: Says hello\n  --input greeting=... (string, optional) — What to say",
-        "list shows the workflow, its description, and its one optional input"
+        "  greet — Says hello\n    inputs       --input greeting=… (string, optional) — What to say\n    run          yunta run greet",
+        "list shows the workflow, its description, its one optional input and how to run it"
     );
 }
 

@@ -19,11 +19,14 @@ impl Terminal {
         Terminal { look }
     }
 
-    /// `doc` laid out for this stream, unpainted.
+    /// `doc` laid out for this stream, unpainted. It opens on what it
+    /// says: the blank line a section keeps above itself is room between
+    /// two things, and there is nothing above the first.
     pub fn lines(&self, doc: &Doc<'_>) -> Vec<Line> {
         doc.blocks()
             .iter()
             .flat_map(|block| self.block(block))
+            .skip_while(|line| line.text().is_empty())
             .collect()
     }
 
