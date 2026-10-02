@@ -213,7 +213,10 @@ impl Page<'_> {
                 )
             });
         Fields::new()
-            .push_if("progress", crate::render::counter::line(self.frame))
+            .push_if(
+                "progress",
+                crate::render::counter::line(self.frame, Look::stdout().glyphs),
+            )
             .push_if(
                 "tokens",
                 format!(

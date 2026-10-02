@@ -91,7 +91,7 @@ mod chronicle_tests {
         let moments = yunta_engine::chronicle(&events);
         let written: Vec<String> = moments
             .iter()
-            .map(|moment| chronicle::say(moment).text)
+            .map(|moment| chronicle::say(moment, crate::render::Glyphs::Ascii).text)
             .collect();
         let history: Vec<String> = moments
             .iter()

@@ -66,7 +66,7 @@ pub(super) fn attention(
 /// surface has not drawn yet.
 pub(super) fn footer(frame: &RunFrame, glyphs: Glyphs) -> Line {
     let sep = format!(" {} ", glyphs.sep());
-    let mut said = vec![crate::render::counter::line(frame)];
+    let mut said = vec![crate::render::counter::line(frame, glyphs)];
     let spent = frame.tokens.input + frame.tokens.output;
     if spent > 0 {
         said.push(Tokens(spent).to_string());

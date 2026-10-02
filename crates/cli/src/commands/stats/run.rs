@@ -56,7 +56,7 @@ pub(super) fn render_run_stats(
         false => format!("{} — left out of every duration", duration(stats.asleep)),
     };
     let fields = Fields::new()
-        .push_if("CPTV", cptv(stats))
+        .push_if("CPTV", cptv(stats, glyphs))
         .push_if("rework", rework(stats, glyphs))
         .push_if("cache", cache(stats, glyphs))
         .push_if("tokens", spent(stats))
@@ -84,11 +84,12 @@ pub(super) fn render_run_stats(
 
 /// What a verified task cost — the rate a run is read by first, and the
 /// one its acronym names.
-fn cptv(stats: &RunStats) -> String {
+fn cptv(stats: &RunStats, glyphs: Glyphs) -> String {
     match stats.cptv {
         Some(cptv) => format!(
-            "{} per verified task · {}",
+            "{} per verified task {} {}",
             Tokens::rounded(cptv),
+            glyphs.sep(),
             yunta_core::text::counted(stats.tasks_done, "task done")
         ),
         None => "n/a — no task is done, so no cost per verified task".to_string(),
@@ -341,7 +342,7 @@ mod tests {
         // findings come to are in it, each said as itself.
         let text = render(&stats(Vec::new()), &Look::plain());
         for row in [
-            "  CPTV         500 tokens per verified task · 1 task done",
+            "  CPTV         500 tokens per verified task | 1 task done",
             "  documents    3 accepted, 1 refused",
             "  findings     5 posted, 1 updated, 1 withdrawn, 0 refused — 4 standing",
             "  answers      2 given, 1 proved — 1 settled",

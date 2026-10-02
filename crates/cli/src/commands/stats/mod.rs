@@ -180,13 +180,17 @@ pub(crate) fn raw_history(history: &[Opened]) -> (Vec<Vec<StoredEvent>>, Option<
 
 /// Shared by `yunta stats --workflow` and `yunta run`/`list_workflows`
 /// so the three surfaces never phrase the same numbers differently.
-pub(crate) fn format_estimation_line(estimation: &yunta_engine::PriorEstimation) -> String {
+pub(crate) fn format_estimation_line(
+    estimation: &yunta_engine::PriorEstimation,
+    glyphs: crate::render::Glyphs,
+) -> String {
+    let sep = glyphs.sep();
     let wall_clock = match estimation.wall_clock_secs {
         Some(p) => duration(Duration::from_secs_f64(p.median)),
         None => "n/a".to_string(),
     };
     format!(
-        "{} · median {}, p90 {} · median wall-clock {}",
+        "{} {sep} median {}, p90 {} {sep} median wall-clock {}",
         yunta_core::text::counted(estimation.sample_count, "past run"),
         Tokens::rounded(estimation.tokens.median),
         Tokens::rounded(estimation.tokens.p90).figure(),

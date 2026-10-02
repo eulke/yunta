@@ -247,9 +247,13 @@ impl RunRow {
                 Some(yunta_core::text::one_line(diagnostic)),
                 Some(advice::verify(handle)),
             ),
-            (_, RunPhase::Created | RunPhase::Running) => {
-                (Some(crate::render::counter::line(frame)), None)
-            }
+            (_, RunPhase::Created | RunPhase::Running) => (
+                Some(crate::render::counter::line(
+                    frame,
+                    crate::render::Glyphs::settled(),
+                )),
+                None,
+            ),
             (
                 _,
                 RunPhase::Failed {

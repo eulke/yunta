@@ -12,6 +12,7 @@
 //! a re-route grows the denominator.
 
 use crate::render::state::RunWord;
+use crate::render::Glyphs;
 use chrono::{DateTime, Utc};
 
 use yunta_core::events::StoredEvent;
@@ -50,14 +51,15 @@ pub(crate) fn frame(
 /// `engine` is what the run's registry says about the process driving
 /// it, which is what tells a run that is moving from one whose engine is
 /// gone.
-pub(crate) fn summary(frame: &RunFrame, engine: EngineLiveness) -> String {
+pub(crate) fn summary(frame: &RunFrame, engine: EngineLiveness, glyphs: Glyphs) -> String {
+    let sep = glyphs.sep();
     let mut summary = format!(
-        "{} · {}",
-        crate::render::counter::line(frame),
+        "{} {sep} {}",
+        crate::render::counter::line(frame, glyphs),
         phase_label(frame, engine)
     );
     if let Some(note) = crate::commands::unknown_kinds_note(&frame.unknown_kinds) {
-        summary.push_str(&format!(" · {note}"));
+        summary.push_str(&format!(" {sep} {note}"));
     }
     summary
 }

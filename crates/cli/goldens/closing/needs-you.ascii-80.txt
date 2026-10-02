@@ -16,7 +16,7 @@ run 7E5PH4: ? needs you
   the run holds its own state on disk — close this terminal whenever you like
   and answer from anywhere.
 
-  progress     nodes 0/1 · 1 failed
+  progress     nodes 0/1 | 1 failed
   tokens       20.2k spent
   slowest      lint 12s
   branch       yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off main, in

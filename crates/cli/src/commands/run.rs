@@ -332,7 +332,10 @@ async fn estimate(
     let estimation = yunta_engine::prior_estimation(&history);
     if let Some(estimation) = &estimation {
         if !(quiet || json) {
-            println!("{}", super::stats::format_estimation_line(estimation));
+            println!(
+                "{}",
+                super::stats::format_estimation_line(estimation, crate::render::Glyphs::settled())
+            );
         }
     }
     let budget_warning = yunta_engine::budget_p90_warning(

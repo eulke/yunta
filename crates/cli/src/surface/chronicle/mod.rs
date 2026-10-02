@@ -22,7 +22,7 @@ use super::view;
 use crate::commands::advice;
 use crate::render::blocks::{Block, FailureDetail};
 use crate::render::ink::{Line, Tone};
-use crate::render::{indent, Look, Mark, CHILD_DEPTH};
+use crate::render::{indent, Glyphs, Look, Mark, CHILD_DEPTH};
 use words::carried;
 
 /// One moment as a surface says it, before any layout decides where it
@@ -36,12 +36,12 @@ pub(super) struct Said {
 }
 
 /// The words for `moment`. One match per domain, and the only ones.
-pub(super) fn say(moment: &Moment) -> Said {
+pub(super) fn say(moment: &Moment, glyphs: Glyphs) -> Said {
     let subject = match &moment.node {
         Some(node) => node.to_string(),
         None => "run".to_string(),
     };
-    let (mark, carried) = carried(&moment.happening);
+    let (mark, carried) = carried(&moment.happening, glyphs.sep());
     Said {
         mark,
         text: aside(subject, &one_line(&carried)),
@@ -91,7 +91,7 @@ pub(super) fn kept(happening: &Happening) -> bool {
 
 /// The line one moment is said on, marked when it carries a mark.
 pub(super) fn line(moment: &Moment, look: &Look) -> Line {
-    let said = say(moment);
+    let said = say(moment, look.glyphs);
     let line = match said.mark {
         Some(mark) => Line::new()
             .push(Tone::of(mark), look.glyphs.mark(mark).to_string())
@@ -164,7 +164,11 @@ mod tests {
             body: EventBody::Known(payload),
         }];
         let moments = derive_chronicle(&events);
-        say(moments.first().expect("one moment per event")).text
+        say(
+            moments.first().expect("one moment per event"),
+            Glyphs::Unicode,
+        )
+        .text
     }
 
     /// A log this binary reads back was written by some other
@@ -206,7 +210,7 @@ mod tests {
                 ))),
             }];
             let moments = derive_chronicle(&events);
-            let said = say(moments.first().expect("one moment"));
+            let said = say(moments.first().expect("one moment"), Glyphs::Unicode);
             assert_eq!(said.mark, Some(mark), "{terminal:?}: {}", said.text);
         }
     }

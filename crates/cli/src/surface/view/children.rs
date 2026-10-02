@@ -29,9 +29,10 @@ const NO_NODE: &str = "under no node on this run's log";
 pub(in crate::surface) fn child_row(child: &ChildLink, glyphs: Glyphs) -> String {
     let standing = child_standing(child.terminal);
     format!(
-        "{} {} · child run {}",
+        "{} {} {} child run {}",
         glyphs.mark(standing.0),
         standing.1,
+        glyphs.sep(),
         child.run_id.handle()
     )
 }
@@ -160,7 +161,7 @@ mod tests {
     fn a_child_row_says_where_the_child_stands_before_which_child_it_is() {
         let open = child(&FIRST, Some("compose"), None);
         let row = child_row(&open, Glyphs::Ascii);
-        assert_eq!(row, format!("> still open · child run {}", FIRST.handle()));
+        assert_eq!(row, format!("> still open | child run {}", FIRST.handle()));
         assert!(
             row.find("still open") < row.find(FIRST.handle()),
             "a row cut to a narrow terminal loses which child, never that there is one: {row}"

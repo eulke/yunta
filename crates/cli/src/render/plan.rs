@@ -63,7 +63,7 @@ pub(super) fn plan(
             lines.extend(hanging(
                 BODY,
                 &format!("{}  ", at + 1),
-                &ids.join(" · "),
+                &ids.join(&format!(" {} ", crate::render::Glyphs::settled().sep())),
                 width,
             ));
         }

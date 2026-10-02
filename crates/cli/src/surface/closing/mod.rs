@@ -28,7 +28,7 @@ use crate::commands::{advice, unknown_kinds_note};
 use crate::error::Outcome;
 use crate::render::blocks::{Block, FailureDetail, Fields, Headline, Next};
 use crate::render::ink::{Line, Tone};
-use crate::render::{duration, indent, paths, wrap, Look, Tokens, INDENT};
+use crate::render::{duration, indent, paths, wrap, Glyphs, Look, Tokens, INDENT};
 use yunta_core::text::counted;
 
 use super::view;
@@ -123,7 +123,7 @@ impl Closing {
                 .collect()
         };
         let mut out = paint(self.head(look));
-        let mut facts = self.fields().lines(look);
+        let mut facts = self.fields(look.glyphs).lines(look);
         facts.extend(self.children(look));
         for part in [
             paint(self.evidence(look)),
@@ -297,15 +297,18 @@ impl Closing {
     }
 
     /// The facts a reader checks once they know how the run stopped.
-    fn fields(&self) -> Fields {
+    fn fields(&self, glyphs: Glyphs) -> Fields {
         let degraded = match self.frame.degraded.len() {
             0 => String::new(),
             n => counted(n, "capability the adapter lacks"),
         };
         Fields::new()
-            .push_if("progress", crate::render::counter::line(&self.frame))
-            .push_if("tokens", self.tokens())
-            .push_if("slowest", self.slowest().unwrap_or_default())
+            .push_if(
+                "progress",
+                crate::render::counter::line(&self.frame, glyphs),
+            )
+            .push_if("tokens", self.tokens(glyphs))
+            .push_if("slowest", self.slowest(glyphs).unwrap_or_default())
             .push_if("branch", self.branch())
             .push_if("artifacts", self.artifacts())
             .push_if("degraded", degraded)
@@ -328,11 +331,11 @@ impl Closing {
     /// the only honest comparison there is, because it is what already
     /// happened rather than a prediction. Nothing when the run spent
     /// nothing and has no history to compare with.
-    fn tokens(&self) -> String {
+    fn tokens(&self, glyphs: Glyphs) -> String {
         let spent = self.frame.tokens.total();
         let said = format!("{} spent", Tokens(spent).figure());
         match &self.frame.prior {
-            Some(prior) => format!("{said} · {}", history(prior)),
+            Some(prior) => format!("{said} {} {}", glyphs.sep(), history(prior, glyphs)),
             None if spent == 0 => String::new(),
             None => said,
         }
@@ -340,7 +343,7 @@ impl Closing {
 
     /// The run's longest nodes, longest first. `None` for a run where no
     /// node ever started.
-    fn slowest(&self) -> Option<String> {
+    fn slowest(&self, glyphs: Glyphs) -> Option<String> {
         let mut timed: Vec<(&NodeFrame, Duration)> = self
             .frame
             .nodes
@@ -357,7 +360,7 @@ impl Closing {
                 .take(SLOWEST)
                 .map(|(node, elapsed)| format!("{} {}", node.id, duration(*elapsed)))
                 .collect::<Vec<_>>()
-                .join(" · "),
+                .join(&format!(" {} ", glyphs.sep())),
         )
     }
 
@@ -400,8 +403,8 @@ impl Closing {
 
 /// What this workflow's past runs cost, in the one phrasing every surface
 /// that reports it uses.
-fn history(prior: &PriorEstimation) -> String {
-    crate::commands::stats::format_estimation_line(prior)
+fn history(prior: &PriorEstimation, glyphs: Glyphs) -> String {
+    crate::commands::stats::format_estimation_line(prior, glyphs)
 }
 
 #[cfg(test)]

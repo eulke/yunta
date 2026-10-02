@@ -21,11 +21,11 @@ use tasks::happening as tasks_happening;
 
 /// What the moment carries beyond its subject, and the state it is
 /// marked with.
-pub(super) fn carried(happening: &Happening) -> (Option<Mark>, String) {
+pub(super) fn carried(happening: &Happening, sep: char) -> (Option<Mark>, String) {
     match happening {
         Happening::Run(it) => run_words(it),
-        Happening::Node(it) => node_words(it),
-        Happening::Session(it) => (None, session_words(it)),
+        Happening::Node(it) => node_words(it, sep),
+        Happening::Session(it) => (None, session_words(it, sep)),
         Happening::Tasks(it) => (None, task_words(it)),
         Happening::Scope(it) => (None, scope_words(it)),
         Happening::Findings(it) => (None, finding_words(it)),
@@ -86,7 +86,7 @@ fn baseline_words(origin: &BaselineOrigin, red: Option<i32>) -> (Option<Mark>, S
     }
 }
 
-fn node_words(happening: &node::happening::Happening) -> (Option<Mark>, String) {
+fn node_words(happening: &node::happening::Happening, sep: char) -> (Option<Mark>, String) {
     use node::happening::Happening as H;
     match happening {
         H::RunnerResolved(it) => (
@@ -96,7 +96,7 @@ fn node_words(happening: &node::happening::Happening) -> (Option<Mark>, String) 
         H::Reached { state, elapsed, .. } => {
             let display = NodeDisplay::of(Some(state));
             let worked = elapsed
-                .map(|elapsed| format!(" · {}", duration(elapsed)))
+                .map(|elapsed| format!(" {sep} {}", duration(elapsed)))
                 .unwrap_or_default();
             (
                 Some(display.word.mark()),
@@ -116,7 +116,7 @@ fn node_words(happening: &node::happening::Happening) -> (Option<Mark>, String) 
         H::ContextAssembled { absent } => (
             None,
             format!(
-                "context assembled · {} absent (optional)",
+                "context assembled {sep} {} absent (optional)",
                 yunta_core::text::listed(absent.iter().map(String::as_str))
             ),
         ),
@@ -125,7 +125,7 @@ fn node_words(happening: &node::happening::Happening) -> (Option<Mark>, String) 
             phase,
             checked,
             red,
-        } => (None, criteria_checked(task, *phase, *checked, red)),
+        } => (None, criteria_checked(task, (*phase, *checked), red, sep)),
         H::ScopeChecked { violations } => (
             None,
             format!(
@@ -143,9 +143,9 @@ fn node_words(happening: &node::happening::Happening) -> (Option<Mark>, String) 
 /// learns why.
 fn criteria_checked(
     task: &yunta_core::TaskId,
-    phase: yunta_core::events::Phase,
-    checked: usize,
+    (phase, checked): (yunta_core::events::Phase, usize),
     red: &[node::happening::Red],
+    sep: char,
 ) -> String {
     let mut said = format!(
         "{task} {}: {}",
@@ -160,12 +160,12 @@ fn criteria_checked(
                 None => format!("`{}` exit {}", red.cmd, red.exit_code),
             })
             .collect();
-        said.push_str(&format!(" · red: {}", named.join("; ")));
+        said.push_str(&format!(" {sep} red: {}", named.join("; ")));
     }
     said
 }
 
-fn session_words(happening: &session::happening::Happening) -> String {
+fn session_words(happening: &session::happening::Happening, sep: char) -> String {
     use session::happening::Happening as H;
     match happening {
         H::Opened {
@@ -181,7 +181,7 @@ fn session_words(happening: &session::happening::Happening) -> String {
                 said.push_str(&format!(" on {model}"));
             }
             if let Some(coverage) = fence {
-                said.push_str(&format!(" · {}", fence_covered(coverage)));
+                said.push_str(&format!(" {sep} {}", fence_covered(coverage)));
             }
             said
         }
@@ -191,7 +191,7 @@ fn session_words(happening: &session::happening::Happening) -> String {
             text,
             input_tokens,
             output_tokens,
-        } => message(*kind, text.as_deref(), *input_tokens, *output_tokens),
+        } => message(*kind, text.as_deref(), (*input_tokens, *output_tokens), sep),
         H::Degraded {
             capability,
             adapter,
@@ -224,13 +224,13 @@ fn called(tool: Option<&str>, target: Option<&ToolTarget>) -> String {
 fn message(
     kind: AgentMessageType,
     text: Option<&str>,
-    input_tokens: Option<u64>,
-    output_tokens: Option<u64>,
+    (input_tokens, output_tokens): (Option<u64>, Option<u64>),
+    sep: char,
 ) -> String {
     let mut said = kind.as_str().to_string();
     if input_tokens.is_some() || output_tokens.is_some() {
         said.push_str(&format!(
-            " · {} in / {} out",
+            " {sep} {} in / {} out",
             Tokens(input_tokens.unwrap_or_default()).figure(),
             Tokens(output_tokens.unwrap_or_default()).figure()
         ));

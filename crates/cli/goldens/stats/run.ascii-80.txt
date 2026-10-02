@@ -1,5 +1,5 @@
 run 01ARZ3NDEKTSV4RRFFQ69G5FAV — mode default
-  CPTV         500 tokens per verified task · 1 task done
+  CPTV         500 tokens per verified task | 1 task done
   rework       12% of tokens went to retries and re-routes
   cache        1.4x cached tokens per input token
   tokens       18k in / 2.2k out (25.2k cached)

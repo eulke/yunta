@@ -72,8 +72,8 @@ impl Presentation {
     /// What `--quiet` and the environment this process was handed allow.
     fn of(quiet: bool) -> Self {
         Self {
-            delivery: Delivery::choose(quiet, &TerminalEnv::from_process()),
-            glyphs: Glyphs::from_env(),
+            delivery: Delivery::choose(quiet, TerminalEnv::settled()),
+            glyphs: Glyphs::settled(),
         }
     }
 }

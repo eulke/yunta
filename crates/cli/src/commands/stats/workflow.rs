@@ -40,7 +40,10 @@ pub(super) fn render_workflow_history(
 
     match prior_estimation(history) {
         Some(estimation) => {
-            out.push_str(&format!("\n{}\n", format_estimation_line(&estimation)));
+            out.push_str(&format!(
+                "\n{}\n",
+                format_estimation_line(&estimation, look.glyphs)
+            ));
         }
         None => out.push_str(&format!(
             "\nestimation: not enough runs yet (need {}, have {})\n",

@@ -5,10 +5,6 @@
 //! rendered: a heading's `#`, emphasis, a list's bullet. The sentence is
 //! what a reader scans a column of; the whole of it is a command away.
 
-// The surfaces adopt this as they move onto the shared blocks.
-//
-#![cfg_attr(not(test), allow(dead_code))]
-
 use super::{truncate, Glyphs};
 
 /// The first sentence of `markdown`, its markup dropped and its

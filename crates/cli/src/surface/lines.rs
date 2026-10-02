@@ -193,10 +193,13 @@ mod pause_reason_tests {
             let payload = RunPausedPayload::new(&reason);
             assert_eq!(payload.reason(), sentence);
 
-            let said = chronicle::say(&yunta_testkit::moment(
-                None,
-                yunta_engine::Happening::Run((&RunEvent::Paused(payload.clone())).into()),
-            ));
+            let said = chronicle::say(
+                &yunta_testkit::moment(
+                    None,
+                    yunta_engine::Happening::Run((&RunEvent::Paused(payload.clone())).into()),
+                ),
+                crate::render::Glyphs::Unicode,
+            );
             assert_eq!(
                 said.text,
                 yunta_core::text::aside(

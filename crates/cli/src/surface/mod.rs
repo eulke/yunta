@@ -25,7 +25,7 @@ mod lines;
 mod painter;
 mod region;
 mod scrollback;
-mod terminal;
+pub(crate) mod terminal;
 mod turns;
 mod view;
 

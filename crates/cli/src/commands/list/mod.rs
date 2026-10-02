@@ -122,7 +122,10 @@ pub(crate) async fn render_catalog(cwd: &Path, history_source: Option<&Context>)
             if let Some(estimation) = yunta_engine::prior_estimation(&history) {
                 out.push_str(&format!(
                     "{INDENT}{}\n",
-                    super::stats::format_estimation_line(&estimation)
+                    super::stats::format_estimation_line(
+                        &estimation,
+                        crate::render::Glyphs::settled()
+                    )
                 ));
             }
         }

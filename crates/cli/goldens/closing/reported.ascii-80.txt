@@ -3,7 +3,7 @@ run 7E5PH4: ! reported
 
   progress     nodes 2/2
   tokens       20.2k spent
-  slowest      lint 12s · review 12s
+  slowest      lint 12s | review 12s
   branch       yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off main, in
                ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
 

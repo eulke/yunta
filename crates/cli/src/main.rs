@@ -24,6 +24,7 @@ mod context;
 mod detect;
 mod error;
 mod graph;
+mod help;
 mod human_interaction;
 mod identity;
 mod interrupt;
@@ -36,7 +37,7 @@ mod surface;
 use std::path::Path;
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 
 use crate::error::{CliError, Outcome};
 
@@ -45,9 +46,14 @@ fn main() -> ExitCode {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let cli = cli::Cli::parse();
+    let command = cli::Cli::command();
+    let template = help::template(&command);
+    let matches = command.help_template(template).get_matches();
+    let cli = cli::Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     render::ink::settle(color_policy(cli.color));
     render::line_width::settle(columns());
+    render::glyphs::settle(&render::glyphs::GlyphEnv::from_process());
+    surface::terminal::settle();
     tracing::debug!("yunta starting");
 
     let outcome = drive(cli);

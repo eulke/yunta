@@ -6,10 +6,6 @@
 //! decision show the same block, so a reader who learned it on one reads
 //! it on the next. A block with nothing to say draws nothing — no
 //! heading over an empty list, no row with an empty value.
-//!
-//! The surfaces move onto these blocks one at a time, and a block no
-//! surface draws is code only its tests run.
-#![cfg_attr(not(test), allow(dead_code, unused_imports))]
 
 mod checklist;
 mod decision;

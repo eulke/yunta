@@ -14,7 +14,7 @@ parenthesized_plural_in_prod_strings 0
 prod_fns_over_50_lines 80
 reason_built_by_format 5
 run_tool_named_outside_vocabulary 1
-separator_literal_outside_glyphs 18
+separator_literal_outside_glyphs 0
 session_request_literal_outside_plan 0
 sgr_outside_ink 0
 sleep_outside_mock_latency 4

@@ -260,7 +260,7 @@ impl Console {
     /// and rows no wider than [`Console::width`].
     pub(crate) fn look(&self) -> crate::render::Look {
         crate::render::Look {
-            glyphs: crate::render::Glyphs::from_env(),
+            glyphs: crate::render::Glyphs::settled(),
             ink: crate::render::ink::Ink::stderr(),
             width: crate::render::Width::row(usize::from(self.term.size().1)),
         }

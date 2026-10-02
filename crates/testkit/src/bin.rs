@@ -39,6 +39,10 @@ pub fn hermetic<C: Spawning>(cmd: &mut C, dir: &Path, home: &Path) {
         ("HOME", home.as_os_str()),
         ("USER", OsStr::new("yunta-test")),
         ("TERM", OsStr::new(TERM)),
+        // The glyph set, named rather than inherited from whatever locale
+        // the machine running the suite has, so a test reads the same
+        // characters everywhere.
+        ("YUNTA_GLYPHS", OsStr::new("unicode")),
         ("GIT_CONFIG_GLOBAL", git_config.as_os_str()),
         ("GIT_CONFIG_SYSTEM", git_config.as_os_str()),
     ] {

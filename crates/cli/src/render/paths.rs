@@ -1,10 +1,6 @@
 //! A path as a reader reads it: as short as it can be and still name one
 //! file.
 
-// The surfaces adopt this as they move onto the shared blocks.
-//
-#![cfg_attr(not(test), allow(dead_code))]
-
 use std::path::Path;
 
 /// `path` as a line shows it: relative to `cwd` when it is under it,

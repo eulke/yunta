@@ -16,7 +16,7 @@ impl Look {
     /// The look stdout gets in this process.
     pub(crate) fn stdout() -> Self {
         Look {
-            glyphs: Glyphs::from_env(),
+            glyphs: Glyphs::settled(),
             ink: Ink::stdout(),
             width: Width::stdout(),
         }

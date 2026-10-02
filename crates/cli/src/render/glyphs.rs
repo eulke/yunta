@@ -59,22 +59,31 @@ impl GlyphEnv {
     }
 }
 
-impl Glyphs {
-    /// The set this process's environment allows, naming on stderr a
-    /// value of [`OVERRIDE_VAR`] it does not recognize and carrying on
-    /// with what the rest of the environment says.
-    pub(crate) fn from_env() -> Self {
-        let env = GlyphEnv::from_process();
-        let chosen = Self::select(&env);
-        if let Some(value) = &env.explicit {
-            if parse_choice(value).is_none() {
-                crate::error::warn(format!(
-                    "{OVERRIDE_VAR}=`{value}` is neither `unicode` nor `ascii` — \
-                     drawing with {chosen}, which is what this environment names"
-                ));
-            }
+static SETTLED: std::sync::OnceLock<Glyphs> = std::sync::OnceLock::new();
+
+/// Fixes the set this process draws with, from the environment it was
+/// started with, naming on stderr a value of [`OVERRIDE_VAR`] it does not
+/// recognize. `main` calls it once, before anything is printed; a later
+/// call changes nothing.
+pub(crate) fn settle(env: &GlyphEnv) {
+    let chosen = Glyphs::select(env);
+    if let Some(value) = &env.explicit {
+        if parse_choice(value).is_none() {
+            crate::error::warn(format!(
+                "{OVERRIDE_VAR}=`{value}` is neither `unicode` nor `ascii` — drawing with \
+                 {chosen}, which is what this environment names"
+            ));
         }
-        chosen
+    }
+    SETTLED.get_or_init(|| chosen);
+}
+
+impl Glyphs {
+    /// The set this process draws with: what `main` settled, or ASCII in
+    /// a process that never settled one — a unit test, which then reads
+    /// the same characters wherever it runs.
+    pub(crate) fn settled() -> Self {
+        SETTLED.get().copied().unwrap_or(Glyphs::Ascii)
     }
 
     /// The set `env` allows.

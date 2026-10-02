@@ -30,26 +30,27 @@ fn elsewhere() -> tempfile::TempDir {
     tempfile::tempdir().unwrap()
 }
 
-/// The subcommands `yunta --help` lists under `Commands:`.
+/// The subcommands `yunta --help` lists: every row under a group
+/// heading — a line of its own ending in `:` — up to the blank line that
+/// closes the group. `Options:` and `Examples:` list no subcommand.
 fn subcommands_from_help() -> BTreeSet<String> {
     let away = elsewhere();
     let out = yunta_in!(away.path(), &away.path().join("home"), &["--help"]);
     let text = stdout(&out);
     let mut names = BTreeSet::new();
-    let mut in_commands = false;
+    let mut in_group = false;
     for line in text.lines() {
-        if line.starts_with("Commands:") {
-            in_commands = true;
+        if line.trim().is_empty() {
+            in_group = false;
             continue;
         }
-        if in_commands {
-            if line.trim().is_empty() {
-                break;
-            }
+        if !line.starts_with(' ') && line.ends_with(':') {
+            in_group = !matches!(line, "Options:" | "Examples:");
+            continue;
+        }
+        if in_group {
             if let Some(name) = line.split_whitespace().next() {
-                if name != "help" {
-                    names.insert(name.to_string());
-                }
+                names.insert(name.to_string());
             }
         }
     }

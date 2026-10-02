@@ -170,7 +170,8 @@ impl RunDocument {
             run_id: run_id.to_string(),
             handle: run_id.handle().to_string(),
             outcome: RunWord::observed(&frame, engine),
-            summary: progress::summary(&frame, engine),
+            // A document reads the same whichever terminal asked for it.
+            summary: progress::summary(&frame, engine, crate::render::Glyphs::Unicode),
             reason: reason(&frame.phase),
             budget_warning: None,
             context_warnings: Vec::new(),
