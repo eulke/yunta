@@ -50,7 +50,7 @@ pub(super) async fn dispatch(command: Command) -> Result<Outcome, CliError> {
         } => {
             commands::resolve_gate::resolve_gate(
                 &run.named().await?,
-                &option,
+                option.as_ref(),
                 by.as_ref(),
                 free_text.as_deref(),
             )

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::text::LINE_WIDTH;
 use yunta_testkit::{
-    git, handle, run_id_from, stdout, wait_for, write, yunta_in, Checkout, MOCK_CONFIG,
+    git, handle, run_id_from, stderr, stdout, wait_for, write, yunta_in, Checkout, MOCK_CONFIG,
 };
 
 /// A node that fails with its one re-route already spent: the run parks
@@ -669,4 +669,48 @@ fn a_run_whose_manifest_does_not_read_back_is_listed_as_itself() {
         text.contains(handle(&run_id)),
         "a run that cannot be derived is still named: {text}"
     );
+}
+
+#[test]
+fn resolve_gate_without_an_option_offers_the_menu() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = repo_with(root.path(), &[("hopeless", EXHAUSTED_REROUTE)]);
+    let home = root.path().join("state");
+    let run = yunta_in!(&repo, &home, &["run", "hopeless.yaml"]);
+    let run_id = run_id_from(&run);
+
+    let mut terminal = yunta_testkit::yunta_on_terminal!(&repo, &home, &["resolve-gate", &run_id]);
+    terminal.wait_for(
+        "> 1  retry",
+        "the run's own menu was never put to the terminal",
+    );
+    // `abort`, the second option, with nothing to add.
+    terminal.keys("\x1b[B\r");
+    terminal.wait_for("enter records it", "choosing never said how it is recorded");
+    terminal.keys("\r");
+    let drawn = terminal.ended();
+    assert!(terminal.ran_to_the_end(), "{drawn}");
+    assert!(drawn.contains("resolved `abort`"), "{drawn}");
+}
+
+#[test]
+fn off_a_terminal_it_lists_one_command_per_option() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = repo_with(root.path(), &[("hopeless", EXHAUSTED_REROUTE)]);
+    let home = root.path().join("state");
+    let run = yunta_in!(&repo, &home, &["run", "hopeless.yaml"]);
+    let run_id = run_id_from(&run);
+
+    let asked = yunta_in!(&repo, &home, &["resolve-gate", &run_id]);
+    assert_eq!(asked.status.code(), Some(1), "{}", stderr(&asked));
+    let said = stderr(&asked);
+    for option in ["retry", "abort"] {
+        assert!(
+            said.contains(&format!(
+                "  yunta resolve-gate {} {option}",
+                handle(&run_id)
+            )),
+            "the command that chooses `{option}`: {said}"
+        );
+    }
 }

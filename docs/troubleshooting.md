@@ -286,12 +286,13 @@ then sleeps again would leave a session hanging. Commands and checks don't
 wait. If nothing moves after those two minutes, the run is waiting on something
 else: check `yunta status`.
 
-## A run is stuck in `waiting`
+## A run says it `needs you`
 
 Not stuck — paused on a `gate`, waiting for a human decision, and it
 survives the engine restarting. `yunta status <run>` shows what it's
-waiting on and the exact option ids; `yunta resolve-gate <run> <option>`
-answers it from any process. See [gates from the
+waiting on and the command that chooses each option; `yunta resolve-gate
+<run> <option>` answers it from any process, and `yunta resolve-gate <run>`
+on a terminal puts the menu to you. See [gates from the
 outside](guide.md#gates-from-the-outside).
 
 ## A node failed and `resume` pauses on the same failure

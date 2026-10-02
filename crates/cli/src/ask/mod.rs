@@ -49,6 +49,8 @@ pub(crate) use menu::{choose, Choice};
 pub(crate) enum Escape {
     /// The run this prompt belongs to parks with its state intact.
     Parks,
+    /// The run, parked already, keeps waiting with nothing recorded.
+    LeavesWaiting,
     /// The value the command detected for itself stands.
     KeepsDefault,
 }
@@ -58,6 +60,7 @@ impl Escape {
     pub(crate) fn said(self) -> &'static str {
         match self {
             Escape::Parks => "esc parks the run",
+            Escape::LeavesWaiting => "esc leaves the run waiting",
             Escape::KeepsDefault => "esc keeps the detected default",
         }
     }

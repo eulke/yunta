@@ -129,8 +129,9 @@ enum Command {
     ResolveGate {
         #[command(flatten)]
         run: RunArg,
-        /// The chosen option id, as printed by `yunta status`.
-        option: OptionId,
+        /// The chosen option id, as printed by `yunta status`. Without
+        /// one, the run's own menu is put to this terminal.
+        option: Option<OptionId>,
         /// Who's answering, for the audit trail
         /// (`gate_resolved.resolved_by`). Omitted, the decision is recorded
         /// as `unverified:$USER` — an ambient identity, not a claimed one.

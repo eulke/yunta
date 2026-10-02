@@ -13,8 +13,12 @@
 use yunta_core::events::HumanChoice;
 use yunta_core::{OptionId, Responder, RunId};
 
+use crate::ask::{Console, Escape, NoAnswer};
+use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::render::state::RunExit;
+use crate::surface::Diagnostics;
 
 /// Records the decision and hands the run back, returning the sentence
 /// that says so.
@@ -59,16 +63,94 @@ pub(crate) async fn resolve(
     ))
 }
 
+/// Answers `run_id`'s decision with `option`, or — with none — with
+/// the option a person picks off the run's own menu on this terminal.
 pub async fn resolve_gate(
     run_id: &RunId,
-    option: &OptionId,
+    option: Option<&OptionId>,
     resolved_by: Option<&Responder>,
     free_text: Option<&str>,
 ) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
+    let choice = match option {
+        Some(option) => HumanChoice {
+            option: option.clone(),
+            by: crate::identity::responder(resolved_by),
+            free_text: free_text.map(str::to_string),
+        },
+        None => match chosen(&ctx, run_id).await? {
+            Chosen::Answered(choice) => HumanChoice {
+                by: resolved_by.cloned().unwrap_or(choice.by),
+                free_text: choice.free_text.or_else(|| free_text.map(str::to_string)),
+                ..choice
+            },
+            Chosen::Not(outcome) => return Ok(outcome),
+        },
+    };
     println!(
         "{}",
-        resolve(&ctx, run_id, option, resolved_by, free_text).await?
+        resolve(
+            &ctx,
+            run_id,
+            &choice.option,
+            Some(&choice.by),
+            choice.free_text.as_deref()
+        )
+        .await?
     );
     Ok(Outcome::Success)
+}
+
+/// What the person at the menu did.
+enum Chosen {
+    Answered(HumanChoice),
+    /// Nothing was recorded, and the invocation ends with this.
+    Not(Outcome),
+}
+
+/// The option a person picks off the menu `run_id` waits on, put to them
+/// on this terminal — the same prompt a run asks on when it stops.
+///
+/// Off a terminal there is nobody to put it to, and what is refused
+/// lists the command that chooses each option, so the next invocation
+/// is one copied line.
+async fn chosen(ctx: &Context, run_id: &RunId) -> Result<Chosen, CliError> {
+    let open = ctx.open_run(run_id).await?;
+    let state = yunta_engine::derive(&open.events);
+    let called = run_id.handle();
+    let Some((_, escalation)) = yunta_engine::current_escalation(&open.manifest.doc, &state) else {
+        return Err(CliError::msg(format!(
+            "run {called} waits on no decision — `{}` says where it stands",
+            advice::status(called)
+        )));
+    };
+    let escalation = escalation.into_payload();
+    let Some(console) = Console::open(&Diagnostics::none(), Escape::LeavesWaiting).await else {
+        let commands: Vec<String> = escalation
+            .options()
+            .iter()
+            .map(|option| format!("  yunta resolve-gate {called} {}", option.id))
+            .collect();
+        return Err(CliError::msg(format!(
+            "run {called} waits on a decision, and no option was given — choose one:\n{}",
+            commands.join("\n")
+        )));
+    };
+    match crate::ask::decide(&console, &escalation, &[]) {
+        Ok(choice) => Ok(Chosen::Answered(choice)),
+        Err(NoAnswer::Declined) => {
+            println!("run {called}: nothing recorded — it still waits on the decision");
+            Ok(Chosen::Not(Outcome::Success))
+        }
+        Err(NoAnswer::Interrupted) => Ok(Chosen::Not(RunExit::Interrupted.outcome())),
+        Err(NoAnswer::OffMenu) => Err(CliError::msg(
+            "the menu answered with an option it does not offer — nothing recorded",
+        )),
+        Err(NoAnswer::Unreadable(error)) => Err(CliError::msg(format!(
+            "this terminal could not be read or drawn on ({error}) — nothing recorded"
+        ))),
+        Err(NoAnswer::Failed(why)) => Err(CliError::msg(format!(
+            "the menu ended without an answer ({why}) — nothing recorded"
+        ))),
+    }
 }
