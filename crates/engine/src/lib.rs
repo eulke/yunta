@@ -81,7 +81,7 @@ pub use answers::{
     answer_questions, AnswerQuestionsError, AnswersError, Recorded as AnswersRecorded,
     Reply as AnswersReply,
 };
-pub use artifacts::shown::view_of;
+pub use artifacts::shown::{documents as shown_documents, view_of};
 pub use artifacts::store::{view_path, ObjectError, ObjectStore};
 pub use artifacts::{
     close_artifacts, AcceptError, ArtifactContent, ArtifactFault, ArtifactIntegrity, StagedHash,

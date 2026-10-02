@@ -3,7 +3,7 @@
 //! words is asked again, and one with words sends the plan back to the
 //! planner before the gate asks once more.
 
-use yunta_testkit::{yunta_on_terminal, Checkout, Terminal};
+use yunta_testkit::{run_id_from, stderr, yunta_in, yunta_on_terminal, Checkout, Terminal};
 
 const REVIEWED_PLAN: &str = r#"
 name: reviewed-plan
@@ -51,29 +51,30 @@ sessions:
     outcome: { type: completed, summary: "planned again" }
 "#;
 
-fn reviewing(root: &std::path::Path) -> Terminal {
-    let checkout = Checkout::under(root)
+const RUN: [&str; 7] = [
+    "run",
+    "wf.yaml",
+    "--adapter",
+    "mock",
+    "--fixture",
+    "fixture.yaml",
+    "--quiet",
+];
+
+fn checkout(root: &std::path::Path) -> Checkout {
+    Checkout::under(root)
         .config(
             "defaults:\n  isolation: none\nrunners:\n  planner:\n    \
              - { adapter: mock, model: mock-model }\n",
         )
         .workflow("wf", REVIEWED_PLAN)
         .file("fixture.yaml", PLANNER)
-        .committed();
-    let (repo, home) = (checkout.repo, checkout.home);
-    yunta_on_terminal!(
-        &repo,
-        &home,
-        &[
-            "run",
-            "wf.yaml",
-            "--adapter",
-            "mock",
-            "--fixture",
-            "fixture.yaml",
-            "--quiet",
-        ]
-    )
+        .committed()
+}
+
+fn reviewing(root: &std::path::Path) -> Terminal {
+    let checkout = checkout(root);
+    yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN)
 }
 
 #[test]
@@ -143,5 +144,29 @@ fn an_option_that_asks_requires_its_words() {
     assert!(
         !drawn.contains("enter records it"),
         "an option that needs words is never settled with a key:\n{drawn}"
+    );
+}
+
+#[test]
+fn resolve_gate_without_an_option_shows_the_documents_its_gate_shows() {
+    let root = tempfile::tempdir().unwrap();
+    let checkout = checkout(root.path());
+    let (repo, home) = (&checkout.repo, &checkout.home);
+    // Off a terminal the gate parks the run, and it is answered later.
+    let parked = yunta_in!(repo, home, &RUN);
+    assert_eq!(parked.status.code(), Some(3), "{}", stderr(&parked));
+    let run_id = run_id_from(&parked);
+
+    let terminal = yunta_on_terminal!(repo, home, &["resolve-gate", &run_id]);
+    terminal.wait_for(
+        "2  adjust",
+        "the run's own menu was never put to the terminal",
+    );
+    let drawn = terminal.drawn();
+    assert!(
+        drawn.contains("what you are deciding on")
+            && drawn.contains("T001 — Make it")
+            && drawn.contains("done when     the file exists"),
+        "resolve-gate offered a decision without the plan it decides on:\n{drawn}"
     );
 }

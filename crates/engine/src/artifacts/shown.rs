@@ -25,7 +25,19 @@ pub fn view_of(shown: &Shown) -> std::path::PathBuf {
 /// exact bytes each hash names, a tasks document read into its tasks and
 /// shown with the departures from it `tasks` records as accepted, a
 /// findings document into its findings.
-pub(crate) async fn documents(
+///
+/// Every surface that puts a decision to a person reads them here — the
+/// prompt a run asks on and `resolve-gate` alike — so a decision is never
+/// offered without what it is about.
+pub async fn documents(
+    run_dir: &Path,
+    shows: &[Shown],
+    tasks: &TaskLedger,
+) -> Result<Vec<ShownDocument>, crate::run::RunError> {
+    Ok(held_documents(run_dir, shows, tasks).await?)
+}
+
+async fn held_documents(
     run_dir: &Path,
     shows: &[Shown],
     tasks: &TaskLedger,
