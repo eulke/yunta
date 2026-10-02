@@ -20,57 +20,68 @@ use std::collections::BTreeSet;
 
 use crate::context::Context;
 use crate::error::{CliError, Outcome};
+use crate::render::blocks::{paint, Checklist, Found, Next};
+use crate::render::{Look, INDENT};
 use yunta_core::port::ProbeReport;
 use yunta_core::AdapterId;
 
 pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
-    let (healthy, all_probed) = probe_adapters(&ctx).await;
-    let mut all_well = all_probed;
-
+    let mut checks = Checklist::default();
+    // The configuration a check found missing, as the lines to paste.
+    let mut steps = Vec::new();
+    let healthy = probe_adapters(&ctx, &mut checks, &mut steps).await;
     match super::committer::committer(&ctx).await {
-        Ok(who) => println!("git: commits as {who}"),
-        Err(why) => {
-            all_well = false;
-            println!("git: {why}");
+        Ok(who) => checks.push(Found::Holds, "git", format!("commits as {who}")),
+        Err(why) => checks.push(Found::Problem, "git", why.to_string()),
+    }
+    checks.extend(super::forge::forge_checks(&ctx).await);
+    check_installed_pack_requires(&ctx.cwd, &ctx.project.config, &mut checks, &mut steps);
+    check_installed_pack_workflows(&ctx, &mut checks, &mut steps).await;
+    if session {
+        probe_sessions(&ctx, &healthy, &mut checks).await;
+    }
+
+    let look = Look::stdout();
+    let mut out = paint(&[&checks], &look);
+    if !steps.is_empty() {
+        out.push('\n');
+        for line in &steps {
+            out.push_str(&format!("{INDENT}{line}\n"));
         }
     }
-    all_well &= super::forge::report_forge(&ctx).await;
-
-    if !check_installed_pack_requires(&ctx.cwd, &ctx.project.config) {
-        all_well = false;
+    if !session {
+        let next = Next {
+            steps: vec![(
+                "yunta doctor --session".to_string(),
+                "opens a session per binding, a prompt each",
+            )],
+        };
+        out.push('\n');
+        out.push_str(&paint(&[&next], &look));
     }
-    if !check_installed_pack_workflows(&ctx).await {
-        all_well = false;
-    }
+    print!("{out}");
 
-    if session {
-        all_well &= probe_sessions(&ctx, &healthy).await;
-    } else {
-        println!(
-            "no session opened — `doctor` says the binary is there, answers and authenticates; \
-             `yunta doctor --session` opens one per binding and says whether a run's session \
-             actually starts, at the cost of a prompt each"
-        );
-    }
-
-    if all_well {
-        Ok(Outcome::Success)
-    } else {
-        Ok(Outcome::Reported)
+    match checks.holds() {
+        true => Ok(Outcome::Success),
+        false => Ok(Outcome::Reported),
     }
 }
 
-/// Probes every adapter this project's `runners:` names and prints each
-/// result. Hands back the ones that answered healthy — the only ones a
-/// session is worth opening on — and whether all of them did.
-async fn probe_adapters(ctx: &Context) -> (BTreeSet<AdapterId>, bool) {
+/// Probes every adapter this project's `runners:` names, a check each.
+/// Hands back the ones that answered healthy — the only ones a session
+/// is worth opening on.
+async fn probe_adapters(
+    ctx: &Context,
+    checks: &mut Checklist,
+    steps: &mut Vec<String>,
+) -> BTreeSet<AdapterId> {
     let adapters = ctx.adapters();
     if adapters.is_empty() {
-        return (BTreeSet::new(), no_runner_declared(ctx).await);
+        no_runner_declared(ctx, checks, steps).await;
+        return BTreeSet::new();
     }
     let mut healthy = BTreeSet::new();
-    let mut all_healthy = true;
     let mut names: Vec<&AdapterId> = adapters.keys().collect();
     names.sort();
     for name in names {
@@ -84,27 +95,27 @@ async fn probe_adapters(ctx: &Context) -> (BTreeSet<AdapterId>, bool) {
                     .as_deref()
                     .map(|v| format!(" ({v})"))
                     .unwrap_or_default();
-                println!("{name}: healthy{said}");
+                checks.push(Found::Holds, name.as_str(), format!("healthy{said}"));
             }
             Ok(ProbeReport::Unhealthy { diagnostic }) => {
-                all_healthy = false;
-                println!("{name}: unhealthy — {diagnostic}");
+                checks.push(
+                    Found::Problem,
+                    name.as_str(),
+                    format!("unhealthy — {diagnostic}"),
+                );
             }
-            Err(e) => {
-                all_healthy = false;
-                println!("{name}: unhealthy — {e}");
-            }
+            Err(e) => checks.push(Found::Problem, name.as_str(), format!("unhealthy — {e}")),
         }
     }
-    (healthy, all_healthy)
+    healthy
 }
 
-/// What `doctor` says of a project whose `runners:` names no adapter
+/// What `doctor` finds of a project whose `runners:` names no adapter
 /// this build supports: that nothing has an adapter to run on, and the
-/// runner to declare with the adapters this machine answers for. `false`
-/// when a workflow in the catalog needs one — it would stop the first
-/// time it reached an agent node — and a caution otherwise.
-async fn no_runner_declared(ctx: &Context) -> bool {
+/// runner to declare with the adapters this machine answers for. A
+/// problem when a workflow in the catalog needs one — it would stop the
+/// first time it reached an agent node — and a caution otherwise.
+async fn no_runner_declared(ctx: &Context, checks: &mut Checklist, steps: &mut Vec<String>) {
     let needing = needing_a_runner(ctx);
     let errors: Vec<yunta_engine::CheckError> = needing
         .iter()
@@ -117,24 +128,23 @@ async fn no_runner_declared(ctx: &Context) -> bool {
         step = crate::detect::runner_step(&[], true, &crate::detect::healthy(&probed));
     }
     let names: Vec<&str> = needing.iter().map(|(name, _)| name.as_str()).collect();
-    let said = match names.is_empty() {
-        true => {
-            "runners: none declared — a workflow's agent nodes cannot run until one is".to_string()
-        }
-        false => format!(
-            "runners: none declared, and {} {} one",
-            yunta_core::text::listed(names.iter().copied()),
-            yunta_core::text::agreeing(names.len(), "needs", "need")
-        ),
-    };
     match names.is_empty() {
-        true => crate::error::warn(said),
-        false => println!("{said}"),
+        true => checks.push(
+            Found::Caution,
+            "runners",
+            "none declared — a workflow's agent nodes cannot run until one is",
+        ),
+        false => checks.push(
+            Found::Problem,
+            "runners",
+            format!(
+                "none declared, and {} {} one",
+                yunta_core::text::listed(names.iter().copied()),
+                yunta_core::text::agreeing(names.len(), "needs", "need")
+            ),
+        ),
     }
-    for line in step {
-        println!("  {line}");
-    }
-    names.is_empty()
+    steps.extend(step);
 }
 
 /// Every catalog workflow that names a runner the config lacks, with
@@ -172,51 +182,64 @@ fn names_a_runner(error: &yunta_engine::CheckError) -> bool {
 
 /// Checks every installed pack's own `requires:` against this
 /// project's merged config — roles resolvable, `mcp_servers:` defined,
-/// and `requires.programs` present on `PATH`. Returns `false` (and
-/// prints an actionable line per gap) when any pack has something
-/// unmet; a project with no packs installed prints nothing and returns
-/// `true`.
-fn check_installed_pack_requires(cwd: &std::path::Path, config: &yunta_core::ConfigLayer) -> bool {
-    let mut all_satisfied = true;
+/// and `requires.programs` present on `PATH` — a check per gap, and the
+/// runner each unresolvable role needs as a step. A project with no
+/// packs installed has nothing to check.
+fn check_installed_pack_requires(
+    cwd: &std::path::Path,
+    config: &yunta_core::ConfigLayer,
+    checks: &mut Checklist,
+    steps: &mut Vec<String>,
+) {
     for publisher in yunta_engine::installed_publishers(cwd) {
         let packs = yunta_engine::packs_for_publisher(cwd, &publisher);
         // A broken pack is a real gap: its manifest is the only place its
         // requirements are declared, so it is named, never skipped.
         for err in &packs.broken {
-            all_satisfied = false;
-            println!("{err}");
+            checks.push(Found::Problem, "pack", err.to_string());
         }
         for (_, manifest) in packs.installed {
             let gap = yunta_engine::check_pack_requires(&manifest, config);
-            let missing_programs: Vec<&String> = gap
+            let pack = format!("pack {}", gap.pack);
+            for runner in &gap.missing_runners {
+                checks.push(
+                    Found::Problem,
+                    pack.as_str(),
+                    format!(
+                        "requires runner `{runner}`, which `runners:` does not define, or \
+                         defines with zero candidates"
+                    ),
+                );
+                steps.extend([
+                    format!("declare runner `{runner}` in .yunta/config.yaml:"),
+                    "    runners:".to_string(),
+                    format!("      {runner}:"),
+                    format!(
+                        "        - {{ adapter: {}, model: <model> }}",
+                        super::first_built_adapter()
+                    ),
+                ]);
+            }
+            for server in &gap.missing_mcp_servers {
+                checks.push(
+                    Found::Problem,
+                    pack.as_str(),
+                    format!("requires mcp_server `{server}`, not defined under `mcp_servers:`"),
+                );
+            }
+            for program in gap
                 .required_programs
                 .iter()
                 .filter(|program| !super::refusals::command_on_path(program))
-                .collect();
-            if gap.is_satisfied() && missing_programs.is_empty() {
-                continue;
-            }
-            all_satisfied = false;
-            println!("pack {} requires:", gap.pack);
-            for runner in &gap.missing_runners {
-                println!(
-                    "  runner `{runner}` — not resolvable: `runners:` doesn't define it, or \
-                     defines it with zero candidates; add e.g.:\n      runners:\n        \
-                     {runner}:\n          - {{ adapter: {}, model: <model> }}",
-                    super::first_built_adapter()
+            {
+                checks.push(
+                    Found::Problem,
+                    pack.as_str(),
+                    format!("requires program `{program}`, not found on PATH"),
                 );
-            }
-            for server in &gap.missing_mcp_servers {
-                println!(
-                    "  mcp_server `{server}` — not defined under `mcp_servers:`; add it there"
-                );
-            }
-            for program in missing_programs {
-                println!("  program `{program}` — not found on PATH");
             }
         }
     }
-    all_satisfied
 }
 
 /// Checks every installed pack's workflows as `yunta run` would check
@@ -228,11 +251,14 @@ fn check_installed_pack_requires(cwd: &std::path::Path, config: &yunta_core::Con
 /// (and prints a line per problem) when any has one; what the manifest
 /// `requires:` and a broken pack are `check_installed_pack_requires`'s
 /// to name.
-async fn check_installed_pack_workflows(ctx: &Context) -> bool {
+async fn check_installed_pack_workflows(
+    ctx: &Context,
+    checks: &mut Checklist,
+    steps: &mut Vec<String>,
+) {
     let config = &ctx.project.config;
     let isolation = config.resolved_isolation();
     let detected = crate::detect::Detected::in_repo(&ctx.cwd, ctx.supervision()).await;
-    let mut all_present = true;
     for publisher in yunta_engine::installed_publishers(&ctx.cwd) {
         for (pack_dir, manifest) in
             yunta_engine::packs_for_publisher(&ctx.cwd, &publisher).installed
@@ -259,40 +285,38 @@ async fn check_installed_pack_workflows(ctx: &Context) -> bool {
                     );
                 let found = super::context_files_at_head(ctx, &workflow, isolation).await;
                 let errors: Vec<yunta_engine::CheckError> = refused.chain(found.errors).collect();
-                let said = errors
-                    .iter()
-                    .map(ToString::to_string)
-                    .chain(found.warnings.iter().map(ToString::to_string))
-                    .chain(crate::detect::suggestions(&errors, &detected));
-                for line in said {
-                    all_present = false;
-                    println!("pack {}: {line}", manifest.reference());
+                let pack = format!("pack {}", manifest.reference());
+                for error in &errors {
+                    checks.push(Found::Problem, pack.as_str(), error.to_string());
                 }
+                for warning in &found.warnings {
+                    checks.push(Found::Caution, pack.as_str(), warning.to_string());
+                }
+                steps.extend(crate::detect::suggestions(&errors, &detected));
             }
         }
     }
-    all_present
 }
 
-/// Opens one session per binding whose adapter probed healthy, and
-/// prints how each ended. Returns `false` when any of them did not open.
+/// Opens one session per binding whose adapter probed healthy, a check
+/// each.
 ///
 /// Only the bindings whose adapter is already healthy: the rest have
-/// nothing a session could add, and the lines above already name them.
-async fn probe_sessions(ctx: &Context, healthy: &BTreeSet<AdapterId>) -> bool {
+/// nothing a session could add, and the checks above already name them.
+async fn probe_sessions(ctx: &Context, healthy: &BTreeSet<AdapterId>, checks: &mut Checklist) {
     let bindings: Vec<session::Binding> = session::bindings(&ctx.project.config)
         .into_iter()
         .filter(|binding| healthy.contains(&binding.candidate.adapter))
         .collect();
     if bindings.is_empty() {
-        println!("no binding to open a session on");
-        return true;
+        checks.push(
+            Found::Caution,
+            "sessions",
+            "no binding to open a session on",
+        );
+        return;
     }
-    let mut all_opened = true;
     for binding in &bindings {
-        let probe = session::session_probe(ctx, binding).await;
-        all_opened &= probe.is_ok();
-        println!("{probe}");
+        checks.push_check(session::session_probe(ctx, binding).await.check());
     }
-    all_opened
 }

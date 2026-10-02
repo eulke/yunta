@@ -163,3 +163,45 @@ fn find_run_id(text: &str) -> Option<String> {
             .map(str::to_string)
     })
 }
+
+/// What the first checklist row about `subject` in `text` says; `None`
+/// when no row checks `subject`. See [`checks`].
+pub fn checked(text: &str, subject: &str) -> Option<String> {
+    checks(text, subject).into_iter().next()
+}
+
+/// What every checklist row about `subject` in `text` says, in order: a
+/// row whose mark is followed by `subject`, and the lines it wraps onto,
+/// joined with single spaces.
+pub fn checks(text: &str, subject: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut found = Vec::new();
+    for (at, row) in lines.iter().enumerate() {
+        let trimmed = row.trim_start();
+        let Some((mark, rest)) = trimmed.split_once(' ') else {
+            continue;
+        };
+        let Some(first) = rest.strip_prefix(subject) else {
+            continue;
+        };
+        if mark.chars().count() != 1 {
+            continue;
+        }
+        let depth = row.len() - trimmed.len();
+        let wrapped = lines
+            .iter()
+            .skip(at + 1)
+            .take_while(|line| {
+                !line.trim().is_empty() && line.len() - line.trim_start().len() > depth
+            })
+            .copied();
+        found.push(
+            std::iter::once(first)
+                .chain(wrapped)
+                .flat_map(str::split_whitespace)
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+    }
+    found
+}

@@ -111,8 +111,12 @@ fn doctor_names_what_a_pack_needs_with_the_detected_value() {
     assert!(!out.status.success());
     let said = stdout(&out);
     assert!(
-        said.lines().any(|l| l
-            == "pack acme/lint-pack: detected here: declare `commands: { lint: \"pnpm lint\" }`"),
-        "{said}"
+        yunta_testkit::checked(&said, "pack acme/lint-pack").is_some(),
+        "the pack's gap is a row of its own: {said}"
+    );
+    assert!(
+        said.lines()
+            .any(|l| l.trim() == "detected here: declare `commands: { lint: \"pnpm lint\" }`"),
+        "and the step under the list names the detected value: {said}"
     );
 }

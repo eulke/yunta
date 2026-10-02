@@ -55,9 +55,9 @@ fn doctor_names_an_unset_forge_token() {
 
     assert!(!doctor.status.success());
     assert!(
-        stdout(&doctor).contains(
-            "forge: github acme/web — `YUNTA_TEST_FORGE_TOKEN_NOBODY_SETS`, the variable its token is in, is not set, and `opens` opens a pull request through it"
-        ),
+        yunta_testkit::checked(&stdout(&doctor), "forge").is_some_and(|said| said.contains(
+            "github acme/web — `YUNTA_TEST_FORGE_TOKEN_NOBODY_SETS`, the variable its token is in, is not set, and `opens` opens a pull request through it"
+        )),
         "{}",
         stdout(&doctor)
     );

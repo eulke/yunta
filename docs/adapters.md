@@ -126,11 +126,13 @@ yunta doctor
 Runs the exact same health probe `yunta run`/`yunta resume` run before
 spending anything — binary present, version compatible, auth valid — for
 every adapter your `runners:` names, and reports every one of them instead of
-stopping at the first failure:
+stopping at the first failure. Each check is a row: `✓` when it holds, `▲` when
+it is worth a look and stops nothing, `✗` when a run would stop on it — and
+`doctor` exits non-zero only for a `✗`:
 
 ```
-claude-code: healthy (1.2.3)
-codex: unhealthy — `codex` not found on PATH
+  ✓ claude-code  healthy (1.2.3)
+  ✗ codex        unhealthy — `codex` not found on PATH
 ```
 
 A config whose `runners:` names no adapter has nothing to probe, and `doctor`
@@ -138,7 +140,8 @@ says so with the runner to declare, on the adapter CLIs this machine answers for
 and the model left for you to name:
 
 ```
-runners: none declared, and `lint-fix` needs one
+  ✗ runners  none declared, and `lint-fix` needs one
+
   declare a runner in .yunta/config.yaml — this machine answers for `claude-code`:
       runners:
         implementer:
@@ -147,8 +150,8 @@ runners: none declared, and `lint-fix` needs one
         runner: implementer
 ```
 
-That is a failure only when a workflow in the catalog has an agent node that
-would stop on it; with none, it is a warning. The same holds for a forge whose
+That is a `✗` only when a workflow in the catalog has an agent node that would
+stop on it; with none, it is a `▲`. The same holds for a forge whose
 token variable is not set: `doctor` fails for it only when a workflow in the
 catalog opens a pull request, since a gate published to the forge asks on the
 console without one. `yunta init` ends with the same runner step, and `yunta

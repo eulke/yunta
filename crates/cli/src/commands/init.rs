@@ -15,6 +15,8 @@ use yunta_engine::process::Supervision;
 use crate::ask::{ask_line, Console, Escape};
 use crate::error::{warn, CliError, Outcome};
 use crate::interrupt::Interrupt;
+use crate::render::blocks::{paint, Checklist, Fields, Found, Next};
+use crate::render::Look;
 use crate::surface::Diagnostics;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
@@ -301,10 +303,10 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         .map_err(|e| CliError::msg(format!("the generated config is not valid: {e}")))?;
     std::fs::write(&config_path, config_yaml)
         .map_err(|source| CliError::io("write", config_path.display(), source))?;
-    wrote.push(config_path.display().to_string());
+    wrote.push(".yunta/config.yaml".to_string());
 
     match write_gitignore(&repo) {
-        Ok(true) => wrote.push(repo.join(".gitignore").display().to_string()),
+        Ok(true) => wrote.push(".gitignore".to_string()),
         Ok(false) => skipped.push(".gitignore (already has yunta entries)".to_string()),
         Err(source) => return Err(CliError::io("update", ".gitignore", source)),
     }
@@ -317,58 +319,110 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         Err(source) => return Err(CliError::io("write", "the mechanism skill", source)),
     }
 
-    println!("yunta init: done in {}", repo.display());
-    for path in &wrote {
-        println!("  wrote {path}");
-    }
-    for path in &skipped {
-        println!("  skipped {path}");
-    }
+    print!(
+        "{}",
+        report(&Wrote {
+            repo: &repo,
+            wrote: &wrote,
+            skipped: &skipped,
+            detected: &detected,
+            probed: &probed,
+        })
+    );
+    Ok(Outcome::Success)
+}
 
-    match &detected.ecosystem {
-        Some(ecosystem) => println!(
-            "\ndetected ecosystem: {} — wrote {}{}\ntip: {}",
+/// What `init` did and found, for the report it ends with.
+struct Wrote<'a> {
+    repo: &'a Path,
+    wrote: &'a [String],
+    skipped: &'a [String],
+    detected: &'a crate::detect::Detected,
+    probed: &'a [crate::detect::ProbedAdapter],
+}
+
+/// The report `init` ends with: what it wrote and detected, as fields;
+/// each adapter this machine answers for, as a check; the line to paste
+/// into the project's CLAUDE.md; and the runner to declare, because no
+/// agent node runs until one is.
+fn report(init: &Wrote<'_>) -> String {
+    let look = Look::stdout();
+    let detected = init.detected;
+    let ecosystem = match &detected.ecosystem {
+        Some(ecosystem) => format!(
+            "{} — wrote {}{}",
             ecosystem.name,
             yunta_core::text::counted(detected.commands.len(), "project command"),
             match detected.suite {
                 Some(_) => " and the suite a run measures",
                 None => "",
-            },
-            ecosystem.cache_tip
+            }
         ),
-        None => println!(
-            "\nno known ecosystem detected (looked for Cargo.toml, package.json, \
-             go.mod, pyproject.toml) — declare `commands:` and `baseline.suite` by hand"
-        ),
+        None => "none known (looked for Cargo.toml, package.json, go.mod, pyproject.toml) — \
+                 declare `commands:` and `baseline.suite` by hand"
+            .to_string(),
+    };
+    let fields = Fields::new()
+        .push_if("wrote", init.wrote.join(", "))
+        .push_if("skipped", init.skipped.join(", "))
+        .push_if("ecosystem", ecosystem)
+        .push_if(
+            "tip",
+            detected
+                .ecosystem
+                .as_ref()
+                .map(|ecosystem| ecosystem.cache_tip.to_string())
+                .unwrap_or_default(),
+        )
+        .push_if(
+            "forge",
+            detected
+                .forge
+                .as_ref()
+                .map(|repo| {
+                    format!("github {repo}, from `origin` — its token is read from `GITHUB_TOKEN`")
+                })
+                .unwrap_or_default(),
+        );
+    let mut adapters = Checklist::default();
+    for adapter in init.probed {
+        match adapter.healthy {
+            true => adapters.push(
+                Found::Holds,
+                adapter.id.as_str(),
+                format!("healthy ({})", adapter.detail),
+            ),
+            false => adapters.push(
+                Found::Caution,
+                adapter.id.as_str(),
+                format!("unavailable ({})", adapter.detail),
+            ),
+        }
     }
-    if let Some(repo) = &detected.forge {
-        println!("forge: github {repo}, from `origin` — its token is read from `GITHUB_TOKEN`");
-    }
-
-    for adapter in &probed {
-        let status = if adapter.healthy {
-            "healthy"
-        } else {
-            "unavailable"
-        };
-        println!("adapter {}: {status} ({})", adapter.id, adapter.detail);
-    }
-
-    println!(
-        "\nsuggested line for this repo's CLAUDE.md (paste it yourself — \
-         Yunta never writes to that file):\n\n{}\n",
+    let mut out = format!("yunta init: done in {}\n\n", init.repo.display());
+    out.push_str(&paint(&[&fields], &look));
+    out.push('\n');
+    out.push_str(&paint(&[&adapters], &look));
+    out.push_str(&format!(
+        "\nsuggested line for this repo's CLAUDE.md (paste it yourself — Yunta never writes to \
+         that file):\n\n{}\n",
         claude_md_suggestion()
-    );
-
+    ));
     // The config is written with its runners commented out: a probe
     // names an adapter and never a model, and the model is the project's
     // to choose. Until a runner is declared, no agent node can run, so
     // that is the step this ends with.
-    println!("no runner is declared, so a workflow's agent nodes cannot run until one is.");
-    for line in crate::detect::runner_step(&[], true, &crate::detect::healthy(&probed)) {
-        println!("{line}");
+    out.push_str("\nno runner is declared, so a workflow's agent nodes cannot run until one is.\n");
+    for line in crate::detect::runner_step(&[], true, &crate::detect::healthy(init.probed)) {
+        out.push_str(&format!("{line}\n"));
     }
-    println!("\nnext: run `yunta doctor` to confirm everything above is actually usable.");
-
-    Ok(Outcome::Success)
+    let next = Next {
+        steps: vec![(
+            "yunta doctor".to_string(),
+            "confirms everything above is usable",
+        )],
+    };
+    out.push('\n');
+    out.push_str(&paint(&[&next], &look));
+    out
 }

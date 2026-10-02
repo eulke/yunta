@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_testkit::{stderr, stdout, yunta_at, Checkout};
+use yunta_testkit::{checked, stderr, stdout, yunta_at, Checkout};
 
 /// A `PATH` on which the one adapter CLI is the scripted `claude`, so
 /// what a test reads does not depend on the CLIs the machine running the
@@ -77,9 +77,9 @@ fn doctor_names_the_missing_runner_with_a_snippet_naming_detected_adapters() {
         stderr(&doctor)
     );
     assert!(
-        stderr(&doctor).contains("warning: runners: none declared"),
+        checked(&stdout(&doctor), "runners").is_some_and(|said| said.starts_with("none declared")),
         "{}",
-        stderr(&doctor)
+        stdout(&doctor)
     );
     assert!(
         stdout(&doctor).contains(SNIPPET_LINE),
@@ -94,8 +94,9 @@ fn doctor_fails_when_a_workflow_needs_a_runner_none_declares() {
     let checkout = project(&root).file(".yunta/workflows/wf.yaml", AGENT_WORKFLOW);
     let doctor = yunta_at!(&checkout, &["doctor"]);
     assert!(!doctor.status.success(), "{}", stdout(&doctor));
-    assert!(
-        stdout(&doctor).contains("runners: none declared, and `wf` needs one"),
+    assert_eq!(
+        checked(&stdout(&doctor), "runners").as_deref(),
+        Some("none declared, and `wf` needs one"),
         "{}",
         stdout(&doctor)
     );
@@ -119,10 +120,11 @@ fn doctor_only_cautions_about_an_unset_forge_token_when_no_workflow_opens_a_pull
         stderr(&doctor)
     );
     assert!(
-        stderr(&doctor)
-            .contains("`YUNTA_TEST_ABSENT_TOKEN`, the variable its token is in, is not set"),
+        checked(&stdout(&doctor), "forge").is_some_and(|said| {
+            said.contains("`YUNTA_TEST_ABSENT_TOKEN`, the variable its token is in, is not set")
+        }),
         "{}",
-        stderr(&doctor)
+        stdout(&doctor)
     );
 
     let shipping = project(&root.join("shipping"))
@@ -131,8 +133,38 @@ fn doctor_only_cautions_about_an_unset_forge_token_when_no_workflow_opens_a_pull
     let doctor = yunta_at!(&shipping, &["doctor"]);
     assert!(!doctor.status.success(), "{}", stdout(&doctor));
     assert!(
-        stdout(&doctor).contains("`ship` opens a pull request through it"),
+        checked(&stdout(&doctor), "forge")
+            .is_some_and(|said| said.contains("`ship` opens a pull request through it")),
         "{}",
         stdout(&doctor)
     );
+}
+
+#[test]
+fn doctor_lists_every_check_with_its_mark() {
+    let (_keep, root) = markers();
+    let checkout = project(&root)
+        .config(FORGE)
+        .file(".yunta/workflows/wf.yaml", AGENT_WORKFLOW);
+    let doctor = yunta_at!(&checkout, &["doctor"]);
+    let text = stdout(&doctor);
+    let mark = |subject: &str| {
+        text.lines().find_map(|line| {
+            let (mark, rest) = line.trim_start().split_once(' ')?;
+            rest.starts_with(subject).then(|| mark.to_string())
+        })
+    };
+    // Whichever glyphs this terminal draws, the mark says the same thing
+    // as the exit code: a check that holds, one worth a look, and one
+    // that stops a run.
+    assert!(matches!(mark("git").as_deref(), Some("✓" | "+")), "{text}");
+    assert!(
+        matches!(mark("forge").as_deref(), Some("▲" | "!")),
+        "{text}"
+    );
+    assert!(
+        matches!(mark("runners").as_deref(), Some("✗" | "x")),
+        "{text}"
+    );
+    assert!(!doctor.status.success(), "{text}");
 }

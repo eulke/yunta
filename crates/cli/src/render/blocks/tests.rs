@@ -222,3 +222,25 @@ fn a_quoted_refusal_matches_its_golden() {
         &super::diagnostic::located("wf.yaml", &problems, "wf.yaml", Some(text)),
     );
 }
+
+#[test]
+fn a_checklist_marks_each_check_and_lines_up_what_it_found() {
+    let mut list = Checklist::default();
+    list.push(Found::Holds, "git", "commits as Ada <ada@example.com>");
+    list.push(Found::Caution, "forge", "github acme/web — reachable");
+    list.push(
+        Found::Problem,
+        "codex/codex-model (executor, planner fallback, reviewer)",
+        "session died",
+    );
+    assert_eq!(
+        plain(&list),
+        [
+            "  + git    commits as Ada <ada@example.com>",
+            "  ! forge  github acme/web — reachable",
+            "  x codex/codex-model (executor, planner fallback, reviewer)",
+            "           session died",
+        ]
+    );
+    assert!(!list.holds(), "a problem on the list is one a run stops on");
+}

@@ -56,24 +56,27 @@ fn doctor_flags_a_pack_whose_requires_the_local_config_cannot_satisfy() {
     let doctor_out = yunta_in!(&repo, &home, &["doctor"]);
     assert!(!doctor_out.status.success());
     let text = stdout(&doctor_out);
+    let gaps = yunta_testkit::checks(&text, "pack acme/review-pack");
     assert!(
-        text.lines().any(|l| l == "pack acme/review-pack requires:"),
-        "the pack's unmet requirements are reported under one header: {text}"
+        gaps.iter()
+            .any(|said| said.starts_with("requires runner `reviewer`, which `runners:`")),
+        "the unresolvable runner is a row of the pack's: {text}"
     );
     assert!(
-        text.lines()
-            .any(|l| l.starts_with("  runner `reviewer` — ")),
-        "the unresolvable runner is named: {text}"
-    );
-    assert!(
-        text.lines().any(|l| l
-            == "  mcp_server `internal-docs` — not defined under `mcp_servers:`; add it there"),
+        gaps.iter()
+            .any(|said| said
+                == "requires mcp_server `internal-docs`, not defined under `mcp_servers:`"),
         "the undefined mcp_server is named: {text}"
     );
     assert!(
-        text.lines().any(|l| l
-            == "  program `this-binary-almost-certainly-does-not-exist-anywhere` — not found on PATH"),
+        gaps.iter().any(|said| said.starts_with("requires program")
+            && said.contains("this-binary-almost-certainly-does-not-exist-anywhere")
+            && said.ends_with("not found on PATH")),
         "the missing program is named: {text}"
+    );
+    assert!(
+        text.contains("declare runner `reviewer` in .yunta/config.yaml:"),
+        "and under the list, the runner to declare: {text}"
     );
 }
 
@@ -169,7 +172,8 @@ fn doctor_session_reports_a_binding_whose_cli_dies_at_startup_with_its_stderr() 
     let plain = doctor_with(&repo, &home, root.path(), &["doctor"]);
     assert!(plain.status.success(), "{}", stderr(&plain));
     assert!(
-        stdout(&plain).contains("codex: healthy"),
+        yunta_testkit::checked(&stdout(&plain), "codex")
+            .is_some_and(|said| said.starts_with("healthy")),
         "a probe is the binary answering, and it does: {}",
         stdout(&plain)
     );
@@ -181,11 +185,13 @@ fn doctor_session_reports_a_binding_whose_cli_dies_at_startup_with_its_stderr() 
         "a binding no session opens on is something to act on: {text}"
     );
     assert!(
-        text.contains("codex/codex-model (executor): session died"),
+        yunta_testkit::checked(&text, "codex/codex-model (executor)")
+            .is_some_and(|said| said.starts_with("session died")),
         "the binding is named, and so is every runner that reaches it: {text}"
     );
+    let died = yunta_testkit::checked(&text, "codex/codex-model (executor)").unwrap_or_default();
     assert!(
-        text.contains("exited with code 2") && text.contains("url is not supported for stdio"),
+        died.contains("exited with code 2") && died.contains("url is not supported for stdio"),
         "with how the process went and what it said on its way out: {text}"
     );
 }
@@ -300,8 +306,9 @@ fn doctor_without_session_opens_none() {
         "nothing was opened, so nothing died: {text}"
     );
     assert!(
-        text.contains("no session opened"),
-        "and the command says what it did not check: {text}"
+        text.lines()
+            .any(|line| line.trim_start().starts_with("yunta doctor --session")),
+        "and the command names the check it did not run: {text}"
     );
 }
 
@@ -378,10 +385,9 @@ fn doctor_names_what_this_config_leaves_an_installed_workflow_without() {
     assert!(!doctor.status.success(), "{}", stdout(&doctor));
     let text = stdout(&doctor);
     assert!(
-        text.lines().any(
-            |line| line.starts_with("pack acme/guard-pack: node `tests`")
-                && line.contains("`baseline.suite`")
-        ),
+        yunta_testkit::checks(&text, "pack acme/guard-pack")
+            .iter()
+            .any(|said| said.starts_with("node `tests`") && said.contains("`baseline.suite`")),
         "{text}"
     );
 }

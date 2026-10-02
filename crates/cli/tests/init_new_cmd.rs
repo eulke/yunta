@@ -48,9 +48,9 @@ fn init_writes_config_gitignore_and_the_mechanism_skill() {
         "init points at CLAUDE.md without ever writing it: {out}"
     );
     assert!(
-        out.lines().any(
-            |l| l == "next: run `yunta doctor` to confirm everything above is actually usable."
-        ),
+        out.lines()
+            .any(|l| l.trim_start().starts_with("yunta doctor")
+                && l.ends_with("confirms everything above is usable")),
         "init directs the user to `yunta doctor` next: {out}"
     );
 }

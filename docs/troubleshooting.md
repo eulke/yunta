@@ -79,7 +79,7 @@ them all. `yunta run` refuses a file with any of them.
 ## `yunta doctor` reports an adapter unhealthy
 
 ```
-codex: unhealthy — `codex` not found on PATH
+  ✗ codex  unhealthy — `codex` not found on PATH
 ```
 
 The diagnostic names the actual problem: binary missing, version

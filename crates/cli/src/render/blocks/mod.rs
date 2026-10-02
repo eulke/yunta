@@ -11,6 +11,7 @@
 //! surface draws is code only its tests run.
 #![cfg_attr(not(test), allow(dead_code, unused_imports))]
 
+mod checklist;
 mod decision;
 pub(crate) mod diagnostic;
 mod evidence;
@@ -20,6 +21,7 @@ mod headline;
 mod next;
 mod node_table;
 
+pub(crate) use checklist::{Check, Checklist, Found};
 pub(crate) use decision::{Decision, DecisionOption};
 pub(crate) use evidence::Evidence;
 pub(crate) use failure::FailureDetail;

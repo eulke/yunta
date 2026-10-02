@@ -971,9 +971,10 @@ fn doctor_cautions_when_no_runner_is_declared_and_no_workflow_needs_one() {
     let doctor = yunta_in!(&repo, &home, &["doctor"]);
     assert!(doctor.status.success(), "{}", stderr(&doctor));
     assert!(
-        stderr(&doctor).contains("warning: runners: none declared"),
+        yunta_testkit::checked(&stdout(&doctor), "runners")
+            .is_some_and(|said| said.starts_with("none declared")),
         "{}",
-        stderr(&doctor)
+        stdout(&doctor)
     );
     assert!(
         stdout(&doctor).contains("declare a runner in .yunta/config.yaml"),

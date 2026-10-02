@@ -15,7 +15,6 @@
 //! to be reported as itself.
 
 use std::collections::BTreeMap;
-use std::fmt;
 use std::sync::Arc;
 
 use yunta_core::events::{
@@ -26,6 +25,7 @@ use yunta_core::{RunnerCandidate, RunnerName};
 use crate::commands::test::{init_git, sandboxed_checkout, SandboxedCheckout};
 use crate::context::Context;
 use crate::error::CliError;
+use crate::render::blocks::{Check, Found};
 
 /// The workflow every probe run drives: one node, one prompt, the run
 /// tools a real node is given. The verdict requires the submission to be
@@ -107,22 +107,25 @@ enum Outcome {
 }
 
 impl SessionProbe {
-    /// Whether this is something a person has to act on.
-    pub(super) fn is_ok(&self) -> bool {
-        matches!(self.outcome, Outcome::Ok { .. })
-    }
-}
-
-impl fmt::Display for SessionProbe {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} ({}): ", self.binding, self.named_by)?;
-        match &self.outcome {
-            Outcome::Ok { tokens } => {
-                write!(f, "ok — {}", yunta_core::units::Tokens(*tokens))
-            }
-            Outcome::Died(died) => write!(f, "session died — {died}"),
-            Outcome::NoDelivery(why) => write!(f, "session opened, no questions document — {why}"),
-            Outcome::Refused(why) => write!(f, "probe failed — {why}"),
+    /// The probe as a check: the binding and the runners that name it,
+    /// and how its session ended.
+    pub(super) fn check(&self) -> Check {
+        let (found, said) = match &self.outcome {
+            Outcome::Ok { tokens } => (
+                Found::Holds,
+                format!("ok — {}", yunta_core::units::Tokens(*tokens)),
+            ),
+            Outcome::Died(died) => (Found::Problem, format!("session died — {died}")),
+            Outcome::NoDelivery(why) => (
+                Found::Problem,
+                format!("session opened, no questions document — {why}"),
+            ),
+            Outcome::Refused(why) => (Found::Problem, format!("probe failed — {why}")),
+        };
+        Check {
+            found,
+            subject: format!("{} ({})", self.binding, self.named_by),
+            said,
         }
     }
 }

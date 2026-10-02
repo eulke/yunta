@@ -200,8 +200,9 @@ fn doctor_names_a_file_an_installed_pack_reads_that_the_repository_lacks() {
     assert!(!doctor.status.success(), "a missing file is a gap");
     let text = stdout(&doctor);
     assert!(
-        text.lines().any(|line| line
-            .starts_with("pack acme/reads-pack: node `plan` reads `docs/architecture.md`")),
+        yunta_testkit::checks(&text, "pack acme/reads-pack")
+            .iter()
+            .any(|said| said.starts_with("node `plan` reads `docs/architecture.md`")),
         "{text}"
     );
 }

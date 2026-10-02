@@ -8,6 +8,7 @@ use yunta_core::port::Forge;
 use yunta_core::{describe, ConfigLayer, NodeKind, SecretSource, Workflow};
 
 use crate::error::{warn, CliError};
+use crate::render::blocks::{Check, Found};
 
 /// The forge a real invocation can offer — `None` when either
 /// `forge.github` isn't configured, or the named `token_env` isn't
@@ -62,12 +63,12 @@ pub(crate) fn refuse_unreachable_forge(
     )))
 }
 
-/// What `doctor` says of a forge whose token variable, `token_env`, is
+/// What `doctor` finds of a forge whose token variable, `token_env`, is
 /// not set here. Without the token a gate published to the forge falls
 /// back to the console; only a `pull_request` node stops. So the missing
-/// token stops something only when the catalog has one, and `false` says
-/// it does.
-fn unset_token(ctx: &crate::context::Context, named: &str, token_env: &str) -> bool {
+/// token is a problem only when the catalog has one, and a caution
+/// otherwise.
+fn unset_token(ctx: &crate::context::Context, named: &str, token_env: &str) -> Check {
     let config = &ctx.project.config;
     let opening: Vec<String> = super::list::catalog_workflows(&ctx.cwd)
         .into_iter()
@@ -76,18 +77,31 @@ fn unset_token(ctx: &crate::context::Context, named: &str, token_env: &str) -> b
         .collect();
     let unset = format!("{named} — `{token_env}`, the variable its token is in, is not set");
     if opening.is_empty() {
-        warn(format!(
-            "{unset}; no workflow here opens a pull request, and a gate published there asks \
-             on the console instead — export {token_env} to reach it"
-        ));
-        return true;
+        return check(
+            Found::Caution,
+            format!(
+                "{unset}; no workflow here opens a pull request, and a gate published there \
+                 asks on the console instead — export {token_env} to reach it"
+            ),
+        );
     }
-    println!(
-        "{unset}, and {} {} a pull request through it — export {token_env} to reach it",
-        yunta_core::text::listed(opening.iter().map(String::as_str)),
-        yunta_core::text::agreeing(opening.len(), "opens", "open"),
-    );
-    false
+    check(
+        Found::Problem,
+        format!(
+            "{unset}, and {} {} a pull request through it — export {token_env} to reach it",
+            yunta_core::text::listed(opening.iter().map(String::as_str)),
+            yunta_core::text::agreeing(opening.len(), "opens", "open"),
+        ),
+    )
+}
+
+/// One finding about the forge.
+fn check(found: Found, said: String) -> Check {
+    Check {
+        found,
+        subject: "forge".to_string(),
+        said,
+    }
 }
 
 /// Whether a run of `workflow` under `config` reaches a `pull_request`
@@ -103,52 +117,45 @@ fn opens_a_pull_request(workflow: &Workflow, config: &ConfigLayer) -> bool {
     })
 }
 
-/// What `doctor` says about the forge the config declares — nothing
-/// when it declares none: whether its token is set here, whether the
-/// repository answers it and lets it push, and whether the remote a run
-/// pushes to is that repository. `false` when any of it would stop a
-/// `pull_request` node.
-pub(crate) async fn report_forge(ctx: &crate::context::Context) -> bool {
+/// What `doctor` finds of the forge the config declares: whether it
+/// answers and its token can push, and whether this checkout's remote
+/// is the repository it names. Nothing for a config that declares none.
+pub(crate) async fn forge_checks(ctx: &crate::context::Context) -> Vec<Check> {
     let config = &ctx.project.config;
     let Some(github) = config
         .forge
         .as_ref()
         .and_then(|forge| forge.github.as_ref())
     else {
-        return true;
+        return Vec::new();
     };
-    let named = format!("forge: github {}", github.repo);
+    let named = format!("github {}", github.repo);
     let Some(forge) = forge_for(config, &yunta_core::ProcessSecrets) else {
-        return unset_token(ctx, &named, &github.token_env);
+        return vec![unset_token(ctx, &named, &github.token_env)];
     };
-    let healthy = match forge.probe().await {
+    let mut checks = vec![match forge.probe().await {
         Ok(yunta_core::port::ForgeProbe {
             can_push: Some(false),
-        }) => {
-            println!("{named} — reachable, and its token cannot push there");
-            false
-        }
-        Ok(_) => {
-            println!("{named} — reachable");
-            true
-        }
-        Err(error) => {
-            println!("{named} — {}", describe(&error));
-            false
-        }
-    };
+        }) => check(
+            Found::Problem,
+            format!("{named} — reachable, and its token cannot push there"),
+        ),
+        Ok(_) => check(Found::Holds, format!("{named} — reachable")),
+        Err(error) => check(Found::Problem, format!("{named} — {}", describe(&error))),
+    }];
     let remote = github.remote();
     match yunta_engine::git::remote_url(&ctx.cwd, remote, ctx.supervision()).await {
-        Some(url) if url.contains(&github.repo.to_string()) => healthy,
-        Some(url) => {
-            println!("  remote `{remote}` is {url}, not {}", github.repo);
-            false
-        }
-        None => {
-            println!("  no remote `{remote}` to push a run's branch to");
-            false
-        }
+        Some(url) if url.contains(&github.repo.to_string()) => {}
+        Some(url) => checks.push(check(
+            Found::Problem,
+            format!("remote `{remote}` is {url}, not {}", github.repo),
+        )),
+        None => checks.push(check(
+            Found::Problem,
+            format!("no remote `{remote}` to push a run's branch to"),
+        )),
     }
+    checks
 }
 
 #[cfg(test)]
