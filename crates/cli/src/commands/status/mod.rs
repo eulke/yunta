@@ -11,6 +11,7 @@
 //! JSONL to learn what the options are.
 
 pub(crate) mod decision;
+mod node;
 mod page;
 pub(crate) mod progress;
 
@@ -29,7 +30,12 @@ use crate::render::blocks::Block;
 use crate::render::ink::Line;
 use crate::render::{Look, Width, INDENT};
 
-pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
+/// Prints where `run_id` stands — or, with `node`, that one node whole.
+pub async fn status(
+    run_id: &RunId,
+    json: bool,
+    node: Option<&yunta_core::NodeId>,
+) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let open = ctx.open_run(run_id).await?;
     let events = open.events;
@@ -56,6 +62,17 @@ pub async fn status(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     }
 
     let frame = progress::frame(run_id, &manifest, &events, now);
+    if let Some(node) = node {
+        let page = node::NodePage {
+            run_id,
+            frame: &frame,
+            run_dir: &run_dir,
+            cwd: &ctx.cwd,
+            home: ctx.env.home.as_deref(),
+        };
+        print!("{}", page.render(node, &Look::stdout())?);
+        return Ok(Outcome::Success);
+    }
     let state = yunta_engine::derive(&events);
     let page = page::Page {
         run_id,

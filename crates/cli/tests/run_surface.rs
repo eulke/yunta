@@ -924,7 +924,10 @@ fn a_failed_bash_node_leaves_its_tail_above_the_region() {
     let quoted = |text: &str| after.iter().position(|line| line.contains(text));
     let error = quoted("error[E0425]: cannot find value `x` in this scope");
     let place = quoted(" --> src/lib.rs:3:5");
-    let rest = quoted(&format!("whole output: yunta status {}", only_run(&home)));
+    let rest = quoted(&format!(
+        "whole output: yunta status {} --node build",
+        only_run(&home)
+    ));
     assert!(
         error.is_some() && error < place && place < rest,
         "what the compiler printed is quoted under the failure, then where the rest is:\n{drawn}"

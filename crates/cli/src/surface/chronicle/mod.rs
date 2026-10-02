@@ -125,9 +125,9 @@ pub(super) fn graduation(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
 }
 
 /// What a node that failed printed, quoted under the line that says it
-/// failed, and where the rest of it is — the reason is read where the
-/// failure is, not one command away. `run` is what the run is called
-/// by. Nothing for any other moment.
+/// failed, and the command that shows all of it — the reason is read
+/// where the failure is, not one command away. `run` is what the run is
+/// called by. Nothing for any other moment.
 pub(super) fn evidence(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
     let Happening::Node(node::happening::Happening::Reached {
         state: yunta_core::events::NodeState::Failed { failure, .. },
@@ -136,7 +136,10 @@ pub(super) fn evidence(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
     else {
         return Vec::new();
     };
-    let whole = failure.output().map(|_| advice::status(run));
+    let whole = failure.output().map(|_| match &moment.node {
+        Some(node) => advice::status_node(run, node.as_str()),
+        None => advice::status(run),
+    });
     FailureDetail { failure, whole }.lines(look)
 }
 

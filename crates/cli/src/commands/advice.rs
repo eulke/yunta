@@ -106,6 +106,12 @@ pub(crate) fn status(run: &str) -> String {
     format!("yunta status {run}")
 }
 
+/// Shows one node of a run whole: its failure, the end of what it
+/// printed and where all of it is.
+pub(crate) fn status_node(run: &str, node: &str) -> String {
+    format!("yunta status {run} --node {node}")
+}
+
 /// Gathers a finished run's manifest, log and artifacts into the bundle
 /// that certifies it.
 pub(crate) fn receipt(run: &str) -> String {

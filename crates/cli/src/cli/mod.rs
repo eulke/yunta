@@ -97,6 +97,11 @@ enum Command {
         /// `workflow_status` returns.
         #[arg(long)]
         json: bool,
+        /// Shows one node whole: its whole failure or what its agent said,
+        /// the end of what it printed and where all of it is, and what it
+        /// produced.
+        #[arg(long, value_name = "id", conflicts_with = "json")]
+        node: Option<yunta_core::NodeId>,
     },
     /// Resume a run from its event log.
     ///

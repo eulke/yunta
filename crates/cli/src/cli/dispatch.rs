@@ -36,7 +36,9 @@ pub(super) async fn dispatch(command: Command) -> Result<Outcome, CliError> {
             )
             .await
         }
-        Command::Status { run, json } => commands::status::status(&run.named().await?, json).await,
+        Command::Status { run, json, node } => {
+            commands::status::status(&run.named().await?, json, node.as_ref()).await
+        }
         Command::Resume { run, quiet, json } => {
             commands::resume::resume(&run.named().await?, quiet, json).await
         }
