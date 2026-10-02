@@ -396,7 +396,23 @@ yunta schema findings --json    # JSON Schema, for an editor to validate against
 ```
 
 and through the `document_shape` tool on `yunta mcp`, so an agent connected to
-the control plane finds it without anyone passing the format along.
+the control plane finds it without anyone passing the format along. With no
+arguments it lists what each kind is for:
+
+```console
+$ yunta schema
+Documents Yunta reads and validates:
+  tasks        the plan: one task per independently verifiable unit of work
+  spec         the tests a plan's tasks are held to, written before any task is
+               built
+  findings     what a review found, as data the engine counts and carries
+               forward
+  questions    what a node needs a person to decide
+  answers      what a person replied, as the engine records it
+
+  yunta schema <kind>          the shape to write
+  yunta schema <kind> --json   the JSON Schema an editor validates against
+```
 
 ### Knowledge layers
 

@@ -462,3 +462,37 @@ fn the_contract_closed_sets_match_the_types() {
         "§2.3's input types (left) and the types an input declares (right) disagree"
     );
 }
+
+/// Every `console` block the documentation quotes: the `$ yunta …` line
+/// it opens with, and what follows it.
+fn quoted_runs() -> Vec<(String, String, String)> {
+    let mut docs = yunta_testkit::markdown_files(&repo_root().join("docs"));
+    docs.push(repo_root().join("README.md"));
+    docs.iter()
+        .flat_map(|path| yunta_testkit::fenced_blocks(path, "console"))
+        .filter_map(|block| {
+            let (first, printed) = block.text.split_once('\n')?;
+            let command = first.strip_prefix("$ yunta ")?.to_string();
+            Some((block.origin, command, printed.to_string()))
+        })
+        .collect()
+}
+
+#[test]
+fn quoted_output_matches_the_binary() {
+    let quoted = quoted_runs();
+    assert!(
+        !quoted.is_empty(),
+        "the documentation quotes no output, so nothing holds it to the binary"
+    );
+    for (origin, command, printed) in quoted {
+        let away = elsewhere();
+        let args: Vec<&str> = command.split_whitespace().collect();
+        let out = yunta_in!(away.path(), &away.path().join("home"), &args);
+        assert_eq!(
+            stdout(&out).trim_end(),
+            printed.trim_end(),
+            "{origin}: `yunta {command}` prints something other than what is quoted"
+        );
+    }
+}
