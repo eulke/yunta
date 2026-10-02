@@ -14,12 +14,12 @@ parenthesized_plural_in_prod_strings 0
 prod_fns_over_50_lines 80
 reason_built_by_format 5
 run_tool_named_outside_vocabulary 1
-separator_literal_outside_glyphs 22
+separator_literal_outside_glyphs 18
 session_request_literal_outside_plan 0
 sgr_outside_ink 0
 sleep_outside_mock_latency 4
 space_runs_in_prod_strings 0
-src_files_over_500_lines 9
+src_files_over_500_lines 8
 sync_fs_in_async 214
 system_clock_outside_boundary 76
 tense_markers 97

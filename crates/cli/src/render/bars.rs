@@ -9,20 +9,30 @@ use super::glyphs::Glyphs;
 /// [`LINE_WIDTH`](super::LINE_WIDTH).
 pub(crate) const BAR_WIDTH: usize = 20;
 
-/// `value` against `max`, drawn in exactly [`BAR_WIDTH`] cells.
+/// `value` against `max`, drawn in exactly `cells` cells.
 ///
 /// A maximum of zero is a row with nothing to compare — the bar is drawn
 /// empty rather than full, because nothing measured is not everything.
-pub(crate) fn bar(value: u64, max: u64, glyphs: Glyphs) -> String {
+pub(crate) fn bar(value: u64, max: u64, cells: usize, glyphs: Glyphs) -> String {
     if max == 0 {
-        return repeat(glyphs.bar_empty(), BAR_WIDTH);
+        return repeat(glyphs.bar_empty(), cells);
     }
-    let filled = (((value as f64 / max as f64) * BAR_WIDTH as f64).round() as usize).min(BAR_WIDTH);
+    let filled = (((value as f64 / max as f64) * cells as f64).round() as usize).min(cells);
     format!(
         "{}{}",
         repeat(glyphs.bar_filled(), filled),
-        repeat(glyphs.bar_empty(), BAR_WIDTH.saturating_sub(filled))
+        repeat(glyphs.bar_empty(), cells.saturating_sub(filled))
     )
+}
+
+/// The cells a bar gets on a line of `width` cells whose other columns
+/// take `taken`: what is left, up to [`BAR_WIDTH`], and none at all when
+/// what is left is too few steps for an eye to compare two bars by.
+pub(crate) fn bar_cells(width: usize, taken: usize) -> usize {
+    match width.saturating_sub(taken) {
+        left if left < BAR_WIDTH / 4 => 0,
+        left => left.min(BAR_WIDTH),
+    }
 }
 
 /// `values` as one cell each, oldest first, scaled to the largest of
@@ -74,14 +84,21 @@ mod tests {
     fn a_bar_is_the_same_width_at_every_value() {
         for (value, max) in [(0, 0), (0, 10), (3, 10), (10, 10)] {
             for glyphs in [Glyphs::Unicode, Glyphs::Ascii] {
-                assert_eq!(cell_width(&bar(value, max, glyphs)), BAR_WIDTH);
+                assert_eq!(cell_width(&bar(value, max, BAR_WIDTH, glyphs)), BAR_WIDTH);
             }
         }
     }
 
     #[test]
     fn a_bar_with_nothing_to_compare_against_is_empty_not_full() {
-        assert_eq!(bar(7, 0, Glyphs::Ascii), ".".repeat(BAR_WIDTH));
+        assert_eq!(bar(7, 0, BAR_WIDTH, Glyphs::Ascii), ".".repeat(BAR_WIDTH));
+    }
+
+    #[test]
+    fn a_bar_takes_what_the_line_leaves_and_none_when_too_little_is_left() {
+        assert_eq!(bar_cells(120, 60), BAR_WIDTH);
+        assert_eq!(bar_cells(80, 70), 10);
+        assert_eq!(bar_cells(60, 70), 0);
     }
 
     #[test]

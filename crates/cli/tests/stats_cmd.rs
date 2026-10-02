@@ -47,7 +47,7 @@ fn stats_run_output_stays_inside_80_columns_and_never_uses_ansi_color() {
     let text = stdout(&stats);
     assert!(
         text.lines()
-            .any(|l| l == "CPTV (cost per verified task): n/a — no task is done"),
+            .any(|l| l == "  CPTV         n/a — no task is done, so no cost per verified task"),
         "got: {text}"
     );
 

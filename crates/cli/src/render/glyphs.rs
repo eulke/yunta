@@ -143,6 +143,14 @@ impl Glyphs {
         }
     }
 
+    /// What points from one thing to the one after it.
+    pub(crate) fn arrow(self) -> &'static str {
+        match self {
+            Self::Unicode => "→",
+            Self::Ascii => "->",
+        }
+    }
+
     /// The edge quoted output hangs from, so it reads as something a
     /// command printed and not as something this one says.
     pub(crate) fn gutter(self) -> char {
