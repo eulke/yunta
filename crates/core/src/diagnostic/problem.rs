@@ -159,6 +159,10 @@ rule_codes! {
     ChangesASpecTest => "changes-a-spec-test",
     /// A decision answers a question no person answered in the run.
     UnknownAnswer => "unknown-answer",
+    /// A file a spec writes is run by none of its tests.
+    UnrunSpecFile => "unrun-spec-file",
+    /// A test of a spec runs none of the files the spec writes.
+    SpecTestRunsNoSpecFile => "spec-test-runs-no-spec-file",
     EmptyText => "empty-text",
     EmptyDetail => "empty-detail",
     /// An update or a withdrawal names a finding this node never posted.

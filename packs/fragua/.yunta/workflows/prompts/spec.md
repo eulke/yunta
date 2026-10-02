@@ -10,9 +10,13 @@ the shapes it builds on, then the code it touches, and give it:
   person or a caller observes, through the interfaces the plan declares,
   not how the task builds it.
 - `tests`: the commands that run them, each saying what passing it
-  `proves`. Where one of the task's criteria runs a test that does not
-  exist yet, write that test, and run it with the criterion's own
-  command.
+  `proves`. Each runs one of your files, and each of your files is run by
+  one: a test that runs only what the task writes judges the task by its
+  own work, and the engine refuses it. Where one of the task's criteria
+  runs a test that does not exist yet in a file of its own, write that
+  test there and run it with the criterion's own command; where the
+  criterion only finds a name in a file the task changes, test the
+  behavior in a file of yours instead.
 
 Write each test against the shapes exactly as the plan declares them —
 their names, signatures and files — and through nothing else: it fails now
@@ -23,7 +27,9 @@ task's tests may not be in the tree when its tests run — so repeat a helper
 rather than share one. Name the file in the command that runs it, so it
 runs whether or not the project's runner would find it.
 
-A task whose change no test can observe gets no spec.
+A task whose change no test can observe through what the plan declares
+gets no spec — leave it out, and say why in your answer, rather than
+writing a test that cannot fail for the right reason.
 
 Every test fails now and passes once its task is done as the plan says.
 The engine runs each one in the run's tree with every file of your spec

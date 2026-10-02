@@ -90,6 +90,9 @@ impl SessionTools {
             true => Vec::new(),
             false => rewritten(spec, &self.held_spec(&events).await?, &owed),
         };
+        // A test that runs none of the spec's files judges the work by
+        // nothing the spec wrote; a file nothing runs judges nothing.
+        broken.extend(spec.untested());
         let (checkout, base) = self.handover_checkout().await?;
         let supervision = self.host.supervision(&self.stop);
         broken.extend(already_held(&checkout, &base, spec, &asked, supervision).await?);

@@ -3704,6 +3704,16 @@
           "const": "unknown-answer"
         },
         {
+          "description": "A file a spec writes is run by none of its tests.",
+          "type": "string",
+          "const": "unrun-spec-file"
+        },
+        {
+          "description": "A test of a spec runs none of the files the spec writes.",
+          "type": "string",
+          "const": "spec-test-runs-no-spec-file"
+        },
+        {
           "description": "An update or a withdrawal names a finding this node never posted.",
           "type": "string",
           "const": "unknown-id"

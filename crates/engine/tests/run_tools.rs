@@ -1278,6 +1278,49 @@ async fn a_spec_accepted_says_how_each_test_fails_before_the_work() {
     assert!(text.contains(said), "`{said}` is missing from:\n{text}");
 }
 
+/// A spec that tests nothing is refused: a file no test runs, a test that
+/// runs none of its files — and a file made to run that already passes.
+#[tokio::test]
+async fn a_spec_that_tests_nothing_is_refused_until_its_tests_fail_for_a_reason() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let plan = json!([{ "id": "greet", "title": "Greet", "scope": ["greeting.txt"],
+                        "criteria": [{ "cmd": "test -f greeting.txt" }] }]);
+    let (refused, text) = submitted(&host, plan).await;
+    assert!(!refused, "got: {text}");
+    let spec = yunta_core::ArtifactSpec::Interpreted(yunta_core::ArtifactKind::Spec);
+    let session = host.session_declaring("spec", None, vec![spec]).await;
+    let client = client_for(&session, None).await.unwrap();
+    let submit = |cmd: &str| {
+        json!({ "document": { "specs": [{
+            "task": "greet",
+            "files": [{ "path": "tests/greet.sh", "content": "exit 0\n" }],
+            "tests": [{ "cmd": cmd, "proves": "there is a greeting" }],
+        }] } })
+    };
+
+    let (refused, text) = call(&client, "yunta_submit_spec", submit("test -f greeting.txt")).await;
+    assert!(refused, "got: {text}");
+    assert!(
+        text.contains("is run by none of this task's tests"),
+        "{text}"
+    );
+    assert!(
+        text.contains("runs none of the files this spec writes"),
+        "{text}"
+    );
+
+    let (refused, text) = call(&client, "yunta_submit_spec", submit("sh tests/greet.sh")).await;
+    client.cancel().await.unwrap();
+    assert!(
+        refused,
+        "a test that checks nothing passes before the work: {text}"
+    );
+    assert!(
+        text.contains("`sh tests/greet.sh` already exits 0"),
+        "{text}"
+    );
+}
+
 #[tokio::test]
 async fn a_tasks_document_whose_criterion_cannot_run_is_refused_saying_why() {
     let host = ToolsHost::over(BLACKBOARD_WORKFLOW);

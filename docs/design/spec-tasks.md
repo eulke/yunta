@@ -164,6 +164,13 @@ documento de vuelta, así que un plan que un run anterior aceptó sigue leyéndo
 - `unknown-answer` — una decisión `answers` sólo una pregunta que el run hizo y
   una persona respondió.
 
+La spec que se escribe para el plan se juzga igual al entregarla: sus tests corren
+los archivos que escribe. `unrun-spec-file` rechaza un archivo que ningún test
+corre, y `spec-test-runs-no-spec-file` un test que no corre ninguno de los archivos
+de la spec, porque juzgaría a la tarea con lo que la tarea misma escribe. Así un
+test que no chequea nada tiene que correr, pasa antes del trabajo, y
+`criterion-already-passes` lo rechaza.
+
 ## 4. Errores
 
 Cada rechazo nombra la tarea, el campo y la expectativa, en el vocabulario del

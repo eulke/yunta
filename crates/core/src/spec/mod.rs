@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::{Criterion, ScopeGlob, TaskId};
 
 mod rules;
+mod specified;
 
 /// The tests a plan's tasks are held to, one spec per task.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -150,4 +151,6 @@ impl crate::shape::Document for SpecFile {
     const RULES: &'static [crate::diagnostic::Rule] = rules::RULES;
 
     const RUN_RULES: &'static [crate::diagnostic::Rule] = rules::RUN_RULES;
+
+    const SPECIFIED_RULES: &'static [crate::diagnostic::Rule] = specified::SPECIFIED_RULES;
 }
