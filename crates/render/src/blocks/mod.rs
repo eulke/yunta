@@ -9,6 +9,7 @@
 //! with an empty value.
 
 mod checklist;
+mod concern;
 mod decision;
 pub mod diagnostic;
 mod document;
@@ -21,6 +22,7 @@ mod node_table;
 mod table;
 
 pub use checklist::{Check, Checklist, Found};
+pub use concern::Concern;
 pub use decision::{Chosen, Decision, DecisionOption};
 pub use document::{Code, Marked, Prose, Section};
 pub use evidence::{Evidence, Whole};

@@ -61,6 +61,8 @@ pub(crate) struct ClosingEnv<'a> {
     /// the log. `None` for a pause with no menu to rebuild, and for a run
     /// that is not parked at all.
     pub(crate) decision: Option<(NodeId, GateWaitingPayload)>,
+    /// The documents that decision shows, as the run holds them.
+    pub(crate) shown: Vec<yunta_engine::ShownDocument>,
     pub(crate) outline: Outline<'a>,
 }
 
@@ -69,6 +71,7 @@ pub(crate) struct Closing {
     run_id: RunId,
     frame: RunFrame,
     decision: Option<(NodeId, GateWaitingPayload)>,
+    shown: Vec<yunta_engine::ShownDocument>,
     run_dir: PathBuf,
     worktree: PathBuf,
     base_branch: String,
@@ -83,20 +86,24 @@ impl Closing {
     /// from whatever the surface managed to see.
     pub(crate) fn of(env: ClosingEnv<'_>) -> Self {
         let frame = run_frame(env.run_id, env.workflow, env.events, env.prior, env.now);
-        Self::framed(env.run_id, frame, env.decision, &env.outline)
+        Self::framed(env.run_id, frame, (env.decision, env.shown), &env.outline)
     }
 
     /// The block for `frame`, as the run's log derived it.
     fn framed(
         run_id: &RunId,
         frame: RunFrame,
-        decision: Option<(NodeId, GateWaitingPayload)>,
+        (decision, shown): (
+            Option<(NodeId, GateWaitingPayload)>,
+            Vec<yunta_engine::ShownDocument>,
+        ),
         outline: &Outline<'_>,
     ) -> Self {
         Self {
             run_id: run_id.clone(),
             frame,
             decision,
+            shown,
             run_dir: outline.run_dir.to_path_buf(),
             worktree: outline.worktree.to_path_buf(),
             base_branch: outline.base_branch.to_string(),
@@ -256,7 +263,8 @@ impl Closing {
             claim: true,
             evidence: said_why || self.failed().any(|(failed, _)| failed.id == *node),
         };
-        let mut lines = decision::lines(&self.run_id, node, escalation, beside, look);
+        let mut lines =
+            decision::lines((&self.run_id, node), escalation, &self.shown, beside, look);
         // A person who has just watched their terminal stop is the one
         // who needs telling that nothing holds the answer open.
         let room = look.width.cells().saturating_sub(INDENT.len());

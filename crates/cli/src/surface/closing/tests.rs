@@ -116,7 +116,7 @@ fn exhausted() -> GateWaitingPayload {
 }
 
 fn closing(frame: RunFrame, decision: Option<(NodeId, GateWaitingPayload)>) -> Closing {
-    Closing::framed(&RUN, frame, decision, &outline())
+    Closing::framed(&RUN, frame, (decision, Vec::new()), &outline())
 }
 
 #[test]

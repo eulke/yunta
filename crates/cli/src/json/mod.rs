@@ -261,6 +261,19 @@ pub(crate) async fn decision_of(
     Ok(yunta_engine::current_escalation(manifest, run_dir, &yunta_engine::derive(events)).await?)
 }
 
+/// The documents `escalation` shows, as the run whose log is `events`
+/// holds them.
+pub(crate) async fn shown_of(
+    run_dir: &std::path::Path,
+    escalation: &yunta_core::events::GateWaitingPayload,
+    events: &[StoredEvent],
+) -> Result<Vec<yunta_engine::ShownDocument>, crate::error::CliError> {
+    Ok(
+        yunta_engine::shown_documents(run_dir, escalation.shows(), &yunta_engine::derive(events))
+            .await?,
+    )
+}
+
 /// What a waiting run is waiting on.
 ///
 /// Tagged by `on`, so a reader matches on the shape instead of

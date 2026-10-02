@@ -108,7 +108,11 @@ pub async fn status(
         }
     }
     let tree = ctx.project.run_tree(&manifest, run_id, &ctx.cwd);
-    let decided = decision_page((run_id, &tree), &events, &frame.phase, decision);
+    let shown = match &decision {
+        Some((_, escalation)) => crate::json::shown_of(&run_dir, escalation, &events).await?,
+        None => Vec::new(),
+    };
+    let decided = decision_page((run_id, &tree), &events, &frame.phase, (decision, &shown));
     if let Some(decided) = &decided {
         out.push('\n');
         out.push_str(&decided.text);
@@ -141,7 +145,10 @@ fn decision_page(
     (run_id, tree): (&RunId, &Path),
     events: &[StoredEvent],
     phase: &RunPhase,
-    decision: Option<(yunta_core::NodeId, yunta_core::events::Escalation)>,
+    (decision, shown): (
+        Option<(yunta_core::NodeId, yunta_core::events::Escalation)>,
+        &[yunta_engine::ShownDocument],
+    ),
 ) -> Option<Decided> {
     let waiting = advice::parked(phase)?;
     let state = yunta_engine::derive(events);
@@ -159,7 +166,7 @@ fn decision_page(
                         Some(yunta_engine::NodeState::Failed { .. })
                     ),
             };
-            let block: String = decision::lines(run_id, &node, &escalation, beside, &look)
+            let block: String = decision::lines((run_id, &node), &escalation, shown, beside, &look)
                 .iter()
                 .map(|line| format!("{}\n", look.ink.paint(line)))
                 .collect();

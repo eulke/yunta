@@ -29,6 +29,7 @@ use std::path::Path;
 
 use yunta_core::events::GateWaitingPayload;
 use yunta_core::{NodeId, RunId};
+use yunta_engine::ShownDocument;
 
 use crate::commands::advice;
 use crate::render::blocks::{Chosen, Decision, DecisionOption, Drawn};
@@ -59,12 +60,13 @@ pub(crate) struct Beside {
     pub(crate) evidence: bool,
 }
 
-/// The lines a decision reads as: what it is on, what it is about, and
-/// every option with what it costs and the command that chooses it.
+/// The lines a decision reads as: what it is on, what it is about, what
+/// weighs on it, and every option with what it costs and the command that
+/// chooses it.
 pub(crate) fn lines(
-    run_id: &RunId,
-    node: &NodeId,
+    (run_id, node): (&RunId, &NodeId),
     escalation: &GateWaitingPayload,
+    shown: &[ShownDocument],
     beside: Beside,
     look: &Look,
 ) -> Vec<Line> {
@@ -84,7 +86,28 @@ pub(crate) fn lines(
             look,
         ));
     }
+    lines.extend(before_you_decide(escalation, shown, look));
     lines.extend(menu(run_id, escalation, look));
+    lines
+}
+
+/// What weighs on a decision, said between its question and its options:
+/// what the gate does not offer and why, and what a person should know
+/// of what it shows. Nothing, with a blank line above it, when there is
+/// nothing to say.
+pub(crate) fn before_you_decide(
+    escalation: &GateWaitingPayload,
+    shown: &[ShownDocument],
+    look: &Look,
+) -> Vec<Line> {
+    let Some(before) = crate::render::shown::before_you_decide(escalation.withheld(), shown) else {
+        return Vec::new();
+    };
+    let mut lines = vec![Line::new()];
+    lines.extend(crate::render::surface_lines(
+        crate::render::doc::Doc::new().with(before),
+        look,
+    ));
     lines
 }
 
@@ -285,7 +308,7 @@ mod tests {
 
     fn drawn(escalation: &GateWaitingPayload, beside: Beside) -> Vec<String> {
         let look = Look::plain();
-        lines(&RUN, &NODE, escalation, beside, &look)
+        lines((&RUN, &NODE), escalation, &[], beside, &look)
             .iter()
             .map(|line| look.ink.paint(line))
             .collect()

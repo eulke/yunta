@@ -54,6 +54,7 @@ impl Terminal {
                 .map(|line| Line::new().plain(line))
                 .collect(),
             Block::Marked(block) => block.lines(look),
+            Block::Concern(block) => block.lines(look),
             Block::Code(block) => block.lines(look),
             Block::Lines(lines) => lines.clone(),
         }

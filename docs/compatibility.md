@@ -536,10 +536,11 @@ always the state the node is in now.
 
 In `status --json`, `decision` carries what a parked run is waiting on:
 `{node, summary, evidence, options: [{id, label, tradeoff}], external_ref?,
-resolve_with, commands}` — the escalation under the same field names the
-`gate_waiting` event writes, plus the node it belongs to, the command that
+withheld?, resolve_with, commands}` — the escalation under the same field names
+the `gate_waiting` event writes, plus the node it belongs to, the command that
 answers it with the option left as `<option>`, and `commands`, the command that
-chooses each option keyed by its id. An option a workflow declares on a gate is
+chooses each option keyed by its id. `withheld` lists each option the gate does
+not offer, as `{option, because}`, and is absent when it withholds none. An option a workflow declares on a gate is
 labelled with where it leads — ``Back to `fix` ``, ``On to `deploy` `` — rather
 than with its own id. Two pauses reconstruct one: a node whose
 re-routes are exhausted, and an unresolved internal gate. Every other pause — a

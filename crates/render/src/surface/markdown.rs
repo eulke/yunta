@@ -5,8 +5,8 @@
 
 use super::Surface;
 use crate::blocks::{
-    Check, Checklist, Code, Decision, Evidence, FailureDetail, FailureSays, Fields, Headline,
-    Holds, Marked, Next, Section, Table, Whole,
+    Check, Checklist, Code, Concern, Decision, Evidence, FailureDetail, FailureSays, Fields,
+    Headline, Holds, Marked, Next, Section, Table, Whole,
 };
 use crate::doc::{Block, Doc};
 use crate::ink::{Line, Tone};
@@ -60,6 +60,7 @@ fn block(block: &Block<'_>, depth: usize) -> String {
         Block::Prose(prose) => prose.0.clone(),
         Block::Markdown(text) => text.trim().to_string(),
         Block::Marked(marked) => self::marked(marked),
+        Block::Concern(concern) => self::concern(concern),
         Block::Code(code) => self::code(code),
         Block::Lines(lines) => lines.iter().map(line).collect::<Vec<_>>().join("  \n"),
     }
@@ -272,6 +273,18 @@ fn line(line: &Line) -> String {
 
 /// Text for one table cell: on one line, and with the pipe that would
 /// end the cell escaped.
+/// A caution as a list item, with what it means and what fixes it under
+/// it.
+fn concern(concern: &Concern) -> String {
+    format!(
+        "- {} {}\n  - so: {}\n  - fix: {}",
+        GLYPHS.mark(crate::Mark::Caution),
+        concern.fact,
+        concern.so,
+        concern.fix
+    )
+}
+
 fn cell(text: &str) -> String {
     yunta_core::text::one_line(text).replace('|', "\\|")
 }

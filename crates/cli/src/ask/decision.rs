@@ -16,7 +16,7 @@ use super::field::ask_line;
 use super::keys::{Stroke, Strokes};
 use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, NoAnswer, ANSWER};
-use crate::commands::status::decision::{account, Beside};
+use crate::commands::status::decision::{account, before_you_decide, Beside};
 use crate::render::blocks::{Drawn, Headline};
 use crate::render::{label, Mark};
 
@@ -92,14 +92,15 @@ fn noted(console: &Console) -> Answered<Option<String>> {
 }
 
 /// Draws what the decision is about: the documents it shows, then that
-/// it needs the person, the claim, and the record the engine attached to
-/// audit it against.
+/// it needs the person, the claim, the record the engine attached to
+/// audit it against, and what weighs on it.
 ///
 /// The documents come first and the question last, beside the menu: on a
 /// terminal the last lines printed are the ones on the screen when the
 /// menu asks, and a plan a screen tall would push the question off it.
 /// The record goes above the options because a menu offered without it
-/// asks for a decision on a claim nobody checked. It is drawn as it is
+/// asks for a decision on a claim nobody checked, and what weighs on the
+/// decision goes last, against the options it weighs on. It is drawn as it is
 /// on every surface that shows the decision, so a person who reads the
 /// same run's page later reads the same block.
 fn present(
@@ -127,6 +128,7 @@ fn present(
         evidence: false,
     };
     lines.extend(account(escalation, nothing_beside, 1, &look));
+    lines.extend(before_you_decide(escalation, shown, &look));
     console.say("")?;
     for line in &lines {
         console.say(&look.ink.paint(line))?;

@@ -22,7 +22,10 @@ use crate::ink::{Line, Tone};
 use crate::Mark;
 
 mod card;
+mod flawed;
 mod map;
+
+pub(crate) use flawed::concerns;
 
 use card::card;
 
@@ -56,7 +59,7 @@ pub fn document(review: &PlanReview, of: &str, run: &str, form: Form) -> Doc<'st
         doc = doc.with(Prose(summary.to_string()));
     }
     doc = doc.with(titled("tasks", vec![map::map(review, &steps).into()]));
-    doc = cannot_be_done(doc, review);
+    doc = flawed::flawed(doc, review);
     if !review.departed.is_empty() {
         doc = doc.with(departures(&review.departed));
     }
@@ -151,44 +154,6 @@ fn sized(plan: &TasksFile, steps: usize, review: &PlanReview) -> String {
         });
     }
     said
-}
-
-/// What the plan says a session will do and no session may: changes on
-/// a test the spec wrote, said before any detail.
-fn cannot_be_done(doc: Doc<'static>, review: &PlanReview) -> Doc<'static> {
-    let denied: Vec<String> = review
-        .tasks
-        .iter()
-        .flat_map(|task| {
-            task.denied
-                .iter()
-                .map(move |change| format!("{} — {}", task.task, change.at))
-        })
-        .collect();
-    if denied.is_empty() {
-        return doc;
-    }
-    let planning = review
-        .tasks
-        .iter()
-        .filter(|task| !task.denied.is_empty())
-        .count();
-    doc.with(Section {
-        mark: None,
-        title: Line::new().push(
-            Tone::Caution,
-            format!(
-                "{} {} to change a test the spec wrote, and no session may write one",
-                counted(planning, "task"),
-                if planning == 1 { "plans" } else { "plan" },
-            ),
-        ),
-        blocks: vec![Marked {
-            mark: Mark::Caution,
-            items: denied,
-        }
-        .into()],
-    })
 }
 
 /// Every departure from the plan a person accepted: what the plan says,

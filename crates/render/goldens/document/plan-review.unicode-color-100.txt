@@ -5,8 +5,13 @@
     ␛[33m▲␛[0m 1  greet     1 spec test     ␛[33mcode 1/2␛[0m  Greet by name
     ␛[33m▲␛[0m 2  farewell  ␛[33m`greet`'s test␛[0m  ␛[33mcode 0/1␛[0m  Say goodbye
 
-  ␛[33m1 task plans to change a test the spec wrote, and no session may write one␛[0m
-    ␛[33m▲␛[0m greet — tests/greet.rs
+  ␛[33mwhat keeps this plan from being proven as it is written␛[0m
+    ␛[33m▲␛[0m `greet` plans to change `tests/greet.rs`, a test the spec wrote for `greet`
+      ␛[2mso          ␛[0m no session may write it, so the task cannot be done as planned
+      ␛[2mfix         ␛[0m leave the test as the spec wrote it, and change the code it tests
+    ␛[33m▲␛[0m `farewell` is judged by `cargo test --test greet`, the spec's test of `greet`
+      ␛[2mso          ␛[0m it passes once `greet` is done, whatever this task does
+      ␛[2mfix         ␛[0m judge the task by a test of its own
 
   The program says nothing today. It will greet whoever runs it by name, and say goodbye.
   ␛[2mdiagram     ␛[0m in the whole plan

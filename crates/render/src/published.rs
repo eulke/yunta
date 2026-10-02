@@ -1,6 +1,6 @@
 //! A gate published to a forge, as its pull request says it: who it
-//! waits on, how a review answers it and what each answer does to the
-//! run, what was published for it, and what the machine that holds the
+//! waits on, what weighs on the review, how a review answers it and what
+//! each answer does to the run, what was published for it, and what the machine that holds the
 //! run is told to do next.
 
 use yunta_core::events::ArtifactId;
@@ -28,12 +28,15 @@ pub fn gate(request: &PublishRequest) -> Doc<'static> {
                 .plain(what)
         })
         .collect();
-    Doc::new()
-        .with(Prose(format!(
-            "Gate `{}` of run `{}` waits on this pull request, for {}.",
-            decision.node, request.run_id, decision.assignee
-        )))
-        .with(Block::Heading("how to answer".to_string()))
+    let mut doc = Doc::new().with(Prose(format!(
+        "Gate `{}` of run `{}` waits on this pull request, for {}.",
+        decision.node, request.run_id, decision.assignee
+    )));
+    // What weighs on the review, beside the answers it weighs on.
+    if let Some(before) = crate::shown::before_you_decide(&[], &request.shown) {
+        doc = doc.with(before);
+    }
+    doc.with(Block::Heading("how to answer".to_string()))
         .with(Decision {
             chosen: Chosen::OnTheForge,
             options: answers(decision),

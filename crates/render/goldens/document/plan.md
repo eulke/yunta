@@ -9,9 +9,15 @@ Greet a person by name, and say goodbye too.
 | ▲ 1 | `greet` | 1 spec test | code 1/2 | Greet by name |
 | ▲ 2 | `farewell` | `greet`'s test | code 0/1 | Say goodbye |
 
-### 1 task plans to change a test the spec wrote, and no session may write one
+### what keeps this plan from being proven as it is written
 
-- ▲ greet — tests/greet.rs
+- ▲ `greet` plans to change `tests/greet.rs`, a test the spec wrote for `greet`
+  - so: no session may write it, so the task cannot be done as planned
+  - fix: leave the test as the spec wrote it, and change the code it tests
+
+- ▲ `farewell` is judged by `cargo test --test greet`, the spec's test of `greet`
+  - so: it passes once `greet` is done, whatever this task does
+  - fix: judge the task by a test of its own
 
 The program says nothing today. It will greet whoever runs it by name, and say goodbye.
 

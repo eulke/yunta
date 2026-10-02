@@ -10,8 +10,8 @@
 //! surface already builds, and changes none of them.
 
 use crate::blocks::{
-    Checklist, Code, Decision, Evidence, FailureDetail, Fields, Headline, Marked, Next, NodeTable,
-    Prose, Section, Table,
+    Checklist, Code, Concern, Decision, Evidence, FailureDetail, Fields, Headline, Marked, Next,
+    NodeTable, Prose, Section, Table,
 };
 use crate::ink::Line;
 
@@ -37,6 +37,8 @@ pub enum Block<'a> {
     /// reads as prose and code.
     Markdown(String),
     Marked(Marked),
+    /// A caution with what it means and what fixes it.
+    Concern(Concern),
     Code(Code),
     /// Lines a surface composed itself, each span carrying its role.
     Lines(Vec<Line>),
@@ -64,6 +66,7 @@ block_from!(
     Section(Section<'a>),
     Prose(Prose),
     Marked(Marked),
+    Concern(Concern),
     Code(Code),
     Lines(Vec<Line>),
 );

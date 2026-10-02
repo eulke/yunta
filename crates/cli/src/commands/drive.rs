@@ -371,15 +371,21 @@ pub(crate) struct Closed<'a> {
 /// off the same source every other surface reads.
 pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliError> {
     let events = closed.storage.events_for_run(closed.run_id.clone()).await?;
+    let decision = crate::json::decision_of(closed.manifest, closed.run_dir, &events)
+        .await?
+        .map(|(node, escalation)| (node, escalation.into_payload()));
+    let shown = match &decision {
+        Some((_, escalation)) => crate::json::shown_of(closed.run_dir, escalation, &events).await?,
+        None => Vec::new(),
+    };
     let closing = Closing::of(ClosingEnv {
         run_id: closed.run_id,
         workflow: &closed.manifest.workflow,
         events: &events,
         prior: closed.prior,
         now: closed.clock.now(),
-        decision: crate::json::decision_of(closed.manifest, closed.run_dir, &events)
-            .await?
-            .map(|(node, escalation)| (node, escalation.into_payload())),
+        decision,
+        shown,
         outline: Outline {
             run_dir: closed.run_dir,
             worktree: closed.worktree,
