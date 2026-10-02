@@ -24,7 +24,7 @@ pub(super) fn card(task: &Task, review: &PlanReview, form: Form, run: &str) -> S
     if let Some(judged) = judged {
         for criterion in &judged.criteria {
             blocks.push(blank());
-            blocks.extend(proved(criterion, review, form, run));
+            blocks.extend(proved(criterion, judged, review, form, run));
         }
     }
     Section {
@@ -107,9 +107,10 @@ fn changes(task: &Task, plan: &TasksFile, judged: Option<&TaskReview>) -> Vec<Bl
 }
 
 /// One criterion: what it proves, the command that runs it, and the code
-/// of the test the spec wrote for it.
+/// of each file the spec wrote that the command runs.
 fn proved(
     criterion: &JudgedCriterion,
+    judged: &TaskReview,
     review: &PlanReview,
     form: Form,
     run: &str,
@@ -128,28 +129,9 @@ fn proved(
     );
     let mut blocks: Vec<Block<'static>> = Vec::new();
     match &criterion.from {
-        HeldTo::Spec { file: Some(file) } => {
+        HeldTo::Spec => {
             blocks.push(fields.into());
-            let content = review
-                .spec
-                .iter()
-                .flat_map(|spec| &spec.specs)
-                .flat_map(|spec| &spec.files)
-                .find(|test| test.path == *file)
-                .map(|test| test.content.as_str())
-                .unwrap_or_default();
-            let code = Code::whole(
-                file.as_str(),
-                Some("the test the spec wrote for this task".to_string()),
-                content,
-            );
-            blocks.push(
-                match form {
-                    Form::Review => code.cut(CODE_SHOWN, format!("yunta status {run} --node spec")),
-                    Form::Whole => code,
-                }
-                .into(),
-            );
+            blocks.extend(tests_run(criterion, judged, review, form, run));
         }
         HeldTo::AnotherTask { task } => {
             blocks.push(
@@ -158,7 +140,42 @@ fn proved(
                     .into(),
             );
         }
-        HeldTo::Spec { file: None } | HeldTo::Plan => blocks.push(fields.into()),
+        HeldTo::Plan => blocks.push(fields.into()),
     }
     blocks
+}
+
+/// The code of each file the spec wrote that `criterion` runs.
+fn tests_run(
+    criterion: &JudgedCriterion,
+    judged: &TaskReview,
+    review: &PlanReview,
+    form: Form,
+    run: &str,
+) -> Vec<Block<'static>> {
+    judged
+        .files
+        .iter()
+        .filter(|file| file.run_by.contains(&criterion.cmd))
+        .map(|file| {
+            let content = review
+                .spec
+                .iter()
+                .flat_map(|spec| &spec.specs)
+                .flat_map(|spec| &spec.files)
+                .find(|test| test.path == file.path)
+                .map(|test| test.content.as_str())
+                .unwrap_or_default();
+            let code = Code::whole(
+                file.path.as_str(),
+                Some("the test the spec wrote for this task".to_string()),
+                content,
+            );
+            match form {
+                Form::Review => code.cut(CODE_SHOWN, format!("yunta status {run} --node spec")),
+                Form::Whole => code,
+            }
+            .into()
+        })
+        .collect()
 }

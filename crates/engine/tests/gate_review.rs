@@ -351,6 +351,34 @@ async fn a_plan_a_gate_will_show_is_refused_until_it_explains_itself() {
     }
 }
 
+/// How a plan got accepted is part of what a person decides on: the gate
+/// shows it with every time it was handed over and what was refused.
+#[tokio::test]
+async fn the_gate_shows_how_the_plan_was_handed_over() {
+    let bench = Bench::new().in_mode("pepito");
+    let interaction = SequencedInteraction::choosing(&["approve"]);
+    bench
+        .run_with_interaction(&two_ways(), &unexplained_then_explained(true), &interaction)
+        .await;
+
+    let shown = interaction.shown();
+    let ShownContent::Tasks(review) = &shown[0][0].content else {
+        panic!("a tasks document is shown as its tasks: {shown:?}");
+    };
+    let handed = review
+        .handed_over
+        .as_ref()
+        .expect("the log says how the plan was handed over");
+    assert_eq!((handed.submissions, handed.refusals), (2, 1));
+    assert!(
+        handed
+            .refused
+            .iter()
+            .any(|(code, times)| code.as_str() == "no-summary" && *times == 1),
+        "{handed:?}"
+    );
+}
+
 #[tokio::test]
 async fn a_plan_no_gate_of_the_run_shows_needs_no_explanation() {
     let bench = Bench::new().in_mode("pirulo");

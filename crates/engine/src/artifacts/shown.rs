@@ -55,15 +55,7 @@ async fn held_documents(
             }
             ArtifactId::Interpreted {
                 kind: ArtifactKind::Tasks,
-            } => {
-                let plan =
-                    yunta_core::shape::read::<TasksFile>(&bytes, path.display().to_string())?;
-                let departed = departed(&plan, &state.tasks);
-                let suite = crate::tasks::suite_of(state.run.baseline());
-                ShownContent::Tasks(Box::new(crate::tasks::plan_review(
-                    plan, None, suite, departed,
-                )))
-            }
+            } => ShownContent::Tasks(Box::new(plan_reviewed(shown, &bytes, &path, state)?)),
             ArtifactId::Interpreted {
                 kind: ArtifactKind::Spec,
             } => ShownContent::Spec(yunta_core::shape::read::<yunta_core::SpecFile>(
@@ -129,6 +121,28 @@ pub async fn produced(
     Ok(held_documents(run_dir, &shows, state).await?)
 }
 
+/// The plan `bytes` hold, as the run in `state` will judge it: with the
+/// departures a person accepted, the suite the run measured, and how its
+/// planner got it accepted — a plan refused fifteen times reads
+/// differently.
+fn plan_reviewed(
+    shown: &Shown,
+    bytes: &[u8],
+    path: &Path,
+    state: &RunState,
+) -> Result<yunta_core::shown::PlanReview, super::HeldError> {
+    let plan = yunta_core::shape::read::<TasksFile>(bytes, path.display().to_string())?;
+    let departed = departed(&plan, &state.tasks);
+    let suite = crate::tasks::suite_of(state.run.baseline());
+    let mut review = crate::tasks::plan_review(plan, None, suite, departed);
+    review.handed_over = shown
+        .producer
+        .as_ref()
+        .and_then(|node| state.artifacts.handed_over(node, ArtifactKind::Tasks))
+        .cloned();
+    Ok(review)
+}
+
 /// `documents` with a spec shown beside a plan read on the plan's tasks:
 /// its tests are what judges them, and a second document after the plan
 /// would put each test a screen away from the task it holds.
@@ -147,12 +161,14 @@ fn beside_its_plan(mut documents: Vec<ShownDocument>) -> Vec<ShownDocument> {
     };
     for document in &mut documents {
         if let ShownContent::Tasks(review) = &mut document.content {
+            let handed_over = review.handed_over.take();
             **review = crate::tasks::plan_review(
                 review.plan.clone(),
                 Some(spec.clone()),
                 review.suite.as_deref(),
                 review.departed.clone(),
             );
+            review.handed_over = handed_over;
         }
     }
     documents

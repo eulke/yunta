@@ -103,8 +103,10 @@ pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionsFile};
 pub use run_tool::RunTool;
 pub use schema_range::{SchemaRange, SchemaRangeError};
 pub use secret::Secret;
-pub use spec::{Spec, SpecFile, SpecTest, TestFile};
-pub use tasks::{Change, Criterion, Decision, Shape, Task, TasksFile};
+pub use spec::{in_repo, Spec, SpecFile, SpecTest, TestFile};
+pub use tasks::{
+    names_file, passes_by_a_name, Change, Criterion, Decision, Shape, Task, TasksFile,
+};
 pub use workflow::{
     followers, left_out, node_commands, reroute_sources, ArtifactContextRef, ArtifactKind,
     ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, Because, CheckBuiltin, CleanupTarget,

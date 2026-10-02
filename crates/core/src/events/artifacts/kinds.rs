@@ -36,13 +36,12 @@ impl ArtifactEvent {
     /// kinds answering `false` here change it.
     pub fn is_audit(&self) -> bool {
         match self {
-            // A submission is the handover, and the acceptance that
-            // follows is what the run holds: the ledger folds
-            // acceptances, so nothing moves when a session hands
-            // something over. What was refused is in the event and
-            // nowhere else, which is exactly what audit means.
+            // A submission is the handover: what the run holds is the
+            // acceptance that follows, and the ledger counts each
+            // handover and the rules its refusals broke — how a document
+            // got accepted is part of what a person decides on.
             Self::Written(_) => false,
-            Self::Submitted(_) => true,
+            Self::Submitted(_) => false,
             Self::Accepted(_) => false,
         }
     }

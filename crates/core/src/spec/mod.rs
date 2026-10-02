@@ -52,6 +52,31 @@ pub struct Spec {
 }
 
 impl Spec {
+    /// Each file of this spec that none of its tests names: a file the
+    /// spec wrote that nothing runs, so it judges nothing.
+    pub fn unrun_files(&self) -> impl Iterator<Item = &TestFile> + '_ {
+        self.files.iter().filter(|file| {
+            !self
+                .tests
+                .iter()
+                .any(|test| crate::names_file(&test.cmd, &file.in_repo()))
+        })
+    }
+
+    /// Each test of this spec that names none of its files, when it has
+    /// files: a test that judges the task by something the spec did not
+    /// write. A spec with no files tests the change through what the
+    /// project already runs, and has none of these.
+    pub fn hollow_tests(&self) -> impl Iterator<Item = &SpecTest> + '_ {
+        self.tests.iter().filter(|test| {
+            !self.files.is_empty()
+                && !self
+                    .files
+                    .iter()
+                    .any(|file| crate::names_file(&test.cmd, &file.in_repo()))
+        })
+    }
+
     /// The tests as the task's criteria: none of them a guard, each
     /// saying what it proves.
     pub fn criteria(&self) -> impl Iterator<Item = Criterion> + '_ {
@@ -77,14 +102,7 @@ impl TestFile {
     /// Its path as git names it inside the repository: its names alone,
     /// joined by `/` — `./tests/a.sh` is `tests/a.sh`.
     pub fn in_repo(&self) -> String {
-        std::path::Path::new(&self.path)
-            .components()
-            .filter_map(|component| match component {
-                std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("/")
+        in_repo(&self.path)
     }
 
     /// The pattern that selects exactly this file — an escaped path
@@ -92,6 +110,19 @@ impl TestFile {
     pub fn glob(&self) -> Option<ScopeGlob> {
         ScopeGlob::exact(std::path::Path::new(&self.in_repo())).ok()
     }
+}
+
+/// `path` as git names it inside the repository: its names alone, joined
+/// by `/` — `./tests/a.sh` is `tests/a.sh`.
+pub fn in_repo(path: &str) -> String {
+    std::path::Path::new(path)
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// One test: the command that runs it, and what its passing proves.

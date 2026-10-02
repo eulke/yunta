@@ -5,7 +5,9 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::events::FindingSeverity;
-use yunta_core::shown::{DeniedChange, HeldTo, JudgedCriterion, PlanReview, TaskReview};
+use yunta_core::shown::{
+    DeniedChange, HeldTo, JudgedCriterion, PlanReview, SpecFileReview, TaskReview,
+};
 use yunta_core::{FindingsFile, SpecFile, TasksFile};
 use yunta_testkit_core::golden::{assert_golden, ENVIRONMENTS};
 
@@ -124,14 +126,17 @@ fn review() -> PlanReview {
                 criteria: vec![JudgedCriterion {
                     cmd: "cargo test --test greet".to_string(),
                     proves: Some("the greeting names the person".to_string()),
-                    from: HeldTo::Spec {
-                        file: Some("tests/greet.rs".to_string()),
-                    },
+                    from: HeldTo::Spec,
                 }],
                 denied: vec![DeniedChange {
                     at: "tests/greet.rs".to_string(),
                     owner: "greet".into(),
                 }],
+                files: vec![SpecFileReview {
+                    path: "tests/greet.rs".to_string(),
+                    run_by: vec!["cargo test --test greet".to_string()],
+                }],
+                guards: Vec::new(),
             },
             TaskReview {
                 task: "farewell".into(),
@@ -143,8 +148,11 @@ fn review() -> PlanReview {
                     },
                 }],
                 denied: Vec::new(),
+                files: Vec::new(),
+                guards: Vec::new(),
             },
         ],
+        handed_over: None,
     }
 }
 

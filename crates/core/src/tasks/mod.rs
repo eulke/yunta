@@ -215,7 +215,10 @@ pub struct Task {
 
 mod order;
 mod owned;
+mod proof;
 mod rules;
+
+pub use proof::{names_file, passes_by_a_name};
 
 /// The shape this document publishes, as the YAML it is.
 ///

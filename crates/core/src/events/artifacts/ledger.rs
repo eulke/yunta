@@ -20,7 +20,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::events::ArtifactEvent;
+use crate::diagnostic::DiagnosticCode;
+use crate::events::{ArtifactEvent, SubmissionOutcome};
 use crate::events::{
     ArtifactId, ArtifactOrigin, ArtifactWrittenPayload, EventPayload, StoredEvent,
 };
@@ -58,6 +59,49 @@ pub struct ArtifactLedger {
     /// content and moves nothing, so a reader sees the run's artifacts
     /// where they first appeared.
     first_accepted: Vec<Held>,
+    /// How each node handed each document over, by its kind.
+    handovers: BTreeMap<(NodeId, ArtifactKind), HandedOver>,
+}
+
+/// How a node handed one document over: how many times, how many the
+/// engine refused, and the rules those refusals broke.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct HandedOver {
+    pub submissions: usize,
+    pub refusals: usize,
+    /// Each rule a refusal broke, with how many refusals broke it, in the
+    /// order the log first broke them.
+    pub refused: Vec<(DiagnosticCode, usize)>,
+    /// The position of the last submission counted: a copy of it handed
+    /// over again is the same submission, and counts once.
+    counted_through: Option<Seq>,
+}
+
+impl HandedOver {
+    fn submitted(&mut self, seq: Seq, outcome: &SubmissionOutcome) {
+        if self.counted_through.is_some_and(|counted| seq <= counted) {
+            return;
+        }
+        self.counted_through = Some(seq);
+        self.submissions += 1;
+        let SubmissionOutcome::Refused { report } = outcome else {
+            return;
+        };
+        self.refusals += 1;
+        let mut broken: Vec<DiagnosticCode> = Vec::new();
+        for diagnostic in &report.diagnostics {
+            let code = diagnostic.problem.code();
+            if !broken.contains(&code) {
+                broken.push(code);
+            }
+        }
+        for code in broken {
+            match self.refused.iter_mut().find(|(seen, _)| *seen == code) {
+                Some((_, times)) => *times += 1,
+                None => self.refused.push((code, 1)),
+            }
+        }
+    }
 }
 
 impl ArtifactLedger {
@@ -99,7 +143,15 @@ impl ArtifactLedger {
             ),
             // A submission is the handover; what the run holds is the
             // acceptance that follows it.
-            ArtifactEvent::Submitted(_) => return None,
+            ArtifactEvent::Submitted(submitted) => {
+                if let Some(node) = node {
+                    self.handovers
+                        .entry((node.clone(), submitted.artifact_kind))
+                        .or_default()
+                        .submitted(seq, &submitted.outcome);
+                }
+                return None;
+            }
         };
         let held = (node.cloned(), artifact.clone());
         if !self.current.contains_key(&held) {
@@ -116,6 +168,11 @@ impl ArtifactLedger {
             },
         );
         self.current.get(&held)
+    }
+
+    /// How `node` handed its document of `kind` over, if it ever did.
+    pub fn handed_over(&self, node: &NodeId, kind: ArtifactKind) -> Option<&HandedOver> {
+        self.handovers.get(&(node.clone(), kind))
     }
 
     /// The artifact answering `id`, or `None` when the run holds none.
@@ -176,4 +233,68 @@ fn artifact_name(path: &Path) -> String {
         .map(|component| component.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diagnostic::{Diagnostic, DocumentRef, Problem, Report, RuleCode, Subject};
+    use crate::events::ArtifactSubmittedPayload;
+
+    fn submitted(codes: &[RuleCode]) -> ArtifactEvent {
+        let outcome = match codes {
+            [] => SubmissionOutcome::Accepted {
+                content_hash: crate::hash::ContentHash::sha256(b"plan"),
+            },
+            _ => SubmissionOutcome::Refused {
+                report: Report::new(
+                    DocumentRef::new(ArtifactKind::Tasks, "tasks.yaml"),
+                    codes
+                        .iter()
+                        .map(|code| Diagnostic::new(Subject::Document, Problem::rule(*code, "x")))
+                        .collect(),
+                ),
+            },
+        };
+        ArtifactEvent::Submitted(ArtifactSubmittedPayload {
+            name: "tasks.yaml".to_string(),
+            artifact_kind: ArtifactKind::Tasks,
+            outcome,
+        })
+    }
+
+    #[test]
+    fn each_handover_counts_once_and_each_rule_by_the_refusals_that_broke_it() {
+        let plan = NodeId::from("plan");
+        let mut ledger = ArtifactLedger::default();
+        let passes = RuleCode::CriterionAlreadyPasses;
+        let scope = RuleCode::ChangeOutsideScope;
+        for (seq, codes) in [vec![passes, passes, scope], vec![passes], vec![]]
+            .iter()
+            .enumerate()
+        {
+            ledger.apply(Some(&plan), Seq::from(seq as u64 + 1), &submitted(codes));
+        }
+        let handed = ledger.handed_over(&plan, ArtifactKind::Tasks).unwrap();
+        assert_eq!(handed.submissions, 3);
+        assert_eq!(handed.refusals, 2);
+        assert_eq!(
+            handed.refused,
+            vec![
+                (DiagnosticCode::Rule(passes), 2),
+                (DiagnosticCode::Rule(scope), 1)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_submission_handed_over_twice_counts_once() {
+        let plan = NodeId::from("plan");
+        let mut ledger = ArtifactLedger::default();
+        let refused = submitted(&[RuleCode::NoSummary]);
+        ledger.apply(Some(&plan), Seq::from(1), &refused);
+        ledger.apply(Some(&plan), Seq::from(1), &refused);
+        let handed = ledger.handed_over(&plan, ArtifactKind::Tasks).unwrap();
+        assert_eq!((handed.submissions, handed.refusals), (1, 1));
+    }
 }
