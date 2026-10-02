@@ -57,6 +57,15 @@ impl Shape {
         }
     }
 
+    /// What a workflow of this shape does, beside its name on the menu.
+    fn does(&self) -> &'static str {
+        match self {
+            Self::OneNode => "one command whose exit code is the check",
+            Self::LintFix => "a check, and an agent that fixes what it finds",
+            Self::Tasks => "a plan of tasks, and an agent that works through them",
+        }
+    }
+
     /// The skeleton named `name`. `lint_declared` says whether the
     /// project's config declares a `lint` command, which a lint-fix
     /// skeleton then runs by name instead of leaving a placeholder.
@@ -150,7 +159,10 @@ nodes:
 fn picked(console: &Console) -> Shape {
     let choices = Shape::all()
         .into_iter()
-        .map(|shape| Choice::named(shape.label(), shape))
+        .map(|shape| Choice {
+            label: Some(shape.does().to_string()),
+            ..Choice::named(shape.label(), shape)
+        })
         .collect();
     choose(console, "choose a shape", choices).unwrap_or(Shape::OneNode)
 }
@@ -187,7 +199,7 @@ pub async fn new_workflow(
         // to say goes out through a door onto nothing, which is stderr.
         None => match interactive {
             false => Shape::OneNode,
-            true => match Console::open(&Diagnostics::none(), Escape::KeepsDefault).await {
+            true => match Console::open(&Diagnostics::none(), Escape::TakesTheFirst).await {
                 Some(console) => picked(&console),
                 None => {
                     warn(

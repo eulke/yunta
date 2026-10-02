@@ -698,3 +698,23 @@ fn init_asks_through_the_console_and_honours_escape() {
         "and the one that was declined kept the detected default:\n{config}"
     );
 }
+
+#[test]
+fn the_questions_say_which_node_asks_and_how_many_answers_it_needs() {
+    let root = tempfile::tempdir().unwrap();
+    let terminal = asking(
+        root.path(),
+        "questions:\n  - id: summary\n    text: \"What changed?\"\n    answer_type: text\n    \
+         required: true\n",
+    );
+    terminal.wait_for("1/1  What changed?", "the question was never asked");
+    let drawn = terminal.drawn();
+    let headline = drawn
+        .lines()
+        .find(|line| line.contains(": ◆ needs you") && line.starts_with("node `"))
+        .unwrap_or_else(|| panic!("the round is headed by the node that asks it:\n{drawn}"));
+    assert!(
+        drawn[drawn.find(headline).unwrap_or_default()..].contains("1 answer before it goes on"),
+        "and how many answers it needs:\n{drawn}"
+    );
+}

@@ -17,6 +17,7 @@ use crate::error::{warn, CliError, Outcome};
 use crate::interrupt::Interrupt;
 use crate::render::blocks::{Checklist, Fields, Found, Next};
 use crate::render::doc::Doc;
+use crate::render::ink::{Line, Tone};
 use crate::surface::Diagnostics;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
@@ -228,7 +229,16 @@ fn claude_md_suggestion() -> &'static str {
 /// now" about a setting that already has a detected value is that
 /// value.
 fn asked(console: &Console, prompt: &str, default: &str) -> String {
-    match ask_line(console, &format!("{prompt} [{default}]: ")) {
+    let look = console.look();
+    let asking = Line::new()
+        .push(Tone::Strong, prompt)
+        .push(Tone::Muted, format!(" (enter keeps `{default}`)"));
+    // A terminal that cannot be drawn on cannot be asked either: the
+    // default stands, as it does for a line left empty.
+    if console.say(&look.ink.paint(&asking)).is_err() {
+        return default.to_string();
+    }
+    match ask_line(console, crate::ask::ANSWER) {
         Ok(typed) if !typed.value.is_empty() => typed.value,
         _ => default.to_string(),
     }

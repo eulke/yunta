@@ -53,6 +53,9 @@ pub(crate) enum Escape {
     LeavesWaiting,
     /// The value the command detected for itself stands.
     KeepsDefault,
+    /// A choice with no detected value: Escape takes the first, the
+    /// plainest of them.
+    TakesTheFirst,
 }
 
 impl Escape {
@@ -62,6 +65,7 @@ impl Escape {
             Escape::Parks => "esc parks the run",
             Escape::LeavesWaiting => "esc leaves the run waiting",
             Escape::KeepsDefault => "esc keeps the detected default",
+            Escape::TakesTheFirst => "esc takes the first",
         }
     }
 }

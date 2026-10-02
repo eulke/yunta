@@ -41,7 +41,7 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
             diagnostic: source.to_string(),
         })?;
 
-    let Some(reply) = ctx.human_interaction.ask(&file).await else {
+    let Some(reply) = ctx.human_interaction.ask(&node.id, &file).await else {
         // No surface can answer right now (headless, `yunta test`, a
         // piped invocation): the run parks, and the questions stand for
         // whichever surface reaches them next.

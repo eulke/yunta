@@ -80,9 +80,15 @@ pub trait HumanInteraction: Send + Sync {
     /// so surfaces that only handle gates stay valid unchanged.
     ///
     /// How the questions are presented is the surface's own call: a
-    /// node that declares them has said everything it has to say.
-    async fn ask(&self, questions: &QuestionsFile) -> Option<QuestionsReply> {
-        let _ = questions;
+    /// node that declares them has said everything it has to say. `node`
+    /// is the one asking, which a surface names so a person knows whose
+    /// questions these are.
+    async fn ask(
+        &self,
+        node: &yunta_core::NodeId,
+        questions: &QuestionsFile,
+    ) -> Option<QuestionsReply> {
+        let _ = (node, questions);
         None
     }
 }

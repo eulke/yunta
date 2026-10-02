@@ -17,6 +17,10 @@ use yunta_core::events::Channel;
 use yunta_core::{Answer, AnswerType, Question, QuestionsFile};
 use yunta_engine::QuestionsReply;
 
+use crate::render::blocks::{Drawn, Headline};
+use crate::render::ink::{Line, Tone};
+use crate::render::{Mark, INDENT};
+
 use super::field::ask_line;
 use super::menu::{choose, Choice};
 use super::{attributed, Answered, Console, ANSWER};
@@ -26,24 +30,47 @@ use super::{attributed, Answered, Console, ANSWER};
 /// given when the choice is echoed back.
 const SKIP: &str = "(no answer)";
 
-/// Puts every question in `questions` to the person, in order.
-pub(crate) fn answer(console: &Console, questions: &QuestionsFile) -> Answered<QuestionsReply> {
+/// Puts every question `node` asks in `questions` to the person, in
+/// order, under a headline that says who is asking and how many
+/// answers the round needs.
+pub(crate) fn answer(
+    console: &Console,
+    node: &yunta_core::NodeId,
+    questions: &QuestionsFile,
+) -> Answered<QuestionsReply> {
     let total = questions.questions.len();
+    let look = console.look();
+    let headline = Headline {
+        subject: format!("node `{node}`"),
+        mark: Mark::NeedsYou,
+        said: "needs you".to_string(),
+    };
     console.say("")?;
-    console.say(&format!(
-        "{} needed before this node goes on ({})",
-        yunta_core::text::counted(total, "answer"),
-        console.escape().said()
-    ))?;
+    for line in headline.lines(&look) {
+        console.say(&look.ink.paint(&line))?;
+    }
+    console.say(&look.ink.paint(&Line::new().plain(INDENT).plain(format!(
+        "{} before it goes on",
+        yunta_core::text::counted(total, "answer")
+    ))))?;
+    console.say(
+        &look.ink.paint(
+            &Line::new()
+                .plain(INDENT)
+                .push(Tone::Muted, console.escape().said()),
+        ),
+    )?;
     let mut answers = Vec::new();
     for (index, question) in questions.questions.iter().enumerate() {
         console.say("")?;
-        console.say(&format!(
-            "{}/{total}  {}{}",
-            index + 1,
-            question.text,
-            if question.required { "" } else { " (optional)" }
-        ))?;
+        let mut asking = Line::new()
+            .push(Tone::Muted, format!("{}/{total}", index + 1))
+            .plain("  ")
+            .push(Tone::Strong, question.text.as_str());
+        if !question.required {
+            asking = asking.push(Tone::Muted, " (optional)");
+        }
+        console.say(&look.ink.paint(&asking))?;
         answers.extend(asked(console, question)?);
     }
     Ok(QuestionsReply {
@@ -69,8 +96,13 @@ fn asked(console: &Console, question: &Question) -> Answered<Option<Answer>> {
         if broken.is_empty() {
             return Ok(candidate);
         }
+        let look = console.look();
         for violation in broken {
-            console.say(&violation)?;
+            let line = Line::new()
+                .push(Tone::Failed, look.glyphs.mark(Mark::Failed).to_string())
+                .plain(" ")
+                .plain(violation);
+            console.say(&look.ink.paint(&line))?;
         }
     }
 }

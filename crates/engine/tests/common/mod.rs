@@ -73,6 +73,7 @@ impl yunta_engine::HumanInteraction for ScriptedAnswers {
     }
     async fn ask(
         &self,
+        _node: &yunta_core::NodeId,
         _questions: &yunta_core::QuestionsFile,
     ) -> Option<yunta_engine::QuestionsReply> {
         Some(yunta_engine::QuestionsReply {

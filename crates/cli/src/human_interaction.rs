@@ -122,9 +122,14 @@ impl HumanInteraction for ConsoleInteraction {
 
     /// Question by question, each answered the way its own
     /// `answer_type` is answered.
-    async fn ask(&self, questions: &QuestionsFile) -> Option<QuestionsReply> {
+    async fn ask(
+        &self,
+        node: &yunta_core::NodeId,
+        questions: &QuestionsFile,
+    ) -> Option<QuestionsReply> {
         let questions = questions.clone();
-        self.prompted(move |console| answer(console, &questions))
+        let node = node.clone();
+        self.prompted(move |console| answer(console, &node, &questions))
             .await
     }
 }
