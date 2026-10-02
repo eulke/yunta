@@ -55,5 +55,6 @@ pub use yunta_core::units::{duration, Ratio, Tokens};
 
 #[cfg(test)]
 mod tests {
+    mod deciding;
     mod documents;
 }

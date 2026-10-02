@@ -36,16 +36,38 @@ pub fn document(document: &ShownDocument, run: &str, form: Form) -> Doc<'static>
         ShownContent::Spec(file) => crate::spec::document(file, &of, run, form),
         ShownContent::Findings(file) => crate::findings::document(file, &of),
         ShownContent::RunFindings(view) => crate::findings::run_document(view),
-        ShownContent::Text(text) => Doc::new()
-            .with(Block::Title(Line::new().push(
-                Tone::Strong,
-                match &document.shown.artifact {
-                    ArtifactId::Interpreted { kind } => format!("the {kind} document{of}"),
-                    ArtifactId::Opaque { name } => format!("{name}{of}"),
-                },
-            )))
-            .with(Block::Markdown(text.clone())),
+        ShownContent::Text(text) => {
+            let named = match &document.shown.artifact {
+                ArtifactId::Interpreted { kind } => format!("the {kind} document{of}"),
+                ArtifactId::Opaque { name } => format!("{name}{of}"),
+            };
+            // A document that opens on a heading is called what it calls
+            // itself — what a brief asks for, before which file it is.
+            let (title, body) = match headed(text) {
+                Some((heading, body)) => (
+                    Line::new()
+                        .push(Tone::Strong, heading)
+                        .push(Tone::Muted, format!(" — {named}")),
+                    body,
+                ),
+                None => (Line::new().push(Tone::Strong, named), text.as_str()),
+            };
+            Doc::new()
+                .with(Block::Title(title))
+                .with(Block::Markdown(body.to_string()))
+        }
     }
+}
+
+/// The heading `text` opens on, and what follows it; `None` when it
+/// opens on anything else.
+fn headed(text: &str) -> Option<(&str, &str)> {
+    let text = text.trim_start();
+    let (first, rest) = text.split_once('\n').unwrap_or((text, ""));
+    let heading = first.trim_start_matches('#');
+    let marks = first.len() - heading.len();
+    let heading = heading.strip_prefix(' ')?.trim();
+    ((1..=6).contains(&marks) && !heading.is_empty()).then_some((heading, rest))
 }
 
 /// What weighs on a decision, said beside its menu: on a terminal the

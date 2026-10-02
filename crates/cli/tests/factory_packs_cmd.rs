@@ -125,6 +125,43 @@ fn yunta_fragua_installs_and_checks_every_declared_mode_through_the_real_pack_pi
     assert!(stdout(&check).contains("OK"));
 }
 
+/// The plan's gate puts what was asked in front of the person before the
+/// plan that answers it: the brief first, then the plan and its spec.
+#[test]
+fn fragua_s_plan_gate_shows_the_brief_before_the_plan() {
+    let text =
+        std::fs::read_to_string(repo_root().join("packs/fragua/.yunta/workflows/fragua.yaml"))
+            .unwrap();
+    let workflow: yunta_core::Workflow = yunta_core::yaml::parse(&text).unwrap();
+    let gate = workflow
+        .iter_nodes()
+        .find(|node| node.id.as_str() == "approve-plan")
+        .expect("fragua asks a person to approve its plan");
+    let yunta_core::NodeKind::Gate { shows, .. } = &gate.kind else {
+        panic!("`approve-plan` is a gate: {:?}", gate.kind);
+    };
+    let shown: Vec<(Option<&str>, yunta_core::events::ArtifactId)> = shows
+        .iter()
+        .map(|reference| {
+            (
+                reference.node.as_ref().map(|node| node.as_str()),
+                yunta_core::events::ArtifactId::from(&reference.id),
+            )
+        })
+        .collect();
+    assert_eq!(
+        shown[0],
+        (
+            Some("brief"),
+            yunta_core::events::ArtifactId::Opaque {
+                name: "brief.md".to_string()
+            }
+        ),
+        "{shown:?}"
+    );
+    assert_eq!(shown[1].0, Some("plan"), "{shown:?}");
+}
+
 #[test]
 fn test_dir_runs_a_packs_own_cases_from_outside_its_root() {
     let project = setup_project();

@@ -118,6 +118,7 @@ nodes:
     options: [approve, adjust]
     on: { adjust: plan }
     shows:
+      - { node: brief, name: brief.md }
       - { node: plan, kind: tasks }
       - { node: spec, kind: spec }
 

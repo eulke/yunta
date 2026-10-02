@@ -209,3 +209,78 @@ fn the_question_and_its_options_are_the_last_lines_before_the_menu() {
         "nothing of the plan sits between the question and its options:\n{drawn}"
     );
 }
+
+/// A brief, the plan written from it, and a gate that shows both.
+const BRIEFED_PLAN: &str = r#"
+name: briefed-plan
+nodes:
+  - id: brief
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    prompt: "Write the brief."
+    artifacts:
+      produces: [brief.md]
+  - id: plan
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    depends_on: [brief]
+    prompt: "Hand over the tasks document."
+    artifacts:
+      produces: [tasks]
+  - id: approve-plan
+    kind: gate
+    assignee: lead
+    message: "Plan registered. Approve?"
+    shows:
+      - { node: brief, name: brief.md }
+      - { node: plan, kind: tasks }
+"#;
+
+/// The brief, then the plan.
+const BRIEFED: &str = r##"
+capabilities: { run_tools: true }
+sessions:
+  - match_prompt_contains: "Write the brief"
+    effects:
+      - { path: "{{run.staging}}/brief/brief.md", content: "# Global pack installation\n\nA pack installs for the user, not one project.\n" }
+    outcome: { type: completed, summary: "briefed" }
+  - match_prompt_contains: "Hand over the tasks"
+    steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            summary: "Make it"
+            description: "Writes the file the run is about."
+            tasks:
+              - { id: T001, title: "Make it", description: "Writes made.txt.", scope: [made.txt], changes: [{ at: made.txt, what: "the file", code: "the file's first line" }], outcome: "made.txt exists", criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }
+    outcome: { type: completed, summary: "planned" }
+"##;
+
+#[test]
+fn what_was_asked_is_read_before_the_plan_that_answers_it() {
+    let root = tempfile::tempdir().unwrap();
+    let checkout = Checkout::under(root.path())
+        .config(
+            "defaults:\n  isolation: none\nrunners:\n  planner:\n    \
+             - { adapter: mock, model: mock-model }\n",
+        )
+        .workflow("wf", BRIEFED_PLAN)
+        .file("fixture.yaml", BRIEFED)
+        .committed();
+    let terminal = yunta_on_terminal!(&checkout.repo, &checkout.home, &RUN);
+    terminal.wait_for("2  abort", "the gate never put its options on the console");
+    let drawn = terminal.drawn();
+
+    let asked = drawn
+        .find("Global pack installation — brief.md of `brief`")
+        .expect(&drawn);
+    let plan = drawn.find("plan of `plan`").expect(&drawn);
+    assert!(asked < plan, "the brief is read before the plan:\n{drawn}");
+    assert!(
+        drawn[asked..plan].contains("A pack installs for the user, not one project."),
+        "{drawn}"
+    );
+}
