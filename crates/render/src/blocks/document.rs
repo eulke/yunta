@@ -173,7 +173,7 @@ impl Drawn for Code {
         for line in &self.lines {
             let pieces = match line.is_empty() {
                 true => vec![String::new()],
-                false => crate::markdown::continued(line, code_room),
+                false => crate::markdown::continued(line, code_room, look.glyphs),
             };
             for piece in pieces {
                 let line = Line::new().plain(under.as_str());

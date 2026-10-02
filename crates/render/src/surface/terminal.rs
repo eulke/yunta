@@ -49,10 +49,12 @@ impl Terminal {
             Block::Title(title) => vec![title.clone()],
             Block::Section(section) => self.section(section),
             Block::Prose(block) => block.lines(look),
-            Block::Markdown(text) => crate::markdown::markdown(text, INDENT, look.width.cells())
-                .into_iter()
-                .map(|line| Line::new().plain(line))
-                .collect(),
+            Block::Markdown(text) => {
+                crate::markdown::markdown(text, INDENT, look.width.cells(), look.glyphs)
+                    .into_iter()
+                    .map(|line| Line::new().plain(line))
+                    .collect()
+            }
             Block::Marked(block) => block.lines(look),
             Block::Concern(block) => block.lines(look),
             Block::Code(block) => block.lines(look),

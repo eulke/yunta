@@ -201,7 +201,8 @@ fn measure() -> BTreeMap<String, usize> {
         }),
     );
 
-    // The separator between two facts on a line written as a literal: a
+    // A glyph that says how a line reads — the separator between two
+    // facts, the mark of a line that goes on — written as a literal: a
     // surface drawing with the ASCII set still prints it, where the
     // glyph set would have printed what that terminal can draw.
     counts.insert(
@@ -213,7 +214,9 @@ fn measure() -> BTreeMap<String, usize> {
             .map(|text| {
                 production_only(&text)
                     .lines()
-                    .filter(|line| !line.trim_start().starts_with("//") && line.contains('·'))
+                    .filter(|line| {
+                        !line.trim_start().starts_with("//") && line.contains(['·', '↪'])
+                    })
                     .count()
             })
             .sum(),

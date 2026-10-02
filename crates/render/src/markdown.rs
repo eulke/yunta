@@ -8,7 +8,7 @@
 //! a line, so what follows reads as the same line and not as one of its
 //! own.
 
-use crate::{cell_width, cut, wrap, INDENT};
+use crate::{cell_width, cut, wrap, Glyphs, INDENT};
 
 /// `text` wrapped to `width` under `indent`, with `lead` before its first
 /// line and the lines after it starting where the text did.
@@ -28,10 +28,11 @@ pub fn hanging(indent: &str, lead: &str, text: &str, width: usize) -> Vec<String
 /// `text` as a terminal shows it: paragraphs and list items wrapped to
 /// `width` under `indent`, code as written — continued where it is wider,
 /// never re-flowed — and each `mermaid` block named rather than drawn.
-pub fn markdown(text: &str, indent: &str, width: usize) -> Vec<String> {
+pub fn markdown(text: &str, indent: &str, width: usize, glyphs: Glyphs) -> Vec<String> {
     let mut page = Page {
         indent,
         width,
+        glyphs,
         lines: Vec::new(),
         paragraph: String::new(),
         fence: None,
@@ -54,6 +55,7 @@ enum Fence {
 struct Page<'a> {
     indent: &'a str,
     width: usize,
+    glyphs: Glyphs,
     lines: Vec<String>,
     /// The paragraph gathered so far, drawn once it ends.
     paragraph: String,
@@ -103,7 +105,7 @@ impl Page<'_> {
         let code = format!("{}{INDENT}", self.indent);
         let room = self.width.saturating_sub(cell_width(&code));
         self.lines
-            .extend(continued(line, room).into_iter().map(|piece| {
+            .extend(continued(line, room, self.glyphs).into_iter().map(|piece| {
                 if piece.is_empty() {
                     String::new()
                 } else {
@@ -162,18 +164,17 @@ fn list_item(line: &str) -> Option<(&str, &str)> {
     None
 }
 
-/// How far a line of code that goes on is set under where it starts.
-const HANG: &str = "    ";
-
 /// `line` of code in pieces that each fit `width`: broken after the last
 /// space that fits, and between characters only where no space does —
-/// each piece after the first set [`HANG`] under the line's own indent.
-pub fn continued(line: &str, width: usize) -> Vec<String> {
+/// each piece after the first set under the line's own indent and opened
+/// with the continuation glyph, so a reader never takes it for a line of
+/// the code.
+pub fn continued(line: &str, width: usize, glyphs: Glyphs) -> Vec<String> {
     if cell_width(line) <= width {
         return vec![line.to_string()];
     }
     let lead = &line[..line.len() - line.trim_start().len()];
-    let under = format!("{lead}{HANG}");
+    let under = format!("{lead}  {} ", glyphs.continued());
     let mut pieces = Vec::new();
     let mut rest = line.trim_end();
     let mut prefix = "";
@@ -221,22 +222,28 @@ mod tests {
             "```rust\n    now.signed_duration_since(created_at) <= chrono::Duration::from_std(window)\n```",
             "",
             48,
+            Glyphs::Unicode,
         );
         assert_eq!(
             drawn,
             [
                 "      now.signed_duration_since(created_at) <=",
-                "          chrono::Duration::from_std(window)",
+                "        ↪ chrono::Duration::from_std(window)",
             ]
         );
     }
 
     #[test]
     fn a_token_no_space_lets_fit_is_cut_and_still_hangs_under_its_line() {
-        let drawn = markdown("```\nabcdefghijklmnopqrstuvwxyz\n```", "", 12);
+        let drawn = markdown(
+            "```\nabcdefghijklmnopqrstuvwxyz\n```",
+            "",
+            12,
+            Glyphs::Ascii,
+        );
         assert_eq!(
             drawn,
-            ["  abcdefghij", "      klmnop", "      qrstuv", "      wxyz"]
+            ["  abcdefghij", "    > klmnop", "    > qrstuv", "    > wxyz"]
         );
         assert!(drawn.iter().all(|line| cell_width(line) <= 12));
     }

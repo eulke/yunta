@@ -387,3 +387,73 @@ fn a_checklist_marks_each_check_and_lines_up_what_it_found() {
     );
     assert!(!list.holds(), "a problem on the list is one a run stops on");
 }
+
+/// A command long enough to be cut, with a quoted stretch a cut inside
+/// would break.
+const LONG: &str = "cargo test -p yunta --test pack_cmd -- global_pack_scope_case --exact --nocapture 'a scope with spaces'";
+
+/// What a reader copies off `lines` once the first `margin` cells of
+/// each are gone: the lines as drawn, joined.
+fn copied(lines: &[String], margin: usize) -> String {
+    lines
+        .iter()
+        .map(|line| {
+            line.chars()
+                .skip(margin)
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Whether a shell reads `command` as valid, without running it.
+fn parses(command: &str) -> bool {
+    std::process::Command::new("sh")
+        .args(["-n", "-c", command])
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[test]
+fn a_cut_command_copies_as_one_command() {
+    let look = Look {
+        width: crate::Width::of(Some(100), None).within(48),
+        ..Look::plain()
+    };
+    let fields = Fields::new().push_command("checked by", LONG);
+    let drawn: Vec<String> = fields
+        .lines(&look)
+        .iter()
+        .map(|line| look.ink.paint(line))
+        .collect();
+    assert!(drawn.len() > 1, "{drawn:?}");
+    assert!(
+        drawn.iter().all(|line| crate::cell_width(line) <= 48),
+        "{drawn:?}"
+    );
+    let command = copied(
+        &drawn,
+        crate::cell_width(crate::INDENT) + crate::LABEL_WIDTH + 1,
+    );
+    assert!(
+        command.contains("'a scope with spaces'"),
+        "a quoted stretch is never cut: {command}"
+    );
+    assert!(parses(&command), "{command}");
+    assert_eq!(command.replace(" \\\n  ", " "), LONG);
+
+    let next = Next {
+        steps: vec![(LONG.to_string(), "runs the case")],
+    };
+    let drawn: Vec<String> = next
+        .lines(&look)
+        .iter()
+        .map(|line| look.ink.paint(line))
+        .collect();
+    let command = copied(&drawn, crate::cell_width(crate::INDENT));
+    let command = command.trim_end_matches("runs the case").trim_end();
+    assert!(parses(command), "{command}");
+    assert_eq!(command.replace(" \\\n  ", " "), LONG);
+}

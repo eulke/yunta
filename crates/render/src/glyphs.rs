@@ -121,6 +121,15 @@ impl Glyphs {
         }
     }
 
+    /// What the rest of a line cut to fit opens with, so it reads as the
+    /// line above going on rather than a line of its own.
+    pub fn continued(self) -> char {
+        match self {
+            Self::Unicode => '↪',
+            Self::Ascii => '>',
+        }
+    }
+
     /// The edge quoted output hangs from, so it reads as something a
     /// command printed and not as something this one says.
     pub fn gutter(self) -> char {

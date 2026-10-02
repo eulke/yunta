@@ -112,6 +112,67 @@ pub fn wrap_unbroken(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
+/// `command` in lines that each fit `width`, cut only at a space no quote
+/// holds, every line but the last ending in ` \` and each after the first
+/// set in by two — so the lines a reader copies together are still the
+/// one command a shell reads. A word wider than the line stays whole.
+pub fn command_lines(command: &str, width: usize) -> Vec<String> {
+    const GOES_ON: &str = " \\";
+    const UNDER: &str = "  ";
+    if cell_width(command) <= width {
+        return vec![command.to_string()];
+    }
+    let words = shell_words(command);
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for (at, word) in words.iter().enumerate() {
+        // The last line needs no room for the mark that it goes on.
+        let rest = words[at..].join(" ");
+        let room = match cell_width(&line) + 1 + cell_width(&rest) <= width {
+            true => width,
+            false => width.saturating_sub(cell_width(GOES_ON)),
+        };
+        if !line.trim().is_empty() && cell_width(&line) + 1 + cell_width(word) > room {
+            lines.push(format!("{line}{GOES_ON}"));
+            line = UNDER.to_string();
+        } else if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    lines.push(line);
+    lines
+}
+
+/// The words of `command` as a shell splits them: at spaces outside
+/// quotes, a quoted stretch kept whole with its quotes.
+fn shell_words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for ch in command.chars() {
+        match (quote, ch) {
+            _ if escaped => escaped = false,
+            (Some('\''), '\'') | (Some('"'), '"') => quote = None,
+            (None, '\'' | '"') => quote = Some(ch),
+            (None | Some('"'), '\\') => escaped = true,
+            (None, ' ' | '\t') => {
+                if !word.is_empty() {
+                    words.push(std::mem::take(&mut word));
+                }
+                continue;
+            }
+            _ => {}
+        }
+        word.push(ch);
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
+}
+
 /// `line` in pieces that each occupy `width` display cells or fewer, cut
 /// between clusters and nowhere else — for text whose spacing is its
 /// meaning, like a line of code, which [`wrap`] would re-flow.
