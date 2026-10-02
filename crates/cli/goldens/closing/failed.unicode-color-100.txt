@@ -4,7 +4,7 @@
   ␛[1mlint␛[0m: ␛[31mexit 101␛[0m
   ␛[2m  │ ␛[0merror[E0425]: cannot find value `x` in this scope
   ␛[2m  │ ␛[0m --> src/lib.rs:3:5
-    ␛[2mwhole output: ~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/342da2eb16499698087adc25ad9595254cd6664564344b7db803bc9bd029d8da␛[0m
+    ␛[2mwhole output: ␛[0m~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/342da2eb16499698087adc25ad9595254cd6664564344b7db803bc9bd029d8da
 
   ␛[2mprogress    ␛[0m nodes 1/2 · 1 failed
   ␛[2mtokens      ␛[0m 20.2k spent

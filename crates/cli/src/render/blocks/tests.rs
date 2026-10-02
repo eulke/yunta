@@ -18,7 +18,10 @@ fn goldens() -> PathBuf {
 fn evidence(lines: usize) -> Evidence {
     Evidence {
         tail: (1..=lines).map(|n| format!("line {n}")).collect(),
-        whole: Some("~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/9f2c".to_string()),
+        whole: Some(Whole::File {
+            shown: "~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/9f2c".to_string(),
+            path: PathBuf::from("/home/me/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/9f2c"),
+        }),
     }
 }
 
@@ -146,8 +149,36 @@ fn every_block_reads_the_same_once_its_color_is_taken_out() {
         ink: crate::render::ink::Ink::Plain,
         ..look
     };
+    let linked = Look {
+        ink: crate::render::ink::Ink::Linked,
+        ..look
+    };
     let blocks: [&dyn Block; 2] = [&decision(), &evidence(3)];
     assert_eq!(strip_sgr(&paint(&blocks, &look)), paint(&blocks, &flat));
+    assert_eq!(strip_sgr(&paint(&blocks, &linked)), paint(&blocks, &flat));
+}
+
+#[test]
+fn a_path_is_a_link_only_when_links_are_on() {
+    let painted = |ink| {
+        let look = Look {
+            ink,
+            ..Look::of(&ENVIRONMENTS[0])
+        };
+        paint(&[&evidence(3)], &look)
+    };
+    let target =
+        "\x1b]8;;file:///home/me/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/9f2c\x1b\\";
+    assert!(
+        painted(crate::render::ink::Ink::Linked).contains(target),
+        "a terminal that opens links gets the file as one"
+    );
+    for ink in [
+        crate::render::ink::Ink::Ansi16,
+        crate::render::ink::Ink::Plain,
+    ] {
+        assert!(!painted(ink).contains("\x1b]8"), "{ink:?}");
+    }
 }
 
 #[test]

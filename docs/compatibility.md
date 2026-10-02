@@ -367,6 +367,13 @@ reads the same once its color is taken out: color repeats the words, it never
 replaces them. `NO_COLOR` changes nothing but color — the live view is drawn on a
 terminal either way.
 
+A stream with color also gets links where a path names a file a reader opens —
+the whole output of a failed command — when its terminal announces it opens them:
+`TERM_PROGRAM` of `iTerm.app`, `WezTerm` or `vscode`, a `VTE_VERSION` of 5000 or
+later, `KITTY_WINDOW_ID` or `WT_SESSION` set. `YUNTA_HYPERLINKS=1` turns them on
+wherever there is color, and `YUNTA_HYPERLINKS=0` off. A link is an OSC 8 sequence
+around the path's own text, which a terminal without links shows as that text.
+
 ## Line width
 
 A line is laid out to the width of the stream it is written to: a terminal's

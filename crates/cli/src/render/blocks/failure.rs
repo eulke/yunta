@@ -6,16 +6,16 @@ use std::path::PathBuf;
 
 use yunta_core::events::Failure;
 
-use super::{Block, Evidence};
+use super::{Block, Evidence, Whole};
 use crate::render::ink::Line;
 use crate::render::{indent, Look, INDENT};
 
 /// One failure's detail, as every surface that quotes it quotes it.
 pub(crate) struct FailureDetail<'a> {
     pub(crate) failure: &'a Failure,
-    /// Where the whole of what a command printed is, as a reader reads
-    /// it: a path, or the command that shows it.
-    pub(crate) whole: Option<String>,
+    /// Where the whole of what a command printed is: the file it is
+    /// kept in, or the command that shows it.
+    pub(crate) whole: Option<Whole>,
 }
 
 impl Block for FailureDetail<'_> {

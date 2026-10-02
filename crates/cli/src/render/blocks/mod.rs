@@ -19,7 +19,7 @@ mod node_table;
 
 pub(crate) use checklist::{Check, Checklist, Found};
 pub(crate) use decision::{Decision, DecisionOption};
-pub(crate) use evidence::Evidence;
+pub(crate) use evidence::{Evidence, Whole};
 pub(crate) use failure::FailureDetail;
 pub(crate) use fields::Fields;
 pub(crate) use headline::Headline;

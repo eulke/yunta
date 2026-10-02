@@ -48,7 +48,17 @@ pub fn hermetic<C: Spawning>(cmd: &mut C, dir: &Path, home: &Path) {
     ] {
         cmd.carries(name, value);
     }
-    for name in ["NO_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "COLUMNS"] {
+    for name in [
+        "NO_COLOR",
+        "CLICOLOR",
+        "CLICOLOR_FORCE",
+        "COLUMNS",
+        "YUNTA_HYPERLINKS",
+        "TERM_PROGRAM",
+        "VTE_VERSION",
+        "KITTY_WINDOW_ID",
+        "WT_SESSION",
+    ] {
         cmd.drops(name);
     }
 }

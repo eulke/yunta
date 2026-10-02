@@ -188,7 +188,9 @@ work held to its plan, PR).
 
 Every command takes `--color auto|always|never`. `auto` colors a stream that is a
 terminal, unless `NO_COLOR` is set or `CLICOLOR=0`; `CLICOLOR_FORCE` colors a pipe
-too. Color only repeats what the words say, so nothing is lost without it.
+too. Color only repeats what the words say, so nothing is lost without it. A
+terminal that announces it opens links gets the file a failure's whole output is
+kept in as one; `YUNTA_HYPERLINKS=1` or `0` says so outright.
 A line is laid out to its terminal's width, held between 60 and 120 cells;
 `COLUMNS` sets it, and a pipe gets 80.
 

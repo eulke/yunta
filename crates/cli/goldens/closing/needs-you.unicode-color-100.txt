@@ -4,7 +4,7 @@
   ␛[1mlint␛[0m: ␛[31mexit 101␛[0m
   ␛[2m  │ ␛[0merror[E0425]: cannot find value `x` in this scope
   ␛[2m  │ ␛[0m --> src/lib.rs:3:5
-    ␛[2mwhole output: ~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/342da2eb16499698087adc25ad9595254cd6664564344b7db803bc9bd029d8da␛[0m
+    ␛[2mwhole output: ␛[0m~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/342da2eb16499698087adc25ad9595254cd6664564344b7db803bc9bd029d8da
 
   ␛[1mdecision on node `lint`␛[0m
     ␛[1mretry␛[0m — Re-route to `fix-lint` once more

@@ -1,5 +1,7 @@
 //! What a command printed, quoted: the end of it, and where the rest is.
 
+use std::path::PathBuf;
+
 use super::Block;
 use crate::render::ink::{Line, Tone};
 use crate::render::{cell_width, truncate, Look, INDENT};
@@ -10,11 +12,34 @@ use crate::render::{cell_width, truncate, Look, INDENT};
 /// command or one path away.
 const QUOTED: usize = 6;
 
+/// Where the whole of what a command printed is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Whole {
+    /// The file it is kept in: shown as a reader reads a path, and a
+    /// link to where it is on a terminal that opens one.
+    File { shown: String, path: PathBuf },
+    /// The command that shows it.
+    Command(String),
+}
+
+impl Whole {
+    /// The file at `path`, shown from `cwd` and with `~` for `home`.
+    pub(crate) fn file(
+        path: PathBuf,
+        cwd: &std::path::Path,
+        home: Option<&std::path::Path>,
+    ) -> Self {
+        Whole::File {
+            shown: crate::render::paths::shown(&path, cwd, home),
+            path,
+        }
+    }
+}
+
 /// The end of what a command printed, and where the whole of it is.
 pub(crate) struct Evidence {
     pub(crate) tail: Vec<String>,
-    /// Where the whole output is, as a reader reads a path.
-    pub(crate) whole: Option<String>,
+    pub(crate) whole: Option<Whole>,
 }
 
 impl Block for Evidence {
@@ -35,26 +60,38 @@ impl Block for Evidence {
                     .plain(truncate(said, room, look.glyphs).trim_end())
             })
             .collect();
-        let earlier =
-            (skipped > 0).then(|| format!("{} above", yunta_core::text::counted(skipped, "line")));
-        let whole = self
-            .whole
-            .as_ref()
-            .map(|whole| format!("whole output: {whole}"));
-        let rest: Vec<String> = earlier.into_iter().chain(whole).collect();
+        let mut rest: Vec<Line> = Vec::new();
+        if skipped > 0 {
+            rest.push(Line::new().push(
+                Tone::Muted,
+                format!("{} above", yunta_core::text::counted(skipped, "line")),
+            ));
+        }
+        if let Some(whole) = &self.whole {
+            let said = Line::new().push(Tone::Muted, "whole output: ");
+            rest.push(match whole {
+                Whole::File { shown, path } => said.path(shown.as_str(), path),
+                Whole::Command(command) => said.push(Tone::Strong, command.as_str()),
+            });
+        }
         // One line when it fits, and each fact on its own when it does
         // not: a path cut to fit is a path nobody can open.
-        let joined = rest.join(&format!(" {} ", look.glyphs.sep()));
+        let sep = format!(" {} ", look.glyphs.sep());
+        let joined = rest.iter().map(Line::text).collect::<Vec<_>>().join(&sep);
         let room = look.width.cells().saturating_sub(cell_width(INDENT));
-        let said = match cell_width(&joined) <= room {
-            true => vec![joined],
-            false => rest,
-        };
-        lines.extend(
-            said.into_iter()
-                .filter(|part| !part.is_empty())
-                .map(|part| Line::new().plain(INDENT).push(Tone::Muted, part)),
-        );
+        match cell_width(&joined) <= room {
+            true if !rest.is_empty() => {
+                let mut line = Line::new().plain(INDENT);
+                for (at, part) in rest.into_iter().enumerate() {
+                    if at > 0 {
+                        line = line.push(Tone::Muted, sep.as_str());
+                    }
+                    line = line.then(part);
+                }
+                lines.push(line);
+            }
+            _ => lines.extend(rest.into_iter().map(|part| part.under(INDENT))),
+        }
         lines
     }
 }

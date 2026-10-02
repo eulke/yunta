@@ -19,6 +19,7 @@
 
 pub(crate) mod bars;
 pub(crate) mod blocks;
+mod color;
 pub(crate) mod counter;
 pub(crate) mod escalation;
 mod findings;

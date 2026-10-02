@@ -85,6 +85,29 @@ fn color_policy(when: render::ink::ColorWhen) -> render::ink::ColorPolicy {
         force: set("CLICOLOR_FORCE").is_some_and(|value| value != "0"),
         off: set("CLICOLOR").is_some_and(|value| value == "0"),
         dumb: set("TERM").is_some_and(|value| value == "dumb"),
+        links: links(&set),
+    }
+}
+
+/// Whether a path is a link on a stream with color: what
+/// `YUNTA_HYPERLINKS` says outright, or what the terminal announced about
+/// itself.
+fn links(set: &dyn Fn(&str) -> Option<String>) -> render::ink::Links {
+    use render::ink::Links;
+    match set("YUNTA_HYPERLINKS").as_deref() {
+        Some("1") => return Links::Forced,
+        Some("0") => return Links::Refused,
+        _ => {}
+    }
+    let program = set("TERM_PROGRAM");
+    let vte = set("VTE_VERSION").and_then(|version| version.parse::<u32>().ok());
+    let announced = matches!(program.as_deref(), Some("iTerm.app" | "WezTerm" | "vscode"))
+        || vte.is_some_and(|version| version >= 5000)
+        || set("KITTY_WINDOW_ID").is_some()
+        || set("WT_SESSION").is_some();
+    match announced {
+        true => Links::Announced,
+        false => Links::Unknown,
     }
 }
 

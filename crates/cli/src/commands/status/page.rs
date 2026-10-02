@@ -9,10 +9,12 @@ use yunta_core::RunId;
 use yunta_engine::{EngineLiveness, NodeState, RunFrame, RunPhase, RunState};
 
 use crate::commands::advice;
-use crate::render::blocks::{Block, FailureDetail, Fields, Headline, Next, NodeRow, NodeTable};
+use crate::render::blocks::{
+    Block, FailureDetail, Fields, Headline, Next, NodeRow, NodeTable, Whole,
+};
 use crate::render::ink::{Line, Tone};
 use crate::render::state::RunWord;
-use crate::render::{indent, paths, prose, truncate, Look, NodeDisplay, Tokens, INDENT};
+use crate::render::{indent, prose, truncate, Look, NodeDisplay, Tokens, INDENT};
 
 /// What the page is drawn from.
 pub(super) struct Page<'a> {
@@ -180,8 +182,8 @@ impl Page<'_> {
     /// the whole of what a command printed is kept.
     fn detail(&self, failure: &Failure, look: &Look) -> Vec<Line> {
         let whole = failure.output().map(|output| {
-            paths::shown(
-                &yunta_engine::ObjectStore::at(self.run_dir).path_of(output),
+            Whole::file(
+                yunta_engine::ObjectStore::at(self.run_dir).path_of(output),
                 self.cwd,
                 self.home,
             )

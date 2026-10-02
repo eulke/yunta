@@ -20,7 +20,7 @@ use yunta_engine::{Happening, Moment};
 
 use super::view;
 use crate::commands::advice;
-use crate::render::blocks::{Block, FailureDetail};
+use crate::render::blocks::{Block, FailureDetail, Whole};
 use crate::render::ink::{Line, Tone};
 use crate::render::{indent, Glyphs, Look, Mark, CHILD_DEPTH};
 use words::carried;
@@ -136,9 +136,11 @@ pub(super) fn evidence(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
     else {
         return Vec::new();
     };
-    let whole = failure.output().map(|_| match &moment.node {
-        Some(node) => advice::status_node(run, node.as_str()),
-        None => advice::status(run),
+    let whole = failure.output().map(|_| {
+        Whole::Command(match &moment.node {
+            Some(node) => advice::status_node(run, node.as_str()),
+            None => advice::status(run),
+        })
     });
     FailureDetail { failure, whole }.lines(look)
 }

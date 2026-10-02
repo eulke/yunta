@@ -11,7 +11,7 @@ use yunta_engine::{NodeFrame, NodeStanding, RunFrame};
 
 use crate::commands::advice;
 use crate::error::CliError;
-use crate::render::blocks::{paint, Block, FailureDetail, Fields, Headline, Next};
+use crate::render::blocks::{paint, Block, FailureDetail, Fields, Headline, Next, Whole};
 use crate::render::ink::{Line, Tone};
 use crate::render::{duration, paths, wrap, Look, NodeDisplay, Tokens, INDENT};
 
@@ -94,8 +94,8 @@ impl NodePage<'_> {
             return Vec::new();
         };
         let whole = failure.output().map(|output| {
-            paths::shown(
-                &yunta_engine::ObjectStore::at(self.run_dir).path_of(output),
+            Whole::file(
+                yunta_engine::ObjectStore::at(self.run_dir).path_of(output),
                 self.cwd,
                 self.home,
             )

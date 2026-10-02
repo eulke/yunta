@@ -9,11 +9,13 @@
 //! same whoever captured it, and that is held by a test rather than by
 //! care.
 //!
-//! This is the one place in the crate that writes an SGR escape.
-
-use std::sync::OnceLock;
+//! This is the one place in the crate that writes an SGR escape or a
+//! terminal link.
 
 use super::state::Mark;
+
+use super::color::policy;
+pub(crate) use super::color::{settle, ColorPolicy, ColorWhen, Links};
 
 /// What a span of text is to a reader, which decides its color.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,11 +64,13 @@ impl Tone {
     }
 }
 
-/// A run of text in one tone.
+/// A run of text in one tone, and — for a path a reader opens — what it
+/// links to where a terminal opens links.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Span {
     pub(crate) text: String,
     pub(crate) tone: Tone,
+    pub(crate) link: Option<String>,
 }
 
 /// One line, as the spans it is built from.
@@ -82,7 +86,25 @@ impl Line {
     pub(crate) fn push(mut self, tone: Tone, text: impl Into<String>) -> Self {
         let text = text.into();
         if !text.is_empty() {
-            self.0.push(Span { text, tone });
+            self.0.push(Span {
+                text,
+                tone,
+                link: None,
+            });
+        }
+        self
+    }
+
+    /// The line with `shown` appended as a path, linking to the file at
+    /// `target` on a terminal that opens links.
+    pub(crate) fn path(mut self, shown: impl Into<String>, target: &std::path::Path) -> Self {
+        let text = shown.into();
+        if !text.is_empty() {
+            self.0.push(Span {
+                text,
+                tone: Tone::Plain,
+                link: Some(format!("file://{}", target.display())),
+            });
         }
         self
     }
@@ -100,6 +122,7 @@ impl Line {
                 Span {
                     text: margin.to_string(),
                     tone: Tone::Plain,
+                    link: None,
                 },
             );
         }
@@ -124,7 +147,12 @@ impl Line {
             // lands between characters of the span it falls in.
             let taken = span.text.len().min(left);
             left -= taken;
-            line = line.push(span.tone, &span.text[..taken]);
+            if taken > 0 {
+                line.0.push(Span {
+                    text: span.text[..taken].to_string(),
+                    ..span.clone()
+                });
+            }
             if left == 0 {
                 return line.push(span.tone, ellipsis.to_string());
             }
@@ -135,6 +163,17 @@ impl Line {
     pub(crate) fn spans(&self) -> &[Span] {
         &self.0
     }
+
+    /// The line with `other`'s spans after its own.
+    pub(crate) fn then(mut self, other: Line) -> Self {
+        self.0.extend(other.0);
+        self
+    }
+
+    /// What the line reads as, unpainted.
+    pub(crate) fn text(&self) -> String {
+        self.0.iter().map(|span| span.text.as_str()).collect()
+    }
 }
 
 /// How a stream's lines are painted.
@@ -144,6 +183,9 @@ pub(crate) enum Ink {
     Plain,
     /// The text, each span in the color of its tone.
     Ansi16,
+    /// As [`Ink::Ansi16`], and a path a link to the file it names — for
+    /// a terminal that opens one.
+    Linked,
 }
 
 impl Ink {
@@ -151,14 +193,25 @@ impl Ink {
     pub(crate) fn paint(self, line: &Line) -> String {
         line.spans()
             .iter()
-            .map(|span| self.word(span.tone, &span.text))
+            .map(|span| {
+                let word = self.word(span.tone, &span.text);
+                match (self, &span.link) {
+                    // OSC 8: the text between the two sequences opens
+                    // the target; a terminal without links shows the
+                    // text alone.
+                    (Ink::Linked, Some(target)) => {
+                        format!("\x1b]8;;{target}\x1b\\{word}\x1b]8;;\x1b\\")
+                    }
+                    _ => word,
+                }
+            })
             .collect()
     }
 
     /// `text` in `tone`, painted.
     pub(crate) fn word(self, tone: Tone, text: &str) -> String {
         match (self, tone.sgr()) {
-            (Ink::Ansi16, Some(sgr)) => format!("\x1b[{sgr}m{text}\x1b[0m"),
+            (Ink::Ansi16 | Ink::Linked, Some(sgr)) => format!("\x1b[{sgr}m{text}\x1b[0m"),
             _ => text.to_string(),
         }
     }
@@ -181,12 +234,25 @@ impl Ink {
     }
 }
 
-/// `text` with every SGR escape taken out: what a painted line reads as
-/// once color is gone.
+/// `text` with every SGR escape and every link taken out: what a painted
+/// line reads as once color and links are gone.
 #[cfg(test)]
 pub(crate) fn strip_sgr(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
+    // A link opens and closes with `ESC ] 8 ; ; <target> ESC \`; what it
+    // wraps is the text a reader reads.
+    let mut unlinked = String::with_capacity(text.len());
+    while let Some(at) = rest.find("\x1b]8;;") {
+        unlinked.push_str(&rest[..at]);
+        let after = &rest[at..];
+        rest = match after.find("\x1b\\") {
+            Some(end) => &after[end + 2..],
+            None => "",
+        };
+    }
+    unlinked.push_str(rest);
+    let mut rest = unlinked.as_str();
     while let Some(at) = rest.find("\x1b[") {
         out.push_str(&rest[..at]);
         let after = &rest[at + 2..];
@@ -200,75 +266,6 @@ pub(crate) fn strip_sgr(text: &str) -> String {
     }
     out.push_str(rest);
     out
-}
-
-/// When `--color` paints.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
-pub(crate) enum ColorWhen {
-    /// On a terminal that draws color, unless the environment says not to.
-    #[default]
-    Auto,
-    /// Always, a pipe included.
-    Always,
-    /// Never.
-    Never,
-}
-
-/// Everything that decides whether a stream gets color, read once from
-/// the process and the command line.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct ColorPolicy {
-    pub(crate) when: ColorWhen,
-    /// `NO_COLOR`, set and not empty.
-    pub(crate) no_color: bool,
-    /// `CLICOLOR_FORCE`, set to anything but `0` or empty.
-    pub(crate) force: bool,
-    /// `CLICOLOR=0`.
-    pub(crate) off: bool,
-    /// `TERM=dumb`.
-    pub(crate) dumb: bool,
-}
-
-impl ColorPolicy {
-    /// The ink a stream gets, `terminal` saying whether it is one.
-    ///
-    /// The command line decides first; then a reader who asked for no
-    /// color; then one who asked to force it; then one who turned it
-    /// off; and then whether the stream is a terminal that draws it.
-    pub(crate) fn ink(&self, terminal: bool) -> Ink {
-        match self.when {
-            ColorWhen::Always => return Ink::Ansi16,
-            ColorWhen::Never => return Ink::Plain,
-            ColorWhen::Auto => {}
-        }
-        if self.no_color {
-            return Ink::Plain;
-        }
-        if self.force {
-            return Ink::Ansi16;
-        }
-        if self.off || !terminal || self.dumb {
-            return Ink::Plain;
-        }
-        Ink::Ansi16
-    }
-}
-
-static POLICY: OnceLock<ColorPolicy> = OnceLock::new();
-
-/// Fixes this process's color policy. `main` calls it once, before
-/// anything is printed; a later call changes nothing.
-pub(crate) fn settle(policy: ColorPolicy) {
-    POLICY.get_or_init(|| policy);
-}
-
-/// This process's color policy: what `main` settled, or the plain one a
-/// process that never settled any — a unit test — gets.
-fn policy() -> ColorPolicy {
-    POLICY.get().cloned().unwrap_or(ColorPolicy {
-        when: ColorWhen::Never,
-        ..ColorPolicy::default()
-    })
 }
 
 #[cfg(test)]
@@ -352,6 +349,30 @@ mod tests {
             ..ColorPolicy::default()
         };
         assert_eq!(off.ink(true), Ink::Plain);
+    }
+
+    #[test]
+    fn links_are_drawn_where_the_terminal_announces_them_or_a_reader_forces_them() {
+        let with = |links| ColorPolicy {
+            links,
+            ..ColorPolicy::default()
+        };
+        assert_eq!(with(Links::Announced).ink(true), Ink::Linked);
+        assert_eq!(with(Links::Announced).ink(false), Ink::Plain);
+        assert_eq!(with(Links::Unknown).ink(true), Ink::Ansi16);
+        assert_eq!(with(Links::Refused).ink(true), Ink::Ansi16);
+        let forced = ColorPolicy {
+            when: ColorWhen::Always,
+            links: Links::Forced,
+            ..ColorPolicy::default()
+        };
+        assert_eq!(forced.ink(false), Ink::Linked, "a pipe asked for both");
+        let no_color = ColorPolicy {
+            no_color: true,
+            links: Links::Forced,
+            ..ColorPolicy::default()
+        };
+        assert_eq!(no_color.ink(true), Ink::Plain, "no color, no escapes");
     }
 
     #[test]
