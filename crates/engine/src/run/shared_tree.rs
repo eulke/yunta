@@ -9,6 +9,7 @@
 //! content, less what git ignores.
 
 use std::path::{Path, PathBuf};
+use yunta_core::commit_message::CommitMessage;
 
 use yunta_core::{CommitSha, Isolation, Node, NodeId, NodeKind, TreeId};
 
@@ -126,7 +127,10 @@ async fn commit_message(
     if working_beside(&ctx.manifest.workflow, &state, &node.id) {
         return Ok(None);
     }
-    Ok(Some(message(&ctx.manifest.workflow, &state, node, closing)))
+    let said = message(&ctx.manifest.workflow, &state, node, closing);
+    Ok(Some(
+        CommitMessage::new(said, ctx.run_id).node(&node.id).text(),
+    ))
 }
 
 /// Commits what the run's tree holds that no node committed, as `node`
@@ -192,12 +196,15 @@ async fn found_message(ctx: &RunCtx<'_>, node: &Node) -> Result<Option<String>, 
         .get(&node.id)
         .filter(|record| record.open_since.is_some())
         .map(|record| record.attempts);
-    Ok(Some(match interrupted {
+    let said = match interrupted {
         Some(attempt) => {
             format!("{subject}\n\nHolds what attempt {attempt} left when it was interrupted.")
         }
         None => subject,
-    }))
+    };
+    Ok(Some(
+        CommitMessage::new(said, ctx.run_id).node(&node.id).text(),
+    ))
 }
 
 /// Whether this run commits what its nodes leave in its tree: only a run

@@ -94,6 +94,7 @@ pub struct UnitHome<'a> {
 pub async fn snapshot_commit(
     repo: &Path,
     index: &Path,
+    message: &str,
     supervision: Supervision<'_>,
 ) -> Result<CommitSha, WorktreeError> {
     let tree = super::capture_tree(repo, index, supervision).await?;
@@ -106,7 +107,7 @@ pub async fn snapshot_commit(
             "-p",
             head.as_str(),
             "-m",
-            "the tree a unit of work started from",
+            message,
         ],
         supervision,
     )

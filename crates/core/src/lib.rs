@@ -22,6 +22,7 @@
 
 mod capabilities;
 mod clock;
+pub mod commit_message;
 mod config;
 pub mod diagnostic;
 mod error;

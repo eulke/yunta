@@ -3,6 +3,7 @@
 //! committed or recorded as a conflict.
 
 use std::path::PathBuf;
+use yunta_core::commit_message::CommitMessage;
 
 use yunta_core::events::{
     CriteriaCheckedPayload, CriterionResult, EventPayload, Phase, ScopeCheckedPayload, TaskStatus,
@@ -96,7 +97,7 @@ pub(super) async fn integrate_batch(
         }
         let blocked_cause = match report.outcome {
             TaskOutcome::Blocked { cause } => {
-                let left_work = left_work(ctx, task, &unit, cancel).await?;
+                let left_work = left_work(ctx, node, task, &unit, cancel).await?;
                 ctx.emit(
                     Some(&node.id),
                     EventPayload::Tasks(TaskEvent::StatusChanged(
@@ -203,6 +204,7 @@ pub(super) async fn integrate_batch(
 /// it. `None` when the attempt changed nothing.
 async fn left_work(
     ctx: &RunCtx<'_>,
+    node: &Node,
     task: &Task,
     unit: &Unit,
     cancel: &tokio_util::sync::CancellationToken,
@@ -210,7 +212,13 @@ async fn left_work(
     let supervision = ctx.supervision(cancel);
     commit_work(
         unit,
-        &format!("task {}: the work its last attempt left", task.id),
+        &CommitMessage::new(
+            format!("task {}: the work its last attempt left", task.id),
+            ctx.run_id,
+        )
+        .node(&node.id)
+        .task(&task.id)
+        .text(),
         supervision,
     )
     .await?;
@@ -263,7 +271,13 @@ async fn integrate_task(
     let supervision = ctx.supervision(cancel);
     commit_work(
         unit,
-        &yunta_core::text::detailed(format!("task {}", task.id), &task.title),
+        &CommitMessage::new(
+            yunta_core::text::detailed(format!("task {}", task.id), &task.title),
+            ctx.run_id,
+        )
+        .node(&node.id)
+        .task(&task.id)
+        .text(),
         supervision,
     )
     .await?;

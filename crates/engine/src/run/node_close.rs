@@ -9,6 +9,7 @@
 //! rather than to every kind of node.
 
 use std::path::{Path, PathBuf};
+use yunta_core::commit_message::CommitMessage;
 
 use yunta_core::events::{
     EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload,
@@ -325,7 +326,12 @@ async fn land_unit(
     let supervision = ctx.root_supervision();
     crate::worktree::commit_work(
         mine.unit,
-        &yunta_core::text::detailed(format!("node {}", node.id), &close_title(node)),
+        &CommitMessage::new(
+            yunta_core::text::detailed(format!("node {}", node.id), &close_title(node)),
+            ctx.run_id,
+        )
+        .node(&node.id)
+        .text(),
         supervision,
     )
     .await?;

@@ -167,6 +167,13 @@ The receipt is the exception to being read back: nothing reads a `receipt.json`,
 because `yunta receipt` derives it from the log every time. Its `schema_version`
 is for whoever consumes the file outside yunta, who has no log to derive it from.
 
+Every commit a run makes ends in git trailers naming where it came from:
+`Yunta-Run: <run id>` always, `Yunta-Node: <node>` when a node's work made it, and
+`Yunta-Task: <task>` when a task's did. The keys and their values are stable, so
+`git log --grep "Yunta-Run: <run id>"` finds a run's commits on any clone. A pull
+request a run opens carries `<!-- yunta run_id: <run id> -->` in its body; the
+earlier form, `run_id:` followed by the id in backticks, is still recognized.
+
 ## The event log
 
 The engine hands storage a draft — what happened, in which run, for which

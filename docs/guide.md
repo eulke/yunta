@@ -134,8 +134,13 @@ run's tree while it is paused is committed when the next node starts, as found t
 so that node and everything after it builds on your edit. What git ignores is
 never committed; anything else a node writes is, so keep build output and secrets in
 `.gitignore`. A run with `isolation: none` works in your own checkout and commits
-nothing: what its nodes write stays uncommitted for you. The engine commits without
-running your git hooks.
+nothing: what its nodes write stays uncommitted for you. What a node leaves in the
+run's tree is committed without running your git hooks, so the commit holds exactly
+the tree the log names; a node or task that works in a checkout of its own commits
+there with `git commit`, and so does distilling knowledge at the end of a run — your
+hooks run for those. Every commit ends in trailers that name the run, and the node and
+task whose work it holds (`Yunta-Run:`, `Yunta-Node:`, `Yunta-Task:`), so
+`git log --grep "Yunta-Run: <run id>"` lists a run's commits.
 
 `permissions: read-only | edit | full` is a separate, coarser ceiling, mapped onto the
 adapter's own session profile: it governs which *tools* the agent may use at all — a

@@ -5,6 +5,7 @@
 //! engine — explicit degradation, never silent.
 
 use std::collections::BTreeMap;
+use yunta_core::commit_message::CommitMessage;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{Failure, HookPhase};
@@ -133,6 +134,9 @@ async fn node_unit(
     let base = crate::worktree::snapshot_commit(
         ctx.worktree,
         &crate::run_dir::index_for(ctx.run_dir, &who),
+        &CommitMessage::new("the tree a unit of work started from", ctx.run_id)
+            .node(&node.id)
+            .text(),
         ctx.root_supervision(),
     )
     .await?;

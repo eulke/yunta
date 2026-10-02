@@ -304,7 +304,11 @@ async fn commit_and_maybe_push(ctx: &RunCtx<'_>) -> Result<(), RunError> {
             )
             .await;
     }
-    let message = format!("docs(knowledge): distill from {}", ctx.run_id.as_str());
+    let message = yunta_core::commit_message::CommitMessage::new(
+        format!("docs(knowledge): distill from {}", ctx.run_id.as_str()),
+        ctx.run_id,
+    )
+    .text();
     if !ran(ctx.worktree, &["commit", "-m", &message], supervision).await {
         return ctx
             .engine_finding(

@@ -12,6 +12,7 @@
 //! that way; that is the manual smoke test's job.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use yunta_core::commit_message::CommitMessage;
 
 use base64::Engine;
 use reqwest::header::HeaderMap;
@@ -442,10 +443,12 @@ impl Forge for GitHubForge {
         }
         // Every lap commits what it decides on, so a pull request reused
         // after a request for changes shows the correction.
-        let message = format!(
-            "publish what gate `{}` of run {run_id} decides on",
-            req.decision.node
-        );
+        let message = CommitMessage::new(
+            format!("publish what gate `{}` decides on", req.decision.node),
+            &req.run_id,
+        )
+        .node(&req.decision.node)
+        .text();
         for (path, content) in super::gate_files(req) {
             self.commit_artifact(&path, &content, &req.branch, &message)
                 .await?;

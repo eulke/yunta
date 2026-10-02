@@ -232,3 +232,4 @@ lista.
 **D223 — The engine writes no view for a person; a document is drawn where it is read.** `accepted` → [`adr/D223-the-engine-writes-no-view-for-a-person.md`](adr/D223-the-engine-writes-no-view-for-a-person.md)
 **D224 — A pull request a run opens carries the run's receipt, and its marker is a comment.** `accepted` → [`adr/D224-a-pull-request-carries-the-receipt-of-its-run.md`](adr/D224-a-pull-request-carries-the-receipt-of-its-run.md)
 **D225 — A gate published to a forge asks its question, says how a review answers it, and asks again after changes.** `accepted` → [`adr/D225-a-gate-published-to-a-forge-asks-its-question.md`](adr/D225-a-gate-published-to-a-forge-asks-its-question.md)
+**D226 — Every commit a run makes names its run, node and task in git trailers.** `accepted` → [`adr/D226-every-commit-a-run-makes-names-its-run.md`](adr/D226-every-commit-a-run-makes-names-its-run.md)
