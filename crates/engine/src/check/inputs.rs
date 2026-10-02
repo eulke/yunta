@@ -147,7 +147,7 @@ fn check_kind_templates(node: &Node, workflow: &Workflow, errors: &mut Vec<Check
         NodeKind::Parallel {
             nodes: children, ..
         } => check_input_references_in_nodes(children, workflow, errors),
-        NodeKind::PullRequest { title, body } => {
+        NodeKind::PullRequest { title, body, .. } => {
             for text in std::iter::once(title).chain(body) {
                 check_template_text(&node.id, text, workflow, errors);
             }

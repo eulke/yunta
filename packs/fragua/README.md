@@ -45,20 +45,13 @@ finding for each difference nobody accepted.
 finding the run holds, each with the node that found it and how it was
 answered or settled. Going on settles what it showed.
 
-## Attaching the receipt
+## The receipt
 
-`yunta receipt <run_id>` can only run once a run is finished — never
-from inside the run that produced it, since the run can't be "finished"
-while one of its own nodes is still executing the receipt command. That's
-why the `pr` node doesn't try to attach one itself. The recommended
-pattern is a follow-up step, run by whatever drives this pack in CI:
-
-```bash
-yunta run yunta/fragua --input idea="..." --detach
-# ... wait for the run to reach a terminal state ...
-yunta receipt <run_id>
-gh pr comment <pr-number> --body-file <run_dir>/receipt.md
-```
+The `pr` node opens its pull request with the run's receipt as its body: the
+checks the run held its work to, each criterion with how it exited, and any path
+written outside the scope — as the run stands when its last step begins. Once
+the run is finished, `yunta receipt <run>` writes it again with how the run
+ended, and `yunta verify <run>` checks its evidence.
 
 Making the receipt a required PR check is a team decision Yunta doesn't
 impose — configure it in your own forge, not in this pack.

@@ -258,7 +258,10 @@ impl Forge for MockForge {
         &self,
         req: &PullRequestRequest,
     ) -> Result<PullRequestRef, ForgeError> {
-        Ok(self.open_or_reuse(&req.run_id, &req.head, &req.base, &req.title, &req.body))
+        // The body a forge's page would show, composed the one way every
+        // forge composes it, so a test reads what a reviewer reads.
+        let body = super::pull_request_body(req);
+        Ok(self.open_or_reuse(&req.run_id, &req.head, &req.base, &req.title, &body))
     }
 
     async fn probe(&self) -> Result<ForgeProbe, ForgeError> {

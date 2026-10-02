@@ -14,7 +14,7 @@ use yunta_core::text::counted;
 use yunta_core::units::Tokens;
 use yunta_core::NodeId;
 
-use crate::blocks::{Checklist, Fields, Found, Headline, Next};
+use crate::blocks::{Checklist, Fields, Found, Headline, Next, Prose};
 use crate::doc::{Block, Doc};
 use crate::RunWord;
 
@@ -46,13 +46,20 @@ pub fn fan_out_groups(runners: &[RunnerUsage]) -> Vec<(NodeId, Vec<&RunnerUsage>
 /// outside the scope, and the command that checks it all again.
 pub fn document(receipt: &Receipt) -> Doc<'static> {
     let handle = receipt.run_id.handle();
-    let word = run_word(receipt.terminal_state);
-    let mut doc = Doc::new()
-        .with(Headline {
-            subject: format!("receipt for run {handle}"),
-            mark: word.mark(),
-            said: word.word().to_string(),
-        })
+    // A run still open is read as its last step begins: it is running,
+    // and its receipt says so before anything it found.
+    let word = receipt.terminal_state.map_or(RunWord::Running, run_word);
+    let mut doc = Doc::new().with(Headline {
+        subject: format!("receipt for run {handle}"),
+        mark: word.mark(),
+        said: word.word().to_string(),
+    });
+    if receipt.terminal_state.is_none() {
+        doc = doc.with(Prose(
+            "the run is still open: this is its last step".to_string(),
+        ));
+    }
+    let mut doc = doc
         .with(
             Fields::new()
                 .push_if("workflow", receipt.workflow.to_string())
@@ -61,28 +68,12 @@ pub fn document(receipt: &Receipt) -> Doc<'static> {
                 .push_if("cost", cost(receipt)),
         )
         .with(checks(receipt));
-    if !receipt.criteria.entries.is_empty() {
-        let mut criteria = Checklist::default();
-        for entry in &receipt.criteria.entries {
-            let found = match entry.exit_code {
-                0 => Found::Holds,
-                _ => Found::Problem,
-            };
-            criteria.push(
-                found,
-                entry.task_id.to_string(),
-                format!("`{}` exits {}", entry.cmd, entry.exit_code),
-            );
-        }
+    if let Some(criteria) = criteria(receipt) {
         doc = doc
             .with(Block::Heading("criteria".to_string()))
             .with(criteria);
     }
-    if !receipt.scope.violations.is_empty() {
-        let mut outside = Checklist::default();
-        for path in &receipt.scope.violations {
-            outside.push(Found::Problem, path.display().to_string(), "");
-        }
+    if let Some(outside) = outside(receipt) {
         doc = doc
             .with(Block::Heading("outside the scope".to_string()))
             .with(outside);
@@ -93,6 +84,38 @@ pub fn document(receipt: &Receipt) -> Doc<'static> {
             "checks this run's evidence again",
         )],
     })
+}
+
+/// Each criterion the run ran, by the task it judged, when it ran any.
+fn criteria(receipt: &Receipt) -> Option<Checklist> {
+    if receipt.criteria.entries.is_empty() {
+        return None;
+    }
+    let mut criteria = Checklist::default();
+    for entry in &receipt.criteria.entries {
+        let found = match entry.exit_code {
+            0 => Found::Holds,
+            _ => Found::Problem,
+        };
+        criteria.push(
+            found,
+            entry.task_id.to_string(),
+            format!("`{}` exits {}", entry.cmd, entry.exit_code),
+        );
+    }
+    Some(criteria)
+}
+
+/// Each path the run wrote outside its scope, when it wrote any.
+fn outside(receipt: &Receipt) -> Option<Checklist> {
+    if receipt.scope.violations.is_empty() {
+        return None;
+    }
+    let mut outside = Checklist::default();
+    for path in &receipt.scope.violations {
+        outside.push(Found::Problem, path.display().to_string(), "");
+    }
+    Some(outside)
 }
 
 /// The word a run that closed this way is called by.

@@ -178,9 +178,15 @@ pub enum NodeKind {
     PullRequest {
         /// The pull request's title, template-rendered.
         title: String,
-        /// Its body, template-rendered; the run's marker follows it.
+        /// Its body, template-rendered; the run's receipt and its marker
+        /// follow it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<String>,
+        /// Whether the body carries the run's receipt — what it held its
+        /// work to and what it found, read off its log as the pull
+        /// request opens. On unless set `false`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        receipt: Option<bool>,
     },
 }
 
@@ -244,7 +250,7 @@ impl NodeKind {
             "executor" => &["executor", "with", "timeout_seconds"],
             "gate" => &["assignee", "message", "options", "on", "shows", "external"],
             "workflow" => &["use", "inputs", "isolation", "mounts"],
-            "pull_request" => &["title", "body"],
+            "pull_request" => &["title", "body", "receipt"],
             _ => return None,
         })
     }

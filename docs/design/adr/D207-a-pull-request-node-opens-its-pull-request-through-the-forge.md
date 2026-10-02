@@ -1,9 +1,9 @@
 ---
 number: D207
 title: "A pull_request node opens its pull request through the forge"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D224]
 ---
 
 # D207 — A `pull_request` node opens its pull request through the forge

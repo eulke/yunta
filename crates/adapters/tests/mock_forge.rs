@@ -11,6 +11,7 @@ fn opening(head: &str, run_id: &str) -> PullRequestRequest {
         title: "add dark mode".to_string(),
         body: "What the run changed.".to_string(),
         run_id: run_id.to_string(),
+        receipt: None,
     }
 }
 

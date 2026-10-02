@@ -213,7 +213,7 @@ lista.
 **D204 — An optional node the project cannot run is left out.** `accepted` → [`adr/D204-an-optional-node-the-project-cannot-run-is-left-out.md`](adr/D204-an-optional-node-the-project-cannot-run-is-left-out.md)
 **D205 — A node's scope may be what the run changed.** `accepted` → [`adr/D205-a-nodes-scope-may-be-what-the-run-changed.md`](adr/D205-a-nodes-scope-may-be-what-the-run-changed.md)
 **D206 — A project's denied paths are never written by a run.** `accepted` → [`adr/D206-a-projects-denied-paths-are-never-written-by-a-run.md`](adr/D206-a-projects-denied-paths-are-never-written-by-a-run.md)
-**D207 — A pull_request node opens its pull request through the forge.** `accepted` → [`adr/D207-a-pull-request-node-opens-its-pull-request-through-the-forge.md`](adr/D207-a-pull-request-node-opens-its-pull-request-through-the-forge.md)
+**D207 — A pull_request node opens its pull request through the forge.** `revised` *(Revisada por D224.)* → [`adr/D207-a-pull-request-node-opens-its-pull-request-through-the-forge.md`](adr/D207-a-pull-request-node-opens-its-pull-request-through-the-forge.md)
 **D208 — A run measures its suite only when it reads the measurement.** `accepted` → [`adr/D208-a-run-measures-its-suite-only-when-it-reads-the-measurement.md`](adr/D208-a-run-measures-its-suite-only-when-it-reads-the-measurement.md)
 **D209 — A failed command carries what it printed.** `accepted` → [`adr/D209-a-failed-command-carries-what-it-printed.md`](adr/D209-a-failed-command-carries-what-it-printed.md)
 **D210 — A run whose engine is gone reads as stalled.** `accepted` → [`adr/D210-a-run-whose-engine-is-gone-reads-as-stalled.md`](adr/D210-a-run-whose-engine-is-gone-reads-as-stalled.md)
@@ -230,3 +230,4 @@ lista.
 **D221 — The words and blocks a reader is told things in are their own crate, and the engine hands it data.** `accepted` → [`adr/D221-the-words-a-reader-is-told-things-in-are-their-own-crate.md`](adr/D221-the-words-a-reader-is-told-things-in-are-their-own-crate.md)
 **D222 — What a surface says is a document of blocks, and a medium draws it.** `accepted` → [`adr/D222-what-is-said-is-a-document-and-a-surface-draws-it.md`](adr/D222-what-is-said-is-a-document-and-a-surface-draws-it.md)
 **D223 — The engine writes no view for a person; a document is drawn where it is read.** `accepted` → [`adr/D223-the-engine-writes-no-view-for-a-person.md`](adr/D223-the-engine-writes-no-view-for-a-person.md)
+**D224 — A pull request a run opens carries the run's receipt, and its marker is a comment.** `accepted` → [`adr/D224-a-pull-request-carries-the-receipt-of-its-run.md`](adr/D224-a-pull-request-carries-the-receipt-of-its-run.md)

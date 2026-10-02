@@ -33,7 +33,7 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
         run_id: RunId::from("run-2026-08-21-0001"),
         workflow: "release-cycle".into(),
         mode: "default".into(),
-        terminal_state: TerminalState::Done,
+        terminal_state: Some(TerminalState::Done),
         criteria: CriteriaSummary {
             total: 3,
             green: 3,
@@ -376,7 +376,7 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     };
     let receipt = build_receipt(&bench.run_id, &manifest, &events, chain).unwrap();
 
-    assert_eq!(receipt.terminal_state, TerminalState::Done);
+    assert_eq!(receipt.terminal_state, Some(TerminalState::Done));
 
     // T001's one criterion, and the suite the run holds every task to.
     assert_eq!(commands(&receipt.criteria), ["test -f hello.txt", "true"]);

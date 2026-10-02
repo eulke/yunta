@@ -1227,7 +1227,7 @@
           "type": "object",
           "properties": {
             "body": {
-              "description": "Its body, template-rendered; the run's marker follows it.",
+              "description": "Its body, template-rendered; the run's receipt and its marker\nfollow it.",
               "type": [
                 "string",
                 "null"
@@ -1236,6 +1236,13 @@
             "kind": {
               "type": "string",
               "const": "pull_request"
+            },
+            "receipt": {
+              "description": "Whether the body carries the run's receipt — what it held its\nwork to and what it found, read off its log as the pull\nrequest opens. On unless set `false`.",
+              "type": [
+                "boolean",
+                "null"
+              ]
             },
             "title": {
               "description": "The pull request's title, template-rendered.",

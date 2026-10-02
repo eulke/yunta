@@ -247,9 +247,17 @@ fn execute_kind<'a>(
         NodeKind::Check(builtin) => {
             Box::pin(super::check_exec::execute_check(ctx, node, builtin, cancel))
         }
-        NodeKind::PullRequest { title, body } => Box::pin(
-            super::pull_request_exec::execute_pull_request(ctx, node, title, body.as_deref()),
-        ),
+        NodeKind::PullRequest {
+            title,
+            body,
+            receipt,
+        } => Box::pin(super::pull_request_exec::execute_pull_request(
+            ctx,
+            node,
+            title,
+            body.as_deref(),
+            receipt.unwrap_or(true),
+        )),
         NodeKind::Executor {
             executor,
             with,

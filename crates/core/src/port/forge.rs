@@ -145,6 +145,9 @@ pub struct PullRequestRequest {
     /// same run and branch finds the pull request it opened instead of
     /// opening a second one — idempotent across a node's reruns.
     pub run_id: String,
+    /// The run's receipt as the pull request opens, drawn into its body
+    /// by whoever writes it.
+    pub receipt: Option<crate::receipt::Receipt>,
 }
 
 /// What a forge says about the credentials a run would reach it with.

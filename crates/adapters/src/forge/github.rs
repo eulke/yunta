@@ -298,13 +298,12 @@ impl GitHubForge {
                 ),
             )
             .await?;
-        let marker = run_marker(run_id);
         Ok(prs
             .into_iter()
             .find(|pr| {
                 pr.body
                     .as_deref()
-                    .is_some_and(|body| body.contains(&marker))
+                    .is_some_and(|body| super::marked(body, run_id))
             })
             .map(|pr| PullRequestRef {
                 url: pr.html_url,
@@ -338,11 +337,6 @@ impl GitHubForge {
             })
             .collect())
     }
-}
-
-/// The line in a PR body that ties it to its run.
-pub(super) fn run_marker(run_id: &str) -> String {
-    format!("run_id: `{run_id}`")
 }
 
 /// A success as it is; a rate limit as [`ForgeError::RateLimited`];
@@ -425,7 +419,7 @@ impl Forge for GitHubForge {
             "{}\n\n---\n{}\n\n_Opened by Yunta — approve or request changes like any other \
              PR review._",
             req.summary,
-            run_marker(&req.run_id)
+            super::run_marker(&req.run_id)
         );
         self.create_pr(
             &format!("yunta: {}", req.summary),

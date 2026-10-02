@@ -19,8 +19,9 @@ pub(super) async fn execute_pull_request(
     node: &Node,
     title: &str,
     body: Option<&str>,
+    receipt: bool,
 ) -> Result<NodeEnd, RunError> {
-    let (forge, request) = match prepared(ctx, node, title, body).await? {
+    let (forge, request) = match prepared(ctx, node, title, body, receipt).await? {
         Step::Value(prepared) => prepared,
         Step::Ended(end) => return Ok(end),
     };
@@ -67,6 +68,7 @@ async fn prepared<'a>(
     node: &Node,
     title: &str,
     body: Option<&str>,
+    receipt: bool,
 ) -> Result<Step<(&'a dyn Forge, PullRequestRequest)>, RunError> {
     for key in [ConfigKey::Forge, ConfigKey::RunBranch] {
         if !key.is_declared(&ctx.manifest.config) {
@@ -94,8 +96,32 @@ async fn prepared<'a>(
         title,
         body,
         run_id: ctx.run_id.to_string(),
+        receipt: match receipt {
+            true => Some(receipt_so_far(ctx).await?),
+            false => None,
+        },
     };
     Ok(Step::Value((forge, request)))
+}
+
+/// The run's receipt as its log stands, its hash chain verified: what a
+/// pull request opened as the run's last step tells its reviewer.
+async fn receipt_so_far(ctx: &RunCtx<'_>) -> Result<yunta_core::receipt::Receipt, RunError> {
+    let events = ctx.load_events().await?;
+    let chain = match ctx.storage.verify_chain(ctx.run_id.clone()).await? {
+        yunta_storage::ChainVerification::Intact { events } => {
+            yunta_core::receipt::EventChainStatus::Intact { events }
+        }
+        yunta_storage::ChainVerification::Broken { seq, detail } => {
+            yunta_core::receipt::EventChainStatus::Broken { seq, detail }
+        }
+    };
+    Ok(crate::receipt::receipt_so_far(
+        ctx.run_id,
+        ctx.manifest,
+        &events,
+        chain,
+    ))
 }
 
 /// The branch a pull request goes into: the project's base branch, or

@@ -333,6 +333,8 @@ fn forge_at(addr: SocketAddr) -> GitHubForge {
         .unwrap()
 }
 
+/// The marker a pull request opened before the comment form carries,
+/// which a run still finds it by.
 fn marker(run_id: &str) -> String {
     format!("summary\n\n---\nrun_id: `{run_id}`\n")
 }
@@ -390,7 +392,7 @@ async fn publish_reuses_only_open_prs() {
     );
     let body = stub.with(|s| s.prs[1].body.clone());
     assert!(
-        body.contains("run_id: `run-1`"),
+        body.contains("<!-- yunta run_id: run-1 -->"),
         "the new PR carries the run marker: {body}"
     );
 
@@ -589,6 +591,7 @@ fn pull_request(head: &str, run_id: &str) -> PullRequestRequest {
         title: "add dark mode".to_string(),
         body: "What the run changed.".to_string(),
         run_id: run_id.to_string(),
+        receipt: None,
     }
 }
 
@@ -625,7 +628,28 @@ async fn open_pull_request_posts_title_body_and_marker() {
     assert_eq!(opened.number, pr.number);
     assert_eq!(pr.title, "add dark mode");
     assert_eq!(pr.branch, "yunta/run/run-1");
-    assert_eq!(pr.body, "What the run changed.\n\n---\nrun_id: `run-1`");
+    assert_eq!(
+        pr.body,
+        "What the run changed.\n\n<!-- yunta run_id: run-1 -->"
+    );
+}
+
+#[tokio::test]
+async fn an_open_pull_request_carrying_the_comment_marker_is_reused() {
+    let stub = Stub::default();
+    stub.with(|s| {
+        let mut pr = stub_pr(4, "yunta/run/run-1", "run-1", "open");
+        pr.body = "What the run changed.\n\n<!-- yunta run_id: run-1 -->".to_string();
+        s.prs.push(pr);
+    });
+    let forge = forge_at(serve(stub.clone()).await);
+
+    let opened = forge
+        .open_pull_request(&pull_request("yunta/run/run-1", "run-1"))
+        .await
+        .unwrap();
+
+    assert_eq!(opened.number, 4, "{:?}", stub.requests());
 }
 
 #[tokio::test]

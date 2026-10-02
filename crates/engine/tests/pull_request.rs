@@ -174,3 +174,46 @@ async fn a_forge_the_machine_cannot_reach_fails_the_node_saying_why() {
         other => panic!("expected the run to pause, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn a_pull_request_carries_the_receipt_of_the_run_that_opened_it() {
+    let (bench, state) = forged();
+    let RunReport { terminal, .. } = bench
+        .run_with_config(WRITES_THEN_OPENS, "sessions: []\n", &config(""))
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    let body = &state.pull_requests()[0].body;
+    let handle = bench.run_id.handle();
+    assert!(
+        body.starts_with("What the run did.")
+            && body.contains(&format!("# receipt for run {handle}: ● running"))
+            && body.contains("the run is still open: this is its last step")
+            && body.contains("**event chain**"),
+        "the author's words, then the receipt read as the run's last step: {body}"
+    );
+    assert!(
+        body.trim_end()
+            .ends_with(&format!("<!-- yunta run_id: {} -->", bench.run_id)),
+        "the marker last, out of what a reviewer reads: {body}"
+    );
+}
+
+#[tokio::test]
+async fn receipt_false_keeps_only_the_author_s_body() {
+    let (bench, state) = forged();
+    let workflow = WRITES_THEN_OPENS.replace(
+        "body: \"What the run did.\" }",
+        "body: \"What the run did.\", receipt: false }",
+    );
+    let RunReport { terminal, .. } = bench
+        .run_with_config(&workflow, "sessions: []\n", &config(""))
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        state.pull_requests()[0].body,
+        format!(
+            "What the run did.\n\n<!-- yunta run_id: {} -->",
+            bench.run_id
+        )
+    );
+}

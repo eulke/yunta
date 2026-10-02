@@ -90,7 +90,10 @@ pub struct Receipt {
     pub run_id: RunId,
     pub workflow: WorkflowName,
     pub mode: ModeName,
-    pub terminal_state: TerminalState,
+    /// How the run closed; none while it is still open — a receipt a
+    /// pull request carries is read as the run's last step begins.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_state: Option<TerminalState>,
     pub criteria: CriteriaSummary,
     pub baseline: Option<BaselineSummary>,
     pub scope: ScopeSummary,

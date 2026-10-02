@@ -10,7 +10,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 
 use yunta_core::diagnostic::{ArtifactFailure, DiagnosticCode, DocumentKind};
-use yunta_core::events::{EventPayload, Failure, Phase, StoredEvent};
+use yunta_core::events::{EventPayload, Failure, Phase, RunMetrics, StoredEvent, TerminalState};
 use yunta_core::{CheckBuiltin, Manifest, NodeId, NodeKind, RunId};
 
 use crate::replay::unknown_kind_counts;
@@ -132,7 +132,41 @@ pub fn build_receipt(
     }) else {
         return Err(ReceiptError::NotFinished(run_id.clone()));
     };
+    Ok(receipt(
+        run_id,
+        manifest,
+        events,
+        event_chain,
+        Some(terminal_state),
+        metrics,
+    ))
+}
 
+/// The receipt of a run still open, as its log stands: what it has held
+/// its work to and found so far, with the cost a close now would record.
+/// What a pull request a run opens as its last step carries.
+pub fn receipt_so_far(
+    run_id: &RunId,
+    manifest: &Manifest,
+    events: &[StoredEvent],
+    event_chain: EventChainStatus,
+) -> Receipt {
+    let state = crate::replay::derive(events);
+    let metrics = RunMetrics {
+        tokens: state.total_tokens(),
+        cptv: crate::stats::cptv(&state),
+    };
+    receipt(run_id, manifest, events, event_chain, None, metrics)
+}
+
+fn receipt(
+    run_id: &RunId,
+    manifest: &Manifest,
+    events: &[StoredEvent],
+    event_chain: EventChainStatus,
+    terminal_state: Option<TerminalState>,
+    metrics: RunMetrics,
+) -> Receipt {
     let criteria = criteria_summary(events);
     let baseline = baseline_summary(manifest, events);
     let scope = scope_summary(events);
@@ -147,8 +181,7 @@ pub fn build_receipt(
             )
         })
         .count();
-
-    Ok(Receipt {
+    Receipt {
         schema_version: Receipt::SCHEMA_VERSION,
         run_id: run_id.clone(),
         workflow: manifest.workflow.name.clone(),
@@ -166,7 +199,7 @@ pub fn build_receipt(
         event_chain,
         unknown_kinds,
         diagnostics: diagnostic_counts(events),
-    })
+    }
 }
 
 /// The latest post-check `criteria_checked` per task — a retried task's

@@ -68,9 +68,11 @@ are valid there. A mistyped key never silently becomes a default.
   and siblings doing that must declare disjoint `scope`.
 - **`pull_request`** — pushes the run's own branch and opens a pull request of it into
   `project.base_branch` (or the branch the run started from), through the forge the
-  project configures: `title:` and an optional `body:`, both templates. Running again
-  pushes the same branch and finds the pull request it opened, so a rerun never opens
-  a second one. It needs `forge.github` in the config — `yunta check` refuses it
+  project configures: `title:` and an optional `body:`, both templates. The body then
+  carries the run's [receipt](#the-verified-work-receipt) as it stands when the pull
+  request opens — `receipt: false` leaves only what the author wrote. Running again
+  pushes the same branch and finds the pull request it opened, by a marker in an HTML
+  comment at the end of its body, so a rerun never opens a second one. It needs `forge.github` in the config — `yunta check` refuses it
   otherwise, unless the node is [optional](#optional-nodes) — and a run with a
   worktree of its own, since `isolation: none` gives the run no branch. `yunta run`
   refuses to start when the variable holding the forge's token is not set, and
@@ -594,7 +596,9 @@ binary does not read), and `·` nothing to check — a workflow that declared no
 criteria is never crossed out for it. On a terminal the receipt is laid out for the
 screen; `receipt.md` holds the same document as Markdown, and `receipt.json` the
 same data for a program. Both files are written to the run's own directory,
-alongside `manifest.yaml`.
+alongside `manifest.yaml`. A `pull_request` node puts the same document in the pull
+request it opens, read as the run's last step begins: what the run held its work to
+and found so far, under the word `running`.
 
 ## MCP
 

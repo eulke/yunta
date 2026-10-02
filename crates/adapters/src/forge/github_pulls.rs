@@ -4,11 +4,12 @@
 use serde::Deserialize;
 use yunta_core::port::{ForgeError, ForgeProbe, PullRequestRef, PullRequestRequest};
 
-use super::github::{run_marker, GitHubForge};
+use super::github::GitHubForge;
 
 impl GitHubForge {
     /// The open pull request this run's marker names on `head`, or a new
-    /// one: its body is the caller's, then the marker.
+    /// one: its body is the caller's, then the run's receipt, then the
+    /// marker.
     pub(super) async fn open(
         &self,
         req: &PullRequestRequest,
@@ -16,7 +17,7 @@ impl GitHubForge {
         if let Some(existing) = self.find_open_pr(&req.head, &req.run_id).await? {
             return Ok(existing);
         }
-        let body = format!("{}\n\n---\n{}", req.body, run_marker(&req.run_id));
+        let body = super::pull_request_body(req);
         self.create_pr(&req.title, &req.head, &req.base, &body)
             .await
     }
