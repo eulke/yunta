@@ -84,7 +84,7 @@ pub fn to_json_string<T: serde::Serialize>(value: &T) -> Result<String, String> 
 /// command that drove a run to its stop and the command that reads that
 /// run an hour later publish the same answer. `outcome` is the word
 /// every text surface prints, spelled the same way here: a reader who
-/// saw `paused` on a terminal finds `paused` in the document.
+/// saw `needs you` on a terminal finds `needs_you` in the document.
 #[derive(serde::Serialize)]
 pub(crate) struct RunDocument {
     schema_version: u32,

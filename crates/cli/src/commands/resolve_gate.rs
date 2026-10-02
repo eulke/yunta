@@ -1,4 +1,4 @@
-//! `yunta resolve-gate <run_id> <option>`: answers a paused run's gate
+//! `yunta resolve-gate <run> [<option>]`: answers a run's waiting gate
 //! decision from a separate process — no live surface attached to the
 //! run itself, exactly the shape `yunta mcp`'s own `resolve_gate` tool
 //! needs. Appends **only the decision** to the log

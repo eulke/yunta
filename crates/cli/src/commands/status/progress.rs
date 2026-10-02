@@ -58,7 +58,7 @@ pub(crate) fn summary(frame: &RunFrame, engine: EngineLiveness, glyphs: Glyphs) 
         crate::render::counter::line(frame, glyphs),
         phase_label(frame, engine)
     );
-    if let Some(note) = crate::commands::unknown_kinds_note(&frame.unknown_kinds) {
+    if let Some(note) = crate::commands::unknown_kinds_note(&frame.unknown_kinds, glyphs) {
         summary.push_str(&format!(" {sep} {note}"));
     }
     summary

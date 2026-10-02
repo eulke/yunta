@@ -731,7 +731,14 @@ fn a_run_reports_the_same_word_on_a_terminal_as_off_one() {
         !terminal.ran_to_the_end(),
         "a parked run is not a success:\n{drawn}"
     );
-    assert!(drawn.contains("paused"), "{drawn}");
+    let id = drawn
+        .lines()
+        .find_map(|line| line.strip_prefix("run ")?.split(':').next())
+        .expect("the run named itself as it started");
+    assert!(
+        drawn.contains(&format!("run {}: ◆ needs you", yunta_testkit::handle(id))),
+        "{drawn}"
+    );
 }
 
 /// A node that reviews and finds something blocking. The run itself

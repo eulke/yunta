@@ -74,7 +74,8 @@ pub(super) fn render_run_stats(
         .push_if("answers", answers(&stats.findings, stats.findings_settled))
         .push_if(
             "unread",
-            crate::commands::unknown_kinds_note(&stats.unknown_kinds).unwrap_or_default(),
+            crate::commands::unknown_kinds_note(&stats.unknown_kinds, look.glyphs)
+                .unwrap_or_default(),
         );
     let mut out = format!("run {run_id} — mode {mode}\n");
     out.push_str(&crate::render::draw(Doc::new().with(fields), look));

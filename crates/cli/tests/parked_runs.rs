@@ -246,19 +246,15 @@ fn a_decision_says_its_claim_and_the_record_behind_it_each_once() {
     }
     assert_eq!(closing.matches("exit 1").count(), 1, "{closing}");
 
-    // A gate: the message it asks with never says who is being asked, so
-    // the evidence is a part of its own — inline on the trailer, under
-    // its own heading on the page.
+    // A gate: the message it asks with never says who is being asked,
+    // and the second line — the run's own sentence for its pause — says
+    // it beside the claim, so the decision under it does not again.
     let gate = yunta_in!(&repo, &home, &["run", "approval.yaml"]);
     let gate_id = run_id_from(&gate);
     let gate_closing = stdout(&gate);
     let gate_status = stdout(&yunta_in!(&repo, &home, &["status", &gate_id]));
-    let trailer = closing_decision(&gate_closing).join("\n");
-    let page = decision_block(&gate_status).join("\n");
-    // A gate's record — who it is addressed to — is said nowhere else,
-    // so both carry it.
-    for block in [&trailer, &page] {
-        assert!(block.contains("assignee: lead"), "{block}");
+    for whole in [&gate_closing, &gate_status] {
+        assert_eq!(whole.matches("assignee: lead").count(), 1, "{whole}");
     }
 }
 

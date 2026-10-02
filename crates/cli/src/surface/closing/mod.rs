@@ -248,9 +248,13 @@ impl Closing {
         let Some((node, escalation)) = &self.decision else {
             return Vec::new();
         };
+        let said_why = match &self.frame.phase {
+            RunPhase::Waiting { on } => advice::parked_says_why(on),
+            _ => false,
+        };
         let beside = decision::Beside {
             claim: true,
-            evidence: self.failed().any(|(failed, _)| failed.id == *node),
+            evidence: said_why || self.failed().any(|(failed, _)| failed.id == *node),
         };
         let mut lines = decision::lines(&self.run_id, node, escalation, beside, look);
         // A person who has just watched their terminal stop is the one
@@ -313,7 +317,7 @@ impl Closing {
             .push_if("degraded", degraded)
             .push_if(
                 "unread",
-                unknown_kinds_note(&self.frame.unknown_kinds).unwrap_or_default(),
+                unknown_kinds_note(&self.frame.unknown_kinds, glyphs).unwrap_or_default(),
             )
     }
 

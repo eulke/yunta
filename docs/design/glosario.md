@@ -171,6 +171,15 @@ después a otro proceso. Es una lectura, no un evento; sin registro no se afirma
 porque un run que pasa de un proceso a otro tampoco tiene uno por un instante.
 _Evitar_: colgado, huérfano, zombie.
 
+**Palabras de una tarea**:
+`pending`, `ready`, `running`, `done`, `blocked` y `failed`: dónde está una tarea
+del ledger, el mismo token que escribe el log, en todas las superficies, en el
+JSON y en lo que lee un agente. Es otro vocabulario que el de un nodo a propósito:
+una tarea está `done` cuando sus criterios pasan y su trabajo se integró, y un
+nodo está `finished` cuando corrió; un loop `finished` puede dejar tareas
+`blocked`.
+_Evitar_: finished (para una tarea), completed.
+
 **Handle**:
 Cómo una persona llama a un run: los últimos seis caracteres de su id, la parte
 al azar de un ULID. Toda línea que lee una persona lo nombra así, y todo comando

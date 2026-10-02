@@ -96,7 +96,7 @@ pub async fn status(
     for part in [
         paint(nodes),
         paint(page.evidence()),
-        paint(page.fields().lines(&look)),
+        paint(page.fields(look.glyphs).lines(&look)),
     ] {
         if !part.is_empty() {
             out.push('\n');
@@ -143,14 +143,16 @@ fn decision_page(
     Some(match yunta_engine::current_escalation(manifest, &state) {
         Some((node, escalation)) => {
             let look = crate::render::stdout_look();
-            // The page's second line made the claim, and a failed
-            // node's evidence is quoted above.
+            // The page's second line made the claim, with the record
+            // beside it when it said the run's own sentence, and a
+            // failed node's evidence is quoted above.
             let beside = decision::Beside {
                 claim: true,
-                evidence: matches!(
-                    state.nodes.state(&node),
-                    Some(yunta_engine::NodeState::Failed { .. })
-                ),
+                evidence: advice::parked_says_why(waiting)
+                    || matches!(
+                        state.nodes.state(&node),
+                        Some(yunta_engine::NodeState::Failed { .. })
+                    ),
             };
             let block: String = decision::lines(run_id, &node, &escalation, beside, &look)
                 .iter()

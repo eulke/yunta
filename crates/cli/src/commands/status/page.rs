@@ -192,11 +192,11 @@ impl Page<'_> {
     }
 
     /// The facts a reader checks once they know where the run stands.
-    pub(super) fn fields(&self) -> Fields {
+    pub(super) fn fields(&self, glyphs: crate::render::Glyphs) -> Fields {
         let tokens = self.state.total_tokens();
         let mut tasks: Vec<_> = self.state.tasks.iter().collect();
         tasks.sort_by(|a, b| a.0.cmp(b.0));
-        let sep = format!(" {} ", crate::render::stdout_look().glyphs.sep());
+        let sep = format!(" {} ", glyphs.sep());
         let tasks = tasks
             .into_iter()
             .map(|(id, record)| format!("{id} {}", record.status))
@@ -215,10 +215,7 @@ impl Page<'_> {
                 )
             });
         Fields::new()
-            .push_if(
-                "progress",
-                crate::render::counter::line(self.frame, crate::render::stdout_look().glyphs),
-            )
+            .push_if("progress", crate::render::counter::line(self.frame, glyphs))
             .push_if("tokens", spent(tokens))
             .push_if("tasks", tasks)
             .push_if(
@@ -232,7 +229,8 @@ impl Page<'_> {
             .push_if("host", suspended.unwrap_or_default())
             .push_if(
                 "unread",
-                crate::commands::unknown_kinds_note(&self.frame.unknown_kinds).unwrap_or_default(),
+                crate::commands::unknown_kinds_note(&self.frame.unknown_kinds, glyphs)
+                    .unwrap_or_default(),
             )
     }
 

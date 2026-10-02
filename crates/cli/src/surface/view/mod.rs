@@ -97,7 +97,7 @@ pub(super) fn footer(frame: &RunFrame, glyphs: Glyphs) -> Line {
 /// review on a forge.
 pub(super) fn answer_command(run_id: &RunId, answerable: bool) -> String {
     match answerable {
-        true => advice::resolve_gate(run_id.handle()),
+        true => advice::decide(run_id.handle()),
         false => advice::resume(run_id.handle()),
     }
 }
@@ -359,10 +359,7 @@ mod tests {
             .map(|row| Ink::Plain.paint(&row))
             .unwrap_or_default();
         assert!(
-            row.contains(&format!(
-                "needs you: yunta resolve-gate {} <option>",
-                RUN.handle()
-            )),
+            row.contains(&format!("needs you: yunta resolve-gate {} (", RUN.handle())),
             "it carries the command that answers it, whole: {row}"
         );
         assert!(row.contains("node `plan`"), "and what it is about: {row}");

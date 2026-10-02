@@ -204,7 +204,7 @@ mod pause_reason_tests {
                 said.text,
                 yunta_core::text::aside(
                     "run",
-                    &yunta_core::text::one_line(&format!("paused — {sentence}"))
+                    &yunta_core::text::one_line(&format!("needs you — {sentence}"))
                 )
             );
 

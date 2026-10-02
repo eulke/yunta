@@ -266,13 +266,16 @@ pub(crate) async fn probe_or_refuse(adapters: &Adapters) -> Result<(), CliError>
 /// prints it on its own, so the framing is each caller's and the
 /// sentence is one — a reader meets the same fact worded the same way
 /// on either surface.
-pub(crate) fn unknown_kinds_note(counts: &[UnknownKindCount]) -> Option<String> {
+pub(crate) fn unknown_kinds_note(
+    counts: &[UnknownKindCount],
+    glyphs: crate::render::Glyphs,
+) -> Option<String> {
     if counts.is_empty() {
         return None;
     }
     let kinds: Vec<String> = counts
         .iter()
-        .map(|count| format!("{} ×{}", count.kind, count.events))
+        .map(|count| format!("{} {}{}", count.kind, glyphs.times(), count.events))
         .collect();
     Some(format!(
         "{}, interpreted partially: {}",

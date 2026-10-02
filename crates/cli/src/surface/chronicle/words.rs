@@ -43,7 +43,7 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
     use run::happening::Happening as H;
     let said = match happening {
         H::Created { mode, base_branch } => format!("created — mode `{mode}` off {base_branch}"),
-        H::Paused { reason } => format!("paused — {reason}"),
+        H::Paused { reason } => format!("needs you — {reason}"),
         H::Resumed { policies } => match policies.len() {
             0 => "resumed".to_string(),
             n => format!(

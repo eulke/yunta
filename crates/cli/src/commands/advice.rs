@@ -60,6 +60,20 @@ pub(crate) fn parked_on(on: &WaitingOn) -> String {
     }
 }
 
+/// Whether [`parked_in_full`] says the sentence the engine recorded —
+/// a decision's claim with the record beside it — rather than only the
+/// node it waits on: a surface that printed it never prints that record
+/// twice.
+pub(crate) fn parked_says_why(on: &WaitingOn) -> bool {
+    matches!(
+        on,
+        WaitingOn::Node {
+            reason: Some(_),
+            ..
+        } | WaitingOn::Run { .. }
+    )
+}
+
 /// What a parked run is waiting on, at the length a page has room for:
 /// the sentence the engine recorded when it stopped the run, which names
 /// what a node id cannot — which questions are still unanswered, which
@@ -82,6 +96,12 @@ pub(crate) fn parked_in_full(on: &WaitingOn) -> String {
 /// reader to pick off the menu printed above it.
 pub(crate) fn resolve_gate(run: &str) -> String {
     format!("yunta resolve-gate {run} <option>")
+}
+
+/// Puts a run's decision to a person: on a terminal, its documents and
+/// its menu; off one, a command per option.
+pub(crate) fn decide(run: &str) -> String {
+    format!("yunta resolve-gate {run}")
 }
 
 /// Hands a run back to the engine, once whatever stopped it is settled

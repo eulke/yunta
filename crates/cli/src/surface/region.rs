@@ -331,7 +331,7 @@ mod tests {
         let first = demanded.first().map(String::as_str).unwrap_or_default();
         assert!(
             first.contains("needs you: ")
-                && first.contains(&format!("yunta resolve-gate {} <option>", RUN.handle())),
+                && first.contains(&format!("yunta resolve-gate {}", RUN.handle())),
             "the row that asks opens the region, with the command that answers: {demanded:?}"
         );
         assert_eq!(demanded.len(), quiet.len() + 1, "{demanded:?}");
