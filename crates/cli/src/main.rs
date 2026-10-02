@@ -68,10 +68,42 @@ fn main() -> ExitCode {
         Ok(Outcome::Reported) => ExitCode::FAILURE,
         Ok(Outcome::Code(code)) => ExitCode::from(code),
         Err(error) => {
-            let said = crate::render::stderr_ink().word(render::ink::Tone::Failed, "error");
-            eprintln!("{said}: {error}");
+            refused(&error);
             ExitCode::FAILURE
         }
+    }
+}
+
+/// A refusal on stderr: the sentence after `error:`, then where it
+/// looked and the commands that go on from here, when it has them.
+fn refused(error: &CliError) {
+    let ink = crate::render::stderr_ink();
+    eprintln!(
+        "{}: {}",
+        ink.word(render::ink::Tone::Failed, "error"),
+        error.said_to(crate::error::Reader::Person)
+    );
+    let (detail, next) = error.advice();
+    if let Some(detail) = detail {
+        eprintln!(
+            "{}{}",
+            render::INDENT,
+            ink.word(render::ink::Tone::Muted, &detail)
+        );
+    }
+    if !next.is_empty() {
+        let look = render::Look {
+            glyphs: render::glyphs(),
+            ink,
+            width: render::stderr_width(),
+        };
+        eprint!(
+            "\n{}",
+            render::draw(
+                render::doc::Doc::new().with(render::blocks::Next { steps: next }),
+                &look
+            )
+        );
     }
 }
 

@@ -182,7 +182,14 @@ impl Context {
         if events.is_empty() && run_dir.is_none() {
             return Err(CliError::RunNotFound {
                 id: id.clone(),
-                roots: self.run_roots(),
+                roots: self
+                    .run_roots()
+                    .iter()
+                    .map(|root| {
+                        crate::render::paths::shown(root, &self.cwd, self.env.home.as_deref())
+                    })
+                    .collect(),
+                near: self.near_run(id),
             });
         }
         let run_dir = run_dir.unwrap_or_else(|| self.project.runs_root.join(id.as_str()));
@@ -193,6 +200,18 @@ impl Context {
             manifest,
             events,
         })
+    }
+
+    /// The run `id` is one slip away from, by its handle or by its whole
+    /// id, when exactly one is.
+    fn near_run(&self, id: &RunId) -> Option<String> {
+        let runs = self.storage().ok()?.list_runs().ok()?;
+        let typed = id.as_str().to_ascii_uppercase();
+        let named: Vec<String> = runs
+            .iter()
+            .flat_map(|run| [run.run_id.handle().to_string(), run.run_id.to_string()])
+            .collect();
+        yunta_core::text::nearest(&typed, named.iter().map(String::as_str)).map(str::to_string)
     }
 
     /// Where a run is looked for, in search order — what a refusal names

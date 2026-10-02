@@ -2826,7 +2826,8 @@ nodes:
         stderr(&resolve).trim_end(),
         format!(
             "error: this run isn't parked at a pause — a live process may still be \
-             driving it, or it already finished — `yunta status {run_id}` shows where it is"
+             driving it, or it already finished — `yunta status {}` shows where it is",
+            yunta_testkit::handle(&run_id)
         ),
         "the refusal names the state and what shows it"
     );
@@ -3104,6 +3105,11 @@ fn every_command_that_opens_a_run_refuses_a_missing_one_with_the_same_sentence()
             .find(|line| line.contains("no run"))
             .unwrap_or_else(|| panic!("`{name}` says which run it could not find: {text}"))
             .to_string();
+        assert!(
+            text.lines()
+                .any(|line| line.trim_start().starts_with("looked in ") && line.contains("runs")),
+            "`{name}` says where this binary looked for it: {text}"
+        );
         said.push((name, line));
     }
 
@@ -3115,10 +3121,6 @@ fn every_command_that_opens_a_run_refuses_a_missing_one_with_the_same_sentence()
         );
     }
     assert!(first.contains(ghost), "the id the person typed: {first}");
-    assert!(
-        first.contains("runs"),
-        "and where this binary looked for it: {first}"
-    );
 }
 
 /// A workflow with somewhere later to go, whose only node exhausts its

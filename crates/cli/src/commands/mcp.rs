@@ -134,7 +134,10 @@ impl ServerHandler for YuntaMcpServer {
 fn tool_result(outcome: Result<String, CliError>) -> rmcp::model::CallToolResponse {
     match outcome {
         Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]).into(),
-        Err(refusal) => CallToolResult::error(vec![ContentBlock::text(refusal.to_string())]).into(),
+        Err(refusal) => CallToolResult::error(vec![ContentBlock::text(
+            refusal.said_to(crate::error::Reader::Agent),
+        )])
+        .into(),
     }
 }
 

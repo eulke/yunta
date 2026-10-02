@@ -1080,8 +1080,8 @@ async fn an_mcp_client_answering_a_running_run_gets_the_advice_a_person_gets() {
         .strip_prefix("error: ")
         .unwrap_or_else(|| panic!("the command's own refusal: {said}"));
     assert!(
-        sentence.contains(&format!("yunta status {run_id}")),
-        "the advice names where the run actually is: {sentence}"
+        sentence.contains(&format!("yunta status {}", yunta_testkit::handle(&run_id))),
+        "a person is told where the run is by its handle: {sentence}"
     );
 
     // The client's answer: a tool result, from the control plane.
@@ -1102,7 +1102,11 @@ async fn an_mcp_client_answering_a_running_run_gets_the_advice_a_person_gets() {
         .await
         .unwrap();
     assert_eq!(answered.is_error, Some(true), "{answered:#?}");
-    assert_eq!(tool_text(&answered), sentence);
+    // The same refusal, naming the run by the whole id an agent copies.
+    assert_eq!(
+        tool_text(&answered),
+        sentence.replace(yunta_testkit::handle(&run_id), &run_id)
+    );
     client.cancel().await.ok();
 }
 

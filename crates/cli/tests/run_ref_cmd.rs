@@ -94,3 +94,27 @@ fn needs_names_the_one_run_waiting_on_a_person_or_lists_them() {
         "{said}"
     );
 }
+
+#[test]
+fn an_unknown_run_suggests_the_closest_and_lists_the_commands() {
+    let checkout = checkout();
+    let run_id = ran(&checkout, "ok.yaml");
+    let called = handle(&run_id);
+    // One key off the run's handle.
+    let mut slipped: Vec<char> = called.chars().collect();
+    let last = slipped.len() - 1;
+    slipped[last] = if slipped[last] == 'Q' { 'R' } else { 'Q' };
+    let slipped: String = slipped.into_iter().collect();
+
+    let said = found(&checkout, &slipped).expect_err("no run is called that");
+    assert!(
+        said.contains(&format!(
+            "no run is called `{slipped}` — did you mean `{called}`?"
+        )),
+        "{said}"
+    );
+    assert!(said.contains("looked in "), "{said}");
+    for command in ["yunta list --runs ", "yunta list --runs --all"] {
+        assert!(said.contains(command), "{said}");
+    }
+}

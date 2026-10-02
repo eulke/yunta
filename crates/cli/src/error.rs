@@ -49,11 +49,14 @@ pub enum CliError {
 
     /// A run this binary has no record of, wherever it looked. One
     /// sentence, because a person who mistyped an id gets the same
-    /// answer whichever command they typed it into.
-    #[error("no run `{id}` under {}", .roots.iter().map(|root| root.display().to_string()).collect::<Vec<_>>().join(" or "))]
+    /// answer whichever command they typed it into — with the run it
+    /// was one slip away from, when there is one.
+    #[error("no run is called `{id}`{}", .near.as_ref().map(|near| format!(" — did you mean `{near}`?")).unwrap_or_default())]
     RunNotFound {
         id: RunId,
-        roots: Vec<std::path::PathBuf>,
+        /// Where it looked, as a person reads a path.
+        roots: Vec<String>,
+        near: Option<String>,
     },
 
     #[error(transparent)]
@@ -86,10 +89,9 @@ pub enum CliError {
     /// A decision was put to a run that is not parked at one. The
     /// engine's sentence says what is true of the run; which command
     /// shows a reader where it actually is is this border's word, so it
-    /// is added here — once, for the command and the control plane
-    /// alike, and so with the run's whole id, which is what a control
-    /// plane names a run by.
-    #[error("{refusal} — `{}` shows where it is", crate::commands::advice::status(.run_id.as_str()))]
+    /// is added here — named by its handle for a person, and by its whole
+    /// id for an agent ([`CliError::said_to`]).
+    #[error("{refusal} — `{}` shows where it is", crate::commands::advice::status(.run_id.handle()))]
     NotPaused {
         run_id: RunId,
         #[source]
@@ -100,7 +102,7 @@ pub enum CliError {
     /// Those pauses are settled where they were raised — a budget, a
     /// scope, an answers file, a review on a forge — and the run handed
     /// back, which is what the advice names.
-    #[error("{refusal} — settle it where it was raised, then `{}`", crate::commands::advice::resume(.run_id.as_str()))]
+    #[error("{refusal} — settle it where it was raised, then `{}`", crate::commands::advice::resume(.run_id.handle()))]
     NoMenu {
         run_id: RunId,
         #[source]
@@ -131,7 +133,7 @@ pub enum CliError {
     /// A run that cannot be closed. The engine's sentence says what is
     /// true of the run; which command moves it instead is this border's
     /// word.
-    #[error("{refusal}{}", close_advice(.run_id, .refusal))]
+    #[error("{refusal}{}", close_advice(.run_id.handle(), .refusal))]
     CloseRefused {
         run_id: RunId,
         #[source]
@@ -251,16 +253,17 @@ fn one_per_line(candidates: &[crate::commands::run_ref::Candidate]) -> String {
         .collect()
 }
 
-/// What to do instead of closing a run the engine would not close.
-fn close_advice(run_id: &RunId, refusal: &yunta_engine::CloseRunError) -> String {
+/// What to do instead of closing a run the engine would not close,
+/// naming the run as `run`.
+fn close_advice(run: &str, refusal: &yunta_engine::CloseRunError) -> String {
     match refusal {
         yunta_engine::CloseRunError::Driven => format!(
             " — `{}` stops it, and then it can be closed",
-            crate::commands::advice::cancel(run_id.handle())
+            crate::commands::advice::cancel(run)
         ),
         yunta_engine::CloseRunError::Moving => format!(
             " — `{}` shows where it is",
-            crate::commands::advice::status(run_id.handle())
+            crate::commands::advice::status(run)
         ),
         yunta_engine::CloseRunError::AlreadyClosed
         | yunta_engine::CloseRunError::Storage(_)
@@ -268,7 +271,60 @@ fn close_advice(run_id: &RunId, refusal: &yunta_engine::CloseRunError) -> String
     }
 }
 
+/// Who a refusal is said to: a person, who types the next command and
+/// reads a run's handle; or an agent, which copies a run's whole id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reader {
+    Person,
+    Agent,
+}
+
 impl CliError {
+    /// The refusal as `reader` reads it: a run's advice names it by its
+    /// handle for a person, by its whole id for an agent.
+    pub fn said_to(&self, reader: Reader) -> String {
+        let id = |run_id: &RunId| match reader {
+            Reader::Person => run_id.handle().to_string(),
+            Reader::Agent => run_id.to_string(),
+        };
+        match self {
+            CliError::NotPaused { run_id, refusal } => format!(
+                "{refusal} — `{}` shows where it is",
+                crate::commands::advice::status(&id(run_id))
+            ),
+            CliError::NoMenu { run_id, refusal } => format!(
+                "{refusal} — settle it where it was raised, then `{}`",
+                crate::commands::advice::resume(&id(run_id))
+            ),
+            CliError::CloseRefused { run_id, refusal } => {
+                format!("{refusal}{}", close_advice(&id(run_id), refusal))
+            }
+            other => other.to_string(),
+        }
+    }
+
+    /// What a person is told beside the refusal: where it looked, and the
+    /// commands that go on from here. Empty for a refusal that says it
+    /// all in its sentence.
+    pub fn advice(&self) -> (Option<String>, Vec<(String, &'static str)>) {
+        match self {
+            CliError::RunNotFound { roots, .. } => (
+                Some(format!("looked in {}", roots.join(" and "))),
+                vec![
+                    (
+                        "yunta list --runs".to_string(),
+                        "this repository's runs, what needs you first",
+                    ),
+                    (
+                        "yunta list --runs --all".to_string(),
+                        "every run on this machine",
+                    ),
+                ],
+            ),
+            _ => (None, Vec::new()),
+        }
+    }
+
     /// An engine refusal to close a run, in this border's vocabulary.
     pub fn close_refused(run_id: &RunId, refusal: yunta_engine::CloseRunError) -> Self {
         CliError::CloseRefused {
