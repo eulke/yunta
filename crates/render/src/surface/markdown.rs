@@ -27,7 +27,12 @@ impl Surface for Markdown {
         let blocks: Vec<String> = doc
             .blocks()
             .iter()
-            .map(block)
+            .enumerate()
+            .map(|(at, drawn)| match (at, drawn) {
+                // A document's first headline is its title.
+                (0, Block::Headline(headline)) => format!("# {}", said(headline)),
+                _ => block(drawn),
+            })
             .filter(|drawn| !drawn.trim().is_empty())
             .collect();
         match blocks.is_empty() {
@@ -47,13 +52,19 @@ fn block(block: &Block<'_>) -> String {
         Block::Decision(decision) => self::decision(decision),
         Block::Checklist(list) => self::checklist(list),
         Block::Next(next) => self::next(next),
+        Block::Heading(title) => format!("### {title}"),
         Block::Lines(lines) => lines.iter().map(line).collect::<Vec<_>>().join("  \n"),
     }
 }
 
 fn headline(headline: &Headline) -> String {
+    format!("## {}", said(headline))
+}
+
+/// What a headline says: its subject, and its mark beside its word.
+fn said(headline: &Headline) -> String {
     format!(
-        "**{}**: {} {}",
+        "{}: {} {}",
         headline.subject,
         GLYPHS.mark(headline.mark),
         headline.said

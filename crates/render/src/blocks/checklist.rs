@@ -14,6 +14,9 @@ pub enum Found {
     Caution,
     /// A run that reaches it stops there.
     Problem,
+    /// There was nothing to check: what it would hold to was never
+    /// asked for. Not a cross — nothing failed.
+    NotApplicable,
 }
 
 impl Found {
@@ -23,6 +26,7 @@ impl Found {
             Found::Holds => Mark::Done,
             Found::Caution => Mark::Caution,
             Found::Problem => Mark::Failed,
+            Found::NotApplicable => Mark::Pending,
         }
     }
 }

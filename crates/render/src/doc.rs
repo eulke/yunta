@@ -24,6 +24,8 @@ pub enum Block<'a> {
     Decision(Decision),
     Checklist(Checklist),
     Next(Next),
+    /// The title of what follows it, inside a document.
+    Heading(String),
     /// Lines a surface composed itself, each span carrying its role.
     Lines(Vec<Line>),
 }

@@ -4,8 +4,8 @@
 use super::Surface;
 use crate::blocks::Drawn;
 use crate::doc::{Block, Doc};
-use crate::ink::Line;
-use crate::Look;
+use crate::ink::{Line, Tone};
+use crate::{Look, INDENT};
 
 /// A terminal stream, by how its lines look.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +37,10 @@ impl Terminal {
             Block::Decision(block) => block.lines(look),
             Block::Checklist(block) => block.lines(look),
             Block::Next(block) => block.lines(look),
+            Block::Heading(title) => vec![
+                Line::new(),
+                Line::new().plain(INDENT).push(Tone::Strong, title.as_str()),
+            ],
             Block::Lines(lines) => lines.clone(),
         }
     }

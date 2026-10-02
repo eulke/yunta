@@ -3192,6 +3192,7 @@ dependencies = [
  "uuid",
  "yunta-adapters",
  "yunta-core",
+ "yunta-render",
  "yunta-storage",
  "yunta-testkit",
  "yunta-testkit-core",

@@ -23,6 +23,7 @@ pub mod run;
 pub mod scope;
 pub mod session;
 pub mod tasks;
+mod unknown;
 mod wire;
 
 pub use artifacts::{payloads::*, ArtifactEvent};
@@ -40,6 +41,7 @@ pub use run::{ledger::*, payloads::*, RunEvent, Suspension, Suspensions};
 pub use scope::{ledger::*, payloads::*, ScopeEvent};
 pub use session::{ledger::*, payloads::*, SessionEvent};
 pub use tasks::{ledger::*, payloads::*, TaskEvent};
+pub use unknown::UnknownKindCount;
 
 // Re-exported for convenience: `agent_session_opened`'s payload uses this
 // type, but it is defined at the crate root (`capabilities.rs`) since the

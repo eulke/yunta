@@ -10,9 +10,7 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::RunId;
-use yunta_engine::{
-    build_receipt, render_receipt_json, render_receipt_markdown, EventChainStatus, Receipt,
-};
+use yunta_engine::{build_receipt, render_receipt_json, EventChainStatus, Receipt};
 use yunta_storage::ChainVerification;
 
 use crate::context::Context;
@@ -22,7 +20,10 @@ pub async fn receipt(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let (run_dir, receipt) = gathered(&ctx, run_id).await?;
 
-    let markdown = render_receipt_markdown(&receipt);
+    let markdown = {
+        use yunta_render::surface::Surface;
+        yunta_render::surface::Markdown.draw(&yunta_render::receipt::document(&receipt))
+    };
     let json_text = render_receipt_json(&receipt)
         .map_err(|e| CliError::msg(format!("could not render receipt JSON: {e}")))?;
 
@@ -34,10 +35,15 @@ pub async fn receipt(run_id: &RunId, json: bool) -> Result<Outcome, CliError> {
     if json {
         println!("{json_text}");
     } else {
-        // `markdown` already ends with its own trailing newline —
-        // `print!`, not `println!`, so stdout matches `receipt.md` byte
-        // for byte instead of gaining a second one.
-        print!("{markdown}");
+        // The same document `receipt.md` holds, laid out for this
+        // terminal rather than written as Markdown.
+        print!(
+            "{}",
+            crate::render::draw(
+                yunta_render::receipt::document(&receipt),
+                &crate::render::stdout_look()
+            )
+        );
     }
     Ok(Outcome::Success)
 }

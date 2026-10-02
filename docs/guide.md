@@ -586,10 +586,13 @@ integrity. Nothing in it is agent-written prose; every line traces back to a spe
 event kind. It refuses a run that hasn't reached a terminal state yet — there's no
 metrics to certify until `run_finished` lands.
 
-Both formats are written to the run's own directory (`receipt.md`, `receipt.json`)
-alongside `manifest.yaml` and `progress.md`, so a later `bash` node can pick them up —
-for example, a closing `pr` node doing `gh pr create --body-file receipt.md` to make
-the receipt the PR description itself, no copy-paste required.
+Each check is marked by what it found: `✓` it holds, `✗` it failed, `▲` worth a
+look though nothing failed (a baseline that was already red, an event kind this
+binary does not read), and `·` nothing to check — a workflow that declared no
+criteria is never crossed out for it. On a terminal the receipt is laid out for the
+screen; `receipt.md` holds the same document as Markdown, and `receipt.json` the
+same data for a program. Both files are written to the run's own directory,
+alongside `manifest.yaml` and `progress.md`.
 
 ## MCP
 

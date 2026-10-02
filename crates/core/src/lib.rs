@@ -42,6 +42,7 @@ pub mod policy;
 pub mod port;
 pub mod process;
 mod questions;
+pub mod receipt;
 mod run_tool;
 pub mod schema;
 mod schema_range;

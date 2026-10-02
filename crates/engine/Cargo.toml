@@ -93,6 +93,8 @@ serde_path_to_error.workspace = true
 
 [dev-dependencies]
 yunta-core = { workspace = true, features = ["testkit"] }
+# A test reads a receipt the way a person is shown it.
+yunta-render.workspace = true
 # A port is exercised against an implementation of it: the engine's
 # tests run whole workflows on the `mock` adapter and the mock forge,
 # which is why this crate the library never links is here.

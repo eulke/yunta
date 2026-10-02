@@ -18,9 +18,9 @@ use yunta_core::events::{
 use yunta_core::events::{NodeEvent, RunEvent};
 use yunta_core::{ArtifactKind, NodeId, RunId};
 use yunta_engine::{
-    build_receipt, render_receipt_json, render_receipt_markdown, BaselineSummary, CostSummary,
-    CriteriaSummary, CriterionEntry, DiagnosticCount, EventChainStatus, Receipt, ReceiptError,
-    RunReport, RunnerUsage, ScopeSummary,
+    build_receipt, render_receipt_json, BaselineSummary, CostSummary, CriteriaSummary,
+    CriterionEntry, DiagnosticCount, EventChainStatus, Receipt, ReceiptError, RunReport,
+    RunnerUsage, ScopeSummary,
 };
 use yunta_testkit::Bench;
 use yunta_testkit_core::FixedClock;
@@ -96,23 +96,33 @@ fn sample_receipt(event_chain: EventChainStatus) -> Receipt {
     }
 }
 
+/// The receipt as a file holds it.
+fn render_receipt_markdown(receipt: &yunta_engine::Receipt) -> String {
+    use yunta_render::surface::Surface;
+    yunta_render::surface::Markdown.draw(&yunta_render::receipt::document(receipt))
+}
+
 const EXPECTED_MARKDOWN_INTACT: &str = "\
-# Verified Work Receipt — run run-2026-08-21-0001
+# receipt for run 1-0001: ✓ finished
 
-workflow: `release-cycle` · mode: `default` · state: Done
-
-- ✓ 3/3 criteria green (commands + exit codes below)
-- ✓ 0 regressions vs baseline across 2 comparisons (suite `make test`, hash `22cc66aa7d26`)
-- ✓ scope: 4 files touched, 0 violations
-- ✓ Reviewed by 2 independent runners via `review` (claude-code, codex)
+- workflow: release-cycle
+- mode: default
+- run: run-2026-08-21-0001
 - cost: 1.54k tokens (1.2k in / 340 out) · CPTV: 770 tokens per task · 2 reroutes
-- ✓ event chain: 342 events, hash-linked, replayable
 
-## Criteria
+- ✓ **criteria** 3/3 green, each command below
+- ✓ **baseline** 0 regressions across 2 comparisons (suite `make test`, hash `22cc66aa7d26`)
+- ✓ **scope** 4 files touched, none outside it
+- ✓ **review** by 2 independent runners via `review` (claude-code, codex)
+- ✓ **event chain** 342 events, hash-linked, replayable
 
-- ✓ `T001` — `test -f hello.txt` (exit 0)
-- ✓ `T002` — `cargo test -p yunta-core` (exit 0)
-- ✓ `T002` — `cargo clippy --workspace -- -D warnings` (exit 0)
+### criteria
+
+- ✓ **T001** `test -f hello.txt` exits 0
+- ✓ **T002** `cargo test -p yunta-core` exits 0
+- ✓ **T002** `cargo clippy --workspace -- -D warnings` exits 0
+
+- `yunta verify 1-0001` — checks this run's evidence again
 ";
 
 #[test]
@@ -129,7 +139,7 @@ fn a_broken_event_chain_renders_as_a_visible_failure_not_a_silent_omission() {
     });
     let markdown = render_receipt_markdown(&receipt);
     assert!(
-        markdown.contains("✗ event chain BROKEN at seq 88: payload hash mismatch"),
+        markdown.contains("✗ **event chain** broken at seq 88: payload hash mismatch"),
         "got:\n{markdown}"
     );
 }
@@ -164,22 +174,26 @@ fn renders_the_json_receipt_as_pretty_printed_structured_data() {
 }
 
 const EXPECTED_MARKDOWN_NO_BASELINE: &str = "\
-# Verified Work Receipt — run run-2026-08-21-0001
+# receipt for run 1-0001: ✓ finished
 
-workflow: `release-cycle` · mode: `default` · state: Done
-
-- ✓ 3/3 criteria green (commands + exit codes below)
-- baseline: not used by this workflow
-- ✓ scope: 4 files touched, 0 violations
-- ✓ Reviewed by 2 independent runners via `review` (claude-code, codex)
+- workflow: release-cycle
+- mode: default
+- run: run-2026-08-21-0001
 - cost: 1.54k tokens (1.2k in / 340 out) · CPTV: 770 tokens per task · 2 reroutes
-- ✓ event chain: 10 events, hash-linked, replayable
 
-## Criteria
+- ✓ **criteria** 3/3 green, each command below
+- · **baseline** not used by this workflow
+- ✓ **scope** 4 files touched, none outside it
+- ✓ **review** by 2 independent runners via `review` (claude-code, codex)
+- ✓ **event chain** 10 events, hash-linked, replayable
 
-- ✓ `T001` — `test -f hello.txt` (exit 0)
-- ✓ `T002` — `cargo test -p yunta-core` (exit 0)
-- ✓ `T002` — `cargo clippy --workspace -- -D warnings` (exit 0)
+### criteria
+
+- ✓ **T001** `test -f hello.txt` exits 0
+- ✓ **T002** `cargo test -p yunta-core` exits 0
+- ✓ **T002** `cargo clippy --workspace -- -D warnings` exits 0
+
+- `yunta verify 1-0001` — checks this run's evidence again
 ";
 
 #[test]
@@ -210,7 +224,7 @@ fn the_receipt_names_the_run_that_measured_an_inherited_baseline() {
     });
     assert!(
         render_receipt_markdown(&receipt).contains(
-            "0 regressions vs baseline across 2 comparisons (suite `make test`, \
+            "0 regressions across 2 comparisons (suite `make test`, \
              hash `22cc66aa7d26`, measured by run run-2026-08-21-0001)"
         ),
         "{}",
@@ -235,12 +249,12 @@ fn a_receipt_over_a_red_measurement_certifies_no_comparison() {
     let markdown = render_receipt_markdown(&receipt);
     assert!(
         markdown.contains(
-            "- ✗ baseline was already red when measured (exit 2): none of 2 comparisons \
+            "- ▲ **baseline** already red when measured (exit 2): none of 2 comparisons \
              could find a regression (suite `make test`, hash `22cc66aa7d26`)"
         ),
         "{markdown}"
     );
-    assert!(!markdown.contains("regressions vs baseline"), "{markdown}");
+    assert!(!markdown.contains("regressions across"), "{markdown}");
 }
 
 // --- derivation: build_receipt over a real run's own log --------------------
@@ -383,7 +397,7 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     );
     assert!(receipt.scope.files_touched > 0);
 
-    let groups = yunta_engine::fan_out_groups(&receipt.runners);
+    let groups = yunta_render::receipt::fan_out_groups(&receipt.runners);
     assert_eq!(groups.len(), 1);
     let (base, members) = &groups[0];
     assert_eq!(base, "review");
@@ -397,7 +411,7 @@ async fn build_receipt_derives_every_section_from_a_real_runs_own_log() {
     // relies on.
     let markdown = render_receipt_markdown(&receipt);
     assert!(
-        markdown.contains("Reviewed by 2 independent runners"),
+        markdown.contains("by 2 independent runners"),
         "got: {markdown}"
     );
     render_receipt_json(&receipt).unwrap();

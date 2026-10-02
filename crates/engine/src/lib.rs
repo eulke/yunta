@@ -125,10 +125,9 @@ pub use process_registry::{
 };
 pub use progress::render_progress;
 pub use receipt::{
-    build_receipt, fan_out_groups, render_json as render_receipt_json,
-    render_markdown as render_receipt_markdown, BaselineSummary, CostSummary, CriteriaSummary,
-    CriterionEntry, DiagnosticCount, EventChainStatus, Receipt, ReceiptError, RunnerUsage,
-    ScopeSummary,
+    build_receipt, render_json as render_receipt_json, BaselineSummary, CostSummary,
+    CriteriaSummary, CriterionEntry, DiagnosticCount, EventChainStatus, Receipt, ReceiptError,
+    RunnerUsage, ScopeSummary,
 };
 pub use replay::{
     dedup_findings, derive, unknown_kind_counts, NodeState, NodeWait, RunState, UnknownKindCount,

@@ -43,31 +43,45 @@ fn receipt_writes_both_formats_to_run_dir_and_prints_markdown_by_default() {
 
     let receipt_out = yunta_in!(&repo, &home, &["receipt", &run_id]);
     assert!(receipt_out.status.success(), "{}", stderr(&receipt_out));
-    let markdown = stdout(&receipt_out);
-    assert!(markdown.starts_with(&format!("# Verified Work Receipt — run {run_id}")));
+    let drawn = stdout(&receipt_out);
+    let handle = yunta_testkit::handle(&run_id);
     assert!(
-        markdown
-            .lines()
-            .any(|l| l == "- baseline: not used by this workflow"),
-        "{markdown}"
+        drawn.starts_with(&format!("receipt for run {handle}: ✓ finished")),
+        "{drawn}"
+    );
+    // A bash-only workflow has no tasks at all, and nothing to prove is
+    // never crossed out: it is said, with the neutral mark.
+    assert!(
+        yunta_testkit::checked(&drawn, "criteria")
+            .unwrap_or_default()
+            .contains("none declared, nothing to prove"),
+        "{drawn}"
     );
     assert!(
-        markdown.lines().any(|l| l.starts_with("- ✓ event chain: ")),
-        "{markdown}"
+        yunta_testkit::checked(&drawn, "baseline")
+            .unwrap_or_default()
+            .contains("not used by this workflow"),
+        "{drawn}"
     );
+    assert!(!drawn.contains('✗'), "{drawn}");
 
-    // A bash-only workflow has no tasks at all — 0/0 criteria, the
-    // honest reading (marked ✗, not a green ✓), never a manufactured pass.
-    assert!(
-        markdown
-            .lines()
-            .any(|l| l == "- ✗ 0/0 criteria green (commands + exit codes below)"),
-        "{markdown}"
-    );
-
+    // The file holds the same document, written as Markdown.
     let run_dir = home.join("runs").join(&run_id);
     let written_md = std::fs::read_to_string(run_dir.join("receipt.md")).unwrap();
-    assert_eq!(written_md, markdown);
+    assert!(
+        written_md.starts_with(&format!("# receipt for run {handle}: ✓ finished")),
+        "{written_md}"
+    );
+    assert!(
+        written_md
+            .lines()
+            .any(|l| l == "- · **criteria** none declared, nothing to prove"),
+        "{written_md}"
+    );
+    assert!(
+        written_md.lines().any(|l| l == format!("- run: {run_id}")),
+        "{written_md}"
+    );
     let written_json = std::fs::read_to_string(run_dir.join("receipt.json")).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&written_json).unwrap();
     assert_eq!(parsed["run_id"], run_id);

@@ -32,6 +32,7 @@ pub mod markdown;
 pub mod paths;
 mod plan;
 pub mod prose;
+pub mod receipt;
 mod run_word;
 pub mod shown;
 mod spec;
