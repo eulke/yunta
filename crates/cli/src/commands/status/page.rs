@@ -243,27 +243,9 @@ impl Page<'_> {
 
     /// What a person types next, for where the run stands.
     pub(super) fn next(&self, menu: bool) -> Next {
-        let handle = self.run_id.handle();
         let word = RunWord::observed(self.frame, self.engine);
-        let steps = match word {
-            RunWord::Stalled => vec![
-                (advice::resume(handle), "continues it from its log"),
-                (advice::close(handle), "closes it for good"),
-            ],
-            RunWord::NeedsYou if !menu => vec![
-                (advice::resume(handle), "hands it back once that is settled"),
-                (advice::close(handle), "closes it for good"),
-            ],
-            RunWord::NeedsYou => vec![(advice::close(handle), "closes it for good")],
-            RunWord::Finished | RunWord::Reported => {
-                vec![(advice::receipt(handle), "certifies what it did")]
-            }
-            RunWord::Broken => vec![(advice::verify(handle), "says where its log stops reading")],
-            RunWord::Created | RunWord::Running => {
-                vec![(advice::cancel(handle), "stops it and everything under it")]
-            }
-            RunWord::Failed | RunWord::Cancelled | RunWord::Promoted => Vec::new(),
-        };
-        Next { steps }
+        Next {
+            steps: advice::after(word, self.run_id.handle(), menu),
+        }
     }
 }

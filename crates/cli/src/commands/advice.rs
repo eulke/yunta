@@ -2,7 +2,7 @@
 //! waiting on, and the commands a person runs to move it.
 //!
 //! Every one of them is printed, at some point, beside a run a person
-//! still has to act on: in the live region's demand line, in the block
+//! still has to act on: in the live region's attention row, in the block
 //! that closes a run out, in `yunta status`, in the JSON a program
 //! reads, and in the diagnostic a command hands back when it could not
 //! finish its own job. They are spelled once here so a reader who met a
@@ -17,6 +17,8 @@
 //! is ever one that run's own menu does not offer.
 
 use yunta_engine::{NodeWait, RunPhase, WaitingOn};
+
+use crate::render::state::RunWord;
 
 /// What a run is parked on, or `None` for a run nobody has to touch —
 /// the one answer that decides whether a surface says anything about a
@@ -111,4 +113,27 @@ pub(crate) fn receipt(run: &str) -> String {
 /// being readable.
 pub(crate) fn verify(run: &str) -> String {
     format!("yunta verify {run}")
+}
+
+/// What a person types next for a run its word describes, each command
+/// with what it does. `menu` says whether a run that needs the person
+/// stopped on a menu, whose options carry their own commands.
+pub(crate) fn after(word: RunWord, run: &str, menu: bool) -> Vec<(String, &'static str)> {
+    match word {
+        RunWord::Stalled => vec![
+            (resume(run), "continues it from its log"),
+            (close(run), "closes it for good"),
+        ],
+        RunWord::NeedsYou if !menu => vec![
+            (resume(run), "hands it back once that is settled"),
+            (close(run), "closes it for good"),
+        ],
+        RunWord::NeedsYou => vec![(close(run), "closes it for good")],
+        RunWord::Finished | RunWord::Reported => vec![(receipt(run), "certifies what it did")],
+        RunWord::Broken => vec![(verify(run), "says where its log stops reading")],
+        RunWord::Created | RunWord::Running => {
+            vec![(cancel(run), "stops it and everything under it")]
+        }
+        RunWord::Failed | RunWord::Cancelled | RunWord::Promoted => Vec::new(),
+    }
 }

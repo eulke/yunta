@@ -249,7 +249,7 @@ fn a_terminal_with_no_color_set_still_draws_the_live_region() {
 }
 
 #[test]
-fn the_closing_block_names_a_finished_run_and_what_to_do_with_it() {
+fn a_finished_run_closes_without_empty_rows() {
     let root = tempfile::tempdir().unwrap();
     let (repo, home) = project(root.path(), TWO_NODES);
 
@@ -262,15 +262,13 @@ fn the_closing_block_names_a_finished_run_and_what_to_do_with_it() {
         text.contains(&format!("run {run_id}: ")) && text.contains("finished"),
         "the outcome comes first, as a word: {text}"
     );
-    for label in [
-        "progress",
-        "tokens",
-        "slowest",
-        "branch",
-        "artifacts",
-        "next",
-    ] {
+    for label in ["progress", "slowest", "branch"] {
         assert!(text.contains(label), "no `{label}` row in: {text}");
+    }
+    // Two `bash` nodes spend no tokens and write no artifacts: a row
+    // for either would be a label over nothing.
+    for label in ["tokens", "artifacts"] {
+        assert!(!text.contains(label), "an empty `{label}` row in: {text}");
     }
     assert!(
         text.contains(&format!("yunta receipt {}", handle(&run_id))),
@@ -395,12 +393,16 @@ fn resume_reports_exactly_what_run_reports() {
     let resumed = yunta_in!(&repo, &home, &["resume", &run_id]);
     let text = stdout(&resumed);
     assert!(
-        text.contains("needs you on a decision") && text.contains("decision on node `lint`"),
+        text.contains("needs you") && text.contains("decision on node `lint`"),
         "{text}"
     );
-    for label in ["progress", "tokens", "branch", "artifacts", "next"] {
+    for label in ["progress", "branch"] {
         assert!(text.contains(label), "no `{label}` row in: {text}");
     }
+    assert!(
+        text.contains(&format!("yunta close {}", handle(&run_id))),
+        "{text}"
+    );
     assert_eq!(
         stderr(&resumed).lines().next(),
         Some("live view off (stderr is not a terminal): one line per event"),
@@ -787,7 +789,7 @@ fn a_run_that_finished_holding_blocking_findings_is_not_a_success() {
     );
     let text = stdout(&run);
     assert!(
-        text.contains("reported — finished holding 1 blocking finding"),
+        text.contains("reported\n  finished holding 1 blocking finding"),
         "the block says what is holding it: {text}\nstderr: {}",
         stderr(&run)
     );
@@ -964,4 +966,28 @@ fn the_estimate_appears_after_three_runs() {
         "usually ~",
         "three runs behind it, the footer never said how long this workflow usually takes",
     );
+}
+
+#[test]
+fn a_run_that_fails_closes_with_what_its_command_printed() {
+    // `on_failure: abort` closes the run on the failure instead of
+    // asking what to do about it.
+    let root = tempfile::tempdir().unwrap();
+    let checkout = Checkout::under(root.path())
+        .config("defaults:\n  isolation: none\n  on_failure: abort\n")
+        .workflow("wf", COMPILER)
+        .committed();
+    let run = yunta_in!(&checkout.repo, &checkout.home, &["run", "wf.yaml"]);
+    assert_eq!(run.status.code(), Some(1), "{}", stderr(&run));
+    let text = stdout(&run);
+    let failed = text
+        .find("node `build` failed: exit 101")
+        .unwrap_or_else(|| panic!("the block says which node failed and how: {text}"));
+    let quoted = text
+        .find("error[E0425]: cannot find value `x` in this scope")
+        .unwrap_or_else(|| panic!("and quotes what it printed: {text}"));
+    let whole = text
+        .find("whole output: ")
+        .unwrap_or_else(|| panic!("and where the rest is: {text}"));
+    assert!(failed < quoted && quoted < whole, "{text}");
 }

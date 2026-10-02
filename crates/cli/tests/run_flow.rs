@@ -1092,10 +1092,9 @@ nodes:
 
 #[test]
 fn a_gate_with_stdin_not_a_tty_pauses_instead_of_hanging() {
-    // "sin TTY... nunca cuelga" — a `yunta run` whose stdin
-    // isn't a terminal (exactly `cargo test`'s own usual case, made
-    // explicit here with `Stdio::null()` so this doesn't depend on
-    // whatever stdin the test binary itself happened to inherit) must
+    // A `yunta run` whose stdin isn't a terminal (exactly `cargo test`'s
+    // own usual case, made explicit here with `Stdio::null()` so this
+    // doesn't depend on whatever stdin the test binary inherited) must
     // degrade to pausing at a gate, never sit waiting for a keystroke
     // nobody can send it.
     let root = tempfile::tempdir().unwrap();
@@ -1138,7 +1137,9 @@ nodes:
         "a gate with no TTY degrades to a paused run instead of hanging: {text}"
     );
     assert!(
-        text.contains(&format!("yunta resolve-gate {called} <option>")),
+        ["retry", "abort"]
+            .iter()
+            .all(|option| text.contains(&format!("yunta resolve-gate {called} {option}"))),
         "and says how to answer it from anywhere: {text}"
     );
 }

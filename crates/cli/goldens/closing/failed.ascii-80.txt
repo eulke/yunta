@@ -1,0 +1,15 @@
+run 7E5PH4: x failed
+  node `lint` failed: exit 101
+
+  lint: exit 101
+    | error[E0425]: cannot find value `x` in this scope
+    |  --> src/lib.rs:3:5
+    whole output: ~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/342da2eb16499698087adc25ad9595254cd6664564344b7db803bc9bd029d8da
+
+  progress     nodes 1/2 · 1 failed
+  tokens       20.2k spent
+  slowest      lint 12s · test 12s
+  branch       yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off main, in
+               ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
+
+  yunta status 7E5PH4   shows the whole run

@@ -1,0 +1,10 @@
+run 7E5PH4: + finished
+
+  progress     nodes 2/2
+  tokens       20.2k spent
+  slowest      lint 12s · test 12s
+  branch       yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off main, in
+               ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
+
+  yunta receipt 7E5PH4   certifies what it did
+  yunta status 7E5PH4    shows the whole run

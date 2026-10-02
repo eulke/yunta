@@ -301,6 +301,8 @@ async fn reported(settling: Settling<'_>) -> Result<Outcome, CliError> {
         clock: &settling.ctx.clock,
         prior: settling.prior,
         glyphs: settling.glyphs,
+        cwd: &settling.ctx.cwd,
+        home: settling.ctx.env.home.as_deref(),
     })
     .await
 }
@@ -355,6 +357,10 @@ pub(crate) struct Closed<'a> {
     /// comparison; `None` below the history floor.
     pub(crate) prior: Option<&'a PriorEstimation>,
     pub(crate) glyphs: Glyphs,
+    /// Where paths are shown from: the directory this was run in, and
+    /// the home `~` stands for.
+    pub(crate) cwd: &'a Path,
+    pub(crate) home: Option<&'a Path>,
 }
 
 /// Reads the run's log one last time and prints the block that closes it
@@ -378,9 +384,15 @@ pub(crate) async fn report_closing(closed: Closed<'_>) -> Result<Outcome, CliErr
             worktree: closed.worktree,
             base_branch: &closed.manifest.base_branch,
             isolation: closed.manifest.isolation,
+            cwd: closed.cwd,
+            home: closed.home,
         },
     });
-    print!("{}", closing.render(closed.glyphs));
+    let look = crate::render::Look {
+        glyphs: closed.glyphs,
+        ..crate::render::Look::stdout()
+    };
+    print!("{}", closing.render(&look));
     Ok(closing.outcome())
 }
 

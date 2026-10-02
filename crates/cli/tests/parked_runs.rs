@@ -120,7 +120,7 @@ fn decision_block(text: &str) -> Vec<&str> {
 }
 
 /// The decision the closing block carries: its heading and every line
-/// under it, through the line that says nothing holds the answer open.
+/// under it, through the lines that say nothing holds the answer open.
 fn closing_decision(text: &str) -> Vec<&str> {
     let mut lines: Vec<&str> = text
         .lines()
@@ -129,7 +129,7 @@ fn closing_decision(text: &str) -> Vec<&str> {
         .collect();
     while lines
         .last()
-        .is_some_and(|line| !line.contains("close this terminal"))
+        .is_some_and(|line| !line.contains("answer from anywhere"))
     {
         lines.pop();
     }
@@ -206,8 +206,10 @@ fn one_decision_reads_the_same_where_a_run_stops_and_where_it_is_asked_about() {
     // Where a person just watched their terminal stop, the last word is
     // that nothing has to stay open for the answer; a page nobody is
     // waiting in front of carries no such aside.
+    let said: Vec<&str> = trailer.split_whitespace().collect();
     assert!(
-        trailer.ends_with("close this terminal whenever you like and answer from anywhere."),
+        said.join(" ")
+            .ends_with("close this terminal whenever you like and answer from anywhere."),
         "{trailer}"
     );
     assert!(!page_text.contains("close this terminal"), "{page_text}");
@@ -230,19 +232,19 @@ fn a_decision_says_its_claim_and_the_record_behind_it_each_once() {
     let run_id = run_id_from(&run);
     let closing = stdout(&run);
     let status = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
-    // Where a run stops, the decision says its claim and its record,
-    // each once.
+    // Where a run stops and on the page `status` prints, the claim is
+    // said on the second line and the record above the decision, so the
+    // decision under them says neither again.
     let trailer = closing_decision(&closing).join("\n");
-    assert_eq!(trailer.matches("are exhausted").count(), 1, "{trailer}");
-    assert_eq!(trailer.matches("exit 1").count(), 1, "{trailer}");
-    // A page said both above it — the claim on its second line — so its
-    // decision says neither again.
     let page = decision_block(&status).join("\n");
-    assert!(
-        !page.contains("are exhausted") && !page.contains("exit 1"),
-        "{status}"
-    );
-    assert_eq!(status.matches("are exhausted").count(), 1, "{status}");
+    for (block, whole) in [(&trailer, &closing), (&page, &status)] {
+        assert!(
+            !block.contains("are exhausted") && !block.contains("exit 1"),
+            "{whole}"
+        );
+        assert_eq!(whole.matches("are exhausted").count(), 1, "{whole}");
+    }
+    assert_eq!(closing.matches("exit 1").count(), 1, "{closing}");
 
     // A gate: the message it asks with never says who is being asked, so
     // the evidence is a part of its own — inline on the trailer, under
