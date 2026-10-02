@@ -56,6 +56,7 @@ impl SessionTools {
             true => tasks.unexplained(),
             false => Vec::new(),
         };
+        found.extend(self.specified(tasks, &events).await?);
         for (index, task) in tasks.tasks.iter().enumerate() {
             if crate::tasks::stays_done(task, &prior, &current) {
                 continue;
@@ -177,6 +178,29 @@ impl SessionTools {
 
     /// The spec the run holds, which a spec written again for a
     /// departure is held against.
+    /// Every rule `tasks` breaks against the run it is handed over in:
+    /// what proves its work, the spec the run holds or will write, and
+    /// the questions a person answered.
+    async fn specified(
+        &self,
+        tasks: &TasksFile,
+        events: &[yunta_core::events::StoredEvent],
+    ) -> Result<Vec<Diagnostic>, RunToolError> {
+        let spec_planned = crate::tasks::plan_specified(&self.host.workflow, events);
+        let mut found = tasks.unspecifiable(spec_planned);
+        found.extend(tasks.against_spec(&self.held_spec(events).await?));
+        let answered: Vec<yunta_core::QuestionId> =
+            crate::artifacts::latest::<yunta_core::AnswersFile>(&self.host.run_dir, events)
+                .await
+                .map_err(|source| RunToolError::Plan { source })?
+                .map(|held| held.document.answers.into_iter().map(|answer| answer.id))
+                .into_iter()
+                .flatten()
+                .collect();
+        found.extend(tasks.unanswered(&answered));
+        Ok(found)
+    }
+
     async fn held_spec(
         &self,
         events: &[yunta_core::events::StoredEvent],

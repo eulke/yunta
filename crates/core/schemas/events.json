@@ -3674,6 +3674,36 @@
           "const": "change-without-code"
         },
         {
+          "description": "A criterion passes once a name is written in a file its task\nchanges, whatever the code does.",
+          "type": "string",
+          "const": "criterion-checks-presence"
+        },
+        {
+          "description": "Two tasks are judged by the same command.",
+          "type": "string",
+          "const": "shared-criterion"
+        },
+        {
+          "description": "A task `uses` a shape it builds itself.",
+          "type": "string",
+          "const": "uses-its-own-shape"
+        },
+        {
+          "description": "A task changes the test file its criterion runs, where the spec\nwrites the tests.",
+          "type": "string",
+          "const": "task-writes-its-test"
+        },
+        {
+          "description": "A task changes a file the run's spec wrote.",
+          "type": "string",
+          "const": "changes-a-spec-test"
+        },
+        {
+          "description": "A decision answers a question no person answered in the run.",
+          "type": "string",
+          "const": "unknown-answer"
+        },
+        {
           "description": "An update or a withdrawal names a finding this node never posted.",
           "type": "string",
           "const": "unknown-id"

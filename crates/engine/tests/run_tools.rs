@@ -1354,6 +1354,59 @@ async fn a_criterion_that_runs_no_test_is_refused_quoting_what_it_ran() {
     );
 }
 
+/// A plan, then the spec written for it.
+const PLANNED_THEN_SPECIFIED: &str = r#"
+name: specified
+nodes:
+  - id: plan
+    kind: prompt
+    prompt: "Plan."
+    artifacts:
+      produces: [tasks]
+  - id: spec
+    kind: prompt
+    depends_on: [plan]
+    prompt: "Write the tests."
+    artifacts:
+      produces: [spec]
+"#;
+
+/// Tasks whose criteria pass once a test's name is written, one of them
+/// in the test file the task itself changes.
+fn proven_by_a_name() -> serde_json::Value {
+    json!([
+        { "id": "cli", "title": "CLI", "scope": ["src/pack.rs", "tests/pack_cmd.rs"],
+          "criteria": [{ "cmd": "test -f tests/pack_cmd.rs && grep -q 'scope_case' tests/pack_cmd.rs" }],
+          "changes": [{ "at": "src/pack.rs::PackStore", "what": "the store" },
+                      { "at": "tests/pack_cmd.rs", "what": "lifecycle tests" }] },
+        { "id": "engine", "title": "Engine", "scope": ["src/catalog.rs"],
+          "criteria": [{ "cmd": "grep -q 'resolution_case' src/catalog.rs" }],
+          "changes": [{ "at": "src/catalog.rs::PackRoots", "what": "the roots" }] },
+    ])
+}
+
+#[tokio::test]
+async fn a_plan_proven_by_a_name_is_refused_when_it_is_handed_over() {
+    let host = ToolsHost::over(PLANNED_THEN_SPECIFIED);
+    let (refused, text) = submitted(&host, proven_by_a_name()).await;
+    assert!(refused, "got: {text}");
+    assert_eq!(
+        text.matches("passes once a name is written").count(),
+        2,
+        "{text}"
+    );
+    assert!(
+        text.contains("the spec writes a task's tests"),
+        "a workflow that writes a spec writes the tests: {text}"
+    );
+
+    // Where no node writes a spec, a task writes its own tests.
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let (refused, text) = submitted(&host, proven_by_a_name()).await;
+    assert!(refused, "got: {text}");
+    assert!(!text.contains("the spec writes a task's tests"), "{text}");
+}
+
 #[tokio::test]
 async fn only_a_task_that_starts_from_this_tree_is_refused_for_passing_already() {
     let host = ToolsHost::over(BLACKBOARD_WORKFLOW);

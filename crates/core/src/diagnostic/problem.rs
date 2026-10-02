@@ -145,6 +145,20 @@ rule_codes! {
     UnexplainedDecision => "unexplained-decision",
     /// A change of a plan a person reviews does not show its code.
     ChangeWithoutCode => "change-without-code",
+    /// A criterion passes once a name is written in a file its task
+    /// changes, whatever the code does.
+    CriterionChecksPresence => "criterion-checks-presence",
+    /// Two tasks are judged by the same command.
+    SharedCriterion => "shared-criterion",
+    /// A task `uses` a shape it builds itself.
+    UsesItsOwnShape => "uses-its-own-shape",
+    /// A task changes the test file its criterion runs, where the spec
+    /// writes the tests.
+    TaskWritesItsTest => "task-writes-its-test",
+    /// A task changes a file the run's spec wrote.
+    ChangesASpecTest => "changes-a-spec-test",
+    /// A decision answers a question no person answered in the run.
+    UnknownAnswer => "unknown-answer",
     EmptyText => "empty-text",
     EmptyDetail => "empty-detail",
     /// An update or a withdrawal names a finding this node never posted.

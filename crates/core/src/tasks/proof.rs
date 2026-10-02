@@ -26,8 +26,9 @@ pub fn names_file(cmd: &str, path: &str) -> bool {
 /// the task changes, with that file: a `grep` or `rg` reading the file
 /// rather than a pipe, or a `test -f`/`-e` of it that nothing runs after.
 ///
-/// A document is the exception: what it says is what it is for, so a
-/// criterion that finds its words checks the work.
+/// Documentation is the exception: what it says is what it is for, so a
+/// criterion that finds the words of a document, or of a comment in
+/// code, checks the work.
 pub fn passes_by_a_name(task: &Task) -> Vec<(String, String)> {
     let changed: Vec<String> = task
         .changes
@@ -51,7 +52,9 @@ pub fn passes_by_a_name(task: &Task) -> Vec<(String, String)> {
                 continue;
             };
             let presence = match words.first().copied() {
-                Some("grep" | "egrep" | "fgrep" | "rg") => !segment.contains('|'),
+                Some("grep" | "egrep" | "fgrep" | "rg") => {
+                    !segment.contains('|') && !finds_a_comment(&words)
+                }
                 Some("test" | "[") => {
                     words.iter().any(|word| matches!(*word, "-f" | "-e" | "-s"))
                         && !segments
@@ -67,6 +70,21 @@ pub fn passes_by_a_name(task: &Task) -> Vec<(String, String)> {
         }
     }
     found
+}
+
+/// Whether the pattern a `grep` looks for is a comment's words — what a
+/// person reads in code, rather than a name the code is built from.
+fn finds_a_comment(words: &[&str]) -> bool {
+    words
+        .iter()
+        .skip(1)
+        .map(|word| word.trim_matches(['\'', '"']))
+        .find(|word| !word.starts_with('-'))
+        .is_some_and(|pattern| {
+            ["//", "#", "/*", "--", "<!--"]
+                .iter()
+                .any(|marker| pattern.starts_with(marker))
+        })
 }
 
 /// Whether `path` is a document a person reads, whose words are the work.
@@ -156,6 +174,18 @@ mod tests {
             let found = passes_by_a_name(&task(&format!("[{{ cmd: \"{cmd}\" }}]")));
             assert!(found.is_empty(), "`{cmd}` runs behavior: {found:?}");
         }
+    }
+
+    #[test]
+    fn a_criterion_that_finds_a_comment_s_words_checks_documentation() {
+        let found = passes_by_a_name(&task("[{ cmd: \"grep -q '//! sandbox' src/a.rs\" }]"));
+        assert!(found.is_empty(), "{found:?}");
+        let found = passes_by_a_name(&task("[{ cmd: \"grep -q 'fn scope_case' src/a.rs\" }]"));
+        assert_eq!(
+            found.len(),
+            1,
+            "a name the code is built from is not documentation"
+        );
     }
 
     #[test]

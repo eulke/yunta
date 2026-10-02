@@ -47,6 +47,29 @@ pub(crate) fn plan_reviewed(
     yunta_core::workflow::reads::shown_by_a_gate(kept, producer)
 }
 
+/// Whether this run writes a spec for its plan: a node among the ones
+/// its mode includes produces one. Where it does, the spec writes each
+/// task's tests, and a plan that writes its own is refused.
+pub(crate) fn plan_specified(
+    workflow: &yunta_core::Workflow,
+    events: &[yunta_core::events::StoredEvent],
+) -> bool {
+    let mode = yunta_core::events::run_mode(events);
+    let left_out = yunta_core::events::run_left_out(events);
+    let included = crate::modes::included_nodes(workflow, &mode, &left_out);
+    workflow
+        .iter_nodes()
+        .filter(|node| included.as_ref().is_none_or(|ids| ids.contains(&node.id)))
+        .filter_map(|node| node.artifacts.as_ref())
+        .any(|artifacts| {
+            artifacts
+                .produces
+                .contains(&yunta_core::ArtifactSpec::Interpreted(
+                    yunta_core::ArtifactKind::Spec,
+                ))
+        })
+}
+
 /// Where a tasks document came from, as far as its registration cares.
 #[derive(Clone, Copy)]
 pub(crate) enum Provenance<'a> {

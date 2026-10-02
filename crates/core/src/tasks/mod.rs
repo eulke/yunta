@@ -227,6 +227,7 @@ mod order;
 mod owned;
 mod proof;
 mod rules;
+mod specified;
 
 pub use proof::{names_file, passes_by_a_name};
 
@@ -253,4 +254,6 @@ impl crate::shape::Document for TasksFile {
     const RUN_RULES: &'static [crate::diagnostic::Rule] = rules::RUN_RULES;
 
     const REVIEW_RULES: &'static [crate::diagnostic::Rule] = rules::REVIEW_RULES;
+
+    const SPECIFIED_RULES: &'static [crate::diagnostic::Rule] = specified::SPECIFIED_RULES;
 }

@@ -192,6 +192,7 @@ fn all_rules() -> Vec<(DocumentKind, &'static Rule)> {
                 .iter()
                 .chain(yunta_core::shape::run_rules(kind))
                 .chain(yunta_core::shape::review_rules(kind))
+                .chain(yunta_core::shape::specified_rules(kind))
                 .map(move |rule| (DocumentKind::Artifact(kind), rule))
         })
         .chain(

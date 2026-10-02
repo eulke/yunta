@@ -64,6 +64,11 @@ pub trait Document: DeserializeOwned + serde::Serialize + sealed::Sealed {
     /// only when the run shows it to one: a gate that puts a plan in
     /// front of a person puts its explanation there too.
     const REVIEW_RULES: &'static [Rule] = &[];
+
+    /// What the document is held to as part of the run it is handed over
+    /// in — its spec, the questions a person answered — and so never
+    /// asked of it when it is read back.
+    const SPECIFIED_RULES: &'static [Rule] = &[];
 }
 
 mod sealed {
@@ -209,6 +214,17 @@ pub fn review_rules(kind: ArtifactKind) -> &'static [Rule] {
     }
 }
 
+/// The rules a kind is held to as part of the run it is handed over in.
+pub fn specified_rules(kind: ArtifactKind) -> &'static [Rule] {
+    match kind {
+        ArtifactKind::Tasks => TasksFile::SPECIFIED_RULES,
+        ArtifactKind::Spec => crate::SpecFile::SPECIFIED_RULES,
+        ArtifactKind::Findings => FindingsFile::SPECIFIED_RULES,
+        ArtifactKind::Questions => QuestionsFile::SPECIFIED_RULES,
+        ArtifactKind::Answers => crate::AnswersFile::SPECIFIED_RULES,
+    }
+}
+
 fn rendered<T: Document>() -> String {
     let mut text = T::EXAMPLE.trim_end().to_string();
     if T::RULES.is_empty() {
@@ -235,6 +251,16 @@ fn rendered<T: Document>() -> String {
              refuses it unless:\n",
         );
         for rule in T::REVIEW_RULES {
+            text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+        }
+    }
+    if !T::SPECIFIED_RULES.is_empty() {
+        text.push_str(
+            "#\n# When it is handed over, the engine holds it to the run it belongs to — the \
+             spec the workflow writes, the questions a person answered — and refuses it \
+             unless:\n",
+        );
+        for rule in T::SPECIFIED_RULES {
             text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
         }
     }
@@ -331,6 +357,7 @@ mod tests {
                     .iter()
                     .chain(run_rules(kind))
                     .chain(review_rules(kind))
+                    .chain(specified_rules(kind))
                     .map(|rule| rule.code)
             })
             .chain(crate::workflow::read::RULES.iter().map(|rule| rule.code))

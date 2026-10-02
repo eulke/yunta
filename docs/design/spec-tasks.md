@@ -142,6 +142,28 @@ y al cerrar el nodo, si no cumple:
 que solo toca documentación no crea formas ni tiene nada abierto, y uno puede no
 tener riesgos. Los pide el prompt de quien planifica.
 
+### 3.2 Al entregarlo, en su run
+
+Al entregarlo, el engine también juzga el documento contra el run al que
+pertenece: lo que prueba su trabajo, la spec que el run tiene o va a escribir y
+las preguntas que una persona respondió. Estas reglas no se aplican al leer un
+documento de vuelta, así que un plan que un run anterior aceptó sigue leyéndose.
+
+- `criterion-checks-presence` — un criterio corre el comportamiento: ninguno
+  pasa con escribir un nombre en un archivo que la tarea cambia (un `grep` de ese
+  archivo, o un `test -f` de él que nada ejecuta después). Buscar las palabras de
+  un documento, o de un comentario en código, sí chequea el trabajo.
+- `shared-criterion` — dos tareas no se juzgan con el mismo comando: el de la
+  segunda pasa en cuanto aterriza la primera, antes de su propio trabajo.
+- `uses-its-own-shape` — `uses` nombra sólo formas que construye otra tarea.
+- `task-writes-its-test` — cuando el workflow escribe una spec, ninguna tarea
+  cambia el archivo de test que corre uno de sus criterios: los tests los escribe
+  la spec.
+- `changes-a-spec-test` — ninguna tarea cambia un archivo que la spec del run
+  escribió.
+- `unknown-answer` — una decisión `answers` sólo una pregunta que el run hizo y
+  una persona respondió.
+
 ## 4. Errores
 
 Cada rechazo nombra la tarea, el campo y la expectativa, en el vocabulario del
