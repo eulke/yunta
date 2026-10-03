@@ -250,9 +250,10 @@ pub async fn acquire(
 /// Dead when the probe says so, or when the live process with that pid
 /// started after the lock was taken: a newcomer that got the holder's
 /// pid, not the holder.
-/// When the process a lock names started, as the record has to state
+/// When the process a record names started, as the record has to state
 /// it: read from the same process table [`holder_state`] compares it
-/// against.
+/// against. Every record of a pid somebody else will read asks here —
+/// the lock, and the run's process registry.
 ///
 /// Not the clock's `now()`. The comparison that decides whether a pid
 /// was reused reads the host's process table, and a run's clock answers
@@ -260,7 +261,7 @@ pub async fn acquire(
 /// host, would make every live holder read as a stranger and every lock
 /// stealable. The clock is only the fallback for a host that cannot say
 /// when a process started, where the comparison cannot happen anyway.
-fn taken_at(pid: Pid, probe: &dyn OwnerProbe, clock: &dyn Clock) -> DateTime<Utc> {
+pub(crate) fn taken_at(pid: Pid, probe: &dyn OwnerProbe, clock: &dyn Clock) -> DateTime<Utc> {
     probe.started(pid).unwrap_or_else(|| clock.now())
 }
 
