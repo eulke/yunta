@@ -1,6 +1,7 @@
 //! The characters a terminal surface draws with, and the policy that
 //! decides which of the two sets an environment allows.
 
+use super::diagram::{Shape, Stroke};
 use super::state::Mark;
 
 /// The environment variable that decides the set outright: `unicode` or
@@ -147,6 +148,62 @@ impl Glyphs {
         }
     }
 
+    /// The joint the lines through a cell make, by the ways they run —
+    /// a straight run drawn in its link's `stroke`, a corner or a
+    /// junction where lines turn or meet.
+    pub fn joint(self, up: bool, down: bool, left: bool, right: bool, stroke: Stroke) -> char {
+        let upright = (up || down) && !left && !right;
+        let level = (left || right) && !up && !down;
+        match (self, upright, level, stroke) {
+            (Self::Unicode, true, _, Stroke::Dotted) => '┆',
+            (Self::Unicode, true, _, Stroke::Thick) => '┃',
+            (Self::Unicode, true, _, _) => '│',
+            (Self::Unicode, _, true, Stroke::Dotted) => '┄',
+            (Self::Unicode, _, true, Stroke::Thick) => '━',
+            (Self::Unicode, _, true, _) => '─',
+            (Self::Ascii, true, _, Stroke::Dotted) => ':',
+            (Self::Ascii, true, _, _) => '|',
+            (Self::Ascii, _, true, Stroke::Dotted) => '.',
+            (Self::Ascii, _, true, Stroke::Thick) => '=',
+            (Self::Ascii, _, true, _) => '-',
+            (Self::Ascii, false, false, _) => '+',
+            (Self::Unicode, false, false, _) => match (up, down, left, right) {
+                (false, true, false, true) => '┌',
+                (false, true, true, false) => '┐',
+                (true, false, false, true) => '└',
+                (true, false, true, false) => '┘',
+                (true, true, false, true) => '├',
+                (true, true, true, false) => '┤',
+                (false, true, true, true) => '┬',
+                (true, false, true, true) => '┴',
+                _ => '┼',
+            },
+        }
+    }
+
+    /// A box's corners — top left, top right, bottom left, bottom right
+    /// — by what the box is.
+    pub fn corners(self, shape: Shape) -> [char; 4] {
+        match (self, shape) {
+            (Self::Unicode, Shape::Box) => ['┌', '┐', '└', '┘'],
+            (Self::Unicode, Shape::Round) => ['╭', '╮', '╰', '╯'],
+            (Self::Unicode, Shape::Decision) => ['╱', '╲', '╲', '╱'],
+            (Self::Ascii, Shape::Box) => ['+', '+', '+', '+'],
+            (Self::Ascii, Shape::Round) => ['.', '.', '\'', '\''],
+            (Self::Ascii, Shape::Decision) => ['/', '\\', '\\', '/'],
+        }
+    }
+
+    /// The head of a link arriving down onto a box, or across into it.
+    pub fn head(self, down: bool) -> char {
+        match (self, down) {
+            (Self::Unicode, true) => '▼',
+            (Self::Unicode, false) => '▶',
+            (Self::Ascii, true) => 'v',
+            (Self::Ascii, false) => '>',
+        }
+    }
+
     /// The eight steps a sparkline climbs, lightest first.
     pub fn ramp(self) -> &'static [char; 8] {
         match self {
@@ -214,6 +271,32 @@ fn names_utf8(locale: Option<&str>) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn every_glyph_a_diagram_is_drawn_with_is_ascii_in_the_ascii_set() {
+        let ways = [false, true];
+        let strokes = [Stroke::Arrow, Stroke::Open, Stroke::Dotted, Stroke::Thick];
+        let mut drawn = Vec::new();
+        for up in ways {
+            for down in ways {
+                for left in ways {
+                    for right in ways {
+                        for stroke in strokes {
+                            drawn.push(Glyphs::Ascii.joint(up, down, left, right, stroke));
+                        }
+                    }
+                }
+            }
+        }
+        for shape in [Shape::Box, Shape::Round, Shape::Decision] {
+            drawn.extend(Glyphs::Ascii.corners(shape));
+        }
+        drawn.extend([Glyphs::Ascii.head(true), Glyphs::Ascii.head(false)]);
+        drawn.extend(Glyphs::Ascii.joins().chars());
+        drawn.push(Glyphs::Ascii.continued());
+        assert!(drawn.iter().all(char::is_ascii), "{drawn:?}");
+    }
+
     use super::*;
 
     fn env(explicit: Option<&str>, locale: Option<&str>, term: Option<&str>) -> GlyphEnv {

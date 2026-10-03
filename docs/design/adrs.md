@@ -234,3 +234,4 @@ lista.
 **D225 — A gate published to a forge asks its question, says how a review answers it, and asks again after changes.** `revised` *(Revisada por D227.)* → [`adr/D225-a-gate-published-to-a-forge-asks-its-question.md`](adr/D225-a-gate-published-to-a-forge-asks-its-question.md)
 **D226 — Every commit a run makes names its run, node and task in git trailers.** `accepted` → [`adr/D226-every-commit-a-run-makes-names-its-run.md`](adr/D226-every-commit-a-run-makes-names-its-run.md)
 **D227 — The spec governs: a plan that cannot be proven as written is refused when handed over, and no gate offers to go on with one.** `accepted` → [`adr/D227-the-spec-governs.md`](adr/D227-the-spec-governs.md)
+**D228 — A diagram is drawn by the surface that reads it.** `accepted` → [`adr/D228-a-diagram-is-drawn-by-the-surface-that-reads-it.md`](adr/D228-a-diagram-is-drawn-by-the-surface-that-reads-it.md)

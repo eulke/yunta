@@ -28,6 +28,8 @@ revised_by: [D216, D217, D220]
 | `RunId::HANDLE_CHARS` | 6 | `core/src/ids.rs` | caracteres del id con que se llama a un run: treinta bits, una colisión en una máquina que nadie encuentra, y pocos para leer en una línea y tipear en la siguiente (D217) |
 | `UNDO_BOUND` | 10 s | `engine/src/worktree/mod.rs` | techo de cada paso del deshacer de un `worktree add` que la cancelación mató: alcanza para un git local con caché fría, y no deja esperando a quien apretó Ctrl-C dos veces |
 | `DEEP_STACK` | 64 MiB | `testkit/src/stack.rs` | pila del hilo en el que corre un test de composición profunda: un run que compone anida un future del engine por nivel y en debug tres niveles no entran en los 8 MiB que le tocan a un hilo de test; la reserva es espacio de direcciones, se compromete página a página, y el margen no cuesta nada |
+| `LABEL_CELLS` | 24 celdas | `render/src/diagram/place.rs` | lo más ancho que corre una línea de la etiqueta de una caja de un diagrama antes de partirse, y la etiqueta más ancha que puede llevar un enlace y seguir dibujándose: tres o cuatro palabras, así una capa de varias cajas entra en una terminal; un enlace con una etiqueta más larga se dice como esquema (D228) |
+| `GAP` | 4 celdas | `render/src/diagram/place.rs` | celdas entre dos cajas de un diagrama lado a lado: lugar para que un enlace pase entre ellas y se lea aparte de las dos (D228) |
 | stagger del blackboard | 60 ms | `engine/tests/blackboard.rs` | separación entre dos posteos para probar que la consolidación ordena por contenido y no por llegada; se reemplaza por una propiedad sobre permutaciones de llegada en M21 |
 
 Un `const` numérico nuevo en `src` lleva en su rustdoc la referencia a esta

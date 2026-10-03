@@ -15,7 +15,9 @@
 
   The program says nothing today. It will greet whoever runs it by name, and say goodbye.
 
-  ␛[1mName → Greeting␛[0m
+  ┌──────┐   ┌──────────┐
+  │ Name │──▶│ Greeting │
+  └──────┘   └──────────┘
 
   ␛[1myou answered␛[0m
 

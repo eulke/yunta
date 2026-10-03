@@ -2,8 +2,13 @@
 //! Mermaid source as written, and a terminal draws what it can read of
 //! it.
 
+mod across;
+mod down;
 pub mod flowchart;
+mod grid;
+mod layer;
 mod outline;
+mod place;
 pub(crate) mod split;
 
 pub use flowchart::{flowchart, Direction, Flowchart, Link, Node, Shape, Stroke};
@@ -32,8 +37,11 @@ impl Diagram {
 }
 
 impl Drawn for Diagram {
-    /// A chart this reads, one line per chain in the order it flows; any
-    /// other diagram as its source, saying it is not drawn here.
+    /// A chart this reads in boxes, the way its author wrote it when it
+    /// fits the line, turned when only that fits, and one line per chain
+    /// when neither does; any other diagram as its source, saying it is
+    /// not drawn here. A chart that reads up or left is drawn reading
+    /// down or right: the same boxes and links, the other way up.
     fn lines(&self, look: &Look) -> Vec<Line> {
         let Some(chart) = &self.chart else {
             return Code::whole(
@@ -46,22 +54,37 @@ impl Drawn for Diagram {
             )
             .lines(look);
         };
-        let under = format!("{INDENT}  ");
-        let room = look.width.cells().saturating_sub(under.len());
-        outline::outline(chart, look.glyphs)
-            .iter()
-            .flat_map(|chain| {
-                wrap(chain, room)
-                    .into_iter()
-                    .enumerate()
-                    .map(|(at, part)| match at {
-                        0 => Line::new().plain(INDENT).push(Tone::Strong, part),
-                        _ => Line::new().plain(under.as_str()).push(Tone::Strong, part),
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect()
+        let room = look.width.cells().saturating_sub(INDENT.len());
+        let across = chart.direction.across();
+        let boxed = place::drawn(chart, across, room, look.glyphs)
+            .or_else(|| place::drawn(chart, !across, room, look.glyphs));
+        match boxed {
+            Some(rows) => rows
+                .into_iter()
+                .map(|row| Line::new().plain(INDENT).plain(row))
+                .collect(),
+            None => chains(chart, look),
+        }
     }
+}
+
+/// `chart` as one line per chain, each wrapped under itself.
+fn chains(chart: &Flowchart, look: &Look) -> Vec<Line> {
+    let under = format!("{INDENT}  ");
+    let room = look.width.cells().saturating_sub(under.len());
+    outline::outline(chart, look.glyphs)
+        .iter()
+        .flat_map(|chain| {
+            wrap(chain, room)
+                .into_iter()
+                .enumerate()
+                .map(|(at, part)| match at {
+                    0 => Line::new().plain(INDENT).push(Tone::Strong, part),
+                    _ => Line::new().plain(under.as_str()).push(Tone::Strong, part),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -145,9 +168,54 @@ mod tests {
 
         let drawn = Terminal::on(plain(80, Glyphs::Unicode)).draw(&doc);
         assert!(
-            drawn.contains("plan → (tasks) Approve?") && !drawn.contains("```"),
+            drawn.contains("│ plan │── tasks ▶│ Approve? │") && !drawn.contains("```"),
             "{drawn}"
         );
         assert!(drawn.contains("Then it builds."), "{drawn}");
+    }
+
+    /// A chart written to read across, with a question and a link back.
+    const LR: &str = "graph LR\n  plan[Write the plan] --> spec[Write its tests] --> gate{Approve?}\n  gate -->|yes| build[Build each task]\n  gate -->|no| plan";
+
+    /// A chart written to read down, its question answered both ways.
+    const DECIDED: &str = "graph TD\n  idea[Read the idea] --> clear{Is it clear?}\n  clear -->|yes| plan(Plan it)\n  clear -.->|no| ask[Ask a question]\n  ask ==> idea";
+
+    /// A chart written to read down whose one layer is too wide for a
+    /// narrow line, and fits it turned.
+    const TURNED: &str = "graph TD\n  run[The run] --> grill[Ask what only a person decides] & brief[Write what was asked for] & plan[Plan the change task by task]";
+
+    /// A chart too long to read across a line and too wide to read down
+    /// it: a pipeline that ends fanning out.
+    const CHAINED: &str = "graph LR\n  a[Read the idea and its brief] --> b[Plan the change task by task] --> c[Write the tests for the plan] --> d[Approve the plan and its tests]\n  d --> e[Build the store task] & f[Build the command task] & g[Build the docs task] & h[Build the release task]";
+
+    #[test]
+    fn a_chart_is_drawn_in_boxes_as_it_fits_and_matches_its_goldens() {
+        let goldens = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("goldens/diagram");
+        for (name, source) in [
+            ("lr", LR),
+            ("labels-and-decision", DECIDED),
+            ("turned", TURNED),
+            ("outline", CHAINED),
+        ] {
+            let doc = Doc::new().with(Block::Diagram(Diagram::of(source)));
+            for environment in &yunta_testkit_core::golden::ENVIRONMENTS {
+                let look = Look::of(environment);
+                let drawn = Terminal::on(look).draw(&doc);
+                yunta_testkit_core::golden::assert_golden(
+                    &environment.golden(&goldens, name),
+                    &drawn,
+                );
+                let plain = crate::ink::strip_sgr(&drawn);
+                assert!(
+                    plain
+                        .lines()
+                        .all(|line| crate::cell_width(line) <= look.width.cells()),
+                    "{name} runs past the line:\n{plain}"
+                );
+                if look.glyphs == Glyphs::Ascii {
+                    assert!(plain.is_ascii(), "{name} draws outside ASCII:\n{plain}");
+                }
+            }
+        }
     }
 }
