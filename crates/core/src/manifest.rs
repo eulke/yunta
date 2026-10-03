@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::hash::{sha256_hex, CommitSha, ContentHash};
+use crate::ids::InputName;
 use crate::{ConfigLayer, Isolation, NodeId, PackName, Publisher, Workflow};
 
 /// The state roots a run is frozen to at creation — post `YUNTA_HOME`,
@@ -98,7 +99,16 @@ pub struct PackProvenance {
     pub name: PackName,
     pub version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub commit: Option<String>,
+    pub commit: Option<CommitSha>,
+}
+
+/// The repository a run was created in: the git directory that its main
+/// checkout and every linked worktree share, absolute and canonical. Every
+/// run on a machine lives under one state root, so this is what says
+/// which of them are one project's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ProjectIdentity {
+    pub git_common_dir: std::path::PathBuf,
 }
 
 /// Everything a run needs frozen at creation time. The
@@ -117,7 +127,7 @@ pub struct Manifest {
     /// provided or the spec's own `default`, already validated.
     /// Frozen here so a node never resolves a default itself:
     /// that would be per-node non-deterministic state.
-    pub inputs: BTreeMap<String, String>,
+    pub inputs: BTreeMap<InputName, String>,
     /// Content of every `prompt: {file: ...}` at freeze time, keyed by
     /// node id. Inline prompts are already frozen inside `workflow`.
     pub prompts: BTreeMap<NodeId, String>,
@@ -144,6 +154,51 @@ pub struct Manifest {
     /// before pack support existed (tolerant reader).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pack: Option<PackProvenance>,
+    /// `None` for a manifest written before runs recorded the repository
+    /// they were created in (tolerant reader), and for one created where
+    /// git could not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectIdentity>,
+}
+
+impl crate::persisted::Persisted for Manifest {
+    /// 3 since `project` joined it, 2 since `paths` and `pack` did. A
+    /// manifest stamped lower is read as it is: the three fields are
+    /// optional and a run born without them still resumes.
+    const SCHEMA_VERSION: u32 = 3;
+    const NAME: &'static str = "run manifest";
+
+    /// A manifest frozen while `inherit` was still a word reads as what
+    /// that word meant: this unit does not isolate (D183). The run's own
+    /// `isolation` and every `kind: workflow` node's alike, wherever
+    /// that key sits in the document, because a frozen manifest is not
+    /// rewritten to be readable.
+    fn reconcile(value: &mut crate::yaml::Value) {
+        let (retired, replacement) = crate::Isolation::RETIRED;
+        rename_isolation(value, retired, replacement);
+    }
+}
+
+/// Rewrites every `isolation: <retired>` in `value`, at any depth.
+fn rename_isolation(value: &mut crate::yaml::Value, retired: &str, replacement: &str) {
+    match value {
+        crate::yaml::Value::Mapping(fields) => {
+            if let Some(found) = fields.get_mut("isolation") {
+                if found.as_str() == Some(retired) {
+                    *found = crate::yaml::Value::from(replacement);
+                }
+            }
+            for nested in fields.values_mut() {
+                rename_isolation(nested, retired, replacement);
+            }
+        }
+        crate::yaml::Value::Sequence(items) => {
+            for item in items {
+                rename_isolation(item, retired, replacement);
+            }
+        }
+        _ => {}
+    }
 }
 
 impl Manifest {

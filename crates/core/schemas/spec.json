@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "yunta spec",
+  "description": "The tests a plan's tasks are held to, one spec per task.",
+  "type": "object",
+  "properties": {
+    "specs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Spec"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "specs"
+  ],
+  "$defs": {
+    "Spec": {
+      "description": "What one task is held to: the files its tests live in, and the tests.",
+      "type": "object",
+      "properties": {
+        "files": {
+          "description": "The files its tests live in, each new to the repository.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TestFile"
+          }
+        },
+        "task": {
+          "description": "A task of the run's plan.",
+          "$ref": "#/$defs/TaskId"
+        },
+        "tests": {
+          "description": "The commands that run its tests.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SpecTest"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "task",
+        "tests"
+      ]
+    },
+    "SpecTest": {
+      "description": "One test: the command that runs it, and what its passing proves.",
+      "type": "object",
+      "properties": {
+        "cmd": {
+          "description": "The command, run under `sh`: it fails before the task's work and\npasses once the task is done.",
+          "type": "string"
+        },
+        "proves": {
+          "description": "What passing shows, in words a person approving the plan reads.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "cmd",
+        "proves"
+      ]
+    },
+    "TaskId": {
+      "description": "A task id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "TestFile": {
+      "description": "A file a task's tests live in, whole.",
+      "type": "object",
+      "properties": {
+        "content": {
+          "description": "The file, whole.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Where the file goes, relative to the repository and outside `.git`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "content"
+      ]
+    }
+  }
+}

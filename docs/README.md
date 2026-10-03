@@ -13,6 +13,5 @@ end. Everything here goes deeper, organized by what you're trying to do:
 | Figure out why a check, a run, or a pack install refused to do something | [Troubleshooting](troubleshooting.md) |
 | Know what's safe to rely on across releases | [Compatibility](compatibility.md) |
 
-These documents describe current behavior only. The normative design corpus —
-the run contract, the adapter and tasks specs, and the decision register —
-lives in [`design/`](design/README.md), in Spanish.
+These documents describe current behavior. Contracts and earlier decisions are
+indexed under [design references](design/README.md).

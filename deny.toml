@@ -51,6 +51,11 @@ skip = [
     { crate = "hashbrown:0.14.5", reason = "rusqlite's hashlink lags indexmap" },
     # Proc-macro crates in the tree still split between syn 2 and syn 3.
     { crate = "syn:2.0.119", reason = "derive macros split between syn 2 and 3" },
+    # tempfile (a dev-dependency) is on getrandom 0.3 while rmcp's rand 0.10
+    # is on 0.4.
+    { crate = "getrandom:0.3.4", reason = "tempfile lags rmcp's rand" },
+    # getrandom 0.3 and 0.4 each bring their own r-efi.
+    { crate = "r-efi:5.3.0", reason = "carried by the two getrandom majors" },
 ]
 
 [sources]

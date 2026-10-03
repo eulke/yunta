@@ -1,6 +1,7 @@
 //! See [`super`]. One family of workflow-check rules.
 
 use super::*;
+use yunta_core::ScopeGlob;
 
 /// Both the error and warning fan-out checks need the same question answered: which pairs of
 /// top-level nodes have no dependency path between them in either
@@ -114,8 +115,8 @@ pub(crate) fn check_fanout_scopes(
         if !(writes(a) && writes(b)) {
             continue;
         }
-        for glob_a in &a.scope {
-            for glob_b in &b.scope {
+        for glob_a in &a.scope.overlap_globs() {
+            for glob_b in &b.scope.overlap_globs() {
                 if might_overlap(glob_a, glob_b) {
                     errors.push(CheckError::OverlappingFanOutScope {
                         a: a.id.clone(),
@@ -144,7 +145,7 @@ pub(crate) fn collect_fanout_warnings(
     let mut adjacency: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
     let eligible: Vec<bool> = nodes
         .iter()
-        .map(|node| writes(node) && node.scope.is_empty())
+        .map(|node| writes(node) && !node.scope.is_declared())
         .collect();
     for (i, j) in independent_top_level_pairs(workflow) {
         let both_eligible =
@@ -196,7 +197,7 @@ pub(crate) fn collect_fanout_warnings(
 /// so `check`'s error and `check_warnings`' warning can never disagree
 /// about what overlaps.
 pub(crate) struct GroupScope<'a> {
-    overlaps: Vec<(&'a Node, &'a Node, &'a str, &'a str)>,
+    overlaps: Vec<(&'a Node, &'a Node, ScopeGlob, ScopeGlob)>,
 }
 
 pub(crate) fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
@@ -206,10 +207,10 @@ pub(crate) fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
             let (Some(a), Some(b)) = (children.get(i), children.get(j)) else {
                 continue;
             };
-            for glob_a in &a.scope {
-                for glob_b in &b.scope {
-                    if might_overlap(glob_a, glob_b) {
-                        overlaps.push((a, b, glob_a.as_str(), glob_b.as_str()));
+            for glob_a in a.scope.overlap_globs() {
+                for glob_b in b.scope.overlap_globs() {
+                    if might_overlap(&glob_a, &glob_b) {
+                        overlaps.push((a, b, glob_a.clone(), glob_b));
                     }
                 }
             }
@@ -218,31 +219,20 @@ pub(crate) fn evaluate_group_scope(children: &[Node]) -> GroupScope<'_> {
     GroupScope { overlaps }
 }
 
-/// Static half of the runtime permissions rule: every literal command in
-/// the workflow — bash `run`, hook steps — against the merged model,
+/// Static half of the runtime permissions rule: every command in the
+/// workflow — bash `run`, hook steps, a project's command as `config`
+/// declares it — against the merged model,
 /// parallel children included. Criteria live in the runtime tasks document and
 /// executors resolve through config, so both are runtime-moment
 /// territory.
 pub(crate) fn check_commands(
     nodes: &[Node],
+    config: &ConfigLayer,
     permissions: &yunta_core::PermissionsConfig,
     errors: &mut Vec<CheckError>,
 ) {
     for node in nodes {
-        let mut commands: Vec<&str> = Vec::new();
-        if let NodeKind::Bash { run } = &node.kind {
-            commands.push(run);
-        }
-        if let Some(hooks) = &node.hooks {
-            commands.extend(
-                hooks
-                    .before
-                    .iter()
-                    .chain(&hooks.after)
-                    .map(|s| s.run.as_str()),
-            );
-        }
-        for command in commands {
+        for command in yunta_core::node_commands(node).filter_map(|run| run.text(config)) {
             if let Some(rule) = crate::permissions::command_violation(command, Some(permissions)) {
                 errors.push(CheckError::CommandDenied {
                     node: node.id.clone(),
@@ -254,28 +244,7 @@ pub(crate) fn check_commands(
             nodes: children, ..
         } = &node.kind
         {
-            check_commands(children, permissions, errors);
-        }
-    }
-}
-
-pub(crate) fn check_parallel_scopes(nodes: &[Node], errors: &mut Vec<CheckError>) {
-    for node in nodes {
-        if let NodeKind::Parallel {
-            nodes: children, ..
-        } = &node.kind
-        {
-            let group = evaluate_group_scope(children);
-            for (a, b, glob_a, glob_b) in group.overlaps {
-                errors.push(CheckError::OverlappingParallelScope {
-                    group: node.id.clone(),
-                    a: a.id.clone(),
-                    b: b.id.clone(),
-                    glob_a: glob_a.to_string(),
-                    glob_b: glob_b.to_string(),
-                });
-            }
-            check_parallel_scopes(children, errors);
+            check_commands(children, config, permissions, errors);
         }
     }
 }
@@ -294,7 +263,7 @@ pub(crate) fn collect_parallel_warnings(nodes: &[Node], warnings: &mut Vec<Check
                 .collect();
             if writers.len() >= 2 {
                 let group = evaluate_group_scope(children);
-                let all_writers_declared = writers.iter().all(|child| !child.scope.is_empty());
+                let all_writers_declared = writers.iter().all(|child| child.scope.is_declared());
                 if group.overlaps.is_empty() && !all_writers_declared {
                     warnings.push(CheckWarning::UndeclaredParallelScope {
                         group: node.id.clone(),

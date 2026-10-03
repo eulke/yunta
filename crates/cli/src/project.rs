@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{ConfigLayer, Manifest};
+use yunta_core::{ConfigLayer, Isolation, Manifest, RunId};
 
 pub struct Project {
     pub config: ConfigLayer,
@@ -37,20 +37,30 @@ impl Project {
         candidates
             .into_iter()
             .map(|root| root.join(run_id))
-            .find(|run_dir| run_dir.join("manifest.yaml").exists())
+            .find(|run_dir| yunta_engine::run_dir::manifest_path(run_dir).exists())
     }
 
     /// The worktrees root a run's checkout lives under: the one *frozen*
     /// in its manifest, so a `paths.*` change after the run was created
-    /// never loses its worktree; a pre-freeze manifest (no `paths:`)
-    /// falls back to this project's current root, the old behavior. The
-    /// one place `resume` and `gc` derive a run's worktree location from.
+    /// never loses its worktree; a manifest with no `paths:` falls back
+    /// to this project's current root. The one place `resume` and `gc`
+    /// derive a run's worktree location from.
     pub fn worktrees_root_for(&self, manifest: &Manifest) -> PathBuf {
         manifest
             .paths
             .as_ref()
             .map(|paths| paths.worktrees_root().to_path_buf())
             .unwrap_or_else(|| self.worktrees_root.clone())
+    }
+
+    /// The tree run `run_id` works in: its own checkout under the
+    /// worktrees root its manifest froze, or — for a run that isolates
+    /// nothing — the checkout this invocation runs in, `cwd`.
+    pub fn run_tree(&self, manifest: &Manifest, run_id: &RunId, cwd: &Path) -> PathBuf {
+        match manifest.isolation {
+            Isolation::Worktree => self.worktrees_root_for(manifest).join(run_id.as_str()),
+            Isolation::None => cwd.to_path_buf(),
+        }
     }
 }
 
@@ -92,15 +102,20 @@ pub enum ProjectError {
 /// the resulting [`Env`](yunta_core::Env). A run leaves `subprocess_vars`
 /// empty: its nodes inherit this process's environment unchanged.
 pub(crate) fn process_env() -> yunta_core::Env {
+    let var = std::env::var_os;
     yunta_core::Env {
-        home: std::env::var_os("HOME").map(PathBuf::from),
-        yunta_home: std::env::var_os("YUNTA_HOME").map(PathBuf::from),
-        org_config: std::env::var_os("YUNTA_ORG_CONFIG").map(PathBuf::from),
+        home: var("HOME").map(PathBuf::from),
+        yunta_home: var("YUNTA_HOME").map(PathBuf::from),
+        org_config: var("YUNTA_ORG_CONFIG").map(PathBuf::from),
+        path: var("PATH")
+            .map(|path| std::env::split_paths(&path).collect())
+            .unwrap_or_default(),
+        fence_var: var(yunta_core::fence::ENV_VAR).and_then(|value| value.into_string().ok()),
         subprocess_vars: Vec::new(),
     }
 }
 
-fn user_root() -> Result<PathBuf, ProjectError> {
+pub(crate) fn user_root() -> Result<PathBuf, ProjectError> {
     yunta_core::user_state_root(&process_env()).ok_or(ProjectError::NoStateRoot)
 }
 

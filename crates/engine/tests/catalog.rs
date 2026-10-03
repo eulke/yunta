@@ -7,7 +7,8 @@ use std::path::Path;
 
 use yunta_core::{ConfigLayer, Workflow};
 use yunta_engine::{
-    check_workflow_refs, origin_of, resolve_workflow, CatalogError, CheckError, WorkflowOrigin,
+    check_workflow_refs, origin_of, resolve_workflow, CatalogError, CheckError, Composition,
+    WorkflowOrigin,
 };
 
 fn write(path: &Path, contents: &str) {
@@ -131,9 +132,16 @@ fn intra_pack_composition_is_allowed_in_check() {
         .path()
         .join(".yunta/packs/acme/review-pack/review.yaml");
     let parent: Workflow =
-        serde_norway::from_str(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
+        yunta_core::yaml::parse(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
     let origin = origin_of(root.path(), &parent_path);
-    let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin);
+    let errors = check_workflow_refs(
+        &parent,
+        &ConfigLayer::default(),
+        root.path(),
+        &origin,
+        &|_| None,
+    )
+    .errors;
     assert!(errors.is_empty(), "got: {errors:?}");
 }
 
@@ -162,13 +170,20 @@ fn cross_pack_composition_is_rejected_in_check() {
         .path()
         .join(".yunta/packs/acme/review-pack/review.yaml");
     let parent: Workflow =
-        serde_norway::from_str(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
+        yunta_core::yaml::parse(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
     let origin = origin_of(root.path(), &parent_path);
-    let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin);
+    let errors = check_workflow_refs(
+        &parent,
+        &ConfigLayer::default(),
+        root.path(),
+        &origin,
+        &|_| None,
+    )
+    .errors;
     assert!(
         errors.iter().any(|e| matches!(
             e,
-            CheckError::CrossPackWorkflowRef { name, from_pack, .. }
+            CheckError::Composition(Composition::CrossPack { name, from_pack, .. })
                 if name == "other/thing" && from_pack == "acme/review-pack"
         )),
         "got: {errors:?}"
@@ -194,13 +209,20 @@ fn a_pack_workflow_referencing_back_to_the_repo_is_also_rejected() {
         .path()
         .join(".yunta/packs/acme/review-pack/review.yaml");
     let parent: Workflow =
-        serde_norway::from_str(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
+        yunta_core::yaml::parse(&std::fs::read_to_string(&parent_path).unwrap()).unwrap();
     let origin = origin_of(root.path(), &parent_path);
-    let errors = check_workflow_refs(&parent, &ConfigLayer::default(), root.path(), &origin);
+    let errors = check_workflow_refs(
+        &parent,
+        &ConfigLayer::default(),
+        root.path(),
+        &origin,
+        &|_| None,
+    )
+    .errors;
     assert!(
         errors
             .iter()
-            .any(|e| matches!(e, CheckError::CrossPackWorkflowRef { .. })),
+            .any(|e| matches!(e, CheckError::Composition(Composition::CrossPack { .. }))),
         "got: {errors:?}"
     );
 }
@@ -278,13 +300,20 @@ fn a_malformed_pack_manifest_fails_the_ceiling_check() {
         &root.path().join(".yunta/packs/acme/review-pack/pack.yaml"),
         "this is not a pack manifest\n",
     );
-    let workflow: Workflow = serde_norway::from_str(LEAF).unwrap();
+    let workflow: Workflow = yunta_core::yaml::parse(LEAF).unwrap();
     let origin = WorkflowOrigin::Pack {
         publisher: "acme".parse().unwrap(),
         pack_name: "review-pack".parse().unwrap(),
     };
 
-    let errors = check_workflow_refs(&workflow, &ConfigLayer::default(), root.path(), &origin);
+    let errors = check_workflow_refs(
+        &workflow,
+        &ConfigLayer::default(),
+        root.path(),
+        &origin,
+        &|_| None,
+    )
+    .errors;
     assert!(
         errors.iter().any(|e| matches!(
             e,

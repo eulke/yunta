@@ -18,13 +18,16 @@ fn run_dir() -> tempfile::TempDir {
     dir
 }
 
-#[test]
-fn storing_the_same_bytes_twice_leaves_one_object() {
+#[tokio::test]
+async fn storing_the_same_bytes_twice_leaves_one_object() {
     let run = run_dir();
     let store = ObjectStore::at(run.path());
 
-    let first = store.put(b"the same bytes").expect("store the bytes");
-    let second = store.put(b"the same bytes").expect("store them again");
+    let first = store.put(b"the same bytes").await.expect("store the bytes");
+    let second = store
+        .put(b"the same bytes")
+        .await
+        .expect("store them again");
 
     assert_eq!(first, second, "the same content is the same object");
     assert_eq!(first, sha256_hex(b"the same bytes"));
@@ -39,12 +42,15 @@ fn storing_the_same_bytes_twice_leaves_one_object() {
     );
 }
 
-#[test]
-fn an_object_is_named_by_its_hash_the_moment_it_appears() {
+#[tokio::test]
+async fn an_object_is_named_by_its_hash_the_moment_it_appears() {
     let run = run_dir();
     let store = ObjectStore::at(run.path());
 
-    let hash = store.put(b"whole or not at all").expect("store the bytes");
+    let hash = store
+        .put(b"whole or not at all")
+        .await
+        .expect("store the bytes");
 
     let names: Vec<String> = std::fs::read_dir(run.path().join("objects"))
         .expect("the objects directory")
@@ -56,18 +62,18 @@ fn an_object_is_named_by_its_hash_the_moment_it_appears() {
         "written through a rename: `objects/` never holds a temporary name"
     );
     assert_eq!(
-        store.get(&hash).expect("read it back"),
+        store.get(&hash).await.expect("read it back"),
         b"whole or not at all"
     );
 }
 
-#[test]
-fn reading_an_object_the_run_never_stored_says_it_is_missing() {
+#[tokio::test]
+async fn reading_an_object_the_run_never_stored_says_it_is_missing() {
     let run = run_dir();
     let store = ObjectStore::at(run.path());
     let absent = sha256_hex(b"never stored");
 
-    let error = store.get(&absent).expect_err("nothing to read");
+    let error = store.get(&absent).await.expect_err("nothing to read");
 
     assert!(
         matches!(&error, ObjectError::Missing { hash } if *hash == absent),
@@ -75,15 +81,19 @@ fn reading_an_object_the_run_never_stored_says_it_is_missing() {
     );
 }
 
-#[test]
-fn reading_an_object_whose_bytes_were_replaced_names_both_hashes() {
+#[tokio::test]
+async fn reading_an_object_whose_bytes_were_replaced_names_both_hashes() {
     let run = run_dir();
     let store = ObjectStore::at(run.path());
-    let hash = store.put(b"the accepted bytes").expect("store the bytes");
+    let hash = store
+        .put(b"the accepted bytes")
+        .await
+        .expect("store the bytes");
     std::fs::write(run.path().join("objects").join(hash.as_str()), b"tampered").expect("replace");
 
     let error = store
         .get(&hash)
+        .await
         .expect_err("the object no longer is itself");
 
     let found = sha256_hex(b"tampered");
@@ -102,14 +112,15 @@ fn reading_an_object_whose_bytes_were_replaced_names_both_hashes() {
     assert!(text.contains(found.as_str()), "names what it found: {text}");
 }
 
-#[test]
-fn a_producers_artifact_projects_under_its_node() {
+#[tokio::test]
+async fn a_producers_artifact_projects_under_its_node() {
     let run = run_dir();
     let store = ObjectStore::at(run.path());
-    let hash = store.put(b"the report").expect("store the bytes");
+    let hash = store.put(b"the report").await.expect("store the bytes");
 
     store
         .project(Some(&"review".into()), "report.md", &hash)
+        .await
         .expect("write the view");
 
     assert_eq!(
@@ -124,14 +135,15 @@ fn a_producers_artifact_projects_under_its_node() {
     );
 }
 
-#[test]
-fn what_the_run_acquires_without_a_producer_projects_at_the_root() {
+#[tokio::test]
+async fn what_the_run_acquires_without_a_producer_projects_at_the_root() {
     let run = run_dir();
     let store = ObjectStore::at(run.path());
-    let hash = store.put(b"inherited").expect("store the bytes");
+    let hash = store.put(b"inherited").await.expect("store the bytes");
 
     store
         .project(None, "brief/plan.md", &hash)
+        .await
         .expect("write the view");
 
     assert_eq!(
@@ -141,14 +153,15 @@ fn what_the_run_acquires_without_a_producer_projects_at_the_root() {
     );
 }
 
-#[test]
-fn projecting_an_object_the_run_never_stored_says_it_is_missing() {
+#[tokio::test]
+async fn projecting_an_object_the_run_never_stored_says_it_is_missing() {
     let run = run_dir();
     let store = ObjectStore::at(run.path());
     let absent = sha256_hex(b"never stored");
 
     let error = store
         .project(None, "plan.yaml", &absent)
+        .await
         .expect_err("there are no bytes to project");
 
     assert!(

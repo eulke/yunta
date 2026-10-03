@@ -3,8 +3,9 @@
 //! directly and never contains CLI-specific knowledge — those
 //! are enforced by the crate graph itself, not by convention.
 //!
-//! This crate anchors the workspace dependency graph
-//! (core ← storage/adapters ← engine ← cli), keeping it compiling and testable.
+//! It sits in the middle of that graph (core ← storage/adapters ← engine
+//! ← cli): it reaches an adapter only through the ports `yunta-core`
+//! declares, and the CLI is the only crate above it.
 
 // A panic is a bug, never a fallible path: production returns a typed
 // error instead of unwrapping, expecting, indexing, or panicking.
@@ -34,24 +35,27 @@ compile_error!(
      same guarantees exists and its cancellation tests pass there."
 );
 
+mod answers;
 mod artifacts;
 mod catalog;
 mod check;
 mod events_export;
 mod findings;
 pub mod git;
+mod history;
 mod human_interaction;
 mod inputs;
+mod live;
 pub mod lock;
 mod manifest;
 pub mod mcp;
 mod modes;
+mod observer;
 mod pack_audit;
 mod pack_requires;
 mod permissions;
 pub mod process;
 mod process_registry;
-mod progress;
 mod receipt;
 mod replay;
 mod reserved;
@@ -67,13 +71,19 @@ mod skills;
 mod stats;
 mod task_cycle;
 mod tasks;
-mod template;
 mod verification_effectiveness;
+mod view;
+mod wakefulness;
 mod worktree;
 
-pub use artifacts::store::{ObjectError, ObjectStore};
+pub use answers::{
+    answer_questions, AnswerQuestionsError, AnswersError, Recorded as AnswersRecorded,
+    Reply as AnswersReply,
+};
+pub use artifacts::shown::{documents as shown_documents, produced as produced_documents, view_of};
+pub use artifacts::store::{view_path, ObjectError, ObjectStore};
 pub use artifacts::{
-    close_artifacts, AcceptError, ArtifactContent, ArtifactFault, ArtifactIntegrity,
+    close_artifacts, AcceptError, ArtifactContent, ArtifactFault, ArtifactIntegrity, StagedHash,
     VerifiedArtifact,
 };
 pub use catalog::{
@@ -81,59 +91,85 @@ pub use catalog::{
     PublisherPacks, ResolvedWorkflow, WorkflowOrigin,
 };
 pub use check::{
-    check, check_warnings, check_workflow_refs, CheckError, CheckWarning, SchemaRangeError,
+    check, check_context_files, check_mode_start, check_mounted, check_warnings,
+    check_workflow_refs, programs_named, CheckError, CheckWarning, Composition, ContextFilesCheck,
+    MissingContextFile, RefsCheck, RunTreeOrigin, Unanswerable, UntakenRoute,
 };
 pub use events_export::{render_events_jsonl, EventsExportError};
 pub use findings::inherited_findings;
 pub use git::GitError;
-pub use human_interaction::{HumanInteraction, NoInteraction, QuestionsReply};
+pub use history::{
+    budget_p90_warning, prior_estimation, run_summary, Percentiles, PriorEstimation, RunSummary,
+    MIN_SAMPLES_FOR_ESTIMATION,
+};
+pub use human_interaction::{
+    Asking, HumanInteraction, NoInteraction, QuestionsReply, ShownContent, ShownDocument,
+};
 pub use inputs::{resolve_inputs, InputsError, ResolvedInputs};
+pub use live::{
+    last_event_age, live_total_tokens, open_sessions, recent_tool_calls, running_since,
+    OpenSession, ToolCall,
+};
 pub use manifest::{build_manifest, FrozenRun, ManifestError};
-pub use modes::{dependencies_in_mode, mode_included_nodes};
+pub use modes::{dependencies_in_mode, included_nodes, mode_included_nodes};
+pub use observer::{Observed, RunObserver};
 pub use pack_audit::{
     audit_pack, NodeAudit, PackAudit, PromptReadError, PromptText, WorkflowAudit,
 };
 pub use pack_requires::{check_pack_requires, PackRequiresGap};
 pub use permissions::command_violation;
-pub use process_registry::{read_registry, registry_path, EngineProcessFile, ProcessRegistry};
-pub use progress::render_progress;
+pub use process_registry::{
+    engine_liveness, engine_prompt, read_registry, registry_path, Asked, EngineLiveness,
+    EngineProcessFile, ProcessRegistry, Prompt, Registry,
+};
 pub use receipt::{
-    build_receipt, fan_out_groups, render_json as render_receipt_json,
-    render_markdown as render_receipt_markdown, BaselineSummary, CostSummary, CriteriaSummary,
-    CriterionEntry, DiagnosticCount, EventChainStatus, Receipt, ReceiptError, RunnerUsage,
-    ScopeSummary,
+    build_receipt, render_json as render_receipt_json, BaselineSummary, CostSummary,
+    CriteriaSummary, CriterionEntry, DiagnosticCount, EventChainStatus, FailedNode, Receipt,
+    ReceiptError, RunnerUsage, ScopeSummary,
 };
 pub use replay::{
-    dedup_findings, derive, unknown_kind_counts, NodeState, RunState, UnknownKindCount,
+    dedup_findings, derive, unknown_kind_counts, NodeState, NodeWait, RunState, UnknownKindCount,
 };
+pub use run::schedule::{decide, Decision, Policy as SchedulingPolicy};
 pub use run::{
-    create_promotion_successor, create_run, current_escalation, execute_run, read_manifest,
-    record_pause_after_crash, resolve_gate, session_token_budget, BirthArtifact, BirthOrigin,
-    CreateRunParams, ManifestReadError, Predecessor, PromotionSuccessor, ResolveGateError, RunEnv,
-    RunError, RunReport, RunRoots, RunTerminal,
+    awaits_decision, close_run, create_promotion_successor, create_run, current_escalation,
+    execute_run, read_manifest, record_pause_after_crash, resolve_gate, session_token_budget,
+    BirthArtifact, BirthOrigin, CallerInfra, CloseRunError, CreateRunParams, ManifestReadError,
+    Predecessor, PromotionSuccessor, ResolveGateError, RunEnv, RunError, RunReport, RunRoots,
+    RunTerminal,
 };
 pub use run_tools::{
-    consolidate_blackboard, open_session_listener, RunToolsAccess, RunToolsHost, RunToolsSession,
+    consolidate_blackboard, open_session_listener, HostOf, NodeScopeAccess, RunTool,
+    RunToolsAccess, RunToolsHost, RunToolsSession, TaskAccess,
 };
 pub use runner::{resolve_runner, ResolvedRunner, RunnerError};
-pub use scope::{audited_scope, scope_check, ScopeCheckError, ScopeCheckResult};
+pub use scope::{
+    audit, audits, changed_between, changed_since, denied, effective_scope, fence_breach,
+    violations, Breach, Ceiling, ScopeCheckError, ScopeCheckResult,
+};
 pub use stats::{
-    budget_p90_warning, compute_run_stats, median, prior_estimation, run_summary, FindingActivity,
-    NodeStat, Percentiles, PriorEstimation, RunStats, RunSummary, Submissions,
-    MIN_SAMPLES_FOR_ESTIMATION,
+    compute_run_stats, compute_run_stats_at, median, FindingActivity, NodeStat, RunStats,
+    Submissions,
 };
 pub use task_cycle::{
-    post_check, pre_check, run_task, AttemptEnv, AttemptRecord, CriterionRun, DispatchOutcome,
-    Memo, PreCheckOutcome, ScopeGovernance, SessionObserver, SessionSetup, TaskCycleError,
-    TaskCycleReport, TaskOutcome, DEFAULT_MAX_RETRIES,
+    post_check, pre_check, run_task, surprises, AttemptEnv, AttemptRecord, BlockedCause,
+    CriterionRun, DispatchOutcome, Memo, ScopeGovernance, SessionObserver, SessionSetup, Surprise,
+    TaskCycleError, TaskCycleReport, TaskOutcome,
 };
-pub use template::{render_template, template_variables, TemplateError};
+pub use tasks::judged_task;
 pub use verification_effectiveness::{
     analyze as analyze_verification_effectiveness, AlwaysApprovedGate, AlwaysFirstTryTasks,
     NeverRedCriterion, NeverTriggeredReroute, VerificationFindings,
     MIN_SAMPLES as VERIFICATION_MIN_SAMPLES,
 };
+pub use view::{
+    chronicle, run_frame, ChildLink, Counter, Degradation, Happening, Moment, NodeFrame,
+    NodeStanding, Reroute, RunFrame, RunPhase, RunningTask, WaitingOn,
+};
+pub use wakefulness::SETTLE_AFTER_SUSPENSION;
 pub use worktree::{
-    cleanup_worktree, head_commit, prepare_worktree, release_worktree, run_branch, task_branch,
-    RunWorktree, WorktreeCleanup, WorktreeError, WorktreeIntegrity, WorktreePrepared,
+    capture_tree, cleanup_worktree, commit_tree, commit_work, hand_over_worktree, head_commit,
+    head_tree, land, open_unit, prepare_worktree, rebase_onto, release_worktree, run_branch,
+    snapshot_commit, unit_branch, Rebase, RunWorktree, Unit, UnitHome, UnitId, WorktreeCleanup,
+    WorktreeError, WorktreeIntegrity, WorktreePrepared,
 };

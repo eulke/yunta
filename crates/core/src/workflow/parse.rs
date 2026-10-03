@@ -42,8 +42,9 @@ pub(super) fn keyed_entry<'de, D: Deserializer<'de>>(
         .map_or(key, |(_, canonical)| canonical);
     if !keys.contains(&key) {
         return Err(D::Error::custom(format!(
-            "unknown key `{key}` for {what}; one of {}",
-            list(keys)
+            "unknown key `{key}` for {what}; one of {}{}",
+            list(keys),
+            crate::text::did_you_mean(key, keys.iter().copied())
         )));
     }
     Ok((key.to_string(), value))
@@ -75,10 +76,10 @@ pub(super) fn nested<'de, D: Deserializer<'de>, T: DeserializeOwned>(
 
     yaml::from_value(value).map_err(|error| {
         D::Error::custom(match error {
-            YamlError::Parse { path, message } if path.is_empty() || path == "." => {
+            YamlError::Parse { path, message, .. } if path.is_empty() || path == "." => {
                 format!("{key}: {message}")
             }
-            YamlError::Parse { path, message } => format!("{key}.{path}: {message}"),
+            YamlError::Parse { path, message, .. } => format!("{key}.{path}: {message}"),
             other => other.to_string(),
         })
     })
@@ -101,6 +102,5 @@ pub(super) fn describe(value: &Value) -> &'static str {
         Value::String(_) => "a string",
         Value::Sequence(_) => "a list",
         Value::Mapping(_) => "a mapping",
-        Value::Tagged(_) => "a tagged value",
     }
 }

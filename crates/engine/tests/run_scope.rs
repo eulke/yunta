@@ -1,10 +1,11 @@
 //! Scope expansion — plain violations, requests across the three modes, and human escalation to a real gate — plus re-plan.
 
-use yunta_engine::{RunTerminal, DEFAULT_MAX_RETRIES};
+use yunta_engine::{RunReport, RunTerminal};
 use yunta_testkit::{Bench, ScriptedInteraction};
 
 mod common;
 use common::*;
+use yunta_core::events::{GateEvent, ScopeEvent, TaskEvent};
 
 #[tokio::test]
 async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_implicit_expansion()
@@ -23,17 +24,15 @@ async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_i
     );
 
     let mut fixture = plan_session(&tasks);
-    for _ in 0..=DEFAULT_MAX_RETRIES {
-        fixture.push_str(
-            "  - match_prompt_contains: \"task-s\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-s }\n",
-        );
-    }
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-s\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: did-s }\n",
+    );
 
-    let (terminal, state) = bench.run(&workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
 
     assert_eq!(
-        state.tasks.get("task-s"),
-        Some(&yunta_core::events::TaskStatus::Blocked),
+        state.tasks.status("task-s"),
+        Some(yunta_core::events::TaskStatus::Blocked),
         "an out-of-scope write with no request must block the task, never silently pass"
     );
     match terminal {
@@ -45,7 +44,7 @@ async fn writing_outside_scope_without_a_request_is_a_plain_violation_never_an_i
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::ScopeExpansionRequested(p)) if p.task_id.as_str() == "task-s"
+            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Requested(p))) if p.task_id.as_ref().is_some_and(|t| t.as_str() == "task-s")
         )),
         "no scope_expansion_* event may fire when the agent never wrote a request"
     );
@@ -72,7 +71,7 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
         request_yaml,
     ));
 
-    let (terminal, state) = bench.run(&workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
 
     assert_eq!(
         terminal,
@@ -80,15 +79,15 @@ async fn an_already_passing_proposed_criterion_is_denied_without_consulting_even
         "an auto-rejected request must never pause the run, even under ask mode"
     );
     assert_eq!(
-        state.tasks.get("task-p"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-p"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let denied = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::ScopeExpansionDenied(p))
+            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Denied(p)))
                 if p.task_id.as_str() == "task-p" =>
             {
                 Some(p)
@@ -133,19 +132,19 @@ async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterio
         request_yaml,
     ));
 
-    let (terminal, state) = bench.run(&workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(&workflow, &fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get("task-d"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-d"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let denied = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::ScopeExpansionDenied(p))
+            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Denied(p)))
                 if p.task_id.as_str() == "task-d" =>
             {
                 Some(p)
@@ -169,7 +168,11 @@ async fn every_denial_becomes_a_finding_carrying_the_agent_s_reason_and_criterio
             cmd: "test -f b.txt".to_string()
         })
     );
-    assert!(finding.location.contains("b.txt"));
+    assert_eq!(
+        finding.location,
+        "b.txt".into(),
+        "the finding locates where the agent asked to write"
+    );
 }
 
 #[tokio::test]
@@ -193,12 +196,14 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
     let granted_workflow = scope_expansion_workflow("rules", &["b.txt"], None);
     let mut granted_fixture = plan_session(&tasks);
     granted_fixture.push_str(&session);
-    let (granted_terminal, granted_state) =
-        granted_bench.run(&granted_workflow, &granted_fixture).await;
+    let RunReport {
+        terminal: granted_terminal,
+        state: granted_state,
+    } = granted_bench.run(&granted_workflow, &granted_fixture).await;
     assert_eq!(granted_terminal, RunTerminal::Finished);
     assert_eq!(
-        granted_state.tasks.get("task-w"),
-        Some(&yunta_core::events::TaskStatus::Done),
+        granted_state.tasks.status("task-w"),
+        Some(yunta_core::events::TaskStatus::Done),
         "a granted expansion must let b.txt through the final scope check"
     );
 
@@ -208,14 +213,14 @@ async fn a_granted_expansion_widens_what_the_final_scope_check_accepts() {
     let denied_bench = Bench::new();
     let denied_workflow = scope_expansion_workflow("deny", &[], None);
     let mut denied_fixture = plan_session(&tasks);
-    for _ in 0..=DEFAULT_MAX_RETRIES {
-        denied_fixture.push_str(&session);
-    }
-    let (_denied_terminal, denied_state) =
-        denied_bench.run(&denied_workflow, &denied_fixture).await;
+    denied_fixture.push_str(&session);
+    let RunReport {
+        state: denied_state,
+        ..
+    } = denied_bench.run(&denied_workflow, &denied_fixture).await;
     assert_eq!(
-        denied_state.tasks.get("task-w"),
-        Some(&yunta_core::events::TaskStatus::Blocked),
+        denied_state.tasks.status("task-w"),
+        Some(yunta_core::events::TaskStatus::Blocked),
         "without a grant, b.txt stays a scope violation on the same diff"
     );
 }
@@ -253,8 +258,8 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
         let requested = events
             .iter()
             .find_map(|e| match e.payload() {
-                Some(yunta_core::events::EventPayload::ScopeExpansionRequested(p))
-                    if p.task_id.as_str() == "task-g" =>
+                Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Requested(p)))
+                    if p.task_id.as_ref().is_some_and(|t| t.as_str() == "task-g") =>
                 {
                     Some(p.clone())
                 }
@@ -277,6 +282,81 @@ async fn the_request_object_is_recorded_identically_across_all_three_modes() {
             first.proposed_criterion_precheck
         );
     }
+}
+
+/// How many sessions the `implement` loop opened.
+fn implement_sessions(bench: &Bench) -> usize {
+    bench
+        .events()
+        .iter()
+        .filter(|e| {
+            e.node_id
+                .as_ref()
+                .is_some_and(|id| id.as_str() == "implement")
+                && matches!(
+                    e.payload(),
+                    Some(yunta_core::events::EventPayload::Session(
+                        yunta_core::events::SessionEvent::Opened(_)
+                    ))
+                )
+        })
+        .count()
+}
+
+/// A grant the engine makes itself changes what the next session may
+/// write — under a fence, the session that asked could not write it — so
+/// one more attempt follows on its own. It is the only one that does: the
+/// attempt after it, like any red attempt, blocks the task.
+#[tokio::test]
+async fn an_engine_granted_expansion_is_followed_by_the_one_attempt_it_makes_different() {
+    let tasks = format!(
+        "tasks:\n{}",
+        task_yaml("task-w", "w", "a.txt", "test -f a.txt && test -f b.txt")
+    );
+    let request_yaml = "paths:\n  - b.txt\nreason: \"the criterion needs it\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
+    // The attempt that asks writes what its scope allows and the request;
+    // the write to b.txt is what a fence would have refused.
+    let asks = format!(
+        "  - match_prompt_contains: \"task-w\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: asked }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+        request_yaml,
+    );
+    let writes = "  - match_prompt_contains: \"task-w\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: wrote }\n";
+    let bench = Bench::new();
+    let mut fixture = plan_session(&tasks);
+    fixture.push_str(&asks);
+    fixture.push_str(writes);
+    let RunReport { terminal, state } = bench
+        .run(
+            &scope_expansion_workflow("rules", &["b.txt"], None),
+            &fixture,
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        state.tasks.status("task-w"),
+        Some(yunta_core::events::TaskStatus::Done)
+    );
+    assert_eq!(
+        implement_sessions(&bench),
+        2,
+        "the grant's attempt, and no other"
+    );
+
+    // Denied, nothing changed for a next session: the task blocks after
+    // the one attempt.
+    let bench = Bench::new();
+    let mut fixture = plan_session(&tasks);
+    fixture.push_str(&asks);
+    fixture.push_str(writes);
+    let RunReport { state, .. } = bench
+        .run(&scope_expansion_workflow("deny", &[], None), &fixture)
+        .await;
+    assert_eq!(
+        state.tasks.status("task-w"),
+        Some(yunta_core::events::TaskStatus::Blocked)
+    );
+    assert_eq!(implement_sessions(&bench), 1);
 }
 
 #[tokio::test]
@@ -305,7 +385,7 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
         by: "eulke".into(),
         free_text: None,
     });
-    let (terminal, state) = bench
+    let RunReport { terminal, state } = bench
         .run_with_interaction(&workflow, &fixture, &interaction)
         .await;
 
@@ -315,8 +395,8 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
         "grant must unblock the run"
     );
     assert_eq!(
-        state.tasks.get("task-h"),
-        Some(&yunta_core::events::TaskStatus::Done),
+        state.tasks.status("task-h"),
+        Some(yunta_core::events::TaskStatus::Done),
         "the retry's b.txt write must pass the widened scope check"
     );
 
@@ -324,8 +404,8 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     let granted = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::ScopeExpansionGranted(p))
-                if p.task_id.as_str() == "task-h" =>
+            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Granted(p)))
+                if p.task_id.as_ref().is_some_and(|t| t.as_str() == "task-h") =>
             {
                 Some(p)
             }
@@ -338,20 +418,20 @@ async fn an_ask_mode_request_granted_by_a_human_lets_the_retry_use_the_expanded_
     );
     assert_eq!(
         granted.paths,
-        vec!["b.txt".to_string()],
+        vec![yunta_core::ScopeGlob::from("b.txt")],
         "the grant must name exactly what it authorized — self-contained audit"
     );
     // The interaction itself is on the log, same vocabulary as every
     // other gate: waiting + resolved, together.
     assert!(events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::GateWaiting(p)) if p.summary.contains("task-h")
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(p))) if p.summary().contains("task-h")
     )));
     assert!(events.iter().any(|e| matches!(
         e.payload(),
-        Some(yunta_core::events::EventPayload::GateResolved(
+        Some(yunta_core::events::EventPayload::Gates(GateEvent::Resolved(
             yunta_core::events::GateResolvedPayload::Chosen(choice)
-        )) if choice.option == "grant"
+        ))) if choice.option == "grant"
     )));
 }
 
@@ -365,33 +445,36 @@ async fn an_ask_mode_request_denied_by_a_human_becomes_a_finding_and_the_task_re
         task_yaml("task-n", "n", "a.txt", "test -f a.txt")
     );
     let mut fixture = plan_session(&tasks);
-    // Attempt 1 asks; the human denies; attempt 2 complies with the
-    // original scope (a.txt only) and succeeds.
-    fixture.push_str(&requesting_session("task-n"));
-    fixture.push_str(
-        "  - match_prompt_contains: \"task-n\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-n }\n",
-    );
+    // Attempt 1 writes what its scope allows and asks for b.txt, which a
+    // fence would have refused; the human denies. The work it left already
+    // closes the task within its scope, so no second session opens.
+    let request = "paths:\n  - b.txt\nreason: \"adjacent fix in b.txt\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
+    fixture.push_str(&format!(
+        "  - match_prompt_contains: \"task-n\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: asked }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+        request,
+    ));
 
     let interaction = ScriptedInteraction::new(yunta_core::events::HumanChoice {
         option: "deny".into(),
         by: "eulke".into(),
         free_text: Some("out of this sprint".to_string()),
     });
-    let (terminal, state) = bench
+    let RunReport { terminal, state } = bench
         .run_with_interaction(&workflow, &fixture, &interaction)
         .await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get("task-n"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-n"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let denied = events
         .iter()
         .find_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::ScopeExpansionDenied(p))
+            Some(yunta_core::events::EventPayload::Scope(ScopeEvent::Denied(p)))
                 if p.task_id.as_str() == "task-n" =>
             {
                 Some(p)
@@ -439,7 +522,10 @@ async fn an_ask_mode_request_with_no_surface_still_pauses_exactly_as_before() {
     let mut fixture = plan_session(&tasks);
     fixture.push_str(&requesting_session("task-p"));
 
-    let (terminal, _state) = bench.run(&workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(&workflow, &fixture).await;
     match terminal {
         RunTerminal::Paused { .. } => {}
         other => panic!("headless ask must pause, got {other:?}"),
@@ -448,7 +534,9 @@ async fn an_ask_mode_request_with_no_surface_still_pauses_exactly_as_before() {
     assert!(
         !events.iter().any(|e| matches!(
             e.payload(),
-            Some(yunta_core::events::EventPayload::GateWaiting(_))
+            Some(yunta_core::events::EventPayload::Gates(GateEvent::Waiting(
+                _
+            )))
         )),
         "an unresolved escalation must not be recorded as a published gate"
     );
@@ -509,26 +597,24 @@ nodes:
     fixture.push_str(
         "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
     );
-    for _ in 0..=DEFAULT_MAX_RETRIES {
-        fixture.push_str(
-            "  - match_prompt_contains: \"task-c\"\n    outcome: { type: completed, summary: \"tried and failed\" }\n",
-        );
-    }
+    fixture.push_str(
+        "  - match_prompt_contains: \"task-c\"\n    outcome: { type: completed, summary: \"tried and failed\" }\n",
+    );
     fixture.push_str(&tasks_session(&tasks_v2, "replanned"));
     fixture.push_str(
         "  - match_prompt_contains: \"task-c\"\n    effects:\n      - { path: c.txt, content: \"c\" }\n    outcome: { type: completed, summary: did-c }\n",
     );
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get("task-a"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-a"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
     assert_eq!(
-        state.tasks.get("task-c"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-c"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -536,7 +622,7 @@ nodes:
         events
             .iter()
             .filter_map(|e| match e.payload() {
-                Some(yunta_core::events::EventPayload::TaskStatusChanged(p))
+                Some(yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(p)))
                     if p.task_id.as_str() == task =>
                 {
                     Some(p.new_status)
@@ -570,7 +656,7 @@ nodes:
     let registered_count = events
         .iter()
         .filter(|e| {
-            matches!(e.payload(), Some(yunta_core::events::EventPayload::TaskRegistered(p)) if p.task_id.as_str() == "task-c")
+            matches!(e.payload(), Some(yunta_core::events::EventPayload::Tasks(TaskEvent::Registered(p))) if p.task_id.as_str() == "task-c")
         })
         .count();
     assert_eq!(
@@ -578,7 +664,7 @@ nodes:
         "both the original and the re-planned registration must stay in the log"
     );
 
-    let commits = commit_subjects(&bench.worktree);
+    let commits = bench.commit_subjects();
     assert!(
         commits.contains(&"task task-a: Write a".to_string()),
         "task-a's committed work must survive the re-plan: {commits:?}"
@@ -618,7 +704,11 @@ async fn a_successor_s_replan_keeps_done_what_it_kept_and_resets_what_it_recut()
         yunta_testkit::git_output(&bench.worktree, &["rev-parse", "HEAD"])
             .parse()
             .unwrap();
-    let planted = yunta_testkit::SourceLog::open(&bench.storage, &source);
+    let planted = yunta_testkit::SourceLog::open(
+        &bench.storage,
+        &source,
+        std::sync::Arc::new(yunta_testkit_core::FixedClock),
+    );
     for task in &document.tasks {
         planted.task(task, yunta_core::events::TaskStatus::Done, Some(&landed));
     }
@@ -656,16 +746,16 @@ nodes:
         "  - match_prompt_contains: \"task-c\"\n    effects:\n      - { path: c.txt, content: \"c\" }\n    outcome: { type: completed, summary: did-c }\n",
     );
 
-    let (terminal, state) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state } = bench.run(workflow, &fixture).await;
 
     assert_eq!(terminal, RunTerminal::Finished);
     assert_eq!(
-        state.tasks.get("task-a"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-a"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
     assert_eq!(
-        state.tasks.get("task-c"),
-        Some(&yunta_core::events::TaskStatus::Done)
+        state.tasks.status("task-c"),
+        Some(yunta_core::events::TaskStatus::Done)
     );
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
@@ -673,7 +763,7 @@ nodes:
         events
             .iter()
             .filter_map(|e| match e.payload() {
-                Some(yunta_core::events::EventPayload::TaskStatusChanged(p))
+                Some(yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(p)))
                     if p.task_id.as_str() == task =>
                 {
                     Some(p.new_status)
@@ -698,7 +788,9 @@ nodes:
         "a re-cut task loses the done it crossed with and runs again"
     );
     assert!(
-        !commit_subjects(&bench.worktree).contains(&"task task-a: Write a".to_string()),
+        !bench
+            .commit_subjects()
+            .contains(&"task task-a: Write a".to_string()),
         "no session ever ran for task-a here"
     );
 }
@@ -731,14 +823,17 @@ nodes:
         "  - match_prompt_contains: \"task-a\"\n    effects:\n      - { path: a.txt, content: \"a\" }\n    outcome: { type: completed, summary: did-a }\n",
     );
 
-    let (terminal, _state) = bench.run(workflow, &fixture).await;
+    let RunReport {
+        terminal,
+        state: _state,
+    } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let events = bench.storage.events_for_run(&bench.run_id).unwrap();
     let placed: Vec<Option<yunta_core::CommitSha>> = events
         .iter()
         .filter_map(|e| match e.payload() {
-            Some(yunta_core::events::EventPayload::TaskStatusChanged(p))
+            Some(yunta_core::events::EventPayload::Tasks(TaskEvent::StatusChanged(p)))
                 if p.new_status == yunta_core::events::TaskStatus::Done =>
             {
                 Some(p.commit.clone())
@@ -754,5 +849,278 @@ nodes:
         placed,
         vec![Some(head)],
         "the done names the commit the run's tree carried after integrating the task"
+    );
+}
+
+// --- de qué árbol parte una auditoría (M32) ------------------------------
+
+/// Lo que un nodo escribió es lo que su propio árbol de partida dice que
+/// escribió. Un nodo anterior que dejó trabajo sin commitear es el estado
+/// del que este parte, no algo de lo que responda.
+#[tokio::test]
+async fn a_node_is_not_blamed_for_what_a_predecessor_left_behind() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: predecessor
+nodes:
+  - id: first
+    kind: bash
+    run: "echo one > loose.txt"
+  - id: second
+    kind: bash
+    depends_on: [first]
+    scope: ["bar/**"]
+    run: "mkdir -p bar && echo two > bar/x.txt"
+"#;
+
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "`second` escribió sólo dentro de su scope: {terminal:?}"
+    );
+    assert!(
+        matches!(
+            state.nodes.state("second"),
+            Some(yunta_engine::NodeState::Finished { .. })
+        ),
+        "got {:?}",
+        state.nodes.state("second")
+    );
+}
+
+/// Y el reverso, que es lo que un punto de partida por lista de paths
+/// —en vez de por árbol— dejaría pasar: un archivo que el predecesor dejó
+/// sucio y que este nodo *también* toca sigue siendo suyo.
+#[tokio::test]
+async fn a_node_that_touches_what_a_predecessor_left_is_still_judged_for_it() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: predecessor-touched
+nodes:
+  - id: first
+    kind: bash
+    run: "echo one > loose.txt"
+  - id: second
+    kind: bash
+    depends_on: [first]
+    scope: ["bar/**"]
+    run: "mkdir -p bar && echo two > bar/x.txt && echo mine > loose.txt"
+"#;
+
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+
+    assert!(
+        !matches!(terminal, RunTerminal::Finished),
+        "escribir fuera de scope sigue fallando aunque el archivo ya estuviera sucio: {terminal:?}"
+    );
+    assert!(
+        matches!(
+            state.nodes.state("second"),
+            Some(yunta_engine::NodeState::Failed { .. })
+        ),
+        "got {:?}",
+        state.nodes.state("second")
+    );
+}
+
+/// El punto de partida es un hecho del log, no memoria de una
+/// invocación: un intento que reinicia se juzga desde donde arrancó el
+/// primero, porque su propio trabajo parcial es obra suya.
+#[tokio::test]
+async fn an_attempt_that_restarts_is_judged_from_where_its_first_attempt_began() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: restarted
+nodes:
+  - id: flaky
+    kind: bash
+    scope: ["ok/**"]
+    run: "mkdir -p ok && echo a > ok/a.txt && echo stray > stray.txt"
+"#;
+
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
+
+    // La escritura fuera de scope es suya y falla, con `stray.txt`
+    // nombrado — no con el árbol entero del run.
+    assert!(!matches!(terminal, RunTerminal::Finished), "{terminal:?}");
+    let scoped = bench
+        .events()
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Node(
+                yunta_core::events::NodeEvent::ScopeChecked(p),
+            )) => Some(p.clone()),
+            _ => None,
+        })
+        .expect("el nodo se auditó");
+    assert_eq!(
+        scoped.violations,
+        vec![std::path::PathBuf::from("stray.txt")],
+        "diff: {:?}",
+        scoped.diff
+    );
+    assert!(matches!(
+        state.nodes.state("flaky"),
+        Some(yunta_engine::NodeState::Failed { .. })
+    ));
+}
+
+/// Y el árbol de partida queda en el log, donde un replay lo encuentra.
+#[tokio::test]
+async fn a_start_records_the_tree_its_attempt_began_from() {
+    let bench = Bench::new();
+    let workflow = "name: recorded\nnodes:\n  - id: work\n    kind: bash\n    run: \"true\"\n";
+    bench.run(workflow, "sessions: []").await;
+
+    let started = bench
+        .events()
+        .iter()
+        .find_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Node(
+                yunta_core::events::NodeEvent::Started(p),
+            )) => Some(p.clone()),
+            _ => None,
+        })
+        .expect("el nodo arrancó");
+    assert!(
+        started.from_tree.is_some(),
+        "un arranque nombra el árbol del que parte: {started:?}"
+    );
+}
+
+/// A task whose session asks for `b.txt` and, as a fence would have it,
+/// writes only `a.txt`; its criterion needs both. After a person grants,
+/// `answered` scripts what the session does next.
+fn asks_then(answered: &str, resumable: bool) -> (String, String) {
+    let tasks = format!(
+        "tasks:\n{}",
+        task_yaml("task-h", "h", "a.txt", "test -f a.txt && test -f b.txt")
+    );
+    let request = "paths:\n  - b.txt\nreason: \"the criterion needs b.txt\"\nproposed_criterion:\n  cmd: \"test -f nonexistent-marker\"\n";
+    let asks = format!(
+        "  - match_prompt_contains: \"task-h\"\n    effects:\n      - {{ path: a.txt, content: \"a\" }}\n      - {{ path: {:?}, content: {:?} }}\n    outcome: {{ type: completed, summary: asked }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE,
+        request,
+    );
+    let fixture = plan_session(&tasks).replace(
+        "capabilities: { run_tools: true }",
+        &format!("capabilities: {{ run_tools: true, resume_session: {resumable} }}"),
+    ) + &asks
+        + answered;
+    (scope_expansion_workflow("ask", &[], None), fixture)
+}
+
+fn grants() -> ScriptedInteraction {
+    ScriptedInteraction::new(yunta_core::events::HumanChoice {
+        option: "grant".into(),
+        by: "eulke".into(),
+        free_text: None,
+    })
+}
+
+/// The answer is the one thing that changed for the session that asked:
+/// it is picked back up in the checkout it saw, holding its work, told
+/// what was granted and where to read its scope — not started over.
+#[tokio::test]
+async fn a_granted_request_resumes_the_session_that_asked_on_its_own_work() {
+    let (workflow, fixture) = asks_then(
+        "  - match_prompt_contains: \"was granted: b.txt\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: wrote-b }\n",
+        true,
+    );
+    let bench = Bench::new();
+    let RunReport { terminal, state } = bench
+        .run_with_interaction(&workflow, &fixture, &grants())
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        state.tasks.status("task-h"),
+        Some(yunta_core::events::TaskStatus::Done)
+    );
+
+    let opened = task_sessions(&bench, "task-h");
+    assert_eq!(opened.len(), 2, "{opened:?}");
+    assert_eq!(opened[1].continues.as_ref(), Some(&opened[0].session_id));
+    assert_eq!(
+        bench.mock().resumes_seen(),
+        vec![opened[0].session_id.clone()]
+    );
+    let resumed = bench.mock().requests_seen().last().cloned().unwrap();
+    assert!(
+        resumed.cwd.ends_with("unit-worktrees/task/task-h-1"),
+        "the checkout the session saw: {}",
+        resumed.cwd.display()
+    );
+    assert!(resumed.prompt.contains("yunta_task"), "{}", resumed.prompt);
+}
+
+/// An adapter that cannot resume still keeps the work: a fresh session
+/// opens in the same checkout on the brief, and the log says the
+/// conversation was not continued.
+#[tokio::test]
+async fn an_adapter_that_cannot_resume_opens_fresh_on_the_same_work() {
+    let (workflow, fixture) = asks_then(
+        "  - match_prompt_contains: \"task-h\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: wrote-b }\n",
+        false,
+    );
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(&workflow, &fixture, &grants())
+        .await;
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "a.txt from the first session is still there"
+    );
+
+    let opened = task_sessions(&bench, "task-h");
+    assert_eq!(opened.len(), 2, "{opened:?}");
+    assert_eq!(opened[1].continues, None);
+    assert!(bench.mock().resumes_seen().is_empty());
+    assert!(bench.events().iter().any(|e| matches!(
+        e.payload(),
+        Some(yunta_core::events::EventPayload::Session(
+            yunta_core::events::SessionEvent::CapabilityDegraded(_)
+        ))
+    )));
+}
+
+/// The sessions `task` opened, in order.
+fn task_sessions(bench: &Bench, task: &str) -> Vec<yunta_core::events::AgentSessionOpenedPayload> {
+    bench
+        .events()
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Session(
+                yunta_core::events::SessionEvent::Opened(p),
+            )) if p.task_id.as_ref().is_some_and(|id| id.as_str() == task) => Some(p.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// An engine grant changes what the next attempt may write, and nothing
+/// else: that attempt resumes the session that asked, in the same unit.
+#[tokio::test]
+async fn the_attempt_after_an_engine_grant_resumes_the_session_that_asked() {
+    let (_, fixture) = asks_then(
+        "  - match_prompt_contains: \"was granted: b.txt\"\n    effects:\n      - { path: b.txt, content: \"b\" }\n    outcome: { type: completed, summary: wrote-b }\n",
+        true,
+    );
+    let bench = Bench::new();
+    let RunReport { terminal, .. } = bench
+        .run(
+            &scope_expansion_workflow("rules", &["b.txt"], None),
+            &fixture,
+        )
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    let opened = task_sessions(&bench, "task-h");
+    assert_eq!(opened.len(), 2, "{opened:?}");
+    assert_eq!(opened[1].continues.as_ref(), Some(&opened[0].session_id));
+    assert_eq!(
+        bench.mock().resumes_seen(),
+        vec![opened[0].session_id.clone()]
     );
 }

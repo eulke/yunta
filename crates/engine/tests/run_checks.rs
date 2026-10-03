@@ -1,63 +1,451 @@
-//! Verification gates: baseline and coverage compares, findings gates, progress.md, the executor, command-permission denials, and events.jsonl.
+//! Verification gates: baseline and coverage compares, findings gates, how a node's end is recorded, the executor, command-permission denials, and events.jsonl.
 
-use yunta_engine::{NodeState, RunTerminal};
-use yunta_testkit::Bench;
+use yunta_core::events::{BaselineOrigin, EventPayload, NodeEvent, RunEvent};
+use yunta_engine::{NodeState, RunReport, RunTerminal};
+use yunta_testkit::{baselines, ApproveEverything, Bench, MOCK_CONFIG};
 
 mod common;
 use common::*;
 
 #[tokio::test]
-async fn baseline_compare_passes_on_its_first_run_with_nothing_to_compare_against() {
+async fn a_run_born_and_not_yet_woken_holds_no_baseline() {
     let bench = Bench::new();
-    std::fs::write(bench.worktree.join("marker.txt"), "ok").unwrap();
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
 
     let workflow = r#"
-name: baseline-first-run
+name: baseline-at-first-wake
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#;
+
+    // A birth states what the run is and what it holds. What its tree
+    // already did is a measurement, and measuring is something an
+    // invocation does — so a run that nobody has woken has none.
+    bench
+        .create(workflow, "sessions: []", CONFIG_WITH_BASELINE)
+        .await;
+
+    assert!(
+        bench.events().iter().all(|event| !matches!(
+            event.payload(),
+            Some(EventPayload::Run(RunEvent::BaselineCaptured(_)))
+        )),
+        "a birth measures nothing: {:#?}",
+        bench.events()
+    );
+}
+
+/// The workflow every baseline test drives: one node and the comparison
+/// that reads the measurement, so what a log holds before the node is
+/// what the wake itself did.
+const ONE_NODE: &str = r#"
+name: baseline-at-first-wake
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+  - id: regressions
+    kind: check
+    builtin: baseline_compare
+    depends_on: [work]
+"#;
+
+#[tokio::test]
+async fn the_first_wake_measures_the_baseline_before_any_node() {
+    let bench = Bench::new();
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+    bench
+        .create(ONE_NODE, "sessions: []", CONFIG_WITH_BASELINE)
+        .await;
+    bench.wake().await;
+
+    let events = bench.events();
+    let measured = baselines(&events);
+    assert_eq!(measured.len(), 1, "one measurement: {events:#?}");
+    assert_eq!(measured[0].command, "cat marker.txt");
+    assert_eq!(measured[0].results.exit_code, 0);
+    assert_eq!(
+        measured[0].origin,
+        BaselineOrigin::Measured,
+        "this run took the measurement itself"
+    );
+
+    let at = position_of(&events, |payload| {
+        matches!(payload, EventPayload::Run(RunEvent::BaselineCaptured(_)))
+    })
+    .expect("the measurement is on the log");
+    assert_eq!(
+        events[at].node_id, None,
+        "the measurement is the run's own fact, under no node"
+    );
+    assert!(
+        position_of(&events, |payload| matches!(
+            payload,
+            EventPayload::Node(NodeEvent::Started(_))
+        ))
+        .is_some_and(|started| at < started),
+        "the suite runs before the first node of the run: {events:#?}"
+    );
+    assert!(
+        position_of(&events, |payload| matches!(
+            payload,
+            EventPayload::Run(RunEvent::Resumed(_))
+        ))
+        .is_none(),
+        "a first wake is not a resume: {events:#?}"
+    );
+}
+
+/// A suite is measured for what reads it: a run with no comparison, no
+/// loop and nothing composed measures nothing, however the config names
+/// one.
+#[tokio::test]
+async fn a_run_that_reads_no_measurement_measures_nothing() {
+    let bench = Bench::new();
+    let only_work = "name: only-work\nnodes:\n  - { id: work, kind: bash, run: \"true\" }\n";
+    bench
+        .create(only_work, "sessions: []", CONFIG_WITH_BASELINE)
+        .await;
+    let RunReport { terminal, .. } = bench.wake().await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(baselines(&bench.events()).is_empty());
+}
+
+/// The log carries the tail of what the suite said; the bytes it hashes
+/// stay with the run that measured, for a reader of a comparison.
+#[tokio::test]
+async fn the_measuring_run_keeps_everything_the_suite_wrote() {
+    let bench = Bench::new();
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+    let run_dir = bench
+        .create(ONE_NODE, "sessions: []", CONFIG_WITH_BASELINE)
+        .await;
+    bench.wake().await;
+
+    let kept = tokio::fs::read(yunta_engine::run_dir::baseline_capture(&run_dir))
+        .await
+        .expect("the run keeps everything the suite wrote");
+    assert_eq!(kept, b"ok\n");
+    assert_eq!(
+        baselines(&bench.events())[0].hash,
+        yunta_core::sha256_hex(&kept),
+        "the hash on the log names the bytes the run kept"
+    );
+}
+
+/// What `node` closed with, as its `node_finished` states it.
+fn outcome_of(events: &[yunta_core::events::StoredEvent], node: &str) -> String {
+    events
+        .iter()
+        .find_map(|event| match event.payload() {
+            Some(EventPayload::Node(NodeEvent::Finished(payload)))
+                if event.node_id.as_ref().is_some_and(|id| id.as_str() == node) =>
+            {
+                Some(payload.outcome.clone())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("`{node}` closed: {events:#?}"))
+}
+
+/// Where the first event whose payload satisfies `is` sits in `events`.
+fn position_of(
+    events: &[yunta_core::events::StoredEvent],
+    is: impl Fn(&EventPayload) -> bool,
+) -> Option<usize> {
+    events
+        .iter()
+        .position(|event| event.payload().is_some_and(&is))
+}
+
+#[tokio::test]
+async fn a_run_born_holding_documents_is_not_resumed_on_its_first_wake() {
+    let bench = Bench::new();
+
+    let workflow = r#"
+name: born-holding
+inputs:
+  brief: { type: document, kind: findings }
+nodes:
+  - id: work
+    kind: bash
+    run: "true"
+"#;
+    let brief = bench.worktree.join("brief.yaml");
+    tokio::fs::write(&brief, "findings: []\n").await.unwrap();
+
+    let bench = bench.with_inputs(&[("brief", brief.to_str().expect("a utf-8 path"))]);
+    bench.create(workflow, "sessions: []", MOCK_CONFIG).await;
+    bench.wake().await;
+
+    assert!(
+        bench.events().iter().all(|event| !matches!(
+            event.payload(),
+            Some(EventPayload::Run(RunEvent::Resumed(_)))
+        )),
+        "a birth writes as many events as the run was born holding, and none of them is a wake: {:#?}",
+        bench.events()
+    );
+}
+
+/// One measurement per lineage means one per run, however many times an
+/// invocation picks the run back up.
+/// A gate the first wake stops at, then work and the comparison that
+/// reads the measurement.
+const GATED_THEN_COMPARED: &str = r#"
+name: measured-once
+nodes:
+  - id: approve
+    kind: gate
+    assignee: lead
+  - id: work
+    kind: bash
+    depends_on: [approve]
+    run: "true"
+  - id: regressions
+    kind: check
+    builtin: baseline_compare
+    depends_on: [work]
+"#;
+
+#[tokio::test]
+async fn a_resumed_run_measures_nothing_again() {
+    let bench = Bench::new();
+    let suite_runs = bench
+        .worktree
+        .parent()
+        .expect("the worktree sits in the bench's world")
+        .join("suite-runs");
+    let config = format!(
+        "{MOCK_CONFIG}baseline:\n  suite: \"echo . >> {}\"\n",
+        suite_runs.display()
+    );
+
+    // The gate has nobody to answer it on the first wake, so the run
+    // pauses there; the second wake brings a surface that answers.
+    let RunReport { terminal, .. } = bench
+        .run_with_config(GATED_THEN_COMPARED, "sessions: []", &config)
+        .await;
+    assert!(matches!(terminal, RunTerminal::Paused { .. }));
+    let RunReport { terminal, .. } = bench.wake_answering(&ApproveEverything::new("test")).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let measured = bench
+        .events()
+        .iter()
+        .filter(|event| {
+            matches!(
+                event.payload(),
+                Some(EventPayload::Run(RunEvent::BaselineCaptured(_)))
+            )
+        })
+        .count();
+    assert_eq!(measured, 1, "the second wake finds the measurement held");
+    let ran = tokio::fs::read_to_string(&suite_runs)
+        .await
+        .expect("the suite ran at least once");
+    assert_eq!(
+        ran.lines().count(),
+        2,
+        "the measurement once and the comparison once: never measured again"
+    );
+}
+
+/// A run whose suite appends a line to a file outside the tree, so a
+/// test can count how many times it ran.
+fn counting_suite(bench: &Bench) -> (String, std::path::PathBuf) {
+    let suite_runs = bench
+        .worktree
+        .parent()
+        .expect("the worktree sits in the bench's world")
+        .join("suite-runs");
+    let config = format!(
+        "{MOCK_CONFIG}baseline:\n  suite: \"echo . >> {}\"\n",
+        suite_runs.display()
+    );
+    (config, suite_runs)
+}
+
+/// The suite a comparison runs is the invocation's to reuse: two
+/// comparisons with nothing between them ask once, and the second says
+/// where its answer came from.
+#[tokio::test]
+async fn two_baseline_compares_on_one_tree_run_the_suite_once_and_the_second_says_so() {
+    let bench = Bench::new();
+    let (config, suite_runs) = counting_suite(&bench);
+
+    let workflow = r#"
+name: compared-twice
+nodes:
+  - id: change
+    kind: bash
+    run: "echo changed > changed.txt"
+  - id: first
+    kind: check
+    builtin: baseline_compare
+    depends_on: [change]
+  - id: second
+    kind: check
+    builtin: baseline_compare
+    depends_on: [first]
+"#;
+
+    let RunReport { terminal, .. } = bench
+        .run_with_config(workflow, "sessions: []", &config)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let events = bench.events();
+    assert_eq!(
+        outcome_of(&events, "first"),
+        "no regression vs baseline (exit 0)"
+    );
+    assert_eq!(
+        outcome_of(&events, "second"),
+        "no regression vs baseline (exit 0, reused: the suite already ran on this same tree)"
+    );
+
+    let ran = tokio::fs::read_to_string(&suite_runs)
+        .await
+        .expect("the suite ran");
+    assert_eq!(
+        ran.lines().count(),
+        2,
+        "the measurement on the first wake, and one comparison the two nodes share"
+    );
+}
+
+/// The measurement is the suite's answer on the tree the run opens on:
+/// a comparison asked while nothing changed it runs no suite of its own.
+#[tokio::test]
+async fn a_compare_on_the_tree_the_run_measured_takes_the_measurement_s_answer() {
+    let bench = Bench::new();
+    let (config, suite_runs) = counting_suite(&bench);
+    let workflow = r#"
+name: compared-at-once
+nodes:
+  - id: compare
+    kind: check
+    builtin: baseline_compare
+"#;
+
+    let RunReport { terminal, .. } = bench
+        .run_with_config(workflow, "sessions: []", &config)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    assert_eq!(
+        outcome_of(&bench.events(), "compare"),
+        "no regression vs baseline (exit 0, reused: the suite already ran on this same tree)"
+    );
+    let ran = tokio::fs::read_to_string(&suite_runs)
+        .await
+        .expect("the suite ran");
+    assert_eq!(ran.lines().count(), 1, "the measurement alone");
+}
+
+/// A suite that fails on the tree the run opens on gives a comparison
+/// nothing that passed: the comparison says so, and running the suite
+/// again could not change that answer.
+#[tokio::test]
+async fn a_comparison_under_a_red_measurement_says_nothing_could_be_compared_and_runs_nothing() {
+    let bench = Bench::new();
+    let suite_runs = bench
+        .worktree
+        .parent()
+        .expect("the worktree sits in the bench's world")
+        .join("suite-runs");
+    let suite = format!("echo . >> {}; cat missing.txt", suite_runs.display());
+    let config = format!("{MOCK_CONFIG}baseline:\n  suite: \"{suite}\"\n");
+
+    let workflow = r#"
+name: compared-against-red
+nodes:
+  - id: compare
+    kind: check
+    builtin: baseline_compare
+"#;
+
+    let RunReport { terminal, .. } = bench
+        .run_with_config(workflow, "sessions: []", &config)
+        .await;
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(
+        outcome_of(&bench.events(), "compare"),
+        format!(
+            "nothing to compare: `{suite}` was already red when the lineage measured it (exit 1)"
+        )
+    );
+    let ran = tokio::fs::read_to_string(&suite_runs)
+        .await
+        .expect("the measurement ran the suite");
+    assert_eq!(ran.lines().count(), 1, "only the measurement ran it");
+}
+
+#[tokio::test]
+async fn the_first_baseline_compare_fails_on_a_regression_made_before_it() {
+    let bench = Bench::new();
+    // `cat marker.txt` exits 0 while the file is there — what the run
+    // measures on its first wake, and what `regress` then breaks.
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+
+    let workflow = r#"
+name: baseline-regression
+nodes:
+  - id: regress
+    kind: bash
+    run: "rm marker.txt"
+  - id: no-regressions
+    kind: check
+    builtin: baseline_compare
+    depends_on: [regress]
+"#;
+
+    let RunReport { terminal, state: _ } = bench
+        .run_with_config(workflow, "sessions: []", CONFIG_WITH_BASELINE)
+        .await;
+    match terminal {
+        RunTerminal::Paused { reason } => assert!(
+            reason.contains("regression") && reason.contains("marker.txt: No such file"),
+            "expected a regression diagnostic quoting what the suite printed, got: {reason}"
+        ),
+        other => panic!(
+            "a run's only `baseline_compare` compares against the measurement its first \
+             wake took, so it must catch the regression; got {other:?}"
+        ),
+    }
+}
+
+#[tokio::test]
+async fn baseline_compare_passes_while_the_suite_keeps_passing() {
+    let bench = Bench::new();
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+
+    let workflow = r#"
+name: baseline-green
 nodes:
   - id: no-regressions
     kind: check
     builtin: baseline_compare
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_BASELINE)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
-}
-
-#[tokio::test]
-async fn baseline_compare_fails_when_a_previously_green_suite_turns_red() {
-    let bench = Bench::new();
-    // `cat marker.txt` exits 0 while the file exists — the first
-    // `baseline_compare` node below captures that as the baseline.
-    std::fs::write(bench.worktree.join("marker.txt"), "ok").unwrap();
-
-    let workflow = r#"
-name: baseline-regression
-nodes:
-  - id: capture
-    kind: check
-    builtin: baseline_compare
-  - id: regress
-    kind: bash
-    run: "rm marker.txt"
-    depends_on: [capture]
-  - id: compare
-    kind: check
-    builtin: baseline_compare
-    depends_on: [regress]
-"#;
-
-    let (terminal, _) = bench
-        .run_with_config(workflow, "sessions: []", CONFIG_WITH_BASELINE)
-        .await;
-    match terminal {
-        RunTerminal::Paused { reason } => assert!(
-            reason.contains("regression"),
-            "expected a regression diagnostic, got: {reason}"
-        ),
-        other => panic!("expected the second baseline_compare to pause the run, got {other:?}"),
-    }
 }
 
 #[tokio::test]
@@ -73,7 +461,7 @@ nodes:
     builtin: coverage_gate
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_COVERAGE)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
@@ -92,7 +480,7 @@ nodes:
     builtin: coverage_gate
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_COVERAGE)
         .await;
     match terminal {
@@ -134,11 +522,11 @@ nodes:
         "The Result is discarded.",
     )]);
 
-    let (terminal, _) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
     match terminal {
         RunTerminal::Paused { reason } => assert_eq!(
             reason,
-            "node `gate` failed: 1 finding(s) at or above Major: f1"
+            "node `gate` failed: 1 finding at or above major: f1"
         ),
         other => panic!("expected the gate to pause the run, got {other:?}"),
     }
@@ -166,12 +554,12 @@ nodes:
 
     let fixture = review_session(&[("f1", "minor", "Style nit", "src/lib.rs:10", "Naming.")]);
 
-    let (terminal, _) = bench.run(workflow, &fixture).await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, &fixture).await;
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
 #[tokio::test]
-async fn progress_md_is_regenerated_at_run_dir_after_each_node_finished() {
+async fn each_node_s_end_is_on_the_log_the_moment_it_ends() {
     let bench = Bench::new();
 
     let workflow = r#"
@@ -187,48 +575,41 @@ nodes:
     depends_on: [write]
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);
-
-    let progress = std::fs::read_to_string(bench.run_dir().join("progress.md")).unwrap();
-    assert_eq!(progress, "# Progress\n\n## Finished\n\n- **write** — Writes the output file\n  outcome: exit 0\n- **verify** — verify\n  outcome: exit 0\n\n## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n");
+    for node in ["write", "verify"] {
+        assert!(
+            matches!(
+                state.nodes.state(node),
+                Some(yunta_engine::NodeState::Finished { outcome, .. }) if outcome == "exit 0"
+            ),
+            "{node}: {:?}",
+            state.nodes.state(node)
+        );
+    }
 }
 
 #[tokio::test]
-async fn progress_md_lists_a_node_s_artifacts_after_it_finishes() {
+async fn a_node_that_failed_is_on_the_log_as_failed_before_anything_else_runs() {
+    // What a retry or a corrective node reads next has to know about the
+    // failure it follows, even when nothing finished after it.
     let bench = Bench::new();
-
     let workflow = r#"
-name: findings-progress
+name: one-failure
 nodes:
-  - id: review
-    kind: prompt
-    runner: executor
-    prompt: "Review the changes."
-    description: "Reviews the diff for issues"
-    artifacts:
-      produces: [findings]
+  - id: broken
+    kind: bash
+    run: "exit 3"
 "#;
-
-    let fixture = review_session(&[]);
-
-    let (terminal, _) = bench.run(workflow, &fixture).await;
-    assert_eq!(terminal, RunTerminal::Finished);
-
-    // The artifact is named by what it is and by the bytes the run
-    // holds, never by where the file happens to sit.
-    let held = bench.accepted();
-    assert_eq!(held.len(), 1, "{held:?}");
-    let progress = std::fs::read_to_string(bench.run_dir().join("progress.md")).unwrap();
-    assert_eq!(
-        progress,
-        format!(
-            "# Progress\n\n## Finished\n\n- **review** — Reviews the diff for issues\n  \
-             outcome: reviewed\n  artifact: findings · {}\n\n\
-             ## Failed\n\n_none_\n\n## Next\n\n_nothing pending_\n",
-            held[0].content_hash.abbreviated()
-        )
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []\n").await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
     );
+    let Some(yunta_engine::NodeState::Failed { failure, .. }) = state.nodes.state("broken") else {
+        panic!("{:?}", state.nodes.state("broken"));
+    };
+    assert_eq!(failure.headline(), "exit 3");
 }
 
 #[tokio::test]
@@ -259,11 +640,11 @@ nodes:
       threshold: 80
 "#;
 
-    let (terminal, state) = bench
+    let RunReport { terminal, state } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
         .await;
     assert_eq!(terminal, RunTerminal::Finished);
-    match state.nodes.get("probe") {
+    match state.nodes.state("probe") {
         Some(NodeState::Finished { outcome, .. }) => {
             assert_eq!(outcome, "threshold was 80");
         }
@@ -290,15 +671,52 @@ nodes:
     executor: probe
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
         .await;
     match terminal {
         RunTerminal::Paused { reason } => {
-            assert_eq!(
-                reason,
-                "node `probe` failed: executor `probe` exited 1: threshold not met"
-            );
+            assert_eq!(reason, "node `probe` failed: executor `probe` exited 1");
+        }
+        other => panic!("expected the run to pause, got {other:?}"),
+    }
+    let Some(yunta_engine::NodeState::Failed { failure, .. }) = state.nodes.state("probe") else {
+        panic!("`probe` failed: {state:?}");
+    };
+    assert_eq!(
+        failure.tail(),
+        ["threshold not met"],
+        "what it printed is its evidence"
+    );
+}
+
+#[tokio::test]
+async fn an_executor_node_that_exits_non_zero_saying_nothing_is_named_by_its_code_alone() {
+    // A probe that signals only through its exit code is the ordinary
+    // case; the node's failure names the code and stops there, with no
+    // colon promising a reason the executor never gave.
+    let bench = Bench::new();
+    write_executable_script(
+        &bench.worktree.join("probe.py"),
+        r#"#!/bin/sh
+exit 3
+"#,
+    );
+
+    let workflow = r#"
+name: executor-silent-failure
+nodes:
+  - id: probe
+    kind: executor
+    executor: probe
+"#;
+
+    let RunReport { terminal, state: _ } = bench
+        .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
+        .await;
+    match terminal {
+        RunTerminal::Paused { reason } => {
+            assert_eq!(reason, "node `probe` failed: executor `probe` exited 3");
         }
         other => panic!("expected the run to pause, got {other:?}"),
     }
@@ -323,7 +741,7 @@ nodes:
     timeout_seconds: 1
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_EXECUTOR)
         .await;
     match terminal {
@@ -349,7 +767,7 @@ nodes:
     executor: does-not-exist
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
     match terminal {
         RunTerminal::Paused { reason } => {
             assert!(
@@ -378,7 +796,7 @@ nodes:
     run: "ls {{run.worktree}}/forbidden-marker"
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_DENY)
         .await;
     match terminal {
@@ -411,7 +829,7 @@ nodes:
           on_failure: warn
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", CONFIG_WITH_DENY)
         .await;
     match terminal {
@@ -448,7 +866,7 @@ nodes:
         task_yaml("T001", "Task", "out.txt", "test -f forbidden-marker")
     ));
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, &fixture, CONFIG_WITH_DENY)
         .await;
     match terminal {
@@ -477,7 +895,7 @@ nodes:
     network: false
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
     assert_eq!(
         terminal,
         RunTerminal::Finished,
@@ -513,7 +931,7 @@ permissions:
     deny: ["*probe.py"]
 "#;
 
-    let (terminal, _) = bench
+    let RunReport { terminal, state: _ } = bench
         .run_with_config(workflow, "sessions: []", config)
         .await;
     match terminal {
@@ -542,7 +960,7 @@ nodes:
     run: "true"
 "#;
 
-    let (terminal, state) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state } = bench.run(workflow, "sessions: []").await;
     assert_eq!(terminal, RunTerminal::Finished);
 
     let jsonl = std::fs::read_to_string(bench.run_dir().join("events.jsonl")).unwrap();
@@ -550,7 +968,21 @@ nodes:
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(yunta_engine::derive(&round_tripped), state);
+    // The export carries the run's own close, which the report the run
+    // hands back was taken just before: what has to round-trip is every
+    // node's state, and then the close on top of it.
+    let exported = yunta_engine::derive(&round_tripped);
+    let states = |ledger: &yunta_core::events::NodeLedger| {
+        ledger
+            .iter()
+            .map(|(id, record)| (id.clone(), record.state.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(states(&exported.nodes), states(&state.nodes));
+    assert_eq!(
+        exported.run.closed().map(|(terminal, _)| *terminal),
+        Some(yunta_core::events::TerminalState::Done)
+    );
     assert!(
         jsonl.contains("\"kind\":\"run_finished\""),
         "the closing event itself must be included in the export"
@@ -569,7 +1001,7 @@ nodes:
     prompt: "plan it"
 "#;
 
-    let (terminal, _) = bench.run(workflow, "sessions: []").await;
+    let RunReport { terminal, state: _ } = bench.run(workflow, "sessions: []").await;
     match terminal {
         RunTerminal::Paused { .. } => {}
         other => panic!("expected the run to pause, got {other:?}"),

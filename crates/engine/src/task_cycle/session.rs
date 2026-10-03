@@ -3,13 +3,14 @@
 //! interrupted.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, AgentEvent, AgentOutcome, SessionRequest};
-use yunta_core::events::{EventPayload, TokenUsage};
+use yunta_core::events::{EventPayload, SessionEvent, TokenUsage};
+use yunta_core::port::{Adapter, SessionRequest};
 use yunta_core::AdapterError;
 use yunta_storage::StorageError;
 
@@ -22,6 +23,28 @@ use super::DispatchOutcome;
 /// (values never touch the log, nothing undeclared leaks).
 #[derive(Clone)]
 pub struct SessionSetup {
+    /// What no session of the run may write: what the project denies to
+    /// every run, and every test a person approved. Every session's fence
+    /// refuses it, whatever its scope.
+    pub denied: Vec<yunta_core::ScopeGlob>,
+    /// The directories every session of the run shares, which a session
+    /// that may write keeps writable beside its checkout.
+    pub shared_dirs: Vec<PathBuf>,
+    /// The plan a loop's tasks come from, which each of its task
+    /// sessions reads its place in. `None` for a node that works no
+    /// tasks.
+    pub plan: Option<std::sync::Arc<yunta_core::TasksFile>>,
+    /// The tests the plan's tasks are held to, when the run holds a spec:
+    /// each task's files are laid over the tree its work starts from and
+    /// denied to that work.
+    pub spec: Option<std::sync::Arc<yunta_core::SpecFile>>,
+    /// The suite the run measured green before any work, which holds
+    /// every task as a guard. `None` when it holds none.
+    pub suite: Option<String>,
+    /// The files a spec the run accepted before gave each task, which the
+    /// spec it holds now does not: work the task did under the earlier
+    /// spec carries them, and they leave it before the current ones go in.
+    pub superseded: std::collections::BTreeMap<yunta_core::TaskId, Vec<PathBuf>>,
     pub skills: Vec<PathBuf>,
     pub adapter_settings: serde_json::Map<String, serde_json::Value>,
     pub env: std::collections::HashMap<String, yunta_core::Secret<String>>,
@@ -39,55 +62,169 @@ pub struct SessionSetup {
     /// session's own scratch directory, so concurrent attempts of one
     /// node never write over each other's scaffolding.
     pub node: yunta_core::NodeId,
+    /// The runner this node resolved to: every task session of the node
+    /// runs on its model and, when it names one, its agent. The runner
+    /// is resolved once for the whole loop, so no attempt can drift onto
+    /// another model than the one the log recorded.
+    pub chosen: yunta_core::RunnerCandidate,
+    /// Where the files this node declares belong, when it declares any.
+    /// A task session writes the loop node's own artifacts, so it is
+    /// told the same directory the node closes on.
+    pub artifact_dir: Option<PathBuf>,
+    /// What makes this node's run tools mandatory rather than an offer:
+    /// a `coordination: blackboard` group whose semantics the engine
+    /// never emulates, an interpreted artifact that has no other way in,
+    /// or a loop whose task sessions read their task nowhere else. A
+    /// listener that fails to bind for such a node fails the node; for
+    /// any other node it degrades and the session runs on.
+    pub run_tools_required: Option<RunToolsNeed>,
+    /// The hook a CLI runs to ask the judge about one write. `None` in a
+    /// harness with no binary to run; an adapter whose fence needs it
+    /// and does not have it fails the session.
+    pub fence_hook: Option<yunta_core::fence::FenceHook>,
+    /// What a node's own session works to: the scope the node declared
+    /// plus every path a person granted it on this run, which fences the
+    /// session and is what its scope tools judge by. `None` for a node
+    /// that declares no scope, and for a read-only one, whose profile is
+    /// its whole ceiling. A task session works to its task's scope
+    /// instead.
+    pub node_scope: Option<Arc<crate::run_tools::NodeScopeAccess>>,
+}
+
+/// Why a node cannot proceed without the run tools.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RunToolsNeed {
+    /// The node is in a `coordination: blackboard` group.
+    Blackboard,
+    /// The node declares an interpreted artifact a session hands over
+    /// through the tools.
+    TypedArtifact(yunta_core::ArtifactKind),
+    /// The node is a loop: its task sessions read their task and check
+    /// their work through the tools, and nowhere else.
+    Task,
+}
+
+impl RunToolsNeed {
+    /// The reason `node` owes, if any — one answer for `check`, which
+    /// refuses a workflow no candidate adapter can serve, and for the
+    /// run, which refuses the session its adapter cannot: a member of a
+    /// blackboard group first, being the older reason, then a document it
+    /// declares, then the loop it is.
+    pub(crate) fn of(
+        node: &yunta_core::Node,
+        blackboard_member: bool,
+        declared: &[yunta_core::ArtifactSpec],
+    ) -> Option<Self> {
+        if blackboard_member {
+            return Some(RunToolsNeed::Blackboard);
+        }
+        if let Some(kind) = declared.iter().find_map(yunta_core::ArtifactSpec::kind) {
+            return Some(RunToolsNeed::TypedArtifact(kind));
+        }
+        matches!(node.kind, yunta_core::NodeKind::Loop { .. }).then_some(RunToolsNeed::Task)
+    }
+
+    /// The declaration that asks for them, as the workflow spells it.
+    pub(crate) fn declaration(&self) -> String {
+        match self {
+            RunToolsNeed::Blackboard => "coordination: blackboard".to_string(),
+            RunToolsNeed::TypedArtifact(kind) => format!("artifacts.produces: [{kind}]"),
+            RunToolsNeed::Task => "kind: loop".to_string(),
+        }
+    }
 }
 
 impl SessionSetup {
-    /// A setup that carries nothing but the node its sessions belong
-    /// to: no skills, no settings, no secrets and no per-run tools.
-    pub fn bare(node: yunta_core::NodeId) -> Self {
+    /// A setup that carries nothing but the run it belongs to, the node
+    /// its sessions are of and the runner they run on: no skills, no
+    /// settings, no secrets, no per-run tools, no declared files and no
+    /// denied paths.
+    ///
+    /// The run directory is not among what a bare setup leaves out: a
+    /// session writes its working files under it, and a path that names
+    /// nowhere is one every such write resolves against the current
+    /// directory instead.
+    pub fn bare(
+        run_dir: PathBuf,
+        node: yunta_core::NodeId,
+        chosen: yunta_core::RunnerCandidate,
+    ) -> Self {
         Self {
+            denied: Vec::new(),
+            shared_dirs: Vec::new(),
+            plan: None,
+            spec: None,
+            suite: None,
+            superseded: Default::default(),
             skills: Vec::new(),
             adapter_settings: serde_json::Map::new(),
             env: std::collections::HashMap::new(),
             run_tools: None,
-            run_dir: PathBuf::new(),
+            fence_hook: None,
+            run_dir,
             node,
+            chosen,
+            artifact_dir: None,
+            run_tools_required: None,
+            node_scope: None,
         }
     }
 
-    /// The env a session may see: declared names, present values.
+    /// The env a session may see: each shared directory under its
+    /// variable, and the secret names the config declares, bound to
+    /// whatever `source` has for them. A name nothing binds simply does
+    /// not reach the session — a secret the run cannot produce is
+    /// absent, never empty.
     pub fn secrets_env(
         config: &yunta_core::ConfigLayer,
+        source: Option<&dyn yunta_core::SecretSource>,
     ) -> std::collections::HashMap<String, yunta_core::Secret<String>> {
-        config
-            .secrets
-            .iter()
-            .filter_map(|name| {
-                std::env::var(name)
-                    .ok()
-                    .map(|value| (name.clone(), yunta_core::Secret::from(value)))
-            })
-            .collect()
+        let shared = config
+            .shared_dirs()
+            .map(|(var, dir)| (var.to_string(), dir.display().to_string().into()));
+        let secrets = source.into_iter().flat_map(|source| {
+            config
+                .secrets
+                .iter()
+                .filter_map(|name| source.get(name).map(|value| (name.clone(), value)))
+        });
+        shared.chain(secrets).collect()
     }
 }
 
-/// What a session dispatch needs from its surrounding run,
+/// What a task cycle needs from its surrounding run,
 /// abstracted so `run_task` stays callable without a full run context
-/// (its own integration tests): append the session's audit events, and
+/// (its own integration tests): append what the cycle observes — each
+/// session's audit events, and each check the moment it runs — and
 /// expose the process registry for pgid bookkeeping. `RunCtx` is the one
 /// real implementor.
 #[async_trait::async_trait]
 pub trait SessionObserver: Sync {
-    /// Appends one session audit event to the run's log. The storage
-    /// cause travels back on failure so the dispatch fails the node
-    /// rather than dropping the event — a lost audit event thins the
-    /// trail `status` and replay read.
-    async fn emit_session_event(
+    /// Appends one event to the run's log and returns the sequence
+    /// number the log gave it. The storage cause travels back on failure
+    /// so the cycle fails the node rather than dropping the event — a
+    /// lost event thins the trail `status`, replay and a task session's
+    /// own tools read.
+    async fn record(
         &self,
         node_id: &yunta_core::NodeId,
         payload: EventPayload,
-    ) -> Result<(), StorageError>;
+    ) -> Result<yunta_core::Seq, StorageError>;
+    /// Keeps what a command printed where the run keeps every object it
+    /// holds, with the run's secrets taken out, and answers the hash it
+    /// is named by. What a cycle's commands print is the run's, never
+    /// the terminal's.
+    async fn keep_output(
+        &self,
+        output: &crate::process::CommandOutput,
+    ) -> std::io::Result<yunta_core::ContentHash>;
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry>;
+    /// Waits until the host the run works on has stayed awake a while
+    /// since it last slept — `false` when `cancel` fired first. An
+    /// observer that watches no host answers at once.
+    async fn host_settled(&self, _cancel: &CancellationToken) -> Result<bool, StorageError> {
+        Ok(true)
+    }
 }
 
 /// How [`dispatch_session`] failed: the adapter refused, or a session
@@ -102,31 +239,10 @@ pub enum DispatchError {
     Audit(#[source] StorageError),
 }
 
-/// The record of a session that opened holding none of the run tools
-/// the engine gave it a server for.
-///
-/// The server is up and the endpoint reached the session; what did not
-/// survive is the client's own reading of the tool list, which neither
-/// side can work around from here — every tool this node needs to hand
-/// its documents over is simply absent. It goes on the log as the
-/// session opens rather than at the close it dooms, so the cause sits
-/// next to the moment it happened instead of one failed close away,
-/// where the only visible symptom is a document nobody delivered.
-fn run_tools_unreachable(adapter: &yunta_core::AdapterId) -> EventPayload {
-    EventPayload::CapabilityDegraded(yunta_core::events::CapabilityDegradedPayload {
-        capability: yunta_core::Capability::RunTools,
-        adapter: adapter.clone(),
-        policy_applied: "the session runs on — its per-run tool server is mounted and the \
-                         session holds none of its tools, so this node ends owing every \
-                         document it declares"
-            .to_string(),
-    })
-}
-
 /// The only shape of a note the log ever carries: its size and
 /// a content-hash prefix — enough to audit a claimed note against,
 /// never enough to reconstruct or leak it.
-fn note_summary(text: &str) -> String {
+pub(super) fn note_summary(text: &str) -> String {
     let hash = yunta_core::sha256_hex(text.as_bytes()).to_string();
     format!("{} bytes, sha256 {}", text.len(), &hash[..12])
 }
@@ -144,27 +260,109 @@ const INTERRUPT_GRACE_PERIOD: Duration = Duration::from_millis(200);
 ///
 /// The adapter passes `request.budget` along if its CLI supports it,
 /// but enforcement is the engine's job either way — this counts `Usage`
-/// and races the wall-clock deadline independent of that, and cuts the
+/// and races the timeout — time the host is awake — independent of
+/// that, and cuts the
 /// session with `interrupt` → grace → `kill` when either budget is
 /// exceeded.
+/// What one session left behind: how it ended, what it spent, and how
+/// much of its writes its adapter's fence covered — a cache of one
+/// invocation of what the log already carries.
+pub(crate) struct Dispatched {
+    pub outcome: DispatchOutcome,
+    pub tokens: TokenUsage,
+    pub fence: Option<yunta_core::fence::Coverage>,
+    /// The session the stream opened, once it did: what the next
+    /// attempt resumes when something it asked for changes.
+    pub session: Option<yunta_core::SessionId>,
+}
+
+/// How a session opens: the task it works, if any, and the conversation
+/// it continues, if any.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Opening<'a> {
+    pub(crate) task: Option<&'a yunta_core::TaskId>,
+    pub(crate) resume: Option<Resume<'a>>,
+}
+
+/// A conversation to pick back up, and what a fresh session is told
+/// instead when the adapter cannot pick it up — `None` when there is no
+/// such way back and not resuming is the caller's failure to report.
+#[derive(Clone, Copy)]
+pub(crate) struct Resume<'a> {
+    pub(crate) session: &'a yunta_core::SessionId,
+    pub(crate) fresh_prompt: Option<&'a str>,
+}
+
 pub(crate) async fn dispatch_session(
     adapter: &dyn Adapter,
     request: SessionRequest,
     cancel: &CancellationToken,
     audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
-    resume: Option<&yunta_core::SessionId>,
-) -> Result<(DispatchOutcome, TokenUsage), DispatchError> {
+    opening: Opening<'_>,
+) -> Result<Dispatched, DispatchError> {
+    // A host that just woke may sleep again within the minute, and a
+    // session opened then hangs until its timeout: none opens until the
+    // host has stayed awake.
+    if let Some((observer, _)) = audit {
+        if !observer
+            .host_settled(cancel)
+            .await
+            .map_err(DispatchError::Audit)?
+        {
+            return Ok(Dispatched {
+                outcome: DispatchOutcome::Cancelled,
+                tokens: TokenUsage::default(),
+                fence: None,
+                session: None,
+            });
+        }
+    }
     let budget = request.budget;
     let requested_agent = request.agent.clone();
     // Whether this session was handed a per-run tool server at all: a
     // session that holds none of those tools only means something went
     // wrong if it was given a server to hold them from.
     let run_tools_offered = request.run_tools_endpoint.is_some();
-    // `Some` continues an interrupted conversation instead of
-    // opening a new one — the caller already verified the capability.
-    let mut session = match resume {
-        Some(session_id) => adapter.resume(session_id, request).await?,
-        None => adapter.spawn(request).await?,
+    // A resume continues a conversation instead of opening a new one. One
+    // the adapter cannot pick up — it declares no resume, or its CLI
+    // refuses this one — opens fresh on what the caller gave for that, and
+    // the log says so; with nothing given, the caller already verified
+    // the capability and not resuming is its failure to report.
+    // What the adapter staged for this session is taken back once it
+    // ends, which needs the request the opening consumes.
+    let staging = request.clone();
+    let (mut session, continues) = match opening.resume {
+        None => (adapter.spawn(request).await?, None),
+        Some(resume) => {
+            let can_resume = adapter
+                .capabilities()
+                .declares(yunta_core::Capability::ResumeSession);
+            let resumed = match (resume.fresh_prompt, can_resume) {
+                (Some(_), false) => None,
+                _ => Some(adapter.resume(resume.session, request.clone()).await),
+            };
+            match resumed {
+                Some(Ok(session)) => (session, Some(resume.session)),
+                Some(Err(error)) if resume.fresh_prompt.is_none() => return Err(error.into()),
+                _ => {
+                    let brief = resume.fresh_prompt.unwrap_or_default();
+                    crate::task_cycle::stream::emit_audit(
+                        audit,
+                        EventPayload::Session(SessionEvent::CapabilityDegraded(
+                            yunta_core::events::CapabilityDegradedPayload::new(
+                                yunta_core::Capability::ResumeSession,
+                                adapter.id().clone(),
+                                yunta_core::events::Policy::FreshSession,
+                            ),
+                        )),
+                    )
+                    .await
+                    .map_err(DispatchError::Audit)?;
+                    let fresh = crate::run::session_plan::with_prompt(request, brief.to_string());
+                    (adapter.spawn(fresh).await?, None)
+                }
+            }
+        }
     };
     // On the map for a separate `yunta cancel` while it lives.
     let _pgid_registration = crate::process_registry::register(
@@ -178,6 +376,8 @@ pub(crate) async fn dispatch_session(
         .timeout
         .map(|timeout| (tokio::time::Instant::now() + timeout, timeout));
     let mut tokens = TokenUsage::default();
+    let mut opened: Option<yunta_core::SessionId> = None;
+    let mut fence: Option<yunta_core::fence::Coverage> = None;
     let mut terminal = None;
     let mut cancelled = false;
 
@@ -198,7 +398,10 @@ pub(crate) async fn dispatch_session(
                             Ok(next) => next,
                             Err(_) => {
                                 terminal = Some(DispatchOutcome::BudgetExceeded {
-                                    reason: format!("exceeded timeout of {timeout:?}"),
+                                    reason: format!(
+                                        "exceeded timeout of {}",
+                                        yunta_core::units::duration(timeout)
+                                    ),
                                 });
                                 break;
                             }
@@ -220,15 +423,21 @@ pub(crate) async fn dispatch_session(
 
             let Some(event) = next else { break };
 
-            if let Some(outcome) = apply_agent_event(AgentEventCtx {
-                event,
-                adapter,
-                requested_agent: &requested_agent,
-                run_tools_offered,
-                max_tokens: budget.max_tokens,
-                audit,
-                tokens: &mut tokens,
-            })
+            if let Some(outcome) = crate::task_cycle::stream::apply_agent_event(
+                crate::task_cycle::stream::AgentEventCtx {
+                    event,
+                    adapter,
+                    requested_agent: &requested_agent,
+                    run_tools_offered,
+                    max_tokens: budget.max_tokens,
+                    audit,
+                    tokens: &mut tokens,
+                    opened: &mut opened,
+                    fence: &mut fence,
+                    task: opening.task,
+                    continues,
+                },
+            )
             .await?
             {
                 terminal = Some(outcome);
@@ -245,160 +454,30 @@ pub(crate) async fn dispatch_session(
         tokio::time::sleep(INTERRUPT_GRACE_PERIOD).await;
         let _ = session.kill().await;
     }
+    adapter.unstage(&staging)?;
 
     if cancelled {
-        return Ok((DispatchOutcome::Cancelled, tokens));
+        return Ok(Dispatched {
+            outcome: DispatchOutcome::Cancelled,
+            tokens,
+            fence,
+            session: opened,
+        });
     }
 
-    Ok((terminal.unwrap_or(DispatchOutcome::Crashed), tokens))
-}
-
-/// One streamed `AgentEvent` and the dispatch state [`apply_agent_event`]
-/// folds it into — grouped so the read loop hands them over as a unit.
-struct AgentEventCtx<'a> {
-    event: AgentEvent,
-    adapter: &'a dyn Adapter,
-    requested_agent: &'a Option<yunta_core::AgentName>,
-    /// Whether the engine gave this session a per-run tool server.
-    run_tools_offered: bool,
-    max_tokens: Option<u64>,
-    audit: Option<(&'a dyn SessionObserver, &'a yunta_core::NodeId)>,
-    tokens: &'a mut TokenUsage,
-}
-
-/// Appends one streamed event to the session's audit trail
-/// (`agent_session_opened`/`agent_message`, emitted as the stream arrives so
-/// a concurrent `status` sees the live session) and folds a `Usage` event
-/// into the running token total. Returns the terminal outcome that ends the
-/// stream — `Completed`, `Failed`, or a budget stop — or `None` to keep
-/// reading. A failed audit append is never swallowed: its storage cause
-/// ends the dispatch, so the node fails with the cause rather than the trail
-/// losing an event nobody can recover.
-async fn apply_agent_event(
-    ctx: AgentEventCtx<'_>,
-) -> Result<Option<DispatchOutcome>, DispatchError> {
-    let AgentEventCtx {
-        event,
-        adapter,
-        requested_agent,
-        run_tools_offered,
-        max_tokens,
-        audit,
+    let outcome = match terminal {
+        Some(outcome) => outcome,
+        // Only the one that fell silent is asked: a session that closed
+        // its turn said everything it had to say, and asking it would
+        // cost a kill and a wait for nothing.
+        None => DispatchOutcome::Crashed {
+            exit: session.exit().await?,
+        },
+    };
+    Ok(Dispatched {
+        outcome,
         tokens,
-    } = ctx;
-    match event {
-        AgentEvent::SessionOpened { session_id, model } => {
-            emit_audit(
-                audit,
-                EventPayload::AgentSessionOpened(yunta_core::events::AgentSessionOpenedPayload {
-                    session_id,
-                    agent: requested_agent.clone(),
-                    model,
-                    capabilities: adapter.capabilities(),
-                }),
-            )
-            .await
-            .map_err(DispatchError::Audit)?;
-        }
-        AgentEvent::RunToolsMounted { count } => {
-            if run_tools_offered && count == 0 {
-                emit_audit(audit, run_tools_unreachable(adapter.id()))
-                    .await
-                    .map_err(DispatchError::Audit)?;
-            }
-        }
-        AgentEvent::ToolUse {
-            name,
-            target_digest,
-        } => {
-            emit_audit(
-                audit,
-                EventPayload::AgentMessage(yunta_core::events::AgentMessagePayload {
-                    message_type: yunta_core::events::AgentMessageType::ToolUse,
-                    tool_name: Some(name),
-                    target_digest: Some(target_digest),
-                    input_tokens: None,
-                    output_tokens: None,
-                    cached_input_tokens: None,
-                    text: None,
-                }),
-            )
-            .await
-            .map_err(DispatchError::Audit)?;
-        }
-        AgentEvent::Note { text } => {
-            emit_audit(
-                audit,
-                EventPayload::AgentMessage(yunta_core::events::AgentMessagePayload {
-                    message_type: yunta_core::events::AgentMessageType::Note,
-                    tool_name: None,
-                    target_digest: None,
-                    input_tokens: None,
-                    output_tokens: None,
-                    cached_input_tokens: None,
-                    // A mechanical size+digest summary, never the content —
-                    // the log must not be able to carry a secret the note
-                    // contained.
-                    text: Some(note_summary(&text)),
-                }),
-            )
-            .await
-            .map_err(DispatchError::Audit)?;
-        }
-        AgentEvent::Usage {
-            input_tokens,
-            output_tokens,
-            cached_input_tokens,
-        } => {
-            emit_audit(
-                audit,
-                EventPayload::AgentMessage(yunta_core::events::AgentMessagePayload {
-                    message_type: yunta_core::events::AgentMessageType::Usage,
-                    tool_name: None,
-                    target_digest: None,
-                    input_tokens: Some(input_tokens),
-                    output_tokens: Some(output_tokens),
-                    cached_input_tokens,
-                    text: None,
-                }),
-            )
-            .await
-            .map_err(DispatchError::Audit)?;
-            tokens.input += input_tokens;
-            tokens.output += output_tokens;
-            if let Some(cached) = cached_input_tokens {
-                tokens.cached = Some(tokens.cached.unwrap_or(0) + cached);
-            }
-            let tokens_used = tokens.total();
-            if let Some(max_tokens) = max_tokens {
-                if tokens_used > max_tokens {
-                    return Ok(Some(DispatchOutcome::BudgetExceeded {
-                        reason: format!("exceeded max_tokens {max_tokens} ({tokens_used} used)"),
-                    }));
-                }
-            }
-        }
-        AgentEvent::Completed {
-            result: AgentOutcome { summary },
-        } => return Ok(Some(DispatchOutcome::Completed { summary })),
-        AgentEvent::Failed { error, retryable } => {
-            return Ok(Some(DispatchOutcome::Failed {
-                message: error.message,
-                retryable,
-            }))
-        }
-    }
-    Ok(None)
-}
-
-/// Appends one event to the session's audit trail, or does nothing when the
-/// dispatch runs without an observer (a standalone `run_task` in a test).
-async fn emit_audit(
-    audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
-    payload: EventPayload,
-) -> Result<(), StorageError> {
-    match audit {
-        Some((observer, node_id)) => observer.emit_session_event(node_id, payload).await,
-        None => Ok(()),
-    }
+        fence,
+        session: opened,
+    })
 }

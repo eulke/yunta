@@ -1,0 +1,28 @@
+[package]
+name = "yunta-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The words, marks and blocks Yunta tells a reader things in, and how they are drawn."
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[features]
+# `--color`'s values parse straight into the policy's own choice.
+clap = ["dep:clap"]
+
+[dependencies]
+yunta-core.workspace = true
+serde = { workspace = true, features = ["derive"] }
+unicode-width.workspace = true
+clap = { workspace = true, features = ["derive"], optional = true }
+
+[dev-dependencies]
+yunta-core = { workspace = true, features = ["testkit"] }
+yunta-testkit-core.workspace = true

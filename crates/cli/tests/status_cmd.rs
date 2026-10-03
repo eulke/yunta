@@ -20,7 +20,7 @@ nodes:
     kind: bash
     run: |
       printf 'tasks:\n  - id: T001\n    title: ""\n    scope: []\n    criteria: []\n' > {{node.artifacts}}/tasks.yaml
-      printf 'findings:\n  - id: F1\n    severity: minor\n    title: ""\n    location: ""\n    detail: ""\n' > {{node.artifacts}}/findings.yaml
+      printf 'findings:\n  - id: F1\n    severity: minor\n    title: ""\n    location: src/lib.rs\n    detail: ""\n' > {{node.artifacts}}/findings.yaml
     artifacts:
       produces: [tasks, findings]
 "#;
@@ -80,11 +80,7 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let text = stdout(&status);
     assert!(
-        text.lines().any(|line| line == "failures:"),
-        "a failed run says what failed: {text}"
-    );
-    assert!(
-        text.lines().any(|line| line.trim() == "draft:"),
+        text.lines().any(|line| line.trim() == "draft"),
         "the failing node heads its own detail: {text}"
     );
 
@@ -130,19 +126,52 @@ fn status_attributes_each_problem_to_the_document_it_came_from() {
         "a task with an empty `title` says so: {tasks_problems:?}"
     );
     assert!(
-        findings_problems.iter().any(|p| p.contains("location")),
-        "a finding with an empty `location` says so: {findings_problems:?}"
+        findings_problems.iter().any(|p| p.contains("detail")),
+        "a finding with an empty `detail` says so: {findings_problems:?}"
     );
 
-    // The node list above stays one line per node, and that one line
-    // still names both documents.
+    // The node list above stays one line per node, cut to the line: it
+    // opens with the first document, and the block under it names every
+    // one.
     let node_line = text
         .lines()
-        .find(|line| line.trim_start().starts_with("draft: failed — "))
+        .find(|line| line.contains("failed") && line.split_whitespace().any(|word| word == "draft"))
         .unwrap_or_else(|| panic!("no one-line verdict for `draft` in:\n{text}"));
     assert!(
-        node_line.contains(&staged("tasks.yaml")) && node_line.contains(&staged("findings.yaml")),
-        "the collapsed line still names every document: {node_line}"
+        node_line.contains(&staged("tasks.yaml")),
+        "the collapsed line names the first document: {node_line}"
+    );
+}
+
+#[test]
+fn every_level_of_a_failure_block_hangs_one_step_under_the_line_above_it() {
+    // Three levels deep: the node that failed, each document that node
+    // named, and each problem of that document. The steps come from one value, so a
+    // reader follows the nesting by eye instead of measuring it — and a
+    // level that started spelling its own margin would show up here as a
+    // ladder with an uneven rung.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let home = root.path().join("state");
+    let run_id = run_two_documents(&repo, &home);
+
+    let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    let mut lines = text.lines().skip_while(|line| line.trim() != "draft");
+    let node = lines.next().expect("the node that failed heads its detail");
+    let named = staged("tasks.yaml");
+    let document = lines
+        .find(|line| line.trim_start().starts_with(&named))
+        .expect("a document the node did not close");
+    let problem = lines.next().expect("the document's problems");
+
+    let step = indent_of(node);
+    assert!(step > 0, "the node hangs under the page: {text}");
+    assert_eq!(indent_of(document), step * 2, "{text}");
+    assert_eq!(
+        indent_of(problem),
+        step * 3,
+        "one step per level, the same step every time: {text}"
     );
 }
 
@@ -207,8 +236,8 @@ fn status_json_carries_the_document_each_problem_belongs_to() {
     assert!(
         findings_problems
             .iter()
-            .any(|d| d["problem"] == "rule" && d["code"] == "empty-location"),
-        "the finding has an empty `location`: {state:#}"
+            .any(|d| d["problem"] == "rule" && d["code"] == "empty-detail"),
+        "the finding has an empty `detail`: {state:#}"
     );
 }
 
@@ -261,7 +290,7 @@ fn status_attributes_an_artifact_no_run_holds_to_that_artifact() {
     let status = yunta_in!(&repo, &home, &["status", &run_id]);
     let text = stdout(&status);
     assert!(
-        text.lines().any(|line| line.trim() == "compose:"),
+        text.lines().any(|line| line.trim() == "compose"),
         "the failing node heads its own detail: {text}"
     );
     assert!(
@@ -298,4 +327,167 @@ fn status_json_publishes_an_unheld_artifact_under_its_stable_code() {
     assert!(entry["path"].is_null(), "{state:#}");
     assert!(entry["kind"].is_null(), "{state:#}");
     assert!(entry["file"].is_null(), "{state:#}");
+}
+
+/// The workflow the one-document test drives: two nodes, the second
+/// depending on the first, so a run of it reaches a stop with nodes and
+/// tasks to report.
+const TWO_NODES: &str = r#"
+name: two-nodes
+nodes:
+  - id: touch
+    kind: bash
+    run: "echo made > made.txt"
+  - id: verify
+    kind: bash
+    depends_on: [touch]
+    run: "test -f made.txt"
+"#;
+
+#[test]
+fn run_json_and_status_json_are_one_document() {
+    // `yunta run --json` and `yunta status --json` answer the same
+    // question about the same run, and answer it with the same document:
+    // one derivation off the run's own log, so a program that learned to
+    // read one reads the other.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(&repo.join("wf.yaml"), TWO_NODES);
+
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml", "--json"]);
+    assert!(run.status.success(), "{}", stdout(&run));
+    let from_run: serde_json::Value = serde_json::from_str(&stdout(&run))
+        .unwrap_or_else(|e| panic!("run --json emits JSON: {e}\n{}", stdout(&run)));
+    let run_id = from_run["run_id"].as_str().expect("the run's id");
+
+    let status = yunta_in!(&repo, &home, &["status", run_id, "--json"]);
+    let from_status: serde_json::Value = serde_json::from_str(&stdout(&status))
+        .unwrap_or_else(|e| panic!("status --json emits JSON: {e}"));
+
+    assert_eq!(
+        from_run, from_status,
+        "one document, two commands:\n{from_run:#}\n{from_status:#}"
+    );
+    assert_eq!(from_run["outcome"], "finished", "{from_run:#}");
+}
+
+// --- a session that never opened -----------------------------------------
+
+/// A project whose one runner is a `codex` that refuses whatever it is
+/// given: it writes the refusal on stderr and exits before its first
+/// line, which is what a CLI rejecting the configuration this engine
+/// writes it actually does.
+fn run_a_dying_session(root: &Path, repo: &Path, home: &Path) -> String {
+    let said = root.join("stderr.txt");
+    write(&said, "url is not supported for stdio\n");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        &format!(
+            "runners:\n  executor:\n    - {{ adapter: codex, model: codex-model }}\nadapters:\n  \
+             codex:\n    binary: {stub}\nsecrets: [CODEX_STUB_STDERR_FILE, CODEX_STUB_EXIT]\n",
+            stub = yunta_testkit_core::stubs::codex().display()
+        ),
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: dying\nnodes:\n  - id: work\n    kind: prompt\n    runner: executor\n    prompt: \
+         \"Do the thing.\"\n",
+    );
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-q", "-m", "project"]);
+
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, repo, home);
+    let run = command
+        .args(["run", "wf.yaml"])
+        .env("CODEX_STUB_STDERR_FILE", &said)
+        .env("CODEX_STUB_EXIT", "2")
+        .output()
+        .expect("the yunta binary runs");
+    run_id_from(&run)
+}
+
+#[test]
+fn status_prints_the_stderr_a_dead_session_left() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    let run_id = run_a_dying_session(root.path(), &repo, &home);
+
+    let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    assert!(
+        text.contains("session `codex` exited with code 2 before any terminal event"),
+        "the node's own line says how the process went: {text}"
+    );
+    assert!(
+        text.contains("url is not supported for stdio"),
+        "and the page shows what the CLI said on its way out: {text}"
+    );
+}
+
+#[test]
+fn status_json_publishes_a_session_death_on_its_node() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    let run_id = run_a_dying_session(root.path(), &repo, &home);
+
+    let document: serde_json::Value = serde_json::from_str(&stdout(&yunta_in!(
+        &repo,
+        &home,
+        &["status", &run_id, "--json"]
+    )))
+    .expect("a JSON document");
+    let node = document["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.first())
+        .expect("the one node");
+    assert_eq!(node["session_death"]["adapter"], "codex", "{document:#}");
+    assert_eq!(node["session_death"]["exit"]["end"], "code", "{document:#}");
+    assert_eq!(node["session_death"]["exit"]["code"], 2, "{document:#}");
+    assert_eq!(
+        node["session_death"]["exit"]["stderr_tail"][0], "url is not supported for stdio",
+        "{document:#}"
+    );
+    // A dead session names no document, so it is not a diagnostic.
+    assert!(document.get("diagnostics").is_none(), "{document:#}");
+}
+
+/// A node allowed only `src/**` that writes two files outside it.
+const WRITES_OUTSIDE: &str = r#"
+name: writes-outside
+nodes:
+  - id: fix
+    kind: bash
+    scope: ["src/**"]
+    run: "echo a > Cargo.toml && echo b > clippy.toml"
+"#;
+
+#[test]
+fn status_lists_each_path_a_node_wrote_outside_its_scope() {
+    let root = tempfile::tempdir().unwrap();
+    let (repo, home) = (root.path().join("repo"), root.path().join("state"));
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    write(&repo.join("wf.yaml"), WRITES_OUTSIDE);
+    let run_id = run_id_from(&yunta_in!(&repo, &home, &["run", "wf.yaml"]));
+
+    let text = stdout(&yunta_in!(&repo, &home, &["status", &run_id]));
+    let block: Vec<&str> = text
+        .lines()
+        .skip_while(|line| line.trim() != "fix")
+        .collect();
+    for path in ["Cargo.toml", "clippy.toml"] {
+        assert!(
+            block.iter().any(|line| line.trim() == path),
+            "every path outside the scope on a line of its own: {text}"
+        );
+    }
 }

@@ -1,10 +1,17 @@
+//! The YAML the design corpus publishes, read by the types that consume
+//! it: the reference config, the reference workflow and the composed and
+//! promotion workflows beside it.
+//!
+//! Each one parses whole and serializes back to the same value, so an
+//! example a reader copies is one the binary accepts.
+
 // --- The reference YAMLs are real fixtures -----------------------------------
 
 #[test]
 fn the_reference_config_parses_and_round_trips() {
     let yaml = include_str!("fixtures/reference-config.yaml");
     let layer: yunta_core::ConfigLayer =
-        serde_norway::from_str(yaml).expect("the reference config must parse whole");
+        yunta_core::yaml::parse(yaml).expect("the reference config must parse whole");
 
     assert_eq!(layer.version, Some(1));
     assert_eq!(
@@ -32,6 +39,10 @@ fn the_reference_config_parses_and_round_trips() {
     );
     assert_eq!(layer.secrets, vec!["GITHUB_TOKEN"]);
     assert_eq!(
+        layer.command(&"lint".into()),
+        Some("cargo clippy --workspace -- -D warnings")
+    );
+    assert_eq!(
         layer.adapters.as_ref().unwrap()["codex"]
             .adapter_settings
             .as_ref()
@@ -41,8 +52,8 @@ fn the_reference_config_parses_and_round_trips() {
 
     // Round-trip at the serde-tree level: what parses serializes back to
     // the same value.
-    let reserialized = serde_norway::to_string(&layer).unwrap();
-    let reparsed: yunta_core::ConfigLayer = serde_norway::from_str(&reserialized).unwrap();
+    let reserialized = yunta_core::yaml::to_string(&layer).unwrap();
+    let reparsed: yunta_core::ConfigLayer = yunta_core::yaml::parse(&reserialized).unwrap();
     assert_eq!(layer, reparsed);
 }
 
@@ -50,15 +61,21 @@ fn the_reference_config_parses_and_round_trips() {
 fn the_reference_workflow_parses_and_round_trips() {
     let yaml = include_str!("fixtures/build-feature.yaml");
     let workflow: yunta_core::Workflow =
-        serde_norway::from_str(yaml).expect("build-feature.yaml must parse whole");
+        yunta_core::yaml::parse(yaml).expect("build-feature.yaml must parse whole");
 
-    assert_eq!(workflow.yunta_schema.as_deref(), Some(">=1 <2"));
-    assert_eq!(workflow.nodes.len(), 11);
+    assert_eq!(
+        workflow
+            .yunta_schema
+            .as_ref()
+            .map(yunta_core::SchemaRange::as_str),
+        Some(">=1 <2")
+    );
+    assert_eq!(workflow.nodes.len(), 12);
     assert_eq!(workflow.on_finish.len(), 2);
     let grill = &workflow.nodes[0];
     assert_eq!(grill.skills, vec!["grill"]);
-    assert!(grill.interactive);
-    let implement = &workflow.nodes[3];
+    assert!(grill.asks(), "the reference workflow's first node asks");
+    let implement = &workflow.nodes[4];
     assert!(implement.invariant);
     let review = workflow
         .nodes
@@ -67,8 +84,8 @@ fn the_reference_workflow_parses_and_round_trips() {
         .unwrap();
     assert_eq!(review.runners, vec!["reviewer", "reviewer-alt"]);
 
-    let reserialized = serde_norway::to_string(&workflow).unwrap();
-    let reparsed: yunta_core::Workflow = serde_norway::from_str(&reserialized).unwrap();
+    let reserialized = yunta_core::yaml::to_string(&workflow).unwrap();
+    let reparsed: yunta_core::Workflow = yunta_core::yaml::parse(&reserialized).unwrap();
     assert_eq!(workflow, reparsed);
 }
 
@@ -76,7 +93,7 @@ fn the_reference_workflow_parses_and_round_trips() {
 fn the_composed_reference_workflow_parses_and_round_trips() {
     let yaml = include_str!("fixtures/release-cycle.yaml");
     let workflow: yunta_core::Workflow =
-        serde_norway::from_str(yaml).expect("release-cycle.yaml must parse whole");
+        yunta_core::yaml::parse(yaml).expect("release-cycle.yaml must parse whole");
 
     assert_eq!(workflow.nodes.len(), 5);
     let design = &workflow.nodes[0];
@@ -94,7 +111,7 @@ fn the_composed_reference_workflow_parses_and_round_trips() {
         inputs.get("rfc").map(String::as_str),
         Some("{{inputs.rfc}}")
     );
-    assert_eq!(*isolation, yunta_core::WorkflowIsolation::Worktree);
+    assert_eq!(*isolation, yunta_core::Isolation::Worktree);
 
     // `qa` declares no `inputs:` at all — the field is optional.
     let qa = workflow
@@ -121,8 +138,8 @@ fn the_composed_reference_workflow_parses_and_round_trips() {
         .iter()
         .all(|child| matches!(child.kind, yunta_core::NodeKind::Workflow { .. })));
 
-    let reserialized = serde_norway::to_string(&workflow).unwrap();
-    let reparsed: yunta_core::Workflow = serde_norway::from_str(&reserialized).unwrap();
+    let reserialized = yunta_core::yaml::to_string(&workflow).unwrap();
+    let reparsed: yunta_core::Workflow = yunta_core::yaml::parse(&reserialized).unwrap();
     assert_eq!(workflow, reparsed);
 }
 
@@ -133,7 +150,7 @@ fn the_promote_knowledge_reference_workflow_parses_and_round_trips() {
     // workflow, no engine mechanism of its own.
     let yaml = include_str!("fixtures/promote-knowledge.yaml");
     let workflow: yunta_core::Workflow =
-        serde_norway::from_str(yaml).expect("promote-knowledge.yaml must parse whole");
+        yunta_core::yaml::parse(yaml).expect("promote-knowledge.yaml must parse whole");
 
     assert_eq!(workflow.nodes.len(), 3);
     assert!(workflow.inputs.contains_key("candidates"));
@@ -163,13 +180,33 @@ fn the_promote_knowledge_reference_workflow_parses_and_round_trips() {
         vec![yunta_core::NodeId::from("approve-promotion")]
     );
 
-    let reserialized = serde_norway::to_string(&workflow).unwrap();
-    let reparsed: yunta_core::Workflow = serde_norway::from_str(&reserialized).unwrap();
+    let reserialized = yunta_core::yaml::to_string(&workflow).unwrap();
+    let reparsed: yunta_core::Workflow = yunta_core::yaml::parse(&reserialized).unwrap();
     assert_eq!(workflow, reparsed);
 }
 
 #[test]
-fn workflow_node_isolation_inherit_parses() {
+fn workflow_node_isolation_none_parses() {
+    let yaml = r#"
+name: phased
+nodes:
+  - id: phase-1
+    kind: workflow
+    use: implement-phase
+    isolation: none
+    scope: ["src/a/**"]
+"#;
+    let workflow: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
+    let yunta_core::NodeKind::Workflow { isolation, .. } = &workflow.nodes[0].kind else {
+        panic!("expected a workflow node");
+    };
+    assert_eq!(*isolation, yunta_core::Isolation::None);
+}
+
+/// One word for the tree a unit does not isolate, at every level: the
+/// retired one does not parse, and what it says instead is in the error.
+#[test]
+fn isolation_inherit_no_longer_parses_and_the_error_names_none() {
     let yaml = r#"
 name: phased
 nodes:
@@ -177,13 +214,14 @@ nodes:
     kind: workflow
     use: implement-phase
     isolation: inherit
-    scope: ["src/a/**"]
 "#;
-    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
-    let yunta_core::NodeKind::Workflow { isolation, .. } = &workflow.nodes[0].kind else {
-        panic!("expected a workflow node");
-    };
-    assert_eq!(*isolation, yunta_core::WorkflowIsolation::Inherit);
+    let error = yunta_core::yaml::parse::<yunta_core::Workflow>(yaml)
+        .expect_err("a retired word is author input this reader refuses")
+        .to_string();
+    assert!(
+        error.contains("`inherit`") && error.contains("`none`"),
+        "the error has to say what replaced it: {error}"
+    );
 }
 
 // --- Cross-run artifact mounts ------------------------------------------------
@@ -200,7 +238,7 @@ nodes:
       - artifact: { node: prod, name: report.md }
       - artifact: { node: plan, name: plan.yaml, as: brief.md }
 "#;
-    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let yunta_core::NodeKind::Workflow { mounts, .. } = &workflow.nodes[0].kind else {
         panic!("expected a workflow node");
     };
@@ -215,8 +253,8 @@ nodes:
     assert!(mounts[0].artifact.rename.is_none());
     assert_eq!(mounts[1].artifact.rename.as_deref(), Some("brief.md"));
 
-    let reserialized = serde_norway::to_string(&workflow).unwrap();
-    let reparsed: yunta_core::Workflow = serde_norway::from_str(&reserialized).unwrap();
+    let reserialized = yunta_core::yaml::to_string(&workflow).unwrap();
+    let reparsed: yunta_core::Workflow = yunta_core::yaml::parse(&reserialized).unwrap();
     assert_eq!(workflow, reparsed);
 }
 
@@ -234,7 +272,7 @@ nodes:
     context:
       - artifact: { name: brief.md }
 "#;
-    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let yunta_core::ContextSpec::Artifact { artifact } = &workflow.nodes[0].context[0] else {
         panic!("expected an artifact context source");
     };
@@ -246,8 +284,8 @@ nodes:
         }
     );
 
-    let reserialized = serde_norway::to_string(&workflow).unwrap();
-    let reparsed: yunta_core::Workflow = serde_norway::from_str(&reserialized).unwrap();
+    let reserialized = yunta_core::yaml::to_string(&workflow).unwrap();
+    let reparsed: yunta_core::Workflow = yunta_core::yaml::parse(&reserialized).unwrap();
     assert_eq!(workflow, reparsed);
 }
 
@@ -272,7 +310,7 @@ nodes:
         kind: bash
         run: "true"
 "#;
-    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let yunta_core::NodeKind::Parallel { coordination, .. } = &workflow.nodes[0].kind else {
         panic!("expected a parallel node");
     };
@@ -284,7 +322,7 @@ nodes:
     // must never see each other's findings unless the author opts in.
     assert_eq!(*coordination, yunta_core::Coordination::Independent);
 
-    let reserialized = serde_norway::to_string(&workflow).unwrap();
-    let reparsed: yunta_core::Workflow = serde_norway::from_str(&reserialized).unwrap();
+    let reserialized = yunta_core::yaml::to_string(&workflow).unwrap();
+    let reparsed: yunta_core::Workflow = yunta_core::yaml::parse(&reserialized).unwrap();
     assert_eq!(workflow, reparsed);
 }

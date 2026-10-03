@@ -1,0 +1,195 @@
+//! The forge a real invocation can offer, built from the config and the
+//! secrets the process was given.
+
+use std::sync::Arc;
+
+use yunta_adapters::GitHubForge;
+use yunta_core::port::Forge;
+use yunta_core::{describe, ConfigLayer, NodeKind, SecretSource, Workflow};
+
+use crate::error::{warn, CliError};
+use crate::render::blocks::{Check, Found};
+
+/// The forge a real invocation can offer — `None` when either
+/// `forge.github` isn't configured, or the named `token_env` isn't
+/// bound in `secrets`, in which case a gate degrades to the console
+/// instead. `yunta check` already refuses a workflow with an external
+/// gate when the former is missing; the latter is a legitimate,
+/// expected runtime state — person B's machine, with no credentials at
+/// all, still runs `yunta` just fine, it only ever falls back to the
+/// console for a gate it can't reach the forge for.
+pub(crate) fn forge_for(
+    config: &ConfigLayer,
+    secrets: &dyn SecretSource,
+) -> Option<Arc<dyn Forge>> {
+    let github = config.forge.as_ref()?.github.as_ref()?;
+    let token = secrets.get(&github.token_env)?;
+    match GitHubForge::new(github.repo.clone(), token) {
+        Ok(forge) => Some(Arc::new(forge)),
+        Err(e) => {
+            warn(format!(
+                "the forge is unavailable — {}; external gates degrade to the console",
+                describe(&e)
+            ));
+            None
+        }
+    }
+}
+
+/// Refuses a run that would open a pull request through a forge this
+/// machine cannot reach: the config declares one, and the variable its
+/// token is in is not set here. The node would fail when the run reaches
+/// it, after every node before it spent; a `pull_request` node the run
+/// leaves out asks nothing.
+pub(crate) fn refuse_unreachable_forge(
+    config: &ConfigLayer,
+    workflow: &Workflow,
+    secrets: &dyn SecretSource,
+) -> Result<(), CliError> {
+    let Some(github) = config
+        .forge
+        .as_ref()
+        .and_then(|forge| forge.github.as_ref())
+    else {
+        return Ok(());
+    };
+    if !opens_a_pull_request(workflow, config) || secrets.get(&github.token_env).is_some() {
+        return Ok(());
+    }
+    Err(CliError::msg(format!(
+        "this workflow opens a pull request through `forge.github` ({}), and `{}`, the \
+         variable its token is in, is not set here — set it, then run again",
+        github.repo, github.token_env
+    )))
+}
+
+/// What `doctor` finds of a forge whose token variable, `token_env`, is
+/// not set here. Without the token a gate published to the forge falls
+/// back to the console; only a `pull_request` node stops. So the missing
+/// token is a problem only when the catalog has one, and a caution
+/// otherwise.
+fn unset_token(ctx: &crate::context::Context, named: &str, token_env: &str) -> Check {
+    let config = &ctx.project.config;
+    let opening: Vec<String> = super::list::catalog_workflows(&ctx.cwd)
+        .into_iter()
+        .filter(|(_, workflow)| opens_a_pull_request(workflow, config))
+        .map(|(name, _)| name)
+        .collect();
+    let unset = format!("{named} — `{token_env}`, the variable its token is in, is not set");
+    if opening.is_empty() {
+        return check(
+            Found::Caution,
+            format!(
+                "{unset}; no workflow here opens a pull request, and a gate published there \
+                 asks on the console instead — export {token_env} to reach it"
+            ),
+        );
+    }
+    check(
+        Found::Problem,
+        format!(
+            "{unset}, and {} {} a pull request through it — export {token_env} to reach it",
+            yunta_core::text::listed(opening.iter().map(String::as_str)),
+            yunta_core::text::agreeing(opening.len(), "opens", "open"),
+        ),
+    )
+}
+
+/// One finding about the forge.
+fn check(found: Found, said: String) -> Check {
+    Check {
+        found,
+        subject: "forge".to_string(),
+        said,
+    }
+}
+
+/// Whether a run of `workflow` under `config` reaches a `pull_request`
+/// node: one the project leaves out never asks the forge for anything.
+fn opens_a_pull_request(workflow: &Workflow, config: &ConfigLayer) -> bool {
+    let left_out: Vec<yunta_core::NodeId> = yunta_core::left_out(workflow, config)
+        .into_iter()
+        .map(|left| left.node)
+        .collect();
+    workflow.iter_nodes_with_group().any(|(node, group)| {
+        matches!(node.kind, NodeKind::PullRequest { .. })
+            && !left_out.contains(group.map_or(&node.id, |group| &group.id))
+    })
+}
+
+/// What `doctor` finds of the forge the config declares: whether it
+/// answers and its token can push, and whether this checkout's remote
+/// is the repository it names. Nothing for a config that declares none.
+pub(crate) async fn forge_checks(ctx: &crate::context::Context) -> Vec<Check> {
+    let config = &ctx.project.config;
+    let Some(github) = config
+        .forge
+        .as_ref()
+        .and_then(|forge| forge.github.as_ref())
+    else {
+        return Vec::new();
+    };
+    let named = format!("github {}", github.repo);
+    let Some(forge) = forge_for(config, &yunta_core::ProcessSecrets) else {
+        return vec![unset_token(ctx, &named, &github.token_env)];
+    };
+    let mut checks = vec![match forge.probe().await {
+        Ok(yunta_core::port::ForgeProbe {
+            can_push: Some(false),
+        }) => check(
+            Found::Problem,
+            format!("{named} — reachable, and its token cannot push there"),
+        ),
+        Ok(_) => check(Found::Holds, format!("{named} — reachable")),
+        Err(error) => check(Found::Problem, format!("{named} — {}", describe(&error))),
+    }];
+    let remote = github.remote();
+    match yunta_engine::git::remote_url(&ctx.cwd, remote, ctx.supervision()).await {
+        Some(url) if url.contains(&github.repo.to_string()) => {}
+        Some(url) => checks.push(check(
+            Found::Problem,
+            format!("remote `{remote}` is {url}, not {}", github.repo),
+        )),
+        None => checks.push(check(
+            Found::Problem,
+            format!("no remote `{remote}` to push a run's branch to"),
+        )),
+    }
+    checks
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use yunta_core::{ConfigLayer, Secret, SecretSource};
+
+    use super::forge_for;
+
+    struct Bound(BTreeMap<&'static str, &'static str>);
+
+    impl SecretSource for Bound {
+        fn get(&self, name: &str) -> Option<Secret<String>> {
+            self.0
+                .get(name)
+                .map(|value| Secret::from(value.to_string()))
+        }
+    }
+
+    fn github_config() -> ConfigLayer {
+        yunta_core::yaml::parse("forge:\n  github: { repo: acme/web, token_env: ACME_TOKEN }\n")
+            .expect("a forge config")
+    }
+
+    #[test]
+    fn forge_for_is_none_without_the_token_it_names() {
+        let elsewhere = Bound(BTreeMap::from([("OTHER_TOKEN", "t")]));
+        assert!(forge_for(&github_config(), &elsewhere).is_none());
+    }
+
+    #[test]
+    fn forge_for_builds_the_forge_the_named_token_reaches() {
+        let bound = Bound(BTreeMap::from([("ACME_TOKEN", "t")]));
+        assert!(forge_for(&github_config(), &bound).is_some());
+    }
+}

@@ -30,6 +30,11 @@ pub fn tasks() -> Schema {
     titled(schema_for!(crate::TasksFile), "yunta tasks")
 }
 
+/// A spec document, as a `kind: spec` artifact carries it.
+pub fn spec() -> Schema {
+    titled(schema_for!(crate::SpecFile), "yunta spec")
+}
+
 /// A findings artifact, as a `kind: findings` artifact carries it.
 pub fn findings() -> Schema {
     titled(schema_for!(crate::FindingsFile), "yunta findings")
@@ -38,6 +43,11 @@ pub fn findings() -> Schema {
 /// A questions artifact, as a `kind: questions` artifact carries it.
 pub fn questions() -> Schema {
     titled(schema_for!(crate::QuestionsFile), "yunta questions")
+}
+
+/// An answers artifact, as a `kind: answers` artifact carries it.
+pub fn answers() -> Schema {
+    titled(schema_for!(crate::AnswersFile), "yunta answers")
 }
 
 /// A withdrawal, as `yunta_withdraw_finding` receives it.
@@ -53,15 +63,17 @@ pub fn events() -> Schema {
 
 /// Every root schema with the file name it is kept under. A kind the
 /// engine parses and validates is a kind whose schema it publishes, so
-/// the three interpreted artifact kinds are all here.
-pub fn all() -> [(&'static str, Schema); 8] {
+/// every interpreted artifact kind is here.
+pub fn all() -> [(&'static str, Schema); 10] {
     [
         ("workflow", workflow()),
         ("config", config()),
         ("pack", pack()),
         ("tasks", tasks()),
+        ("spec", spec()),
         ("findings", findings()),
         ("questions", questions()),
+        ("answers", answers()),
         ("withdrawal", withdrawal()),
         ("events", events()),
     ]
@@ -82,7 +94,9 @@ fn titled(mut schema: Schema, title: &str) -> Schema {
 pub fn json(kind: crate::ArtifactKind) -> &'static str {
     match kind {
         crate::ArtifactKind::Tasks => include_str!("../schemas/tasks.json"),
+        crate::ArtifactKind::Spec => include_str!("../schemas/spec.json"),
         crate::ArtifactKind::Findings => include_str!("../schemas/findings.json"),
         crate::ArtifactKind::Questions => include_str!("../schemas/questions.json"),
+        crate::ArtifactKind::Answers => include_str!("../schemas/answers.json"),
     }
 }

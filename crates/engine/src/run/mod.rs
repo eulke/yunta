@@ -1,8 +1,9 @@
 //! Run creation and execution.
 //!
 //! `create_run` freezes the anatomy on disk (run.dir, `manifest.yaml`,
-//! `run_created`); `execute_run` drives the run forward and is also
-//! `yunta resume` — it replays the log, asks [`schedule::next_action`]
+//! `run_created`, and the baseline the run is measured against);
+//! `execute_run` drives the run forward and is also
+//! `yunta resume` — it replays the log, asks [`schedule::decide`]
 //! what's next, and executes until the answer is terminal. Crash,
 //! restart and Ctrl-C are the same case: whatever the log says happened,
 //! happened; everything else re-runs (`restart_node`).
@@ -17,30 +18,46 @@
 //! `distill.rs`; the close sequence is distill → `run_finished` →
 //! export → cleanup.
 
+pub mod baseline;
 mod bash_exec;
 mod budget;
+pub(crate) mod capability;
 mod check_exec;
+mod close;
+mod console_gate;
 mod context_resolve;
+mod continuation;
 mod create;
 mod ctx;
+pub(crate) mod denied;
 mod distill;
 mod escalation;
 mod exec;
 mod executor_exec;
+mod finding_proofs;
+mod flawed;
 mod gate_exec;
+pub(crate) mod gate_findings;
 mod hooks_exec;
+mod internal_gate;
 mod loop_exec;
 mod node_artifacts;
 mod node_close;
-mod node_exec;
+pub(crate) mod node_exec;
+mod node_scope;
+mod node_start;
 mod parallel_exec;
 mod promote;
 mod prompt_exec;
+mod pull_request_exec;
 mod questions_exec;
-mod runner_resolve;
-mod schedule;
+pub(crate) mod runner_resolve;
+pub mod schedule;
+pub(crate) mod session_plan;
+mod shared_tree;
 mod step;
 mod steps;
+mod wake;
 mod workflow_exec;
 
 use std::collections::HashMap;
@@ -49,22 +66,29 @@ use std::sync::Arc;
 
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, Forge, ForgeError};
-use yunta_core::{AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, RunId};
+use yunta_core::port::{Adapter, Forge, ForgeError};
+use yunta_core::{
+    AdapterError, AdapterId, Clock, IdSource, Manifest, ModeName, NodeId, RunId, WorkflowName,
+};
 use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
+use crate::observer::RunObserver;
 use crate::replay::RunState;
 use crate::scope::ScopeCheckError;
 use crate::task_cycle::TaskCycleError;
+pub use baseline::BirthBaseline;
 pub use budget::session_token_budget;
+pub use close::{close_run, CloseRunError};
 pub use create::{create_run, BirthArtifact, BirthOrigin, CreateRunParams};
 pub(crate) use ctx::RunCtx;
-pub use escalation::{current_escalation, resolve_gate, ResolveGateError};
+pub use escalation::{awaits_decision, current_escalation, resolve_gate, ResolveGateError};
 pub(crate) use exec::execute_run_at_depth;
 pub use exec::record_pause_after_crash;
-pub(in crate::run) use exec::{find_node, pause, record_pause};
-pub use promote::{create_promotion_successor, Predecessor, PromotionSuccessor, RunRoots};
+pub(in crate::run) use exec::{find_node, pause};
+pub use promote::{
+    create_promotion_successor, CallerInfra, Predecessor, PromotionSuccessor, RunRoots,
+};
 
 /// A frozen `manifest.yaml` that cannot be read back.
 #[derive(Debug, Error)]
@@ -75,21 +99,32 @@ pub enum ManifestReadError {
         #[source]
         source: std::io::Error,
     },
-    #[error("`{path}` is not a manifest")]
+    #[error("cannot read the manifest at `{path}`")]
     Parse {
         path: PathBuf,
         #[source]
-        source: yunta_core::yaml::YamlError,
+        source: yunta_core::persisted::PersistedError,
     },
 }
 
-/// Reads a run's frozen manifest back from its `manifest.yaml`.
-pub fn read_manifest(path: &Path) -> Result<Manifest, ManifestReadError> {
-    let text = std::fs::read_to_string(path).map_err(|source| ManifestReadError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    yunta_core::yaml::parse(&text).map_err(|source| ManifestReadError::Parse {
+/// Reads a run's frozen manifest back from its `manifest.yaml`, keeping
+/// whatever a newer binary wrote beside what this one knows.
+///
+/// A manifest stamped with a schema this binary does not read is
+/// refused naming both versions — a run interpreted under a shape its
+/// own creator did not write is a run whose history means something
+/// else. Everything below that reads, and what this binary did not
+/// understand comes back on the document for a caller to report.
+pub async fn read_manifest(
+    path: &Path,
+) -> Result<yunta_core::persisted::PersistedDoc<Manifest>, ManifestReadError> {
+    let bytes = tokio::fs::read(path)
+        .await
+        .map_err(|source| ManifestReadError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    yunta_core::persisted::PersistedDoc::read(&bytes).map_err(|source| ManifestReadError::Parse {
         path: path.to_path_buf(),
         source,
     })
@@ -106,16 +141,21 @@ pub enum RunError {
     #[error("run is broken: {diagnostic}")]
     Broken { diagnostic: String },
 
-    /// A `HumanInteraction` surface returned an option the escalation it
-    /// was shown never offered: a decision nobody was given, refused
+    /// The invocation's token fired while the run was being born, or
+    /// while it was preparing the tree a run works on. A birth has no
+    /// log of its own to record a pause on, so it says so to its
+    /// caller — a `kind: workflow` node turns it into the parent's
+    /// `run_paused { cancelled by user }`, and a CLI into its own exit.
+    #[error("cancelled by user")]
+    Cancelled,
+
+    /// A `HumanInteraction` surface returned an answer the escalation it
+    /// was shown does not accept — an option it never offered, or one
+    /// that asks for words given none: a decision nobody made, refused
     /// rather than recorded as the gate's outcome.
-    #[error(
-        "the human surface answered `{answer}`, which is not one of the options it was offered \
-         ({offered}), for: {summary}"
-    )]
-    OffMenuAnswer {
-        answer: yunta_core::OptionId,
-        offered: String,
+    #[error("the human surface's answer was refused: {refused}, for: {summary}")]
+    RefusedAnswer {
+        refused: yunta_core::events::Refusal,
         summary: String,
     },
 
@@ -125,7 +165,7 @@ pub enum RunError {
     /// caught, before anything is written.
     #[error("workflow `{workflow}` declares no mode `{mode}` — declared modes: {declared}")]
     UnknownMode {
-        workflow: String,
+        workflow: WorkflowName,
         mode: ModeName,
         declared: String,
     },
@@ -161,8 +201,8 @@ pub enum RunError {
         source: ForgeError,
     },
 
-    #[error("git failed to {context}: {detail}")]
-    Git { context: String, detail: String },
+    #[error(transparent)]
+    Git(crate::git::GitError),
 
     #[error("failed to serialize the manifest for `{path}`: {detail}")]
     ManifestWrite { path: PathBuf, detail: String },
@@ -194,7 +234,7 @@ pub enum RunError {
     EventsExport(#[from] crate::events_export::EventsExportError),
 
     #[error(transparent)]
-    Worktree(#[from] crate::worktree::WorktreeError),
+    Worktree(crate::worktree::WorktreeError),
 
     /// An artifact the run acquired that could not become a fact of the
     /// run: its bytes, its acceptance or its view did not land.
@@ -206,6 +246,27 @@ pub enum RunError {
     /// accepted.
     #[error(transparent)]
     Object(#[from] crate::artifacts::ObjectError),
+}
+
+/// A git the caller's token stopped is not a failure of anything: it is
+/// the invocation being cancelled, and it says so wherever it surfaces.
+/// One conversion, so no call site has to remember to ask.
+impl From<crate::git::GitError> for RunError {
+    fn from(git: crate::git::GitError) -> Self {
+        match git.cancelled() {
+            true => RunError::Cancelled,
+            false => RunError::Git(git),
+        }
+    }
+}
+
+impl From<crate::worktree::WorktreeError> for RunError {
+    fn from(worktree: crate::worktree::WorktreeError) -> Self {
+        match worktree.cancelled() {
+            true => RunError::Cancelled,
+            false => RunError::Worktree(worktree),
+        }
+    }
 }
 
 /// How `execute_run` came back: everything done, waiting on a human, or
@@ -259,10 +320,12 @@ pub struct RunEnv<'a> {
     /// Mints the ids of the runs this one gives birth to — its
     /// children and its promotion successor.
     pub ids: &'a dyn IdSource,
-    pub max_task_retries: u32,
     pub human_interaction: &'a dyn HumanInteraction,
     pub forge: Option<&'a dyn Forge>,
-    pub cancel: Option<&'a CancellationToken>,
+    /// What stops this run: the invocation's own token, which the shell
+    /// that started it owns. Every subprocess the run spawns is born
+    /// under it, so a Ctrl-C reaches the whole tree.
+    pub cancel: &'a CancellationToken,
     /// `yunta run --adapter <id>`: every role resolves to its candidate
     /// on this adapter, or fails naming what it tried. Invocation-scoped,
     /// never frozen: the log's `runner_resolved` records the discards.
@@ -273,6 +336,71 @@ pub struct RunEnv<'a> {
     /// variables layered onto every subprocess. `None` means no user layer
     /// and no injected variables — the shape most tests want.
     pub ambient: Option<&'a yunta_core::Env>,
+    /// The hook a CLI runs to ask the judge about one write: this
+    /// binary's own path, resolved once by the shell that started the
+    /// run. `None` in a harness with no binary to run — an adapter
+    /// whose fence needs it then fails the session rather than opening
+    /// one that writes freely.
+    pub fence_hook: Option<yunta_core::fence::FenceHook>,
+    /// Where the values of the variables `secrets:` names come from. The
+    /// config names them; only the shell that started the run may read
+    /// their values, so the engine asks here and never the process.
+    /// `None` is a run that can reach no secret at all — what a test
+    /// starts from, and what a run declaring none needs.
+    pub secrets: Option<Arc<dyn yunta_core::SecretSource>>,
+    /// Where every event this invocation appends is mirrored as it is
+    /// written — this run's, its `kind: workflow` children's and its
+    /// promotion successors' alike. Display only: it derives nothing and
+    /// decides nothing.
+    ///
+    /// An owned [`Arc`] rather than a borrow, unlike `human_interaction`
+    /// and `forge` beside it, because [`RunToolsHost`] outlives every
+    /// borrow of the invocation and needs its own handle; `clock` in this
+    /// same struct is an `Arc<dyn Clock>` for exactly that reason. The
+    /// `Option` is load-bearing too, not nullability sugar: it is what
+    /// lets the append helper skip the payload clone entirely when
+    /// nobody is watching.
+    ///
+    /// [`RunToolsHost`]: crate::RunToolsHost
+    pub observer: Option<Arc<dyn RunObserver>>,
+}
+
+/// The failure a command that exited `code` becomes: what it printed
+/// kept, redacted, in the run's objects, and its last lines on the
+/// failure itself, stdout included — a compiler or a test runner says
+/// why on stdout as often as on stderr.
+///
+/// `what` names the command in the error a failed write reports.
+async fn command_exited(
+    ctx: &RunCtx<'_>,
+    outcome: &crate::process::Outcome,
+    code: i32,
+    origin: Option<yunta_core::events::CommandOrigin>,
+    what: &str,
+) -> Result<yunta_core::events::Failure, RunError> {
+    let printed = crate::process::CommandOutput::of(outcome);
+    // A command that printed nothing leaves nothing to keep, and no
+    // pointer to an empty file a reader would open to find nothing.
+    let output = match printed.bytes().is_empty() {
+        true => None,
+        false => Some(
+            crate::artifacts::store::ObjectStore::at(ctx.run_dir)
+                .put_redacted(printed.bytes(), &ctx.redactor)
+                .await
+                .map_err(|source| RunError::Io {
+                    context: format!("keep what {what} printed"),
+                    source,
+                })?,
+        ),
+    };
+    Ok(yunta_core::events::Failure::exited(
+        yunta_core::events::CommandExit {
+            origin,
+            code,
+            tail: printed.tail(),
+            output,
+        },
+    ))
 }
 
 /// Drives a run until it finishes or pauses. Serving `yunta run` and

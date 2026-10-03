@@ -54,6 +54,31 @@ const fn is_name(bytes: &[u8]) -> bool {
     true
 }
 
+const SHARED_DIR_VAR_RULE: &str =
+    "an uppercase letter or `_` followed by uppercase letters, digits or `_`, and not `PATH`";
+
+/// A variable a shared directory is exported under: shaped like an
+/// environment variable, and never `PATH`, which lists directories
+/// rather than naming one.
+const fn is_shared_dir_var(bytes: &[u8]) -> bool {
+    if let [b'P', b'A', b'T', b'H'] = bytes {
+        return false;
+    }
+    let Some((first, mut rest)) = bytes.split_first() else {
+        return false;
+    };
+    if !(first.is_ascii_uppercase() || *first == b'_') {
+        return false;
+    }
+    while let Some((byte, tail)) = rest.split_first() {
+        if !(byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_') {
+            return false;
+        }
+        rest = tail;
+    }
+    true
+}
+
 /// A node id is a name, or a name plus `@` and the runner's name for a
 /// fan-out sibling the manifest expands `runners:` into.
 const NODE_RULE: &str =
@@ -353,6 +378,31 @@ string_id!(
 );
 
 string_id!(
+    /// A workflow's own `name:`, and the key the catalog files it under
+    /// — what a `kind: workflow` node's `use:` names and what `yunta
+    /// run` takes: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    WorkflowName, what = "workflow name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// A skill's name as a node's `skills:` lists it and a pack
+    /// declares it: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    SkillName, what = "skill name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// An input's name — the key under `inputs:` that `{{inputs.<name>}}`
+    /// resolves: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    InputName, what = "input name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// An MCP server's name — the key under `mcp_servers:` a node's
+    /// `mcp:` refers to: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    McpServerName, what = "MCP server name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
     /// A model's name as the adapter's CLI accepts it — one printable
     /// word, opaque to the engine.
     ModelName, what = "model name", rule = TOKEN_RULE, check = is_token
@@ -379,6 +429,19 @@ impl Default for ModeName {
 }
 
 string_id!(
+    /// A command the project declares under `commands:` and a workflow
+    /// runs by name: `^[A-Za-z][A-Za-z0-9_-]*$`.
+    CommandName, what = "command name", rule = NAME_RULE, check = is_name
+);
+
+string_id!(
+    /// The variable a directory under `shared_dirs:` is exported under,
+    /// to every command and session of a run:
+    /// `^[A-Z_][A-Z0-9_]*$`, and not `PATH`.
+    SharedDirVar, what = "shared directory variable", rule = SHARED_DIR_VAR_RULE, check = is_shared_dir_var
+);
+
+string_id!(
     /// An executor's name — a `skills.executors` entry a `kind: executor`
     /// node refers to: `^[A-Za-z][A-Za-z0-9_-]*$`.
     ExecutorName, what = "executor name", rule = NAME_RULE, check = is_name
@@ -394,6 +457,28 @@ string_id!(
 impl From<ulid::Ulid> for RunId {
     fn from(ulid: ulid::Ulid) -> Self {
         RunId(Cow::Owned(ulid.to_string()))
+    }
+}
+
+impl RunId {
+    /// How many characters of a run's id its handle keeps: enough that
+    /// two runs on one machine sharing one is a collision nobody meets,
+    /// few enough to read off one line and type into the next.
+    pub const HANDLE_CHARS: usize = 6;
+
+    /// What a person calls the run by: the last [`RunId::HANDLE_CHARS`]
+    /// characters of its id. A ULID opens with the time it was made,
+    /// which every run of a day shares, and closes with its random part,
+    /// which tells two runs apart even when they were made in the same
+    /// millisecond. An id no longer than a handle is its own.
+    pub fn handle(&self) -> &str {
+        let id = self.as_str();
+        let start = id
+            .char_indices()
+            .rev()
+            .nth(Self::HANDLE_CHARS - 1)
+            .map_or(0, |(at, _)| at);
+        id.get(start..).unwrap_or(id)
     }
 }
 
@@ -809,6 +894,22 @@ impl From<u64> for Seq {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_handle_is_the_random_tail_of_a_ulid() {
+        let made = ulid::Ulid::from_parts(1_700_000_000_000, 0x0123_4567_89AB_CDEF);
+        let run = RunId::from(made);
+        let random = made.to_string();
+        assert_eq!(run.handle(), &random[random.len() - RunId::HANDLE_CHARS..]);
+        // Two runs made in the same millisecond share their head and
+        // differ in their handle.
+        let twin = RunId::from(ulid::Ulid::from_parts(
+            1_700_000_000_000,
+            0x0123_4567_89AB_CDEE,
+        ));
+        assert_ne!(run.handle(), twin.handle());
+        assert_eq!(RunId::from_static("run-1").handle(), "run-1");
+    }
 
     #[test]
     fn a_name_starts_with_a_letter_and_continues_with_letters_digits_underscore_or_dash() {

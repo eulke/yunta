@@ -28,6 +28,19 @@ pub struct PermissionsConfig {
     pub network: Option<NetworkPermissions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scope_expansion: Option<ScopeExpansionPermissions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paths: Option<PathPermissions>,
+}
+
+/// `permissions.paths` — what no node and no task of any run may write:
+/// the project's CI, the configuration of its own checks, whatever the
+/// team decides no agent touches. A ceiling like the rest: every layer's
+/// denies stand, and none is ever granted back.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PathPermissions {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny: Vec<crate::ScopeGlob>,
 }
 
 /// `permissions.scope_expansion`: the layered ceiling
@@ -57,11 +70,9 @@ pub struct CommandPermissions {
     pub allow: Vec<String>,
 }
 
-/// `permissions.packs` — governance over pack contents. Parsed
-/// and merged here; *enforced* at `pack add`/check once pack support
-/// lands fully — a key without its consumer yet, kept
-/// because the org ceiling file is one document and its schema shouldn't
-/// dribble in piecemeal.
+/// `permissions.packs` — governance over pack contents. Parsed and
+/// merged here; enforced by `pack add` and `pack update`, which read the
+/// merged value and name the layer that declared it when they refuse.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PackPermissions {
@@ -84,6 +95,15 @@ pub enum PackExecutorPolicy {
 }
 
 impl PackExecutorPolicy {
+    /// The value as a config file writes it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PackExecutorPolicy::Allow => "allow",
+            PackExecutorPolicy::Prompt => "prompt",
+            PackExecutorPolicy::Deny => "deny",
+        }
+    }
+
     fn strictness(self) -> u8 {
         match self {
             PackExecutorPolicy::Allow => 0,
@@ -208,6 +228,20 @@ pub(super) fn merge_permissions(
         (c, l) => c.or(l),
     };
 
+    // Union, like `commands.deny`: a lower layer only ever adds a path.
+    let paths = match (ceiling.paths, lower.paths) {
+        (Some(c), Some(l)) => {
+            let mut deny = c.deny;
+            for glob in l.deny {
+                if !deny.contains(&glob) {
+                    deny.push(glob);
+                }
+            }
+            Some(PathPermissions { deny })
+        }
+        (c, l) => c.or(l),
+    };
+
     let network = match (ceiling.network, lower.network) {
         (Some(c), Some(l)) => Some(NetworkPermissions {
             // `false` is the narrower value — a ceiling that turned the
@@ -222,6 +256,7 @@ pub(super) fn merge_permissions(
         packs,
         network,
         scope_expansion,
+        paths,
     })
 }
 
@@ -266,7 +301,9 @@ pub fn permission_layer_conflicts(layers: &[(&str, &ConfigLayer)]) -> Vec<String
                 {
                     if lower_pol.strictness() < higher_pol.strictness() {
                         conflicts.push(format!(
-                            "layer `{lower_name}` loosens `packs.executors` to `{lower_pol:?}` below layer `{higher_name}`'s `{higher_pol:?}` — permissions only narrow"
+                            "layer `{lower_name}` loosens `packs.executors` to `{}` below layer `{higher_name}`'s `{}` — permissions only narrow",
+                            lower_pol.as_str(),
+                            higher_pol.as_str()
                         ));
                     }
                 }

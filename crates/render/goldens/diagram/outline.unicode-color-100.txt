@@ -1,0 +1,6 @@
+  ␛[1mRead the idea and its brief → Plan the change task by task → Write the tests for the plan →␛[0m
+    ␛[1mApprove the plan and its tests␛[0m
+  ␛[1mApprove the plan and its tests → Build the store task␛[0m
+  ␛[1mApprove the plan and its tests → Build the command task␛[0m
+  ␛[1mApprove the plan and its tests → Build the docs task␛[0m
+  ␛[1mApprove the plan and its tests → Build the release task␛[0m

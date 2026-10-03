@@ -17,33 +17,88 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::catalog::RunTool;
 use rmcp::model::{
     CallToolRequestParams, CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams,
 };
 use rmcp::model::{ServerCapabilities, ServerInfo};
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
+use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, StoredEvent};
-use yunta_core::{ArtifactKind, ArtifactSpec, NodeId, TaskId};
+use yunta_core::{ArtifactSpec, NodeId, NodeKind};
 
-use super::host::RunToolsHost;
+use super::host::{NodeScopeAccess, RunToolsAccess, RunToolsHost, TaskAccess};
 use crate::run_log::RunLog;
 
 /// The run tools of one session. Which of them are even *listed* depends
 /// on the session: `yunta_get_blackboard` only inside a
 /// `coordination: blackboard` group (for `independent` they aren't
-/// mounted at all), `yunta_request_scope_expansion` only for task
-/// sessions (scope expansion is task-keyed), and one submission tool per
-/// kind of document this node declares.
+/// mounted at all), the task tools only for task sessions,
+/// `yunta_check_scope` only for a node's own session with a scope of its
+/// own, `yunta_request_scope_expansion` for either when an answer can
+/// widen it, and one submission tool per kind of document this node
+/// declares.
 #[derive(Clone)]
 pub(super) struct SessionTools {
     pub(super) host: Arc<RunToolsHost>,
     pub(super) node: NodeId,
-    pub(super) task: Option<TaskId>,
+    /// What the node is, so a verdict asks who answers for an artifact
+    /// the same way its close does.
+    pub(super) node_kind: NodeKind,
+    /// The task this session works, for a loop's task session: what
+    /// the task tools read and judge, and what makes this a session a
+    /// scope expansion can be asked for.
+    pub(super) task: Option<Arc<TaskAccess>>,
+    /// The node's own scope, for a node's session when the node declares
+    /// one: what `yunta_check_scope` judges against, and whether the
+    /// session may ask for more.
+    pub(super) node_scope: Option<Arc<NodeScopeAccess>>,
     pub(super) cwd: PathBuf,
+    /// What stops a command a tool runs for this session: the task's own
+    /// token, and the session's end.
+    pub(super) stop: CancellationToken,
     /// The artifacts this node's close will verify, names already
     /// rendered.
     pub(super) declared: Vec<ArtifactSpec>,
+    /// How the session's CLI names these tools to its model.
+    pub(super) naming: yunta_core::ToolNaming,
+}
+
+impl SessionTools {
+    /// The tools one session is served: what its node's setup allows,
+    /// what its work is held to — a loop's task, or the node's own scope
+    /// — where it works, and what stops what a tool runs for it.
+    pub(super) fn new(
+        access: RunToolsAccess,
+        (task, node_scope): (Option<Arc<TaskAccess>>, Option<Arc<NodeScopeAccess>>),
+        cwd: PathBuf,
+        stop: CancellationToken,
+    ) -> Self {
+        let RunToolsAccess {
+            host,
+            node,
+            node_kind,
+            declared,
+            naming,
+        } = access;
+        SessionTools {
+            host,
+            node,
+            node_kind,
+            task,
+            node_scope,
+            cwd,
+            stop,
+            declared,
+            naming,
+        }
+    }
+
+    /// What this session's model calls `tool` by.
+    pub(super) fn called(&self, tool: RunTool) -> String {
+        tool.called(self.naming)
+    }
 }
 
 /// Why a tool call could not be honored — rendered once, at the MCP
@@ -62,26 +117,111 @@ pub(super) enum RunToolError {
     InvalidSubmission { names: String, detail: String },
     #[error(
         "invalid request — requires paths (list) and reason, with an optional \
-         proposed_criterion {{cmd}}: {source}"
+         proposed_criterion {{cmd}}"
     )]
     InvalidRequest {
         #[source]
         source: serde_json::Error,
     },
     #[error(
+        "invalid departure — requires `from` (one of `{{\"shape\": name}}`, \
+         `{{\"decision\": id}}`, `{{\"change\": at}}`, `{{\"criterion\": cmd}}` or \
+         `\"outcome\"`), `planned`, `instead` and `why`"
+    )]
+    InvalidDeparture {
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error(
+        "invalid answer — requires `node` and `id`, the finding answered as its node reported \
+         it, `answer` (`fixed` or `declined`) and `why`"
+    )]
+    InvalidAnswer {
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("an answer says why — `why` is empty")]
+    EmptyAnswer,
+    #[error(
+        "`{id}` is a finding this node reported: change it with `{update}`, or take it back \
+         with `{withdraw}`, saying why"
+    )]
+    OwnFinding {
+        id: yunta_core::FindingId,
+        update: String,
+        withdraw: String,
+    },
+    #[error("node `{node}`'s finding `{id}` is settled — {settled}; there is nothing to answer")]
+    SettledFinding {
+        node: NodeId,
+        id: yunta_core::FindingId,
+        settled: String,
+    },
+    #[error("node `{node}` reported no finding `{id}` on this run")]
+    NoSuchFinding {
+        node: NodeId,
+        id: yunta_core::FindingId,
+    },
+    #[error("node `{node}` took its finding `{id}` back — {reason}; there is nothing to answer")]
+    WithdrawnFinding {
+        node: NodeId,
+        id: yunta_core::FindingId,
+        reason: String,
+    },
+    #[error("a departure says what it is — `{field}` is empty")]
+    EmptyDeparture { field: &'static str },
+    #[error("the plan holds no {from} — it holds {known}")]
+    NotInThePlan { from: String, known: String },
+    #[error(
+        "`{cmd}` is the suite the run measured green before any work, which holds every task — \
+         it is not the plan's to depart from: keep what passed passing"
+    )]
+    SuiteDeparture { cmd: String },
+    #[error(
         "this session's node is not in a `coordination: blackboard` group — the blackboard is \
          never mounted outside one"
     )]
     NotInBlackboardGroup,
     #[error(
-        "scope expansion is task machinery, keyed by task — this session has no task; a \
-         prompt node's scope is fixed by its own declaration"
+        "this session has no scope an answer could widen — it works no task, and its node \
+         either declares no scope or may not be granted more on this run"
     )]
-    NoTask,
+    NoScopeToWiden,
+    #[error("this tool judges a node's own scope, and this session's node declares none")]
+    NoNodeScope,
+    #[error("this attempt's start is not on the log, so there is no tree to judge its work from")]
+    NoStartingTree,
+    #[error("the node's work could not be audited")]
+    Audit {
+        #[source]
+        source: crate::ScopeCheckError,
+    },
     #[error(
         "a scope expansion request is already pending for this attempt — one request per attempt"
     )]
     RequestPending,
+    #[error(
+        "`{tool}` answers about a task, and this session works none — only a loop's task \
+         sessions are served it"
+    )]
+    NotATaskSession { tool: String },
+    #[error("the criteria could not be run where the engine runs them: {detail}")]
+    Handover { detail: String },
+    #[error("the run's plan could not be read")]
+    Plan {
+        #[source]
+        source: crate::artifacts::HeldError,
+    },
+    #[error("the task's work could not be checked")]
+    Check {
+        #[source]
+        source: crate::task_cycle::TaskCycleError,
+    },
+    #[error(
+        "this check stopped: the checkout changed, and the check asked after it judges what \
+         the checkout holds now — its answer is the one that counts"
+    )]
+    Superseded,
     #[error("the run's log cannot be reached")]
     Storage {
         #[source]
@@ -103,8 +243,6 @@ pub(super) enum RunToolError {
         #[source]
         source: std::io::Error,
     },
-    #[error("unknown tool `{name}`")]
-    UnknownTool { name: String },
     #[error("node `{node}` declares no artifacts, so there is nothing to check")]
     NoArtifacts { node: NodeId },
     #[error("`{name}` is not an artifact this node declares; it declares {declared}")]
@@ -133,7 +271,9 @@ impl SessionTools {
             &self.host.storage,
             &self.host.run_id,
             self.host.clock.as_ref(),
+            &self.host.redactor,
         )
+        .observed_by(self.host.observer.as_deref())
     }
 
     /// Records `payload` against this session's run and node, stamped
@@ -166,24 +306,31 @@ impl ServerHandler for SessionTools {
         _context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, McpError> {
         let args = request.arguments.unwrap_or_default();
-        let outcome = match request.name.as_ref() {
-            "yunta_check_artifact" => self.check_artifact(&args).await,
-            "yunta_post_finding" => self.post_finding(args).await,
-            name if name == ArtifactKind::UPDATE_FINDING_TOOL => self.update_finding(args).await,
-            name if name == ArtifactKind::WITHDRAW_FINDING_TOOL => {
-                self.withdraw_finding(args).await
+        // Exhaustive over the same set the catalog mounts from, so a
+        // tool offered without an answer here does not compile.
+        let outcome = match RunTool::parse(request.name.as_ref()) {
+            Some(RunTool::CheckArtifact) => self.check_artifact(&args).await,
+            Some(RunTool::PostFinding) => self.post_finding(args).await,
+            Some(RunTool::UpdateFinding) => self.update_finding(args).await,
+            Some(RunTool::WithdrawFinding) => self.withdraw_finding(args).await,
+            Some(RunTool::Findings) => self.findings_standing().await,
+            Some(RunTool::AnswerFinding) => self.answer_finding(args).await,
+            Some(RunTool::GetBlackboard) => self.get_blackboard().await,
+            Some(RunTool::TaskStatus) => self.task_status().await,
+            Some(RunTool::Task) => self.task().await,
+            Some(RunTool::CheckTask) => self.check_task().await,
+            Some(RunTool::CheckScope) => self.check_scope().await,
+            Some(RunTool::RequestScopeExpansion) => self.request_scope_expansion(args).await,
+            Some(RunTool::DeclareDeviation) => self.declare_deviation(args).await,
+            Some(RunTool::Submit(kind)) => self.submit(kind, args).await,
+            // A tool this server never offered is a call the protocol
+            // refuses, not a tool that ran and failed.
+            None => {
+                return Err(McpError::invalid_params(
+                    format!("unknown tool `{}`", request.name),
+                    None,
+                ))
             }
-            "yunta_get_blackboard" => self.get_blackboard().await,
-            "yunta_task_status" => self.task_status().await,
-            "yunta_request_scope_expansion" => self.request_scope_expansion(args),
-            // A submission tool names its own kind, so the name that
-            // matched is the kind that answers it.
-            other => match ArtifactKind::from_submit_tool(other) {
-                Some(kind) => self.submit(kind, args).await,
-                None => Err(RunToolError::UnknownTool {
-                    name: other.to_string(),
-                }),
-            },
         };
         Ok(match outcome {
             Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]).into(),

@@ -5,8 +5,7 @@ use yunta_core::events::ArtifactId;
 
 /// Config `defaults:` values that only `check` can catch before a run:
 /// a `max_parallel_nodes` of zero (which would schedule nothing), and a
-/// `defaults.runner` that `runners:` doesn't define. Every
-/// `defaults.on_failure` value is now built, so none is refused here.
+/// `defaults.runner` that `runners:` doesn't define.
 pub(crate) fn check_config_defaults(config: &ConfigLayer, errors: &mut Vec<CheckError>) {
     let Some(defaults) = &config.defaults else {
         return;
@@ -24,6 +23,7 @@ pub(crate) fn check_config_defaults(config: &ConfigLayer, errors: &mut Vec<Check
             errors.push(CheckError::UnknownRunner {
                 node: DEFAULTS.clone(),
                 runner: runner.clone(),
+                near: near_runner(config, runner),
             });
         }
     }
@@ -44,65 +44,18 @@ pub(crate) fn check_resume_session(workflow: &Workflow, errors: &mut Vec<CheckEr
     }
 }
 
-/// `yunta_schema` is a space-separated list of comparators
-/// over the schema major (`>=1 <2`, `=1`, `<3`…), all of which must
-/// hold for [`yunta_core::YUNTA_SCHEMA`]. Deliberately a ~20-line
-/// parser instead of a semver dependency: the schema version is one
-/// integer, and the small static binary is a product feature.
+/// The range held for this binary's own schema major, or the workflow
+/// declares a requirement this binary does not meet.
 pub(crate) fn check_yunta_schema(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     let Some(range) = &workflow.yunta_schema else {
         return;
     };
-    match yunta_schema_satisfied(range, yunta_core::YUNTA_SCHEMA) {
-        Ok(true) => {}
-        Ok(false) => errors.push(CheckError::YuntaSchemaOutside {
+    if !range.holds_for(yunta_core::YUNTA_SCHEMA) {
+        errors.push(CheckError::YuntaSchemaOutside {
             range: range.clone(),
             binary: yunta_core::YUNTA_SCHEMA,
-        }),
-        Err(source) => errors.push(CheckError::YuntaSchemaUnreadable {
-            range: range.clone(),
-            binary: yunta_core::YUNTA_SCHEMA,
-            source,
-        }),
+        });
     }
-}
-
-/// `Ok(bool)` = every comparator evaluated against `binary`; `Err` = the
-/// range doesn't parse. Empty ranges don't parse either — a declared
-/// requirement that constrains nothing is a typo, not a wildcard.
-pub(crate) fn yunta_schema_satisfied(range: &str, binary: u32) -> Result<bool, SchemaRangeError> {
-    let mut any = false;
-    for comparator in range.split_whitespace() {
-        let (op, number) = comparator
-            .find(|c: char| c.is_ascii_digit())
-            .map(|i| comparator.split_at(i))
-            .ok_or_else(|| SchemaRangeError::NoVersion {
-                comparator: comparator.to_string(),
-            })?;
-        let number: u32 = number.parse().map_err(|_| SchemaRangeError::NotAVersion {
-            text: number.to_string(),
-        })?;
-        let holds = match op {
-            ">=" => binary >= number,
-            "<=" => binary <= number,
-            ">" => binary > number,
-            "<" => binary < number,
-            "=" | "==" | "" => binary == number,
-            other => {
-                return Err(SchemaRangeError::UnknownOperator {
-                    op: other.to_string(),
-                })
-            }
-        };
-        any = true;
-        if !holds {
-            return Ok(false);
-        }
-    }
-    if !any {
-        return Err(SchemaRangeError::Empty);
-    }
-    Ok(true)
 }
 
 /// What a node may declare it produces: one document of each kind at
@@ -113,7 +66,41 @@ pub(crate) fn yunta_schema_satisfied(range: &str, binary: u32) -> Result<bool, S
 /// second declaration could never be answered separately. An opaque
 /// artifact is written to a path, and a name that is absolute or climbs
 /// with `..` would land outside the run — templates in a name
-/// (`report-{{runner.role}}.md`) are checked as written.
+/// (`report-{{runner.name}}.md`) are checked as written.
+/// A node that asks, asks: it declares `questions` and nothing else,
+/// and it is the one kind that holds a session to ask from and a close
+/// to wait in.
+///
+/// Both refusals name the way out, because the way out is a workflow
+/// shape and not a flag: what depended on the answers moves to a node
+/// that follows this one and mounts them as context.
+pub(crate) fn check_asking_nodes(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    for node in workflow.iter_nodes() {
+        if !node.asks() {
+            continue;
+        }
+        if !matches!(node.kind, NodeKind::Prompt { .. }) {
+            errors.push(CheckError::QuestionsOnKind {
+                node: node.id.clone(),
+                kind: node.kind.kind_name(),
+            });
+        }
+        let others: Vec<ArtifactSpec> = node
+            .artifacts
+            .iter()
+            .flat_map(|artifacts| artifacts.produces.iter())
+            .filter(|spec| spec.kind() != Some(yunta_core::ArtifactKind::Questions))
+            .cloned()
+            .collect();
+        if !others.is_empty() {
+            errors.push(CheckError::QuestionsAlongsideOtherArtifacts {
+                node: node.id.clone(),
+                others,
+            });
+        }
+    }
+}
+
 pub(crate) fn check_artifact_declarations(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     for node in workflow.iter_nodes() {
         let Some(artifacts) = &node.artifacts else {
@@ -123,6 +110,11 @@ pub(crate) fn check_artifact_declarations(workflow: &Workflow, errors: &mut Vec<
         for spec in &artifacts.produces {
             match spec {
                 yunta_core::ArtifactSpec::Interpreted(kind) => {
+                    if !kind.declarable() {
+                        errors.push(CheckError::AnswersDeclaredAsProduced {
+                            node: node.id.clone(),
+                        });
+                    }
                     if !kinds.insert(*kind) {
                         errors.push(CheckError::DuplicateArtifactKind {
                             node: node.id.clone(),
@@ -131,10 +123,13 @@ pub(crate) fn check_artifact_declarations(workflow: &Workflow, errors: &mut Vec<
                     }
                 }
                 yunta_core::ArtifactSpec::Opaque(name) => {
-                    if !yunta_core::stays_inside(name) {
-                        errors.push(CheckError::ArtifactNameEscapes {
+                    // The name as written, which is what a reader of the
+                    // workflow sees: a template renders to a name like any
+                    // other and is parsed again once it is known.
+                    if let Err(problem) = yunta_core::ArtifactName::parse(name) {
+                        errors.push(CheckError::ArtifactNameRefused {
                             node: node.id.clone(),
-                            name: name.clone(),
+                            said: problem.to_string(),
                         });
                     }
                 }
@@ -211,7 +206,7 @@ pub(crate) fn check_distill_paths(workflow: &Workflow, errors: &mut Vec<CheckErr
 /// here rather than left to resolve to nothing at run time, and named
 /// with the form that does work.
 pub(crate) fn check_reserved_artifact_names(workflow: &Workflow, errors: &mut Vec<CheckError>) {
-    let mut reserved = |site: String, name: &str| {
+    let mut reserved = |site: super::Site, name: &str| {
         if name.parse::<yunta_core::ArtifactKind>().is_ok() {
             errors.push(CheckError::ReservedArtifactName {
                 site,
@@ -220,24 +215,19 @@ pub(crate) fn check_reserved_artifact_names(workflow: &Workflow, errors: &mut Ve
         }
     };
     for node in workflow.iter_nodes() {
-        for source in &node.context {
-            if let yunta_core::ContextSpec::Artifact { artifact } = source {
-                if let yunta_core::ArtifactRefId::Name { name } = &artifact.id {
-                    reserved(
-                        format!("the `artifact:` context source of node `{}`", node.id),
-                        name,
-                    );
-                }
+        for read in yunta_core::workflow::reads::artifact_reads(node) {
+            if let yunta_core::ArtifactRefId::Name { name } = read.id {
+                reserved(super::Site::read(read.site, &node.id), name);
             }
         }
+        // What a mount is called in the child is a name as well.
         if let yunta_core::NodeKind::Workflow { mounts, .. } = &node.kind {
             for mount in mounts {
-                let site = format!("a `mounts:` entry of node `{}`", node.id);
-                if let yunta_core::ArtifactRefId::Name { name } = &mount.artifact.id {
-                    reserved(site.clone(), name);
-                }
                 if let Some(name) = &mount.artifact.rename {
-                    reserved(site, name);
+                    reserved(
+                        super::Site::read(yunta_core::workflow::reads::ReadSite::Mount, &node.id),
+                        name,
+                    );
                 }
             }
         }
@@ -246,9 +236,22 @@ pub(crate) fn check_reserved_artifact_names(workflow: &Workflow, errors: &mut Ve
         if let yunta_core::OnFinishStep::Distill { distill } = step {
             for declaration in distill {
                 if let yunta_core::ArtifactRefId::Name { name } = &declaration.id {
-                    reserved("an `on_finish.distill` entry".to_string(), name);
+                    reserved(
+                        super::Site::new(
+                            yunta_core::yaml::Pointer::root().key("on_finish"),
+                            "an `on_finish.distill` entry".to_string(),
+                        ),
+                        name,
+                    );
                 }
             }
         }
     }
+}
+
+/// The runner `config` defines that `runner` most likely misspells.
+pub(crate) fn near_runner(config: &ConfigLayer, runner: &RunnerName) -> Option<String> {
+    let defined = config.runners.as_ref()?;
+    yunta_core::text::nearest(runner.as_str(), defined.keys().map(RunnerName::as_str))
+        .map(str::to_string)
 }

@@ -41,7 +41,7 @@ fn knowledge_dir(ctx: &RunCtx<'_>, layer: yunta_core::KnowledgeLayer) -> Option<
 /// silent-by-basename merge `repo`/`user` already have; across packs
 /// there is no order to fall back on, so a collision is a typed error
 /// naming both.
-fn org_knowledge_files(
+async fn org_knowledge_files(
     ctx: &RunCtx<'_>,
     node: &NodeId,
     source_id: &str,
@@ -58,7 +58,7 @@ fn org_knowledge_files(
                 let files = if root.is_file() {
                     vec![root]
                 } else {
-                    list_knowledge_files(&root, node, source_id)?
+                    list_knowledge_files(&root, node, source_id).await?
                 };
                 for path in files {
                     let Some(name) = path.file_name() else {
@@ -88,12 +88,12 @@ fn org_knowledge_files(
         .collect())
 }
 
-fn list_knowledge_files(
+async fn list_knowledge_files(
     dir: &Path,
     node: &NodeId,
     source_id: &str,
 ) -> Result<Vec<PathBuf>, ContextResolveError> {
-    if !dir.exists() {
+    if !tokio::fs::try_exists(dir).await.unwrap_or(false) {
         // No override at this layer is the ordinary case (a fresh repo,
         // or no user-level knowledge yet), not a broken source — distinct
         // from a genuinely missing artifact or node output, which always
@@ -107,18 +107,19 @@ fn list_knowledge_files(
     let mut entries: Vec<PathBuf> = Vec::new();
     let mut pending = vec![dir.to_path_buf()];
     while let Some(current) = pending.pop() {
-        let listing = std::fs::read_dir(&current).map_err(|source| ContextResolveError::Io {
+        let io = |source| ContextResolveError::Io {
             node: node.clone(),
             source_id: source_id.to_string(),
             action: format!("list `{}`", current.display()),
             source,
-        })?;
-        for entry in listing.filter_map(|entry| entry.ok()) {
+        };
+        let mut listing = tokio::fs::read_dir(&current).await.map_err(io)?;
+        while let Some(entry) = listing.next_entry().await.map_err(io)? {
             let path = entry.path();
-            if path.is_dir() {
-                pending.push(path);
-            } else if path.is_file() {
-                entries.push(path);
+            match entry.file_type().await {
+                Ok(kind) if kind.is_dir() => pending.push(path),
+                Ok(kind) if kind.is_file() => entries.push(path),
+                _ => {}
             }
         }
     }
@@ -151,7 +152,7 @@ pub(super) async fn resolve_knowledge(
             continue;
         }
         if layer == yunta_core::KnowledgeLayer::Org {
-            for (name, path) in org_knowledge_files(ctx, &node.id, source_id)? {
+            for (name, path) in org_knowledge_files(ctx, &node.id, source_id).await? {
                 by_name.insert(name, path);
             }
             continue;
@@ -159,7 +160,7 @@ pub(super) async fn resolve_knowledge(
         let Some(dir) = knowledge_dir(ctx, layer) else {
             continue;
         };
-        for path in list_knowledge_files(&dir, &node.id, source_id)? {
+        for path in list_knowledge_files(&dir, &node.id, source_id).await? {
             if let Some(name) = path.file_name() {
                 by_name.insert(name.to_owned(), path);
             }
@@ -168,12 +169,14 @@ pub(super) async fn resolve_knowledge(
 
     let mut out = Vec::new();
     for path in by_name.into_values() {
-        let bytes = std::fs::read(&path).map_err(|source| ContextResolveError::Io {
-            node: node.id.clone(),
-            source_id: source_id.to_string(),
-            action: format!("read `{}`", path.display()),
-            source,
-        })?;
+        let bytes = tokio::fs::read(&path)
+            .await
+            .map_err(|source| ContextResolveError::Io {
+                node: node.id.clone(),
+                source_id: source_id.to_string(),
+                action: format!("read `{}`", path.display()),
+                source,
+            })?;
         out.extend_from_slice(format!("# {}\n", path.display()).as_bytes());
         out.extend_from_slice(&bytes);
         out.push(b'\n');

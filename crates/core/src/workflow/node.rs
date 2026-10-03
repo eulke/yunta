@@ -5,8 +5,10 @@
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::parse::{describe, list};
-use super::{Artifacts, ContextSpec, Hooks, NodeKind, OnFailure};
-use crate::ids::{AgentName, NodeId, RunnerName};
+use super::{
+    Artifacts, ContextSpec, Hooks, NodeKind, NodePermissions, NodeScope, OnFailure, OnInterrupt,
+};
+use crate::ids::{AgentName, NodeId, RunnerName, SkillName};
 use crate::yaml::{self, Mapping, Value};
 
 /// `node_defaults:` — currently carries only `hooks`, the one consumer
@@ -20,7 +22,7 @@ pub struct NodeDefaults {
     /// Skills every node mounts unless it declares its own list
     /// — same replace-wholesale inheritance as `hooks`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub skills: Vec<String>,
+    pub skills: Vec<SkillName>,
 }
 
 /// A single node. Fields here are the ones currently implemented;
@@ -35,8 +37,8 @@ pub struct Node {
     pub kind: NodeKind,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub depends_on: Vec<NodeId>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub scope: Vec<String>,
+    #[serde(default, skip_serializing_if = "NodeScope::is_unscoped")]
+    pub scope: NodeScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<RunnerName>,
     /// `runners: [name, name]` — static fan-out: the manifest expands
@@ -63,8 +65,9 @@ pub struct Node {
     /// field is the node's own override of that default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on_interrupt: Option<OnInterrupt>,
-    /// One-line summary `progress.md` shows for this node —
-    /// a node without one falls back to its own id. Not the same field as
+    /// One-line summary of what this node does, which the commit it
+    /// leaves on the run's branch is titled with — a node without one
+    /// falls back to its own id. Not the same field as
     /// `Workflow.description` (that one's the whole workflow's own
     /// summary).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -102,24 +105,57 @@ pub struct Node {
     /// `skills.paths` (repo first); an adapter with no native mechanism
     /// degrades with `capability_degraded`, never a fatal error.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub skills: Vec<String>,
-    /// `interactive: true` — presentation datum for
-    /// this node's questions: the surface renders them as a live
-    /// conversation when it can. With no surface, nothing changes.
-    /// Absent means `false`.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub interactive: bool,
+    pub skills: Vec<SkillName>,
     /// `invariant: true` — this node's verification/scope/
     /// baseline/hygiene role is non-negotiable: every declared mode must
     /// include it, checked independent of any mode's name or count. A
     /// mode narrows deliberation, never verification.
     #[serde(default)]
     pub invariant: bool,
+    /// `optional: true` — the project may not provide what this node
+    /// needs (a command it names, a forge); where it does not, the run
+    /// leaves the node out as a mode would, instead of being refused.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub optional: bool,
+}
+
+impl Node {
+    /// Whether this node's pass is a verdict on the run's tree: an
+    /// `invariant` that runs a command there — a `bash` node, or a check
+    /// that judges the tree. Its pass holds for the tree it left, and a
+    /// later change to that tree asks for it again. A loop, a session or
+    /// a check that reads the log gives no such verdict.
+    pub fn verifies_the_tree(&self) -> bool {
+        self.invariant
+            && match &self.kind {
+                NodeKind::Bash { .. } => true,
+                NodeKind::Check(builtin) => builtin.judges_the_tree(),
+                _ => false,
+            }
+    }
+
+    /// Whether this node hands a `questions` document over and waits on
+    /// its answers.
+    ///
+    /// The one copy of the predicate: the scheduler asks it to know
+    /// whom to put questions to, the ask round asks it to know whose
+    /// document to re-read, and `check` asks it to refuse a node that
+    /// declares questions alongside anything else. A node that asks
+    /// ends when it asks — what depends on the answers belongs to the
+    /// node after it.
+    pub fn asks(&self) -> bool {
+        self.artifacts.iter().any(|artifacts| {
+            artifacts
+                .produces
+                .iter()
+                .any(|spec| spec.kind() == Some(crate::ArtifactKind::Questions))
+        })
+    }
 }
 
 /// The keys every node accepts at its own level; `kind` and the keys
 /// that belong to the kind are [`NodeKind`]'s.
-const NODE_KEYS: &[&str] = &[
+pub(super) const NODE_KEYS: &[&str] = &[
     "id",
     "depends_on",
     "scope",
@@ -135,14 +171,19 @@ const NODE_KEYS: &[&str] = &[
     "network",
     "context",
     "skills",
-    "interactive",
     "invariant",
+    "optional",
 ];
 
 /// Keys an author reaches for that no node accepts, each with the key
 /// that expresses the intent.
-const RETIRED_NODE_KEYS: &[(&str, &str)] = &[
+pub(super) const RETIRED_NODE_KEYS: &[(&str, &str)] = &[
     ("role", "a node names its runner with `runner:`"),
+    (
+        "interactive",
+        "a node that declares `questions` asks them, and whichever surface is \
+         watching puts them to a person",
+    ),
     (
         "fresh_context",
         "every session starts fresh; `on_interrupt: resume_session` reuses one only when a \
@@ -159,7 +200,7 @@ struct NodeFields {
     #[serde(default)]
     depends_on: Vec<NodeId>,
     #[serde(default)]
-    scope: Vec<String>,
+    scope: NodeScope,
     #[serde(default)]
     runner: Option<RunnerName>,
     #[serde(default)]
@@ -183,11 +224,11 @@ struct NodeFields {
     #[serde(default)]
     context: Vec<ContextSpec>,
     #[serde(default)]
-    skills: Vec<String>,
-    #[serde(default)]
-    interactive: bool,
+    skills: Vec<SkillName>,
     #[serde(default)]
     invariant: bool,
+    #[serde(default)]
+    optional: bool,
 }
 
 impl<'de> Deserialize<'de> for Node {
@@ -227,8 +268,9 @@ impl<'de> Deserialize<'de> for Node {
         };
         let Some(kind_keys) = NodeKind::keys(kind_name) else {
             return Err(D::Error::custom(format!(
-                "{subject}: unknown kind `{kind_name}`; one of {}",
-                list(NodeKind::KINDS)
+                "{subject}: unknown kind `{kind_name}`; one of {}{}",
+                list(NodeKind::KINDS),
+                crate::text::did_you_mean(kind_name, NodeKind::KINDS.iter().copied())
             )));
         };
         let unknown: Vec<&str> = kind_part
@@ -244,7 +286,8 @@ impl<'de> Deserialize<'de> for Node {
                 .copied()
                 .collect();
             let mut message = format!(
-                "{subject}: unknown key(s) {} for a `{kind_name}` node; valid keys: {}",
+                "{subject}: unknown {} {} for a `{kind_name}` node; valid keys: {}",
+                crate::text::agreeing(unknown.len(), "key", "keys"),
                 list(&unknown),
                 list(&valid)
             );
@@ -253,18 +296,19 @@ impl<'de> Deserialize<'de> for Node {
                     message.push_str(&format!("; `{key}`: {hint}"));
                 }
             }
+            for key in &unknown {
+                let retired = RETIRED_NODE_KEYS.iter().any(|(old, _)| old == key);
+                if let Some(near) = crate::text::nearest(key, valid.iter().copied()) {
+                    if !retired {
+                        message.push_str(&format!("; `{key}`: did you mean `{near}`?"));
+                    }
+                }
+            }
             return Err(D::Error::custom(message));
         }
 
         let fields: NodeFields = yaml::from_value(Value::Mapping(own))
             .map_err(|error| D::Error::custom(format!("{subject}: {error}")))?;
-        if fields.id.is_fan_out() {
-            return Err(D::Error::custom(format!(
-                "{subject}: `@` is reserved for the fan-out siblings the manifest expands \
-                 `runners:` into; an authored id is a letter followed by letters, digits, `_` \
-                 or `-`"
-            )));
-        }
         let kind: NodeKind = yaml::from_value(Value::Mapping(kind_part))
             .map_err(|error| D::Error::custom(format!("{subject}: {error}")))?;
         Ok(Node {
@@ -284,93 +328,9 @@ impl<'de> Deserialize<'de> for Node {
             network: fields.network,
             context: fields.context,
             skills: fields.skills,
-            interactive: fields.interactive,
             invariant: fields.invariant,
+            optional: fields.optional,
         })
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum NodePermissions {
-    ReadOnly,
-    Edit,
-    Full,
-}
-
-impl NodePermissions {
-    /// The YAML spelling, for diagnostics and reports.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            NodePermissions::ReadOnly => "read-only",
-            NodePermissions::Edit => "edit",
-            NodePermissions::Full => "full",
-        }
-    }
-}
-
-/// `skip_serializing_if` for a flag whose absence means `false`.
-fn is_false(flag: &bool) -> bool {
-    !*flag
-}
-
-/// A node's crash-recovery policy — the full triple of options.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum OnInterrupt {
-    #[default]
-    RestartNode,
-    FailIfUncertain,
-    /// Continue the same agent conversation — the
-    /// `session_id` the log recorded (`agent_session_opened`) is
-    /// handed back to the adapter's `resume`. Only `kind: prompt` opens
-    /// a node-scoped session, so `check` refuses the explicit
-    /// declaration anywhere else; an adapter without the
-    /// `resume_session` capability — or a crash before any session
-    /// opened — degrades to `restart_node` with an explicit
-    /// `capability_degraded` event, never silently. As a *config default*
-    /// (`defaults.on_interrupt`) it applies where a session exists;
-    /// kinds without one (bash/check/…, and a loop's per-task sessions)
-    /// restart, which is the only meaning the policy can have there.
-    ResumeSession,
-}
-
-impl OnInterrupt {
-    /// The YAML spelling, for diagnostics and the log.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            OnInterrupt::RestartNode => "restart_node",
-            OnInterrupt::FailIfUncertain => "fail_if_uncertain",
-            OnInterrupt::ResumeSession => "resume_session",
-        }
-    }
-}
-
-/// The node kinds built so far. `gate` and
-/// `workflow` are the rest of the full catalogue and stay out until
-/// their own turn.
-/// What a `kind: loop` runs until. One condition exists: the tasks document
-/// has no task left to do.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum LoopUntil {
-    AllTasksComplete,
-}
-
-impl LoopUntil {
-    /// The YAML spelling, for diagnostics.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            LoopUntil::AllTasksComplete => "all_tasks_complete",
-        }
-    }
-}
-
-impl std::fmt::Display for LoopUntil {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
     }
 }
 
@@ -406,13 +366,15 @@ nodes:
     message: m
     options: [approve]
     on: { approve: p }
+    shows: [{ node: p, kind: tasks }]
     external: { kind: pull_request, artifacts: [a], branch: b }
   - id: w
     kind: workflow
     use: child
     inputs: { a: b }
-    isolation: inherit
+    isolation: none
     mounts: [{ artifact: { node: p, name: n, as: m } }]
+  - { id: r, kind: pull_request, title: t, body: b, receipt: false }
 "#;
 
     #[test]
@@ -423,6 +385,11 @@ nodes:
             let text = yaml::to_string(node).unwrap();
             let mapping: Mapping = yaml::parse(&text).unwrap();
             let kind = mapping["kind"].as_str().unwrap().to_string();
+            assert_eq!(
+                node.kind.kind_name(),
+                kind,
+                "`kind_name` and the serialized `kind:` tag name the same kind"
+            );
             let listed =
                 NodeKind::keys(&kind).unwrap_or_else(|| panic!("`{kind}` has no key list"));
             let mut serialized: Vec<String> = mapping
@@ -461,8 +428,8 @@ permissions: edit
 network: true
 context: [{ command: x }]
 skills: [s]
-interactive: true
 invariant: true
+optional: true
 "#,
         )
         .unwrap();

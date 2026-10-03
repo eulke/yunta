@@ -16,6 +16,8 @@ use yunta_core::shape::contract;
 use yunta_core::ArtifactKind;
 
 use crate::error::{CliError, Outcome};
+use crate::render::blocks::{Fields, Next};
+use crate::render::doc::Doc;
 
 /// Prints one kind's shape, or lists the kinds when none is named.
 pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
@@ -33,16 +35,14 @@ pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
     // One parse and one sentence: `ArtifactKind`'s own `FromStr` names
     // the kinds that exist, so this door and the `document_shape` tool
     // answer the same mistake with the same words.
-    let kind = name
-        .parse::<ArtifactKind>()
-        .map_err(|e| CliError::msg(e.to_string()))?;
+    let kind = name.parse::<ArtifactKind>()?;
     if json {
         // The committed bytes CI proves still match the types (`cargo
         // xtask schema --check`), never a schema generated here:
         // generating it would pull `schemars` and the whole
         // schema-building machinery into the shipped binary — around
         // 100 KB, reachable from this one flag — against a recorded
-        // binary-size ceiling (D124).
+        // binary-size ceiling.
         print!("{}", yunta_core::schema::json(kind));
     } else {
         print!("{}", contract(kind));
@@ -50,15 +50,27 @@ pub fn schema(kind: Option<&str>, json: bool) -> Result<Outcome, CliError> {
     Ok(Outcome::Success)
 }
 
-/// The catalog, one kind per line with what it is for.
+/// The catalog, one kind per row with what it is for, and the two
+/// commands that show a kind's shape.
 fn list() -> String {
-    let mut out = String::from("Documents Yunta reads and validates:\n");
-    for kind in ArtifactKind::ALL {
-        out.push_str(&format!("  {:<12} {}\n", kind.as_str(), kind.label()));
-    }
-    out.push_str(
-        "\nRun `yunta schema <kind>` for the shape to write, or add `--json` for the \
-         JSON Schema an editor can validate against.",
-    );
-    out
+    let look = crate::render::stdout_look();
+    let kinds = ArtifactKind::ALL
+        .into_iter()
+        .fold(Fields::new(), |fields, kind| {
+            fields.push_if(kind.as_str(), kind.purpose())
+        });
+    let next = Next {
+        steps: vec![
+            ("yunta schema <kind>".to_string(), "the shape to write"),
+            (
+                "yunta schema <kind> --json".to_string(),
+                "the JSON Schema an editor validates against",
+            ),
+        ],
+    };
+    format!(
+        "Documents Yunta reads and validates:\n{}\n{}",
+        crate::render::draw(Doc::new().with(kinds), &look),
+        crate::render::draw(Doc::new().with(next), &look).trim_end()
+    )
 }

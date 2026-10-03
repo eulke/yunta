@@ -1,0 +1,12 @@
+# What a person replied, as the engine records it.
+# Written by the engine when a `questions` document is answered — never
+# by an agent — and read by whatever node mounts `kind: answers`.
+
+answers:                                # required; one entry per answer
+  - id: theme                           # required: the question this answers
+    value: dark                         # required: what was replied, as text —
+                                        #   a `choice` answer is one of that
+                                        #   question's `values`, a `boolean`
+                                        #   one is `true` or `false`
+  - id: ship-it
+    value: "true"

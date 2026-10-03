@@ -6,7 +6,7 @@ use yunta_core::{NodePermissions, PackLock, PackLockEntry, PackManifest, PackRef
 fn the_reference_pack_parses_and_round_trips() {
     let yaml = include_str!("fixtures/reference-pack.yaml");
     let pack: PackManifest =
-        serde_norway::from_str(yaml).expect("the reference pack manifest must parse whole");
+        yunta_core::yaml::parse(yaml).expect("the reference pack manifest must parse whole");
 
     assert_eq!(pack.name, "review-pack");
     assert_eq!(pack.publisher, "acme");
@@ -16,7 +16,12 @@ fn the_reference_pack_parses_and_round_trips() {
         Some("Review multi-runner con consolidación de hallazgos")
     );
     assert_eq!(pack.license.as_deref(), Some("MIT"));
-    assert_eq!(pack.yunta_schema.as_deref(), Some(">=1 <2"));
+    assert_eq!(
+        pack.yunta_schema
+            .as_ref()
+            .map(yunta_core::SchemaRange::as_str),
+        Some(">=1 <2")
+    );
 
     assert_eq!(pack.requires.runners.len(), 2);
     assert_eq!(pack.requires.runners[0].name, "reviewer");
@@ -27,7 +32,7 @@ fn the_reference_pack_parses_and_round_trips() {
     assert_eq!(pack.requires.runners[1].name, "mechanical");
     assert_eq!(pack.requires.runners[1].permissions, None);
     assert_eq!(pack.requires.mcp_servers, vec!["internal-docs"]);
-    assert_eq!(pack.requires.commands, vec!["gh", "cargo"]);
+    assert_eq!(pack.requires.programs, vec!["gh", "cargo"]);
 
     assert_eq!(pack.declares.permissions, NodePermissions::ReadOnly);
     assert!(!pack.declares.network);
@@ -43,8 +48,8 @@ fn the_reference_pack_parses_and_round_trips() {
 
     // Round-trip at the serde-tree level: what parses serializes back to
     // the same value.
-    let reserialized = serde_norway::to_string(&pack).unwrap();
-    let reparsed: PackManifest = serde_norway::from_str(&reserialized).unwrap();
+    let reserialized = yunta_core::yaml::to_string(&pack).unwrap();
+    let reparsed: PackManifest = yunta_core::yaml::parse(&reserialized).unwrap();
     assert_eq!(pack, reparsed);
 }
 
@@ -60,7 +65,7 @@ contents:
   knowledge: [adrs/, conventions.md]
 "#;
     let pack: PackManifest =
-        serde_norway::from_str(yaml).expect("a knowledge-only pack must parse");
+        yunta_core::yaml::parse(yaml).expect("a knowledge-only pack must parse");
     assert!(pack.contents.workflows.is_empty());
     assert!(pack.contents.skills.is_empty());
     assert_eq!(pack.contents.knowledge, vec!["adrs/", "conventions.md"]);
@@ -75,11 +80,11 @@ version: 0.1.0
 declares:
   permissions: full
 "#;
-    let pack: PackManifest = serde_norway::from_str(yaml)
+    let pack: PackManifest = yunta_core::yaml::parse(yaml)
         .expect("declares is the only hard requirement beyond identity");
     assert!(pack.requires.runners.is_empty());
     assert!(pack.requires.mcp_servers.is_empty());
-    assert!(pack.requires.commands.is_empty());
+    assert!(pack.requires.programs.is_empty());
     assert!(pack.contents.workflows.is_empty());
 }
 
@@ -90,7 +95,7 @@ name: no-ceiling
 publisher: acme
 version: 0.1.0
 "#;
-    let result: Result<PackManifest, _> = serde_norway::from_str(yaml);
+    let result: Result<PackManifest, _> = yunta_core::yaml::parse(yaml);
     assert!(
         result.is_err(),
         "a pack with no declared ceiling must fail to parse, not default to some assumed one"
@@ -109,13 +114,45 @@ fn yunta_lock_round_trips_and_keys_by_publisher_slash_name() {
             name: "review-pack".into(),
             source: "https://github.com/acme/review-pack".to_string(),
             r#ref: "v1.2.0".to_string(),
-            commit: "abc123def456".to_string(),
+            commit: "abc123def456".into(),
             content_hash: yunta_core::sha256_hex(b"deadbeef"),
         },
     );
 
-    let yaml = serde_norway::to_string(&lock).unwrap();
-    let reparsed: PackLock = serde_norway::from_str(&yaml).unwrap();
+    let yaml = yunta_core::yaml::to_string(&lock).unwrap();
+    let reparsed: PackLock = yunta_core::yaml::parse(&yaml).unwrap();
     assert_eq!(lock, reparsed);
     assert_eq!(reparsed.packs[&key].commit, "abc123def456");
+}
+
+/// `yunta_schema:` is a comparator range, and one nobody can evaluate
+/// is refused where the manifest is read: a pack that states a
+/// requirement no version could satisfy or fail has stated nothing.
+#[test]
+fn a_pack_schema_range_that_does_not_parse_is_refused() {
+    let yaml = r#"
+name: broken
+publisher: acme
+version: "1.0.0"
+yunta_schema: "~>1"
+declares: {}
+"#;
+    let error = yunta_core::yaml::parse::<PackManifest>(yaml)
+        .expect_err("a range that does not parse should not parse");
+
+    let text = error.to_string();
+    assert!(
+        text.contains("~>"),
+        "the refusal names the comparator it could not read: {text}"
+    );
+}
+
+/// Every comparator in a range is evaluated against the binary's own
+/// schema major: the whole range holds, or it does not.
+#[test]
+fn a_schema_range_holds_only_when_every_comparator_does() {
+    let range: yunta_core::SchemaRange = ">=1 <2".parse().unwrap();
+    assert!(range.holds_for(1));
+    assert!(!range.holds_for(2));
+    assert_eq!(range.to_string(), ">=1 <2");
 }

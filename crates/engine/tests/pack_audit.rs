@@ -17,7 +17,7 @@ fn write(path: &Path, contents: &str) {
 
 fn manifest(pack_dir: &Path) -> PackManifest {
     let text = std::fs::read_to_string(pack_dir.join("pack.yaml")).unwrap();
-    serde_norway::from_str(&text).unwrap()
+    yunta_core::yaml::parse(&text).unwrap()
 }
 
 /// A pack exercising every audit-worthy surface in one workflow: a
@@ -102,7 +102,10 @@ fn the_inventory_is_exhaustive_against_the_packs_own_content() {
     assert!(draft.context[0].contains("src/lib.rs"));
     assert!(draft.context[1].contains("git log -1"));
     assert!(draft.context[2].contains("internal-docs"));
-    assert_eq!(draft.mcp_servers, vec!["internal-docs".to_string()]);
+    assert_eq!(
+        draft.mcp_servers,
+        vec![yunta_core::McpServerName::from("internal-docs")]
+    );
 
     let package = &workflow.nodes[3];
     assert_eq!(package.kind, "executor");
@@ -200,4 +203,55 @@ fn a_missing_prompt_file_is_reported_with_its_path_and_cause() {
     );
     assert!(std::error::Error::source(error).is_some());
     assert!(error.to_string().contains("prompts/missing.md"));
+}
+
+/// The paths a node would write, and those its tasks may grow within,
+/// are what ties a workflow to one repository's layout.
+#[test]
+fn the_inventory_lists_the_repository_paths_a_node_names() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        &root.path().join("pack.yaml"),
+        "name: layout\npublisher: acme\nversion: 1.0.0\n\
+         declares:\n  permissions: edit\n  network: false\n  executors: []\n\
+         contents:\n  workflows: [build.yaml]\n",
+    );
+    write(
+        &root.path().join("build.yaml"),
+        "name: build\n\
+         nodes:\n\
+         \x20 - { id: plan, kind: prompt, prompt: \"p\", artifacts: { produces: [tasks] } }\n\
+         \x20 - id: implement\n\
+         \x20   kind: loop\n\
+         \x20   depends_on: [plan]\n\
+         \x20   until: all_tasks_complete\n\
+         \x20   prompt: \"i\"\n\
+         \x20   scope_expansion: { mode: ask, within: [\"src/**\"] }\n\
+         \x20 - { id: fix, kind: prompt, depends_on: [implement], prompt: \"f\", scope: [\"**/*.rs\", \"docs/**\"] }\n\
+         \x20 - { id: polish, kind: prompt, depends_on: [fix], prompt: \"p\", scope: run }\n",
+    );
+
+    let audit = audit_pack(root.path(), manifest(root.path()));
+
+    let workflow = &audit.workflows[0];
+    assert!(workflow.error.is_none(), "{:?}", workflow.error);
+    let paths: Vec<(&str, Vec<&str>)> = workflow
+        .nodes
+        .iter()
+        .map(|node| {
+            (
+                node.id.as_str(),
+                node.paths.iter().map(String::as_str).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            ("plan", vec![]),
+            ("implement", vec!["src/**"]),
+            ("fix", vec!["**/*.rs", "docs/**"]),
+            ("polish", vec![]),
+        ]
+    );
 }

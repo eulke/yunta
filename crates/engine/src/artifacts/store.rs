@@ -70,25 +70,40 @@ impl<'a> ObjectStore<'a> {
     /// into place, which is atomic on one filesystem — nobody ever meets
     /// half an object, and `objects/` never holds a name that is not a
     /// hash.
-    pub fn put(&self, bytes: &[u8]) -> std::io::Result<ContentHash> {
+    pub async fn put(&self, bytes: &[u8]) -> std::io::Result<ContentHash> {
         let hash = sha256_hex(bytes);
         let path = self.path_of(&hash);
         if path.exists() {
             return Ok(hash);
         }
         let scratch = self.run_dir.join(crate::run_dir::SCRATCH_DIR);
-        std::fs::create_dir_all(&scratch)?;
-        std::fs::create_dir_all(path.parent().unwrap_or(self.run_dir))?;
+        tokio::fs::create_dir_all(&scratch).await?;
+        tokio::fs::create_dir_all(path.parent().unwrap_or(self.run_dir)).await?;
         let mut file = tempfile::NamedTempFile::new_in(&scratch)?;
         std::io::Write::write_all(&mut file, bytes)?;
         file.persist(&path).map_err(|e| e.error)?;
         Ok(hash)
     }
 
+    /// Stores `bytes` with every secret `redactor` knows taken out, as
+    /// the log takes them out of what it appends — for what a command
+    /// printed, which the run keeps and a secret may have reached.
+    pub async fn put_redacted(
+        &self,
+        bytes: &[u8],
+        redactor: &yunta_core::Redactor,
+    ) -> std::io::Result<ContentHash> {
+        if redactor.is_empty() {
+            return self.put(bytes).await;
+        }
+        self.put(redactor.text(&String::from_utf8_lossy(bytes)).as_bytes())
+            .await
+    }
+
     /// The bytes `hash` names, verified against it.
-    pub fn get(&self, hash: &ContentHash) -> Result<Vec<u8>, ObjectError> {
+    pub async fn get(&self, hash: &ContentHash) -> Result<Vec<u8>, ObjectError> {
         let path = self.path_of(hash);
-        let bytes = match std::fs::read(&path) {
+        let bytes = match tokio::fs::read(&path).await {
             Ok(bytes) => bytes,
             Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
                 return Err(ObjectError::Missing { hash: hash.clone() })
@@ -117,20 +132,34 @@ impl<'a> ObjectStore<'a> {
     /// replaced is replaced back; a nested name nests. Writing a view of
     /// bytes the run does not hold is [`ObjectError::Missing`], never a
     /// file with nothing behind it.
-    pub fn project(
+    pub async fn project(
         &self,
         node: Option<&NodeId>,
         name: &str,
         hash: &ContentHash,
     ) -> Result<(), ObjectError> {
-        let bytes = self.get(hash)?;
+        let bytes = self.get(hash).await?;
+        self.write_view(node, name, &bytes).await
+    }
+
+    /// Writes `bytes` as `node`'s view under `name`: a projection of an
+    /// object, or a view derived from one.
+    pub async fn write_view(
+        &self,
+        node: Option<&NodeId>,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<(), ObjectError> {
         let path = self.run_dir.join(view_path(node, name));
         let io = |context: String| move |source| ObjectError::Io { context, source };
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
+            tokio::fs::create_dir_all(parent)
+                .await
                 .map_err(io(format!("create `{}`", parent.display())))?;
         }
-        std::fs::write(&path, &bytes).map_err(io(format!("write `{}`", path.display())))
+        tokio::fs::write(&path, bytes)
+            .await
+            .map_err(io(format!("write `{}`", path.display())))
     }
 
     /// Where the bytes `hash` names live, absolute.
@@ -144,7 +173,7 @@ impl<'a> ObjectStore<'a> {
 /// The one place the layout of `artifacts/` is written down: a
 /// producer's artifacts under its node, what the run acquired without a
 /// producer at the root.
-pub(crate) fn view_path(node: Option<&NodeId>, name: &str) -> PathBuf {
+pub fn view_path(node: Option<&NodeId>, name: &str) -> PathBuf {
     let mut path = PathBuf::from(ARTIFACTS_DIR);
     if let Some(node) = node {
         path.push(node.as_str());

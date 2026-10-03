@@ -46,8 +46,19 @@ and a later `yunta resume`, changes nothing about how that run's remaining
 nodes execute: `resume` replays the run's own event log against its own
 frozen manifest, never against whatever the newly-installed binary would
 generate today. The only thing a new binary version can change for an
-existing run is how `status`/`stats`/`graph` *render* information already in
-the log — never the log's content or the run's outcome.
+existing run is how `status`/`stats`/`graph` and the live view a `run` draws
+*render* information already in the log — never the log's content or the run's
+outcome.
+
+The manifest also records the repository the run was created in, as `project:
+{ git_common_dir }` — the git directory its main checkout and every linked
+worktree share, absolute — from manifest schema 3 on. A manifest written before
+it carries none and reads as it always did.
+
+The manifest also preserves the declaration order of `modes:` for newly
+created runs, so promotion follows the authored sequence. Manifests written
+before that preservation remain readable, though an order already changed
+on disk cannot be reconstructed from the file.
 
 Waking a run does verify what it holds: `resume` reads back every artifact
 the run's log accepted, from the object the log names it by, and refuses to
@@ -103,8 +114,10 @@ rule is refused with the value, what it was meant to be and the rule:
 
 - A node id, a runner name, a mode name, a task id, a question id, an
   adapter id and an executor name are a letter followed by letters, digits,
-  `_` or `-`. A fan-out sibling the manifest expands `runners:` into adds
-  `@` and its runner's name; authored YAML never spells that form.
+  `_` or `-`. `@` is reserved for the fan-out siblings Yunta generates from
+  `runners:`. `yunta check` rejects an authored node id containing `@`,
+  including the id of a child in a `parallel` group, before fan-out expands.
+  Frozen manifests read those generated `<base>@<runner>` ids back.
 - A model name and an agent name are one printable word without whitespace,
   as the adapter's CLI accepts them.
 - A run id, a publisher and a pack name are one path segment: printable,
@@ -115,6 +128,16 @@ rule is refused with the value, what it was meant to be and the rule:
   between a parent and its child, and between a run and its promotion
   successor, is recorded in the log (`child_run_created`, `promoted_from`),
   never encoded in the id.
+- A run's handle is the last six characters of its id: the random part of a
+  ULID, which tells apart two runs made in the same millisecond. Every line a
+  person reads names a run by its handle; `--json` (which carries both,
+  `run_id` and `handle`), `--quiet`, the receipt, the `status` headline, a line
+  naming a run's directory and the control plane name it by the whole id. A
+  command that takes a run accepts the whole id, any part that starts or ends
+  it in either case, `last` — the newest run of the repository it runs in —
+  and `needs` — that repository's run waiting on a person. A part two runs
+  share, and `needs` with two runs waiting, is refused listing each whole id.
+  The control plane's tools take the whole id only.
 - A finding id is any printable label; a session id is whatever the
   adapter's CLI issued, as long as it is not empty.
 
@@ -122,6 +145,34 @@ A pack manifest names the runners it needs under `requires.runners`. The
 `runner_resolved` event names its runner under `runner`; the log reader also
 accepts `role`, the field's former name, so a log written under it still
 replays. `stats --json` and the JSON receipt name the same value `runner`.
+
+## What this system writes down
+
+Five files outlive the command that wrote them: a run's frozen manifest, the pack
+lock, a run's process registry, the isolation lock and the receipt. Each carries
+`schema_version`, and each is read the same way.
+
+A file stamped with a schema this binary does not know is refused, naming what it
+found and what this binary reads — a manifest interpreted under a shape its own
+creator did not write is a run whose history would mean something else. A file
+stamped lower, or carrying no version at all because it predates one, reads as it
+is: every field this binary needs is either there or optional.
+
+A key this binary does not know is kept rather than dropped, and written back
+when the file is rewritten — so an older binary that reads a file a newer one
+wrote does not silently delete what the newer one recorded. A reader that wants
+to say what it did not understand can name those keys; `yunta status` does.
+
+The receipt is the exception to being read back: nothing reads a `receipt.json`,
+because `yunta receipt` derives it from the log every time. Its `schema_version`
+is for whoever consumes the file outside yunta, who has no log to derive it from.
+
+Every commit a run makes ends in git trailers naming where it came from:
+`Yunta-Run: <run id>` always, `Yunta-Node: <node>` when a node's work made it, and
+`Yunta-Task: <task>` when a task's did. The keys and their values are stable, so
+`git log --grep "Yunta-Run: <run id>"` finds a run's commits on any clone. A pull
+request a run opens carries `<!-- yunta run_id: <run id> -->` in its body; the
+earlier form, `run_id:` followed by the id in backticks, is still recognized.
 
 ## The event log
 
@@ -141,7 +192,12 @@ reading the run fails naming its position.
 
 `node_failed` records what failed, not a sentence about it. Its `failure` is
 either `outcome:` — one sentence the engine states, for a failure with no
-artifact behind it — or `artifacts:`, one entry per declared artifact that did
+artifact behind it — `exited:` — a command the node ran that exited non-zero:
+its `code`, the `tail` of what it printed (stdout, then stderr, at most 20
+lines, redacted like the rest of the log), the `output` object holding all of
+it under the run's `objects/`, and, when the command was not the node's own
+`run:`, its `origin` (`executor` with its name, or `hook` with its `phase` and
+`command`) — or `artifacts:`, one entry per declared artifact that did
 not close. An entry is one of four: the file itself (`artifact-missing`,
 `artifact-empty`, `artifact-oversized` with both numbers, `artifact-unreadable`),
 a document nobody handed over (`artifact-undelivered`), which carries the node
@@ -158,12 +214,51 @@ the whole of where it is: a diagnostic carries no line and column, and
 and the receipt — so none of them can disagree about the facts, and nothing has
 to take a sentence apart to recover them.
 
+A finding's `location` is where it is: a path with the lines of it when the
+finder named them (`src/lib.rs`, `src/lib.rs:142`, `src/lib.rs:142-150`). The path
+is relative and never climbs out of what it is under, because a findings document
+is inherited by a successor run that need not be on this host — an absolute path
+is that host's, not the run's. A bare path is in the worktree, which is what every
+finding an agent writes is about; the engine's own findings about the run's
+bookkeeping carry the prefix `run:` and are relative to the run directory
+(`run:scratch/engine.json`). A location that does not read is refused where it is
+read, as a `parse` problem at its own key (`findings[0].location`).
+
+A report names the document it is about: its `path`, and its `kind` — one of the
+artifact kinds, or `workflow` for the file a run is created from. A workflow is
+read the same way every other document is, so a graph that breaks its own rules —
+an id declared twice, a reference that reaches nothing, two `parallel` children
+that can touch the same files, a `parallel` group inside another, a mode that
+leaves the graph unable to run —
+reaches a reader as the same report a tasks document does. A diagnostic's subject,
+under `of`, names the entry the problem is about; for a workflow that is `node`.
+
 A problem is one of two shapes, under the key `problem`. `parse` carries `message`
 and, unless the root itself is at fault, the `path` of the value that stopped the
-read (`tasks[1].manual_review`); its stable code is `parse`. `rule` carries a
-`code` from a closed set and the `detail` a reader acts on. A node fails on an
+read (`tasks[1].scope`); its stable code is `parse`. `rule` carries a `code` from a
+closed set and the `detail` a reader acts on. A node fails on an
 artifact with `retryable: false`: there is no second session to instruct, so
 nothing about the failure asks for one.
+
+The rules a document can break, which is that closed set: `duplicate-id`,
+`empty-title`, `empty-scope`, `no-criteria`, `all-criteria-are-guards`,
+`unknown-dependency`, `dependency-cycle`, `overlapping-scope`, `duplicate-shape`,
+`duplicate-decision`, `unknown-shape-owner`, `shape-outside-owner-scope`,
+`unknown-shape`, `shape-used-before-its-owner`, `change-outside-scope`,
+`duplicate-spec`, `no-spec-test`, `unexplained-test`, `test-file-escapes`,
+`duplicate-test-file`, `unknown-spec-task`, `test-file-exists`, `other-spec-changed`, `departed-spec-unchanged`, `criterion-cannot-run`, `criterion-already-passes`, `guard-already-red`, `proposed-criterion-already-passes`, `no-summary`,
+`no-description`, `unexplained-criterion`, `no-outcome`, `no-changes`,
+`unexplained-decision`, `change-without-code`, `change-code-misses-a-name`,
+`change-code-is-a-comment`, `criterion-checks-presence`,
+`shared-criterion`, `uses-its-own-shape`, `task-writes-its-test`,
+`changes-a-spec-test`, `unknown-answer`, `unrun-spec-file`,
+`spec-test-runs-no-spec-file`, `empty-text`,
+`empty-detail`, `unknown-id`, `withdrawn-id`, `empty-reason`, `missing-values`,
+`missing-answer`, `mismatched-answer`, `incoherent-mode`,
+`invariant-in-parallel` and `incoherent-optional`. Together with
+`parse` and the six an artifact fails under, they are every stable code this
+system reports: a receipt counts by one, `status --json` publishes one, and a log
+is grepped by one.
 
 A log whose `node_failed` events carry `outcome:` on its own — every log written
 before `artifacts:` existed — reads back as exactly that one-sentence failure:
@@ -206,7 +301,15 @@ whole `finding`; `finding_updated` carries the whole finding again, under the sa
 id, as its new state; `finding_withdrawn` carries the `id` and the `reason` its node
 gave. `finding_refused` carries the `operation` (`post`, `update` or `withdraw`), the
 `report`, and the `id` the call named when it named one that parses — the field is
-absent otherwise.
+absent otherwise. Another node's answer is `finding_answered`: the `node` and `id` of
+the finding answered, `answer` (`fixed` or `declined`) and `why`, with the answering
+node in the envelope; `finding_proved` carries the same `node` and `id` and the
+`result` of the criterion the finding proposes, run on the tree the answering node
+left; `finding_settled` carries the `node` (absent for the engine's own finding) and
+`id` a person went on past at the gate in the envelope, and `caused_by`, the
+decision's `gate_resolved`. An older binary keeps it as a kind it does not know. A run
+tool a newer binary serves can reach a log as `run_tool_failed.tool`, which an older
+binary reads as corrupt — a log written by a newer binary is read by a binary as new.
 
 Which findings a run holds is the last state of each `(node, id)` pair, minus the
 withdrawn ones, in the order each was first posted. A log that carries only
@@ -218,22 +321,125 @@ it is the state it can account for.
 
 `yunta list --runs` orders runs by the timestamp of their first event.
 
+A run a person closed with `yunta close` ends in `run_finished` with
+`terminal_state: cancelled` and `closed_by`, the responder who closed it; a run
+the engine drove to its end carries no `closed_by`.
+
+`yunta list --runs` lists the runs of the repository it is run in — the ones
+whose manifest names its git directory, and the ones that name none and have
+their own branch in it — and ends with how many runs on the machine belong to
+other projects; `--all`, or running it outside a repository, lists every run.
+
+`yunta list --runs` groups runs by what can be done about them — what needs a
+person, what stalled, what is running, what has closed, and last the runs whose
+log or manifest does not read back. A run is stalled when its log says it is
+moving and the engine its registry (`scratch/engine.json`) names is gone: a
+process that exited, or a pid the host has since given to a process that started
+later. Nothing else is called stalled — a run with no registry at all may be
+between two processes. A run needs someone, too, when its log says it is moving
+and its live engine is asking a person at its terminal: the registry records
+`asking: {node?, since}` while the question is open, and the row says which node
+is asking, at which process's terminal, and for how long. Each row says what the run is called, its handle, its
+workflow and mode, and how long it has been where it is; a run that needs
+someone, or stalled, carries what holds it and the command that moves it under
+its row. The first three groups are ordered by how long a run has been where it
+is, longest first; two runs that have been there equally long are ordered by run
+id, which for a minted one is the order they were created in. Closed runs are
+listed newest first, and only the ten newest are named — the rest are counted
+(`2 older closed runs not listed`). A run in the last group has no derived state
+to have been in, so that group is ordered by run id alone.
+
+## Exit codes
+
+`yunta run` and `yunta resume` — with or without `--json` and `--quiet` — exit
+with what the run reached, so a script that starts one reads the outcome without
+parsing what it printed:
+
+| Code | The run |
+|---|---|
+| 0 | finished |
+| 1 | failed, was cancelled, promoted, stalled or broke — or the command itself failed |
+| 2 | was never started: the command line did not parse |
+| 3 | needs you: it stopped on a person — a decision, a question, a budget, a scope |
+| 4 | reported: it finished holding findings that block it |
+| 130 | was interrupted by a person in this invocation (Ctrl-C) |
+
+`yunta status` and `yunta close` exit 0 whatever the run says: they report a
+run, they do not drive it. `yunta test` writes a case's `final_state` in the same
+words: `finished`, `needs you`, `reported`, `failed`, `promoted`; a case written
+with `paused` is refused, naming `needs you`.
+
+## Color
+
+Every command takes `--color auto|always|never`, decided for each stream on its
+own: stdout and stderr can be a terminal and a pipe at once. Under `auto`, in
+order, `NO_COLOR` (set and not empty) turns color off, `CLICOLOR_FORCE` (set,
+not `0`) turns it on even for a pipe, `CLICOLOR=0` turns it off, and otherwise a
+stream gets color when it is a terminal and `TERM` is not `dumb`. Only the sixteen
+ANSI colors are used, so a terminal draws them in its own palette. A painted line
+reads the same once its color is taken out: color repeats the words, it never
+replaces them. `NO_COLOR` changes nothing but color — the live view is drawn on a
+terminal either way.
+
+A stream with color also gets links where a path names a file a reader opens —
+the whole output of a failed command — when its terminal announces it opens them:
+`TERM_PROGRAM` of `iTerm.app`, `WezTerm` or `vscode`, a `VTE_VERSION` of 5000 or
+later, `KITTY_WINDOW_ID` or `WT_SESSION` set. `YUNTA_HYPERLINKS=1` turns them on
+wherever there is color, and `YUNTA_HYPERLINKS=0` off. A link is an OSC 8 sequence
+around the path's own text, which a terminal without links shows as that text.
+
+## Line width
+
+A line is laid out to the width of the stream it is written to: a terminal's
+own width, held between 60 and 120 cells. `COLUMNS`, set to a positive number,
+is the width asked for and wins over the measured one, on a terminal or a pipe;
+with neither, a line is 80 cells. A row the live view or a prompt redraws in
+place never passes the terminal's edge, whatever the floor says.
+
 ## The JSON surfaces
 
-`stats --json`, `status --json` and `run --json` carry `schema_version: 2`. The
-three share one stamp, so all of them carry the new number even though only
-`status --json` changed shape.
+`stats --json`, `status --json` and `run --json` carry `schema_version: 6`. The
+three share one stamp, so all of them carry the new number even though only the
+run document changed shape: from 6 on, a run stopped on a person is `needs you`
+rather than `paused`, and a run that finished holding blocking findings is
+`reported` rather than `finished`.
+
+`run --json`, `resume --json`, `status --json` and the control plane's
+`workflow_status` all emit one document. It names the run by its whole `run_id`
+and by the `handle` every line a person reads calls it. It is derived from the run's own event
+log, so the command that drove a run to its stop and the command that reads that
+run afterwards publish the same answer, field for field. `outcome` is the word
+every text surface prints for the run — `created`, `running`, `stalled`,
+`needs you`, `finished`, `reported`, `failed`, `cancelled`, `promoted`, `broken` — so a reader who greps a
+terminal for what `status` said finds the same word in the document. A failed or
+broken run carries `reason`; a parked one carries `waiting_on` and, when its
+pause reconstructs a menu, `decision`. `yunta run --detach --json` publishes that
+same document for the run it just handed off, which its log calls `created` or
+`running`: no surface reports an outcome of `detached`, because detaching is
+something an invocation did and not a state a run is in.
+
+`stats --json` publishes what a run handed over and what it found beside what it
+spent: `submissions` (`{accepted, refused}`) counts every document offered,
+`findings` (`{posted, updated, withdrawn, refused}`) counts every finding call the
+log carries, and `findings_standing` counts the findings that stand now — the
+fold over the whole log, where an update replaces and a withdrawal removes. Each
+node row carries its own `submissions` and `findings`, zeroed for a node the log
+carries none from.
 
 In `status --json`, `diagnostics` maps a failed node to the artifacts its failure
 names — `{"<node>": [{code?, path?, kind?, file?, run?, producer?, artifact?,
 diagnostics?}, ...]}`, one entry per artifact. Every field is absent when the
 failure has nothing to put there, so no consumer meets an invented path: only a
 failure the close opened a file for carries `path`. `code` is the stable name of
-what is wrong with the artifact itself — `artifact-missing`, `artifact-undelivered`,
+what is wrong with the artifact itself — `artifact-missing`, `artifact-empty`,
+`artifact-oversized`, `artifact-unreadable`, `artifact-undelivered`,
 `artifact-unheld` — and is absent for a content failure, whose problems each carry
 a code of their own. A content failure carries `kind`, the artifact kind whose
 shape the content was read against, and `diagnostics`, every problem that document
-has in document order. A file-level failure carries `file` instead, naming what
+has in document order. A problem read from the file's text carries `at`
+(`{line, col, len}`, counted from one, `len` in characters): where the parser
+stopped, or where the entry the problem names is written. A document a session
+handed over as a value has no text, and its problems carry no `at`. A file-level failure carries `file` instead, naming what
 went wrong with the file itself: never written, empty, past
 `limits.max_artifact_bytes`, or refused by the filesystem. A document a node ended
 owing carries `producer`, the node that owes it, and `artifact`, the identity it
@@ -246,7 +452,11 @@ always the state the node is in now.
 
 Yunta serves MCP in two places: the per-session tool server the engine starts on
 loopback HTTP for one node's session, and the control plane `yunta mcp` serves over
-stdio. Both announce every protocol revision the SDK implements — `2024-11-05`
+stdio. They are named apart. The per-session server is always `yunta-run`, which is
+the name a CLI writes it under and the prefix its tools carry; the control plane is
+registered by whoever uses it, under whatever name they choose. A CLI merges both
+entries into one table by key, so one name for both would be one server configured
+twice. Both announce every protocol revision the SDK implements — `2024-11-05`
 through `2026-07-28` — and both serve all of them from one set of handlers.
 
 Every result either server builds satisfies the newest revision it announces. A
@@ -265,6 +475,88 @@ on every later request. Which tools a per-session server lists depends on that
 session — its node, its task and the documents it declares — never on the revision
 the client speaks.
 
+A call to a tool the server does not serve is refused by the protocol, with
+`-32602` (invalid params), on both servers: no tool ran. Every text a per-session
+tool answers with opens on its verdict, numbers what stands in the way, and ends
+on a line opening `Next:` when there is something to call or do next; what a tool
+answers as data is JSON.
+
+`run --json` carries `budget_warning` when the declared cap sits under the
+workflow's historical p90 — the same sentence that goes to stderr, undecorated,
+because how a caution looks is the terminal's word and not the document's.
+Absent otherwise, and always absent from `resume --json`: the estimation belongs
+to whoever *creates* a run.
+
+`status --json` carries `waiting_on` for a parked run, tagged by `on`:
+`{"on": "gate", "node", "external_ref"?, "reason"?}` when a node is parked on a
+gate, `{"on": "questions", "node", "asked": [...], "reason"?}` when it is parked
+on questions nobody answered, and `{"on": "run", "reason"}` when the run itself
+stopped. A run that is moving while its live engine asks a person at its terminal
+carries `{"on": "prompt", "node"?, "since", "pid"}`: a question asked live is on
+no log until it is answered, and the only place it takes an answer is the
+terminal of process `pid`. Its `outcome` is `"needs you"` then, as a parked run's
+is. `summary` says the same thing inside a sentence that also carries the run's
+counters; this is the pause on its own.
+
+`status --json` carries `nodes` as a **list**, in the order the run's frozen
+workflow declares them, each `parallel` group followed by its own children —
+the same list, in the same order, that `status` prints and that `graph --run`
+draws. Every declared node is in it, the ones this run's mode leaves out
+included and marked `skipped`; a node the log never mentioned is in it too,
+because a document that left it out could not say whether the run is still on
+its way there or never going. Each entry is `{id, state, detail?, group?,
+waiting_on?, session_death?, last_tool_failure?}`: `state` is the word every text
+surface prints for a node, `detail`
+is what qualifies it, `group` names the enclosing `parallel` group, and
+`waiting_on` carries the wait in the same shape the run-level one uses.
+`tasks` and `diagnostics` stay maps: a reader indexes those by id, and they
+carry no order of their own.
+
+`last_tool_failure`, when present, is `{session_id, tool, cause}` for the
+last failed `yunta-run` call of that node's current or most recently closed
+attempt. `cause` is `approval_blocked` or `call_failed`. A new attempt clears
+it. The field gives context and does not claim that the call caused the
+node's terminal outcome. The event log keeps every `run_tool_failed`; this
+status field keeps only the latest for the attempt.
+
+A node that failed because its session ended without ever reporting a terminal
+event carries `session_death`: the `adapter` whose session it was and, when that
+session had a process of its own, its `exit` — `end`, tagged `code`, `signal` or
+`unknown`, and `stderr_tail`, the last lines the process wrote, with every value
+its environment carried replaced by `[redacted]`. `detail` says the same thing in
+a sentence. `diagnostics` gains no entry for it: a dead session names no document,
+the same as a failure stated in one sentence.
+
+A parked run's `decision.evidence` is a list of the facts the engine attached,
+each `{label?, value}` — the escalation as the log holds it, not the lines a
+reader was shown. A fact that names itself, like a failing command's `exit 1`,
+carries no `label`.
+
+In `status --json`, `diagnostics` maps a failed node to the documents its failure
+names — `{"<node>": [{path, kind?, diagnostics?, file?}, ...]}`, one entry per
+file. `path` is always there. A content failure carries `kind`, the artifact kind
+whose shape the file was read against, and `diagnostics`, every problem that
+document has in document order. A file-level failure carries `file` instead,
+naming what went wrong with the file itself: never written, empty, past
+`limits.max_artifact_bytes`, or refused by the filesystem. A node whose most
+recent failure is a plain message has no entry at all, so what the field shows is
+always the state the node is in now.
+
+In `status --json`, `decision` carries what a parked run is waiting on:
+`{node, summary, evidence, options: [{id, label, tradeoff}], external_ref?,
+withheld?, resolve_with, commands}` — the escalation under the same field names
+the `gate_waiting` event writes, plus the node it belongs to, the command that
+answers it with the option left as `<option>`, and `commands`, the command that
+chooses each option keyed by its id. `withheld` lists each option the gate does
+not offer, as `{option, because}`, and is absent when it withholds none. An option a workflow declares on a gate is
+labelled with where it leads — ``Back to `fix` ``, ``On to `deploy` `` — rather
+than with its own id. Two pauses reconstruct one: a node whose
+re-routes are exhausted, and an unresolved internal gate. Every other pause — a
+budget cap, a scope expansion, an unanswered questions artifact, an external
+gate with no reachable forge — carries no `decision` at all, and `summary` says
+what the run is waiting on instead. The `decision` field itself is additive; the
+stamp moved to `3` for the shape of `decision.evidence`, described above.
+
 ## Message wording
 
 The block that reports what is wrong with a document counts in whole words —
@@ -276,13 +568,21 @@ interpreted artifact that could not be read, a workflow that fails `yunta check`
 check failed (run `yunta doctor` for detail): 2 errors`` — the advice sits inside
 the parenthesis so the count lands directly after the heading.
 
+`yunta run`'s live view needs a terminal, and where there isn't one it says so on
+its first line and prints one line per event instead: `live view off (<reason>):
+one line per event`, the reason being `stderr is not a terminal` or `TERM=dumb`.
+`NO_COLOR` is not one: it takes the color away and leaves the region, whose
+words already say everything its color does. The same shape as the line above — what is off, why in the
+parenthesis, what happens instead after the colon. `--quiet` announces nothing,
+because it has no view to stand down.
+
 The `document_shape` tool refuses an unknown kind with the same sentence
 `yunta schema` prints, byte for byte.
 
 A run tool that refuses something a session offered opens with what was not accepted
 and which call to make again, then lists the problems numbered from 1, one per
 paragraph. The heading names the document by the noun of its kind — `tasks document`,
-`findings artifact`, `questions artifact`:
+`spec document`, `findings artifact`, `questions artifact`:
 
 ```
 The tasks document `tasks.yaml` was not accepted. Fix these and submit again:
@@ -305,8 +605,9 @@ that report it: `2 unknown event kinds, interpreted partially: <kind> ×<count>,
 and `1 unknown event kind` for one. `yunta status` folds that into its
 `·`-separated summary; `yunta stats` gives it a line of its own.
 
-`yunta test` closes a case with what it found: `case <name> ... FAILED: 2 errors`,
-`case <name> ... ERROR: 1 error`, and `case <name> ... ok` on its own. The tally
+`yunta test` gives each case a row — its mark, its name, and what it found:
+`failed: 2 errors`, `could not run: 1 error`, or `ok` — with each problem on the
+lines under it. The tally
 under them counts cases — `4 cases, 1 failed`, `1 case, 1 failed` — and carries no
 error count, unlike every other heading that introduces problems: `failed` counts
 cases while the lines beneath it count problems, and one failing case contributes
@@ -321,17 +622,26 @@ no cases. Failure lines sit two spaces in under it.
 `yunta pack audit` prints a node's `prompt:` block even when the prompt file is
 empty: a blank line under the heading, an empty block that shows it is empty.
 
+A quantity carries its unit and only the digits it has to say, the same on every
+surface and in the receipt. A count of tokens is exact below a thousand and in
+three significant digits above — `999`, `20.2k`, `1.86M` — and exact where it
+stands beside a configured limit (``run spent 200431 tokens with
+`limits.max_tokens_per_run: 200000` ``). A ratio up to one reads as whole percent and
+one past it as a multiple: `35%`, `120×`. A duration past a day names days and
+hours: `5d13h`. `--json` keeps every number as the integer or float it is.
+
 ## The schemas as files
 
 `crates/core/schemas/` holds `workflow.json`, `config.json`, `pack.json`,
-`tasks.json`, `findings.json`, `questions.json` and `events.json`: the JSON
-Schema (draft 2020-12) of a workflow file, a config layer, a pack manifest, the
-three artifacts the engine interprets, and one event of the log — the shape of a
-line of `events.jsonl`. They are generated from the types that read those
-documents: `cargo xtask schema` writes them and CI fails when a committed file
-differs from what the types emit, so any change to a format is a visible diff in
-the pull request that makes it. They live inside the crate whose types produce
-them, which is also the crate that ships them: the binary embeds those exact
+`tasks.json`, `spec.json`, `findings.json`, `questions.json`, `answers.json`,
+`withdrawal.json` and `events.json`: the JSON Schema (draft 2020-12) of a
+workflow file, a config layer, a pack manifest, the five artifacts the engine
+interprets, the withdrawal that retires a finding, and one event of the log —
+the shape of a line of `events.jsonl`. They are generated from the types that
+read those documents: `cargo xtask schema` writes them and CI fails when a
+committed file differs from what the types emit, so any change to a format is a
+visible diff in the pull request that makes it. They live inside the crate whose
+types produce them, which is also the crate that ships them: the binary embeds those exact
 files, so `yunta schema <kind> --json` prints the bytes CI checked rather than
 deriving a schema of its own at run time. An editor or a validator can use the
 files as they are, with or without a checkout.
@@ -362,7 +672,9 @@ pid reused while the lock stands keeps it until that process ends.
 Individual adapters (CLI integrations like `claude-code`, `codex`) have
 their own version compatibility against the coding-agent CLI they wrap; see
 `yunta doctor`, which checks the installed binary's version against what the
-adapter supports. Pack compatibility (a pack's own `declares:`/`requires:`
+adapter supports — and `yunta doctor --session`, which goes further and opens one
+real session per binding, because a version check never touches the configuration
+a run writes the CLI and so cannot say whether a session opens at all. Pack compatibility (a pack's own `declares:`/`requires:`
 against a given Yunta version) is the pack author's responsibility, checked
 statically at `pack add`/`check` time — this document covers the engine
 itself, not third-party content distributed through it.

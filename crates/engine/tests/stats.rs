@@ -3,7 +3,7 @@
 //! re-route, exercised directly without spinning up a full run (same
 //! style `tests/progress.rs` uses for `render_progress`).
 
-use chrono::{DateTime, TimeZone, Utc};
+use yunta_core::events::{ArtifactEvent, FindingEvent, NodeEvent, RunEvent, TaskEvent};
 use yunta_core::events::{
     ArtifactSubmittedPayload, EventBody, EventPayload, Failure, Finding, FindingOperation,
     FindingPostedPayload, FindingRefusedPayload, FindingSeverity, FindingUpdatedPayload,
@@ -15,15 +15,14 @@ use yunta_core::{Node, NodeId, NodeKind, RunnerCandidate, Workflow};
 use yunta_engine::{
     compute_run_stats, prior_estimation, run_summary, FindingActivity, RunSummary, Submissions,
 };
+use yunta_testkit_core::Log;
 
 fn node(id: &str, depends_on: &[&str]) -> Node {
     Node {
         id: id.into(),
-        kind: NodeKind::Bash {
-            run: "true".to_string(),
-        },
+        kind: NodeKind::Bash { run: "true".into() },
         depends_on: depends_on.iter().map(|d| (*d).into()).collect(),
-        scope: Vec::new(),
+        scope: yunta_core::NodeScope::Unscoped,
         runner: Some("implementer".into()),
         artifacts: None,
         hooks: None,
@@ -35,9 +34,9 @@ fn node(id: &str, depends_on: &[&str]) -> Node {
         context: Vec::new(),
         invariant: false,
         skills: Vec::new(),
-        interactive: false,
         runners: Vec::new(),
         agent: None,
+        optional: false,
     }
 }
 
@@ -51,27 +50,6 @@ fn workflow(nodes: Vec<Node>) -> Workflow {
         nodes,
         yunta_schema: None,
         on_finish: Vec::new(),
-    }
-}
-
-fn base_time() -> DateTime<Utc> {
-    Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap()
-}
-
-/// `index` is the event's 0-based position in the synthetic log; storage
-/// numbers positions from 1.
-fn event(
-    index: u64,
-    offset_secs: i64,
-    node_id: Option<&str>,
-    payload: EventPayload,
-) -> StoredEvent {
-    StoredEvent {
-        run_id: "run-1".into(),
-        seq: (index + 1).into(),
-        timestamp: base_time() + chrono::Duration::seconds(offset_secs),
-        node_id: node_id.map(Into::into),
-        body: EventBody::Known(payload),
     }
 }
 
@@ -96,134 +74,108 @@ fn tokens(input: u64, output: u64, cached: Option<u64>) -> TokenUsage {
 /// finishes on attempt 2 — a retry's tokens count as rework, and the
 /// second `RunnerResolved` re-affirms the same role.
 fn fixture_events() -> Vec<StoredEvent> {
-    vec![
-        event(
-            0,
-            0,
-            None,
-            EventPayload::RunCreated(RunCreatedPayload {
-                manifest_hash: yunta_core::sha256_hex(b"h"),
-                inputs: Default::default(),
-                mode: "default".into(),
-                promoted_from: None,
-                yunta_schema: None,
-                base_branch: "main".to_string(),
-                base_commit: "deadbeef".into(),
-            }),
-        ),
-        event(
-            1,
-            0,
-            Some("a"),
-            EventPayload::RunnerResolved(RunnerResolvedPayload {
+    Log::for_run("run-1")
+        .event(EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+            manifest_hash: yunta_core::sha256_hex(b"h"),
+            inputs: Default::default(),
+            mode: "default".into(),
+            promoted_from: None,
+            yunta_schema: None,
+            base_branch: "main".to_string(),
+            base_commit: "deadbeef".into(),
+            environment: None,
+            left_out: Vec::new(),
+        })))
+        .node(
+            "a",
+            EventPayload::Node(NodeEvent::RunnerResolved(RunnerResolvedPayload {
                 runner: "implementer".into(),
                 chosen: candidate(),
                 discarded: Vec::new(),
-            }),
-        ),
-        event(
-            2,
-            0,
-            Some("a"),
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
-        ),
-        event(
-            3,
-            10,
-            Some("a"),
-            EventPayload::NodeFinished(NodeFinishedPayload {
-                outcome: "ok".to_string(),
-                tokens_used: tokens(100, 50, Some(20)),
-            }),
-        ),
-        event(
-            4,
-            10,
-            Some("b"),
-            EventPayload::RunnerResolved(RunnerResolvedPayload {
+            })),
+        )
+        .node(
+            "a",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .after(10)
+        .node(
+            "a",
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "ok".to_string(),
+                tokens(100, 50, Some(20)),
+            ))),
+        )
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::RunnerResolved(RunnerResolvedPayload {
                 runner: "implementer".into(),
                 chosen: candidate(),
                 discarded: Vec::new(),
-            }),
-        ),
+            })),
+        )
         // `b` becomes ready at t=10s (when `a` finishes) but only starts
         // at t=15s — 5s blocked.
-        event(
-            5,
-            15,
-            Some("b"),
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
-        ),
-        event(
-            6,
-            25,
-            Some("b"),
-            EventPayload::NodeFailed(NodeFailedPayload::new(
+        .after(5)
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .after(10)
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::Failed(NodeFailedPayload::new(
                 Failure::message("criteria still red".to_string()),
                 true,
                 tokens(80, 40, None),
-            )),
-        ),
-        event(
-            7,
-            25,
-            Some("b"),
-            EventPayload::NodeRerouted(NodeReroutedPayload {
-                to_node: "b".into(),
-                cause: "criteria still red".to_string(),
-                attempt: Some(2),
-                max_reroutes: Some(1),
-                origin: yunta_core::events::RerouteOrigin::OnFailure,
-            }),
-        ),
-        event(
-            8,
-            26,
-            Some("b"),
-            EventPayload::RunnerResolved(RunnerResolvedPayload {
+            ))),
+        )
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+                "b".into(),
+                yunta_core::events::RerouteCause(yunta_core::events::Failure::message(
+                    "criteria still red",
+                )),
+                yunta_core::events::RerouteOrigin::OnFailure,
+                Some(2),
+                Some(1),
+            ))),
+        )
+        .after(1)
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::RunnerResolved(RunnerResolvedPayload {
                 runner: "implementer".into(),
                 chosen: candidate(),
                 discarded: Vec::new(),
-            }),
-        ),
-        event(
-            9,
-            26,
-            Some("b"),
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 2 }),
-        ),
-        event(
-            10,
-            36,
-            Some("b"),
-            EventPayload::NodeFinished(NodeFinishedPayload {
-                outcome: "ok".to_string(),
-                tokens_used: tokens(60, 30, None),
-            }),
-        ),
-        event(
-            11,
-            36,
-            None,
-            EventPayload::TaskRegistered(TaskRegisteredPayload {
+            })),
+        )
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(2))),
+        )
+        .after(10)
+        .node(
+            "b",
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "ok".to_string(),
+                tokens(60, 30, None),
+            ))),
+        )
+        .event(EventPayload::Tasks(TaskEvent::Registered(
+            TaskRegisteredPayload {
                 task_id: "t1".into(),
                 criteria: Vec::new(),
                 scope: Vec::new(),
                 depends_on: Vec::new(),
-            }),
-        ),
-        event(
-            12,
-            37,
-            None,
-            EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
-                task_id: "t1".into(),
-                new_status: TaskStatus::Done,
-                caused_by: 10.into(),
-                commit: None,
-            }),
-        ),
-    ]
+            },
+        )))
+        .after(1)
+        .event(EventPayload::Tasks(TaskEvent::StatusChanged(
+            TaskStatusChangedPayload::to("t1".into(), TaskStatus::Done, 10.into()),
+        )))
+        .build()
 }
 
 #[test]
@@ -260,7 +212,7 @@ fn cache_rate_is_none_unless_some_attempt_reported_it() {
         .into_iter()
         .take(4)
         .map(|mut e| {
-            if let EventBody::Known(EventPayload::NodeFinished(p)) = &mut e.body {
+            if let EventBody::Known(EventPayload::Node(NodeEvent::Finished(p))) = &mut e.body {
                 p.tokens_used.cached = None;
             }
             e
@@ -275,37 +227,31 @@ fn cache_rate_is_none_without_input() {
     // A run can report a cache figure yet spend no input tokens to divide
     // by; a rate over zero input is undefined, never a fabricated 0%.
     let wf = workflow(vec![node("a", &[])]);
-    let events = vec![
-        event(
-            0,
-            0,
-            None,
-            EventPayload::RunCreated(RunCreatedPayload {
-                manifest_hash: yunta_core::sha256_hex(b"h"),
-                inputs: Default::default(),
-                mode: "default".into(),
-                promoted_from: None,
-                yunta_schema: None,
-                base_branch: "main".to_string(),
-                base_commit: "deadbeef".into(),
-            }),
-        ),
-        event(
-            1,
-            0,
-            Some("a"),
-            EventPayload::NodeStarted(NodeStartedPayload { attempt: 1 }),
-        ),
-        event(
-            2,
-            5,
-            Some("a"),
-            EventPayload::NodeFinished(NodeFinishedPayload {
-                outcome: "ok".to_string(),
-                tokens_used: tokens(0, 50, Some(0)),
-            }),
-        ),
-    ];
+    let events = Log::for_run("run-1")
+        .event(EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+            manifest_hash: yunta_core::sha256_hex(b"h"),
+            inputs: Default::default(),
+            mode: "default".into(),
+            promoted_from: None,
+            yunta_schema: None,
+            base_branch: "main".to_string(),
+            base_commit: "deadbeef".into(),
+            environment: None,
+            left_out: Vec::new(),
+        })))
+        .node(
+            "a",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .after(5)
+        .node(
+            "a",
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "ok".to_string(),
+                tokens(0, 50, Some(0)),
+            ))),
+        )
+        .build();
     let stats = compute_run_stats(&wf, &events);
     assert_eq!(stats.total_tokens.input, 0);
     assert_eq!(stats.cache_rate, None);
@@ -476,7 +422,26 @@ fn a_cap_below_the_historical_p90_produces_the_warning() {
         .expect("cap 250 < p90 300 must warn");
     assert_eq!(
         warning,
-        "warning: `limits.max_tokens_per_run` (250) is below this workflow's historical p90 (300 tokens over 3 run(s)) — the run may pause on its budget"
+        "`limits.max_tokens_per_run` (250) is below this workflow's historical p90 (300 tokens over 3 runs) — the run may pause on its budget"
+    );
+}
+
+/// The engine states what it found; the surface showing it decides how a
+/// caution is marked. A sentence that carried its own marking would reach
+/// a CLI that adds one as `warning: warning: ...`.
+#[test]
+fn the_warning_sentence_carries_no_surface_s_own_marking() {
+    let history = vec![
+        summary(100, 10, 1),
+        summary(200, 20, 2),
+        summary(300, 30, 3),
+    ];
+    let estimation = prior_estimation(&history);
+    let warning = yunta_engine::budget_p90_warning(Some(250), estimation.as_ref())
+        .expect("cap 250 < p90 300 must warn");
+    assert!(
+        !warning.to_lowercase().contains("warning"),
+        "the sentence states the fact and stops there: {warning}"
     );
 }
 
@@ -509,7 +474,7 @@ fn finding(id: &str) -> Finding {
         id: id.into(),
         severity: FindingSeverity::Major,
         title: "the tasks document has no criteria".to_string(),
-        location: "plan.yaml".to_string(),
+        location: "plan.yaml".into(),
         detail: "every task needs one".to_string(),
         proposed_criterion: None,
     }
@@ -534,73 +499,65 @@ fn report() -> yunta_core::diagnostic::Report {
 /// `a` submits one document the engine takes and posts findings; `b`
 /// submits one the engine refuses.
 fn handover_events() -> Vec<StoredEvent> {
-    vec![
-        event(
-            0,
-            0,
-            Some("a"),
-            EventPayload::ArtifactSubmitted(ArtifactSubmittedPayload {
+    Log::for_run("run-1")
+        .node(
+            "a",
+            EventPayload::Artifacts(ArtifactEvent::Submitted(ArtifactSubmittedPayload {
                 name: "plan.yaml".to_string(),
                 artifact_kind: yunta_core::ArtifactKind::Tasks,
                 outcome: SubmissionOutcome::Accepted {
                     content_hash: yunta_core::sha256_hex(b"plan"),
                 },
-            }),
-        ),
-        event(
-            1,
-            1,
-            Some("b"),
-            EventPayload::ArtifactSubmitted(ArtifactSubmittedPayload {
+            })),
+        )
+        .after(1)
+        .node(
+            "b",
+            EventPayload::Artifacts(ArtifactEvent::Submitted(ArtifactSubmittedPayload {
                 name: "questions.yaml".to_string(),
                 artifact_kind: yunta_core::ArtifactKind::Questions,
                 outcome: SubmissionOutcome::Refused { report: report() },
-            }),
-        ),
-        event(
-            2,
-            2,
-            Some("a"),
-            EventPayload::FindingPosted(FindingPostedPayload {
+            })),
+        )
+        .after(1)
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: finding("f-1"),
-            }),
-        ),
-        event(
-            3,
-            3,
-            Some("a"),
-            EventPayload::FindingPosted(FindingPostedPayload {
+            })),
+        )
+        .after(1)
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: finding("f-2"),
-            }),
-        ),
-        event(
-            4,
-            4,
-            Some("a"),
-            EventPayload::FindingUpdated(FindingUpdatedPayload {
+            })),
+        )
+        .after(1)
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Updated(FindingUpdatedPayload {
                 finding: finding("f-1"),
-            }),
-        ),
-        event(
-            5,
-            5,
-            Some("a"),
-            EventPayload::FindingWithdrawn(FindingWithdrawnPayload {
+            })),
+        )
+        .after(1)
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Withdrawn(FindingWithdrawnPayload {
                 id: "f-2".into(),
                 reason: "the call it named is gone".to_string(),
-            }),
-        ),
-        event(
-            6,
-            6,
-            Some("a"),
-            EventPayload::FindingRefused(FindingRefusedPayload {
+            })),
+        )
+        .after(1)
+        .node(
+            "a",
+            EventPayload::Findings(FindingEvent::Refused(FindingRefusedPayload {
                 operation: FindingOperation::Post,
                 id: Some("f-3".into()),
                 report: report(),
-            }),
-        ),
-    ]
+            })),
+        )
+        .build()
 }
 
 #[test]
@@ -635,6 +592,8 @@ fn submissions_and_finding_calls_are_counted_by_verdict_and_by_node() {
         updated: 1,
         withdrawn: 1,
         refused: 1,
+        answered: 0,
+        proved: 0,
     };
     assert_eq!(stats.findings, posted_by_a);
     assert_eq!(
@@ -652,4 +611,72 @@ fn findings_effective_counts_what_stands_rather_than_what_was_posted() {
     let stats = compute_run_stats(&wf, &handover_events());
     assert_eq!(stats.findings.posted, 2);
     assert_eq!(stats.findings_effective, 1);
+}
+
+/// A suspension of `minutes`, noticed now.
+fn host_slept(minutes: u64) -> EventPayload {
+    EventPayload::Run(RunEvent::HostSuspended(
+        yunta_core::events::HostSuspendedPayload::slept(std::time::Duration::from_secs(
+            minutes * 60,
+        )),
+    ))
+}
+
+fn minutes(n: u64) -> std::time::Duration {
+    std::time::Duration::from_secs(n * 60)
+}
+
+/// The run opens at minute 0 and `work` starts at minute 1; the host
+/// sleeps from minute 10 to minute 70; `work` finishes at minute 75.
+#[test]
+fn the_time_the_host_slept_is_left_out_of_active_and_wall_clock() {
+    let log = Log::for_run("run-asleep")
+        .event(fixture_events()[0].payload().cloned().expect("the birth"))
+        .after(60)
+        .node(
+            "work",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .after(69 * 60)
+        .event(host_slept(60))
+        .after(5 * 60)
+        .node(
+            "work",
+            EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+                "ok",
+                TokenUsage::default(),
+            ))),
+        )
+        .build();
+
+    let stats = compute_run_stats(&workflow(vec![node("work", &[])]), &log);
+
+    assert_eq!(
+        stats.nodes[0].active,
+        minutes(14),
+        "74 minutes, 60 of them asleep"
+    );
+    assert_eq!(stats.wall_clock, Some(minutes(15)));
+    assert_eq!(stats.asleep, minutes(60));
+}
+
+/// A root node is ready when the run opens at minute 0; the host sleeps
+/// from minute 5 to minute 65, and the node starts at minute 70: it
+/// waited ten minutes the run had a machine for.
+#[test]
+fn a_suspension_before_a_node_started_is_left_out_of_the_time_it_waited() {
+    let log = Log::for_run("run-asleep")
+        .event(fixture_events()[0].payload().cloned().expect("the birth"))
+        .after(65 * 60)
+        .event(host_slept(60))
+        .after(5 * 60)
+        .node(
+            "work",
+            EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
+        )
+        .build();
+
+    let stats = compute_run_stats(&workflow(vec![node("work", &[])]), &log);
+
+    assert_eq!(stats.nodes[0].blocked, minutes(10));
 }

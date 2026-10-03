@@ -10,15 +10,18 @@ project:
 runners:
   planner:
     - { adapter: claude-code, model: claude-opus-4-8 }
-    - { adapter: codex, model: gpt-5-codex }
+    - { adapter: codex, model: gpt-6-luna }
   executor:
     - { adapter: claude-code, model: claude-sonnet-4-6 }
+    - { adapter: codex, model: gpt-6-luna }
   mechanical:
     - { adapter: claude-code, model: claude-haiku-4-5 }
+    - { adapter: codex, model: gpt-6-luna }
   reviewer:
     - { adapter: claude-code, model: claude-sonnet-4-6 }
+    - { adapter: codex, model: gpt-6-luna }
   reviewer-alt:
-    - { adapter: codex, model: gpt-5-codex }
+    - { adapter: codex, model: gpt-6-luna }
 
 defaults:
   runner: executor
@@ -26,5 +29,31 @@ defaults:
   timeout_minutes: 45
   on_failure: pause
 
+# The suite a run measures before its first node; `baseline_compare`
+# nodes (fragua's `tests`) fail when something that passed stops passing.
 baseline:
   suite: "cargo test --workspace"
+
+
+# Every task builds in a checkout of its own; this keeps one Cargo build
+# directory for all of them, and for the agents working in them.
+shared_dirs:
+  CARGO_TARGET_DIR: ~/.cache/yunta/target/yunta
+
+# What this project runs for each capability a workflow names
+# (`run: { command: lint }`): fragua's `lint` runs this one.
+commands:
+  lint: "cargo clippy --workspace --all-targets -- -D warnings"
+
+# The suite listens on loopback, which codex's `workspace-write` sandbox
+# refuses; this opens the network to those sessions.
+adapters:
+  codex:
+    adapter_settings:
+      network_access: true
+
+# Where a `pull_request` node (fragua's `pr`) opens its pull request.
+forge:
+  github:
+    repo: eulke/yunta
+    token_env: GITHUB_TOKEN

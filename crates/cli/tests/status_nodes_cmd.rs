@@ -1,0 +1,444 @@
+//! `yunta status` on the nodes of a run: which ones it lists, in what
+//! order, and what it says each of them is doing.
+//!
+//! One derivation for the whole page (D179): the frame the live view
+//! draws is the frame `status` prints and the frame `--json` carries,
+//! so the three never disagree about what a run has or where a node
+//! sits.
+
+use yunta_testkit::{run_id_from, stderr, stdout, Checkout};
+
+/// Nodes out of alphabetical order, a `parallel` group with children,
+/// and a mode that leaves one out — everything the list has to get
+/// right in one workflow.
+const SHAPED: &str = r#"
+name: shaped
+modes:
+  quick: { include: [zeta, review, alpha] }
+  full: { include: all }
+nodes:
+  - id: zeta
+    kind: bash
+    run: "true"
+  - id: review
+    kind: parallel
+    depends_on: [zeta]
+    nodes:
+      - { id: review-a, kind: bash, run: "true" }
+      - { id: review-b, kind: bash, run: "true" }
+  - id: alpha
+    kind: bash
+    depends_on: [review]
+    run: "true"
+  - id: omega
+    kind: bash
+    depends_on: [alpha]
+    run: "true"
+"#;
+
+fn shaped_run() -> (Checkout, String) {
+    let project = Checkout::new()
+        .working_in_place()
+        .workflow("wf", SHAPED)
+        .committed();
+    let run = project.run(
+        std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
+        &["run", "wf.yaml", "--mode", "quick"],
+    );
+    let run_id = run_id_from(&run);
+    (project, run_id)
+}
+
+fn status(project: &Checkout, run_id: &str, extra: &[&str]) -> String {
+    let mut args = vec!["status", run_id];
+    args.extend_from_slice(extra);
+    stdout(&project.run(std::path::Path::new(env!("CARGO_BIN_EXE_yunta")), &args))
+}
+
+/// What each row of the page's node table says after its mark and its
+/// word: the id — a group's child two cells in — and the row's note. The
+/// table is the block that opens after the page's first two lines.
+fn rows(text: &str) -> Vec<String> {
+    const AFTER_THE_WORD: usize = 14;
+    text.lines()
+        .skip(3)
+        .take_while(|line| !line.is_empty())
+        .map(|line| {
+            line.chars()
+                .skip(AFTER_THE_WORD)
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect()
+}
+
+/// Declaration order, not alphabetical; every declared node, not only
+/// the ones the log named; and a group's children one step under it.
+#[test]
+fn status_lists_every_declared_node_in_declaration_order_with_children_under_their_group() {
+    let (project, run_id) = shaped_run();
+    let text = status(&project, &run_id, &[]);
+    let listed = rows(&text);
+
+    assert_eq!(
+        listed
+            .iter()
+            .map(|row| row.split_whitespace().next().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        ["zeta", "review", "review-a", "review-b", "alpha", "omega"],
+        "the frame's own order, groups with their children: {text}"
+    );
+    assert!(
+        listed[2].starts_with("  review-a") && listed[1].starts_with("review"),
+        "a group's children sit one step under it: {text}"
+    );
+    assert!(
+        text.lines()
+            .any(|line| line.contains("skipped") && line.trim_end().ends_with("omega")),
+        "a node this mode leaves out is listed and said to be left out: {text}"
+    );
+}
+
+/// The `--json` document carries the same list, in the same order,
+/// under the schema version that says its shape changed.
+#[test]
+fn status_json_lists_every_declared_node_in_order() {
+    let (project, run_id) = shaped_run();
+    let document: serde_json::Value =
+        serde_json::from_str(&status(&project, &run_id, &["--json"])).expect("a JSON document");
+
+    assert_eq!(document["schema_version"], 6);
+    let nodes = document["nodes"].as_array().expect("a list of nodes");
+    assert_eq!(
+        nodes
+            .iter()
+            .map(|node| node["id"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        ["zeta", "review", "review-a", "review-b", "alpha", "omega"]
+    );
+    assert_eq!(nodes[2]["group"], "review", "{document:#}");
+    assert_eq!(nodes[5]["state"], "skipped", "{document:#}");
+    assert!(
+        nodes[0]["group"].is_null(),
+        "a top-level node belongs to no group: {document:#}"
+    );
+}
+
+const CORRECTED_WORKFLOW: &str = r#"
+name: corrected-submission
+nodes:
+  - id: ask
+    kind: prompt
+    runner: executor
+    prompt: "Submit an empty questions document."
+    artifacts:
+      produces: [questions]
+"#;
+
+const CORRECTED_FIXTURE: &str = r#"
+capabilities: { run_tools: true }
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_questions
+        expect: refused
+        arguments:
+          document:
+            questions: "secret-in-arguments"
+      - type: run_tool
+        tool: yunta_submit_questions
+        arguments:
+          document:
+            questions: []
+    outcome: { type: completed, summary: corrected }
+"#;
+
+fn corrected_submission_run() -> (Checkout, String) {
+    let project = Checkout::new()
+        .config("defaults:\n  isolation: none\nrunners:\n  executor:\n    - { adapter: mock, model: mock-model }\n")
+        .workflow("wf", CORRECTED_WORKFLOW)
+        .file("fixture.yaml", CORRECTED_FIXTURE)
+        .committed();
+    let run = project.run(
+        std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
+        &[
+            "run",
+            "wf.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml",
+        ],
+    );
+    assert!(run.status.success(), "{}", stderr(&run));
+    let run_id = run_id_from(&run);
+    (project, run_id)
+}
+
+#[test]
+fn a_finished_node_s_failed_call_is_kept_for_programs_and_off_its_page() {
+    let (project, run_id) = corrected_submission_run();
+    let text = status(&project, &run_id, &[]);
+    assert!(
+        !text.contains("last failed call"),
+        "a node that finished is past the calls it got wrong on its way:\n{text}"
+    );
+    assert!(
+        text.contains("nodes 1/1") && !text.contains("secret-in-arguments"),
+        "{text}"
+    );
+
+    let json: serde_json::Value =
+        serde_json::from_str(&status(&project, &run_id, &["--json"])).expect("status JSON");
+    assert_eq!(json["outcome"], "finished");
+    assert_eq!(
+        json["nodes"][0]["last_tool_failure"]["tool"],
+        "yunta_submit_questions"
+    );
+    assert_eq!(
+        json["nodes"][0]["last_tool_failure"]["cause"],
+        "call_failed"
+    );
+    assert!(!json.to_string().contains("secret-in-arguments"));
+
+    let log = std::fs::read_to_string(project.home.join("runs").join(&run_id).join("events.jsonl"))
+        .expect("append-only event log");
+    let failures: Vec<serde_json::Value> = log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("stored event"))
+        .filter(|event| event["kind"] == "run_tool_failed")
+        .collect();
+    assert_eq!(failures.len(), 1);
+    assert!(!failures[0].to_string().contains("secret-in-arguments"));
+}
+
+/// The workflow and the scripted session behind the questions tests: a
+/// node that asks, and a session that submits one question and closes.
+const ASKING: &str = r#"
+name: asking
+nodes:
+  - id: ask
+    kind: prompt
+    runner: executor
+    prompt: "Ask what has to be known before going on."
+    artifacts:
+      produces: [questions]
+"#;
+
+const ASKING_FIXTURE: &str = r#"
+capabilities: { run_tools: true }
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_questions
+        arguments:
+          document:
+            questions:
+              - id: summary
+                text: "What changed?"
+                answer_type: text
+                required: true
+    outcome: { type: completed, summary: asked }
+"#;
+
+/// A run of [`ASKING`], parked on the question its session asked, with
+/// the moments the run wrote as it went.
+fn asking_run() -> (Checkout, String, String) {
+    let project = Checkout::new()
+        .config(
+            "defaults:\n  isolation: none\nrunners:\n  executor:\n    - { adapter: mock, \
+             model: mock-model }\n",
+        )
+        .workflow("wf", ASKING)
+        .file("fixture.yaml", ASKING_FIXTURE)
+        .committed();
+    let run = project.run(
+        std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
+        &[
+            "run",
+            "wf.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml",
+        ],
+    );
+    let run_id = run_id_from(&run);
+    let moments = stderr(&run);
+    (project, run_id, moments)
+}
+
+/// A node parked on its own questions says which ones, and says it the
+/// same way wherever a reader meets it.
+/// A planner whose first plan is refused — its one criterion passes
+/// before any work — and whose second is accepted.
+const REPLANNED_WORKFLOW: &str = r#"
+name: replanned
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Hand over the tasks document."
+    artifacts:
+      produces: [tasks]
+"#;
+
+const REPLANNED_FIXTURE: &str = r#"
+capabilities: { run_tools: true }
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        expect: refused
+        arguments:
+          document:
+            summary: "Make it"
+            tasks:
+              - { id: T001, title: "Make it", scope: [made.txt], changes: [{ at: made.txt, what: "the file", code: "made" }], criteria: [{ cmd: "true", proves: "nothing yet" }] }
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            summary: "Make it"
+            tasks:
+              - { id: T001, title: "Make it", scope: [made.txt], changes: [{ at: made.txt, what: "the file", code: "made" }], criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }
+    outcome: { type: completed, summary: planned }
+"#;
+
+#[test]
+fn a_finished_node_says_how_its_document_got_accepted() {
+    let project = Checkout::new()
+        .config("defaults:\n  isolation: none\nrunners:\n  executor:\n    - { adapter: mock, model: mock-model }\n")
+        .workflow("wf", REPLANNED_WORKFLOW)
+        .file("fixture.yaml", REPLANNED_FIXTURE)
+        .committed();
+    let run = project.run(
+        std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
+        &[
+            "run",
+            "wf.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml",
+        ],
+    );
+    assert!(run.status.success(), "{}", stderr(&run));
+    let run_id = run_id_from(&run);
+
+    let text = status(&project, &run_id, &[]);
+    let row = text
+        .lines()
+        .find(|line| line.contains(" plan "))
+        .expect("the plan's row");
+    assert!(
+        row.contains("accepted on its 2nd handover (1 refused)"),
+        "{text}"
+    );
+    let page = status(&project, &run_id, &["--node", "plan"]);
+    assert!(
+        page.lines()
+            .any(|line| line.trim_start().starts_with("handed over ")
+                && line.ends_with("accepted on its 2nd handover (1 refused)")),
+        "{page}"
+    );
+}
+
+#[test]
+fn status_says_which_questions_a_node_is_waiting_on() {
+    let (project, run_id, _) = asking_run();
+
+    let text = status(&project, &run_id, &[]);
+    assert_eq!(
+        rows(&text),
+        ["ask  asked 1 question: `summary`"],
+        "the node's own row says what it asked: {text}"
+    );
+    assert!(text.contains("waiting   ask"), "{text}");
+
+    let document: serde_json::Value =
+        serde_json::from_str(&status(&project, &run_id, &["--json"])).expect("a JSON document");
+    let node = document["nodes"]
+        .as_array()
+        .and_then(|nodes| nodes.first())
+        .expect("the one node");
+    assert_eq!(node["waiting_on"]["on"], "questions", "{document:#}");
+    assert_eq!(node["waiting_on"]["asked"][0], "summary", "{document:#}");
+    assert_eq!(
+        node["detail"], "asked 1 question: `summary`",
+        "{document:#}"
+    );
+}
+
+/// The list `status` prints and the list `--json` carries are the same
+/// frame read twice: same ids, same order, no node in one and not the
+/// other.
+#[test]
+fn status_lists_the_nodes_the_frame_declares_in_its_order() {
+    let (project, run_id) = shaped_run();
+
+    let printed: Vec<String> = rows(&status(&project, &run_id, &[]))
+        .iter()
+        .map(|row| {
+            row.split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+
+    let document: serde_json::Value =
+        serde_json::from_str(&status(&project, &run_id, &["--json"])).expect("a JSON document");
+    let carried: Vec<String> = document["nodes"]
+        .as_array()
+        .expect("a list of nodes")
+        .iter()
+        .map(|node| node["id"].as_str().unwrap_or_default().to_string())
+        .collect();
+
+    assert_eq!(printed, carried, "{document:#}");
+}
+
+/// The chronicle says a node asked in the same words the page says it
+/// is waiting on: one modifier, built once, wherever a reader meets it.
+#[test]
+fn the_chronicle_and_status_say_a_node_that_asked_with_the_same_bytes() {
+    let (project, run_id, moments) = asking_run();
+    let said = "asked 1 question: `summary`";
+
+    assert!(
+        moments.contains(said),
+        "the chronicle says what the node asked as it happens: {moments}"
+    );
+    assert!(
+        status(&project, &run_id, &[]).contains(said),
+        "and the page says it the same way afterwards: {moments}"
+    );
+}
+
+/// A node the run left out says what the project lacks, and the summary
+/// counts it apart from the work the run does.
+#[test]
+fn status_says_why_a_node_is_not_in_this_run() {
+    let project = Checkout::new()
+        .working_in_place()
+        .workflow(
+            "wf",
+            "name: linted\nnodes:\n  - { id: build, kind: bash, run: \"true\" }\n  - { id: lint, kind: bash, run: { command: lint }, optional: true, depends_on: [build] }\n",
+        )
+        .committed();
+    let run = project.run(
+        std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
+        &["run", "wf.yaml"],
+    );
+    assert!(run.status.success(), "{}", stderr(&run));
+
+    let said = status(&project, &run_id_from(&run), &[]);
+
+    assert!(
+        said.contains("not in this run: the project declares no command `lint`"),
+        "{said}"
+    );
+    assert!(said.contains("nodes 1/1 · 1 left out"), "{said}");
+}

@@ -14,18 +14,66 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use yunta_core::{ArtifactSpec, Coordination, NodeId, NodeKind, RunId, Workflow};
+use tokio_util::sync::CancellationToken;
+use yunta_core::events::ExecutionEnvironment;
+use yunta_core::{ArtifactSpec, Coordination, NodeId, NodeKind, RunId, ScopeGlob, Task, Workflow};
 use yunta_storage::AsyncStorage;
+
+use crate::observer::RunObserver;
+use crate::process::Supervision;
+use crate::process_registry::ProcessRegistry;
+use crate::task_cycle::Memo;
+use crate::worktree::Unit;
 
 /// What every listener of one run shares: its own handle on the log
 /// (the listener outlives any borrow of the engine's), the run
 /// identity, and which nodes sit in a `coordination: blackboard`
 /// group — for anyone else, the blackboard tools are never even
 /// mounted.
+/// What a host is built from: everything about the run that outlives
+/// any one session. One value because it is read together, once, when
+/// the run wakes.
+pub struct HostOf {
+    pub storage: AsyncStorage,
+    pub run_id: RunId,
+    pub clock: Arc<dyn yunta_core::Clock>,
+    pub observer: Option<Arc<dyn RunObserver>>,
+    pub run_dir: PathBuf,
+    pub max_artifact_bytes: Option<u64>,
+    pub redactor: yunta_core::Redactor,
+    /// The invocation's criterion results — the same cache every task
+    /// cycle reads, so a check a session asks for and the check its
+    /// close runs answer the same tree once.
+    pub memo: Arc<Memo>,
+    /// Where the run keeps the process groups it started, so a command
+    /// a tool runs is one the run can account for and stop.
+    pub process_registry: Option<Arc<ProcessRegistry>>,
+    /// The variables the run sets on every subprocess it starts.
+    pub subprocess_vars: Vec<(String, String)>,
+    /// What those subprocesses run with, so an answer about a command
+    /// that could not run can say where it was looked for.
+    pub environment: Option<ExecutionEnvironment>,
+    /// The run's own tree: what a handed-over document's commands are
+    /// proven against, in a checkout of their own.
+    pub worktree: PathBuf,
+}
+
 pub struct RunToolsHost {
     pub(super) storage: AsyncStorage,
     pub(super) run_id: RunId,
-    pub(super) blackboard_members: HashMap<NodeId, Vec<NodeId>>,
+    /// What the config named as a secret, taken out of every event this
+    /// host's listeners append — the same door the run's own appends go
+    /// through.
+    pub(super) redactor: yunta_core::Redactor,
+    /// The members of each `coordination: blackboard` group, by the
+    /// group's own id and in declaration order — what the group
+    /// consolidates when it closes, and what each of its members reads
+    /// while it runs. One reading of the workflow, so no consumer can
+    /// compute a second list.
+    groups: HashMap<NodeId, Vec<NodeId>>,
+    /// Which group a node belongs to — the mount rule for
+    /// `yunta_get_blackboard`.
+    member_of: HashMap<NodeId, NodeId>,
     /// Where the run keeps its artifacts. A session's working directory is
     /// the worktree, not this, so a tool that reads what the node declared
     /// has to be told.
@@ -37,18 +85,45 @@ pub struct RunToolsHost {
     /// appends with it, never a fresh `SystemClock`, so every emitter on
     /// the run shares one clock.
     pub(super) clock: Arc<dyn yunta_core::Clock>,
+    /// The invocation's display surface, held by the same rule as the
+    /// clock and the log handle beside it: a listener outlives every
+    /// borrow of the engine's, so it owns its clone. What a session
+    /// records mid-flight reaches a live view the moment it lands,
+    /// because the log this host hands out carries the mirror.
+    pub(super) observer: Option<Arc<dyn RunObserver>>,
+    /// The invocation's criterion results, shared with every task cycle.
+    pub(super) memo: Arc<Memo>,
+    /// The run's process registry, which every command a tool runs joins.
+    process_registry: Option<Arc<ProcessRegistry>>,
+    /// What the run sets on every subprocess it starts.
+    subprocess_vars: Vec<(String, String)>,
+    /// What every subprocess the run starts runs with.
+    pub(super) environment: Option<ExecutionEnvironment>,
+    /// The run's own tree.
+    pub(super) worktree: PathBuf,
+    /// The frozen workflow, for what a document handed over is held to
+    /// by the nodes around the one that hands it over.
+    pub(super) workflow: Workflow,
 }
 
 impl RunToolsHost {
-    pub fn new(
-        storage: AsyncStorage,
-        run_id: RunId,
-        workflow: &Workflow,
-        clock: Arc<dyn yunta_core::Clock>,
-        run_dir: PathBuf,
-        max_artifact_bytes: Option<u64>,
-    ) -> Self {
-        let mut blackboard_members = HashMap::new();
+    pub fn new(workflow: &Workflow, host: HostOf) -> Self {
+        let HostOf {
+            storage,
+            run_id,
+            clock,
+            observer,
+            run_dir,
+            max_artifact_bytes,
+            redactor,
+            memo,
+            process_registry,
+            subprocess_vars,
+            environment,
+            worktree,
+        } = host;
+        let mut groups = HashMap::new();
+        let mut member_of = HashMap::new();
         for node in &workflow.nodes {
             if let NodeKind::Parallel {
                 coordination: Coordination::Blackboard,
@@ -56,19 +131,43 @@ impl RunToolsHost {
                 ..
             } = &node.kind
             {
-                let member_ids: Vec<NodeId> = children.iter().map(|c| c.id.clone()).collect();
                 for child in children {
-                    blackboard_members.insert(child.id.clone(), member_ids.clone());
+                    member_of.insert(child.id.clone(), node.id.clone());
                 }
+                groups.insert(
+                    node.id.clone(),
+                    children.iter().map(|c| c.id.clone()).collect(),
+                );
             }
         }
         Self {
             storage,
             run_id,
-            blackboard_members,
+            redactor,
+            groups,
+            member_of,
             clock,
+            observer,
             run_dir,
             max_artifact_bytes,
+            memo,
+            process_registry,
+            subprocess_vars,
+            environment,
+            worktree,
+            workflow: workflow.clone(),
+        }
+    }
+
+    /// The supervision a command a tool runs is born under: the run's
+    /// registry, its subprocess variables and its clock, stopped by
+    /// `cancel` — exactly what the run gives a command of its own.
+    pub(super) fn supervision<'s>(&'s self, cancel: &'s CancellationToken) -> Supervision<'s> {
+        Supervision {
+            registry: self.process_registry.as_deref(),
+            cancel,
+            env: &self.subprocess_vars,
+            clock: self.clock.as_ref(),
         }
     }
 
@@ -78,7 +177,19 @@ impl RunToolsHost {
     /// need it (a declared coordination the adapter can't carry is a
     /// node failure, never silent emulation).
     pub fn is_blackboard_member(&self, node: &NodeId) -> bool {
-        self.blackboard_members.contains_key(node)
+        self.member_of.contains_key(node)
+    }
+
+    /// The members of the `coordination: blackboard` group `node` is —
+    /// in declaration order — or of the group it belongs to. Empty for
+    /// a node that is neither.
+    ///
+    /// The group asks when it closes and a member asks while it runs,
+    /// and both get the same list: what a group consolidates is exactly
+    /// what its members could read.
+    pub fn members_of(&self, node: &NodeId) -> &[NodeId] {
+        let group = self.member_of.get(node).unwrap_or(node);
+        self.groups.get(group).map_or(&[], Vec::as_slice)
     }
 }
 
@@ -94,5 +205,132 @@ impl RunToolsHost {
 pub struct RunToolsAccess {
     pub host: Arc<RunToolsHost>,
     pub node: NodeId,
+    /// What the node is, because who answers for an artifact it
+    /// declared is the node's kind's to say — the same question its
+    /// close asks, answered by the same function.
+    pub node_kind: NodeKind,
     pub declared: Vec<ArtifactSpec>,
+    /// How the session's CLI names these tools to its model, which is
+    /// what every text it is shown names one by.
+    pub naming: yunta_core::ToolNaming,
+}
+
+/// What a task session's tools reach: its task as the cycle judges it,
+/// the unit it works in, and what that judgement leaves out — so the
+/// session reads its contract, and checks its work, against the very
+/// values its attempt's close will use rather than a copy of them.
+#[derive(Clone)]
+pub struct TaskAccess {
+    /// The task as the cycle judges it: the criteria the loop registered,
+    /// plus the suite the run holds every task to.
+    pub task: Task,
+    /// What a scope audit holds the diff to: the scope the task declared
+    /// plus every path the log granted it when this cycle began.
+    pub scope: Vec<ScopeGlob>,
+    /// What no session of the run may write — what the project denies to
+    /// every run, and the tests a person approved — which the check
+    /// reports whatever the scope allows.
+    pub denied: Vec<ScopeGlob>,
+    /// The checkout the session works in and the tree it started from.
+    pub unit: Unit,
+    /// Where a check keeps its private index — apart from the close's
+    /// own, so a check cut short never leaves the close a lock behind.
+    pub index: PathBuf,
+    /// The token the task's own subprocesses answer to. A check's
+    /// commands stop with it, and with the session that asked.
+    pub cancel: CancellationToken,
+    /// What the adapter stages in the checkout for its own mechanics,
+    /// which no audit counts. Known once the session's request is built,
+    /// which is before any call can arrive.
+    pub staged: Arc<std::sync::OnceLock<Vec<PathBuf>>>,
+    /// The one check of this task that judges at a time.
+    pub checks: Arc<CheckTurn>,
+    /// The plan the task belongs to, when a loop is working one.
+    pub plan: Option<Arc<yunta_core::TasksFile>>,
+    /// The suite the run holds every task to, which no task departs from.
+    pub suite: Option<String>,
+}
+
+/// The one check of a task that judges at a time, and the tree it is
+/// judging.
+///
+/// Checks of one task take turns because they stage through one private
+/// index. A check asked about a tree the task has moved on from stops
+/// the one still judging the tree it left — nobody is going to close
+/// that work any more — while one asked about the same tree waits its
+/// turn and takes the answers the first one kept.
+#[derive(Default)]
+pub struct CheckTurn {
+    turn: tokio::sync::Mutex<()>,
+    judging: std::sync::Mutex<Option<(yunta_core::TreeId, CancellationToken)>>,
+}
+
+impl CheckTurn {
+    /// Waits for the turn to judge `tree`, stopping the check in
+    /// progress when that one judges another tree. What it returns holds
+    /// the turn, and the token this check's commands answer to — a child
+    /// of `stop`.
+    ///
+    /// The turn is the only holder of the checks' `index`, so a lock
+    /// found beside it was left by a check stopped mid-way through
+    /// staging, and taking the turn clears it.
+    pub(crate) async fn take(
+        &self,
+        tree: yunta_core::TreeId,
+        stop: &CancellationToken,
+        index: &std::path::Path,
+    ) -> (tokio::sync::MutexGuard<'_, ()>, CancellationToken) {
+        if let Some((judged, stops)) = self.judging().as_ref() {
+            if *judged != tree {
+                stops.cancel();
+            }
+        }
+        let turn = self.turn.lock().await;
+        let mut lock = index.as_os_str().to_owned();
+        lock.push(".lock");
+        // One that will not go is met by the audit, which says so.
+        if let Err(e) = tokio::fs::remove_file(lock).await {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(error = %e, "failed to clear a stopped check's index lock");
+            }
+        }
+        let stops = stop.child_token();
+        *self.judging() = Some((tree, stops.clone()));
+        (turn, stops)
+    }
+
+    /// Says the check holding the turn is done judging.
+    pub(crate) fn judged(&self) {
+        *self.judging() = None;
+    }
+
+    fn judging(
+        &self,
+    ) -> std::sync::MutexGuard<'_, Option<(yunta_core::TreeId, CancellationToken)>> {
+        self.judging.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// What a node's own session's scope tools reach: the scope its close
+/// will hold the diff to, where a check keeps its index, and what the
+/// audit leaves out — the values the close uses, never a copy of them.
+#[derive(Clone)]
+pub struct NodeScopeAccess {
+    /// The scope the node declared plus every path the log granted it
+    /// when this attempt began.
+    pub scope: Vec<ScopeGlob>,
+    /// Where a check keeps its private index — apart from the close's
+    /// own, so a check cut short never leaves the close a lock behind.
+    pub index: PathBuf,
+    /// Whether the session may ask for more: whether a person may grant
+    /// this node anything on this run.
+    pub may_ask: bool,
+    /// What no session of the run may write — what the project denies to
+    /// every run, and the tests a person approved — which the check
+    /// reports whatever the scope allows.
+    pub denied: Vec<ScopeGlob>,
+    /// What the adapter stages in the checkout for its own mechanics,
+    /// which no audit counts. Known once the session's request is built,
+    /// which is before any call can arrive.
+    pub staged: Arc<std::sync::OnceLock<Vec<PathBuf>>>,
 }

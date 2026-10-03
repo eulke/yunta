@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::RunCommand;
 use crate::ids::NodeId;
 
 /// `hooks: {before, after}`.
@@ -24,7 +25,7 @@ pub struct Hooks {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HookStep {
-    pub run: String,
+    pub run: RunCommand,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u64>,
     /// Distinct from a node's own `on_failure.goto` re-routing — a hook

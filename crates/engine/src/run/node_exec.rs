@@ -5,13 +5,14 @@
 //! engine — explicit degradation, never silent.
 
 use std::collections::BTreeMap;
+use yunta_core::commit_message::CommitMessage;
 
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::PermissionProfile;
-use yunta_core::events::{EventPayload, HookPhase};
-use yunta_core::{HookFailurePolicy, Node, NodeKind};
+use yunta_core::events::{Failure, HookPhase};
+use yunta_core::port::PermissionProfile;
+use yunta_core::{HookFailurePolicy, Node, NodeId, NodeKind};
 
-use crate::template::{render_template, TemplateError};
+use yunta_core::template::render_template;
 
 use super::bash_exec::execute_bash;
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};
@@ -20,9 +21,10 @@ use super::parallel_exec::execute_parallel;
 use super::prompt_exec::execute_prompt;
 use super::step::Step;
 use super::{RunCtx, RunError};
+use yunta_core::template::TemplateVar;
 
 /// How the node's execution ended, as recorded in the log by the caller.
-pub(super) enum NodeEnd {
+pub(crate) enum NodeEnd {
     Finished,
     Failed,
     /// The run's root cancellation cut this node mid-flight — no
@@ -37,8 +39,17 @@ pub(super) enum NodeEnd {
     /// unlike `Interrupted` the *parent run* must pause with this
     /// reason rather than fall through to its loop-top cancel check.
     ChildPaused {
+        /// The parent's own `kind: workflow` node.
+        node: NodeId,
+        /// The line the child run stated for its pause.
         reason: String,
     },
+    /// The node closed in full — hooks, scope, artifacts — and handed
+    /// questions over: `questions_asked` is on the log and no terminal
+    /// event is, on purpose. The next scheduler pass sees the node
+    /// waiting and puts its questions to whatever surface is there; the
+    /// `node_finished` this close deferred lands after the answer.
+    Asked,
 }
 
 /// The shared "my token fired" epilogue — which cancellation was
@@ -64,17 +75,96 @@ pub(super) async fn cancelled_end(ctx: &RunCtx<'_>, node: &Node) -> Result<NodeE
     skip_all,
     fields(run_id = %ctx.run_id, node_id = %node.id, attempt)
 )]
+/// Runs one attempt of `node`, in the tree that node works in.
+///
+/// A node that declares `scope:` is given a checkout of its own, opened
+/// at what the run's tree holds this moment and landed back onto it when
+/// its work passes its audit. Asking to be audited is asking for a tree:
+/// it is the only way what a node answers for is its own, and the only
+/// way two nodes running at once are not answerable for each other. A
+/// node that declares nothing works where the run works and sees what
+/// the node before it left — including what git ignores, which no
+/// checkout of its own would carry; what it writes there is committed
+/// on the run's branch when it closes.
 pub(super) async fn execute_node(
     ctx: &RunCtx<'_>,
     node: &Node,
     attempt: u32,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::NodeStarted(yunta_core::events::NodeStartedPayload { attempt }),
+    super::node_scope::grant_chosen_scope(ctx, node).await?;
+    // Boxed on both paths: this function opens a unit and then holds a
+    // whole `RunCtx` across the await below, and node execution nests —
+    // a group inside a workflow inside a group — so an inlined future
+    // would carry every level's frame at once.
+    if !crate::audits(node) {
+        return Box::pin(execute_in_its_tree(ctx, node, attempt, cancel)).await;
+    }
+    let (unit, continuing) = node_unit(ctx, node, attempt).await?;
+    Box::pin(execute_in_its_tree(
+        &ctx.in_unit(&unit, continuing.as_ref()),
+        node,
+        attempt,
+        cancel,
+    ))
+    .await
+}
+
+/// The checkout this attempt works in, and the session it picks back up
+/// there. A session that asked for scope and got it continues in the
+/// checkout it saw; with that checkout gone, the attempt opens a unit of
+/// its own on the run's tree, fresh, and the log says the session was not
+/// resumed.
+async fn node_unit(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    attempt: u32,
+) -> Result<(crate::worktree::Unit, Option<crate::task_cycle::Continuing>), RunError> {
+    let who = crate::worktree::UnitId::Node(node.id.clone());
+    let continuing = super::continuation::continuation(ctx, node).await?;
+    if continuing.is_some() {
+        let reopened =
+            crate::worktree::reopen_unit(ctx.run_dir, who.clone(), None, ctx.root_supervision())
+                .await?;
+        match reopened {
+            Some(unit) => return Ok((unit, continuing)),
+            None => super::continuation::not_resumed(ctx, node).await?,
+        }
+    }
+    let base = crate::worktree::snapshot_commit(
+        ctx.worktree,
+        &crate::run_dir::index_for(ctx.run_dir, &who),
+        &CommitMessage::new("the tree a unit of work started from", ctx.run_id)
+            .node(&node.id)
+            .text(),
+        ctx.root_supervision(),
     )
     .await?;
+    let unit = crate::worktree::open_unit(
+        crate::worktree::UnitHome {
+            repo: ctx.worktree,
+            run_dir: ctx.run_dir,
+            run_id: ctx.run_id,
+            base: &base,
+        },
+        who,
+        attempt,
+        ctx.root_supervision(),
+    )
+    .await?;
+    Ok((unit, None))
+}
+
+async fn execute_in_its_tree(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    attempt: u32,
+    cancel: &CancellationToken,
+) -> Result<NodeEnd, RunError> {
+    // Boxed: every attempt starts here, a child run's included, and the
+    // commit of what it finds would otherwise ride inline in every level
+    // of a composed run's recursion.
+    Box::pin(super::node_start::emit_started(ctx, node, attempt)).await?;
 
     // A node that continues no session opens on an empty directory of
     // its own, and `node_started` is the one point every one of its
@@ -96,32 +186,43 @@ pub(super) async fn execute_node(
     for step in &hooks.before {
         match run_hook(ctx, node, HookPhase::Before, step).await? {
             HookRun::Violation(rule) => return fail(ctx, node, rule, false).await,
-            HookRun::Ran(false) if step.on_failure == HookFailurePolicy::Fail => {
-                return fail(
-                    ctx,
-                    node,
-                    format!("before hook `{}` failed", step.run),
-                    false,
-                )
-                .await;
+            HookRun::Unset(key) => return super::check_exec::unset(ctx, node, key).await,
+            HookRun::Failed(exit) if step.on_failure == HookFailurePolicy::Fail => {
+                let failure = yunta_core::events::Failure::exited(exit);
+                return super::node_close::fail_with(ctx, node, failure, false, Default::default())
+                    .await;
             }
-            HookRun::Ran(_) => {}
+            HookRun::Passed | HookRun::Failed(_) => {}
         }
     }
 
-    let end = match &node.kind {
-        NodeKind::Bash { run } => execute_bash(ctx, node, run, cancel).await?,
-        NodeKind::Prompt { prompt } => execute_prompt(ctx, node, prompt, cancel).await?,
+    execute_kind(ctx, node, cancel).await
+}
+
+/// The work `node`'s kind does, built and boxed in a plain function
+/// rather than in the `async fn` that awaits it: an unoptimized build
+/// keeps each state machine an `async fn` builds in the stack frame that
+/// polls it, and a composed run stacks this frame once per nested node —
+/// a group, the workflow node inside it, each node of its child run.
+/// Built here, only the box reaches that frame.
+fn execute_kind<'a>(
+    ctx: &'a RunCtx<'_>,
+    node: &'a Node,
+    cancel: &'a CancellationToken,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<NodeEnd, RunError>> + 'a>> {
+    match &node.kind {
+        NodeKind::Bash { run } => Box::pin(execute_bash(ctx, node, run, cancel)),
+        NodeKind::Prompt { prompt } => Box::pin(execute_prompt(ctx, node, prompt, cancel)),
         NodeKind::Loop {
             until: yunta_core::LoopUntil::AllTasksComplete,
             prompt,
             ..
-        } => super::loop_exec::execute_loop(ctx, node, prompt, cancel).await?,
+        } => Box::pin(super::loop_exec::execute_loop(ctx, node, prompt, cancel)),
         NodeKind::Parallel {
             join,
             coordination,
             nodes,
-        } => {
+        } => Box::pin(async move {
             let end = execute_parallel(ctx, node, *join, nodes, cancel).await?;
             // The blackboard's consolidation happens exactly once,
             // at the group's own terminal close (success or failure —
@@ -133,56 +234,62 @@ pub(super) async fn execute_node(
             if *coordination == yunta_core::Coordination::Blackboard
                 && matches!(end, NodeEnd::Finished | NodeEnd::Failed)
             {
-                let members: Vec<yunta_core::NodeId> =
-                    nodes.iter().map(|child| child.id.clone()).collect();
-                let consolidated =
-                    crate::run_tools::consolidate_blackboard(&ctx.load_events().await?, &members);
+                let consolidated = crate::run_tools::consolidate_blackboard(
+                    &ctx.load_events().await?,
+                    ctx.run_tools_host.members_of(&node.id),
+                );
                 super::context_resolve::write_node_output(
                     ctx.run_dir,
                     &node.id,
                     consolidated.as_bytes(),
                     &[],
-                )?;
+                )
+                .await?;
             }
-            end
-        }
+            Ok(end)
+        }),
         NodeKind::Check(builtin) => {
-            super::check_exec::execute_check(ctx, node, builtin, cancel).await?
+            Box::pin(super::check_exec::execute_check(ctx, node, builtin, cancel))
         }
+        NodeKind::PullRequest {
+            title,
+            body,
+            receipt,
+        } => Box::pin(super::pull_request_exec::execute_pull_request(
+            ctx,
+            node,
+            title,
+            body.as_deref(),
+            receipt.unwrap_or(true),
+        )),
         NodeKind::Executor {
             executor,
             with,
             timeout_seconds,
-        } => {
-            super::executor_exec::execute_executor(
-                ctx,
-                node,
-                executor,
-                with,
-                *timeout_seconds,
-                cancel,
-            )
-            .await?
-        }
+        } => Box::pin(super::executor_exec::execute_executor(
+            ctx,
+            node,
+            executor,
+            with,
+            *timeout_seconds,
+            cancel,
+        )),
         NodeKind::Workflow {
             r#use,
             inputs,
             isolation,
             mounts,
-        } => {
-            super::workflow_exec::execute_workflow(
-                ctx,
-                node,
-                super::workflow_exec::WorkflowCall {
-                    use_name: r#use,
-                    inputs,
-                    isolation: *isolation,
-                    mounts,
-                },
-                cancel,
-            )
-            .await?
-        }
+        } => Box::pin(super::workflow_exec::execute_workflow(
+            ctx,
+            node,
+            super::workflow_exec::WorkflowCall {
+                use_name: r#use,
+                inputs,
+                isolation: *isolation,
+                mounts,
+            },
+            cancel,
+        )),
         // A gate's resolution is a forge round-trip, not a
         // session — `schedule::next_step` intercepts a ready/orphaned
         // gate before it ever becomes an `Execute` step (its own
@@ -191,17 +298,15 @@ pub(super) async fn execute_node(
         // the only other way a node reaches this function without going
         // through the top-level scheduler (`parallel`'s own children).
         NodeKind::Gate { .. } => {
-            return Err(RunError::Broken {
-                diagnostic: format!(
-                    "node `{}` is a `kind: gate` but reached node execution, which only \
-                     dispatches sessions and checks — a gate resolves through its own \
-                     scheduler step (see this arm's own comment)",
-                    node.id
-                ),
-            });
+            let diagnostic = format!(
+                "node `{}` is a `kind: gate` but reached node execution, which only \
+                 dispatches sessions and checks — a gate resolves through its own \
+                 scheduler step (see this arm's own comment)",
+                node.id
+            );
+            Box::pin(std::future::ready(Err(RunError::Broken { diagnostic })))
         }
-    };
-    Ok(end)
+    }
 }
 
 /// Prepares the directory `node` writes the files it declares into, for
@@ -224,58 +329,62 @@ pub(super) async fn open_staging(
         })
 }
 
-/// Template variables for one node's own rendering: `run.*`
-/// and `node.artifacts` — this node's own writable directory — are
-/// always present; `runner.role` is the node's own declared `runner:`
-/// (the role name itself, known statically from the workflow — never the
-/// adapter/model a later resolution step picks, so no ordering
-/// dependency on `resolve_node_runner`); `project.*` mirrors whatever
-/// the merged config's `project:` group declares; `inputs.*` is
-/// every declared input's already-resolved-and-validated value, read
-/// straight from the frozen manifest — never re-resolved per node, since
-/// that would make a `default` non-deterministic across nodes.
-pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<String, String> {
+/// Template variables for one node's own rendering: the run's own places
+/// and this node's identity are always present; `runner.name` is the
+/// name the node declares under `runner:` (known from the workflow
+/// alone, never the adapter or model a later resolution picks, so no
+/// ordering dependency on `resolve_node_runner`); `project.*` mirrors
+/// whatever the merged config's `project:` group declares; an input is
+/// its already-resolved-and-validated value, read straight from the
+/// frozen manifest — never re-resolved per node, since that would make a
+/// `default` non-deterministic across nodes.
+pub(super) fn template_vars(ctx: &RunCtx<'_>, node: &Node) -> BTreeMap<TemplateVar, String> {
     let mut vars = BTreeMap::from([
-        ("run.dir".to_string(), ctx.run_dir.display().to_string()),
-        (
-            "run.worktree".to_string(),
-            ctx.worktree.display().to_string(),
-        ),
+        (TemplateVar::RunDir, ctx.run_dir.display().to_string()),
+        (TemplateVar::Worktree, ctx.worktree.display().to_string()),
         // The reference example (`external.branch:
         // "{{run.branch}}"`) — a fresh push target derived from the
         // run id, not necessarily the worktree's own local checkout
         // branch (which `isolation: none` never creates one of at all,
         // `worktree.rs`'s own doc comment).
         (
-            "run.branch".to_string(),
+            TemplateVar::RunBranch,
             crate::worktree::run_branch(ctx.run_id),
+        ),
+        (TemplateVar::RunBase, ctx.manifest.base_commit.to_string()),
+        (
+            TemplateVar::Staging,
+            crate::run_dir::staging_root(ctx.run_dir)
+                .display()
+                .to_string(),
         ),
         // Where this node's own files go. A command node has no run tool
         // to be told through, so the one way it can write what it
         // declares is to render this.
         (
-            "node.artifacts".to_string(),
+            TemplateVar::NodeArtifacts,
             crate::run_dir::staging(ctx.run_dir, &node.id)
                 .display()
                 .to_string(),
         ),
+        (TemplateVar::NodeId, node.id.to_string()),
     ]);
-    if let Some(role) = &node.runner {
-        vars.insert("runner.role".to_string(), role.to_string());
+    if let Some(runner) = &node.runner {
+        vars.insert(TemplateVar::RunnerName, runner.to_string());
     }
     if let Some(project) = &ctx.manifest.config.project {
-        if let Some(name) = &project.name {
-            vars.insert("project.name".to_string(), name.clone());
-        }
-        if let Some(base_branch) = &project.base_branch {
-            vars.insert("project.base_branch".to_string(), base_branch.clone());
-        }
-        if let Some(branch_prefix) = &project.branch_prefix {
-            vars.insert("project.branch_prefix".to_string(), branch_prefix.clone());
+        for (variable, declared) in [
+            (TemplateVar::ProjectName, &project.name),
+            (TemplateVar::ProjectBaseBranch, &project.base_branch),
+            (TemplateVar::ProjectBranchPrefix, &project.branch_prefix),
+        ] {
+            if let Some(value) = declared {
+                vars.insert(variable, value.clone());
+            }
         }
     }
     for (name, value) in &ctx.manifest.inputs {
-        vars.insert(format!("inputs.{name}"), value.clone());
+        vars.insert(TemplateVar::Input(name.clone()), value.clone());
     }
     vars
 }
@@ -340,12 +449,12 @@ pub(crate) fn artifact_dir(ctx: &RunCtx<'_>, node: &Node) -> Option<std::path::P
 
 /// `node` with every opaque artifact name rendered against its own
 /// template vars, so a fan-out sibling that names its file
-/// `report-{{runner.role}}.md` declares — and verifies — its own.
+/// `report-{{runner.name}}.md` declares — and verifies — its own.
 ///
 /// Only an opaque name: an interpreted artifact is identified by its
 /// kind, which is a closed vocabulary with nothing in it to render, and
 /// the run holds one per node whatever the runner is called.
-pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, TemplateError> {
+pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Node, Failure> {
     if node.artifacts.is_none() {
         return Ok(node.clone());
     }
@@ -354,7 +463,14 @@ pub(crate) fn render_artifact_names(ctx: &RunCtx<'_>, node: &Node) -> Result<Nod
     if let Some(artifacts) = &mut rendered.artifacts {
         for spec in &mut artifacts.produces {
             if let yunta_core::ArtifactSpec::Opaque(name) = spec {
-                *name = render_template(name, &vars)?;
+                *name =
+                    render_template(name, &vars).map_err(|e| Failure::message(e.to_string()))?;
+                // What a template renders to is a name like any other,
+                // and this is where it is first known: a name checked
+                // as written says nothing about what its variables
+                // stand for.
+                yunta_core::ArtifactName::parse(name)
+                    .map_err(|problem| Failure::message(problem.to_string()))?;
             }
         }
     }

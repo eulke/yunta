@@ -7,18 +7,35 @@ bugs — Yunta prefers a named, actionable error over guessing what you meant.
 ## `yunta check` refuses the workflow
 
 `check` validates statically, before any session opens. The message always
-names the node and the exact problem:
+names the node and the exact problem, and a problem about the workflow file is
+followed by the line it is about, with carets under the part at fault:
 
-- **`node "x" references runner "y", which "runners:" does not define`** —
-  add the role under `runners:` in `.yunta/config.yaml` (see
+```
+workflow.yaml: 1 error
+  node `fix` references runner `implementr`, which `runners:` does not define — did you mean `implementer`?
+     --> workflow.yaml:6:13
+      |
+    6 |     runner: implementr
+      |             ^^^^^^^^^^
+```
+
+A name one or two typos away from one the workflow or the config declares — a
+key, a node id, a runner, a command — is suggested at the end of the sentence.
+`check` reads past a key it does not know — as the key it is one typo from, when
+the node does not write that key already — so every problem in the file is
+listed at once, in the order the file has them, and one round of edits fixes
+them all. `yunta run` refuses a file with any of them.
+
+- **``node `x` references runner `y`, which `runners:` does not define``** —
+  add the runner under `runners:` in `.yunta/config.yaml` (see
   [adapters](adapters.md#configuring-runners)), or fix the typo in the
   node's `runner:`.
 - **`cycle in depends_on: ...`** — the path is printed; break the cycle,
   there's no partial-order fallback.
-- **`node "x" on_failure.goto targets unknown node "y"`** / **`node "x"
-  depends_on unknown node "y"`** — a typo'd or removed node id. Every
-  `goto`/`depends_on` target must exist in the same workflow.
-- **`node "x" references {{inputs.y}}, which inputs: does not declare`** —
+- **``node `x`: `depends_on` names `y`, and no node carries that id``** (or
+  `on_failure.goto`, a gate option's `on`) — a typo'd or removed node id.
+  Every target must exist in the same workflow.
+- **``node `x` references `{{inputs.y}}`, which `inputs:` does not declare``** —
   add `y` under the workflow's own `inputs:`, or fix the template reference.
 - **a pack ceiling error naming the node, the pack, and both the declared
   and requested permission level** — a node inside a pack asked for more
@@ -26,6 +43,34 @@ names the node and the exact problem:
   [packs](packs.md#installing-and-using-a-pack) — the ceiling can't be
   exceeded from the consuming side; it's the pack's own manifest that has to
   change.
+- **`node "x": `baseline_compare` has nothing to compare against ...`** (or
+  `coverage_gate`, an unregistered executor, a session with no runner) — the
+  node's kind cannot run without a key the config leaves unset. A run
+  freezes its config, so it would stop there every time: declare the key
+  (`baseline.suite`, `coverage`, `skills.executors`, `defaults.runner`)
+  and check again.
+- **``node `x`: it runs the project's command `lint`, and the config declares
+  none``** — the node runs a
+  project command by name (`run: { command: lint }`) and `commands:` does
+  not name it. Declare what this project runs for it; when the repository
+  answers for it, the next line says what was detected there
+  (`detected here: declare `commands: { lint: "pnpm lint" }``).
+- **`loop "x" works through the run's tasks document, and nothing ... gives it
+  one`** / **`... reads the ... of node "y", which does not declare it`** /
+  **`... reads the run's ..., and nothing can hold one`** — a read nothing in
+  the run can answer, in the named mode when there is one. Declare the
+  artifact on the node that writes it, bring it in as a `type: document`
+  input, or mount it from the composing workflow.
+- **`node "x" reads "path" (a `files:` context source) ... stops there every
+  time`** — the commit the run starts from lacks the file and no node that
+  runs before the reader can write it. Commit it, or declare the entry
+  `optional: true`. When an earlier node might write it, this is a warning
+  instead.
+- **`node "x": `use: y` fails check — ...`** — a composed workflow its birth
+  would refuse, reported before the parent spends anything.
+- **`pack "p" requires ...`** — a pack workflow needs a runner, an MCP server
+  or a command on `PATH` this project or machine lacks. `yunta doctor` lists
+  the same gaps for every installed pack.
 - **`yunta_schema: "..."` — ... (this binary speaks schema N)`** — the
   workflow (or an installed pack) declares a schema range your installed
   `yunta` binary doesn't satisfy. Check [compatibility](compatibility.md) for
@@ -34,26 +79,88 @@ names the node and the exact problem:
 ## `yunta doctor` reports an adapter unhealthy
 
 ```
-codex: unhealthy — `codex` not found on PATH
+  ✗ codex  unhealthy — `codex` not found on PATH
 ```
 
 The diagnostic names the actual problem: binary missing, version
 incompatible, or auth invalid. Fix that specific thing and re-run — `doctor`
 runs the identical probe `yunta run` runs before spending anything, so a
-healthy `doctor` means a run won't fail on setup for that adapter. See
+healthy `doctor` means the binary is there, answers and authenticates.
+
+It does not mean a session opens. The probe asks for a version, which never
+touches the configuration a run writes the CLI; a CLI that refuses that
+configuration is healthy to a probe and dead to a run. `yunta doctor
+--session` opens one real session per binding, asks it to submit an empty
+`questions` document, and reports success only after the run accepts that
+document and finishes. It costs a prompt per binding. See
 [adapters](adapters.md#yunta-doctor).
 
 If `doctor` reports a pack's `requires:` unmet (a role, an `mcp_servers:`
 name, or a command not on `PATH`), it names the pack — add what's missing to
 your own config, you don't need to touch the pack itself.
 
-## A node failed with "scope violated: N file(s) outside the declared globs"
+## A node failed with "session `<adapter>` exited with code N before any terminal event"
 
-The session edited something outside the node's `scope:` globs. This is a
-hard post-check, not a warning — the fix is either narrowing what the
-session actually touches (tighten the prompt, or the `scope:` boundary was
-too aggressive for what the task legitimately needs) or widening `scope:` if
-the edit was legitimate. See [scope and permissions](guide.md#scope-and-permissions).
+The CLI started and stopped without ever opening a session. The line carries
+how its process ended and the last thing it wrote to stderr, which is
+normally the whole answer: a configuration key it does not accept, a
+credential it could not read, a flag it does not know.
+
+`yunta status <run>` shows the rest of what the CLI said on its way out,
+up to its last twenty lines. Values that came from the session's own
+environment — the run tools' token among them — read as `[redacted]`.
+
+`yunta doctor --session` reproduces it outside any run, once per binding, so
+you can fix the configuration and check it without spending a workflow.
+
+## `doctor --session` opened a session but received no questions document
+
+`session opened, no questions document` means the CLI opened, but the probe
+run never accepted its required `yunta_submit_questions` call. The probe
+asks for `{"document":{"questions":[]}}`; this empty document needs no
+human answer. Check the binding's tool access. For a workflow run that
+shows the same symptom, `yunta status <run>` can show a failed
+`yunta-run` call. Codex sessions need the per-run server's tool approval;
+Yunta supplies that approval when it mounts the endpoint.
+
+## A run reports a failed `yunta-run` call
+
+The live chronicle shows each failed call, while `yunta status <run>` shows
+the **last failed call of the attempt** of a node that has not finished, with
+the tool name and either `approval_blocked` or `call_failed`. A node that
+finished is past the calls it got wrong on its way. Its row says how its
+document was accepted instead, for example "accepted on its 2nd handover
+(1 refused)". The event log records every failed call as `run_tool_failed`.
+`status --json` exposes the last one on the node as `last_tool_failure`,
+with `session_id`, `tool`, and `cause`, whether the node finished or not. A retry starts a
+new attempt and clears
+that summary. The failed call is diagnostic context: the session may recover
+and finish, and a node failure can have another cause. Arguments, responses,
+tokens and CLI error text are not stored in this event or summary.
+
+## A node failed with "scope violated: N files outside the declared globs"
+
+The session edited something outside the node's `scope:` globs, and the
+failure names each of those paths. This is a hard post-check, not a warning.
+
+When the run pauses on it, the decision offers three ways on:
+
+- `grant` widens the node's scope by exactly those paths, for the rest of
+  this run, and picks the same session back up in the checkout it worked
+  in, with its work — told what was granted — rather than starting over.
+  When the adapter cannot resume it, or that checkout is gone, a fresh
+  session runs the node again and the log records a `capability_degraded`.
+  Choose it when the edit was the right one.
+- `retry` runs the node again under the same scope. It only helps after you
+  change what it failed on in the run's tree yourself; otherwise the node
+  writes the same paths and asks again. `yunta status` says where that
+  tree is, above the decision ("the run works in …").
+- `abort` pauses the run.
+
+`grant` is not offered to a `read-only` node, or when a config layer sets
+`permissions.scope_expansion.max_mode: deny`. If the edit is legitimate for
+every run, widen `scope:` in the workflow instead. See
+[scope and permissions](guide.md#scope-and-permissions).
 
 ## A node failed on an artifact it declared
 
@@ -104,7 +211,7 @@ The tasks document `tasks.yaml` was not accepted. Fix these and submit again:
   2. task `graph-cmd`: `depends_on` names `t9`, which no task in this file declares
 ```
 
-This is the engine answering `yunta_submit_tasks`, `yunta_submit_questions`,
+This is the engine answering `yunta_submit_tasks`, `yunta_submit_spec`, `yunta_submit_questions`,
 `yunta_post_finding`, `yunta_update_finding` or `yunta_withdraw_finding` inside the
 session, with the verdict the node's close reaches. It is not a failure: the
 session reads the numbered list, fixes exactly those problems, and calls the tool
@@ -116,7 +223,7 @@ once. A document that does not read into its kind is refused with that one probl
 and the path where it sits:
 
 ```
-  1. does not parse at `tasks[1].manual_review`: invalid type: string "yes", expected a boolean
+  1. does not parse at `tasks[1].scope`: invalid type: string "src/**", expected a sequence
 ```
 
 A value of the wrong type stops the read, and the rules only hold over a document
@@ -131,12 +238,30 @@ saw.
 
 ## A node's criteria never turn green
 
-`yunta status <run_id>` shows which criterion is failing and its exit code.
+`yunta status <run>` shows which criterion is failing, its exit code and
+the last line it printed. What a criterion prints never reaches your
+terminal; the run keeps it. The last 20 lines of a red criterion are on its
+`criteria_checked` event, which is what a task session reads through
+`yunta_task`, and the whole output, redacted, is the object under the run's
+`objects/` that the event's `output` names.
+
 If the same criterion keeps failing across every re-route
 (`on_failure.goto`) up to `max_reroutes`, the run pauses on a gate instead of
 looping forever — that's expected, not a hang. Widen what the correction
 node is allowed to see (`context:`) or change (`scope:`) before assuming the
 criterion itself is wrong.
+
+## `yunta run` refuses because git cannot name who commits
+
+```
+a run commits every node's work, and git cannot name who commits here: …
+```
+
+Every node's work becomes a commit on the run's branch, so a repository where
+git has no `user.name` and `user.email` — or is told not to guess them, with
+`user.useConfigOnly` — would fail the run at its first commit. Set both, globally
+or for this repository alone, and run again; `yunta doctor` says who git commits
+as.
 
 ## `isolation: none` refuses to start
 
@@ -150,20 +275,60 @@ refuses a second concurrent run against it. Commit or stash first, or switch
 to the default `isolation: worktree` if you don't specifically need to run
 in place.
 
-## A run is stuck in `waiting`
+## A run looked stuck after the laptop slept
+
+```
+run — host suspended for 1h52m — durations leave it out; new sessions wait until it has been awake 2m00s
+```
+
+The run noticed the machine slept and recorded it. None of its durations count
+that time, and a session's timeout counts only the time the host is awake. When
+the host wakes, the run does not open a new session until the host has been
+awake for two minutes, because a laptop that wakes briefly for maintenance and
+then sleeps again would leave a session hanging. Commands and checks don't
+wait. If nothing moves after those two minutes, the run is waiting on something
+else: check `yunta status`.
+
+## A run says it `needs you`
 
 Not stuck — paused on a `gate`, waiting for a human decision, and it
-survives the engine restarting. `yunta status <run_id>` shows what it's
-waiting on and the exact option ids; `yunta resolve-gate <run_id> <option>`
-answers it from any process. See [gates from the
+survives the engine restarting. `yunta status <run>` shows what it's
+waiting on and the command that chooses each option; `yunta resolve-gate
+<run> <option>` answers it from any process, and `yunta resolve-gate <run>`
+on a terminal puts the menu to you. See [gates from the
 outside](guide.md#gates-from-the-outside).
+
+## A node failed and `resume` pauses on the same failure
+
+A node with no `on_failure` re-route that fails leaves the decision to you:
+`yunta status <run>` lists `retry` and `abort`. Fix the cause in the run's
+own worktree (`~/.yunta/worktrees/<run_id>` by default), not in your checkout:
+the run starts from the commit it was created on and never sees files you add
+or change there afterwards. Then run
+`yunta resolve-gate <run> retry`. The node starts a fresh attempt; nothing
+before it runs again. A plain `yunta resume` asks the same question again
+rather than spending on a retry nobody chose.
+
+When the failure is a config key the node cannot run without — `baseline.suite`,
+`coverage`, an executor's registration, a runner — the menu offers only
+`abort`: the run's config was frozen when it was created, so no attempt of it
+can go differently. Declare the key in `.yunta/config.yaml` and start a new
+run; `yunta check` refuses the workflow until you do.
+
+A loop task that ends an attempt with its criteria red is `blocked` right
+away: another session on the same task and tree would have nothing the first
+did not. The decision is yours — `retry`, `continue-work` when its attempt
+left work behind, or `grant` when it asked for scope. After an answer to a
+task's scope request, granted or denied, the session that asked picks its work
+back up where it left it; if that work already closes the task, no session
+opens at all.
 
 ## `yunta pack add`/`update` refuses
 
 - **`publisher "x" is not in permissions.packs.publishers.allow`** — your
   config (the layer is named in the error) restricts which publishers can be
   installed. Add the publisher there, or get the pack from an allowed one.
-- **`this pack declares N executor(s) ...`** — `permissions.packs.executors`
+- **`this pack declares N executors ...`** — `permissions.packs.executors`
   is `prompt` (the default) and needs `--yes` after you've reviewed the
   printed audit, or is `deny` and refuses outright regardless of `--yes`.
   See [packs](packs.md#installing-and-using-a-pack).
@@ -172,7 +337,7 @@ outside](guide.md#gates-from-the-outside).
 
 ```
 run is broken: run `01J...` no longer holds the bytes its log accepted for 1
-of the 3 artifact(s) it names: `artifacts/plan/tasks.yaml`: object
+of the 3 artifacts it names: `artifacts/plan/tasks.yaml`: object
 `a1b2...` holds content that hashes to `c3d4...` — the bytes under
 `objects/` are not the bytes the run accepted
 ```
@@ -196,7 +361,7 @@ What to do:
 - **If the bytes are gone for good**, the run cannot be resumed — its
   artifacts are part of what it is. Start a new run from the same inputs.
 
-`yunta verify <run_id>` reports the same check on demand, without resuming.
+`yunta verify <run>` reports the same check on demand, without resuming.
 
 A run created by a Yunta older than the object store reports instead that it
 holds artifacts this binary cannot verify — a `minor` finding, not a break.
@@ -268,7 +433,7 @@ was created in rather than on one of its own, so resume it from there.
 ## Something looks corrupted, or a replay disagrees with what you remember
 
 ```bash
-yunta verify <run_id>
+yunta verify <run>
 ```
 
 Checks a run's two mechanical guarantees and reports them apart:
@@ -288,6 +453,6 @@ never guess from `status` output alone if you suspect this.
 
 `yunta <command> --help` is the source of truth for flags — this doc and the
 [workflow guide](guide.md) cover behavior, not every flag. If a run's
-behavior doesn't match anything here, `yunta status <run_id>` and the run's
-own `progress.md` (in the run's directory) are both derived straight from
-the event log and are the most reliable place to start.
+behavior doesn't match anything here, `yunta status <run>` — and
+`yunta status <run> --node <id>` for one node whole — are derived straight
+from the event log and are the most reliable place to start.

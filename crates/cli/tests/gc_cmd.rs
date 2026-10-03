@@ -223,7 +223,7 @@ fn failed_removal_is_not_counted() {
     // Only the run gc fully reclaimed is counted; the stuck one is not,
     // even though it too is terminal and past retention.
     assert!(
-        stdout(&gc).contains("1 run(s) reclaimed"),
+        stdout(&gc).contains("1 run reclaimed"),
         "exactly the clean run is counted: {}",
         stdout(&gc)
     );

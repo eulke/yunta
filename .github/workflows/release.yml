@@ -12,43 +12,17 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# One release per tag.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  # Gate: identical to `ci.yml`'s own checks, plus the factory packs. If
-  # this fails, nothing below it runs and no release is created.
+  # Gate: `ci.yml` itself, so the release runs the checks CI runs rather
+  # than a re-listed subset that drifts. If this fails, nothing below it
+  # runs and no release is created.
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          rustflags: ""
-
-      - name: fmt
-        run: cargo fmt --all -- --check
-      - name: clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check
-      - name: test (workspace)
-        run: cargo test --workspace --locked
-
-      - name: build (release binary, for the factory-pack checks below)
-        run: cargo build --release --locked -p yunta
-
-      - name: the repository's own workflows and the factory packs pass check and their cases
-        run: |
-          bin="$PWD/target/release/yunta"
-          for wf in .yunta/workflows/*.yaml packs/*/.yunta/workflows/*.yaml; do
-            echo "::group::check $wf"
-            "$bin" check "$wf"
-            echo "::endgroup::"
-          done
-          echo "::group::test cases (mock adapter)"
-          "$bin" test
-          "$bin" test --dir packs/starter
-          "$bin" test --dir packs/fragua
-          echo "::endgroup::"
+    uses: ./.github/workflows/ci.yml
 
   # Four-target matrix, all gated on `test`. musl via `cross` (a real
   # static Linux binary, no glibc dependency); macOS compiles natively on
@@ -77,6 +51,7 @@ jobs:
             os: macos-latest
             cross: false
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -137,6 +112,7 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -173,6 +149,7 @@ jobs:
   publish-crates:
     needs: release
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -208,6 +185,7 @@ jobs:
   publish-container:
     needs: release
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write

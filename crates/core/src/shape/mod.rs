@@ -53,13 +53,33 @@ pub trait Document: DeserializeOwned + serde::Serialize + sealed::Sealed {
     /// A writer who never heard a rule pays a whole attempt for
     /// something the system already knew.
     const RULES: &'static [Rule];
+
+    /// What the engine demands of the commands this document hands it,
+    /// checked when the document is submitted by running each one where
+    /// the engine runs it — the rules no reading of the document can
+    /// settle, because only that environment can answer them.
+    const RUN_RULES: &'static [Rule] = &[];
+
+    /// What a person reviewing the document needs it to say, demanded
+    /// only when the run shows it to one: a gate that puts a plan in
+    /// front of a person puts its explanation there too.
+    const REVIEW_RULES: &'static [Rule] = &[];
+
+    /// What the document is held to as part of the run it is handed over
+    /// in — its spec, the questions a person answered — and so never
+    /// asked of it when it is read back.
+    const SPECIFIED_RULES: &'static [Rule] = &[];
 }
 
 mod sealed {
     pub trait Sealed {}
     impl Sealed for crate::TasksFile {}
+    impl Sealed for crate::SpecFile {}
     impl Sealed for crate::FindingsFile {}
     impl Sealed for crate::QuestionsFile {}
+    impl Sealed for crate::AnswersFile {}
+    impl Sealed for crate::FindingEntry {}
+    impl Sealed for crate::Withdrawal {}
 }
 
 /// Reads `bytes` into `T`, or reports every problem the document has.
@@ -87,12 +107,14 @@ pub fn read<T: Document>(bytes: &[u8], path: impl Into<String>) -> Result<T, Rep
             if broken.is_empty() {
                 Ok(parsed)
             } else {
-                Err(Report::new(document, broken))
+                Err(Report::new(document, broken).located(text))
             }
         }
-        Err(crate::yaml::YamlError::Parse { path, message }) => {
-            Err(one(Problem::parse(path, message)))
-        }
+        Err(crate::yaml::YamlError::Parse { path, message, at }) => Err(Report::new(
+            document.clone(),
+            vec![Diagnostic::new(Subject::Document, Problem::parse(path, message)).at(at)],
+        )
+        .located(text)),
         Err(other) => Err(one(Problem::parse("", other.to_string()))),
     }
 }
@@ -151,8 +173,10 @@ pub fn render<T: Document>(document: &T) -> Result<String, crate::yaml::YamlErro
 pub fn contract(kind: ArtifactKind) -> String {
     match kind {
         ArtifactKind::Tasks => rendered::<TasksFile>(),
+        ArtifactKind::Spec => rendered::<crate::SpecFile>(),
         ArtifactKind::Findings => rendered::<FindingsFile>(),
         ArtifactKind::Questions => rendered::<QuestionsFile>(),
+        ArtifactKind::Answers => rendered::<crate::AnswersFile>(),
     }
 }
 
@@ -160,8 +184,44 @@ pub fn contract(kind: ArtifactKind) -> String {
 pub fn rules(kind: ArtifactKind) -> &'static [Rule] {
     match kind {
         ArtifactKind::Tasks => TasksFile::RULES,
+        ArtifactKind::Spec => crate::SpecFile::RULES,
         ArtifactKind::Findings => FindingsFile::RULES,
         ArtifactKind::Questions => QuestionsFile::RULES,
+        ArtifactKind::Answers => crate::AnswersFile::RULES,
+    }
+}
+
+/// The rules a kind's commands are held to where the engine runs them,
+/// checked when the document is submitted.
+pub fn run_rules(kind: ArtifactKind) -> &'static [Rule] {
+    match kind {
+        ArtifactKind::Tasks => TasksFile::RUN_RULES,
+        ArtifactKind::Spec => crate::SpecFile::RUN_RULES,
+        ArtifactKind::Findings => FindingsFile::RUN_RULES,
+        ArtifactKind::Questions => QuestionsFile::RUN_RULES,
+        ArtifactKind::Answers => crate::AnswersFile::RUN_RULES,
+    }
+}
+
+/// The rules a kind is held to when a gate shows it to a person.
+pub fn review_rules(kind: ArtifactKind) -> &'static [Rule] {
+    match kind {
+        ArtifactKind::Tasks => TasksFile::REVIEW_RULES,
+        ArtifactKind::Spec => crate::SpecFile::REVIEW_RULES,
+        ArtifactKind::Findings => FindingsFile::REVIEW_RULES,
+        ArtifactKind::Questions => QuestionsFile::REVIEW_RULES,
+        ArtifactKind::Answers => crate::AnswersFile::REVIEW_RULES,
+    }
+}
+
+/// The rules a kind is held to as part of the run it is handed over in.
+pub fn specified_rules(kind: ArtifactKind) -> &'static [Rule] {
+    match kind {
+        ArtifactKind::Tasks => TasksFile::SPECIFIED_RULES,
+        ArtifactKind::Spec => crate::SpecFile::SPECIFIED_RULES,
+        ArtifactKind::Findings => FindingsFile::SPECIFIED_RULES,
+        ArtifactKind::Questions => QuestionsFile::SPECIFIED_RULES,
+        ArtifactKind::Answers => crate::AnswersFile::SPECIFIED_RULES,
     }
 }
 
@@ -174,6 +234,35 @@ fn rendered<T: Document>() -> String {
     text.push_str("\n\n# The engine also refuses the document, and fails the node, unless:\n");
     for rule in T::RULES {
         text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+    }
+    if !T::RUN_RULES.is_empty() {
+        text.push_str(
+            "#\n# When it is submitted, the engine runs every criterion under `sh`, where it \
+             runs criteria — not in your shell, whose tools it may not have — and refuses \
+             the document unless:\n",
+        );
+        for rule in T::RUN_RULES {
+            text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+        }
+    }
+    if !T::REVIEW_RULES.is_empty() {
+        text.push_str(
+            "#\n# When the workflow has a gate show the document to a person, the engine also \
+             refuses it unless:\n",
+        );
+        for rule in T::REVIEW_RULES {
+            text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+        }
+    }
+    if !T::SPECIFIED_RULES.is_empty() {
+        text.push_str(
+            "#\n# When it is handed over, the engine holds it to the run it belongs to — the \
+             spec the workflow writes, the questions a person answered — and refuses it \
+             unless:\n",
+        );
+        for rule in T::SPECIFIED_RULES {
+            text.push_str(&format!("#   - {}\n", crate::text::one_line(rule.demand)));
+        }
     }
     text
 }
@@ -220,6 +309,12 @@ mod tests {
             "ProposedCriterionEntry",
         );
         example_writes_every_key::<QuestionsFile>(schemars::schema_for!(QuestionsFile), "Question");
+        for part in ["Spec", "TestFile", "SpecTest"] {
+            example_writes_every_key::<crate::SpecFile>(
+                schemars::schema_for!(crate::SpecFile),
+                part,
+            );
+        }
     }
 
     /// Every published example is a document its own kind accepts.
@@ -231,6 +326,8 @@ mod tests {
             .expect("the findings example");
         read::<QuestionsFile>(QuestionsFile::EXAMPLE.as_bytes(), "example")
             .expect("the questions example");
+        read::<crate::SpecFile>(crate::SpecFile::EXAMPLE.as_bytes(), "example")
+            .expect("the spec example");
     }
 
     /// Every rule a kind is held to is a rule its contract states, so a
@@ -249,13 +346,21 @@ mod tests {
         }
     }
 
-    /// Every rule code belongs to some kind's published rules: a rule
-    /// the engine can report is a rule a writer was told about.
+    /// Every rule code belongs to some document's published rules: a
+    /// rule the engine can report is a rule a writer was told about.
     #[test]
     fn every_rule_code_belongs_to_a_published_contract() {
         let published: BTreeSet<crate::diagnostic::RuleCode> = ArtifactKind::ALL
             .into_iter()
-            .flat_map(|kind| rules(kind).iter().map(|rule| rule.code))
+            .flat_map(|kind| {
+                rules(kind)
+                    .iter()
+                    .chain(run_rules(kind))
+                    .chain(review_rules(kind))
+                    .chain(specified_rules(kind))
+                    .map(|rule| rule.code)
+            })
+            .chain(crate::workflow::read::RULES.iter().map(|rule| rule.code))
             .collect();
         for code in crate::diagnostic::RuleCode::ALL {
             assert!(

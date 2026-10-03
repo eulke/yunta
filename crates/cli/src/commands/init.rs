@@ -8,85 +8,30 @@
 //! non-interactive with a warning when stdin isn't a TTY — `init` must
 //! never hang waiting for input that isn't coming.
 
-use std::io::IsTerminal;
 use std::path::Path;
 
-use yunta_adapters::{Adapter, ClaudeCodeAdapter, CodexAdapter, ProbeReport};
-use yunta_core::AdapterSettings;
+use yunta_engine::process::Supervision;
 
+use crate::ask::{ask_line, Console, Escape};
 use crate::error::{warn, CliError, Outcome};
+use crate::interrupt::Interrupt;
+use crate::render::blocks::{Checklist, Fields, Found, Next};
+use crate::render::doc::Doc;
+use crate::render::ink::{Line, Tone};
+use crate::surface::Diagnostics;
 
 const MECHANISM_SKILL_DIR: &str = ".yunta/skills/yunta-mechanism";
 
-struct Ecosystem {
-    name: &'static str,
-    test_cmd: &'static str,
-    /// A tip printed to the terminal, never written to config — no key
-    /// for this exists anywhere in the reference schema; this is a
-    /// deliberate scoping decision, not an oversight.
-    cache_tip: &'static str,
-}
-
-/// First match wins, in the order listed — a repo with both `Cargo.toml`
-/// and `package.json` (a Rust project with a small JS tool inside) is
-/// still primarily a Rust project for this purpose.
-fn detect_ecosystem(repo: &Path) -> Option<Ecosystem> {
-    let candidates = [
-        (
-            "Cargo.toml",
-            Ecosystem {
-                name: "rust",
-                test_cmd: "cargo test",
-                cache_tip: "share a build cache across worktrees: export \
-                            CARGO_TARGET_DIR=$HOME/.cache/yunta-cargo-target \
-                            before running yunta — otherwise every \
-                            worktree rebuilds the whole dependency tree.",
-            },
-        ),
-        (
-            "package.json",
-            Ecosystem {
-                name: "node",
-                test_cmd: "npm test",
-                cache_tip: "share a package cache across worktrees: point \
-                            npm's cache at a shared directory (`npm config \
-                            set cache <shared-dir>`) or use a package manager \
-                            with content-addressed storage.",
-            },
-        ),
-        (
-            "go.mod",
-            Ecosystem {
-                name: "go",
-                test_cmd: "go test ./...",
-                cache_tip: "Go's own build/module caches (GOCACHE/GOMODCACHE) \
-                            are already shared machine-wide by default — \
-                            nothing extra to configure for worktrees.",
-            },
-        ),
-        (
-            "pyproject.toml",
-            Ecosystem {
-                name: "python",
-                test_cmd: "pytest",
-                cache_tip: "share a virtualenv or package cache across \
-                            worktrees (e.g. a shared `uv`/`pip` cache dir) to \
-                            avoid reinstalling dependencies per worktree.",
-            },
-        ),
-    ];
-    candidates
-        .into_iter()
-        .find(|(marker, _)| repo.join(marker).is_file())
-        .map(|(_, ecosystem)| ecosystem)
-}
-
-fn detect_base_branch(repo: &Path) -> String {
+async fn detect_base_branch(repo: &Path, supervision: Supervision<'_>) -> String {
     // Both probes are best-effort: a git that can't answer (no remote
     // HEAD, detached head, no repo) falls through to the next, then to
     // the conventional default.
-    if let Ok(raw) =
-        yunta_engine::git::output_blocking(repo, &["symbolic-ref", "refs/remotes/origin/HEAD"])
+    if let Ok(raw) = yunta_engine::git::output(
+        repo,
+        &["symbolic-ref", "refs/remotes/origin/HEAD"],
+        supervision,
+    )
+    .await
     {
         if let Some(branch) = raw.trim().strip_prefix("refs/remotes/origin/") {
             if !branch.is_empty() {
@@ -94,7 +39,9 @@ fn detect_base_branch(repo: &Path) -> String {
             }
         }
     }
-    if let Ok(name) = yunta_engine::git::output_blocking(repo, &["branch", "--show-current"]) {
+    if let Ok(name) =
+        yunta_engine::git::output(repo, &["branch", "--show-current"], supervision).await
+    {
         let name = name.trim();
         if !name.is_empty() {
             return name.to_string();
@@ -103,42 +50,12 @@ fn detect_base_branch(repo: &Path) -> String {
     "main".to_string()
 }
 
-struct ProbedAdapter {
-    id: &'static str,
-    healthy: bool,
-    detail: String,
-}
-
-async fn probe_known_adapters() -> Vec<ProbedAdapter> {
-    let claude_code = ClaudeCodeAdapter::new(&AdapterSettings::default());
-    let codex = CodexAdapter::new(&AdapterSettings::default());
-    let mut probed = Vec::new();
-    for (id, report) in [
-        ("claude-code", claude_code.probe().await),
-        ("codex", codex.probe().await),
-    ] {
-        probed.push(match report {
-            Ok(ProbeReport::Healthy { version }) => ProbedAdapter {
-                id,
-                healthy: true,
-                detail: version.unwrap_or_else(|| "version unknown".to_string()),
-            },
-            Ok(ProbeReport::Unhealthy { diagnostic }) => ProbedAdapter {
-                id,
-                healthy: false,
-                detail: diagnostic,
-            },
-            Err(e) => ProbedAdapter {
-                id,
-                healthy: false,
-                detail: e.to_string(),
-            },
-        });
-    }
-    probed
-}
-
-fn render_config_yaml(project_name: &str, base_branch: &str, probed: &[ProbedAdapter]) -> String {
+fn render_config_yaml(
+    project_name: &str,
+    base_branch: &str,
+    probed: &[crate::detect::ProbedAdapter],
+    detected: &crate::detect::Detected,
+) -> String {
     let mut out = String::new();
     out.push_str("# Written by `yunta init` — team-shared, commit this file.\n");
     out.push_str("# Personal overrides belong in ~/.yunta/config.yaml (the user\n");
@@ -147,6 +64,7 @@ fn render_config_yaml(project_name: &str, base_branch: &str, probed: &[ProbedAda
     out.push_str(&format!("  name: {project_name}\n"));
     out.push_str(&format!("  base_branch: {base_branch}\n"));
     out.push_str("  branch_prefix: yunta/\n\n");
+    out.push_str(&render_detected(detected));
 
     out.push_str("# `runners:` names roles your workflows' `runner:` fields reference,\n");
     out.push_str("# each with one or more adapter candidates (first capable one wins).\n");
@@ -171,9 +89,44 @@ fn render_config_yaml(project_name: &str, base_branch: &str, probed: &[ProbedAda
             healthy.id
         ));
     } else {
-        out.push_str("#     - { adapter: claude-code, model: <model-name> }\n");
+        out.push_str(&format!(
+            "#     - {{ adapter: {}, model: <model-name> }}\n",
+            super::first_built_adapter()
+        ));
     }
     out
+}
+
+/// What `init` found in the repository, as config: the commands a
+/// workflow asks for by name, the suite a run measures when it reads the
+/// measurement, and the forge `origin` is on.
+fn render_detected(detected: &crate::detect::Detected) -> String {
+    let mut out = String::new();
+    if !detected.commands.is_empty() {
+        out.push_str("# What this project runs for each capability a workflow names\n");
+        out.push_str("# (`run: { command: lint }`), as `yunta init` detected it.\n");
+        out.push_str("commands:\n");
+        for (name, text) in &detected.commands {
+            out.push_str(&format!("  {name}: {}\n", yaml_string(text)));
+        }
+        out.push('\n');
+    }
+    if let Some(suite) = &detected.suite {
+        out.push_str("# Measured before a run's first node when the run reads it.\n");
+        out.push_str(&format!("baseline:\n  suite: {}\n\n", yaml_string(suite)));
+    }
+    if let Some(repo) = &detected.forge {
+        out.push_str("# Where a `pull_request` node opens its pull request.\n");
+        out.push_str(&format!(
+            "forge:\n  github:\n    repo: {repo}\n    token_env: GITHUB_TOKEN\n\n"
+        ));
+    }
+    out
+}
+
+/// `text` as a double-quoted YAML scalar.
+fn yaml_string(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 const GITIGNORE_MARKER: &str = "# added by `yunta init`";
@@ -266,23 +219,40 @@ fn claude_md_suggestion() -> &'static str {
      tool) for an existing verified workflow that already covers it."
 }
 
-fn prompt_line(prompt: &str, default: &str) -> String {
-    print!("{prompt} [{default}]: ");
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    let mut line = String::new();
-    if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
+/// One setting asked for on `console`, or `default` when nobody
+/// answers.
+///
+/// Answered on the one line every prompt in this binary is answered on
+/// — same editing, same Escape, same Ctrl-C, same terminal handed back
+/// — so a person who has answered a run answers `init` the same way.
+/// An empty line takes the default, and so does Escape: "not me, not
+/// now" about a setting that already has a detected value is that
+/// value.
+fn asked(console: &Console, prompt: &str, default: &str) -> String {
+    let look = console.look();
+    let asking = Line::new()
+        .push(Tone::Strong, prompt)
+        .push(Tone::Muted, format!(" (enter keeps `{default}`)"));
+    // A terminal that cannot be drawn on cannot be asked either: the
+    // default stands, as it does for a line left empty.
+    if console.say(&look.ink.paint(&asking)).is_err() {
         return default.to_string();
     }
-    let trimmed = line.trim();
-    if trimmed.is_empty() {
-        default.to_string()
-    } else {
-        trimmed.to_string()
+    match ask_line(console, crate::ask::ANSWER) {
+        Ok(typed) if !typed.value.is_empty() => typed.value,
+        _ => default.to_string(),
     }
 }
 
 pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
     let repo = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    // `init` is the command that makes a project, so there is no
+    // `Context` to resolve yet — and its probes still spawn git, so it
+    // owns the interruption itself, like any other invocation.
+    let interrupt = Interrupt::ctrl_c()
+        .map_err(|source| CliError::io("install the interrupt handler for", "init", source))?;
+    let clock = yunta_core::SystemClock;
+    let supervision = Supervision::outside_any_run(interrupt.stop(), &clock);
 
     let config_path = repo.join(".yunta/config.yaml");
     if config_path.exists() && !force {
@@ -292,32 +262,39 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         )));
     }
 
-    // `-i` degrades to non-interactive with a warning rather than
-    // hanging on a stdin that will never produce a line.
-    let interactive = if interactive && !std::io::stdin().is_terminal() {
-        warn("--interactive given but stdin isn't a TTY — using detected defaults");
-        false
-    } else {
-        interactive
+    // `-i` degrades with a warning rather than hanging on a terminal
+    // that will never produce a line. There is no run drawing here, so
+    // what opening the console has to say goes out through a door onto
+    // nothing, which is stderr.
+    let console = match interactive {
+        true => Console::open(&Diagnostics::none(), Escape::KeepsDefault).await,
+        false => None,
     };
+    if interactive && console.is_none() {
+        warn("--interactive given but there is no terminal to ask on — using detected defaults");
+    }
 
     let default_name = repo
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "workflow-project".to_string());
-    let default_branch = detect_base_branch(&repo);
-    let ecosystem = detect_ecosystem(&repo);
+    let default_branch = detect_base_branch(&repo, supervision).await;
+    let detected = crate::detect::Detected::in_repo(&repo, supervision).await;
 
-    let (project_name, base_branch) = if interactive {
-        (
-            prompt_line("project name", &default_name),
-            prompt_line("base branch", &default_branch),
-        )
-    } else {
-        (default_name, default_branch)
+    let (project_name, base_branch) = match &console {
+        Some(console) => {
+            // What Escape does, said once above the prompts it applies
+            // to — the same place every other surface says it.
+            let _ = console.say(console.escape().said());
+            (
+                asked(console, "project name", &default_name),
+                asked(console, "base branch", &default_branch),
+            )
+        }
+        None => (default_name, default_branch),
     };
 
-    let probed = probe_known_adapters().await;
+    let probed = crate::detect::probe_known_adapters().await;
 
     let mut wrote = Vec::new();
     let mut skipped = Vec::new();
@@ -326,7 +303,7 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         std::fs::create_dir_all(parent)
             .map_err(|source| CliError::io("create", parent.display(), source))?;
     }
-    let config_yaml = render_config_yaml(&project_name, &base_branch, &probed);
+    let config_yaml = render_config_yaml(&project_name, &base_branch, &probed, &detected);
     // Never write a config this binary can't read back: parse the
     // generated text into a real `ConfigLayer` first, so a broken template
     // fails here instead of leaving an unreadable file — the more so under
@@ -336,10 +313,10 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         .map_err(|e| CliError::msg(format!("the generated config is not valid: {e}")))?;
     std::fs::write(&config_path, config_yaml)
         .map_err(|source| CliError::io("write", config_path.display(), source))?;
-    wrote.push(config_path.display().to_string());
+    wrote.push(".yunta/config.yaml".to_string());
 
     match write_gitignore(&repo) {
-        Ok(true) => wrote.push(repo.join(".gitignore").display().to_string()),
+        Ok(true) => wrote.push(".gitignore".to_string()),
         Ok(false) => skipped.push(".gitignore (already has yunta entries)".to_string()),
         Err(source) => return Err(CliError::io("update", ".gitignore", source)),
     }
@@ -352,41 +329,110 @@ pub async fn init(interactive: bool, force: bool) -> Result<Outcome, CliError> {
         Err(source) => return Err(CliError::io("write", "the mechanism skill", source)),
     }
 
-    println!("yunta init: done in {}", repo.display());
-    for path in &wrote {
-        println!("  wrote {path}");
-    }
-    for path in &skipped {
-        println!("  skipped {path}");
-    }
-
-    match &ecosystem {
-        Some(eco) => println!(
-            "\ndetected ecosystem: {} (suggested test command: `{}`)\ntip: {}",
-            eco.name, eco.test_cmd, eco.cache_tip
-        ),
-        None => println!(
-            "\nno known ecosystem detected (looked for Cargo.toml, package.json, \
-             go.mod, pyproject.toml) — fill in a test command by hand"
-        ),
-    }
-
-    for adapter in &probed {
-        let status = if adapter.healthy {
-            "healthy"
-        } else {
-            "unavailable"
-        };
-        println!("adapter {}: {status} ({})", adapter.id, adapter.detail);
-    }
-
-    println!(
-        "\nsuggested line for this repo's CLAUDE.md (paste it yourself — \
-         Yunta never writes to that file):\n\n{}\n",
-        claude_md_suggestion()
+    print!(
+        "{}",
+        report(&Wrote {
+            repo: &repo,
+            wrote: &wrote,
+            skipped: &skipped,
+            detected: &detected,
+            probed: &probed,
+        })
     );
-
-    println!("next: run `yunta doctor` to confirm everything above is actually usable.");
-
     Ok(Outcome::Success)
+}
+
+/// What `init` did and found, for the report it ends with.
+struct Wrote<'a> {
+    repo: &'a Path,
+    wrote: &'a [String],
+    skipped: &'a [String],
+    detected: &'a crate::detect::Detected,
+    probed: &'a [crate::detect::ProbedAdapter],
+}
+
+/// The report `init` ends with: what it wrote and detected, as fields;
+/// each adapter this machine answers for, as a check; the line to paste
+/// into the project's CLAUDE.md; and the runner to declare, because no
+/// agent node runs until one is.
+fn report(init: &Wrote<'_>) -> String {
+    let look = crate::render::stdout_look();
+    let detected = init.detected;
+    let ecosystem = match &detected.ecosystem {
+        Some(ecosystem) => format!(
+            "{} — wrote {}{}",
+            ecosystem.name,
+            yunta_core::text::counted(detected.commands.len(), "project command"),
+            match detected.suite {
+                Some(_) => " and the suite a run measures",
+                None => "",
+            }
+        ),
+        None => "none known (looked for Cargo.toml, package.json, go.mod, pyproject.toml) — \
+                 declare `commands:` and `baseline.suite` by hand"
+            .to_string(),
+    };
+    let fields = Fields::new()
+        .push_if("wrote", init.wrote.join(", "))
+        .push_if("skipped", init.skipped.join(", "))
+        .push_if("ecosystem", ecosystem)
+        .push_if(
+            "tip",
+            detected
+                .ecosystem
+                .as_ref()
+                .map(|ecosystem| ecosystem.cache_tip.to_string())
+                .unwrap_or_default(),
+        )
+        .push_if(
+            "forge",
+            detected
+                .forge
+                .as_ref()
+                .map(|repo| {
+                    format!("github {repo}, from `origin` — its token is read from `GITHUB_TOKEN`")
+                })
+                .unwrap_or_default(),
+        );
+    let mut adapters = Checklist::default();
+    for adapter in init.probed {
+        match adapter.healthy {
+            true => adapters.push(
+                Found::Holds,
+                adapter.id.as_str(),
+                format!("healthy ({})", adapter.detail),
+            ),
+            false => adapters.push(
+                Found::Caution,
+                adapter.id.as_str(),
+                format!("unavailable ({})", adapter.detail),
+            ),
+        }
+    }
+    let mut out = format!("yunta init: done in {}\n\n", init.repo.display());
+    out.push_str(&crate::render::draw(Doc::new().with(fields), &look));
+    out.push('\n');
+    out.push_str(&crate::render::draw(Doc::new().with(adapters), &look));
+    out.push_str(&format!(
+        "\nsuggested line for this repo's CLAUDE.md (paste it yourself — Yunta never writes to \
+         that file):\n\n{}\n",
+        claude_md_suggestion()
+    ));
+    // The config is written with its runners commented out: a probe
+    // names an adapter and never a model, and the model is the project's
+    // to choose. Until a runner is declared, no agent node can run, so
+    // that is the step this ends with.
+    out.push_str("\nno runner is declared, so a workflow's agent nodes cannot run until one is.\n");
+    for line in crate::detect::runner_step(&[], true, &crate::detect::healthy(init.probed)) {
+        out.push_str(&format!("{line}\n"));
+    }
+    let next = Next {
+        steps: vec![(
+            "yunta doctor".to_string(),
+            "confirms everything above is usable",
+        )],
+    };
+    out.push('\n');
+    out.push_str(&crate::render::draw(Doc::new().with(next), &look));
+    out
 }

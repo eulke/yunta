@@ -16,7 +16,8 @@ not a prerequisite for writing one.
 This repo ships two example packs at [`packs/`](../packs/) — `yunta/starter`
 (two minimal workflows: a one-node `fix` and a fan-out `review`) and
 `yunta/fragua` (the full reference pipeline: grill, a verified tasks document,
-lint→fix, a baseline check, multi-runner review, PR). Both install and remove
+lint→fix, a baseline check, multi-runner review, the work held to its plan, PR).
+Both install and remove
 like any third-party pack; the engine treats them no differently, and
 they're worth reading as concrete, working examples of everything below.
 
@@ -48,7 +49,10 @@ yunta run acme/review
 yunta check acme/review
 ```
 
-and the same form works inside a workflow (`use: acme/qa-review`) and a
+The reference pack's workflow is `fragua.yaml`, so run it with
+`yunta run yunta/fragua` after installing the pack.
+
+The same form works inside a workflow (`use: acme/qa-review`) and a
 node's `skills:` list (`skills: [acme/review-rubric]`). Resolution always
 tries the repo's own `.yunta/workflows/` first — a repo file at the same
 `publisher/name` path always wins over the pack: a local workflow with the
@@ -64,8 +68,9 @@ A pack is code from someone else, and it can be audited by reading it:
 `yunta pack audit acme/review-pack` prints a full static inventory of every
 workflow it ships — every `bash`/hook/loop command, every context source and
 exactly what it points at, permissions and required agent per node, `mcp`
-servers reached, executors flagged as code, and each workflow's **complete,
-untrimmed prompt text**. It's inventory, never a verdict: nothing here flags
+servers reached, executors flagged as code, the repository paths a node's
+`scope:` or a loop's `scope_expansion.within` names, and each workflow's
+**complete, untrimmed prompt text**. It's inventory, never a verdict: nothing here flags
 content as "suspicious" — that would be trivially evadible and would only
 give false confidence. It also reports whether the pack ships its own tests
 under `.yunta/tests/` (same format `yunta test` uses) and whether they pass.
@@ -104,6 +109,13 @@ alongside its usual adapter health check — see [adapters](adapters.md#yunta-do
 Nothing here blocks `pack add` or `check` — a pack can be installed and
 configured for later, same as an adapter that isn't set up yet doesn't stop
 `yunta init`.
+
+What a pack's workflows ask the project's config for — a command by name, a
+forge, a suite — is said once the pack lands: `pack add` lists every key a node
+needs and the config leaves unset, whether a run is refused for it or leaves an
+`optional: true` node out, and what this repository was detected to answer for
+it. It refuses nothing for it; `yunta check` and `yunta doctor` say the same
+later.
 
 Starting a run from a pack's own workflow freezes exactly which pack version
 produced it — publisher, name, the pack's own semver, and the exact commit
@@ -183,8 +195,11 @@ Field by field:
 - **`requires`** — the floor the installing team's config must provide:
   `runners` (the runner names your workflows use in `runner:`, optionally
   with the permission profile you expect them resolvable at), `mcp_servers` (names
-  your workflows reference under `context: { mcp: ... }`), `commands`
-  (binaries your `bash`/hook steps assume are on `PATH`). None of this is
+  your workflows reference under `context: { mcp: ... }`), `programs`
+  (binaries your `bash`/hook steps start themselves and assume are on
+  `PATH`). A capability the installing project provides — its lint, its
+  tests — is not a program: name it as a project command instead (see
+  below). None of this is
   enforced at install time — `yunta doctor` reports gaps, naming your pack,
   so an installing team can fix them before running anything.
 - **`contents`** — every path your pack ships, relative to the pack's own
@@ -198,9 +213,31 @@ Field by field:
   roles (`runner: reviewer`); the installing team's own `.yunta/config.yaml`
   resolves those. A pack that hardcodes `runner: claude-code` couldn't run on
   a Codex-only team, which defeats the point of shipping a pack at all.
+- **No tool of the installing repository.** A command your workflow runs to
+  lint, test or build is the project's to choose: write
+  `run: { command: lint }` and let the installing project declare what `lint`
+  runs under `commands:` (see [project commands](guide.md#project-commands)).
+  `yunta check` and `yunta doctor` tell the person installing your pack which
+  names their config lacks. List a program under `requires.programs` only when
+  your own `bash` step starts it.
 - **No composition outside the pack's own contents.** A workflow inside your
   pack can `use:` another workflow from the same pack; reaching into another
   pack or back out to the installing repo is rejected by `check`.
+- **No silent assumption about the installing repo's files.** A path a node
+  reads through `files:` is a guess about repositories you have never seen.
+  Declare the entry `{ path: <path>, optional: true }` when the node can do
+  without the file — a missing optional file is marked in the session's
+  context instead of failing the node — and name the files your pack reads in
+  its README. `yunta check` and `yunta doctor` tell the person installing it
+  which required ones their last commit lacks.
+- **No repository layout in a scope.** `scope: ["src/**"]` or
+  `within: ["**/*.rs"]` holds only where the code sits there. A node that
+  fixes what the run itself wrote declares `scope: run` — what the run
+  changed so far, whatever the language or layout — and what must never be
+  touched is the installing project's to say, under `permissions.paths.deny`
+  (see [scope and permissions](guide.md#scope-and-permissions)). `yunta pack
+  audit` lists every path a pack's scopes still name, so its author and the
+  person installing it see the assumption.
 
 ## Testing a pack before sharing it
 
@@ -234,7 +271,35 @@ case — `mode: standard` and `inputs: { idea: "add dark mode" }` — see
 [`packs/fragua/.yunta/tests/`](../packs/fragua/.yunta/tests) for mode-specific
 cases.
 
-Every case runs in a fresh, empty repository. A workflow whose nodes read
+`expect.nodes` names a node's state in the words `yunta status` prints for it:
+`finished`, `failed`, `running`, `waiting`, `skipped` for a node the case's mode
+leaves out, and `never ran` for one the run did not reach. A node the workflow
+does not declare fails the case, naming it.
+
+A case answers a gate the way a person does, under `decisions:`, by node id
+and by the option that gate's own menu offers:
+
+```yaml
+# .yunta/tests/approved.yaml
+workflow: review
+fixture: fixtures/review.yaml
+decisions:
+  approve-plan: approve
+expect:
+  final_state: finished
+```
+
+The decision goes on the run's log and the run is handed back, so what it
+reaches afterwards is what a real answer reaches — a promotion included, which
+is what `final_state: promoted` asserts. A gate no entry names is a gate nobody
+answers, and the run parks on it; each answer is spent once, so a workflow that
+parks on the same gate twice stops there the second time.
+
+A fixture describes what the run does, so every session it scripts has to be one
+the run opens. A script nothing opened fails the case, naming which: two modes of
+one workflow that open different sessions read different fixtures.
+
+Every case runs in a copy of the pack's own `.yunta/` inside a fresh repository. A workflow whose nodes read
 files (`files:`), take a `path` input or run the project's own toolchain
 declares `worktree: <directory>` (relative to the case file): the directory's
 contents become the sandbox's initial commit before any session starts, so

@@ -29,6 +29,7 @@ use yunta_core::{Isolation, Manifest, RunId};
 use crate::context::Context;
 use crate::error::{warn, CliError, Outcome};
 use crate::project::Project;
+use yunta_core::events::RunEvent;
 
 pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
@@ -58,7 +59,7 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
         let events = match storage.events_for_run(&run_id) {
             Ok(events) => events,
             Err(e) => {
-                warn(format!("run `{run_id}`: {e}"));
+                warn(format!("run {}: {e}", run_id.handle()));
                 continue;
             }
         };
@@ -69,7 +70,7 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
             || events.iter().any(|e| {
                 matches!(
                     e.payload(),
-                    Some(yunta_core::events::EventPayload::RunFinished(_))
+                    Some(yunta_core::events::EventPayload::Run(RunEvent::Finished(_)))
                 )
             });
         if !is_terminal {
@@ -87,20 +88,28 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
         // previous gc, or a human) has its rows purged now.
         match ctx.project.run_dir(run_id.as_str()) {
             Some(run_dir) => {
-                if remove_run(&ctx.project, &run_dir, &run_id, dry_run) {
+                if remove_run(&ctx, &run_dir, &run_id, dry_run) {
                     reclaimed += 1;
                 }
             }
             None if dry_run => {
-                println!("would purge {} event(s) for run {run_id}", events.len());
+                println!(
+                    "would purge {} of run {}",
+                    yunta_core::text::counted(events.len(), "event"),
+                    run_id.handle()
+                );
                 reclaimed += 1;
             }
             None => match storage.purge_run(&run_id) {
                 Ok(purged) => {
-                    println!("purged {} event(s) for run {run_id}", purged.rows);
+                    println!(
+                        "purged {} of run {}",
+                        yunta_core::text::counted(purged.rows, "event"),
+                        run_id.handle()
+                    );
                     reclaimed += 1;
                 }
-                Err(e) => warn(format!("run `{run_id}`: {e}")),
+                Err(e) => warn(format!("run {}: {e}", run_id.handle())),
             },
         }
     }
@@ -108,9 +117,12 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
     if reclaimed == 0 {
         println!("nothing to reclaim");
     } else if dry_run {
-        println!("{reclaimed} run(s) would be reclaimed");
+        println!(
+            "{} would be reclaimed",
+            yunta_core::text::counted(reclaimed, "run")
+        );
     } else {
-        println!("{reclaimed} run(s) reclaimed");
+        println!("{} reclaimed", yunta_core::text::counted(reclaimed, "run"));
     }
     Ok(Outcome::Success)
 }
@@ -122,8 +134,9 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
 /// is never counted as reclaimed while some of its disk survives. Under
 /// `dry_run` nothing is removed and every present directory counts as if
 /// it had been.
-fn remove_run(project: &Project, run_dir: &Path, run_id: &RunId, dry_run: bool) -> bool {
-    let worktree = worktree_of(project, run_dir, run_id);
+fn remove_run(ctx: &Context, run_dir: &Path, run_id: &RunId, dry_run: bool) -> bool {
+    let worktree = worktree_of(&ctx.project, run_dir, run_id);
+    let shown = |dir: &Path| crate::render::paths::shown(dir, &ctx.cwd, ctx.env.home.as_deref());
     let mut removed_any = false;
     let mut all_removed = true;
 
@@ -135,13 +148,13 @@ fn remove_run(project: &Project, run_dir: &Path, run_id: &RunId, dry_run: bool) 
             continue;
         }
         if dry_run {
-            println!("would remove {}", dir.display());
+            println!("would remove {}", shown(&dir));
             removed_any = true;
         } else if let Err(e) = std::fs::remove_dir_all(&dir) {
-            warn(format!("failed to remove {}: {e}", dir.display()));
+            warn(format!("failed to remove {}: {e}", shown(&dir)));
             all_removed = false;
         } else {
-            println!("removed {}", dir.display());
+            println!("removed {}", shown(&dir));
             removed_any = true;
         }
     }
@@ -156,14 +169,16 @@ fn remove_run(project: &Project, run_dir: &Path, run_id: &RunId, dry_run: bool) 
 /// `run.dir` is still reclaimed, its worktree (if any) left for a human,
 /// never guessed at from the current config.
 fn worktree_of(project: &Project, run_dir: &Path, run_id: &RunId) -> Option<PathBuf> {
-    let manifest: Manifest = match crate::load_yaml(&run_dir.join("manifest.yaml"), "run manifest")
-    {
-        Ok(manifest) => manifest,
-        Err(e) => {
-            warn(format!("run `{run_id}`: {e}"));
-            return None;
-        }
-    };
+    let manifest: Manifest =
+        match crate::load_manifest(&yunta_engine::run_dir::manifest_path(run_dir))
+            .map(|manifest| manifest.doc)
+        {
+            Ok(manifest) => manifest,
+            Err(e) => {
+                warn(format!("run {}: {e}", run_id.handle()));
+                return None;
+            }
+        };
     match manifest.isolation {
         Isolation::Worktree => Some(project.worktrees_root_for(&manifest).join(run_id.as_str())),
         Isolation::None => None,

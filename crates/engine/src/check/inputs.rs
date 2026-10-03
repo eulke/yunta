@@ -1,12 +1,13 @@
 //! See [`super`]. One family of workflow-check rules.
 
 use super::*;
+use yunta_core::template::TemplateVar;
 
 /// Each declared input's own fields are internally consistent
 /// — independent of anything else in the workflow, so this runs once
 /// over `inputs:` rather than per reference site.
 pub(crate) fn check_input_specs(
-    inputs: &std::collections::BTreeMap<String, InputSpec>,
+    inputs: &std::collections::BTreeMap<yunta_core::InputName, InputSpec>,
     errors: &mut Vec<CheckError>,
 ) {
     for (name, spec) in inputs {
@@ -51,8 +52,13 @@ pub(crate) fn check_input_specs(
 pub(crate) fn check_input_references(workflow: &Workflow, errors: &mut Vec<CheckError>) {
     if let Some(defaults) = &workflow.node_defaults {
         if let Some(hooks) = &defaults.hooks {
-            for step in hooks.before.iter().chain(&hooks.after) {
-                check_template_text(&NODE_DEFAULTS, &step.run, workflow, errors);
+            for script in hooks
+                .before
+                .iter()
+                .chain(&hooks.after)
+                .filter_map(|step| step.run.script())
+            {
+                check_template_text(&NODE_DEFAULTS, script, workflow, errors);
             }
         }
     }
@@ -65,34 +71,24 @@ pub(crate) fn check_input_references_in_nodes(
     errors: &mut Vec<CheckError>,
 ) {
     for node in nodes {
-        match &node.kind {
-            NodeKind::Prompt {
-                prompt: yunta_core::PromptSource::Inline(text),
-            } => check_template_text(&node.id, text, workflow, errors),
-            NodeKind::Bash { run } => check_template_text(&node.id, run, workflow, errors),
-            NodeKind::Loop {
-                prompt: yunta_core::PromptSource::Inline(text),
-                ..
-            } => check_template_text(&node.id, text, workflow, errors),
-            NodeKind::Parallel {
-                nodes: children, ..
-            } => {
-                check_input_references_in_nodes(children, workflow, errors);
-            }
-            _ => {}
-        }
+        check_kind_templates(node, workflow, errors);
 
         if let Some(hooks) = &node.hooks {
-            for step in hooks.before.iter().chain(&hooks.after) {
-                check_template_text(&node.id, &step.run, workflow, errors);
+            for script in hooks
+                .before
+                .iter()
+                .chain(&hooks.after)
+                .filter_map(|step| step.run.script())
+            {
+                check_template_text(&node.id, script, workflow, errors);
             }
         }
 
         for source in &node.context {
             match source {
                 yunta_core::ContextSpec::Files { files } => {
-                    for pattern in files {
-                        check_template_text(&node.id, pattern, workflow, errors);
+                    for file in files {
+                        check_template_text(&node.id, &file.path, workflow, errors);
                     }
                 }
                 yunta_core::ContextSpec::Command { command } => {
@@ -114,19 +110,48 @@ pub(crate) fn check_template_text(
     errors: &mut Vec<CheckError>,
 ) {
     let Ok(variables) = template_variables(text) else {
-        // An unclosed `{{` is a template-syntax error, not an inputs
-        // one — the runtime's own `render_template` reports that when
-        // this node actually executes; nothing new to say here.
+        // A `{{` that never closes, and a name that is not a variable,
+        // are template-syntax errors rather than inputs ones — the
+        // runtime's own `render_template` reports both when this node
+        // actually executes; nothing new to say here.
         return;
     };
     for variable in variables {
-        if let Some(name) = variable.strip_prefix("inputs.") {
-            if !workflow.inputs.contains_key(name) {
+        if let TemplateVar::Input(name) = variable {
+            if !workflow.inputs.contains_key(&name) {
                 errors.push(CheckError::UndeclaredInput {
                     node: node.clone(),
                     name: name.to_string(),
                 });
             }
         }
+    }
+}
+
+/// The templates `node`'s kind renders: an inline prompt, a script, a pull
+/// request's title and body — a `parallel` group's through its children.
+fn check_kind_templates(node: &Node, workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    match &node.kind {
+        NodeKind::Prompt {
+            prompt: yunta_core::PromptSource::Inline(text),
+        }
+        | NodeKind::Loop {
+            prompt: yunta_core::PromptSource::Inline(text),
+            ..
+        } => check_template_text(&node.id, text, workflow, errors),
+        NodeKind::Bash { run } => {
+            if let Some(script) = run.script() {
+                check_template_text(&node.id, script, workflow, errors);
+            }
+        }
+        NodeKind::Parallel {
+            nodes: children, ..
+        } => check_input_references_in_nodes(children, workflow, errors),
+        NodeKind::PullRequest { title, body, .. } => {
+            for text in std::iter::once(title).chain(body) {
+                check_template_text(&node.id, text, workflow, errors);
+            }
+        }
+        _ => {}
     }
 }

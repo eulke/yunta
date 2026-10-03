@@ -7,11 +7,19 @@ license.workspace = true
 repository.workspace = true
 description = "Adapter trait and CLI integrations (claude-code, codex, mock) for Yunta."
 
+# What a doc example shows, the crate's own tests assert: a doctest would
+# build a binary of its own to say it again.
+[lib]
+doctest = false
+
 [lints]
 workspace = true
 
 [dependencies]
 yunta-core.workspace = true
+# A pull request's body is drawn for a person, in the words and blocks
+# every other reader of Yunta is told things in.
+yunta-render.workspace = true
 async-trait.workspace = true
 futures.workspace = true
 tracing.workspace = true
@@ -51,6 +59,7 @@ rmcp = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+yunta-testkit-core.workspace = true
 # The tests read back what `config.rs` renders, which needs the parser
 # the adapter itself has no use for.
 toml = { workspace = true, features = ["parse"] }

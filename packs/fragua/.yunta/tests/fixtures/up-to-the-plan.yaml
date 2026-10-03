@@ -1,0 +1,55 @@
+# One script per session the planner spawns, selected by prompt: the
+# four that run before `approve-plan`, the plan's spec among them. `standard` and `full` both stop
+# at that gate, so neither ever opens the executor's task — which is
+# why they read this fixture and not `build-feature.yaml`.
+#
+# The planner hands its interpreted artifacts over through run tools, so
+# the fixture declares that capability; only `brief.md`, an opaque
+# artifact, is a file a session writes itself. `grill` asks nothing, so
+# nobody has to answer for the case to run to its end.
+capabilities: { run_tools: true }
+sessions:
+  - match_prompt_contains: "only a person can decide"
+    steps:
+      - { type: run_tool, tool: yunta_submit_questions, arguments: { document: { questions: [] } } }
+    outcome: { type: completed, summary: "nothing to ask" }
+  - match_prompt_contains: "Write the brief"
+    effects:
+      - { path: "{{run.staging}}/brief/brief.md", content: "# Brief\n\nAdd dark mode.\n" }
+    outcome: { type: completed, summary: "brief written" }
+  - match_prompt_contains: "tasks document"
+    steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            summary: "Bootstrap the crate dark mode lives in"
+            description: "Starts the library crate, so the dark mode has somewhere to live."
+            tasks:
+              - id: T001
+                title: "Bootstrap the crate"
+                description: "Adds the manifest and an empty library."
+                scope: ["Cargo.toml", "src/**"]
+                changes:
+                  - { at: Cargo.toml, what: "the crate's manifest", code: "[package] name = 'demo'" }
+                  - { at: src/lib.rs, what: "an empty library", code: "//! The demo library." }
+                outcome: "The project builds as a library crate"
+                criteria:
+                  - cmd: "cargo metadata --no-deps --format-version 1 --offline | grep -q '\"lib\"'"
+                    proves: "cargo reads the crate, and it has a library to build on"
+    outcome: { type: completed, summary: "tasks document registered" }
+  - match_prompt_contains: "Write the tests the plan's tasks are held to"
+    steps:
+      - type: run_tool
+        tool: yunta_submit_spec
+        arguments:
+          document:
+            specs:
+              - task: T001
+                files:
+                  - path: tests/bootstrap.sh
+                    content: "test -f Cargo.toml && test -f src/lib.rs\n"
+                tests:
+                  - cmd: "sh tests/bootstrap.sh"
+                    proves: "the crate has a manifest and a library to build on"
+    outcome: { type: completed, summary: "tests written" }

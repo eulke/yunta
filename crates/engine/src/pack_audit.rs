@@ -15,7 +15,6 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::{
     AgentName, ContextSpec, ExecutorName, Hooks, Node, NodeKind, PackManifest, PromptSource,
-    Workflow,
 };
 
 /// The full inventory of one installed (or freshly cloned, pre-vendor)
@@ -72,10 +71,15 @@ pub struct NodeAudit {
     pub agent: Option<AgentName>,
     /// MCP server names reached by this node's own `context: - mcp:`
     /// entries.
-    pub mcp_servers: Vec<String>,
+    pub mcp_servers: Vec<yunta_core::McpServerName>,
     /// `kind: executor`'s own name — code, not declarative content;
     /// flagged separately from everything else in the inventory.
     pub executor: Option<ExecutorName>,
+    /// The repository paths the node names: the globs its `scope:`
+    /// declares and, for a loop, those its tasks may grow within — what
+    /// makes a workflow assume the layout of a repository it may never
+    /// see. `scope: run` names none.
+    pub paths: Vec<String>,
 }
 
 /// Audits every workflow the manifest declares under `contents.workflows`,
@@ -107,12 +111,12 @@ fn audit_workflow(pack_dir: &Path, declared: &str) -> WorkflowAudit {
             }
         }
     };
-    let workflow: Workflow = match yunta_core::yaml::parse(&text) {
+    let workflow = match yunta_core::workflow::read::read(&text, &path) {
         Ok(workflow) => workflow,
-        Err(e) => {
+        Err(report) => {
             return WorkflowAudit {
                 declared_path: declared.to_string(),
-                error: Some(format!("`{}` fails to parse: {e}", path.display())),
+                error: Some(report.to_string()),
                 nodes: Vec::new(),
             }
         }
@@ -160,33 +164,28 @@ fn effective_hooks<'a>(
 fn audit_node(node: &Node, workflow_dir: &Path, node_defaults_hooks: Option<&Hooks>) -> NodeAudit {
     let (before, after) = effective_hooks(node, node_defaults_hooks);
 
-    let (kind, command, prompt, executor) = match &node.kind {
-        NodeKind::Prompt { prompt } => (
-            "prompt",
-            None,
-            Some(resolve_prompt(prompt, workflow_dir)),
-            None,
-        ),
-        NodeKind::Bash { run } => ("bash", Some(run.clone()), None, None),
+    let (command, prompt, executor) = match &node.kind {
+        NodeKind::Prompt { prompt } => (None, Some(resolve_prompt(prompt, workflow_dir)), None),
+        NodeKind::Bash { run } => (Some(run.to_string()), None, None),
         NodeKind::Loop { until, prompt, .. } => (
-            "loop",
             Some(until.as_str().to_string()),
             Some(resolve_prompt(prompt, workflow_dir)),
             None,
         ),
-        NodeKind::Parallel { .. } => ("parallel", None, None, None),
-        NodeKind::Check(_) => ("check", None, None, None),
-        NodeKind::Executor { executor, .. } => ("executor", None, None, Some(executor.clone())),
-        NodeKind::Gate { .. } => ("gate", None, None, None),
-        NodeKind::Workflow { .. } => ("workflow", None, None, None),
+        NodeKind::Executor { executor, .. } => (None, None, Some(executor.clone())),
+        NodeKind::Parallel { .. }
+        | NodeKind::Check(_)
+        | NodeKind::Gate { .. }
+        | NodeKind::Workflow { .. }
+        | NodeKind::PullRequest { .. } => (None, None, None),
     };
 
     NodeAudit {
         id: node.id.as_str().to_string(),
-        kind,
+        kind: node.kind.kind_name(),
         command,
-        hooks_before: before.iter().map(|step| step.run.clone()).collect(),
-        hooks_after: after.iter().map(|step| step.run.clone()).collect(),
+        hooks_before: before.iter().map(|step| step.run.to_string()).collect(),
+        hooks_after: after.iter().map(|step| step.run.to_string()).collect(),
         prompt,
         context: node.context.iter().map(describe_context).collect(),
         permissions: node.permissions.map(yunta_core::NodePermissions::as_str),
@@ -200,7 +199,24 @@ fn audit_node(node: &Node, workflow_dir: &Path, node_defaults_hooks: Option<&Hoo
             })
             .collect(),
         executor,
+        paths: named_paths(node),
     }
+}
+
+fn named_paths(node: &Node) -> Vec<String> {
+    let within = match &node.kind {
+        NodeKind::Loop {
+            scope_expansion: Some(expansion),
+            ..
+        } => expansion.within.as_slice(),
+        _ => &[],
+    };
+    node.scope
+        .globs()
+        .iter()
+        .chain(within)
+        .map(ToString::to_string)
+        .collect()
 }
 
 fn resolve_prompt(prompt: &PromptSource, workflow_dir: &Path) -> PromptText {
@@ -218,7 +234,17 @@ fn resolve_prompt(prompt: &PromptSource, workflow_dir: &Path) -> PromptText {
 
 fn describe_context(spec: &ContextSpec) -> String {
     match spec {
-        ContextSpec::Files { files } => format!("files: {}", files.join(", ")),
+        ContextSpec::Files { files } => yunta_core::text::detailed(
+            "files",
+            &files
+                .iter()
+                .map(|file| match file.optional {
+                    true => format!("{} (optional)", file.path),
+                    false => file.path.clone(),
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
         ContextSpec::Command { command } => format!("command: {command}"),
         ContextSpec::Artifact { artifact } => match &artifact.node {
             Some(node) => format!("artifact: node={node} {}", artifact.id),
