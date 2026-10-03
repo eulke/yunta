@@ -223,6 +223,7 @@ pub struct Task {
     pub invariants: Vec<String>,
 }
 
+mod code;
 mod order;
 mod owned;
 mod proof;

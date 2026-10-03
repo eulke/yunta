@@ -574,8 +574,11 @@ A plan a gate shows has to say those things. Next to `tasks:` it carries a
 `summary`, a Markdown `description` (code blocks and `mermaid` diagrams welcome), a
 `design` with the types, interfaces or schemas it creates or changes, and `risks`
 and `out_of_scope` when there are any; every task has its own `description`, every
-change shows its `code` — the signature it changes or the lines it adds, unless the
-task declares a shape in that file — and every criterion says what it `proves`. A
+change shows its `code` — the declarations it adds or changes, each type with its
+fields and each signature whole, every symbol its `at` names, and code rather than a
+comment about it, unless the task declares a shape in that file — and every
+criterion says what it `proves`. Each shape a task builds is drawn whole in its
+card. A
 decision that restates what a person answered names the question it `answers`. The
 engine refuses a plan it will show without the summary, the descriptions, the code
 and the `proves`, and tells the planner what is missing in the same answer.

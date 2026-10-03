@@ -136,7 +136,9 @@ y al cerrar el nodo, si no cumple:
 - `no-outcome` — cada tarea dice qué se va a observar cuando esté hecha.
 - `no-changes` — cada tarea dice qué cambia, lugar por lugar.
 - `unexplained-decision` — cada decisión dice `why`.
-- `change-without-code` — cada cambio muestra su `code`, salvo que la tarea declare una `shape` en ese archivo.
+- `change-without-code` — cada cambio muestra su `code`: las declaraciones que agrega o cambia, cada tipo con sus campos y cada firma entera; salvo que la tarea declare una `shape` en ese archivo.
+- `change-code-misses-a-name` — el `code` de un cambio muestra cada símbolo que su `at` nombra (`pack.rs::add/update` muestra `add` y `update`), o lo muestra una `shape` que su tarea declara en ese archivo.
+- `change-code-is-a-comment` — el `code` de un cambio es código, no un comentario sobre lo que el código va a hacer; salvo en un documento.
 
 `decisions`, `shapes`, `design`, `risks` y `out_of_scope` no se exigen: un plan
 que solo toca documentación no crea formas ni tiene nada abierto, y uno puede no

@@ -60,10 +60,10 @@ tasks:                                  # required, at least one
                                         # its code is the shape above
       - at: "src/theme/toggle.rs::on_toggle"
         what: "the toggle writes the setting"
-        code: |                         # how the change will read: the
-          fn on_toggle(settings: &mut Settings, on: bool) {   # signature it
+        code: |                         # how the change will read: each
+          fn on_toggle(settings: &mut Settings, on: bool) {   # declaration
               settings.set_theme(if on { Theme::Dark } else { Theme::Light });
-          }                             #   changes or the lines it adds
+          }                             #   it adds or changes, whole
     outcome: "The settings screen has a dark mode switch, and turning it on darkens every screen"
     invariants:                         # optional: what the code it touches
       - "A screen never reads settings while it draws"   # already promises

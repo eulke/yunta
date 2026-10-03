@@ -3681,6 +3681,16 @@
           "const": "change-without-code"
         },
         {
+          "description": "A change of a plan a person reviews shows code that leaves out a\nsymbol its `at` names.",
+          "type": "string",
+          "const": "change-code-misses-a-name"
+        },
+        {
+          "description": "A change of a plan a person reviews shows a comment where its code\ngoes.",
+          "type": "string",
+          "const": "change-code-is-a-comment"
+        },
+        {
           "description": "A criterion passes once a name is written in a file its task\nchanges, whatever the code does.",
           "type": "string",
           "const": "criterion-checks-presence"

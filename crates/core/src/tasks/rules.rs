@@ -148,8 +148,19 @@ pub(super) const REVIEW_RULES: &[Rule] = &[
     },
     Rule {
         code: RuleCode::ChangeWithoutCode,
-        demand: "every change shows its `code` — the signature it changes or the lines it \
-                 adds — unless its task declares a shape in that file",
+        demand: "every change shows its `code` — the declarations it adds or changes, each \
+                 type with its fields and each signature whole — unless its task declares a \
+                 shape in that file",
+    },
+    Rule {
+        code: RuleCode::ChangeCodeMissesAName,
+        demand: "a change's `code` shows every symbol its `at` names — `pack.rs::add/update` \
+                 shows `add` and `update` — or a shape its task declares in that file does",
+    },
+    Rule {
+        code: RuleCode::ChangeCodeIsAComment,
+        demand: "a change's `code` is code, not a comment about what the code will do, unless \
+                 the change is to a document",
     },
 ];
 
@@ -186,6 +197,7 @@ pub(super) fn reviewed(tasks: &TasksFile) -> Vec<Diagnostic> {
     for (index, task) in tasks.tasks.iter().enumerate() {
         broken.extend(task_reviewed(index, task));
         broken.extend(codeless(index, task, &tasks.shapes));
+        broken.extend(super::code::unshown(index, task, &tasks.shapes));
     }
     broken
 }
@@ -207,8 +219,9 @@ fn codeless(index: usize, task: &Task, shapes: &[crate::Shape]) -> Vec<Diagnosti
                 &task.id,
                 RuleCode::ChangeWithoutCode,
                 format!(
-                    "the change at `{}` shows no `code`; give the signature it changes or the \
-                     lines it adds, so a person sees how the work will look",
+                    "the change at `{}` shows no `code`; give the declarations it adds or \
+                     changes — each type with its fields, each signature whole — so a person \
+                     sees how the work will look",
                     change.at
                 ),
             )
@@ -262,7 +275,12 @@ fn said(text: &Option<String>) -> bool {
     text.as_deref().is_some_and(|t| !t.trim().is_empty())
 }
 
-fn broke(index: usize, id: &TaskId, code: RuleCode, detail: impl Into<String>) -> Diagnostic {
+pub(super) fn broke(
+    index: usize,
+    id: &TaskId,
+    code: RuleCode,
+    detail: impl Into<String>,
+) -> Diagnostic {
     Diagnostic::new(
         Subject::Task(Named::new(id.clone(), index)),
         Problem::rule(code, detail),

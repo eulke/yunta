@@ -145,6 +145,12 @@ rule_codes! {
     UnexplainedDecision => "unexplained-decision",
     /// A change of a plan a person reviews does not show its code.
     ChangeWithoutCode => "change-without-code",
+    /// A change of a plan a person reviews shows code that leaves out a
+    /// symbol its `at` names.
+    ChangeCodeMissesAName => "change-code-misses-a-name",
+    /// A change of a plan a person reviews shows a comment where its code
+    /// goes.
+    ChangeCodeIsAComment => "change-code-is-a-comment",
     /// A criterion passes once a name is written in a file its task
     /// changes, whatever the code does.
     CriterionChecksPresence => "criterion-checks-presence",

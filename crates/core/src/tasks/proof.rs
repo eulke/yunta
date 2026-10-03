@@ -88,7 +88,7 @@ fn finds_a_comment(words: &[&str]) -> bool {
 }
 
 /// Whether `path` is a document a person reads, whose words are the work.
-fn documentation(path: &str) -> bool {
+pub(super) fn documentation(path: &str) -> bool {
     let extension = path.rsplit_once('.').map(|(_, extension)| extension);
     matches!(
         extension.map(str::to_ascii_lowercase).as_deref(),
@@ -108,7 +108,7 @@ fn segments(cmd: &str) -> Vec<String> {
 
 /// Whether `said` appears in `text` with no word character on either
 /// side.
-fn as_a_word(text: &str, said: &str) -> bool {
+pub(super) fn as_a_word(text: &str, said: &str) -> bool {
     let word = |c: char| c.is_alphanumeric() || c == '_';
     text.match_indices(said).any(|(at, _)| {
         let before = text.get(..at).and_then(|head| head.chars().next_back());
