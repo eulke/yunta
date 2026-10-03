@@ -1,7 +1,7 @@
 //! Markdown as a terminal shows it, cut to the width it is read at.
 //!
-//! A terminal draws no emphasis and no diagram, and re-flows nothing on
-//! its own: prose is wrapped here, under the indent of the block it sits
+//! A terminal draws no emphasis, and re-flows nothing on its own — a
+//! diagram is read apart, before what is left reaches here: prose is wrapped here, under the indent of the block it sits
 //! in, while code keeps its spacing — re-flowing code changes what it
 //! says. A line of code wider than the column breaks after a space and
 //! goes on one step under where it starts, the way a formatter continues
@@ -26,8 +26,8 @@ pub fn hanging(indent: &str, lead: &str, text: &str, width: usize) -> Vec<String
 }
 
 /// `text` as a terminal shows it: paragraphs and list items wrapped to
-/// `width` under `indent`, code as written — continued where it is wider,
-/// never re-flowed — and each `mermaid` block named rather than drawn.
+/// `width` under `indent`, and code as written — continued where it is
+/// wider, never re-flowed.
 pub fn markdown(text: &str, indent: &str, width: usize, glyphs: Glyphs) -> Vec<String> {
     let mut page = Page {
         indent,
@@ -35,19 +35,12 @@ pub fn markdown(text: &str, indent: &str, width: usize, glyphs: Glyphs) -> Vec<S
         glyphs,
         lines: Vec::new(),
         paragraph: String::new(),
-        fence: None,
+        fenced: false,
     };
     for line in text.lines() {
         page.read(line);
     }
     page.done()
-}
-
-/// What a fenced block is, which is what it is shown as.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Fence {
-    Code,
-    Diagram,
 }
 
 /// The lines drawn so far, and what the next line of Markdown is read
@@ -59,18 +52,20 @@ struct Page<'a> {
     lines: Vec<String>,
     /// The paragraph gathered so far, drawn once it ends.
     paragraph: String,
-    /// The fenced block a line is inside, when it is.
-    fence: Option<Fence>,
+    /// Whether a line is inside a fenced block of code.
+    fenced: bool,
 }
 
 impl Page<'_> {
     fn read(&mut self, line: &str) {
         let trimmed = line.trim();
-        if let Some(open) = self.fence {
-            return self.fenced(open, line, trimmed);
+        if self.fenced {
+            return self.code(line, trimmed);
         }
         if trimmed.starts_with("```") {
-            return self.open(trimmed);
+            self.flush();
+            self.fenced = true;
+            return;
         }
         if trimmed.is_empty() {
             self.flush();
@@ -92,14 +87,11 @@ impl Page<'_> {
         }
     }
 
-    /// A line inside a fenced block: its closing fence, a line of code,
-    /// or a line of a diagram nothing draws.
-    fn fenced(&mut self, open: Fence, line: &str, trimmed: &str) {
+    /// A line inside a fenced block: its closing fence, or a line of
+    /// code.
+    fn code(&mut self, line: &str, trimmed: &str) {
         if trimmed.starts_with("```") {
-            self.fence = None;
-            return;
-        }
-        if open == Fence::Diagram {
+            self.fenced = false;
             return;
         }
         let code = format!("{}{INDENT}", self.indent);
@@ -112,20 +104,6 @@ impl Page<'_> {
                     format!("{code}{piece}")
                 }
             }));
-    }
-
-    /// The fence that opens a block, and what it is named as when it is
-    /// a diagram.
-    fn open(&mut self, trimmed: &str) {
-        self.flush();
-        let mermaid = trimmed.trim_start_matches('`').trim() == "mermaid";
-        if mermaid {
-            self.lines.push(format!(
-                "{}(a diagram, drawn wherever Markdown is read)",
-                self.indent
-            ));
-        }
-        self.fence = Some(if mermaid { Fence::Diagram } else { Fence::Code });
     }
 
     /// The paragraph gathered so far, wrapped onto the page.

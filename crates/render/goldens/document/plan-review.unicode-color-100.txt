@@ -14,7 +14,8 @@
       ␛[2mfix         ␛[0m judge the task by a test of its own
 
   The program says nothing today. It will greet whoever runs it by name, and say goodbye.
-  ␛[2mdiagram     ␛[0m in the whole plan
+
+  ␛[1mName → Greeting␛[0m
 
   ␛[1myou answered␛[0m
 

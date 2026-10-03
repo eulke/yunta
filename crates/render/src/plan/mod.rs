@@ -184,19 +184,14 @@ fn departures(departed: &[AcceptedDeparture]) -> Section<'static> {
     titled("accepted departures from this plan", blocks)
 }
 
-/// The description: its first paragraph where a decision is made, and
-/// where a diagram is; all of it, diagrams included, otherwise.
+/// The description: its first paragraph and each diagram where a
+/// decision is made; all of it otherwise.
 fn described(doc: Doc<'static>, description: &str, form: Form) -> Doc<'static> {
     match form {
         Form::Whole => doc.with(Block::Markdown(description.to_string())),
-        Form::Review => {
-            let first = description.split("\n\n").next().unwrap_or(description);
-            let mut doc = doc.with(Block::Markdown(first.to_string()));
-            if description.contains("```mermaid") && !first.contains("```mermaid") {
-                doc = doc.with(Fields::new().push_if("diagram", "in the whole plan"));
-            }
-            doc
-        }
+        Form::Review => crate::diagram::split::reviewed(description)
+            .into_iter()
+            .fold(doc, Doc::with),
     }
 }
 

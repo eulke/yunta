@@ -61,6 +61,7 @@ fn block(block: &Block<'_>, depth: usize) -> String {
         Block::Markdown(text) => text.trim().to_string(),
         Block::Marked(marked) => self::marked(marked),
         Block::Concern(concern) => self::concern(concern),
+        Block::Diagram(diagram) => format!("```mermaid\n{}\n```", diagram.source),
         Block::Code(code) => self::code(code),
         Block::Lines(lines) => lines.iter().map(line).collect::<Vec<_>>().join("  \n"),
     }

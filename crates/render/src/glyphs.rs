@@ -121,6 +121,14 @@ impl Glyphs {
         }
     }
 
+    /// What joins one thing to another without pointing either way.
+    pub fn joins(self) -> &'static str {
+        match self {
+            Self::Unicode => "—",
+            Self::Ascii => "--",
+        }
+    }
+
     /// What the rest of a line cut to fit opens with, so it reads as the
     /// line above going on rather than a line of its own.
     pub fn continued(self) -> char {

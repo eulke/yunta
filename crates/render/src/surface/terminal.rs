@@ -49,14 +49,10 @@ impl Terminal {
             Block::Title(title) => vec![title.clone()],
             Block::Section(section) => self.section(section),
             Block::Prose(block) => block.lines(look),
-            Block::Markdown(text) => {
-                crate::markdown::markdown(text, INDENT, look.width.cells(), look.glyphs)
-                    .into_iter()
-                    .map(|line| Line::new().plain(line))
-                    .collect()
-            }
+            Block::Markdown(text) => self.markdown(text),
             Block::Marked(block) => block.lines(look),
             Block::Concern(block) => block.lines(look),
+            Block::Diagram(block) => block.lines(look),
             Block::Code(block) => block.lines(look),
             Block::Lines(lines) => lines.clone(),
         }
@@ -64,6 +60,33 @@ impl Terminal {
 }
 
 impl Terminal {
+    /// Markdown an author wrote: its text as prose and code, and each
+    /// diagram in it drawn as one.
+    fn markdown(&self, text: &str) -> Vec<Line> {
+        use crate::diagram::split::{parts, Part};
+        let look = &self.look;
+        parts(text)
+            .into_iter()
+            .enumerate()
+            .flat_map(|(at, part)| {
+                let mut lines = match at {
+                    0 => Vec::new(),
+                    _ => vec![Line::new()],
+                };
+                lines.extend(match part {
+                    Part::Text(text) => {
+                        crate::markdown::markdown(&text, INDENT, look.width.cells(), look.glyphs)
+                            .into_iter()
+                            .map(|line| Line::new().plain(line))
+                            .collect()
+                    }
+                    Part::Diagram(diagram) => diagram.lines(look),
+                });
+                lines
+            })
+            .collect()
+    }
+
     /// A section: its title, and its blocks one step under it, laid out
     /// for what is left of the line there.
     fn section(&self, section: &Section<'_>) -> Vec<Line> {

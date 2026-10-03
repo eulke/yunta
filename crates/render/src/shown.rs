@@ -3,15 +3,14 @@
 //! What they decide on is what the run holds, so the words come from the
 //! document itself, cut to the width they read at, and the path under
 //! them is where its file sits, in full. A plan is read the way it is
-//! reviewed: what it changes and why, the shapes it creates, what it
-//! risks and leaves out, the order its tasks run in, then task by task
-//! what each does, what it touches and what proves it done — in words;
-//! the commands that prove it stay in the whole plan, one open away. A
-//! diagram has no room on a terminal either, so it is named here and
-//! drawn there. A spec is read task by task, with its tests' files
-//! whole; what a review found, the most severe first; the run's findings
-//! the same way, each with the node that found it and how others
-//! answered it.
+//! reviewed: its tasks at a glance, what keeps it from being proven, what
+//! it changes and why — with each diagram the author drew — the choices
+//! it makes, what it risks and leaves out, then task by task what each
+//! does, the code of what it changes and what proves it done. A spec is
+//! read task by task, its tests whole and what only sets them up folded;
+//! what a review found, the most severe first; the run's findings the
+//! same way, each with the node that found it and how others answered
+//! it. What weighs on the decision is said last, beside its menu.
 
 use yunta_core::events::{ArtifactId, Withheld};
 use yunta_core::shown::{PlanReview, ShownContent, ShownDocument};

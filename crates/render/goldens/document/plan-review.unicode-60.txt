@@ -20,7 +20,8 @@ plan of `plan`: 2 tasks in 2 steps, held to 1 test from its spec
 
   The program says nothing today. It will greet whoever runs
   it by name, and say goodbye.
-  diagram      in the whole plan
+
+  Name → Greeting
 
   you answered
 

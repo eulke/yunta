@@ -39,6 +39,8 @@ pub enum Block<'a> {
     Marked(Marked),
     /// A caution with what it means and what fixes it.
     Concern(Concern),
+    /// A diagram an author wrote, which each surface draws its own way.
+    Diagram(crate::diagram::Diagram),
     Code(Code),
     /// Lines a surface composed itself, each span carrying its role.
     Lines(Vec<Line>),
@@ -67,6 +69,7 @@ block_from!(
     Prose(Prose),
     Marked(Marked),
     Concern(Concern),
+    Diagram(crate::diagram::Diagram),
     Code(Code),
     Lines(Vec<Line>),
 );
