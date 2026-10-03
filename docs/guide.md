@@ -539,12 +539,21 @@ nodes:
     shows: [{ node: plan, kind: tasks }]
 ```
 
-At the decision you read the plan as the run will judge it: what it changes and
-why, anything in it no session may do — a change to a test the spec wrote — its
-decisions, design and risks, then step by step each task: what you will see once it
-is done, what it touches and keeps, the code of each change it makes, and what
-proves it done with the code of the test that does. `yunta status <run> --node plan`
-prints the whole plan, every file whole. The log records the
+At the decision you read what was asked first — fragua's plan gate shows the
+brief, titled by its own first heading — then the plan as the run will judge it. It
+opens on its tasks at a glance: the step each runs in, what proves it, how many of
+its changes show their code, and a mark on each task that cannot be proven as it is
+written. Then come what keeps it from being proven, each flaw with what it means and
+what fixes it; what it changes and why, with each diagram its author drew — in boxes
+on a terminal, as the Mermaid itself on a forge and in a file; what you already
+answered when the run asked, apart from what the plan decided for you; its design
+and risks; and step by step each task: what you will see once it is done, what it
+touches and keeps — and what checks that it keeps it, its guards or nothing but the
+suite — the code of each change it makes, and what proves it done, with each test
+the spec wrote whole and what only sets it up folded. Every claim says what backs
+it: a plan whose spec tests run nothing the spec wrote says so in its title, and a
+file of the spec no test runs is never said to test the task.
+`yunta status <run> --node plan` prints the whole plan, every file whole. The log records the
 exact version you saw by its hash, so an approval is an approval of those bytes.
 A gate after the work that shows the same plan — before a pull request, say —
 reads first every departure from it a person accepted while its tasks were built:
@@ -564,10 +573,33 @@ which the option says: a person read each one with its answers and went on.
 A plan a gate shows has to say those things. Next to `tasks:` it carries a
 `summary`, a Markdown `description` (code blocks and `mermaid` diagrams welcome), a
 `design` with the types, interfaces or schemas it creates or changes, and `risks`
-and `out_of_scope` when there are any; every task has its own `description` and
-every criterion says what it `proves`. The engine refuses a plan it will show
-without the summary, the descriptions and the `proves`, and tells the planner what
-is missing in the same answer.
+and `out_of_scope` when there are any; every task has its own `description`, every
+change shows its `code` — the signature it changes or the lines it adds, unless the
+task declares a shape in that file — and every criterion says what it `proves`. A
+decision that restates what a person answered names the question it `answers`. The
+engine refuses a plan it will show without the summary, the descriptions, the code
+and the `proves`, and tells the planner what is missing in the same answer.
+
+What weighs on the decision is said last, between the question and its options:
+on a terminal the last lines printed are the first ones read. Under "before you
+decide" come what the gate does not offer and why, how the planner got the plan
+accepted when that took more than one handover, how many changes show no code, how
+many promises only the suite checks, and the first sentence of each risk. `yunta
+status` prints the same block above the options of a parked run, and a gate's pull
+request says it before how to answer.
+
+The spec governs. A plan that cannot be proven as it is written is refused when it
+is handed over: a criterion that passes once a name is written in a file its task
+changes, two tasks judged by one command, a task that `uses` a shape it builds
+itself, a decision that `answers` a question nobody asked — and, when the workflow
+writes a spec, a task that changes the test its criterion runs or a test the spec
+already wrote. A spec is refused when a file it writes is run by none of its tests,
+or a test runs none of its files. A flaw only both documents together reveal can
+still reach the gate, and the gate does not offer to go on with it: it withholds
+the options that would, says why, and keeps the ones that send the plan back, and
+`abort`. A withheld option is refused on every surface it is chosen from. A gate on
+a forge publishes no such plan: it posts what keeps it from being proven as
+findings, and sends it back the way a request for changes does.
 
 An option that sends the run back to a node with a session, like `adjust` above,
 asks what should change and doesn't take an empty answer: those words are what the
@@ -586,6 +618,13 @@ it's waiting on and the exact option ids available, `yunta resolve-gate <run>
 `resolve_gate` tool, for an agent doing it programmatically), and the run picks the
 decision up on its own next resume. Nothing about answering a gate requires the
 process that hit it to still be alive.
+
+A question asked live is the exception that proves it. A run whose engine is
+asking at its terminal — a gate's menu, a set of questions — has nothing on its log
+until the question is answered, so its registry says so instead: `yunta status`,
+`yunta list --runs`, `status --json` (`waiting_on.on` is `prompt`) and MCP's
+`workflow_status` say it needs you, which node is asking, at which process's
+terminal and for how long. Answer it there.
 
 The live view `yunta run` draws changes nothing about that. It reads the run; it is
 never part of it. A gate waits on the event log, so one raised by a run whose view is

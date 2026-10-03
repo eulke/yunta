@@ -335,7 +335,10 @@ log or manifest does not read back. A run is stalled when its log says it is
 moving and the engine its registry (`scratch/engine.json`) names is gone: a
 process that exited, or a pid the host has since given to a process that started
 later. Nothing else is called stalled — a run with no registry at all may be
-between two processes. Each row says what the run is called, its handle, its
+between two processes. A run needs someone, too, when its log says it is moving
+and its live engine is asking a person at its terminal: the registry records
+`asking: {node?, since}` while the question is open, and the row says which node
+is asking, at which process's terminal, and for how long. Each row says what the run is called, its handle, its
 workflow and mode, and how long it has been where it is; a run that needs
 someone, or stalled, carries what holds it and the command that moves it under
 its row. The first three groups are ordered by how long a run has been where it

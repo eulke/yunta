@@ -106,8 +106,8 @@ impl HumanInteraction for ConsoleInteraction {
             .await
     }
 
-    /// The decision, with the documents it is about drawn under its
-    /// account.
+    /// The decision, with the documents it is about drawn above its
+    /// question and what weighs on it beside its options.
     async fn resolve_in(
         &self,
         escalation: &GateWaitingPayload,
