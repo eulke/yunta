@@ -3,7 +3,7 @@
 //! for it; what proves it done, with the code of the test that does.
 
 use yunta_core::shown::{HeldTo, JudgedCriterion, PlanReview, TaskReview};
-use yunta_core::{Task, TasksFile};
+use yunta_core::{Change, Shape, Task, TasksFile};
 
 use super::{blank, grouped, said, Form, CODE_SHOWN};
 use crate::blocks::{Code, Fields, Marked, Section};
@@ -115,47 +115,101 @@ fn checked(mut fields: Fields, task: &Task, judged: Option<&TaskReview>) -> Fiel
 }
 
 /// Each change a task makes: where, what for, and the code the plan
-/// writes for it — or, for a test the spec wrote, that no session may.
+/// writes for it — or, for a test the spec wrote, that no session may —
+/// and each shape the task builds, whole, once: under the first change
+/// of its file that brings no code of its own, before the first change
+/// of its file otherwise, and first of all when no change touches its
+/// file. A shape is the interface the task adds; a change's code is often
+/// one line of it, and neither stands in for the other.
 fn changes(task: &Task, plan: &TasksFile, judged: Option<&TaskReview>) -> Vec<Block<'static>> {
-    task.changes
+    let owned: Vec<&Shape> = plan
+        .shapes
+        .iter()
+        .filter(|shape| shape.owner == task.id)
+        .collect();
+    let mut drawn = vec![false; owned.len()];
+    let attached: Vec<Option<&Shape>> = task
+        .changes
         .iter()
         .map(|change| {
-            let at = change.at.replace("::", " › ");
-            let denied = judged
-                .into_iter()
-                .flat_map(|judged| &judged.denied)
-                .find(|denied| denied.at == change.at);
-            if let Some(denied) = denied {
-                return Marked {
-                    mark: Mark::Caution,
-                    items: vec![format!(
-                        "{at} — a test the spec wrote for `{}`; no session may write it",
-                        denied.owner
-                    )],
-                }
-                .into();
+            if change.code.is_some() {
+                return None;
             }
-            // The change's own code, or the shape its task declares in
-            // that file: how the work will look, beside what it is about.
-            let code = change.code.as_deref().or_else(|| {
-                plan.shapes
-                    .iter()
-                    .find(|shape| shape.owner == task.id && shape.file == change.file())
-                    .map(|shape| shape.code.as_str())
-            });
-            match code {
-                Some(code) => Code::whole(at, Some(change.what.clone()), code).into(),
-                None => Code {
-                    at,
-                    what: Some(change.what.clone()),
-                    lines: Vec::new(),
-                    whole: 0,
-                    rest: None,
-                }
-                .into(),
-            }
+            let at = (0..owned.len()).find(|at| !drawn[*at] && owned[*at].file == change.file())?;
+            drawn[at] = true;
+            Some(owned[at])
         })
-        .collect()
+        .collect();
+    let mut blocks: Vec<Block<'static>> = Vec::new();
+    for (at, shape) in owned.iter().enumerate() {
+        if !task
+            .changes
+            .iter()
+            .any(|change| change.file() == shape.file)
+        {
+            drawn[at] = true;
+            blocks.push(built(shape));
+        }
+    }
+    for (change, attached) in task.changes.iter().zip(attached) {
+        for (at, shape) in owned.iter().enumerate() {
+            if !drawn[at] && shape.file == change.file() {
+                drawn[at] = true;
+                blocks.push(built(shape));
+            }
+        }
+        blocks.push(changed(change, attached, judged));
+    }
+    blocks
+}
+
+/// A shape the task builds, whole.
+fn built(shape: &Shape) -> Block<'static> {
+    Code::whole(
+        format!("{} › {}", shape.file, shape.name),
+        Some("the shape this task builds".to_string()),
+        &shape.code,
+    )
+    .into()
+}
+
+/// One change: where, what for, and its own code — or the code of the
+/// shape `attached` to it, when it brings none.
+fn changed(
+    change: &Change,
+    attached: Option<&Shape>,
+    judged: Option<&TaskReview>,
+) -> Block<'static> {
+    let at = change.at.replace("::", " › ");
+    let denied = judged
+        .into_iter()
+        .flat_map(|judged| &judged.denied)
+        .find(|denied| denied.at == change.at);
+    if let Some(denied) = denied {
+        return Marked {
+            mark: Mark::Caution,
+            items: vec![format!(
+                "{at} — a test the spec wrote for `{}`; no session may write it",
+                denied.owner
+            )],
+        }
+        .into();
+    }
+    let code = change
+        .code
+        .as_deref()
+        .or_else(|| attached.map(|shape| shape.code.as_str()));
+    match code {
+        Some(code) => Code::whole(at, Some(change.what.clone()), code).into(),
+        None => Code {
+            at,
+            what: Some(change.what.clone()),
+            lines: Vec::new(),
+            whole: 0,
+            rest: None,
+        }
+        .into(),
+    }
 }
 
 /// One criterion: what it proves, the command that runs it, and the code

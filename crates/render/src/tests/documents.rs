@@ -225,6 +225,37 @@ fn a_change_shows_its_own_code() {
 }
 
 #[test]
+fn a_shape_a_task_builds_is_in_its_card_whole_when_its_change_brings_its_own_line() {
+    let mut review = review();
+    let greet = &mut review.plan.tasks[0];
+    greet.changes[0].code = Some("pub fn hello(&self) -> String;".to_string());
+    let doc = document(&review, " of `plan`", "7E5PH4", Form::Review);
+    let drawn = Terminal::on(Look::plain()).draw(&doc);
+    let card = &drawn[drawn.find("greet — Greet by name").unwrap()
+        ..drawn.find("farewell — Say goodbye").unwrap()];
+
+    let shape = card
+        .find("src/greet.rs › Greeter ")
+        .expect("the shape the task builds is in its card");
+    let line = card
+        .find("| pub fn hello(&self) -> String;")
+        .expect("the change's own line");
+    assert!(
+        card.contains("| pub struct Greeter {") && card.contains("|     pub name: String,"),
+        "the whole shape, not one line of it:\n{card}"
+    );
+    assert!(
+        shape < line,
+        "the shape comes before the change of its file:\n{card}"
+    );
+    assert_eq!(
+        card.matches("| pub struct Greeter {").count(),
+        1,
+        "the shape is drawn once:\n{card}"
+    );
+}
+
+#[test]
 fn what_keeps_a_plan_from_being_proven_is_said_before_any_task() {
     let doc = document(&review(), " of `plan`", "7E5PH4", Form::Review);
     let drawn = Terminal::on(Look::plain()).draw(&doc);
