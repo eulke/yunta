@@ -39,7 +39,7 @@ pub struct Evidence {
 }
 
 impl Evidence {
-    /// The lines quoted: the last [`QUOTED`] of the tail, where a
+    /// The lines quoted: the last `QUOTED` of the tail, where a
     /// compiler or a test runner says what failed.
     pub fn quoted(&self) -> &[String] {
         let skipped = self.tail.len().saturating_sub(QUOTED);
@@ -53,7 +53,7 @@ impl Evidence {
 }
 
 impl Drawn for Evidence {
-    /// The last [`QUOTED`] lines, each hanging from the gutter and cut to
+    /// The last `QUOTED` lines, each hanging from the gutter and cut to
     /// the line rather than wrapped — what a command printed keeps its
     /// shape — then how much came before them and where it is.
     fn lines(&self, look: &Look) -> Vec<Line> {
