@@ -65,19 +65,20 @@ fn facts(task: &Task, plan: &TasksFile, judged: Option<&TaskReview>) -> Fields {
         fields = fields.push_if("you will see", outcome);
     }
     fields = fields.push_if("touches", grouped(&task.scope).join(", "));
-    if !task.uses.is_empty() {
-        let uses: Vec<String> = task
-            .uses
-            .iter()
-            .map(
-                |name| match plan.shapes.iter().find(|shape| shape.name == *name) {
-                    Some(shape) => format!("{name} (from {})", shape.owner),
-                    None => name.clone(),
-                },
-            )
-            .collect();
-        fields = fields.push_if("uses", uses.join(", "));
-    }
+    // What the task builds on: a shape it builds itself is in its
+    // changes, however a plan accepted before that was a rule says it.
+    let uses: Vec<String> = task
+        .uses
+        .iter()
+        .filter_map(
+            |name| match plan.shapes.iter().find(|shape| shape.name == *name) {
+                Some(shape) if shape.owner == task.id => None,
+                Some(shape) => Some(format!("{name} (from {})", shape.owner)),
+                None => Some(name.clone()),
+            },
+        )
+        .collect();
+    fields = fields.push_if("uses", uses.join(", "));
     for (n, invariant) in task.invariants.iter().enumerate() {
         fields = fields.push_if(if n == 0 { "keeps" } else { "" }, invariant.as_str());
     }

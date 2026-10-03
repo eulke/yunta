@@ -399,3 +399,25 @@ fn a_card_shows_each_test_whole_and_folds_what_only_sets_it_up() {
     let whole = draw(Form::Whole);
     assert!(whole.contains("out.trim().to_string()"), "{whole}");
 }
+
+#[test]
+fn a_card_names_only_the_shapes_its_task_builds_on() {
+    let mut review = review();
+    review.plan.tasks[0].uses = vec!["Greeter".to_string()];
+    let drawn =
+        Terminal::on(Look::plain()).draw(&document(&review, " of `plan`", "7E5PH4", Form::Review));
+
+    let greet = drawn.find("greet — Greet by name").expect(&drawn);
+    let farewell = drawn.find("farewell — Say goodbye").expect(&drawn);
+    assert!(
+        !drawn[greet..farewell].contains("uses"),
+        "a task does not build on the shape it builds: {drawn}"
+    );
+    assert!(
+        drawn[farewell..]
+            .lines()
+            .map(str::trim)
+            .any(|line| line.starts_with("uses ") && line.ends_with("Greeter (from greet)")),
+        "{drawn}"
+    );
+}
