@@ -116,6 +116,19 @@ pub fn counted(n: usize, noun: &str) -> String {
     counted_as(n, noun, &format!("{noun}s"))
 }
 
+/// `n` as a place in an order: `1st`, `2nd`, `3rd`, `11th`, `16th`,
+/// `21st`.
+pub fn ordinal(n: usize) -> String {
+    let suffix = match (n % 100, n % 10) {
+        (11..=13, _) => "th",
+        (_, 1) => "st",
+        (_, 2) => "nd",
+        (_, 3) => "rd",
+        _ => "th",
+    };
+    format!("{n}{suffix}")
+}
+
 /// `n` things, named by a noun whose plural is not a plain `-s`:
 /// `1 capability the adapter lacks`, `2 capabilities the adapter lacks`.
 pub fn counted_as(n: usize, one: &str, many: &str) -> String {
@@ -237,6 +250,21 @@ pub fn escape_mermaid(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{aside, counted, detailed, did_you_mean, nearest};
+
+    #[test]
+    fn a_place_in_an_order_takes_the_suffix_it_is_read_with() {
+        let read: Vec<String> = [1, 2, 3, 4, 11, 12, 13, 16, 21, 22, 23, 101, 111]
+            .into_iter()
+            .map(super::ordinal)
+            .collect();
+        assert_eq!(
+            read,
+            [
+                "1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "16th", "21st", "22nd", "23rd",
+                "101st", "111th"
+            ]
+        );
+    }
 
     #[test]
     fn an_unknown_key_suggests_the_key_one_typo_away() {

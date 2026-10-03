@@ -73,6 +73,7 @@ pub async fn status(
             cwd: &ctx.cwd,
             home: ctx.env.home.as_deref(),
             documents: &documents,
+            state: &state,
         };
         print!("{}", page.render(node, &crate::render::stdout_look())?);
         return Ok(Outcome::Success);

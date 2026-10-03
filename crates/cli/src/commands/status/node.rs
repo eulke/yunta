@@ -27,6 +27,7 @@ pub(super) struct NodePage<'a> {
     pub(super) home: Option<&'a Path>,
     /// The documents the node produced, each read whole here.
     pub(super) documents: &'a [yunta_core::shown::ShownDocument],
+    pub(super) state: &'a yunta_engine::RunState,
 }
 
 impl NodePage<'_> {
@@ -159,6 +160,10 @@ impl NodePage<'_> {
             .push_if("runner", runner)
             .push_if("tokens", tokens)
             .push_if("took", node.elapsed.map(duration).unwrap_or_default())
+            .push_if(
+                "handed over",
+                super::page::handed(self.state, &node.id).unwrap_or_default(),
+            )
             .push_if("produced", produced.join(", "))
     }
 

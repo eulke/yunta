@@ -83,19 +83,9 @@ fn ordinal(noun: &str, index: usize) -> String {
         1 => "first".to_string(),
         2 => "second".to_string(),
         3 => "third".to_string(),
-        n => format!("{n}{}", ordinal_suffix(n)),
+        n => crate::text::ordinal(n),
     };
     format!("the {word} {noun}")
-}
-
-fn ordinal_suffix(n: usize) -> &'static str {
-    match (n % 100, n % 10) {
-        (11..=13, _) => "th",
-        (_, 1) => "st",
-        (_, 2) => "nd",
-        (_, 3) => "rd",
-        _ => "th",
-    }
 }
 
 impl Subject {

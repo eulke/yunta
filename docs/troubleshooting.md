@@ -126,10 +126,13 @@ Yunta supplies that approval when it mounts the endpoint.
 ## A run reports a failed `yunta-run` call
 
 The live chronicle shows each failed call, while `yunta status <run>` shows
-the **last failed call of the attempt**, with the tool name and either
-`approval_blocked` or `call_failed`. The event log records every failed call
-as `run_tool_failed`. `status --json` exposes the last one on the node as
-`last_tool_failure`, with `session_id`, `tool`, and `cause`. A retry starts a
+the **last failed call of the attempt** of a node that has not finished, with
+the tool name and either `approval_blocked` or `call_failed`. A node that
+finished is past the calls it got wrong on its way. Its row says how its
+document was accepted instead, for example "accepted on its 2nd handover
+(1 refused)". The event log records every failed call as `run_tool_failed`.
+`status --json` exposes the last one on the node as `last_tool_failure`,
+with `session_id`, `tool`, and `cause`, whether the node finished or not. A retry starts a
 new attempt and clears
 that summary. The failed call is diagnostic context: the session may recover
 and finish, and a node failure can have another cause. Arguments, responses,

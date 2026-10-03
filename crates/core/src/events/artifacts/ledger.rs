@@ -175,6 +175,14 @@ impl ArtifactLedger {
         self.handovers.get(&(node.clone(), kind))
     }
 
+    /// How `node` handed over each document it handed over.
+    pub fn handed_over_by<'a>(&'a self, node: &'a NodeId) -> impl Iterator<Item = &'a HandedOver> {
+        self.handovers
+            .iter()
+            .filter(move |((by, _), _)| by == node)
+            .map(|(_, handed)| handed)
+    }
+
     /// The artifact answering `id`, or `None` when the run holds none.
     ///
     /// A `producer` names whose artifact is meant and reaches that

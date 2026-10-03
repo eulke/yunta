@@ -177,12 +177,12 @@ fn corrected_submission_run() -> (Checkout, String) {
 }
 
 #[test]
-fn status_reports_the_last_failed_run_tool_call_without_making_it_the_run_outcome() {
+fn a_finished_node_s_failed_call_is_kept_for_programs_and_off_its_page() {
     let (project, run_id) = corrected_submission_run();
     let text = status(&project, &run_id, &[]);
     assert!(
-        text.contains("ask: last failed call of its attempt: yunta_submit_questions (call_failed)"),
-        "{text}"
+        !text.contains("last failed call"),
+        "a node that finished is past the calls it got wrong on its way:\n{text}"
     );
     assert!(
         text.contains("nodes 1/1") && !text.contains("secret-in-arguments"),
@@ -271,6 +271,80 @@ fn asking_run() -> (Checkout, String, String) {
 
 /// A node parked on its own questions says which ones, and says it the
 /// same way wherever a reader meets it.
+/// A planner whose first plan is refused — its one criterion passes
+/// before any work — and whose second is accepted.
+const REPLANNED_WORKFLOW: &str = r#"
+name: replanned
+nodes:
+  - id: plan
+    kind: prompt
+    runner: executor
+    prompt: "Hand over the tasks document."
+    artifacts:
+      produces: [tasks]
+"#;
+
+const REPLANNED_FIXTURE: &str = r#"
+capabilities: { run_tools: true }
+sessions:
+  - steps:
+      - type: run_tool
+        tool: yunta_submit_tasks
+        expect: refused
+        arguments:
+          document:
+            summary: "Make it"
+            tasks:
+              - { id: T001, title: "Make it", scope: [made.txt], changes: [{ at: made.txt, what: "the file", code: "made" }], criteria: [{ cmd: "true", proves: "nothing yet" }] }
+      - type: run_tool
+        tool: yunta_submit_tasks
+        arguments:
+          document:
+            summary: "Make it"
+            tasks:
+              - { id: T001, title: "Make it", scope: [made.txt], changes: [{ at: made.txt, what: "the file", code: "made" }], criteria: [{ cmd: "test -f made.txt", proves: "the file exists" }] }
+    outcome: { type: completed, summary: planned }
+"#;
+
+#[test]
+fn a_finished_node_says_how_its_document_got_accepted() {
+    let project = Checkout::new()
+        .config("defaults:\n  isolation: none\nrunners:\n  executor:\n    - { adapter: mock, model: mock-model }\n")
+        .workflow("wf", REPLANNED_WORKFLOW)
+        .file("fixture.yaml", REPLANNED_FIXTURE)
+        .committed();
+    let run = project.run(
+        std::path::Path::new(env!("CARGO_BIN_EXE_yunta")),
+        &[
+            "run",
+            "wf.yaml",
+            "--adapter",
+            "mock",
+            "--fixture",
+            "fixture.yaml",
+        ],
+    );
+    assert!(run.status.success(), "{}", stderr(&run));
+    let run_id = run_id_from(&run);
+
+    let text = status(&project, &run_id, &[]);
+    let row = text
+        .lines()
+        .find(|line| line.contains(" plan "))
+        .expect("the plan's row");
+    assert!(
+        row.contains("accepted on its 2nd handover (1 refused)"),
+        "{text}"
+    );
+    let page = status(&project, &run_id, &["--node", "plan"]);
+    assert!(
+        page.lines()
+            .any(|line| line.trim_start().starts_with("handed over ")
+                && line.ends_with("accepted on its 2nd handover (1 refused)")),
+        "{page}"
+    );
+}
+
 #[test]
 fn status_says_which_questions_a_node_is_waiting_on() {
     let (project, run_id, _) = asking_run();

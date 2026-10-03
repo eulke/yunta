@@ -90,10 +90,14 @@ impl Page<'_> {
             .iter()
             .map(|node| {
                 let display = crate::render::standing(&node.state);
-                let note = display
+                let said = display
                     .modifier
-                    .map(|said| prose::first_sentence(&said, look.width.cells(), look.glyphs))
-                    .unwrap_or_default();
+                    .map(|said| prose::first_sentence(&said, look.width.cells(), look.glyphs));
+                let note = [said, handed(self.state, &node.id)]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(&format!(" {} ", look.glyphs.sep()));
                 NodeRow {
                     mark: display.word.mark(),
                     word: display.word.word(),
@@ -108,10 +112,18 @@ impl Page<'_> {
     /// The last call of a run tool each node's attempt made that failed,
     /// one to a line under the table: what a node got wrong on its way
     /// is not why it stands where it does, so it is not its row's note.
+    /// A node that finished is past it: how its documents were accepted
+    /// says what the way there took.
     pub(super) fn calls(&self) -> Vec<Line> {
         self.frame
             .nodes
             .iter()
+            .filter(|node| {
+                !matches!(
+                    self.state.nodes.state(&node.id),
+                    Some(NodeState::Finished { .. })
+                )
+            })
             .filter_map(|node| {
                 let failed = self.state.nodes.get(&node.id)?.last_tool_failure.as_ref()?;
                 Some(Line::new().plain(INDENT).push(
@@ -258,4 +270,22 @@ fn spent(tokens: yunta_core::events::TokenUsage) -> String {
             Tokens(tokens.output).figure()
         ),
     }
+}
+
+/// How node `id` got its documents accepted once it finished, when that
+/// took more than one handover: what it took is part of what it did.
+pub(super) fn handed(state: &RunState, id: &yunta_core::NodeId) -> Option<String> {
+    if !matches!(state.nodes.state(id), Some(NodeState::Finished { .. })) {
+        return None;
+    }
+    let refused = state
+        .artifacts
+        .handed_over_by(id)
+        .filter(|handed| handed.refusals > 0)
+        .max_by_key(|handed| handed.submissions)?;
+    Some(format!(
+        "accepted on its {} handover ({} refused)",
+        yunta_core::text::ordinal(refused.submissions),
+        refused.refusals
+    ))
 }
