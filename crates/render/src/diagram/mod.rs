@@ -184,6 +184,10 @@ mod tests {
     /// narrow line, and fits it turned.
     const TURNED: &str = "graph TD\n  run[The run] --> grill[Ask what only a person decides] & brief[Write what was asked for] & plan[Plan the change task by task]";
 
+    /// A chart whose loop back carries a label longer than the box it
+    /// reaches is wide.
+    const LOOPED: &str = "graph LR\n  add[pack add --global] --> user[the user's packs]\n  user --> find{a project looks for a pack}\n  find -->|its own| project[the project's pack]\n  find -->|none of its own| user";
+
     /// A chart too long to read across a line and too wide to read down
     /// it: a pipeline that ends fanning out.
     const CHAINED: &str = "graph LR\n  a[Read the idea and its brief] --> b[Plan the change task by task] --> c[Write the tests for the plan] --> d[Approve the plan and its tests]\n  d --> e[Build the store task] & f[Build the command task] & g[Build the docs task] & h[Build the release task]";
@@ -195,6 +199,7 @@ mod tests {
             ("lr", LR),
             ("labels-and-decision", DECIDED),
             ("turned", TURNED),
+            ("looped", LOOPED),
             ("outline", CHAINED),
         ] {
             let doc = Doc::new().with(Block::Diagram(Diagram::of(source)));

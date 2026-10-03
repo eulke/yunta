@@ -82,12 +82,25 @@ fn frame(laid: &Laid) -> Frame {
         }
     }
     let lanes = laid.layered.back.len();
+    // Room to the right of the boxes for the widest label beside a head,
+    // before the lanes that go back: a label next to the right-most head
+    // still has its cells.
+    let labels = match laid
+        .lanes
+        .channels
+        .iter()
+        .map(|channel| channel.label)
+        .max()
+    {
+        Some(0) | None => 0,
+        Some(widest) => widest + 2,
+    };
     Frame {
         xs,
         rows,
         channels,
-        lane: inner + 1,
-        width: inner + if lanes > 0 { 2 * lanes } else { 0 },
+        lane: inner + labels + 1,
+        width: inner + labels + if lanes > 0 { 2 * lanes } else { 0 },
         height: y,
     }
 }
