@@ -21,6 +21,7 @@
 pub mod bars;
 pub mod blocks;
 pub mod color;
+pub mod diagram;
 pub mod doc;
 pub mod escalation;
 mod findings;
