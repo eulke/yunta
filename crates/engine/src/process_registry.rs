@@ -41,9 +41,12 @@ pub struct EngineProcessFile {
     /// cancel` sends SIGINT here while it's alive, so the engine's own
     /// interrupt→kill path does the exterminating).
     pub engine_pid: Pid,
-    /// When this engine started, as its own injected clock read it —
+    /// When this engine started, as the host's process table reads it —
     /// what tells a live pid apart from a number the host handed to
-    /// something else after a crash.
+    /// something else after a crash. Read there and not from the run's
+    /// clock, because [`EngineProcessFile::liveness`] compares it
+    /// against that same table — the reason the lock reads it there
+    /// too.
     pub started_at: DateTime<Utc>,
     /// Process-group ids of live sessions/hooks/executors — what a
     /// post-crash `cancel` kills directly when `engine_pid` is gone.
@@ -74,15 +77,20 @@ impl ProcessRegistry {
     /// Writes the initial file for this invocation. An earlier
     /// invocation's file (crash leftovers) is simply overwritten — the
     /// new engine owns the run now.
+    ///
+    /// Takes the probe and the clock the lock takes, and for the same
+    /// reason: the start time it records is a claim about a pid that
+    /// another process will check against the host's process table.
     pub fn create(
         run_dir: &Path,
         engine_pid: Pid,
-        started_at: DateTime<Utc>,
+        probe: &dyn crate::lock::OwnerProbe,
+        clock: &dyn yunta_core::Clock,
     ) -> std::io::Result<ProcessRegistry> {
         let state = EngineProcessFile {
             schema_version: <EngineProcessFile as Persisted>::SCHEMA_VERSION,
             engine_pid,
-            started_at,
+            started_at: crate::lock::taken_at(engine_pid, probe, clock),
             process_groups: Vec::new(),
             asking: None,
         };
@@ -366,6 +374,7 @@ fn lock(state: &Mutex<EngineProcessFile>) -> std::sync::MutexGuard<'_, EnginePro
 mod tests {
     use super::*;
     use crate::lock::OwnerProbe;
+    use yunta_testkit_core::AtClock;
 
     /// A host whose process table holds one process, started at a fixed
     /// instant, under every pid.
@@ -388,7 +397,15 @@ mod tests {
     fn left_behind(run_dir: &Path, started_at: DateTime<Utc>) {
         let pid = Pid::try_from(4321u32).expect("a pid");
         std::fs::create_dir_all(registry_path(run_dir).parent().expect("a parent")).unwrap();
-        std::mem::forget(ProcessRegistry::create(run_dir, pid, started_at).expect("registry"));
+        // A host that cannot say when the pid started leaves the clock
+        // as the only reading, so the record says what the test chose.
+        let silent = Host {
+            alive: Liveness::Unknown,
+            started: None,
+        };
+        std::mem::forget(
+            ProcessRegistry::create(run_dir, pid, &silent, &AtClock(started_at)).expect("registry"),
+        );
     }
 
     #[test]

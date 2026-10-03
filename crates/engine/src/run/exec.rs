@@ -355,7 +355,8 @@ fn build_ctx(
     let (registry, registry_error) = match crate::process_registry::ProcessRegistry::create(
         run_dir,
         Pid::current(),
-        clock.now(),
+        &crate::lock::SystemProbe,
+        clock.as_ref(),
     ) {
         Ok(registry) => (Some(std::sync::Arc::new(registry)), None),
         Err(e) => (None, Some(e)),
