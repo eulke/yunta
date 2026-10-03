@@ -86,7 +86,13 @@ pub(crate) fn lines(
             look,
         ));
     }
-    lines.extend(before_you_decide(escalation, shown, look));
+    let before = before_you_decide(escalation, shown, look);
+    if !before.is_empty() {
+        // What weighs on the decision ends a block of its own, apart from
+        // the options it weighs on.
+        lines.extend(before);
+        lines.push(Line::new());
+    }
     lines.extend(menu(run_id, escalation, look));
     lines
 }

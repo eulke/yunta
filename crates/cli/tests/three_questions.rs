@@ -200,12 +200,42 @@ fn a_person_learns_a_run_asking_at_its_terminal_needs_them() {
     let lines: Vec<&str> = page.lines().collect();
     assert!(
         lines[0].ends_with("needs you")
-            && lines[1]
-                .contains("node `approve` is asking at the terminal that runs this run (pid"),
+            && lines[1].contains("node `approve` is asking at its terminal (pid"),
         "the page says the run needs a person, and where to answer:\n{page}"
     );
+    assert!(
+        page.lines().any(|line| line.contains("waiting")
+            && line.contains("approve")
+            && line.ends_with("asking at its terminal")),
+        "the node asking is the one waiting on a person:\n{page}"
+    );
+    assert!(
+        !page.contains("yunta resume"),
+        "a run asking at its terminal is alive, and no resume reaches the question:\n{page}"
+    );
 
-    let json = yunta_in!(repo, home, &["status", &run_id, "--json"]);
+    the_documents_say_it_needs_you(repo, home, &run_id);
+
+    // `abort`, the second option, with nothing to add.
+    terminal.keys("\x1b[B\r");
+    terminal.wait_for(
+        "enter records it",
+        "aborting asked for words it does not need",
+    );
+    terminal.keys("\r");
+    terminal.ended();
+
+    let after = stdout(&yunta_in!(repo, home, &["status", &run_id]));
+    assert!(
+        !after.contains("is asking at its terminal"),
+        "a question answered is asked no longer:\n{after}"
+    );
+}
+
+/// What `status --json` and `list --runs` say of a run asking at its
+/// terminal: that it waits on a prompt, and that it needs someone.
+fn the_documents_say_it_needs_you(repo: &Path, home: &Path, run_id: &str) {
+    let json = yunta_in!(repo, home, &["status", run_id, "--json"]);
     let document: Value = serde_json::from_str(&stdout(&json)).expect("one JSON document");
     assert_eq!(document["waiting_on"]["on"], "prompt", "{document:#}");
     assert_eq!(document["waiting_on"]["node"], "approve", "{document:#}");
@@ -219,19 +249,4 @@ fn a_person_learns_a_run_asking_at_its_terminal_needs_them() {
         .take_while(|line| !line.is_empty())
         .any(|line| line.contains(handle));
     assert!(filed, "the inbox files the run under needs you:\n{inbox}");
-
-    // `abort`, the second option, with nothing to add.
-    terminal.keys("\x1b[B\r");
-    terminal.wait_for(
-        "enter records it",
-        "aborting asked for words it does not need",
-    );
-    terminal.keys("\r");
-    terminal.ended();
-
-    let after = stdout(&yunta_in!(repo, home, &["status", &run_id]));
-    assert!(
-        !after.contains("is asking at the terminal"),
-        "a question answered is asked no longer:\n{after}"
-    );
 }

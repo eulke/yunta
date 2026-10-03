@@ -33,7 +33,7 @@ pub(crate) fn asking(prompt: &yunta_engine::Prompt, at: chrono::DateTime<chrono:
         .map_or_else(|| "the run".to_string(), |node| format!("node `{node}`"));
     let waited = (at - prompt.since).to_std().unwrap_or_default();
     format!(
-        "{who} is asking at the terminal that runs this run (pid {}), for {}; answer it there",
+        "{who} is asking at its terminal (pid {}) for {}; answer it there",
         prompt.pid,
         yunta_core::units::duration(waited)
     )

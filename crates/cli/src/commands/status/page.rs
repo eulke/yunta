@@ -13,7 +13,7 @@ use crate::render::blocks::{
     Drawn, FailureDetail, Fields, Headline, Next, NodeRow, NodeTable, Whole,
 };
 use crate::render::ink::{Line, Tone};
-use crate::render::state::RunWord;
+use crate::render::state::{RunWord, StateWord};
 use crate::render::{indent, prose, truncate, Look, Tokens, INDENT};
 
 /// What the page is drawn from.
@@ -98,10 +98,26 @@ impl Page<'_> {
                     .flatten()
                     .collect::<Vec<_>>()
                     .join(&format!(" {} ", look.glyphs.sep()));
+                let id = format!("{}{}", indent(usize::from(node.group.is_some())), node.id);
+                // The node a live engine is asking at its terminal is
+                // waiting on a person, whatever its log says.
+                let asking = self
+                    .engine
+                    .prompt
+                    .as_ref()
+                    .and_then(|prompt| prompt.node.as_ref());
+                if asking == Some(&node.id) {
+                    return NodeRow {
+                        mark: StateWord::Waiting.mark(),
+                        word: StateWord::Waiting.word(),
+                        id,
+                        note: "asking at its terminal".to_string(),
+                    };
+                }
                 NodeRow {
                     mark: display.word.mark(),
                     word: display.word.word(),
-                    id: format!("{}{}", indent(usize::from(node.group.is_some())), node.id),
+                    id,
                     note,
                 }
             })
@@ -253,7 +269,13 @@ impl Page<'_> {
 
     /// What a person types next, for where the run stands.
     pub(super) fn next(&self, menu: bool) -> Next {
-        let word = crate::render::observed_word(self.frame, &self.engine);
+        // A run asking at its terminal is alive: what moves it is the
+        // answer given there, and what stops it is what stops any run
+        // that is moving.
+        let word = match self.engine.prompt {
+            Some(_) => RunWord::Running,
+            None => crate::render::observed_word(self.frame, &self.engine),
+        };
         Next {
             steps: advice::after(word, self.run_id.handle(), menu),
         }

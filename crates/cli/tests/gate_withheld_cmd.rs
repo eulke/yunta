@@ -157,6 +157,15 @@ fn status_says_what_weighs_on_the_decision_and_what_the_gate_withholds() {
 
     let page = yunta_in!(&checkout.repo, &checkout.home, &["status", &run_id]);
     let page = stdout(&page);
+    let lines: Vec<&str> = page.lines().collect();
+    let first_option = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with("adjust"))
+        .expect(&page);
+    assert!(
+        lines[first_option - 1].trim().is_empty(),
+        "what weighs on the decision stands apart from its options:\n{page}"
+    );
     let before = page.find("before you decide").expect(&page);
     let adjust = page.find("adjust").expect(&page);
     assert!(before < page.rfind("adjust").unwrap_or(adjust), "{page}");
