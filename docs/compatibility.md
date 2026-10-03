@@ -487,8 +487,12 @@ to whoever *creates* a run.
 `{"on": "gate", "node", "external_ref"?, "reason"?}` when a node is parked on a
 gate, `{"on": "questions", "node", "asked": [...], "reason"?}` when it is parked
 on questions nobody answered, and `{"on": "run", "reason"}` when the run itself
-stopped. `summary` says the same thing inside a sentence that also carries the
-run's counters; this is the pause on its own.
+stopped. A run that is moving while its live engine asks a person at its terminal
+carries `{"on": "prompt", "node"?, "since", "pid"}`: a question asked live is on
+no log until it is answered, and the only place it takes an answer is the
+terminal of process `pid`. Its `outcome` is `"needs you"` then, as a parked run's
+is. `summary` says the same thing inside a sentence that also carries the run's
+counters; this is the pause on its own.
 
 `status --json` carries `nodes` as a **list**, in the order the run's frozen
 workflow declares them, each `parallel` group followed by its own children —

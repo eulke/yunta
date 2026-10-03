@@ -40,7 +40,6 @@ pub async fn status(
     let open = ctx.open_run(run_id).await?;
     let events = open.events;
     let run_dir = open.run_dir;
-    let engine = yunta_engine::engine_liveness(&run_dir, &yunta_engine::lock::SystemProbe);
     // What this binary did not understand in a file a later one wrote:
     // said, because a reader acting on a manifest whose newer half is
     // invisible to them should know that is what they are doing.
@@ -55,10 +54,11 @@ pub async fn status(
     let manifest = open.manifest.doc;
 
     let now = ctx.clock.now();
+    let engine = crate::render::Engine::of(&run_dir, now);
     let decision = crate::json::decision_of(&manifest, &run_dir, &events).await?;
     if json {
         return crate::json::print_json(&crate::json::RunDocument::of(
-            run_id, &events, &manifest, now, engine, decision,
+            run_id, &events, &manifest, now, &engine, decision,
         ));
     }
 

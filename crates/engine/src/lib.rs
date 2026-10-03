@@ -119,8 +119,8 @@ pub use pack_audit::{
 pub use pack_requires::{check_pack_requires, PackRequiresGap};
 pub use permissions::command_violation;
 pub use process_registry::{
-    engine_liveness, read_registry, registry_path, EngineLiveness, EngineProcessFile,
-    ProcessRegistry, Registry,
+    engine_liveness, engine_prompt, read_registry, registry_path, Asked, EngineLiveness,
+    EngineProcessFile, ProcessRegistry, Prompt, Registry,
 };
 pub use receipt::{
     build_receipt, render_json as render_receipt_json, BaselineSummary, CostSummary,

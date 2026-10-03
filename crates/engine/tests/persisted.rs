@@ -12,6 +12,10 @@ fn every_persisted_file_carries_its_version() {
         engine_pid: 4242u32.try_into().expect("a pid"),
         started_at: DateTime::<Utc>::UNIX_EPOCH,
         process_groups: vec![4243u32.try_into().expect("a pid")],
+        asking: Some(yunta_engine::Asked {
+            node: Some("approve".into()),
+            since: DateTime::<Utc>::UNIX_EPOCH,
+        }),
     });
     holds_its_version(yunta_engine::lock::LockOwner {
         schema_version: 1,

@@ -17,7 +17,7 @@ use chrono::{DateTime, Utc};
 
 use yunta_core::events::StoredEvent;
 use yunta_core::{Manifest, RunId};
-use yunta_engine::{EngineLiveness, RunFrame, RunPhase};
+use yunta_engine::{RunFrame, RunPhase};
 
 use crate::commands::advice;
 
@@ -51,7 +51,7 @@ pub(crate) fn frame(
 /// `engine` is what the run's registry says about the process driving
 /// it, which is what tells a run that is moving from one whose engine is
 /// gone.
-pub(crate) fn summary(frame: &RunFrame, engine: EngineLiveness, glyphs: Glyphs) -> String {
+pub(crate) fn summary(frame: &RunFrame, engine: &crate::render::Engine, glyphs: Glyphs) -> String {
     let sep = glyphs.sep();
     let mut summary = format!(
         "{} {sep} {}",
@@ -66,10 +66,13 @@ pub(crate) fn summary(frame: &RunFrame, engine: EngineLiveness, glyphs: Glyphs) 
 
 /// The phase on one line, for the end of a summary: the word every
 /// surface calls it by, and what qualifies it when something does.
-fn phase_label(frame: &RunFrame, engine: EngineLiveness) -> String {
+fn phase_label(frame: &RunFrame, engine: &crate::render::Engine) -> String {
     let word = crate::render::observed_word(frame, engine);
     if word == RunWord::Stalled {
         return format!("{word} — no process is driving it");
+    }
+    if let (RunWord::NeedsYou, Some(prompt)) = (word, &engine.prompt) {
+        return format!("{word} — {}", advice::asking(prompt, engine.at));
     }
     match &frame.phase {
         // A parked run is waiting on a person, not stuck, and what it is

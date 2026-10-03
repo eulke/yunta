@@ -15,7 +15,7 @@ pub(crate) use stream::{
     glyphs, row_width, settle_color, settle_columns, settle_glyphs, stderr_ink, stderr_width,
     stdout_look, stdout_width,
 };
-pub(crate) use words::{exit, observed_word, run_word, standing, RunExit};
+pub(crate) use words::{exit, observed_word, run_word, standing, Engine, RunExit};
 #[cfg(test)]
 pub(crate) use yunta_render::LINE_WIDTH;
 

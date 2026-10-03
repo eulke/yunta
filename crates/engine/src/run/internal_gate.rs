@@ -272,7 +272,7 @@ pub(super) async fn resolve(ctx: &RunCtx<'_>, node: &Node) -> Result<GateStep, R
     let already_recorded = pre_seeded.is_some();
     let choice = match pre_seeded {
         Some(choice) => choice,
-        None => match ctx.ask_human(&escalation).await? {
+        None => match ctx.ask_human(Some(&node.id), &escalation).await? {
             Some(choice) => choice,
             None => {
                 return Ok(GateStep::Waiting(PauseReason::Escalation(Box::new(

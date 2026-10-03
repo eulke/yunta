@@ -23,6 +23,22 @@ use crate::render::state::RunWord;
 /// What holds a run whose log says it is moving and whose engine is gone.
 pub(crate) const STALLED: &str = "no process is driving it: the engine that ran it is gone";
 
+/// What holds a run whose engine is asking a person at its terminal: a
+/// question asked live is on no log until it is answered, so the only
+/// place to answer it is where it is asked.
+pub(crate) fn asking(prompt: &yunta_engine::Prompt, at: chrono::DateTime<chrono::Utc>) -> String {
+    let who = prompt
+        .node
+        .as_ref()
+        .map_or_else(|| "the run".to_string(), |node| format!("node `{node}`"));
+    let waited = (at - prompt.since).to_std().unwrap_or_default();
+    format!(
+        "{who} is asking at the terminal that runs this run (pid {}), for {}; answer it there",
+        prompt.pid,
+        yunta_core::units::duration(waited)
+    )
+}
+
 /// What a run is parked on, or `None` for a run nobody has to touch —
 /// the one answer that decides whether a surface says anything about a
 /// decision at all.

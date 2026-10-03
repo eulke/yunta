@@ -46,7 +46,7 @@ pub(super) async fn resolve_escalations(
                 .map_err(|source| RunError::Broken {
                     diagnostic: format!("task `{}`'s expansion request: {source}", pending.task_id),
                 })?;
-        let Some(choice) = ctx.ask_human(&escalation).await? else {
+        let Some(choice) = ctx.ask_human(Some(&node.id), &escalation).await? else {
             unresolved.push(pending.task_id);
             continue;
         };

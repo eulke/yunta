@@ -161,7 +161,7 @@ impl RunDocument {
         events: &[StoredEvent],
         manifest: &Manifest,
         now: DateTime<Utc>,
-        engine: yunta_engine::EngineLiveness,
+        engine: &crate::render::Engine,
         decision: Option<(yunta_core::NodeId, yunta_core::events::Escalation)>,
     ) -> Self {
         let state = yunta_engine::derive(events);
@@ -189,7 +189,7 @@ impl RunDocument {
                 .collect(),
             diagnostics: node_diagnostics(events),
             decision: parked_decision(run_id, decision, &frame.phase),
-            waiting_on: WaitingOnJson::of(&frame.phase),
+            waiting_on: WaitingOnJson::of(&frame.phase, engine),
             tokens: TokensJson {
                 input: state.total_tokens().input,
                 output: state.total_tokens().output,
@@ -298,14 +298,32 @@ pub(crate) enum WaitingOnJson {
     },
     /// The run itself paused, with the reason it recorded.
     Run { reason: String },
+    /// The engine driving the run is asking a person at its terminal,
+    /// where the only answer it takes is given.
+    Prompt {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        node: Option<String>,
+        since: chrono::DateTime<chrono::Utc>,
+        pid: yunta_core::Pid,
+    },
 }
 
 impl WaitingOnJson {
-    /// The frame's own answer, in the document's shape. `None` for a run
-    /// that is not waiting on anything.
-    fn of(phase: &RunPhase) -> Option<Self> {
+    /// The frame's own answer, in the document's shape — or, for a run
+    /// that is moving, the question its engine is asking at its terminal.
+    /// `None` for a run that is not waiting on anything.
+    fn of(phase: &RunPhase, engine: &crate::render::Engine) -> Option<Self> {
         let RunPhase::Waiting { on } = phase else {
-            return None;
+            let moving = matches!(phase, RunPhase::Created | RunPhase::Running);
+            return engine
+                .prompt
+                .as_ref()
+                .filter(|_| moving)
+                .map(|prompt| WaitingOnJson::Prompt {
+                    node: prompt.node.as_ref().map(ToString::to_string),
+                    since: prompt.since,
+                    pid: prompt.pid,
+                });
         };
         Some(match on {
             WaitingOn::Node { node, on, reason } => WaitingOnJson::Node {

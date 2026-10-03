@@ -19,7 +19,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use yunta_core::persisted::Persisted;
 use yunta_core::process::signal::Liveness;
-use yunta_core::{Pid, RelativePath};
+use yunta_core::{NodeId, Pid, RelativePath};
 
 impl Persisted for EngineProcessFile {
     const SCHEMA_VERSION: u32 = 1;
@@ -48,6 +48,20 @@ pub struct EngineProcessFile {
     /// Process-group ids of live sessions/hooks/executors — what a
     /// post-crash `cancel` kills directly when `engine_pid` is gone.
     pub process_groups: Vec<Pid>,
+    /// The person this engine is asking at its terminal, while it asks:
+    /// a question asked live leaves nothing on the log until it is
+    /// answered, and a reader elsewhere has to be able to tell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asking: Option<Asked>,
+}
+
+/// What an engine asks a person at its terminal: the node that asks,
+/// when one does, and since when.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Asked {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub node: Option<NodeId>,
+    pub since: DateTime<Utc>,
 }
 
 /// Handle the run's imperative shell holds for the registry file.
@@ -70,6 +84,7 @@ impl ProcessRegistry {
             engine_pid,
             started_at,
             process_groups: Vec::new(),
+            asking: None,
         };
         let registry = ProcessRegistry {
             path: registry_path(run_dir),
@@ -99,6 +114,16 @@ impl ProcessRegistry {
         drop(state);
         if let Err(e) = self.persist() {
             tracing::warn!(pgid = %pgid, error = %e, "failed to unregister a process group in engine.json");
+        }
+    }
+
+    /// Records that this engine is asking a person at its terminal, or,
+    /// with `None`, that it no longer is. Failures warn, never fail the
+    /// run.
+    pub fn asking(&self, asked: Option<Asked>) {
+        lock(&self.state).asking = asked;
+        if let Err(e) = self.persist() {
+            tracing::warn!(error = %e, "failed to record a live question in engine.json");
         }
     }
 
@@ -298,6 +323,32 @@ pub fn engine_liveness(run_dir: &Path, probe: &dyn crate::lock::OwnerProbe) -> E
             Liveness::Unknown => EngineLiveness::Unknown,
         },
     }
+}
+
+/// A person a live engine is asking at its terminal: the node that asks,
+/// since when, and the process whose terminal holds the question.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Prompt {
+    pub node: Option<NodeId>,
+    pub since: DateTime<Utc>,
+    pub pid: Pid,
+}
+
+/// Whom the engine driving the run under `run_dir` is asking at its
+/// terminal; `None` when it asks no one, or no live engine drives it.
+pub fn engine_prompt(run_dir: &Path, probe: &dyn crate::lock::OwnerProbe) -> Option<Prompt> {
+    let Registry::Read(registry) = read_registry(run_dir) else {
+        return None;
+    };
+    if registry.doc.liveness(probe) != Liveness::Alive {
+        return None;
+    }
+    let asked = registry.doc.asking.clone()?;
+    Some(Prompt {
+        node: asked.node,
+        since: asked.since,
+        pid: registry.doc.engine_pid,
+    })
 }
 
 /// The pid of a spawned child, or `None` once it has been reaped.

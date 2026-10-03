@@ -420,15 +420,20 @@ async fn documented(
 ) -> Result<crate::json::RunDocument, CliError> {
     let events = storage.events_for_run(run_id.clone()).await?;
     // This invocation is the engine that drove the run.
-    let engine = yunta_engine::EngineLiveness::Alive;
+    let engine = crate::render::Engine::this(ctx.clock.now());
     let decision = match ctx.project.run_dir(run_id.as_str()) {
         Some(run_dir) => crate::json::decision_of(manifest, &run_dir, &events).await?,
         None => None,
     };
-    Ok(
-        crate::json::RunDocument::of(run_id, &events, manifest, ctx.clock.now(), engine, decision)
-            .warnings(warnings),
+    Ok(crate::json::RunDocument::of(
+        run_id,
+        &events,
+        manifest,
+        ctx.clock.now(),
+        &engine,
+        decision,
     )
+    .warnings(warnings))
 }
 
 /// Prints the run as the one versioned document `run --json`,

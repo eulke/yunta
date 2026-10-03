@@ -1,7 +1,8 @@
 //! The words the engine's own types are called by, and how the
 //! invocation that drove a run exits for the word it ended on.
 
-use yunta_engine::{EngineLiveness, NodeStanding, RunFrame, RunPhase};
+use chrono::{DateTime, Utc};
+use yunta_engine::{EngineLiveness, NodeStanding, Prompt, RunFrame, RunPhase};
 use yunta_render::{NodeDisplay, RunWord};
 
 use crate::error::Outcome;
@@ -42,17 +43,53 @@ pub(crate) fn run_word(frame: &RunFrame) -> RunWord {
     }
 }
 
+/// What a run's registry says about the process driving it, read at one
+/// instant: whether it lives, and whom it is asking at its terminal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Engine {
+    pub(crate) liveness: EngineLiveness,
+    pub(crate) prompt: Option<Prompt>,
+    /// When it was read, which is what a question has been waiting from.
+    pub(crate) at: DateTime<Utc>,
+}
+
+impl Engine {
+    /// What the registry of the run under `run_dir` says at `at`.
+    pub(crate) fn of(run_dir: &std::path::Path, at: DateTime<Utc>) -> Self {
+        let probe = yunta_engine::lock::SystemProbe;
+        Engine {
+            liveness: yunta_engine::engine_liveness(run_dir, &probe),
+            prompt: yunta_engine::engine_prompt(run_dir, &probe),
+            at,
+        }
+    }
+
+    /// This invocation, driving the run itself: alive, and asking no one
+    /// a reader elsewhere could answer.
+    pub(crate) fn this(at: DateTime<Utc>) -> Self {
+        Engine {
+            liveness: EngineLiveness::Alive,
+            prompt: None,
+            at,
+        }
+    }
+}
+
 /// What a run read from outside the process driving it is called:
 /// [`run_word`] of its frame, except that a run whose log says it is
-/// moving while the engine its registry names is gone is stalled.
+/// moving while the engine its registry names is gone is stalled, and
+/// one whose engine is asking a person at its terminal needs them.
 ///
 /// Only a dead engine is proof. No registry at all is also what a run
 /// looks like for the instant it is handed to another process, and
 /// calling that stalled would be wrong for exactly that instant.
-pub(crate) fn observed_word(frame: &RunFrame, engine: EngineLiveness) -> RunWord {
-    match (run_word(frame), engine) {
-        (RunWord::Created | RunWord::Running, EngineLiveness::Dead) => RunWord::Stalled,
-        (word, _) => word,
+pub(crate) fn observed_word(frame: &RunFrame, engine: &Engine) -> RunWord {
+    match run_word(frame) {
+        RunWord::Created | RunWord::Running if engine.liveness == EngineLiveness::Dead => {
+            RunWord::Stalled
+        }
+        RunWord::Created | RunWord::Running if engine.prompt.is_some() => RunWord::NeedsYou,
+        word => word,
     }
 }
 

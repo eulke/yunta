@@ -109,7 +109,7 @@ pub(super) async fn resolve_departures(
         let escalation = escalation(&departure, holders).map_err(|source| RunError::Broken {
             diagnostic: format!("task `{}`'s departure: {source}", departure.task_id),
         })?;
-        let Some(choice) = ctx.ask_human(&escalation).await? else {
+        let Some(choice) = ctx.ask_human(Some(&node.id), &escalation).await? else {
             unanswered.push(departure.task_id);
             continue;
         };

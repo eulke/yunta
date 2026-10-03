@@ -27,7 +27,7 @@ pub(super) async fn degrade_to_console(
     summary: String,
 ) -> Result<GateStep, RunError> {
     let escalation = asked(ctx, node, summary).await?;
-    let Some(choice) = ctx.ask_human(&escalation).await? else {
+    let Some(choice) = ctx.ask_human(Some(&node.id), &escalation).await? else {
         return Ok(GateStep::Waiting(PauseReason::Escalation(Box::new(
             escalation,
         ))));

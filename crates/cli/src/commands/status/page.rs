@@ -6,7 +6,7 @@ use std::path::Path;
 
 use yunta_core::events::Failure;
 use yunta_core::RunId;
-use yunta_engine::{EngineLiveness, NodeState, RunFrame, RunPhase, RunState};
+use yunta_engine::{NodeState, RunFrame, RunPhase, RunState};
 
 use crate::commands::advice;
 use crate::render::blocks::{
@@ -21,7 +21,7 @@ pub(super) struct Page<'a> {
     pub(super) run_id: &'a RunId,
     pub(super) frame: &'a RunFrame,
     pub(super) state: &'a RunState,
-    pub(super) engine: EngineLiveness,
+    pub(super) engine: crate::render::Engine,
     pub(super) run_dir: &'a Path,
     /// Where paths are shown from: the directory this was run in, and
     /// the home `~` stands for.
@@ -33,7 +33,7 @@ impl Page<'_> {
     /// The word the run is called by, and the sentence that says what
     /// holds it: the verdict a reader came for, in two lines.
     pub(super) fn head(&self) -> Vec<Line> {
-        let word = crate::render::observed_word(self.frame, self.engine);
+        let word = crate::render::observed_word(self.frame, &self.engine);
         let mut lines = Headline {
             subject: format!("run {}", self.run_id),
             mark: word.mark(),
@@ -55,6 +55,11 @@ impl Page<'_> {
     fn holds(&self, word: RunWord) -> (Tone, String) {
         match (word, &self.frame.phase) {
             (RunWord::Stalled, _) => (Tone::Caution, advice::STALLED.to_string()),
+            (RunWord::NeedsYou, RunPhase::Created | RunPhase::Running) => match &self.engine.prompt
+            {
+                Some(prompt) => (Tone::NeedsYou, advice::asking(prompt, self.engine.at)),
+                None => (Tone::NeedsYou, "it needs you".to_string()),
+            },
             (_, RunPhase::Waiting { on }) => (Tone::NeedsYou, advice::parked_in_full(on)),
             (_, RunPhase::Broken { diagnostic }) => {
                 (Tone::Failed, yunta_core::text::one_line(diagnostic))
@@ -236,7 +241,7 @@ impl Page<'_> {
 
     /// What a person types next, for where the run stands.
     pub(super) fn next(&self, menu: bool) -> Next {
-        let word = crate::render::observed_word(self.frame, self.engine);
+        let word = crate::render::observed_word(self.frame, &self.engine);
         Next {
             steps: advice::after(word, self.run_id.handle(), menu),
         }

@@ -12,7 +12,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use yunta_core::events::StoredEvent;
 use yunta_core::{Clock, Manifest, ModeName, RunId, WorkflowName};
-use yunta_engine::{EngineLiveness, RunFrame, RunPhase};
+use yunta_engine::{RunFrame, RunPhase};
 use yunta_storage::Storage;
 
 use crate::commands::advice;
@@ -228,43 +228,9 @@ impl RunRow {
     /// One row from the run's own frame: which group it belongs in, what
     /// the run is, what holds it and what moves it. `menu` says whether
     /// the run stopped on a decision whose options `yunta status` lists.
-    fn of(frame: &RunFrame, engine: EngineLiveness, age: Duration, menu: bool) -> Self {
+    fn of(frame: &RunFrame, engine: &crate::render::Engine, age: Duration, menu: bool) -> Self {
         let word = crate::render::observed_word(frame, engine);
-        let handle = frame.run_id.handle();
-        let (reason, command) = match (word, &frame.phase) {
-            (RunWord::Stalled, _) => (
-                Some(advice::STALLED.to_string()),
-                Some(advice::resume(handle)),
-            ),
-            (_, RunPhase::Waiting { on }) => (
-                Some(advice::parked_in_full(on)),
-                Some(match menu {
-                    true => advice::status(handle),
-                    false => advice::resume(handle),
-                }),
-            ),
-            (_, RunPhase::Broken { diagnostic }) => (
-                Some(yunta_core::text::one_line(diagnostic)),
-                Some(advice::verify(handle)),
-            ),
-            (_, RunPhase::Created | RunPhase::Running) => (
-                Some(crate::render::counter::line(frame, crate::render::glyphs())),
-                None,
-            ),
-            (
-                _,
-                RunPhase::Failed {
-                    failure: Some(failure),
-                },
-            ) => (Some(failure.headline()), None),
-            (
-                _,
-                RunPhase::Finished
-                | RunPhase::Failed { failure: None }
-                | RunPhase::Cancelled
-                | RunPhase::Promoted { .. },
-            ) => (None, None),
-        };
+        let (reason, command) = held(frame, engine, word, menu);
         RunRow {
             run_id: frame.run_id.clone(),
             standing: Standing::of(word),
@@ -275,6 +241,61 @@ impl RunRow {
             reason,
             command,
         }
+    }
+}
+
+/// What holds a run whose word is `word`, and the command that moves it:
+/// `menu` says whether it stopped on a decision `yunta status` lists the
+/// options of.
+fn held(
+    frame: &RunFrame,
+    engine: &crate::render::Engine,
+    word: RunWord,
+    menu: bool,
+) -> (Option<String>, Option<String>) {
+    let handle = frame.run_id.handle();
+    match (word, &frame.phase) {
+        (RunWord::Stalled, _) => (
+            Some(advice::STALLED.to_string()),
+            Some(advice::resume(handle)),
+        ),
+        // Asked live, the question is answered where it is asked: no
+        // command here reaches it.
+        (RunWord::NeedsYou, RunPhase::Created | RunPhase::Running) => (
+            engine
+                .prompt
+                .as_ref()
+                .map(|prompt| advice::asking(prompt, engine.at)),
+            None,
+        ),
+        (_, RunPhase::Waiting { on }) => (
+            Some(advice::parked_in_full(on)),
+            Some(match menu {
+                true => advice::status(handle),
+                false => advice::resume(handle),
+            }),
+        ),
+        (_, RunPhase::Broken { diagnostic }) => (
+            Some(yunta_core::text::one_line(diagnostic)),
+            Some(advice::verify(handle)),
+        ),
+        (_, RunPhase::Created | RunPhase::Running) => (
+            Some(crate::render::counter::line(frame, crate::render::glyphs())),
+            None,
+        ),
+        (
+            _,
+            RunPhase::Failed {
+                failure: Some(failure),
+            },
+        ) => (Some(failure.headline()), None),
+        (
+            _,
+            RunPhase::Finished
+            | RunPhase::Failed { failure: None }
+            | RunPhase::Cancelled
+            | RunPhase::Promoted { .. },
+        ) => (None, None),
     }
 }
 
@@ -320,7 +341,7 @@ fn run_row(
         && yunta_engine::awaits_decision(&manifest, &yunta_engine::derive(&events)).is_some();
     let row = RunRow::of(
         &frame,
-        yunta_engine::engine_liveness(&run_dir, &yunta_engine::lock::SystemProbe),
+        &crate::render::Engine::of(&run_dir, now),
         time_in_state(&events, now),
         menu,
     );

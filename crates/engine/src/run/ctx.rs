@@ -250,9 +250,12 @@ impl<'a> RunCtx<'a> {
     /// verified against the menu the surface was shown. `None` keeps its
     /// meaning: no surface can answer right now. An answer the
     /// escalation does not accept is refused as
-    /// [`RunError::RefusedAnswer`] before anything is recorded.
+    /// [`RunError::RefusedAnswer`] before anything is recorded. While the
+    /// surface asks, the run's registry says `node` is asking, so a
+    /// reader elsewhere knows the run needs a person.
     pub(crate) async fn ask_human(
         &self,
+        node: Option<&NodeId>,
         escalation: &GateWaitingPayload,
     ) -> Result<Option<HumanChoice>, RunError> {
         // A plan is shown as the run judges it — with what a person
@@ -269,7 +272,11 @@ impl<'a> RunCtx<'a> {
             shown: &shown,
             run: self.run_id,
         };
-        let Some(choice) = self.human_interaction.resolve_in(escalation, &asking).await else {
+        let answered = {
+            let _asking = self.asking(node);
+            self.human_interaction.resolve_in(escalation, &asking).await
+        };
+        let Some(choice) = answered else {
             return Ok(None);
         };
         escalation
@@ -279,6 +286,21 @@ impl<'a> RunCtx<'a> {
                 summary: escalation.summary().to_string(),
             })?;
         Ok(Some(choice))
+    }
+
+    /// Says in the run's registry that `node` is asking a person at this
+    /// engine's terminal, until what this returns is dropped — however
+    /// the asking ends.
+    pub(crate) fn asking(&self, node: Option<&NodeId>) -> Asking<'_> {
+        if let Some(registry) = &self.process_registry {
+            registry.asking(Some(crate::process_registry::Asked {
+                node: node.cloned(),
+                since: self.clock.now(),
+            }));
+        }
+        Asking {
+            registry: self.process_registry.as_deref(),
+        }
     }
 
     /// The run's log read and its state derived, together — the pairing
@@ -447,5 +469,19 @@ impl crate::task_cycle::SessionObserver for RunCtx<'_> {
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<bool, StorageError> {
         self.awake.settled(&self.log(), cancel).await
+    }
+}
+
+/// A question this engine is asking a person at its terminal, recorded
+/// in the run's registry until it is dropped.
+pub(crate) struct Asking<'r> {
+    registry: Option<&'r crate::process_registry::ProcessRegistry>,
+}
+
+impl Drop for Asking<'_> {
+    fn drop(&mut self) {
+        if let Some(registry) = self.registry {
+            registry.asking(None);
+        }
     }
 }

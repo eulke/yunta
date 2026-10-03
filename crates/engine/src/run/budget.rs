@@ -41,7 +41,7 @@ pub async fn escalate(
     escalation: Escalation,
     pause_reason: PauseReason,
 ) -> Result<BudgetDecision, RunError> {
-    match ctx.ask_human(&escalation).await? {
+    match ctx.ask_human(node_id, &escalation).await? {
         Some(choice) => {
             let continues = ReservedOption::of(&choice.option) == Some(ReservedOption::Continue);
             ctx.emit(
