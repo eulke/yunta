@@ -2195,7 +2195,7 @@ fn a_detached_run_leaves_the_checkout_locked_by_the_child_that_is_in_it() {
     write(
         &repo.join("wf.yaml"),
         "name: holds-open\nnodes:\n  - id: hold\n    kind: bash\n    \
-         run: \"echo in > ../started.txt; until [ -f ../go.txt ]; do sleep 0.05; done\"\n",
+         run: \"echo in > ../started.txt; until [ -f ../go.txt ] || [ ! -e ../started.txt ]; do sleep 0.05; done\"\n",
     );
     git(&repo, &["add", "."]);
     git(&repo, &["commit", "-q", "-m", "fixtures"]);

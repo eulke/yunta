@@ -7,10 +7,12 @@ use yunta_testkit::{
 };
 
 /// A node that says it started and then holds until it is told to go,
-/// so the run is mid-node when its engine is killed.
+/// so the run is mid-node when its engine is killed — or until its
+/// marker is gone with the test, so no engine outlives the test that
+/// started it.
 fn holding(started: &std::path::Path, go: &std::path::Path) -> String {
     format!(
-        "name: hold\nnodes:\n  - id: hold\n    kind: bash\n    run: \"echo in > {}; until [ -f {} ]; do sleep 0.05; done\"\n",
+        "name: hold\nnodes:\n  - id: hold\n    kind: bash\n    run: \"echo in > {0}; until [ -f {1} ] || [ ! -e {0} ]; do sleep 0.05; done\"\n",
         started.display(),
         go.display()
     )

@@ -10,10 +10,12 @@ use yunta_testkit::{
 /// A build that fails at once: the run stops on a person.
 const FAILS: &str = "name: fails\nnodes:\n  - { id: build, kind: bash, run: \"exit 101\" }\n";
 
-/// A node that says it started and holds until told to go.
+/// A node that says it started and holds until told to go, or until its
+/// marker is gone with the test, so no engine outlives the test that
+/// started it.
 fn holding(started: &std::path::Path, go: &std::path::Path) -> String {
     format!(
-        "name: hold\nnodes:\n  - id: hold\n    kind: bash\n    run: \"echo in > {}; until [ -f {} ]; do sleep 0.05; done\"\n",
+        "name: hold\nnodes:\n  - id: hold\n    kind: bash\n    run: \"echo in > {0}; until [ -f {1} ] || [ ! -e {0} ]; do sleep 0.05; done\"\n",
         started.display(),
         go.display()
     )
