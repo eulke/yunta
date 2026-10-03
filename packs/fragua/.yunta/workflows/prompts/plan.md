@@ -36,10 +36,16 @@ they can see what will be built and disagree with it:
   - `description`: what it does and why; name the shapes it touches rather
     than repeating them.
   - `changes`: every place it changes, a file or a file and what in it
-    (`src/theme.rs::Theme`), what changes there — each inside its scope —
-    and its `code`: the signature it changes or the lines it adds, so a
-    person sees how the work will look rather than reading about it. A
-    change in a file where the task declares a shape shows that shape.
+    (`src/theme.rs::Theme`, `src/pack.rs::add/update`), what changes there —
+    each inside its scope — and its `code`: every declaration it adds or
+    changes, whole — a type with all its fields or variants, a function
+    with its whole signature, the enum a variant joins with the variant in
+    place — and every symbol its `at` names. Write a body only where the
+    logic is what a person decides on: an order of precedence, a rule of
+    selection, a migration. A comment that says what the code will do is
+    not code, and is refused. A person decides on how the work will look,
+    so its interface is there to read rather than described. A change in a
+    file where the task declares a shape shows that shape.
   - `outcome`: what a person will observe once it is done. For a change
     someone sees — output, a screen, a message — say what they see before
     and after.
