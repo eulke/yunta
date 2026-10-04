@@ -79,6 +79,7 @@ pub(super) fn render_run_stats(
         );
     let mut out = format!("run {run_id} — mode {mode}\n");
     out.push_str(&crate::render::draw(Doc::new().with(fields), look));
+    out.push_str(&super::time::render(&stats.time, look));
     out.push_str(&render_nodes(stats, state, look));
     out.push_str(&render_runners(stats, look));
     out
@@ -304,6 +305,7 @@ mod tests {
             tasks_done: 1,
             wall_clock: Some(Duration::from_secs(90)),
             asleep: Duration::ZERO,
+            time: Default::default(),
             nodes,
             unknown_kinds: Vec::new(),
             artifact_submissions: yunta_engine::Submissions {

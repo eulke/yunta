@@ -72,6 +72,8 @@ pub(super) struct RunStatsJson {
     /// How long the host was suspended inside the run's window — what
     /// `wall_clock_secs` and every node's durations leave out.
     asleep_secs: f64,
+    /// That wall-clock, by what it went to.
+    time: TimeJson,
     currency_estimate: Option<String>,
     nodes: Vec<NodeStatJson>,
     unknown_kinds: Vec<yunta_engine::UnknownKindCount>,
@@ -86,6 +88,32 @@ pub(super) struct RunStatsJson {
     findings_standing: u64,
     /// How many of those a proof or a person settled.
     findings_settled: u64,
+}
+
+/// A run's wall-clock by share, in seconds.
+#[derive(Serialize)]
+struct TimeJson {
+    working_secs: f64,
+    checks_secs: f64,
+    decided_checks_secs: f64,
+    measuring_secs: f64,
+    people_secs: f64,
+    parked_secs: f64,
+    between_secs: f64,
+}
+
+impl TimeJson {
+    fn of(time: &yunta_engine::TimeSpent) -> Self {
+        TimeJson {
+            working_secs: time.working.as_secs_f64(),
+            checks_secs: time.checks.as_secs_f64(),
+            decided_checks_secs: time.decided_checks.as_secs_f64(),
+            measuring_secs: time.measuring.as_secs_f64(),
+            people_secs: time.people.as_secs_f64(),
+            parked_secs: time.parked.as_secs_f64(),
+            between_secs: time.between.as_secs_f64(),
+        }
+    }
 }
 
 impl RunStatsJson {
@@ -110,6 +138,7 @@ impl RunStatsJson {
             tasks_done: stats.tasks_done,
             wall_clock_secs: stats.wall_clock.map(|d| d.as_secs_f64()),
             asleep_secs: stats.asleep.as_secs_f64(),
+            time: TimeJson::of(&stats.time),
             currency_estimate: currency_line(total, pricing),
             nodes: stats
                 .nodes

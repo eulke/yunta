@@ -11,6 +11,7 @@
 
 mod json;
 mod run;
+mod time;
 mod workflow;
 
 use std::time::Duration;

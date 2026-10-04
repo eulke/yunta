@@ -160,6 +160,8 @@ pub struct RunStats {
     /// How long the host was suspended inside that same window — what
     /// [`RunStats::wall_clock`] and every node's durations leave out.
     pub asleep: Duration,
+    /// That same wall-clock, by what it went to.
+    pub time: crate::time_spent::TimeSpent,
     /// Every node that reached at least one `node_started`, in the
     /// workflow's own declaration order.
     pub nodes: Vec<NodeStat>,
@@ -309,6 +311,7 @@ pub(crate) fn stats_observed_at(
         asleep: window
             .map(|(start, until)| asleep.asleep_between(start, until))
             .unwrap_or_default(),
+        time: crate::time_spent::time_spent(events, asleep, window.map(|(_, until)| until)),
         nodes: node_stats(
             &flat,
             &walk,

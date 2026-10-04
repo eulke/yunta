@@ -71,6 +71,7 @@ mod skills;
 mod stats;
 mod task_cycle;
 mod tasks;
+mod time_spent;
 mod verification_effectiveness;
 mod view;
 mod wakefulness;
@@ -157,6 +158,7 @@ pub use task_cycle::{
     Surprise, TaskCycleError, TaskCycleReport, TaskOutcome,
 };
 pub use tasks::judged_task;
+pub use time_spent::TimeSpent;
 pub use verification_effectiveness::{
     analyze as analyze_verification_effectiveness, AlwaysApprovedGate, AlwaysFirstTryTasks,
     NeverRedCriterion, NeverTriggeredReroute, VerificationFindings,
