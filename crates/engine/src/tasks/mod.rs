@@ -2,6 +2,7 @@
 //! registration every one entails, and what a document another run
 //! hands over carries into the tree this run works in.
 
+mod code_words;
 mod crossing;
 mod derived;
 mod judged;

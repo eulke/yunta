@@ -6,7 +6,9 @@
 //! the shape and its owner; which files name it is a fact of the tree the
 //! run works in, so the engine reads it there — rather than asking the
 //! planner to foresee every caller, or a person to allow each one once
-//! the build points at it.
+//! the build points at it. Only code names it: a fixture string that
+//! quotes a plan, or a comment, calls nothing, and reaching for it would
+//! only keep the owner from working beside the task whose file it is.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -18,10 +20,11 @@ use crate::process::Supervision;
 use crate::run::RunError;
 use crate::run_log::RunLog;
 
-/// States, for each task of `document`, every file of `tree` that names a
-/// shape the task owns and its declared scope leaves out. Once per change:
-/// a task whose reach the log already states as this one is left alone,
-/// and one a recut gave other shapes is stated again, replacing it.
+/// States, for each task of `document`, every file of `tree` whose code
+/// names a shape the task owns and its declared scope leaves out. Once
+/// per change: a task whose reach the log already states as this one is
+/// left alone, and one a recut gave other shapes is stated again,
+/// replacing it.
 pub(crate) async fn derive_reach(
     log: &RunLog<'_>,
     node: Option<&NodeId>,
@@ -89,10 +92,12 @@ async fn reach_of(
             common.push(shape.name.clone());
             continue;
         }
+        let kind = kind.to_string_lossy();
         let beyond: Vec<String> = naming
             .into_iter()
             .filter(|file| !declared.as_ref().is_some_and(|set| set.is_match(file)))
             .collect();
+        let beyond = calling(beyond, &shape.name, &kind, (tree, at, supervision)).await?;
         if !beyond.is_empty() {
             named.push(shape.name.clone());
             files.extend(beyond);
@@ -108,6 +113,25 @@ async fn reach_of(
         common,
         at: at.clone(),
     })
+}
+
+/// The files among `files` whose code — not a string or a comment in them,
+/// which call nothing — names `name`, read at `at`.
+async fn calling(
+    files: Vec<String>,
+    name: &str,
+    kind: &str,
+    (tree, at, supervision): (&Path, &CommitSha, Supervision<'_>),
+) -> Result<Vec<String>, RunError> {
+    let mut calling = Vec::new();
+    for file in files {
+        let blob = format!("{}:{file}", at.as_str());
+        let source = crate::git::output(tree, &["show", &blob], supervision).await?;
+        if super::code_words::names_in_code(&source, kind, name) {
+            calling.push(file);
+        }
+    }
+    Ok(calling)
 }
 
 /// Whether `name` is one word of code, as `git grep -w` reads a word: what

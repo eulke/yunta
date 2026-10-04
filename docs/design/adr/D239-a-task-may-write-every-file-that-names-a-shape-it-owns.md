@@ -26,7 +26,11 @@ owner: everything needed to allow the write was already known.
    registered, at birth or when a node produces it, each shape whose name is an
    identifier is looked up in the run's tree as a whole word, in files of its
    own file's type (`git grep -lwF` at the tree's commit). Every file found
-   outside its owner's declared scope joins that owner's reach.
+   outside its owner's declared scope whose code names it joins that owner's
+   reach: an occurrence inside a string literal or a comment — a test
+   fixture quoting a plan, a doc mentioning the shape — calls nothing, and
+   would only keep the owner from sharing a batch with the task whose file
+   it is. A language the engine cannot read is read whole.
 2. **A name too common reaches nothing.** A shape named in more than 20 files
    derives no file; the event lists it under `common`, so a reader sees why.
 3. **Its own event.** `scope_derived` states, per task, the files, the shapes

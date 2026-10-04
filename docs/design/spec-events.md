@@ -361,7 +361,7 @@ la tarea.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `task_id` | string | sí | la dueña de las shapes |
-| `paths` | lista de globs | sí | cada archivo exacto fuera del scope declarado que nombra, como palabra entera, una shape de la tarea con nombre de identificador, entre los del tipo de archivo de la shape. Reemplaza lo que dijo una derivación anterior |
+| `paths` | lista de globs | sí | cada archivo exacto fuera del scope declarado cuyo código —no un string ni un comentario— nombra, como palabra entera, una shape de la tarea con nombre de identificador, entre los del tipo de archivo de la shape. Reemplaza lo que dijo una derivación anterior |
 | `shapes` | lista de strings | sí | las shapes que nombran esos archivos |
 | `common` | lista de strings | sí; vacía —y omitida del log— cuando no hay ninguna | las shapes que nombran más de 20 archivos: no alcanzan ninguno |
 | `at` | sha de commit git | sí | el commit en que se leyeron los archivos |

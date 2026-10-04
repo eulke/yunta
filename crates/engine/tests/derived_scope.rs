@@ -23,10 +23,15 @@ fn owning(writes: &str) -> (String, String) {
     (no_scope_expansion_workflow(), fixture)
 }
 
-/// Commits `files` into the bench's repository, each naming `build_it`.
+/// Commits `files` into the bench's repository, each calling `build_it`.
 fn naming(bench: &Bench, files: &[String]) {
+    holding(bench, files, "fn caller() { build_it(); }\n");
+}
+
+/// Commits `files` into the bench's repository, each holding `source`.
+fn holding(bench: &Bench, files: &[String], source: &str) {
     for file in files {
-        std::fs::write(bench.worktree.join(file), "fn caller() { build_it(); }\n").unwrap();
+        std::fs::write(bench.worktree.join(file), source).unwrap();
     }
     git(&bench.worktree, &["add", "-A"]);
     git(&bench.worktree, &["commit", "-q", "-m", "callers"]);
@@ -70,4 +75,16 @@ async fn a_common_name_derives_nothing() {
     let derived = derivation(&bench).expect("the common name is on the log");
     assert!(derived.paths.is_empty(), "{:?}", derived.paths);
     assert_eq!(derived.common, ["build_it"]);
+}
+
+#[tokio::test]
+async fn a_name_only_a_string_or_a_comment_says_derives_nothing() {
+    let bench = Bench::new();
+    let fixture = "// build_it\nconst PLAN: &str = r#\"- name: build_it\"#;\n";
+    holding(&bench, &["fixture.rs".to_string()], fixture);
+    let (workflow, fixture) = owning("");
+
+    bench.run(&workflow, &fixture).await;
+
+    assert_eq!(derivation(&bench), None);
 }
