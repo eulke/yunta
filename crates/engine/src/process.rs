@@ -11,15 +11,16 @@ use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
-use thiserror::Error;
-use tokio::task::{JoinError, JoinSet};
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use yunta_core::process::group::{force_kill_group, GroupError};
+use yunta_core::process::exit::ExitWatch;
+use yunta_core::process::group::force_kill_group;
 use yunta_core::process::signal::{signal_group, Signal};
 use yunta_core::{Clock, Pid};
 
 use crate::process_registry::{self, ProcessRegistry};
 mod environment;
+mod error;
 mod leader;
 mod output;
 mod pipes;
@@ -27,10 +28,12 @@ mod state;
 
 pub use environment::execution_environment;
 use environment::SHELL;
+use error::captured_output;
+pub use error::{CapturedOutput, PipeKind, SpawnError};
 use leader::Leader;
 pub use output::CommandOutput;
 use pipes::{read_to_capture, stdio, write_then_close, Captured, PipeFailure};
-use state::{child_has_exited, observation_interval, wait_for_deadline, Waited};
+use state::{wait_for_deadline, Waited};
 
 /// The run context a governed subprocess runs under: who watches it — the
 /// run's registry, so `yunta cancel` finds it, and the token whose firing
@@ -191,84 +194,6 @@ pub enum Outcome {
     },
 }
 
-#[derive(Debug, Error)]
-pub enum SpawnError {
-    #[error("failed to spawn `{command}`")]
-    Spawn {
-        command: String,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("`{command}` spawned without a pid")]
-    NoPid { command: String },
-    #[error("failed to wait for `{command}`")]
-    Wait {
-        command: String,
-        #[source]
-        source: std::io::Error,
-        output: Box<CapturedOutput>,
-    },
-    #[error("failed to observe the child process for `{command}`")]
-    Observe {
-        command: String,
-        #[source]
-        source: std::io::Error,
-        output: Box<CapturedOutput>,
-    },
-    #[error("failed to kill the process group of `{command}`: {source}")]
-    Kill {
-        command: String,
-        #[source]
-        source: Box<GroupError>,
-        output: Box<CapturedOutput>,
-    },
-    #[error("failed to read the {} of `{command}`", stream.as_str())]
-    Read {
-        command: String,
-        stream: PipeKind,
-        #[source]
-        source: std::io::Error,
-        output: Box<CapturedOutput>,
-    },
-    #[error("the task reading the {} of `{command}` failed", stream.as_str())]
-    ReadTask {
-        command: String,
-        stream: PipeKind,
-        #[source]
-        source: JoinError,
-        output: Box<CapturedOutput>,
-    },
-}
-
-/// Output already captured when supervision failed. Kept behind a box in
-/// [`SpawnError`] so carrying diagnostics does not inflate every run error.
-#[derive(Debug)]
-pub struct CapturedOutput {
-    pub stdout: Vec<u8>,
-    pub stderr: Vec<u8>,
-}
-
-fn captured_output(stdout: Vec<u8>, stderr: Vec<u8>) -> Box<CapturedOutput> {
-    Box::new(CapturedOutput { stdout, stderr })
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum PipeKind {
-    Stdin,
-    Stdout,
-    Stderr,
-}
-impl PipeKind {
-    /// The stream's name, as a reader of a command's output knows it.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            PipeKind::Stdin => "stdin",
-            PipeKind::Stdout => "stdout",
-            PipeKind::Stderr => "stderr",
-        }
-    }
-}
-
 /// Runs `command` to its end under the engine's governance: in its own
 /// process group, registered while it lives, killed with its whole
 /// tree when its timeout elapses, the supervision's token fires or its
@@ -333,24 +258,18 @@ pub async fn spawn_governed(
     let mut child = Leader::new(child, pgid);
 
     let mut observe_error = None;
-    let mut child_observation = observation_interval();
-    child_observation.tick().await;
-    let mut waited = loop {
-        tokio::select! {
-            biased;
-            _ = supervision.cancel.cancelled() => break Waited::Cancelled,
-            _ = wait_for_deadline(timeout_at) => break Waited::TimedOut,
-            _ = child_observation.tick() => {
-                match child_has_exited(pgid) {
-                    Ok(true) => break Waited::Exited,
-                    Ok(false) => {}
-                    Err(error) => {
-                        observe_error = Some(error);
-                        break Waited::Failed;
-                    }
-                }
+    let mut exit = ExitWatch::new(pgid);
+    let mut waited = tokio::select! {
+        biased;
+        _ = supervision.cancel.cancelled() => Waited::Cancelled,
+        _ = wait_for_deadline(timeout_at) => Waited::TimedOut,
+        exited = exit.exited() => match exited {
+            Ok(()) => Waited::Exited,
+            Err(error) => {
+                observe_error = Some(error);
+                Waited::Failed
             }
-        }
+        },
     };
 
     // Keep this close operation pinned while watching the token and deadline. If
@@ -383,6 +302,11 @@ pub async fn spawn_governed(
         }
     }
 
+    // Nothing in the group can write any more: what is still buffered
+    // reads at once, and a pipe still open after a moment is held by a
+    // process that left the group — a detached daemon — which this
+    // command does not wait for.
+    let drained_by = tokio::time::Instant::now() + Duration::from_millis(250);
     let mut pipe_failure = None;
     let mut abort_pipes = cleanup_result.is_err();
     while !pipes.is_empty() && !abort_pipes {
@@ -407,6 +331,10 @@ pub async fn spawn_governed(
                 waited = Waited::TimedOut;
                 abort_pipes = true;
             }
+            _ = wait_for_deadline(Some(drained_by)) => {
+                tracing::debug!(command = %described, "a process outside the command's group still holds its output; reading stops here");
+                abort_pipes = true;
+            }
         }
     }
     if abort_pipes {
@@ -422,7 +350,7 @@ pub async fn spawn_governed(
         while pipes.join_next().await.is_some() {}
     }
 
-    // The group has been signalled and its members stopped or killed. The
+    // The group has been signalled and its members killed. The
     // leader is now collected, which is the first point at which its pid
     // may safely be reused.
     let status = loop {

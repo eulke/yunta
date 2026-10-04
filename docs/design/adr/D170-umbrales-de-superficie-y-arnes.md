@@ -11,7 +11,7 @@ revised_by: [D216, D217, D220]
 | constante | valor | dónde | por qué |
 |---|---|---|---|
 | `WAIT_DEADLINE` | 10 s | `testkit/src/wait.rs` | techo de una espera explícita en tests: suficiente para un proceso real en CI cargado, corto para que un cuelgue no consuma el runner |
-| `INTERRUPT_GRACE_PERIOD` | 200 ms | `engine/src/task_cycle/session.rs` | lo que un CLI que honra SIGINT tarda en salir antes de que el grupo reciba SIGKILL |
+| `INTERRUPT_GRACE_PERIOD` | a lo sumo 200 ms | `engine/src/task_cycle/session.rs` | lo que un CLI que honra SIGINT tarda en salir antes de que el grupo reciba SIGKILL; uno que sale antes recibe el SIGKILL en ese momento |
 | `ENGINE_SHUTDOWN_POLL` | 200 ms | `cli/src/commands/cancel.rs` | cadencia con la que `cancel` mira si el engine soltó el registro |
 | `QUEUE_DEPTH` | 1024 | `cli/src/surface/mod.rs` | profundidad de la cola engine→pintor: una ráfaga de nodos paralelos entra entera; un pintor atrasado vuelve al log en vez de replayar un minuto viejo |
 | `REDRAW_CEILING_HZ` | 20 | `cli/src/surface/mod.rs` | techo de redibujos por segundo que los eventos piden entre latidos |

@@ -247,10 +247,11 @@ pub(super) fn note_summary(text: &str) -> String {
     format!("{} bytes, sha256 {}", text.len(), &hash[..12])
 }
 
-/// Grace period between `interrupt` and the follow-up `kill` once a
-/// budget has been exceeded — long enough for a session that closes
-/// cleanly on interrupt to actually do so, short enough that a session
-/// that ignores it doesn't stall the attempt.
+/// The most a session gets between `interrupt` and the follow-up `kill`
+/// once a budget has been exceeded — long enough for a session that
+/// closes cleanly on interrupt to actually do so, short enough that a
+/// session that ignores it doesn't stall the attempt. One that leaves
+/// sooner is killed — what is left of its group — the moment it does.
 const INTERRUPT_GRACE_PERIOD: Duration = Duration::from_millis(200);
 
 /// Spawns one session from `request`, drains it to a terminal outcome
@@ -451,7 +452,7 @@ pub(crate) async fn dispatch_session(
         // then forceful — mock has nothing to distinguish them, but a
         // real adapter's session may still close cleanly on interrupt.
         let _ = session.interrupt().await;
-        tokio::time::sleep(INTERRUPT_GRACE_PERIOD).await;
+        session.allow_exit(INTERRUPT_GRACE_PERIOD).await;
         let _ = session.kill().await;
     }
     adapter.unstage(&staging)?;

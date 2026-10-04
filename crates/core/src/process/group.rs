@@ -1,7 +1,13 @@
-//! Closing a process group without assuming one group signal reaches a
-//! stable snapshot of its members. A running process can fork while the
-//! kernel delivers `SIGSTOP`; we stop until two consecutive observations
-//! agree on the members, then kill and confirm none can still execute.
+//! Closing a process group without assuming one group signal reaches
+//! every member. A running process can fork while the kernel delivers a
+//! signal to its group; we kill until an observation finds no member
+//! that can still execute.
+//!
+//! No member is ever stopped first. A process that leaves the group as
+//! it closes — a detached daemon calling `setsid` — is either killed
+//! before it leaves or runs on outside it. A stop that caught it leaving
+//! would leave it frozen outside the group, holding whatever it
+//! inherited, with nothing left that would continue or kill it.
 
 use std::io;
 use std::time::Duration;
@@ -81,8 +87,6 @@ pub enum GroupError {
         #[source]
         source: io::Error,
     },
-    #[error("process group {pgid} did not reach a stable stopped state: {members}")]
-    DidNotStop { pgid: Pid, members: String },
     #[error("process group {pgid} still has executable members after SIGKILL: {members}")]
     DidNotExit { pgid: Pid, members: String },
     #[error(
@@ -97,112 +101,44 @@ pub enum GroupError {
     },
 }
 
-/// Stops then kills every member of `pgid`, including descendants that
-/// joined while the first stop signal was being delivered. The caller must
-/// keep the group leader unreaped until this returns: its pid is the group
-/// id, and retaining it prevents that identity from being recycled while
-/// signals are still sent.
+/// Kills every member of `pgid`, including descendants that joined while
+/// an earlier signal was being delivered, until none can still execute.
+/// The caller must keep the group leader unreaped until this returns: its
+/// pid is the group id, and retaining it prevents that identity from
+/// being recycled while signals are still sent.
 pub async fn force_kill_group(pgid: Pid) -> Result<(), GroupError> {
-    let last_members = match stop_until_stable(pgid).await {
-        Ok(members) => members,
-        Err(error) => return Err(emergency_kill(pgid, error)),
-    };
-
-    // An already-empty group, or one represented only by zombies, needs
-    // no signal. In particular, macOS can answer EPERM when killpg targets
-    // a group whose only remaining member has already exited.
-    if last_members
-        .iter()
-        .all(|member| member.state == State::Terminated)
-    {
-        return Ok(());
-    }
-
-    if let Err(error) = signal_group(pgid, Signal::SIGKILL) {
-        let cause = GroupError::Signal {
-            pgid,
-            signal: Signal::SIGKILL,
-            source: error,
-        };
-        return Err(match signal_group(pgid, Signal::SIGCONT) {
-            Ok(()) => cause,
-            Err(signal) => GroupError::EmergencyKill {
-                pgid,
-                cause: Box::new(cause),
-                signal,
-            },
-        });
-    }
-
-    match confirm_group_exit(pgid).await {
-        Ok(()) => Ok(()),
-        Err(error) => Err(emergency_kill(pgid, error)),
-    }
-}
-
-async fn stop_until_stable(pgid: Pid) -> Result<Vec<Member>, GroupError> {
-    let mut previous_stopped_members: Option<Vec<i32>> = None;
-    let mut last_members = Vec::new();
     let mut observation = tokio::time::interval(OBSERVATION_INTERVAL);
-    observation.tick().await;
+    let mut last_members = Vec::new();
+    let mut refused = None;
     for _ in 0..MAX_OBSERVATIONS {
-        let members = match inspect(pgid) {
-            Ok(members) => members,
-            Err(source) => return Err(GroupError::Inspect { pgid, source }),
-        };
-        last_members = members.clone();
-        let stopped = members.iter().all(|member| member.state != State::Running);
-        if stopped {
-            let pids: Vec<_> = members.iter().map(|member| member.pid).collect();
-            if previous_stopped_members.as_ref() == Some(&pids) {
-                return Ok(last_members);
-            }
-            previous_stopped_members = Some(pids);
-        } else {
-            // A child may have been created after the kernel's first walk
-            // through the group. Stop again, then require a stable view.
-            send(pgid, Signal::SIGSTOP)?;
-            previous_stopped_members = None;
-        }
         observation.tick().await;
-    }
-
-    Err(GroupError::DidNotStop {
-        pgid,
-        members: listed(&last_members),
-    })
-}
-
-async fn confirm_group_exit(pgid: Pid) -> Result<(), GroupError> {
-    let mut observation = tokio::time::interval(OBSERVATION_INTERVAL);
-    observation.tick().await;
-    let mut last_members = Vec::new();
-    for _ in 0..MAX_OBSERVATIONS {
         let members = match inspect(pgid) {
             Ok(members) => members,
-            Err(source) => return Err(GroupError::Inspect { pgid, source }),
+            Err(source) => return Err(emergency_kill(pgid, GroupError::Inspect { pgid, source })),
         };
+        // An empty group, or one represented only by zombies, needs no
+        // signal. In particular, macOS can answer EPERM when killpg
+        // targets a group whose only remaining member has already exited,
+        // which a member exiting between the look and the signal reaches.
         if members
             .iter()
             .all(|member| member.state == State::Terminated)
         {
             return Ok(());
         }
+        refused = signal_group(pgid, Signal::SIGKILL).err();
         last_members = members;
-        observation.tick().await;
     }
-
-    Err(GroupError::DidNotExit {
-        pgid,
-        members: listed(&last_members),
-    })
-}
-
-fn send(pgid: Pid, signal: Signal) -> Result<(), GroupError> {
-    signal_group(pgid, signal).map_err(|source| GroupError::Signal {
-        pgid,
-        signal,
-        source,
+    Err(match refused {
+        Some(source) => GroupError::Signal {
+            pgid,
+            signal: Signal::SIGKILL,
+            source,
+        },
+        None => GroupError::DidNotExit {
+            pgid,
+            members: listed(&last_members),
+        },
     })
 }
 
@@ -343,7 +279,7 @@ mod tests {
     use crate::process::signal::{liveness, Liveness};
 
     #[tokio::test]
-    async fn force_kill_group_stops_and_kills_a_live_group() {
+    async fn force_kill_group_kills_a_live_group() {
         let mut child = Command::new("sh")
             .args(["-c", "sleep 30 & wait"])
             .process_group(0)
@@ -396,6 +332,64 @@ mod tests {
             Liveness::Dead,
             "the ordinary wait reaps the leader"
         );
+    }
+
+    #[tokio::test]
+    async fn a_leader_that_exited_leaving_a_child_still_has_its_child_killed() {
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 30 & exit 0"])
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pgid = Pid::try_from(child.id()).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !child_has_exited_unreaped(pgid).unwrap() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the leader exits");
+        assert!(
+            inspect(pgid)
+                .unwrap()
+                .iter()
+                .any(|member| member.state == State::Running),
+            "the sleep it left behind runs on in its group"
+        );
+
+        force_kill_group(pgid).await.unwrap();
+
+        assert!(inspect(pgid)
+            .unwrap()
+            .iter()
+            .all(|member| member.state == State::Terminated));
+        child.wait().unwrap();
+    }
+
+    /// A group whose members keep forking is emptied all the same: a
+    /// child born while one signal was delivered gets the next.
+    #[tokio::test]
+    async fn a_group_that_keeps_forking_is_emptied() {
+        let mut child = Command::new("sh")
+            .args(["-c", "while :; do sleep 30 & done"])
+            .process_group(0)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let pgid = Pid::try_from(child.id()).unwrap();
+
+        force_kill_group(pgid).await.unwrap();
+
+        assert!(inspect(pgid)
+            .unwrap()
+            .iter()
+            .all(|member| member.state == State::Terminated));
+        child.wait().unwrap();
     }
 
     #[tokio::test]

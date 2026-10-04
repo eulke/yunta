@@ -11,6 +11,7 @@
 
 use std::error::Error as _;
 use std::path::PathBuf;
+use std::time::Duration;
 use yunta_core::fence::{Advice, Coverage, Fence};
 
 use yunta_adapters::ClaudeCodeAdapter;
@@ -321,6 +322,55 @@ async fn capability_resume_session_passes_the_session_id_to_the_resume_flag() {
         .collect();
     let resume_pos = args.iter().position(|a| a == "--resume").unwrap();
     assert_eq!(args[resume_pos + 1], "sess-to-resume");
+}
+
+/// An interrupted session that leaves on its own is not held for the
+/// whole grace: the wait ends the moment it exits.
+#[tokio::test]
+async fn an_interrupted_session_that_leaves_ends_its_grace_at_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let child_pid_file = child_pid_fifo(dir.path());
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CLAUDE_STUB_CHILD_PID_FILE".to_string(),
+        child_pid_file.display().to_string().into(),
+    );
+    req.env
+        .insert("CLAUDE_STUB_LINGER".to_string(), "1".to_string().into());
+    let mut session = adapter().spawn(req).await.unwrap();
+    grandchild_pid(&child_pid_file).await;
+
+    session.interrupt().await.unwrap();
+    let started = std::time::Instant::now();
+    session.allow_exit(Duration::from_secs(30)).await;
+
+    let waited = started.elapsed();
+    session.kill().await.unwrap();
+    assert!(waited < Duration::from_secs(5), "waited {waited:?}");
+}
+
+/// One that ignores the interrupt is given the whole grace, and no more.
+#[tokio::test]
+async fn an_interrupted_session_that_stays_is_given_the_whole_grace() {
+    let dir = tempfile::tempdir().unwrap();
+    let child_pid_file = child_pid_fifo(dir.path());
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CLAUDE_STUB_CHILD_PID_FILE".to_string(),
+        child_pid_file.display().to_string().into(),
+    );
+    req.env
+        .insert("CLAUDE_STUB_HANG".to_string(), "1".to_string().into());
+    let mut session = adapter().spawn(req).await.unwrap();
+    grandchild_pid(&child_pid_file).await;
+
+    session.interrupt().await.unwrap();
+    let started = std::time::Instant::now();
+    session.allow_exit(Duration::from_millis(300)).await;
+
+    let waited = started.elapsed();
+    session.kill().await.unwrap();
+    assert!(waited >= Duration::from_millis(300), "waited {waited:?}");
 }
 
 #[tokio::test]

@@ -288,13 +288,27 @@ impl SubprocessSession {
 
     /// The readers hold the pipes; dropping them before the wait means
     /// no process can sit on a full pipe nobody reads from.
+    ///
+    /// Called once the group is closed: what is still buffered on stderr
+    /// reads at once, and a pipe still open after a moment is held by a
+    /// process that left the group — a detached daemon — which the
+    /// session does not wait for.
     async fn finish_readers(&mut self, abort_stderr: bool) -> Result<()> {
         self.reader.abort();
         if abort_stderr {
             self.stderr_drain.abort();
         }
         let stdout = (&mut self.reader).await;
-        let stderr = (&mut self.stderr_drain).await;
+        let stderr = match tokio::time::timeout(Duration::from_millis(250), &mut self.stderr_drain)
+            .await
+        {
+            Ok(drained) => drained,
+            Err(_) => {
+                tracing::debug!(adapter = %self.adapter, pgid = %self.pgid, "a process outside the session's group still holds its stderr; reading stops here");
+                self.stderr_drain.abort();
+                (&mut self.stderr_drain).await
+            }
+        };
         for (action, result) in [
             ("read the session's stdout", stdout),
             ("read the session's stderr", stderr),
@@ -331,6 +345,16 @@ impl AgentSession for SubprocessSession {
             return Ok(());
         }
         signal_group(self.pgid, Signal::SIGINT).map_err(|e| e.into_adapter_error(self.adapter))
+    }
+
+    async fn allow_exit(&mut self, grace: Duration) {
+        if self.reaped {
+            return;
+        }
+        let mut exit = super::exit::ExitWatch::new(self.pgid);
+        if let Ok(Err(error)) = tokio::time::timeout(grace, exit.exited()).await {
+            tracing::debug!(adapter = %self.adapter, pgid = %self.pgid, %error, "could not watch the session leave");
+        }
     }
 
     async fn kill(&mut self) -> Result<()> {

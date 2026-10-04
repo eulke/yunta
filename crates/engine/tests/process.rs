@@ -6,6 +6,7 @@
 use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
+use yunta_core::process::signal::Signal;
 use yunta_core::Pid;
 use yunta_engine::process::{spawn_governed, GovernedCommand, Outcome, Supervision};
 use yunta_testkit::{Owner, ProcessGroupCleanup};
@@ -231,6 +232,47 @@ async fn a_finished_shell_does_not_leave_a_descendant_holding_its_pipes_open() {
     assert!(status.success());
     assert_eq!(stdout, b"leader stdout\n");
     assert_eq!(stderr, b"leader stderr\n");
+}
+
+/// A descendant that left the command's group — a detached daemon — is
+/// not the command's to wait for: once the group is gone, what it still
+/// holds of the command's output stops being read, and the command
+/// answers with what its own processes wrote.
+#[tokio::test]
+async fn a_descendant_that_left_the_group_does_not_hold_the_command_open() {
+    let owner = Owner::new();
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = dir.path().join("daemon.pid");
+    let script = format!(
+        "perl -MPOSIX -e 'setsid(); open(my $f, \">\", \"{pid}\"); print $f $$; close $f; sleep 30' & \
+         while [ ! -s {pid} ]; do :; done; echo hi",
+        pid = daemon.display()
+    );
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(3),
+        spawn_governed(
+            GovernedCommand::shell(dir.path(), &script),
+            owner.supervision(),
+        ),
+    )
+    .await
+    .expect("the daemon holding the pipe does not hold the command");
+
+    let daemon = tokio::fs::read_to_string(&daemon).await.unwrap();
+    let daemon: Pid = daemon.trim().parse::<u32>().unwrap().try_into().unwrap();
+    let alive = yunta_core::process::signal::liveness(daemon);
+    let _ = yunta_core::process::signal::signal_process(daemon, Signal::SIGKILL);
+    let Ok(Outcome::Exited { status, stdout, .. }) = outcome else {
+        panic!("expected the shell's exit, got {outcome:?}");
+    };
+    assert!(status.success());
+    assert_eq!(stdout, b"hi\n");
+    assert_eq!(
+        alive,
+        yunta_core::process::signal::Liveness::Alive,
+        "the daemon runs on"
+    );
 }
 
 #[tokio::test]

@@ -3,7 +3,8 @@
 //! A subprocess this workspace starts is born in its own process group,
 //! belongs to whoever opened it, and dies with its whole tree when that
 //! owner is killed or dropped. [`signal`] is how it is reached, with the
-//! kernel's own answer instead of a `kill` binary's exit status;
+//! kernel's own answer instead of a `kill` binary's exit status, and
+//! [`exit`] how its exit is heard the moment it happens;
 //! [`process_start`] is how a later, separate process tells the same pid
 //! from a recycled one; [`subprocess`] is the spawn and [`lines`] the
 //! line-by-line read of its output.
@@ -12,6 +13,7 @@
 //! running a CLI, the engine running `git`, and the harness running the
 //! binary all own their children the same way.
 
+pub mod exit;
 pub mod group;
 pub mod lines;
 pub mod process_start;

@@ -1,12 +1,16 @@
 ---
 number: D185
 title: "Cerrar un process group exige una observación estable de sus miembros"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D229]
 ---
 
 # D185 — Cerrar un process group exige una observación estable de sus miembros
+
+*(Revisada por D229: el grupo se mata hasta vaciarlo y nunca se detiene; los
+pipes se drenan un momento acotado una vez cerrado el grupo, y la salida del
+líder se oye cuando ocurre en lugar de consultarse cada 10ms.)*
 
 ## Contexto
 

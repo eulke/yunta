@@ -25,6 +25,16 @@
 #   session.
 # - (if $CLAUDE_STUB_HANG is set) ignores SIGINT and blocks afterwards —
 #   exercising the kill fallback a session that ignores interrupt needs.
+# - (if $CLAUDE_STUB_LINGER is set) blocks until interrupted, then exits —
+#   a session that honours SIGINT.
+
+# How SIGINT is met is settled before anything else, so a test that waits
+# for the grandchild's pid interrupts a stub that already meets it so.
+if [ -n "$CLAUDE_STUB_HANG" ]; then
+  trap '' INT
+elif [ -n "$CLAUDE_STUB_LINGER" ]; then
+  trap 'exit 0' INT
+fi
 
 if [ -n "$CLAUDE_STUB_ARGS_FILE" ]; then
   printf '%s\n' "$@" > "$CLAUDE_STUB_ARGS_FILE"
@@ -62,8 +72,11 @@ if [ -f "$lines_file" ]; then
 fi
 
 if [ -n "$CLAUDE_STUB_HANG" ]; then
-  trap '' INT
   tail -f /dev/null
+fi
+
+if [ -n "$CLAUDE_STUB_LINGER" ]; then
+  while :; do sleep 1; done
 fi
 
 exit "${CLAUDE_STUB_EXIT:-0}"

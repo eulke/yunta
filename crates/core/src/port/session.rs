@@ -350,6 +350,11 @@ pub trait AgentSession: Send {
     /// leaves anything running.
     async fn kill(&mut self) -> Result<()>;
 
+    /// Gives the session's process up to `grace` to exit on its own after
+    /// an interrupt, answering the moment it does. A session with no
+    /// process of its own has nothing to wait for and answers at once.
+    async fn allow_exit(&mut self, _grace: Duration) {}
+
     /// The OS process-group id of the session's subprocess tree, when
     /// the adapter runs one — what the engine registers in
     /// `run.dir/scratch/engine.json` so a *separate* process (`yunta

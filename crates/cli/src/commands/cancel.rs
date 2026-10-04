@@ -27,8 +27,9 @@ use crate::context::Context;
 use crate::error::{note, warn, CliError, Outcome};
 
 /// How long the engine gets to react to the SIGINT before the escalation
-/// — generous next to the engine's own 200ms interrupt grace, because a
-/// mid-batch engine finishes killing its sessions before it pauses.
+/// — generous next to the engine's own interrupt grace of at most 200ms,
+/// because a mid-batch engine finishes killing its sessions before it
+/// pauses.
 const ENGINE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// How often `cancel` re-reads the log while it waits for the engine to

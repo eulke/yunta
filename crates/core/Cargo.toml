@@ -25,11 +25,11 @@ futures.workspace = true
 # `process::subprocess` spawns a CLI, reads its stdout line by line and
 # reaps it: the same "process"/"io-util" halves the adapters used before
 # the module moved here, plus the task and channel the reader runs on.
-tokio = { workspace = true, features = ["rt", "sync", "time", "process", "io-util"] }
+tokio = { workspace = true, features = ["rt", "sync", "time", "process", "io-util", "net"] }
 # Signals to processes and process groups (`process::signal`): the
 # kernel's own `errno` instead of a `kill` binary's exit status, with no
 # unsafe code of ours (D118).
-nix.workspace = true
+nix = { workspace = true, features = ["event"] }
 rustix.workspace = true
 # A subprocess's stderr is drained to the trace log rather than dropped.
 tracing.workspace = true
@@ -82,3 +82,4 @@ yunta-testkit-core.workspace = true
 yunta-core = { path = ".", features = ["testkit"] }
 tokio = { workspace = true, features = ["macros"] }
 proptest.workspace = true
+tempfile.workspace = true
