@@ -32,11 +32,18 @@
         "answer_type": {
           "$ref": "#/$defs/AnswerType"
         },
+        "assumes": {
+          "description": "What the work takes as the answer when nobody gives one — what an\noptional question has to say, so the run can go on without it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "id": {
           "$ref": "#/$defs/QuestionId"
         },
         "required": {
-          "description": "Whether the run waits for the answer: an unanswered required\nquestion pauses it.",
+          "description": "Whether the run waits for the answer: a round with a required\nquestion pauses it, and a round of optional ones does not.",
           "type": "boolean"
         },
         "text": {

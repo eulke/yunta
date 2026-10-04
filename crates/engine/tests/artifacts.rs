@@ -553,6 +553,7 @@ questions:
     text: "Any notes?"
     answer_type: text
     required: false
+    assumes: "no notes"
 "#;
 
 #[tokio::test]
@@ -595,6 +596,22 @@ questions:
 }
 
 #[tokio::test]
+async fn an_optional_question_without_assumes_is_refused() {
+    let run_dir = tempfile::tempdir().unwrap();
+    write_artifact(
+        run_dir.path(),
+        "ask",
+        "questions.yaml",
+        "questions:\n  - { id: q1, text: \"Any notes?\", answer_type: text, required: false }\n",
+    );
+
+    let failures = close_artifacts(&node(ASK_NODE), run_dir.path(), NOTHING_HELD, None)
+        .await
+        .unwrap_err();
+    assert_eq!(codes(&failures), ["unstated-assumption"]);
+}
+
+#[tokio::test]
 async fn duplicate_question_ids_report_every_violation_together() {
     let run_dir = tempfile::tempdir().unwrap();
     write_artifact(
@@ -611,6 +628,7 @@ questions:
     text: ""
     answer_type: text
     required: false
+    assumes: "nothing"
 "#,
     );
 

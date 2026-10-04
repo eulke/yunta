@@ -105,6 +105,36 @@ pub(crate) async fn record_nothing_asked(
     write(log, run_dir, node, &file, RecordedOrigin::Derived).await
 }
 
+/// The answers of a round that asked nothing required: empty, and the
+/// engine's own, with the `questions_answered` that closes the round on
+/// what each question assumes — so the run goes on without anyone asked.
+pub(crate) async fn record_assumed(
+    log: &RunLog<'_>,
+    run_dir: &Path,
+    node: &NodeId,
+) -> Result<Recorded, AnswersError> {
+    let recorded = record_nothing_asked(log, run_dir, node).await?;
+    log.record(
+        Some(node),
+        EventPayload::Gates(GateEvent::QuestionsAnswered(QuestionsAnsweredPayload {
+            answers_hash: recorded.answers_hash.clone(),
+            channel: Channel::Assumed,
+            responder: None,
+        })),
+    )
+    .await
+    .map_err(|source| {
+        AnswersError::Write(AcceptError::Log {
+            name: ArtifactId::Interpreted {
+                kind: ArtifactKind::Answers,
+            }
+            .view_name(),
+            source,
+        })
+    })?;
+    Ok(recorded)
+}
+
 async fn write(
     log: &RunLog<'_>,
     run_dir: &Path,

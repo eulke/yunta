@@ -179,21 +179,32 @@ pub(super) async fn close_node(
     // of a terminal is what makes the wait a wait rather than a failure
     // read as one.
     match asked(verified) {
-        Some(questions) => {
+        Some(asked) => {
             // The hash the fact names is the one the run's own store
             // answers for, read back off the log rather than taken from
             // the bytes the close happened to hold: the round that
             // follows resolves the same acceptance, and one number that
             // came from two places is one that can disagree with itself.
             let questions_hash = held_questions(ctx, &node.id).await?;
-            match QuestionsAskedPayload::new(questions_hash, questions, tokens) {
+            match QuestionsAskedPayload::new(questions_hash, asked.ids, tokens) {
                 Some(payload) => {
                     ctx.emit(
                         Some(&node.id),
                         EventPayload::Gates(GateEvent::QuestionsAsked(payload)),
                     )
                     .await?;
-                    Ok(NodeEnd::Asked)
+                    if asked.waits {
+                        return Ok(NodeEnd::Asked);
+                    }
+                    // Nothing it asked is required: each question says what
+                    // the work assumes without an answer, and the run goes
+                    // on with that rather than waiting for a person.
+                    crate::answers::record_assumed(&ctx.log(), ctx.run_dir, &node.id)
+                        .await
+                        .map_err(|source| RunError::Broken {
+                            diagnostic: source.to_string(),
+                        })?;
+                    finish_node(ctx, node, "questions assumed", TokenUsage::default()).await
                 }
                 // A questions document with no questions asked nothing.
                 // Its answers still exist, empty and the engine's own,

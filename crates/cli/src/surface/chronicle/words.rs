@@ -429,9 +429,12 @@ fn gate_words(happening: &gates::happening::Happening) -> (Option<Mark>, String)
         ),
         H::Answered { channel, responder } => (
             Some(Mark::Done),
-            match responder {
-                Some(by) => format!("answered by {by} via {}", channel.as_str()),
-                None => format!("answered via {}", channel.as_str()),
+            match (channel, responder) {
+                (yunta_core::events::Channel::Assumed, _) => {
+                    "nothing required: going on with what each question assumes".to_string()
+                }
+                (_, Some(by)) => format!("answered by {by} via {}", channel.as_str()),
+                (_, None) => format!("answered via {}", channel.as_str()),
             },
         ),
         H::AskingOpened => (Some(Mark::NeedsYou), "asking a person".to_string()),

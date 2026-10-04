@@ -481,14 +481,17 @@ mismo número (D207).
 
 ### 5.19 `questions_asked` / `questions_answered` — engine
 **Fuente:** node_id; hash e ids del documento `questions` y tokens de la sesión que
-preguntó / hash del artifact de respuestas, canal (tty\|mcp), respondiente si se
-conoce
+preguntó / hash del artifact de respuestas, canal (tty\|mcp\|assumed), respondiente
+si se conoce
 
 Un nodo que declara `questions` cierra entero —hooks, scope, artifacts— y registra
 `questions_asked` en vez de un terminal; entre ese hecho y `questions_answered` el
 nodo espera, y el `node_finished` que el cierre difirió llega después de la
 respuesta. Un `questions_asked` sin preguntas es irrepresentable: un nodo que no
-preguntó nada termina en el mismo cierre.
+preguntó nada termina en el mismo cierre. Una ronda sin preguntas `required` no
+espera: al `questions_asked` le siguen las respuestas vacías del engine y un
+`questions_answered` con canal `assumed` —cada pregunta dice en `assumes` qué toma
+el trabajo por respuesta— y el nodo termina en el mismo cierre (D241).
 
 `questions_asked`:
 
@@ -503,7 +506,7 @@ preguntó nada termina en el mismo cierre.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `answers_hash` | string | sí | hash del artifact de respuestas |
-| `channel` | enum `tty \| mcp` | sí | — |
+| `channel` | enum `tty \| mcp \| assumed` | sí | `assumed`: nadie respondió, porque ninguna pregunta era `required`; el engine cerró la ronda con lo que cada una asume |
 | `responder` | `Option<string>` | no | si el canal lo identifica |
 
 ### 5.19a `asking_opened` — engine

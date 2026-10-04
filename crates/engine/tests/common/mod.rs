@@ -51,6 +51,7 @@ sessions:
                 text: "Any notes?"
                 answer_type: text
                 required: false
+                assumes: "no notes"
     outcome: { type: completed, summary: "asked" }
 "#;
 

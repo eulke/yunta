@@ -357,8 +357,15 @@ async fn record_content(
 
 /// Every question this node's artifacts ask, by id.
 ///
-/// The questions a node handed over, with the document they came from —
-/// `None` when the node declared none at all.
+/// What a node asked: the ids of the questions it handed over, and
+/// whether any of them is one the run waits for.
+pub(super) struct Asked {
+    pub(super) ids: Vec<QuestionId>,
+    pub(super) waits: bool,
+}
+
+/// The questions a node handed over — `None` when the node declared none
+/// at all.
 ///
 /// A `kind: questions` artifact is read at the node's close (the same
 /// "artifact read only at node close" ordering `tasks` and `findings`
@@ -368,13 +375,14 @@ async fn record_content(
 /// asking happens in ONE place afterwards, the scheduler's own
 /// `AskQuestions` step, which serves the first invocation and every
 /// resume through the identical path.
-pub(super) fn asked(verified: &[VerifiedArtifact]) -> Option<Vec<QuestionId>> {
+pub(super) fn asked(verified: &[VerifiedArtifact]) -> Option<Asked> {
     verified
         .iter()
         .find_map(|artifact| match &artifact.content {
-            ArtifactContent::Questions(questions) => {
-                Some(questions.iter().map(|q| q.id.clone()).collect())
-            }
+            ArtifactContent::Questions(questions) => Some(Asked {
+                ids: questions.iter().map(|q| q.id.clone()).collect(),
+                waits: questions.iter().any(|q| q.required),
+            }),
             _ => None,
         })
 }

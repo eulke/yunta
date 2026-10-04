@@ -120,7 +120,7 @@ fn questions() -> impl Strategy<Value = QuestionsFile> {
                 .map(|(id, text, required)| {
                     format!(
                         "  - id: {id}\n    text: \"{text}\"\n    answer_type: text\n\
-                         \x20   required: {required}\n"
+                         \x20   required: {required}\n    assumes: \"{text}\"\n"
                     )
                 })
                 .collect::<String>();

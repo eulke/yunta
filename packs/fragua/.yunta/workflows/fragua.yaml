@@ -55,8 +55,11 @@ nodes:
       them: make each one stand alone, say what depends on the answer and
       what you would choose. Prefer `boolean`, or `choice` with the options
       you see; use `text` only when the answer cannot be listed. A question
-      is `required` only when the brief cannot be written without it. When
-      nothing needs deciding, hand over an empty list.
+      is `required` only when the brief cannot be written without it; any
+      other says in `assumes` what the work takes as its answer when nobody
+      gives one. Only a required question stops the run: a round of optional
+      ones goes on with what each assumes. When nothing needs deciding, hand
+      over an empty list.
     artifacts:
       produces: [questions]
 
@@ -75,9 +78,9 @@ nodes:
       - What changes, for whom, and why.
       - What is in, and what is out.
       - Each answer, as the requirement it sets.
-      - Open points: every question left unanswered and anything the answers
-        do not settle, each with the assumption you would make. The plan
-        closes them.
+      - Open points: every question left unanswered — with the assumption it
+        states in `assumes` — and anything the answers do not settle, each
+        with the assumption you would make. The plan closes them.
 
       Add nothing the idea and the answers do not say: a guess is an open
       point, not a requirement.

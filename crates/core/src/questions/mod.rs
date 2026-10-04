@@ -36,9 +36,13 @@ pub struct Question {
     /// The options of a `choice` question, and of no other.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
-    /// Whether the run waits for the answer: an unanswered required
-    /// question pauses it.
+    /// Whether the run waits for the answer: a round with a required
+    /// question pauses it, and a round of optional ones does not.
     pub required: bool,
+    /// What the work takes as the answer when nobody gives one — what an
+    /// optional question has to say, so the run can go on without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assumes: Option<String>,
 }
 
 /// What a node needs a person to decide. An empty list asks nothing.

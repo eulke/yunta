@@ -42,6 +42,9 @@ pub struct Shown {
 pub enum Channel {
     Tty,
     Mcp,
+    /// Nobody answered: every question was optional, and the engine closed
+    /// the round on what each one assumes.
+    Assumed,
 }
 
 impl Channel {
@@ -50,6 +53,7 @@ impl Channel {
         match self {
             Channel::Tty => "tty",
             Channel::Mcp => "mcp",
+            Channel::Assumed => "assumed",
         }
     }
 }

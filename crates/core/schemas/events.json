@@ -684,10 +684,19 @@
       ]
     },
     "Channel": {
-      "type": "string",
-      "enum": [
-        "tty",
-        "mcp"
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "tty",
+            "mcp"
+          ]
+        },
+        {
+          "description": "Nobody answered: every question was optional, and the engine closed\nthe round on what each one assumes.",
+          "type": "string",
+          "const": "assumed"
+        }
       ]
     },
     "ChildRunCreatedPayload": {
@@ -3927,6 +3936,11 @@
           "description": "`answer_type` is `choice` and `values` is empty.",
           "type": "string",
           "const": "missing-values"
+        },
+        {
+          "description": "An optional question does not say what the work assumes when\nnobody answers it.",
+          "type": "string",
+          "const": "unstated-assumption"
         },
         {
           "description": "A `required` question has no answer.",

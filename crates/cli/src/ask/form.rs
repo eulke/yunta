@@ -174,6 +174,7 @@ mod tests {
             answer_type,
             values: vec!["staging".to_string(), "production".to_string()],
             required,
+            assumes: (!required).then(|| "staging".to_string()),
         }
     }
 

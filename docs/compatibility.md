@@ -254,7 +254,7 @@ The rules a document can break, which is that closed set: `duplicate-id`,
 `changes-a-spec-test`, `unknown-answer`, `unrun-spec-file`,
 `spec-test-runs-no-spec-file`, `empty-text`,
 `empty-detail`, `unknown-id`, `withdrawn-id`, `empty-reason`, `missing-values`,
-`missing-answer`, `mismatched-answer`, `incoherent-mode`,
+`unstated-assumption`, `missing-answer`, `mismatched-answer`, `incoherent-mode`,
 `invariant-in-parallel` and `incoherent-optional`. Together with
 `parse` and the six an artifact fails under, they are every stable code this
 system reports: a receipt counts by one, `status --json` publishes one, and a log

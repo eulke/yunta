@@ -180,6 +180,9 @@ rule_codes! {
     EmptyReason => "empty-reason",
     /// `answer_type` is `choice` and `values` is empty.
     MissingValues => "missing-values",
+    /// An optional question does not say what the work assumes when
+    /// nobody answers it.
+    UnstatedAssumption => "unstated-assumption",
     /// A `required` question has no answer.
     MissingAnswer => "missing-answer",
     /// An answer's value is not what its question's `answer_type` allows.

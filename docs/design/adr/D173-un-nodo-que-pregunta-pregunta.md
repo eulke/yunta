@@ -1,9 +1,9 @@
 ---
 number: D173
 title: "Un nodo que pregunta, pregunta: el hecho es `questions_asked`, el nodo espera entre preguntar y responder, lo que depende de las respuestas es del nodo siguiente, e `interactive` se retira"
-status: accepted
+status: revised
 revises: [D86]
-revised_by: []
+revised_by: [D241]
 ---
 
 # D173 — Un nodo que pregunta, pregunta: el hecho es `questions_asked`, el nodo espera entre preguntar y responder, lo que depende de las respuestas es del nodo siguiente, e `interactive` se retira

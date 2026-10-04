@@ -202,7 +202,7 @@ fn a_questions_artifact_refuses_unknown_keys() {
     let text = err::<QuestionsFile>("questions:\n  - id: q\n    text: t\n    answer_type: text\n    required: true\n    valeus: []\n");
     assert_eq!(
         text,
-        "`questions[0].valeus`: unknown field `valeus`, expected one of `id`, `text`, `answer_type`, `values`, `required` — did you mean `values`? at line 6 column 5"
+        "`questions[0].valeus`: unknown field `valeus`, expected one of `id`, `text`, `answer_type`, `values`, `required`, `assumes` — did you mean `values`? at line 6 column 5"
     );
 }
 

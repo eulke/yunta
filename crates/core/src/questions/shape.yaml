@@ -9,8 +9,10 @@ questions:                              # required; an empty list is valid and
     text: "Should dark mode follow the operating system setting?"  # required
     answer_type: boolean                # required, one of:
                                         #   text | choice | boolean
-    required: true                      # required: an unanswered `required`
-                                        #   question pauses the run
+    required: true                      # required: a round with a `required`
+                                        #   question pauses the run until a
+                                        #   person answers; a round of optional
+                                        #   ones does not pause it
 
   - id: accent-colour
     text: "Which accent colour should the dark theme use?"
@@ -18,3 +20,6 @@ questions:                              # required; an empty list is valid and
     values: ["teal", "amber", "violet"] # required when answer_type is `choice`,
                                         #   and an answer must be one of these
     required: false
+    assumes: "teal, the brand's own accent"  # required when `required` is
+                                        #   false: what the work takes as the
+                                        #   answer when nobody gives one
