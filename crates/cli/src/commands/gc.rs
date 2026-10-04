@@ -33,15 +33,38 @@ use yunta_core::events::RunEvent;
 
 pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
-    let removed = reclaim(&ctx, dry_run)?;
+    let Reclaimed {
+        removed,
+        given_back,
+    } = reclaim(&ctx, dry_run)?;
     let pool = yunta_engine::CheckoutPool::upkeep(&ctx.project.worktrees_root, &ctx.cwd);
     for run_id in &removed {
         forget_units(&ctx, &pool, run_id).await;
     }
     if !dry_run {
+        for (run_id, tree) in &given_back {
+            give_back(&ctx, &pool, run_id, tree).await;
+        }
         trim(&ctx, &pool).await;
     }
     Ok(Outcome::Success)
+}
+
+/// What a pass collected: the runs whose files went, and the checkouts of
+/// the project's pool runs gave back — a collected run's, and a parked
+/// run's nobody came back to.
+#[derive(Default)]
+struct Reclaimed {
+    removed: Vec<RunId>,
+    given_back: Vec<(RunId, PathBuf)>,
+}
+
+/// Gives a run's checkout back to the project's pool, with no branch.
+async fn give_back(ctx: &Context, pool: &yunta_engine::CheckoutPool, run_id: &RunId, tree: &Path) {
+    let released = yunta_engine::release_run_checkout(pool, tree, run_id, ctx.supervision());
+    if let Err(e) = released.await {
+        warn(format!("run {}: {e}", run_id.handle()));
+    }
 }
 
 /// What git still holds of a run whose files are gone: the checkouts its
@@ -73,8 +96,10 @@ async fn trim(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
 }
 
 /// Removes every terminal run past retention — its files on this pass,
-/// its rows on a later one — and answers the runs whose files went.
-fn reclaim(ctx: &Context, dry_run: bool) -> Result<Vec<RunId>, CliError> {
+/// its rows on a later one — and answers the runs whose files went, with
+/// the checkouts of the project's pool to give back: a collected run's,
+/// and that of a parked run nobody came back to within retention.
+fn reclaim(ctx: &Context, dry_run: bool) -> Result<Reclaimed, CliError> {
     let Some(retention_days) = ctx
         .project
         .config
@@ -86,7 +111,7 @@ fn reclaim(ctx: &Context, dry_run: bool) -> Result<Vec<RunId>, CliError> {
             "`storage.retention_days` isn't configured — nothing to reclaim until it is, \
              since `gc` has no default retention to guess"
         );
-        return Ok(Vec::new());
+        return Ok(Reclaimed::default());
     };
 
     let storage = ctx.storage()?;
@@ -96,7 +121,7 @@ fn reclaim(ctx: &Context, dry_run: bool) -> Result<Vec<RunId>, CliError> {
 
     let now = yunta_core::Clock::now(&ctx.clock);
     let mut reclaimed = 0usize;
-    let mut removed = Vec::new();
+    let mut collected = Reclaimed::default();
     for run_id in run_ids {
         let events = match storage.events_for_run(&run_id) {
             Ok(events) => events,
@@ -115,12 +140,14 @@ fn reclaim(ctx: &Context, dry_run: bool) -> Result<Vec<RunId>, CliError> {
                     Some(yunta_core::events::EventPayload::Run(RunEvent::Finished(_)))
                 )
             });
-        if !is_terminal {
-            continue;
-        }
-
         let age_days = (now - last.timestamp).num_days();
         if age_days < retention_days as i64 {
+            continue;
+        }
+        if !is_terminal {
+            if let Some(tree) = parked_checkout(&state) {
+                collected.given_back.push((run_id.clone(), tree));
+            }
             continue;
         }
 
@@ -131,10 +158,14 @@ fn reclaim(ctx: &Context, dry_run: bool) -> Result<Vec<RunId>, CliError> {
         match ctx.project.run_dir(run_id.as_str()) {
             Some(run_dir) => {
                 let bound = state.run.checkout();
+                let tree = worktree_of(&ctx.project, &run_dir, &run_id, bound);
+                if let Some(tree) = tree.as_ref().filter(|tree| in_the_pool(tree)) {
+                    collected.given_back.push((run_id.clone(), tree.clone()));
+                }
                 if remove_run(ctx, &run_dir, &run_id, bound, dry_run) {
                     reclaimed += 1;
                     if !dry_run {
-                        removed.push(run_id.clone());
+                        collected.removed.push(run_id.clone());
                     }
                 }
             }
@@ -170,7 +201,35 @@ fn reclaim(ctx: &Context, dry_run: bool) -> Result<Vec<RunId>, CliError> {
     } else {
         println!("{} reclaimed", yunta_core::text::counted(reclaimed, "run"));
     }
-    Ok(removed)
+    Ok(collected)
+}
+
+/// Whether `tree` is a checkout of a project's pool — `pool/<project>/slot-N`
+/// under whichever worktrees root the run froze — which a run gives back
+/// rather than takes away.
+fn in_the_pool(tree: &Path) -> bool {
+    let named = |path: Option<&Path>, what: &dyn Fn(&str) -> bool| {
+        path.and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            .is_some_and(what)
+    };
+    named(Some(tree), &|name| name.starts_with("slot-"))
+        && named(tree.parent().and_then(Path::parent), &|name| name == "pool")
+}
+
+/// The checkout of the project's pool a parked run works in, when nobody
+/// would lose anything if it went back: no session the run left open is
+/// waiting to be picked up there. Its work stays on its branch, and a wake
+/// takes a checkout again.
+fn parked_checkout(state: &yunta_engine::RunState) -> Option<PathBuf> {
+    let tree = state.run.checkout()?;
+    let continued = state.nodes.iter().any(|(_, record)| {
+        matches!(
+            record.orphaned_session,
+            Some(yunta_core::events::OrphanedSession::Open(_))
+        )
+    });
+    (!continued && in_the_pool(tree)).then(|| tree.to_path_buf())
 }
 
 /// Removes a terminal run's on-disk footprint — its `run.dir` and, for a
@@ -192,6 +251,8 @@ fn remove_run(
     let mut removed_any = false;
     let mut all_removed = true;
 
+    // A checkout of the project's pool is given back, never taken away.
+    let worktree = worktree.filter(|tree| !in_the_pool(tree));
     for dir in [Some(run_dir.to_path_buf()), worktree]
         .into_iter()
         .flatten()

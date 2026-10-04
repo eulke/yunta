@@ -77,7 +77,6 @@ pub(crate) async fn drive_promotions(
                 worktree: &worktree,
                 run_dir: &env.ctx.project.runs_root.join(run_id.as_str()),
             },
-            &env.ctx.cwd,
             &suggested_mode,
             yunta_engine::RunRoots {
                 runs: &env.ctx.project.runs_root,

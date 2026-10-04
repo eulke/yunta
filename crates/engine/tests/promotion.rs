@@ -317,10 +317,8 @@ async fn successor_of(
     bench: &Bench,
     ids: &SeqIdSource,
 ) -> yunta_engine::PromotionSuccessor {
-    let repo = predecessor.worktree.to_path_buf();
     yunta_engine::create_promotion_successor(
         predecessor,
-        &repo,
         &ModeName::from("full"),
         yunta_engine::RunRoots {
             runs: &bench.runs_root,
@@ -862,4 +860,31 @@ fn two_nodes_findings_under_one_id_are_inherited_as_two() {
         yunta_core::shape::Document::check(&file).is_empty(),
         "the document the successor inherits never repeats an id"
     );
+}
+
+/// A successor carries on in its predecessor's own checkout, on a branch of
+/// its own cut where that tree stands: what the predecessor built is there,
+/// and the successor's birth names that checkout.
+#[tokio::test]
+async fn successor_works_in_its_predecessors_checkout() {
+    let bench = Bench::new().in_mode("quick");
+    let interaction = ScriptedInteraction::choose("promote");
+    let RunReport { terminal, .. } = bench
+        .run_with_interaction(PROMOTABLE_WORKFLOW, NO_SESSIONS, &interaction)
+        .await;
+    assert!(matches!(terminal, RunTerminal::Promoted { .. }));
+    let (manifest, run_dir) = (bench.manifest(), bench.run_dir());
+    let ids = SeqIdSource::new("minted");
+
+    let successor = successor_of(predecessor_of(&bench, &manifest, &run_dir), &bench, &ids).await;
+
+    assert_eq!(successor.worktree, bench.worktree);
+    let on = yunta_testkit::git_output(&bench.worktree, &["branch", "--show-current"]);
+    assert_eq!(on.trim(), format!("yunta/run/{}", successor.run_id));
+    let born = bench.storage.events_for_run(&successor.run_id).unwrap();
+    let named = yunta_engine::derive(&born)
+        .run
+        .checkout()
+        .map(std::path::Path::to_path_buf);
+    assert_eq!(named, Some(bench.worktree.clone()));
 }

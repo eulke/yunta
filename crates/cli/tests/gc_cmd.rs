@@ -191,8 +191,8 @@ fn gc_finds_runs_by_frozen_paths_after_a_config_change() {
     assert!(run.status.success(), "stderr: {}", stderr(&run));
     let run_id = run_id_from(&run);
     let run_dir = home.join("runs").join(&run_id);
-    let worktree = home.join("worktrees").join(&run_id);
-    assert!(run_dir.exists() && worktree.exists());
+    let checkouts = yunta_testkit::pool_checkouts(&home);
+    assert!(run_dir.exists() && checkouts.len() == 1, "{checkouts:?}");
 
     // The config's paths now point elsewhere — the run stays frozen where
     // it was created, and gc must follow the manifest, not this config.
@@ -211,18 +211,11 @@ fn gc_finds_runs_by_frozen_paths_after_a_config_change() {
     assert!(gc.status.success(), "stderr: {}", stderr(&gc));
     assert!(stdout(&gc).contains("reclaimed"), "got: {}", stdout(&gc));
 
-    // The run's real (frozen) run.dir and worktree are gone; the current
-    // config's roots never were this run's home.
-    assert!(
-        !run_dir.exists(),
-        "the frozen run.dir must be reclaimed: {}",
-        stdout(&gc)
-    );
-    assert!(
-        !worktree.exists(),
-        "the frozen worktree must be reclaimed, not the current config's: {}",
-        stdout(&gc)
-    );
+    // The run's real (frozen) run.dir is gone; the current config's roots
+    // never were this run's home. Its checkout went back to the project.
+    let said = stdout(&gc);
+    assert!(!run_dir.exists(), "the frozen run.dir is reclaimed: {said}");
+    assert!(checkouts[0].exists(), "and its checkout given back: {said}");
     assert!(!relocated_runs.join(&run_id).exists());
     assert!(!relocated_worktrees.join(&run_id).exists());
 }
@@ -230,54 +223,78 @@ fn gc_finds_runs_by_frozen_paths_after_a_config_change() {
 #[test]
 fn failed_removal_is_not_counted() {
     let root = tempfile::tempdir().unwrap();
-    let repo = root.path().join("repo");
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    let home = root.path().join("state");
-
-    write(
-        &repo.join(".yunta/config.yaml"),
-        "storage:\n  retention_days: 0\n",
-    );
-    write(&repo.join("wf.yaml"), ONE_NODE);
+    let (repo, home) = keeping_nothing(root.path());
 
     // Two finished runs, both past the zero-day retention window.
-    let clean = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
-    assert!(clean.status.success());
-    let clean_id = run_id_from(&clean);
-    let stuck = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
-    assert!(stuck.status.success());
-    let stuck_id = run_id_from(&stuck);
+    let [clean_id, stuck_id] = ["clean", "stuck"].map(|_| {
+        let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+        assert!(run.status.success());
+        run_id_from(&run)
+    });
 
-    // One run's worktree cannot be removed as a directory: a regular file
-    // in its place makes `remove_dir_all` fail with ENOTDIR for any user,
-    // root included — a removal that can never succeed.
-    let stuck_worktree = home.join("worktrees").join(&stuck_id);
-    std::fs::remove_dir_all(&stuck_worktree).unwrap();
-    std::fs::write(&stuck_worktree, b"not a directory").unwrap();
+    // One run's directory cannot be removed: a directory in it that lets
+    // nobody take what is inside. Root takes it anyway, so a root test has
+    // nothing to show.
+    if running_as_root() {
+        return;
+    }
+    let stuck_dir = locked_in(&home.join("runs").join(&stuck_id));
 
     let gc = yunta_in!(&repo, &home, &["gc"]);
+    let (said, warned) = (stdout(&gc), stderr(&gc));
     assert!(
         gc.status.success(),
-        "a failed removal warns, never aborts: {}",
-        stderr(&gc)
+        "a failed removal warns, never aborts: {warned}"
     );
     // Only the run gc fully reclaimed is counted; the stuck one is not,
     // even though it too is terminal and past retention.
     assert!(
-        stdout(&gc).contains("1 run reclaimed"),
-        "exactly the clean run is counted: {}",
-        stdout(&gc)
+        said.contains("1 run reclaimed"),
+        "only the clean run counts: {said}"
     );
     // The failure is surfaced, never swallowed.
     assert!(
-        stderr(&gc).contains("warning"),
-        "the stuck removal is warned: {}",
-        stderr(&gc)
+        warned.contains("warning"),
+        "the stuck removal is warned: {warned}"
     );
-    // The clean run is gone; the un-removable worktree is still there.
+    // The clean run is gone; the un-removable directory is still there.
     assert!(!home.join("runs").join(&clean_id).exists());
-    assert!(stuck_worktree.exists(), "the removal genuinely failed");
+    assert!(
+        stuck_dir.join("kept").exists(),
+        "the removal genuinely failed"
+    );
+    set_mode(&stuck_dir, 0o700);
+}
+
+/// A repository under `root` whose config keeps nothing past a day, with
+/// its one-node workflow, and the state root beside it.
+fn keeping_nothing(root: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    let repo = root.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let config = "storage:\n  retention_days: 0\n";
+    write(&repo.join(".yunta/config.yaml"), config);
+    write(&repo.join("wf.yaml"), ONE_NODE);
+    (repo, root.join("state"))
+}
+
+/// A directory under `run_dir` that lets nobody take what is inside it.
+fn locked_in(run_dir: &std::path::Path) -> std::path::PathBuf {
+    let locked = run_dir.join("locked");
+    std::fs::create_dir_all(&locked).unwrap();
+    std::fs::write(locked.join("kept"), b"kept").unwrap();
+    set_mode(&locked, 0o500);
+    locked
+}
+
+fn set_mode(dir: &std::path::Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode)).unwrap();
+}
+
+fn running_as_root() -> bool {
+    let id = std::process::Command::new("id").arg("-u").output().unwrap();
+    String::from_utf8_lossy(&id.stdout).trim() == "0"
 }
 
 #[test]

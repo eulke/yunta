@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use yunta_core::process::signal::{liveness, signal_group, signal_process, Liveness, Signal};
 use yunta_core::Pid;
 use yunta_testkit::{
-    git, hermetic, init_repo, run_id_from, stderr, stdout, wait_for, wait_until, write, yunta_at,
-    yunta_in, Checkout, CliChild, ProcessGroupCleanup,
+    git, git_output, hermetic, init_repo, run_id_from, stderr, stdout, wait_for, wait_until, write,
+    yunta_at, yunta_in, Checkout, CliChild, ProcessGroupCleanup,
 };
 
 fn claude_code_stub() -> PathBuf {
@@ -546,21 +546,22 @@ nodes:
     // The default (`worktree`) isolation must never let the agent's edit
     // land in the checkout the user is looking at.
     assert!(!repo.join("made.txt").exists());
-    // It lives in a dedicated worktree under the state root instead.
-    let worktrees_dir = home.join("worktrees");
-    let made_somewhere = std::fs::read_dir(&worktrees_dir)
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .any(|entry| entry.path().join("made.txt").exists());
+    // It lives in a checkout of the project's pool under the state root.
+    let made_somewhere = yunta_testkit::pool_checkouts(&home)
+        .iter()
+        .any(|checkout| checkout.join("made.txt").exists());
     assert!(
         made_somewhere,
-        "expected made.txt inside some worktree under {}",
-        worktrees_dir.display()
+        "expected made.txt in a checkout of the pool under {}",
+        home.display()
     );
 }
 
+/// Two runs one after the other work in the same checkout of the project's
+/// pool, each on a branch of its own: the second finds what the first
+/// built, and each branch holds only its own run's work.
 #[test]
-fn two_runs_on_the_same_repo_get_independent_worktrees() {
+fn two_runs_on_the_same_repo_share_one_warm_checkout_on_branches_of_their_own() {
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -583,15 +584,12 @@ nodes:
     let run2 = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
     assert!(run2.status.success(), "run2: {}", stdout(&run2));
 
-    let worktree_dirs: Vec<_> = std::fs::read_dir(home.join("worktrees"))
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .collect();
-    assert_eq!(
-        worktree_dirs.len(),
-        2,
-        "expected one dedicated worktree per run"
-    );
+    assert_eq!(yunta_testkit::pool_checkouts(&home).len(), 1);
+    for run in [&run1, &run2] {
+        let branch = format!("yunta/run/{}:made.txt", run_id_from(run));
+        let made = git_output(&repo, &["show", &branch]);
+        assert_eq!(made.trim(), "made", "{branch}");
+    }
 }
 
 #[test]
@@ -708,20 +706,17 @@ nodes:
         stdout(&resume)
     );
 
-    // Resume must operate on the very worktree `run` created — never a
+    // Resume must operate on the very checkout `run` worked in — never a
     // second one, and never the original checkout.
     assert!(!repo.join("attempt-marker.txt").exists());
-    let worktree_dirs: Vec<_> = std::fs::read_dir(home.join("worktrees"))
-        .unwrap()
-        .filter_map(|e| e.ok())
-        .collect();
+    let checkouts = yunta_testkit::pool_checkouts(&home);
     assert_eq!(
-        worktree_dirs.len(),
+        checkouts.len(),
         1,
-        "resume must reuse the run's own worktree, not create another"
+        "resume must reuse the run's own checkout, not take another"
     );
-    assert!(worktree_dirs[0].path().join("marker.txt").exists());
-    assert!(worktree_dirs[0].path().join("attempt-marker.txt").exists());
+    assert!(checkouts[0].join("marker.txt").exists());
+    assert!(checkouts[0].join("attempt-marker.txt").exists());
 }
 
 #[test]
@@ -1774,15 +1769,9 @@ nodes:
     let mut yunta = CliChild::spawn(command, None).unwrap();
     let worktree = wait_for(
         || {
-            let entry = std::fs::read_dir(home.join("worktrees"))
-                .ok()?
-                .flatten()
-                .next()?;
-            entry
-                .path()
-                .join("started.txt")
-                .exists()
-                .then(|| entry.path())
+            yunta_testkit::pool_checkouts(&home)
+                .into_iter()
+                .find(|checkout| checkout.join("started.txt").exists())
         },
         || "the node never started".into(),
     );
@@ -2147,11 +2136,9 @@ nodes:
         "expected the child's frozen manifest at {}",
         child_manifest.display()
     );
-    let child_tree = home.join("worktrees").join(&child_id);
+    let on_its_branch = format!("yunta/run/{child_id}:child.txt");
     assert_eq!(
-        std::fs::read_to_string(child_tree.join("child.txt"))
-            .unwrap()
-            .trim(),
+        git_output(&repo, &["show", &on_its_branch]).trim(),
         "from-child"
     );
 }

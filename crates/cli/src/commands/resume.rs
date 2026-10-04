@@ -46,12 +46,38 @@ async fn parked(ctx: &Context, run_id: &RunId) -> Result<Parked, CliError> {
     let worktree = ctx
         .project
         .run_tree(&manifest, bound.as_deref(), run_id, &ctx.cwd);
+    let worktree = still_or_again(ctx, &manifest, run_id, worktree).await?;
     Ok(Parked {
         run_dir,
         manifest,
         worktree,
         adapters,
     })
+}
+
+/// The checkout the run works in on this wake: the one its log names
+/// while it is still the run's, or else the one the project's pool finds
+/// for the run's branch — given back while the run was parked, or taken
+/// away. A run working in a person's checkout works where it always did.
+async fn still_or_again(
+    ctx: &Context,
+    manifest: &Manifest,
+    run_id: &RunId,
+    named: PathBuf,
+) -> Result<PathBuf, CliError> {
+    let supervision = ctx.supervision();
+    if manifest.isolation != yunta_core::Isolation::Worktree
+        || yunta_engine::still_the_runs(&named, run_id, supervision).await
+    {
+        return Ok(named);
+    }
+    let pool = yunta_engine::CheckoutPool::new(
+        &ctx.project.worktrees_root_for(manifest),
+        &ctx.cwd,
+        &ctx.project.runs_root.join(run_id.as_str()),
+    );
+    let (checkout, _held) = pool.reopen_run(run_id, supervision).await?;
+    Ok(checkout)
 }
 
 pub async fn resume(run_id: &RunId, quiet: bool, json: bool) -> Result<Outcome, CliError> {

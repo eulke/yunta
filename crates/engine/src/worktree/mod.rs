@@ -43,16 +43,16 @@ use yunta_core::{CommitSha, InvalidId, Isolation, Pid, TreeId};
 use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
 
 use crate::process::Supervision;
-pub(crate) use branches::unit_branches;
 pub(crate) use branches::RUN_BRANCHES;
+pub(crate) use branches::{is_unit_branch, unit_branches};
 pub use branches::{run_branch, run_units, unit_branch};
 pub use commit::{commit_tree, restore};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
 pub(crate) use listing::checkouts;
 pub use overlay::{remove_files, tree_with, write_files};
 pub use pool::{
-    forget_run_units, pool_home, put_back, release_unit_checkouts, retire_unit_branch, trim_pool,
-    CheckoutPool, Lease,
+    forget_run_units, hand_over_run_checkout, pool_home, put_back, release_run_checkout,
+    release_unit_checkouts, retire_unit_branch, still_the_runs, trim_pool, CheckoutPool, Lease,
 };
 pub use unit::{
     carry_work, commit_work, land, rebase_onto, reopen_unit, snapshot_commit, Carried, Rebase,

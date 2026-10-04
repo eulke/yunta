@@ -431,25 +431,43 @@ pub(super) async fn create_run_from(
     }
 
     let run_id = ctx.ids.mint_run_id(ctx.clock.now());
-    let worktree = ctx.project.run_tree(manifest, None, &run_id, &ctx.cwd);
-    match yunta_engine::prepare_worktree(
-        &ctx.cwd,
-        &worktree,
-        &manifest.base_commit,
-        &yunta_engine::run_branch(&run_id),
-        manifest.isolation,
-        ctx.supervision(),
-    )
-    .await?
-    {
-        yunta_engine::WorktreePrepared::Ready => {}
-        yunta_engine::WorktreePrepared::StoleStaleLock { dead_pid } => {
-            warn(format!(
-                "this checkout's isolation lock belonged to a dead process \
-                 (pid {dead_pid}) — taking it over"
-            ));
+    let worktree = match manifest.isolation {
+        // A run of its own works in a checkout of the project's pool, on a
+        // branch of its own: warm with whatever the last run there built.
+        yunta_core::Isolation::Worktree => {
+            let pool = yunta_engine::CheckoutPool::new(
+                &ctx.project.worktrees_root_for(manifest),
+                &ctx.cwd,
+                &ctx.project.runs_root.join(run_id.as_str()),
+            );
+            let (checkout, _held) = pool
+                .open_run(&run_id, &manifest.base_commit, ctx.supervision())
+                .await?;
+            checkout
         }
-    }
+        yunta_core::Isolation::None => {
+            let worktree = ctx.project.run_tree(manifest, None, &run_id, &ctx.cwd);
+            match yunta_engine::prepare_worktree(
+                &ctx.cwd,
+                &worktree,
+                &manifest.base_commit,
+                &yunta_engine::run_branch(&run_id),
+                manifest.isolation,
+                ctx.supervision(),
+            )
+            .await?
+            {
+                yunta_engine::WorktreePrepared::Ready => {}
+                yunta_engine::WorktreePrepared::StoleStaleLock { dead_pid } => {
+                    warn(format!(
+                        "this checkout's isolation lock belonged to a dead process \
+                         (pid {dead_pid}) — taking it over"
+                    ));
+                }
+            }
+            worktree
+        }
+    };
 
     let resolved_mode = resolve_mode(manifest, mode);
 

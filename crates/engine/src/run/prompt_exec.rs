@@ -80,12 +80,16 @@ async fn resume_target(
     if policy != yunta_core::OnInterrupt::ResumeSession {
         return Ok(None);
     }
-    match crate::replay::derive(&ctx.load_events().await?)
+    let state = crate::replay::derive(&ctx.load_events().await?);
+    // A session that worked in the run's own tree started in the checkout
+    // the run left behind when it woke somewhere else.
+    let left_behind = !crate::audits(node) && state.run.moved_on_waking();
+    let orphaned = state
         .nodes
         .get(&node.id)
-        .and_then(|record| record.orphaned_session.clone())
-    {
-        Some(OrphanedSession::Open(session_id)) => {
+        .and_then(|record| record.orphaned_session.clone());
+    match orphaned {
+        Some(OrphanedSession::Open(session_id)) if !left_behind => {
             match crate::run::capability::require(
                 ctx,
                 adapter,
@@ -100,24 +104,34 @@ async fn resume_target(
             }
         }
         // The capability is not what is missing here — there is nothing
-        // to resume. The run still says so, with the same fallback it
-        // took, so a reader knows the interrupted node started over.
-        Some(OrphanedSession::NoneRecorded) => {
-            ctx.emit(
-                Some(&node.id),
-                EventPayload::Session(SessionEvent::CapabilityDegraded(
-                    yunta_core::events::CapabilityDegradedPayload::new(
-                        yunta_core::Capability::ResumeSession,
-                        adapter.id().clone(),
-                        yunta_core::events::Policy::FreshSession,
-                    ),
-                )),
-            )
-            .await?;
-        }
+        // to resume, or nothing to resume from where the run now works.
+        // The run still says so, with the same fallback it took, so a
+        // reader knows the interrupted node started over.
+        Some(_) => starts_over(ctx, node, adapter).await?,
         None => {}
     }
     Ok(None)
+}
+
+/// Says an interrupted node starts a fresh session instead of the one it
+/// left.
+async fn starts_over(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    adapter: &dyn yunta_core::port::Adapter,
+) -> Result<(), RunError> {
+    ctx.emit(
+        Some(&node.id),
+        EventPayload::Session(SessionEvent::CapabilityDegraded(
+            yunta_core::events::CapabilityDegradedPayload::new(
+                yunta_core::Capability::ResumeSession,
+                adapter.id().clone(),
+                yunta_core::events::Policy::FreshSession,
+            ),
+        )),
+    )
+    .await?;
+    Ok(())
 }
 
 /// One `kind: prompt` node: its context, its prompt, one session, and

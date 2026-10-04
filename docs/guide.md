@@ -742,32 +742,36 @@ tasks:
       - cmd: "test -f scripts/verify.sh && sh scripts/verify.sh"
 ```
 
-### Shared build caches across worktrees
+### Warm builds across worktrees
 
-Isolation-by-worktree (the engine's default) means every run — and, under
-`concurrency > 1`, every task within a run — gets its own working tree from a fresh
-`git worktree`. For compiled languages this makes tree preparation the dominant cost
-of wall-clock: a cold build in every worktree, every time.
+Isolation-by-worktree (the engine's default) gives every run — and, under
+`concurrency > 1`, every task within a run — a working tree of its own. Those trees
+are checkouts of the project's pool, under the worktrees root: a run or a task takes a
+free one, put back to the commit it starts from, and what git ignores — a build's
+output, `target/`, `node_modules/` — stays where the last run left it. The first build
+in a checkout is cold; every later one rebuilds only what changed, the same as in your
+own checkout after a pull. `yunta gc` keeps as many free checkouts as your runs had
+busy at once in the last 30 days.
 
-The fix is a cache shared across worktrees, not skipping isolation. `shared_dirs:`
-names directories every command and every session of a run shares, each under the
-variable it is exported as:
+Do not point several checkouts at one build directory. A build is right only at the
+path that made it: build tools name a project's own output the same way in any
+checkout and judge it fresh by time, so a shared directory hands one task the code
+another task built, and output that names the directory that built it (Cargo's
+`CARGO_MANIFEST_DIR`, `CARGO_BIN_EXE_*`) runs another checkout's files.
+
+`shared_dirs:` is for caches whose content does not depend on the checkout —
+downloads such as Cargo's registry or pip's `PIP_CACHE_DIR`:
 
 ```yaml
 shared_dirs:
-  CARGO_TARGET_DIR: ~/.cache/yunta/target/my-project
+  PIP_CACHE_DIR: ~/.cache/yunta/pip
 ```
 
 Every command the run spawns — bash nodes, hooks, criteria, the suite — sees the
 variable, and so does every agent session. The engine creates the directory when the
-run wakes, and every session that may write keeps it writable inside its sandbox, so
-the build an agent runs and the one the engine checks it with land in the same
-cache. A read-only session is given nothing to write. The path is written in full or
-from `~`, never relative to a checkout, and the variable is never `PATH`.
-
-The same shape works for any tool that reads its output or cache directory from a
-variable, such as pip's `PIP_CACHE_DIR` or Go's `GOCACHE`. Keep the directory
-scoped to the project, so two projects' builds never collide.
+run wakes, and every session that may write keeps it writable inside its sandbox. A
+read-only session is given nothing to write. The path is written in full or from
+`~`, never relative to a checkout, and the variable is never `PATH`.
 
 ## Packs
 

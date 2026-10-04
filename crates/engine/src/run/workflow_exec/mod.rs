@@ -311,19 +311,19 @@ pub(super) async fn execute_workflow(
         // `none` shares the tree this node works in: the engine never
         // commits, cleans up or locks a tree this run does not own.
         Isolation::None => ctx.worktree.to_path_buf(),
+        // A tree of its own is a checkout of the project's pool, like the
+        // parent's.
         Isolation::Worktree => {
-            let tree = trees.join(child_id.as_str());
-            match crate::worktree::prepare_worktree(
-                ctx.worktree,
-                &tree,
-                &child_manifest.base_commit,
-                &crate::worktree::run_branch(&child_id),
-                Isolation::Worktree,
-                ctx.root_supervision(),
-            )
-            .await
-            {
-                Ok(_) => tree,
+            let opened = ctx
+                .pool
+                .open_run(
+                    &child_id,
+                    &child_manifest.base_commit,
+                    ctx.root_supervision(),
+                )
+                .await;
+            match opened {
+                Ok((tree, _held)) => tree,
                 // Somebody stopped the run while its child's tree was
                 // being made: that is not the node failing, it is the
                 // node being cut.
@@ -457,20 +457,20 @@ async fn resume_child(
                     .unwrap_or_else(|| worktrees_root(ctx))
                     .join(child_id.as_str())
             });
-            if !tree.exists() {
-                return fail(
-                    ctx,
-                    node,
-                    format!(
-                        "child run `{child_id}` cannot resume: its worktree `{}` is gone — \
-                         cancel the child or restore the tree",
-                        tree.display()
-                    ),
-                    false,
-                )
-                .await;
+            // A checkout given back while the child was parked, or taken
+            // away, is found again on the child's branch.
+            let supervision = ctx.root_supervision();
+            if crate::worktree::still_the_runs(&tree, child_id, supervision).await {
+                tree
+            } else {
+                match ctx.pool.reopen_run(child_id, supervision).await {
+                    Ok((tree, _held)) => tree,
+                    Err(e) => {
+                        let said = format!("child run `{child_id}` cannot resume: {e}");
+                        return fail(ctx, node, said, false).await;
+                    }
+                }
             }
-            tree
         }
     };
     drive_child(
@@ -613,7 +613,6 @@ async fn drive_child(
                         worktree: &current_tree,
                         run_dir: &current_run_dir,
                     },
-                    ctx.worktree,
                     &suggested_mode,
                     super::RunRoots {
                         runs: &runs_root(ctx),

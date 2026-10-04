@@ -6,7 +6,7 @@
 //! frozen manifest through its `child_run_id` — never re-resolving the
 //! workflow name.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
@@ -74,13 +74,13 @@ fn manifest_of(runs_root: &Path, run_id: &RunId) -> Manifest {
     yunta_core::yaml::parse(&std::fs::read_to_string(&path).unwrap()).unwrap()
 }
 
-/// The root a child run's tree goes under: the `runs` sibling
-/// `worktrees` directory.
-fn child_trees(runs_root: &Path) -> PathBuf {
-    runs_root
-        .parent()
-        .expect("the runs root sits beside the worktrees root")
-        .join("worktrees")
+/// What `file` holds on run `run`'s own branch — where a child's work
+/// stays once its checkout went back to the project's pool.
+async fn on_its_branch(bench: &Bench, run: &RunId, file: &str) -> Option<String> {
+    let named = format!("yunta/run/{run}:{file}");
+    yunta_engine::git::output(&bench.worktree, &["show", &named], bench.supervision())
+        .await
+        .ok()
 }
 
 const EMPTY_FIXTURE: &str = "sessions: []\n";
@@ -163,12 +163,12 @@ nodes:
     assert_eq!(child_manifest.isolation, yunta_core::Isolation::Worktree);
 
     // The child worked in its own tree, branched off the parent's HEAD.
-    let child_tree = child_trees(&bench.runs_root).join(child_id.as_str());
     assert_eq!(
-        std::fs::read_to_string(child_tree.join("out.txt"))
-            .unwrap()
-            .trim(),
-        "hola"
+        on_its_branch(&bench, child_id, "out.txt")
+            .await
+            .as_deref()
+            .map(str::trim),
+        Some("hola")
     );
     // The parent's own tree never saw the child's write.
     assert!(!bench.worktree.join("out.txt").exists());
@@ -656,8 +656,9 @@ nodes:
     assert_eq!(successor_created.mode, "full");
 
     // And the successor really did the `full` work, in its own tree.
-    let successor_tree = child_trees(&bench.runs_root).join(successor.as_str());
-    assert!(successor_tree.join("shipped.txt").exists());
+    assert!(on_its_branch(&bench, &successor, "shipped.txt")
+        .await
+        .is_some());
 }
 
 // --- cross-run artifact mounts -----------------------------------
@@ -1533,10 +1534,9 @@ nodes:
         "the successor is born with the work done, and never dispatches it again"
     );
     assert!(
-        child_trees(&bench.runs_root)
-            .join(successor.as_str())
-            .join("shipped.txt")
-            .exists(),
+        on_its_branch(&bench, successor, "shipped.txt")
+            .await
+            .is_some(),
         "the successor's own mode ran past the loop it had nothing left to do"
     );
 }

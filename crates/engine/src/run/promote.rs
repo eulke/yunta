@@ -73,15 +73,13 @@ pub struct CallerInfra<'a> {
     pub environment: Option<yunta_core::events::ExecutionEnvironment>,
 }
 
-/// `repo` is the checkout a fresh worktree branches from (the original
-/// `cwd` for a top-level chain; the parent run's own tree for a child's).
-/// Under `Isolation::None` the successor reuses the predecessor's
-/// checkout — the lock (if any) is the caller's and only releases when
-/// the whole chain ends. `storage`, `ids` and `supervision` are the
+/// The successor works in the predecessor's own tree: under
+/// `Isolation::Worktree` on a branch of its own cut where that tree stands,
+/// and under `Isolation::None` in the same checkout — the lock (if any) is
+/// the caller's and only releases when the whole chain ends. `storage`, `ids` and `supervision` are the
 /// caller's infrastructure and trail, as in [`create_run`].
 pub async fn create_promotion_successor(
     predecessor: Predecessor<'_>,
-    repo: &Path,
     suggested_mode: &ModeName,
     roots: RunRoots<'_>,
     caller: CallerInfra<'_>,
@@ -105,19 +103,18 @@ pub async fn create_promotion_successor(
     // work left the tree, not on the original base.
     manifest.base_commit = crate::worktree::head_commit(predecessor_worktree, supervision).await?;
 
+    // The successor carries on in the predecessor's own checkout, on a
+    // branch of its own cut where that tree stands: nothing it built has to
+    // be built again.
     let worktree = match manifest.isolation {
         Isolation::Worktree => {
-            let worktree = roots.worktrees.join(successor_id.as_str());
-            crate::worktree::prepare_worktree(
-                repo,
-                &worktree,
-                &manifest.base_commit,
-                &crate::worktree::run_branch(&successor_id),
-                Isolation::Worktree,
+            crate::worktree::hand_over_run_checkout(
+                predecessor_worktree,
+                &successor_id,
                 supervision,
             )
             .await?;
-            worktree
+            predecessor_worktree.to_path_buf()
         }
         Isolation::None => predecessor_worktree.to_path_buf(),
     };

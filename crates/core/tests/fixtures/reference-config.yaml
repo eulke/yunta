@@ -52,7 +52,7 @@ commands:
   fmt: "cargo fmt"
 
 shared_dirs:
-  CARGO_TARGET_DIR: ~/.cache/yunta/target/mi-proyecto
+  PIP_CACHE_DIR: ~/.cache/yunta/pip
 
 baseline:
   suite: "make test"

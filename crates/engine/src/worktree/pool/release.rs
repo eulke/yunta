@@ -64,6 +64,78 @@ pub async fn release_unit_checkouts(
     Ok(())
 }
 
+/// Gives back the checkout run `run_id` worked in, as the run ends: it
+/// lets go of the run's branch where it stands, unless something in it is
+/// uncommitted — somebody's. The branch stays: it holds what the run did.
+/// A checkout outside the pool, one a run made before its project kept
+/// checkouts, stays where it is.
+pub async fn release_run_checkout(
+    pool: &CheckoutPool,
+    tree: &Path,
+    run_id: &yunta_core::RunId,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
+    let home = pool.home(supervision).await?;
+    let tree = tokio::fs::canonicalize(tree)
+        .await
+        .unwrap_or_else(|_| tree.to_path_buf());
+    let number = tree
+        .parent()
+        .filter(|parent| *parent == home)
+        .and_then(|_| {
+            tree.file_name()?
+                .to_str()?
+                .strip_prefix(slot::SLOT)?
+                .parse()
+                .ok()
+        });
+    let Some(number) = number else {
+        return Ok(());
+    };
+    let held = slot::hold(&home, number, Contention::Refuse, None, supervision).await?;
+    let Some(_lease) = held else {
+        return Ok(());
+    };
+    let on = crate::git::output(&tree, &["branch", "--show-current"], supervision).await?;
+    if on.trim() == super::super::run_branch(run_id) && slot::is_clean(&tree, supervision).await {
+        crate::git::output(&tree, &["switch", "--detach", "-q"], supervision).await?;
+    }
+    Ok(())
+}
+
+/// Whether `tree` is still where run `run_id` works: a checkout on the
+/// run's own branch, or on a branch of a person's — one who switched it
+/// while the run was parked — and never on another run's or unit's.
+pub async fn still_the_runs(
+    tree: &Path,
+    run_id: &yunta_core::RunId,
+    supervision: Supervision<'_>,
+) -> bool {
+    if !slot::is_checkout(tree, supervision).await {
+        return false;
+    }
+    let Ok(on) = crate::git::output(tree, &["branch", "--show-current"], supervision).await else {
+        return false;
+    };
+    let on = on.trim();
+    on == super::super::run_branch(run_id)
+        || !(on.is_empty() || on.starts_with(&format!("{}/", super::super::RUN_BRANCHES)))
+            && !super::super::is_unit_branch(on)
+}
+
+/// Hands the checkout a run worked in to the run that carries on from it:
+/// the successor's branch is cut where the predecessor's tree stands, in
+/// the same checkout, so nothing it built has to be built again.
+pub async fn hand_over_run_checkout(
+    tree: &Path,
+    successor: &yunta_core::RunId,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
+    let branch = super::super::run_branch(successor);
+    crate::git::output(tree, &["switch", "-q", "-c", &branch], supervision).await?;
+    Ok(())
+}
+
 /// Lets go of every branch of `run_id`'s units in the pool and deletes
 /// them all, landed or not: the run is being collected, and nothing will
 /// continue its work.

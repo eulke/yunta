@@ -21,6 +21,7 @@
 //! outlives every process.
 
 mod release;
+mod runs;
 mod slot;
 
 use std::path::{Path, PathBuf};
@@ -32,7 +33,10 @@ use super::{head_tree, prepare_worktree, Unit, UnitHome, UnitId, WorktreeError};
 use crate::lock::Contention;
 use crate::process::Supervision;
 
-pub use release::{forget_run_units, release_unit_checkouts, retire_unit_branch, trim_pool};
+pub use release::{
+    forget_run_units, hand_over_run_checkout, release_run_checkout, release_unit_checkouts,
+    retire_unit_branch, still_the_runs, trim_pool,
+};
 use slot::SLOT;
 
 /// A project's checkouts, as one run's invocation reaches them.
@@ -81,11 +85,13 @@ impl Drop for Lease {
 
 /// What a new checkout of the pool starts as.
 enum Fresh<'a> {
-    /// On a branch of its own, cut from `base`.
-    Unit {
+    /// On a new branch cut from `base`.
+    Cut {
         branch: &'a str,
         base: &'a CommitSha,
     },
+    /// On a branch that already holds somebody's work.
+    On { branch: &'a str },
     /// On `base`, with no branch.
     Detached { base: &'a CommitSha },
 }
@@ -134,7 +140,7 @@ impl CheckoutPool {
                 let common_dir = tokio::fs::canonicalize(&common_dir)
                     .await
                     .unwrap_or(common_dir);
-                Ok(pool_home(&self.root, &common_dir))
+                Ok(settled(&pool_home(&self.root, &common_dir)).await)
             })
             .await
             .cloned()
@@ -158,7 +164,7 @@ impl CheckoutPool {
                 (checkout, lease)
             }
             None => {
-                let fresh = Fresh::Unit {
+                let fresh = Fresh::Cut {
                     branch: &branch,
                     base: home.base,
                 };
@@ -321,15 +327,33 @@ impl CheckoutPool {
                 }
                 slot::clear(repo, &path, supervision).await?;
             }
-            match fresh {
-                Fresh::Unit { branch, base } => {
-                    let isolation = yunta_core::Isolation::Worktree;
-                    prepare_worktree(repo, &path, base, branch, isolation, supervision).await?;
-                }
-                Fresh::Detached { base } => add_detached(repo, &path, base, supervision).await?,
-            }
+            make(repo, &path, fresh, supervision).await?;
             let path = tokio::fs::canonicalize(&path).await.unwrap_or(path);
             return Ok((path, lease));
+        }
+    }
+}
+
+/// `path` named the way the file system names it — every link resolved —
+/// whether or not it exists: what exists of it is resolved, and the
+/// rest follows as written. A checkout is named by its resolved path, so
+/// the pool's own directory has to be too.
+async fn settled(path: &Path) -> PathBuf {
+    let mut existing = path.to_path_buf();
+    let mut rest = Vec::new();
+    loop {
+        if let Ok(resolved) = tokio::fs::canonicalize(&existing).await {
+            return rest.iter().rev().fold(resolved, |at, part| at.join(part));
+        }
+        match (
+            existing.file_name().map(ToOwned::to_owned),
+            existing.parent(),
+        ) {
+            (Some(part), Some(parent)) => {
+                rest.push(part);
+                existing = parent.to_path_buf();
+            }
+            _ => return path.to_path_buf(),
         }
     }
 }
@@ -342,11 +366,32 @@ pub async fn put_back(checkout: &Path, supervision: Supervision<'_>) -> Result<(
     Ok(())
 }
 
-/// Adds a checkout of `repo` at `checkout`, on `base` with no branch.
-async fn add_detached(
+/// Makes the checkout of `repo` at `path` that `fresh` says.
+async fn make(
+    repo: &Path,
+    path: &Path,
+    fresh: Fresh<'_>,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
+    match fresh {
+        Fresh::Cut { branch, base } => {
+            let isolation = yunta_core::Isolation::Worktree;
+            prepare_worktree(repo, path, base, branch, isolation, supervision).await?;
+            Ok(())
+        }
+        Fresh::On { branch } => add(repo, path, &[branch], supervision).await,
+        Fresh::Detached { base } => {
+            add(repo, path, &["--detach", base.as_str()], supervision).await
+        }
+    }
+}
+
+/// Adds a checkout of `repo` at `checkout`, on what `on` names: a branch,
+/// or `--detach` and a commit.
+async fn add(
     repo: &Path,
     checkout: &Path,
-    base: &CommitSha,
+    on: &[&str],
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
     if let Some(parent) = checkout.parent() {
@@ -361,12 +406,9 @@ async fn add_detached(
     let common_dir = super::common_git_dir(repo, supervision).await?;
     let _mutation_lock = super::lock_worktree_mutations(&common_dir, supervision.clock).await?;
     let path = checkout.display().to_string();
-    super::run_git(
-        repo,
-        &["worktree", "add", "--detach", &path, base.as_str()],
-        supervision,
-    )
-    .await?;
+    let mut args = vec!["worktree", "add", path.as_str()];
+    args.extend_from_slice(on);
+    super::run_git(repo, &args, supervision).await?;
     Ok(())
 }
 

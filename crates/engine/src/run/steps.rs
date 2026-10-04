@@ -55,6 +55,9 @@ pub(super) async fn finish(
     .await?;
     ctx.export_events_jsonl().await?;
     super::cleanup::units(ctx).await;
+    if terminal != TerminalState::Promoted {
+        super::cleanup::run(ctx).await;
+    }
     // `on_finish.cleanup: worktree` — after the export, only at a real Finish
     // (a paused run expects a resume in that tree; a promoted one seeds its
     // successor's worktree from it). A cleanup failure warns and never

@@ -61,11 +61,13 @@ pub(super) async fn listed(home: &Path) -> Vec<(u32, PathBuf)> {
 /// from `target`: lower is better, `None` when it is not this user's to
 /// take. Only a clean checkout is ever handed out: what is uncommitted in
 /// one is somebody's. One on its owner's branch goes back to its owner
-/// first. One on another branch is that branch's owner's while its work
-/// is not in `target`; once it is — landed where the user starts — it is
-/// anybody's, and keeps its branch until somebody takes it, so its owner
-/// can still pick its session back up there. One on no branch is
-/// anybody's. Among those, the nearer to `target` the better.
+/// first. One on a unit's branch is that unit's while its work is not in
+/// `target`; once it is — landed where the user starts — it is anybody's,
+/// and keeps its branch until somebody takes it, so its owner can still
+/// pick its session back up there. One on a run's branch is that run's
+/// for as long as the run lives, and one on any other branch — a
+/// person's — is nobody's to take. One on no branch is anybody's. Among
+/// those, the nearer to `target` the better.
 pub(super) async fn rank(
     checkout: &Path,
     owner: Option<&str>,
@@ -81,7 +83,10 @@ pub(super) async fn rank(
     match (branch.trim(), owner) {
         ("", _) => Some((1, distance(checkout, target, supervision).await)),
         (on, Some(owner)) if on.starts_with(owner) => Some((0, 0)),
-        _ if landed_in(checkout, target, supervision).await => {
+        (on, _)
+            if super::super::is_unit_branch(on)
+                && landed_in(checkout, target, supervision).await =>
+        {
             Some((1, distance(checkout, target, supervision).await))
         }
         _ => None,

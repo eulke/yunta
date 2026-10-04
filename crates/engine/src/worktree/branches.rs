@@ -51,6 +51,11 @@ pub fn run_units(run_id: &RunId) -> String {
     format!("{UNIT_BRANCHES}/{run_id}")
 }
 
+/// Whether `branch` is the branch of a unit's attempt.
+pub(crate) fn is_unit_branch(branch: &str) -> bool {
+    branch.starts_with(&format!("{UNIT_BRANCHES}/"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

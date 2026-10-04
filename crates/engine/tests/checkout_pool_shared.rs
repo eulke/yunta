@@ -160,3 +160,60 @@ async fn gc_keeps_as_many_free_slots_as_were_busy() {
     assert_eq!(removed.len(), 2, "{removed:?}");
     assert_eq!(world.slots().await, vec!["slot-1"]);
 }
+
+/// A run's own checkout is the run's while it lives, parked or not: no
+/// unit of another run and no other run is handed it, though it holds
+/// nothing but the commit it opened on.
+#[tokio::test]
+async fn a_paused_runs_checkout_is_never_leased_to_another_run() {
+    let world = World::new();
+    let parked = RunId::from("01JPOOLPARKEDRUNCHECKOUT0A");
+    let supervision = world.owner.supervision();
+    let (theirs, held) = world
+        .pool
+        .open_run(&parked, &world.head(), supervision)
+        .await
+        .unwrap();
+    drop(held);
+
+    let (unit, _held) = world.open("T001").await;
+    let other = RunId::from("01JPOOLANOTHERRUNCHECKOUTA");
+    let (others, _held) = world
+        .pool
+        .open_run(&other, &world.head(), supervision)
+        .await
+        .unwrap();
+
+    assert_ne!(unit.worktree, theirs);
+    assert_ne!(others, theirs);
+}
+
+/// A checkout a person switched to a branch of their own while the run was
+/// parked is still the run's; one on another run's branch is not.
+#[tokio::test]
+async fn resume_continues_on_a_persons_branch_in_the_bound_checkout() {
+    let world = World::new();
+    let run = RunId::from("01JPOOLPERSONSBRANCHRUN00A");
+    let supervision = world.owner.supervision();
+    let (tree, _held) = world
+        .pool
+        .open_run(&run, &world.head(), supervision)
+        .await
+        .unwrap();
+
+    yunta_testkit::git(&tree, &["switch", "-q", "-c", "my-fix"]);
+    let a_persons = yunta_engine::still_the_runs(&tree, &run, supervision).await;
+    yunta_testkit::git(
+        &tree,
+        &[
+            "switch",
+            "-q",
+            "-c",
+            "yunta/run/01JPOOLSOMEBODYELSE0000000A",
+        ],
+    );
+    let another_runs = yunta_engine::still_the_runs(&tree, &run, supervision).await;
+
+    assert!(a_persons);
+    assert!(!another_runs);
+}

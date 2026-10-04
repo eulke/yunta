@@ -62,8 +62,8 @@ commands:                           # lo que el proyecto corre por cada capacida
   lint: "cargo clippy --workspace -- -D warnings"
   fmt: "cargo fmt"
 
-shared_dirs:                        # directorios que comparten todos los comandos y sesiones de un run
-  CARGO_TARGET_DIR: ~/.cache/yunta/target/mi-proyecto   # exportado bajo la variable; escribible en cada sandbox que escribe
+shared_dirs:                        # caches que comparten todos los comandos y sesiones de un run; nunca la salida de un build (D236)
+  PIP_CACHE_DIR: ~/.cache/yunta/pip   # exportado bajo la variable; escribible en cada sandbox que escribe
 baseline:
   suite: "cargo test --workspace"
 coverage:

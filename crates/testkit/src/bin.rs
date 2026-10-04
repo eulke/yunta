@@ -126,6 +126,22 @@ pub fn stderr(output: &Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
+/// The checkouts of every project's pool under the state root `home`: the
+/// checkouts runs worked in, wherever the pool put them.
+pub fn pool_checkouts(home: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let Ok(pools) = std::fs::read_dir(home.join("worktrees").join("pool")) else {
+        return Vec::new();
+    };
+    let mut checkouts: Vec<std::path::PathBuf> = pools
+        .flatten()
+        .filter_map(|pool| std::fs::read_dir(pool.path()).ok())
+        .flat_map(|slots| slots.flatten().map(|slot| slot.path()))
+        .filter(|slot| slot.is_dir())
+        .collect();
+    checkouts.sort();
+    checkouts
+}
+
 /// The run id `yunta run` prints, parsed from a `run <id>: …` line or the
 /// id alone `--quiet` prints — the
 /// handle every follow-up command (`status`, `receipt`, `graph --run`)

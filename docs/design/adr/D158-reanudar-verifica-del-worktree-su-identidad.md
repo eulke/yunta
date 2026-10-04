@@ -3,7 +3,7 @@ number: D158
 title: "Reanudar verifica del worktree su identidad y su ascendencia; su contenido no se verifica porque el contenido es el trabajo"
 status: revised
 revises: []
-revised_by: [D235]
+revised_by: [D235, D236]
 ---
 
 # D158 — Reanudar verifica del worktree su identidad y su ascendencia; su contenido no se verifica porque el contenido es el trabajo

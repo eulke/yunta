@@ -74,6 +74,8 @@ pub struct RunLedger {
     opens_on_base: bool,
     /// The checkout of its own the run works in, as its log last named it.
     checkout: Option<std::path::PathBuf>,
+    /// The wake that last moved the run to another checkout.
+    moved_at: Option<Seq>,
 }
 
 impl RunLedger {
@@ -82,6 +84,13 @@ impl RunLedger {
     /// working in a person's checkout, or one whose log never named it.
     pub fn checkout(&self) -> Option<&std::path::Path> {
         self.checkout.as_deref()
+    }
+
+    /// Whether the latest wake moved the run to another checkout than the
+    /// one it worked in before: a session started there cannot be picked
+    /// back up from here.
+    pub fn moved_on_waking(&self) -> bool {
+        self.moved_at.is_some() && self.moved_at == self.resumed_after
     }
 
     /// How the environment the run's commands run with changed since
@@ -224,6 +233,7 @@ impl RunLedger {
                 self.invocations.push((meta.seq, p.environment.clone()));
                 if let Some(checkout) = &p.checkout {
                     self.checkout = Some(checkout.clone());
+                    self.moved_at = Some(meta.seq);
                 }
             }
             RunEvent::Finished(p) => {
@@ -357,6 +367,29 @@ mod tests {
             ledger.checkout(),
             Some(std::path::Path::new("/pool/slot-3"))
         );
+    }
+
+    /// Only the wake that moved the run says so: the next one, in the same
+    /// checkout, does not.
+    #[test]
+    fn a_wake_that_moved_the_run_says_so_and_the_next_does_not() {
+        let mut ledger = RunLedger::default();
+        at(
+            &mut ledger,
+            1,
+            RunEvent::Created(born_in(Some("/pool/slot-1"))),
+        );
+        let moved = RunResumedPayload::new(Vec::new(), None).in_checkout("/pool/slot-2".into());
+        at(&mut ledger, 2, RunEvent::Resumed(moved));
+        assert!(ledger.moved_on_waking());
+
+        at(
+            &mut ledger,
+            3,
+            RunEvent::Resumed(RunResumedPayload::new(Vec::new(), None)),
+        );
+
+        assert!(!ledger.moved_on_waking());
     }
 
     /// A log written before the field names no checkout, and reads back.

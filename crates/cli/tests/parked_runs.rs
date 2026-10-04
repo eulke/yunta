@@ -397,7 +397,7 @@ fn a_failed_node_offers_to_run_again_with_the_command_that_answers_it() {
         );
     }
     assert!(
-        text.contains("the run works in") && text.contains(&format!("worktrees/{run_id}")),
+        text.contains("the run works in") && text.contains("worktrees/pool/"),
         "the page says where to change what the node failed on: {text}"
     );
 
@@ -525,15 +525,9 @@ fn the_listing_puts_a_waiting_run_above_a_running_one() {
         .expect("failed to run the yunta binary");
     let worktree = wait_for(
         || {
-            let entry = std::fs::read_dir(home.join("worktrees"))
-                .ok()?
-                .flatten()
-                .next()?;
-            entry
-                .path()
-                .join("started.txt")
-                .exists()
-                .then(|| entry.path())
+            yunta_testkit::pool_checkouts(&home)
+                .into_iter()
+                .find(|checkout| checkout.join("started.txt").exists())
         },
         || "the holding node never started".to_string(),
     );

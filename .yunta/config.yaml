@@ -35,11 +35,6 @@ baseline:
   suite: "cargo test --workspace"
 
 
-# Every task builds in a checkout of its own; this keeps one Cargo build
-# directory for all of them, and for the agents working in them.
-shared_dirs:
-  CARGO_TARGET_DIR: ~/.cache/yunta/target/yunta
-
 # What this project runs for each capability a workflow names
 # (`run: { command: lint }`): fragua's `lint` runs this one.
 commands:

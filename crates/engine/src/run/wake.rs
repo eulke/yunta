@@ -90,13 +90,25 @@ async fn record_resume(ctx: &RunCtx<'_>, view: &RunView) -> Result<(), RunError>
         &view.state,
         ctx.manifest.config.resolved_on_interrupt(),
     );
-    ctx.emit(
-        None,
-        EventPayload::Run(RunEvent::Resumed(RunResumedPayload::new(
-            policies,
-            crate::process::execution_environment(ctx.ambient),
-        ))),
-    )
-    .await?;
+    let woken =
+        RunResumedPayload::new(policies, crate::process::execution_environment(ctx.ambient));
+    let woken = match moved(ctx, view).await {
+        Some(checkout) => woken.in_checkout(checkout),
+        None => woken,
+    };
+    ctx.emit(None, EventPayload::Run(RunEvent::Resumed(woken)))
+        .await?;
     Ok(())
+}
+
+/// The checkout the run wakes in, when it is not the one its log last
+/// named: the one it worked in was given back while it was parked.
+async fn moved(ctx: &RunCtx<'_>, view: &RunView) -> Option<std::path::PathBuf> {
+    let named = view.state.run.checkout()?;
+    let canonical = |path: &std::path::Path| {
+        let path = path.to_path_buf();
+        async move { tokio::fs::canonicalize(&path).await.unwrap_or(path) }
+    };
+    let here = canonical(ctx.worktree).await;
+    (canonical(named).await != here).then_some(here)
 }
