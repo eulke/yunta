@@ -220,6 +220,12 @@ pub struct CriteriaCheckedPayload {
     pub task_id: TaskId,
     pub phase: Phase,
     pub results: Vec<CriterionResult>,
+    /// The guards the check did not run, by command: one of the task's
+    /// own criteria was red, and a guard runs only once every one of
+    /// those passes. Absent when every guard ran, and in a log written
+    /// before guards waited.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waiting: Vec<String>,
 }
 
 /// `task_id` is present for a task's scope check within a loop node;

@@ -87,6 +87,71 @@ async fn cancel_then_resume_finishes_the_run() {
     assert_eq!(terminal, RunTerminal::Finished);
 }
 
+/// A node with a scope of its own, which is given a checkout before it
+/// starts: the checkout is a step's `git worktree add`, outside any
+/// node.
+const SCOPED_WORKFLOW: &str = "\
+name: scoped
+nodes:
+  - id: work
+    kind: bash
+    run: \"true\"
+    scope: [\"*.txt\"]
+";
+
+/// A cancellation that stops the git a step runs outside any node — the
+/// checkout a scoped node is given before it starts — pauses the run as
+/// cancelled by user, and the next wake finishes it.
+#[tokio::test]
+async fn a_cancel_that_stops_a_step_s_git_pauses_the_run() {
+    let token = CancellationToken::new();
+    let stubs = tempfile::tempdir().expect("a directory for the stub");
+    let held = stubs.path().join("worktree-add.pid");
+    let armed = stubs.path().join("armed");
+    tokio::fs::write(&armed, "").await.expect("arm the hold");
+    let vars = yunta_testkit::stubs::git_holding(stubs.path(), "worktree add", &held, Some(&armed));
+    let bench = Bench::new()
+        .with_cancel(token.clone())
+        .with_subprocess_vars(vars);
+
+    let (report, ()) = tokio::join!(
+        bench.run(SCOPED_WORKFLOW, "sessions: []"),
+        cancel_once_written(&held, &token)
+    );
+
+    assert_eq!(
+        report.terminal,
+        RunTerminal::Paused {
+            reason: "cancelled by user".to_string()
+        }
+    );
+    assert!(
+        matches!(
+            bench.events().last().and_then(|event| event.payload()),
+            Some(EventPayload::Run(RunEvent::Paused(_)))
+        ),
+        "the log ends on the pause: {:#?}",
+        bench.events()
+    );
+    tokio::fs::remove_file(&armed)
+        .await
+        .expect("disarm the hold");
+    let bench = bench.with_cancel(CancellationToken::new());
+    let RunReport { terminal, .. } = bench.wake_on_fixture("sessions: []").await;
+    assert_eq!(terminal, RunTerminal::Finished);
+}
+
+/// Fires `token` once `marker` is on disk: whatever writes it is under
+/// way when it appears.
+async fn cancel_once_written(marker: &std::path::Path, token: &CancellationToken) {
+    wait_until_async(
+        || async { tokio::fs::try_exists(marker).await.unwrap_or(false) },
+        || format!("`{}` was never written", marker.display()),
+    )
+    .await;
+    token.cancel();
+}
+
 /// The lineage's measurement is a step the run owns, so `yunta cancel`
 /// reaches it: the suite dies with the rest of the tree, the log holds
 /// no measurement, and the next wake takes it from the top.

@@ -1012,6 +1012,13 @@
         },
         "task_id": {
           "$ref": "#/$defs/TaskId"
+        },
+        "waiting": {
+          "description": "The guards the check did not run, by command: one of the task's\nown criteria was red, and a guard runs only once every one of\nthose passes. Absent when every guard ran, and in a log written\nbefore guards waited.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -4422,6 +4429,13 @@
         },
         "task_id": {
           "$ref": "#/$defs/TaskId"
+        },
+        "waiting": {
+          "description": "The guards the check did not run, by command: one of the task's\nown criteria was red, and a guard runs only once every one of\nthose passes. Absent when every guard ran.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

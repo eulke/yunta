@@ -71,7 +71,9 @@ pub(super) async fn judge_in_place(
     recorder: Recorder<'_>,
 ) -> Result<Carry, TaskCycleError> {
     let judgement = judged(params).await?;
-    let last_check = recorder.criteria(Phase::Post, &judgement.criteria).await?;
+    let last_check = recorder
+        .post_check(&judgement.criteria, &judgement.waiting)
+        .await?;
     recorder.scope(&judgement.scope).await?;
     Ok(match settled(&judgement) {
         Some(outcome) => Carry::Settled {

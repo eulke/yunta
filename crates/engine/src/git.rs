@@ -142,7 +142,16 @@ async fn run<S: AsRef<OsStr>>(
     args: &[S],
     supervision: Supervision<'_>,
 ) -> Result<Output, GitError> {
+    // The repository's upkeep is left to the person's own git. An
+    // automatic `gc` or `maintenance` a commit starts detaches into the
+    // background, out of the process group the engine supervises, and
+    // works on in the run's repository beside its commits and suites,
+    // holding the pipes the engine reads git through.
     let mut command = GovernedCommand::new("git", cwd)
+        .arg("-c")
+        .arg("gc.auto=0")
+        .arg("-c")
+        .arg("maintenance.auto=false")
         .stdout(Capture::Collect)
         .stderr(Capture::Collect);
     for arg in args {
@@ -297,4 +306,32 @@ pub async fn remote_url(repo: &Path, remote: &str, supervision: Supervision<'_>)
         .await
         .ok()
         .map(|url| url.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The engine's git starts no upkeep of its own: whatever the
+    /// repository configures, the commands it runs read `gc.auto` as 0
+    /// and `maintenance.auto` as off.
+    #[tokio::test]
+    async fn the_engine_s_git_starts_no_upkeep_of_its_own() {
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let supervision = Supervision::outside_any_run(&cancel, &yunta_testkit_core::FixedClock);
+        let repo = tempfile::tempdir().unwrap();
+        yunta_testkit::init_repo(repo.path());
+        yunta_testkit::git(repo.path(), &["config", "gc.auto", "6700"]);
+
+        let gc = output(repo.path(), &["config", "--get", "gc.auto"], supervision).await;
+        let maintenance = output(
+            repo.path(),
+            &["config", "--get", "maintenance.auto"],
+            supervision,
+        )
+        .await;
+
+        assert_eq!(gc.unwrap().trim(), "0");
+        assert_eq!(maintenance.unwrap().trim(), "false");
+    }
 }

@@ -146,82 +146,76 @@ async fn drive(ready: &Ready<'_>) -> Result<RunReport, RunError> {
         // handler that needs the run's state read the same derivation.
         let events = ctx.load_events().await?;
         let state = crate::replay::derive(&events);
-        match schedule::decide(&ctx.manifest.workflow, &state, policy) {
-            Decision::Broken { diagnostic } => return Err(steps::broken(ctx, diagnostic).await),
-            Decision::MeasureBaseline { suite } => baseline::measure(ctx, suite).await?,
-            Decision::Finish => return steps::run_finished(ctx, mode_name).await,
-            Decision::Pause { reason } => return pause(ctx, reason).await,
-            Decision::Fail { reason } => return steps::run_failed(ctx, reason).await,
-            Decision::Reroute {
-                from,
-                to,
-                attempt,
-                max_reroutes,
-                cause,
-            } => steps::reroute(ctx, from, to, attempt, max_reroutes, cause).await?,
-            Decision::GateExhaustedReroutes {
-                node,
-                goto,
-                max_reroutes,
-                cause,
-            } => {
-                if let Some(report) =
-                    steps::gate_exhausted(ctx, &state, mode_name, node, goto, max_reroutes, cause)
-                        .await?
-                {
-                    return Ok(report);
-                }
-            }
-            Decision::EscalateFailure {
+        let decision = schedule::decide(&ctx.manifest.workflow, &state, policy);
+        match take_step(ctx, &state, mode_name, decision).await {
+            Ok(Some(report)) => return Ok(report),
+            Ok(None) => {}
+            // A cancellation that reached the step's own git said so on
+            // the way out; it is the same Ctrl-C the loop's next turn
+            // reads, and it pauses the run the same way.
+            Err(RunError::Cancelled) if root_cancel.is_cancelled() => {}
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// Takes one step the scheduler decided, answering with the report of a
+/// step that ended the invocation.
+async fn take_step(
+    ctx: &RunCtx<'_>,
+    state: &crate::replay::RunState,
+    mode_name: &ModeName,
+    decision: Decision,
+) -> Result<Option<RunReport>, RunError> {
+    match decision {
+        Decision::Broken { diagnostic } => Err(steps::broken(ctx, diagnostic).await),
+        Decision::MeasureBaseline { suite } => {
+            baseline::measure(ctx, suite).await?;
+            Ok(None)
+        }
+        Decision::Finish => steps::run_finished(ctx, mode_name).await.map(Some),
+        Decision::Pause { reason } => pause(ctx, reason).await.map(Some),
+        Decision::Fail { reason } => steps::run_failed(ctx, reason).await.map(Some),
+        Decision::Reroute {
+            from,
+            to,
+            attempt,
+            max_reroutes,
+            cause,
+        } => {
+            steps::reroute(ctx, from, to, attempt, max_reroutes, cause).await?;
+            Ok(None)
+        }
+        Decision::GateExhaustedReroutes {
+            node,
+            goto,
+            max_reroutes,
+            cause,
+        } => steps::gate_exhausted(ctx, state, mode_name, node, goto, max_reroutes, cause).await,
+        Decision::EscalateFailure {
+            node,
+            failure,
+            next_attempt,
+            continuable,
+            grantable,
+        } => {
+            steps::failure_escalation(
+                ctx,
+                state,
                 node,
                 failure,
-                next_attempt,
-                continuable,
-                grantable,
-            } => {
-                if let Some(report) = steps::failure_escalation(
-                    ctx,
-                    &state,
-                    node,
-                    failure,
-                    (next_attempt, (continuable, grantable)),
-                )
-                .await?
-                {
-                    return Ok(report);
-                }
-            }
-            Decision::Execute(batch) => {
-                if let Some(report) = steps::execute_batch(ctx, &state, batch).await? {
-                    return Ok(report);
-                }
-            }
-            Decision::PublishGate { node } => {
-                if let Some(report) = steps::publish_gate(ctx, node).await? {
-                    return Ok(report);
-                }
-            }
-            Decision::PollGate { node, external_ref } => {
-                if let Some(report) = steps::poll_gate(ctx, node, external_ref).await? {
-                    return Ok(report);
-                }
-            }
-            Decision::ResolveInternalGate { node } => {
-                if let Some(report) = steps::resolve_internal_gate(ctx, node).await? {
-                    return Ok(report);
-                }
-            }
-            Decision::AskQuestions { node } => {
-                if let Some(report) = steps::ask_questions(ctx, node).await? {
-                    return Ok(report);
-                }
-            }
-            Decision::FinishAnswered { node } => {
-                if let Some(report) = steps::finish_answered(ctx, node).await? {
-                    return Ok(report);
-                }
-            }
+                (next_attempt, (continuable, grantable)),
+            )
+            .await
         }
+        Decision::Execute(batch) => steps::execute_batch(ctx, state, batch).await,
+        Decision::PublishGate { node } => steps::publish_gate(ctx, node).await,
+        Decision::PollGate { node, external_ref } => {
+            steps::poll_gate(ctx, node, external_ref).await
+        }
+        Decision::ResolveInternalGate { node } => steps::resolve_internal_gate(ctx, node).await,
+        Decision::AskQuestions { node } => steps::ask_questions(ctx, node).await,
+        Decision::FinishAnswered { node } => steps::finish_answered(ctx, node).await,
     }
 }
 

@@ -306,6 +306,7 @@ async fn integrate_task(
                             output: None,
                             tail: Vec::new(),
                         }],
+                        waiting: Vec::new(),
                     })),
                 )
                 .await?;
@@ -314,14 +315,15 @@ async fn integrate_task(
     };
     let task_worktree = unit.worktree.as_path();
 
-    let post_runs = post_check(task, task_worktree, memo, ctx.supervision(cancel)).await?;
+    let checked = post_check(task, task_worktree, memo, ctx.supervision(cancel)).await?;
     *last_check_seq = ctx
         .emit(
             Some(&node.id),
             EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
                 task_id: task.id.clone(),
                 phase: Phase::Post,
-                results: to_results(&post_runs),
+                results: to_results(&checked.runs),
+                waiting: checked.waiting.clone(),
             })),
         )
         .await?;
@@ -363,8 +365,7 @@ async fn integrate_task(
         record_breach(ctx, node, &breach).await?;
     }
 
-    let criteria_green = post_runs.iter().all(|r| r.exit_code == 0);
-    if !criteria_green || !scope.violations.is_empty() {
+    if !checked.passes() || !scope.violations.is_empty() {
         return Ok(IntegrationOutcome::Rejected);
     }
 

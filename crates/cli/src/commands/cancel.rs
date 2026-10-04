@@ -17,14 +17,14 @@
 
 use std::time::Duration;
 
+use yunta_core::events::RunPhaseRaw;
 use yunta_core::process::signal::{signal_group, signal_process, Liveness, Signal};
-use yunta_core::{describe, events::EventPayload, Pid, RunId};
+use yunta_core::{describe, Pid, RunId};
 use yunta_engine::NodeState;
 
 use crate::commands::advice;
 use crate::context::Context;
 use crate::error::{note, warn, CliError, Outcome};
-use yunta_core::events::RunEvent;
 
 /// How long the engine gets to react to the SIGINT before the escalation
 /// — generous next to the engine's own 200ms interrupt grace, because a
@@ -43,20 +43,12 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
     let events = open.events;
 
     let state = yunta_engine::derive(&events);
-    let has_terminal_run_event = events.iter().any(|e| {
-        matches!(
-            e.payload(),
-            Some(EventPayload::Run(RunEvent::Finished(_)) | EventPayload::Run(RunEvent::Paused(_)))
-        )
-    });
+    // Where the log leaves the run now: a pause a later wake resumed
+    // stopped nothing that is still stopped.
+    let parked = matches!(state.run.phase(), RunPhaseRaw::Paused);
+    let stopped = parked || matches!(state.run.phase(), RunPhaseRaw::Closed);
 
-    if state.broken.is_some() || has_terminal_run_event {
-        let parked = events.last().is_some_and(|event| {
-            matches!(
-                event.payload(),
-                Some(EventPayload::Run(RunEvent::Paused(_)))
-            )
-        });
+    if state.broken.is_some() || stopped {
         match parked {
             true => println!(
                 "run {called}: already stopped — nothing to cancel; `{}` closes it for good",
@@ -136,15 +128,9 @@ pub async fn cancel(run_id: &RunId) -> Result<Outcome, CliError> {
                 }
             }
             let events = storage.events_for_run(run_id.clone()).await?;
-            let terminal = events.iter().any(|e| {
-                matches!(
-                    e.payload(),
-                    Some(
-                        EventPayload::Run(RunEvent::Finished(_))
-                            | EventPayload::Run(RunEvent::Paused(_))
-                    )
-                )
-            });
+            // The pause this signal asks for, not one an earlier wake
+            // already resumed.
+            let terminal = !matches!(yunta_engine::derive(&events).run.phase(), RunPhaseRaw::Open);
             if terminal {
                 println!("run {called}: cancelled — the log has its terminal");
                 return Ok(Outcome::Success);

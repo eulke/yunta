@@ -195,7 +195,52 @@ async fn every_task_is_checked_against_the_lineage_suite_before_and_after_its_wo
             "{checks:#?}"
         );
     }
+    let posts = post_checks(&bench);
+    assert!(
+        posts
+            .iter()
+            .all(|(waiting, ran_suite)| waiting.is_empty() && *ran_suite),
+        "with its criterion green, every check after the work runs the suite: {posts:#?}"
+    );
     assert_eq!(status_of(&bench), Some(TaskStatus::Done));
+}
+
+/// A check after work that leaves the task's own criterion red does not
+/// run the suite, and its event names the suite as waiting.
+#[tokio::test]
+async fn a_post_check_records_the_suite_waiting_while_the_task_s_criterion_is_red() {
+    let bench = Bench::new();
+    let sessions = "\
+capabilities: { run_tools: true }
+sessions:
+  - outcome: { type: completed, summary: nothing made }
+";
+    let RunReport { terminal, .. } = bench
+        .run_with_config(&workflow("[made.txt]", ""), sessions, &config())
+        .await;
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+
+    let posts = post_checks(&bench);
+    assert_eq!(posts, vec![(vec![SUITE.to_string()], false)]);
+}
+
+/// Each of T001's checks after its work: the guards it left waiting, and
+/// whether it ran the suite.
+fn post_checks(bench: &Bench) -> Vec<(Vec<String>, bool)> {
+    bench
+        .events()
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Node(NodeEvent::CriteriaChecked(p))) if p.phase == Phase::Post => {
+                let ran_suite = p.results.iter().any(|result| result.cmd == SUITE);
+                Some((p.waiting.clone(), ran_suite))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// The incident this exists for: a task whose own criterion passes, but

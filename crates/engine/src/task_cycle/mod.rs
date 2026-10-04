@@ -20,6 +20,7 @@ mod record;
 mod session;
 mod spec;
 mod stream;
+mod tree;
 
 use std::path::PathBuf;
 use yunta_core::ScopeGlob;
@@ -38,12 +39,13 @@ use attempt::{run_one_attempt, AttemptParams, AttemptStep};
 pub(crate) use record::to_results;
 use record::Recorder;
 
-pub(crate) use criteria::{content_of, could_not_run, pre_check_unless_cut, probe, probe_command};
-pub use criteria::{post_check, pre_check, Memo, Memoized};
+pub(crate) use criteria::{could_not_run, pre_check_unless_cut, probe, probe_command};
+pub use criteria::{post_check, pre_check, Memo, Memoized, PostCheck};
 pub(crate) use judge::{judge, Judgement, Work};
 pub(crate) use session::dispatch_session;
 pub use session::{DispatchError, RunToolsNeed, SessionObserver, SessionSetup};
 pub(crate) use session::{Dispatched, Opening, Resume};
+pub(crate) use tree::content_of;
 
 pub use answer::{Answer, Continuing, RespecifiedTask, Respecify, Review};
 pub use error::TaskCycleError;

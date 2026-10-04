@@ -150,6 +150,7 @@ fn pre_checks_of(bench: &Bench, task: &str) -> Vec<Vec<String>> {
                 task_id,
                 phase: Phase::Pre,
                 results,
+                ..
             }))) if task_id.as_str() == task => {
                 Some(results.iter().map(|result| result.cmd.clone()).collect())
             }

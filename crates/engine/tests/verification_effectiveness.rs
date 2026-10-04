@@ -100,6 +100,7 @@ fn pre_check_run(cmd: &str, exit_code: i32) -> Vec<StoredEvent> {
                 task_id: "T001".into(),
                 phase: Phase::Pre,
                 results: vec![criterion(cmd, exit_code)],
+                waiting: Vec::new(),
             },
         )))
         .build()
@@ -133,6 +134,7 @@ fn a_guard_green_before_every_task_is_never_flagged() {
                         r#type: Some(CriterionType::Guard),
                         ..criterion("cargo test --workspace", 0)
                     }],
+                    waiting: Vec::new(),
                 },
             )))
             .build()
@@ -339,6 +341,7 @@ fn post_check_run(task_attempts: &[u32]) -> Vec<StoredEvent> {
                     task_id: format!("T{i:03}").parse().unwrap(),
                     phase: Phase::Post,
                     results: vec![criterion("test -f done", 0)],
+                    waiting: Vec::new(),
                 },
             )));
         }

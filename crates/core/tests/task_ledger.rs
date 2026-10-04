@@ -32,6 +32,7 @@ fn checked(task: &str, results: Vec<CriterionResult>) -> NodeEvent {
         task_id: task.into(),
         phase: Phase::Pre,
         results,
+        waiting: Vec::new(),
     })
 }
 

@@ -8,8 +8,9 @@ use std::sync::Mutex;
 
 use yunta_core::events::{CriterionType, TaskLedger};
 use yunta_core::Criterion;
-use yunta_core::{ContentHash, Task, TaskId, TreeId};
+use yunta_core::{ContentHash, Task, TaskId};
 
+use super::tree::{asks_git, Tree};
 use super::{CriterionRun, TaskCycleError};
 use crate::process::{spawn_governed, CommandOutput, GovernedCommand, Outcome, Supervision};
 
@@ -211,73 +212,6 @@ pub struct Memoized {
     pub output: Option<CommandOutput>,
 }
 
-/// What a criterion's answer on a checkout turns on: the git tree of
-/// everything the checkout holds, and — read only when a command that
-/// runs `git` asks — the commit it stands on.
-struct Tree {
-    content: TreeId,
-    head: Option<String>,
-}
-
-impl Tree {
-    /// `cwd` as it stands now. The content is every file a checkout
-    /// shows — untracked ones included, ignored ones not — staged
-    /// through an index of this call's own, which starts as a copy of
-    /// the checkout's so only what changed is hashed again, and which
-    /// no other capture of the same checkout shares.
-    async fn of(
-        cwd: &Path,
-        with_head: bool,
-        supervision: Supervision<'_>,
-    ) -> Result<Self, TaskCycleError> {
-        let git = |args: &'static [&'static str]| async move {
-            crate::git::output(cwd, args, supervision)
-                .await
-                .map_err(|e| {
-                    let detail = e.detail();
-                    TaskCycleError::TreeHash {
-                        args: e.args,
-                        cwd: e.cwd,
-                        detail,
-                    }
-                })
-        };
-        let own = git(&["rev-parse", "--path-format=absolute", "--git-path", "index"]).await?;
-        let staging = tempfile::tempdir().map_err(TaskCycleError::TreeIndex)?;
-        let index = staging.path().join("index");
-        if let Err(source) = tokio::fs::copy(own.trim(), &index).await {
-            // A checkout with no index yet stages from nothing.
-            if source.kind() != std::io::ErrorKind::NotFound {
-                return Err(TaskCycleError::TreeIndex(source));
-            }
-        }
-        let content = crate::worktree::capture_tree(cwd, &index, supervision)
-            .await
-            .map_err(|source| TaskCycleError::TreeContent(Box::new(source)))?;
-        let head = match with_head {
-            true => Some(git(&["rev-parse", "HEAD"]).await?.trim().to_string()),
-            false => None,
-        };
-        Ok(Tree { content, head })
-    }
-}
-
-/// What `cwd` holds, as the tree a criterion's answer is kept for.
-pub(crate) async fn content_of(
-    cwd: &Path,
-    supervision: Supervision<'_>,
-) -> Result<TreeId, TaskCycleError> {
-    Ok(Tree::of(cwd, false, supervision).await?.content)
-}
-
-/// Whether `cmd` runs `git`, which can answer from history as well as
-/// from the files a checkout holds.
-fn asks_git(cmd: &str) -> bool {
-    crate::check::leading_programs(cmd)
-        .iter()
-        .any(|program| program == "git")
-}
-
 /// Runs one criterion command, measuring its wall-clock cost —
 /// an observed fact about an external process, same standing as its
 /// exit code, and recorded like one: the order a later check runs its
@@ -320,11 +254,23 @@ async fn run_all_criteria(
     memo: &Memo,
     supervision: Supervision<'_>,
 ) -> Result<Vec<CriterionRun>, TaskCycleError> {
-    let with_head = criteria.iter().any(|criterion| asks_git(&criterion.cmd));
-    let tree = Tree::of(cwd, with_head, supervision).await?;
+    let tree = Tree::for_criteria(criteria, cwd, supervision).await?;
+    run_on(task_id, criteria, &tree, cwd, memo, supervision).await
+}
+
+/// Runs `criteria` in order on `tree`, which `cwd` holds, each through
+/// the memo.
+async fn run_on(
+    task_id: &TaskId,
+    criteria: &[Criterion],
+    tree: &Tree,
+    cwd: &Path,
+    memo: &Memo,
+    supervision: Supervision<'_>,
+) -> Result<Vec<CriterionRun>, TaskCycleError> {
     let mut runs = Vec::with_capacity(criteria.len());
     for criterion in criteria {
-        let key = memo.key(&criterion.cmd, &tree);
+        let key = memo.key(&criterion.cmd, tree);
         let _turn = memo.turn(&key).await;
         let (exit_code, reused, duration_ms, output) = match memo.get(&key) {
             Some(answer) => (answer.exit_code, true, None, answer.output),
@@ -439,13 +385,49 @@ pub(crate) async fn pre_check_unless_cut(
     }
 }
 
-/// Post-check: every criterion, guard or not, must now
-/// pass.
+/// What a post-check answered: every criterion it ran, and the guards
+/// it left waiting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostCheck {
+    pub runs: Vec<CriterionRun>,
+    /// The guards that did not run, by command, because one of the
+    /// task's own criteria is red.
+    pub waiting: Vec<String>,
+}
+
+impl PostCheck {
+    /// Whether the check passes: every criterion ran, and each exits 0.
+    pub fn passes(&self) -> bool {
+        self.waiting.is_empty() && self.runs.iter().all(|run| run.exit_code == 0)
+    }
+}
+
+/// Post-check: every criterion, guard or not, must now pass. The task's
+/// own criteria run first, in declared order, and its guards only once
+/// every one of those passes.
+///
+/// While one of its own is red the check cannot close the task whatever
+/// a guard answers, and a guard that is the project's whole suite holds
+/// that same red test: run then, it costs the suite and says nothing the
+/// red criterion did not. A guard left waiting is in no run, so nothing
+/// reads it as passed.
 pub async fn post_check(
     task: &Task,
     cwd: &Path,
     memo: &Memo,
     supervision: Supervision<'_>,
-) -> Result<Vec<CriterionRun>, TaskCycleError> {
-    run_all_criteria(&task.id, &task.criteria, cwd, memo, supervision).await
+) -> Result<PostCheck, TaskCycleError> {
+    let (guards, own): (Vec<Criterion>, Vec<Criterion>) =
+        task.criteria.iter().cloned().partition(Criterion::is_guard);
+    let tree = Tree::for_criteria(&task.criteria, cwd, supervision).await?;
+    let mut runs = run_on(&task.id, &own, &tree, cwd, memo, supervision).await?;
+    if !runs.iter().all(|run| run.exit_code == 0) {
+        let waiting = guards.into_iter().map(|guard| guard.cmd).collect();
+        return Ok(PostCheck { runs, waiting });
+    }
+    runs.extend(run_on(&task.id, &guards, &tree, cwd, memo, supervision).await?);
+    Ok(PostCheck {
+        runs,
+        waiting: Vec::new(),
+    })
 }

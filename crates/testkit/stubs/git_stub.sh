@@ -11,8 +11,26 @@
 # The pid goes out by rename, never by writing the watched path: a
 # rename is atomic, so the moment the file exists it holds the whole
 # pid and a watcher needs no interval to be sure of that.
+#
+# The subcommand is read as git reads it: after the `-c name=value`
+# pairs a caller sets ahead of it.
+first=""
+second=""
+setting=""
+for arg in "$@"; do
+    if [ -n "$setting" ]; then
+        setting=""
+    elif [ -z "$first" ] && [ "$arg" = "-c" ]; then
+        setting=1
+    elif [ -z "$first" ]; then
+        first=$arg
+    else
+        second=$arg
+        break
+    fi
+done
 if [ -n "$YUNTA_STUB_GIT_BLOCK_ON" ] &&
-    { [ "$1" = "$YUNTA_STUB_GIT_BLOCK_ON" ] || [ "$1 $2" = "$YUNTA_STUB_GIT_BLOCK_ON" ]; } &&
+    { [ "$first" = "$YUNTA_STUB_GIT_BLOCK_ON" ] || [ "$first $second" = "$YUNTA_STUB_GIT_BLOCK_ON" ]; } &&
     { [ -z "$YUNTA_STUB_GIT_BLOCK_WHEN" ] || [ -f "$YUNTA_STUB_GIT_BLOCK_WHEN" ]; }; then
     echo $$ > "$YUNTA_STUB_GIT_PID.partial"
     mv "$YUNTA_STUB_GIT_PID.partial" "$YUNTA_STUB_GIT_PID"

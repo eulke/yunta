@@ -553,6 +553,7 @@ fn checked(phase: Phase, exits: [i32; 2]) -> EventPayload {
                 tail: Vec::new(),
             },
         ],
+        waiting: Vec::new(),
     }))
 }
 
@@ -855,7 +856,8 @@ async fn every_check_leaves_its_question_and_its_answer_on_the_log() {
         checks_on(&session.host),
         vec![
             None,
-            Some((false, vec![1, 0], vec!["notes.md".into()])),
+            // The guard waits while the task's own criterion is red.
+            Some((false, vec![1], vec!["notes.md".into()])),
             None,
             Some((true, vec![0, 0], vec![])),
         ]
@@ -907,7 +909,8 @@ async fn a_check_of_a_tree_that_moved_on_stops_the_one_still_judging_the_old() {
 async fn a_check_judges_the_work_the_way_its_close_will() {
     let session = GreetingSession::open().await;
 
-    // The criterion is still red, and the work strayed outside the scope.
+    // The criterion is still red, and the work strayed outside the scope:
+    // the guard waits for the criterion.
     session.stray().await;
     assert_eq!(
         session.check().await,
@@ -915,17 +918,26 @@ async fn a_check_judges_the_work_the_way_its_close_will() {
             "closes": false,
             "criteria": [
                 {"cmd": "test -f hello.txt", "guard": false, "exit_code": 1},
-                {"cmd": "true", "guard": true, "exit_code": 0},
             ],
+            "guards_waiting": ["true"],
             "outside_scope": ["notes.md"],
         })
     );
 
-    // The work done, and nothing left outside: the close would take it.
+    // The work done, and nothing left outside: the guard runs, and the
+    // close would take it.
     session.finish().await;
-    let verdict = session.check().await;
-    assert_eq!(verdict["closes"], json!(true), "got: {verdict}");
-    assert_eq!(verdict["outside_scope"], json!([]));
+    assert_eq!(
+        session.check().await,
+        json!({
+            "closes": true,
+            "criteria": [
+                {"cmd": "test -f hello.txt", "guard": false, "exit_code": 0},
+                {"cmd": "true", "guard": true, "exit_code": 0},
+            ],
+            "outside_scope": [],
+        })
+    );
     session.client.cancel().await.unwrap();
 }
 
@@ -959,9 +971,9 @@ async fn a_check_says_what_a_red_criterion_printed_last() {
         "the session reads why it fails without running the command again"
     );
     assert_eq!(
-        verdict["criteria"][1].get("tail"),
-        None,
-        "a criterion that passes has nothing to explain"
+        verdict["guards_waiting"],
+        json!(["true"]),
+        "the guard waits for the red criterion"
     );
     client.cancel().await.unwrap();
 }
@@ -1602,6 +1614,33 @@ async fn only_the_kinds_this_node_declares_have_a_submission_tool() {
         properties.keys().collect::<Vec<_>>(),
         vec!["document"],
         "the node declared the kind, so nothing names the artifact: {properties:?}"
+    );
+    client.cancel().await.unwrap();
+}
+
+/// A plan's criteria run before it is accepted, so the tool it is handed
+/// over through says where: a program the engine cannot find is never
+/// written into one in the first place.
+#[tokio::test]
+async fn the_plan_s_submission_tool_says_where_its_commands_run() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host
+        .session_declaring("plan", None, vec![tasks_spec()])
+        .await;
+    let client = client_for(&session, None).await.unwrap();
+
+    let tools = client.list_tools(None).await.unwrap();
+    let description = tools
+        .tools
+        .iter()
+        .find(|t| t.name == "yunta_submit_tasks")
+        .and_then(|t| t.description.clone())
+        .expect("the tool is mounted with a description");
+    let environment = yunta_testkit::tools_environment();
+    assert!(
+        description.contains(&format!("run under `{}`", environment.shell))
+            && description.contains(&environment.path.join(":")),
+        "{description}"
     );
     client.cancel().await.unwrap();
 }

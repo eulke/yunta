@@ -247,6 +247,7 @@ mod tests {
                 result("cargo fmt --check", 0, &[]),
                 result("test -f made.txt", 1, &[]),
             ],
+            waiting: Vec::new(),
         }));
         assert_eq!(
             said_for(payload),
@@ -274,6 +275,7 @@ mod tests {
                     outside_scope: outside.iter().map(|path| path.into()).collect(),
                     denied: Vec::new(),
                     duration_ms: 222_400,
+                    waiting: Vec::new(),
                 },
             ))
         };

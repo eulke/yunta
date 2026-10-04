@@ -32,6 +32,25 @@ impl Recorder<'_> {
         phase: Phase,
         runs: &[CriterionRun],
     ) -> Result<Option<Seq>, TaskCycleError> {
+        self.checked(phase, runs, Vec::new()).await
+    }
+
+    /// Records what a check after the work answered, with the guards it
+    /// left waiting.
+    pub(super) async fn post_check(
+        &self,
+        runs: &[CriterionRun],
+        waiting: &[String],
+    ) -> Result<Option<Seq>, TaskCycleError> {
+        self.checked(Phase::Post, runs, waiting.to_vec()).await
+    }
+
+    async fn checked(
+        &self,
+        phase: Phase,
+        runs: &[CriterionRun],
+        waiting: Vec<String>,
+    ) -> Result<Option<Seq>, TaskCycleError> {
         let mut results = to_results(runs);
         // What each command printed goes where the run keeps its objects;
         // the check names it, and quotes the end of what did not pass.
@@ -53,6 +72,7 @@ impl Recorder<'_> {
                 task_id: self.task.clone(),
                 phase,
                 results,
+                waiting,
             },
         )))
         .await

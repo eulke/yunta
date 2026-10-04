@@ -437,6 +437,7 @@ mod tests {
                             tail: Vec::new(),
                         },
                     ],
+                    waiting: Vec::new(),
                 })),
             )
             .build();

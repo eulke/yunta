@@ -117,6 +117,7 @@ impl SessionTools {
                 .iter()
                 .map(|run| Answered::of_run(run, &self.host.redactor))
                 .collect(),
+            guards_waiting: judgement.waiting,
             outside_scope: judgement.scope.violations,
             runs_under: self.host.environment.as_ref().filter(|_| any_unrunnable),
         })
@@ -138,6 +139,7 @@ fn answered(task: &TaskId, judgement: &Judgement, took: std::time::Duration) -> 
         task_id: task.clone(),
         closes: judgement.closes(),
         results: crate::task_cycle::to_results(&judgement.criteria),
+        waiting: judgement.waiting.clone(),
         outside_scope: judgement.scope.violations.clone(),
         denied: judgement.scope.denied.clone(),
         duration_ms: took.as_millis().min(u64::MAX as u128) as u64,
@@ -377,6 +379,10 @@ struct Verdict<'a> {
     /// Whether the task would be done if the session ended now.
     closes: bool,
     criteria: Vec<Answered>,
+    /// The guards this check did not run, because one of the task's own
+    /// criteria is red: they run once every one of those passes.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    guards_waiting: Vec<String>,
     outside_scope: Vec<PathBuf>,
     /// What the criteria ran with, told only when one could not run.
     #[serde(skip_serializing_if = "Option::is_none")]

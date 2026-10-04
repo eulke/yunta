@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::Task;
 
-use super::criteria::{post_check, Memo};
+use super::criteria::{post_check, Memo, PostCheck};
 use super::{CriterionRun, TaskCycleError};
 use crate::process::Supervision;
 use crate::scope::{audit, ScopeCheckResult};
@@ -20,18 +20,23 @@ use crate::worktree::Unit;
 /// What judging a task's work found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Judgement {
-    /// Every criterion, run again (or answered from the cache) on the
-    /// tree as it stands.
+    /// Every criterion that ran again (or was answered from the cache) on
+    /// the tree as it stands.
     pub criteria: Vec<CriterionRun>,
+    /// The guards that did not run, by command, because a criterion of
+    /// the task's own is red: they run once every one of those passes.
+    pub waiting: Vec<String>,
     /// Every path the work changed, and those outside its scope.
     pub scope: ScopeCheckResult,
 }
 
 impl Judgement {
-    /// Whether this work closes its task: every criterion passes and
-    /// nothing it changed lies outside its scope.
+    /// Whether this work closes its task: every criterion ran and passes,
+    /// and nothing it changed lies outside its scope.
     pub fn closes(&self) -> bool {
-        self.criteria.iter().all(|run| run.exit_code == 0) && self.scope.violations.is_empty()
+        self.criteria.iter().all(|run| run.exit_code == 0)
+            && self.waiting.is_empty()
+            && self.scope.violations.is_empty()
     }
 }
 
@@ -60,7 +65,10 @@ pub(crate) async fn judge(
     supervision: Supervision<'_>,
 ) -> Result<Judgement, TaskCycleError> {
     let cwd = work.unit.worktree.as_path();
-    let criteria = post_check(task, cwd, memo, supervision).await?;
+    let PostCheck {
+        runs: criteria,
+        waiting,
+    } = post_check(task, cwd, memo, supervision).await?;
     let scope = audit(
         cwd,
         &work.unit.from,
@@ -70,5 +78,9 @@ pub(crate) async fn judge(
         supervision,
     )
     .await?;
-    Ok(Judgement { criteria, scope })
+    Ok(Judgement {
+        criteria,
+        waiting,
+        scope,
+    })
 }

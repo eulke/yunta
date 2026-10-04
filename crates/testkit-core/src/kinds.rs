@@ -102,6 +102,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 output: None,
                 tail: Vec::new(),
             }],
+            waiting: Vec::new(),
         })),
         EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::done(
             "graph-cmd".into(),
@@ -126,6 +127,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
             outside_scope: vec!["notes.md".into()],
             denied: Vec::new(),
             duration_ms: 4_310,
+            waiting: Vec::new(),
         })),
         EventPayload::Tasks(TaskEvent::DeviationDeclared(DeviationDeclaredPayload {
             task_id: "graph-cmd".into(),

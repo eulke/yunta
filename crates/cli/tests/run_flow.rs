@@ -1592,6 +1592,78 @@ nodes:
     );
 }
 
+/// A run that paused once and was woken again is running, whatever its
+/// log said before the wake: `cancel` reaches the engine that woke it.
+#[test]
+fn yunta_cancel_stops_a_run_woken_after_a_pause() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    let home = root.path().join("state");
+    let run_id = woken_long_run(&repo, &home);
+    let child_pid = parse_pid(&std::fs::read_to_string(repo.join("child.pid")).unwrap());
+    let mut child_group = ProcessGroupCleanup::new(child_pid);
+
+    let cancel = yunta_in!(&repo, &home, &["cancel", &run_id]);
+
+    assert!(
+        cancel.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&cancel.stderr)
+    );
+    assert!(
+        stdout(&cancel).contains("signalling the live engine"),
+        "got: {}",
+        stdout(&cancel)
+    );
+    wait_until(
+        || liveness(child_pid) == Liveness::Dead,
+        || "the woken run's child outlived the cancel".into(),
+    );
+    child_group.disarm();
+}
+
+/// A run in `repo` that parked on a gate nobody answered, then was woken
+/// by its answer and is running a node that never ends on its own — its
+/// pid in `child.pid`. Answers the run's id.
+fn woken_long_run(repo: &Path, home: &Path) -> String {
+    std::fs::create_dir_all(repo).unwrap();
+    init_repo(repo);
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "defaults:\n  isolation: none\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        r#"
+name: woken
+nodes:
+  - { id: approve, kind: gate, assignee: lead }
+  - id: long
+    kind: bash
+    depends_on: [approve]
+    run: "echo $$ > child.pid; tail -f /dev/null"
+"#,
+    );
+    git(repo, &["add", "."]);
+    git(repo, &["commit", "-q", "-m", "fixtures"]);
+
+    // No terminal answers the gate, so the run parks on it.
+    let parked = yunta_in!(repo, home, &["run", "wf.yaml"]);
+    assert!(stdout(&parked).contains("approve"), "{}", stdout(&parked));
+    let run_id = only_run_id(home);
+    let resolved = yunta_in!(repo, home, &["resolve-gate", &run_id, "approve"]);
+    assert!(
+        resolved.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&resolved.stderr)
+    );
+    wait_until(
+        || marker_written(&repo.join("child.pid")),
+        || "the woken run never started `long`".into(),
+    );
+    run_id
+}
+
 #[test]
 fn yunta_cancel_cleans_up_after_a_crashed_engine() {
     let root = tempfile::tempdir().unwrap();

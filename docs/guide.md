@@ -705,6 +705,10 @@ config declares `baseline.suite` and the suite passed when the run measured it,
 every task of a loop is held to that suite as a `guard`: its pre-check, the checks
 its session runs through `yunta_check_task`, its close and its integration all run
 it, and `yunta_task` lists it among the task's guards with what it is there to show.
+A check runs the task's own criteria first and the guard only once they all pass:
+while one is red the task cannot close whatever the suite says, so the guard waits,
+the check's event names it under `waiting`, and `yunta_check_task` under
+`guards_waiting`.
 A change that breaks what passed keeps the task that made it open, while its session
 can still answer for it — instead of surfacing after every task closed, at a
 `baseline_compare` node nobody who made the change is left to fix. Don't repeat the

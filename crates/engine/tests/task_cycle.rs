@@ -116,6 +116,7 @@ fn priced(entries: &[(&str, &[u64])]) -> TaskLedger {
                 task_id: "T1".into(),
                 phase: Phase::Pre,
                 results,
+                waiting: Vec::new(),
             })),
         )
         .build();
@@ -665,6 +666,77 @@ async fn pre_check_and_post_check_run_every_criterion() {
         .unwrap();
     assert_eq!(runs.len(), 2);
     assert!(surprises(&t, &runs).is_empty());
+}
+
+#[tokio::test]
+async fn a_guard_waits_while_a_criterion_of_its_own_task_is_red() {
+    // The guard writes a line outside the repo each time it runs, so the
+    // marker says whether it ran without changing the tree it is judged on.
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    let marker = root.path().join("guard-runs.txt");
+    let suite = format!("echo ran >> {}", marker.display());
+    let t = task(
+        "red-own",
+        &["a.txt"],
+        vec![guard(&suite), cmd("test -f a.txt")],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    let checked = yunta_engine::post_check(&t, &repo, &memo, owner.supervision())
+        .await
+        .unwrap();
+
+    let ran: Vec<(&str, i32)> = checked
+        .runs
+        .iter()
+        .map(|run| (run.cmd.as_str(), run.exit_code))
+        .collect();
+    assert_eq!(ran, vec![("test -f a.txt", 1)]);
+    assert_eq!(checked.waiting, vec![suite]);
+    assert!(!checked.passes());
+    assert!(
+        !tokio::fs::try_exists(&marker).await.unwrap(),
+        "the guard never ran"
+    );
+}
+
+#[tokio::test]
+async fn a_guard_runs_after_every_criterion_of_its_own_task_passes() {
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    tokio::fs::write(repo.join("a.txt"), "done").await.unwrap();
+    let marker = root.path().join("guard-runs.txt");
+    let suite = format!("echo ran >> {}", marker.display());
+    let t = task(
+        "green-own",
+        &["a.txt"],
+        vec![guard(&suite), cmd("test -f a.txt")],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    let checked = yunta_engine::post_check(&t, &repo, &memo, owner.supervision())
+        .await
+        .unwrap();
+
+    let ran: Vec<(&str, bool, i32)> = checked
+        .runs
+        .iter()
+        .map(|run| (run.cmd.as_str(), run.is_guard, run.exit_code))
+        .collect();
+    assert_eq!(
+        ran,
+        vec![("test -f a.txt", false, 0), (suite.as_str(), true, 0)]
+    );
+    assert!(checked.waiting.is_empty() && checked.passes());
+    let runs = tokio::fs::read_to_string(&marker).await.unwrap();
+    assert_eq!(runs.lines().count(), 1);
 }
 
 #[tokio::test]

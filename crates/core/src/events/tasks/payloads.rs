@@ -157,6 +157,11 @@ pub struct TaskCheckAnsweredPayload {
     /// Whether the task would have been done had the session ended then.
     pub closes: bool,
     pub results: Vec<CriterionResult>,
+    /// The guards the check did not run, by command: one of the task's
+    /// own criteria was red, and a guard runs only once every one of
+    /// those passes. Absent when every guard ran.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waiting: Vec<String>,
     /// What the work changed outside the task's scope.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outside_scope: Vec<PathBuf>,

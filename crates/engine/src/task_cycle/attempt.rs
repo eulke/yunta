@@ -168,11 +168,12 @@ pub(super) async fn run_one_attempt(
     let succeeded = judgement.closes();
     let Judgement {
         criteria: post_runs,
+        waiting,
         scope,
     } = judgement;
     // On the log before anything else happens to this task, so the next
     // attempt's session can read why this one did not close.
-    let recorded = recorder.criteria(Phase::Post, &post_runs).await?;
+    let recorded = recorder.post_check(&post_runs, &waiting).await?;
     recorder.scope(&scope).await?;
 
     let escalated = matches!(

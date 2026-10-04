@@ -11,6 +11,7 @@
 
 use rmcp::model::Tool;
 use serde_json::{json, Value};
+use yunta_core::events::ExecutionEnvironment;
 use yunta_core::ArtifactKind;
 pub use yunta_core::RunTool;
 
@@ -59,7 +60,9 @@ impl RunToolCatalog for RunTool {
             RunTool::WithdrawFinding => withdraw_finding_tool(),
             RunTool::Findings => findings_tool(session),
             RunTool::AnswerFinding => answer_finding_tool(session),
-            RunTool::Submit(kind) => submit_tool(self.name(), kind),
+            RunTool::Submit(kind) => {
+                submit_tool(self.name(), kind, session.host.environment.as_ref())
+            }
         }
     }
 }
@@ -228,10 +231,12 @@ fn check_task_tool() -> Tool {
     Tool::new(
         RunTool::CheckTask.name(),
         "Judge your work on this task exactly as the engine will when your session \
-         ends: run every criterion on the checkout as it stands and audit what changed \
-         against the task's scope. `closes` is true when every criterion exits 0 and \
-         nothing changed lies outside the scope — the task is then done if the tree does \
-         not change again. A scope expansion you asked for counts only once granted. \
+         ends: run the task's criteria on the checkout as it stands and audit what \
+         changed against the task's scope. Its guards run once every other criterion \
+         passes; until then `guards_waiting` names them. `closes` is true when every \
+         criterion and guard exits 0 and nothing changed lies outside the scope — the \
+         task is then done if the tree does not change again. A scope expansion you \
+         asked for counts only once granted. \
          It answers when the criteria have, however long they take. Calling it again on \
          an unchanged checkout waits for the check already running and reuses its \
          answers; calling it after changing the checkout stops that check, whose tree \
@@ -326,9 +331,26 @@ fn blackboard_tool() -> Tool {
 /// shape the engine already validates rather than transcribing a format
 /// — and it is the only argument: the node declared the kind, so which
 /// document this is was settled before the session started.
-fn submit_tool(tool: &'static str, kind: ArtifactKind) -> Tool {
+///
+/// A document whose commands the engine runs before accepting it says
+/// where they run, so a command that names a program the engine cannot
+/// find is not written in the first place.
+fn submit_tool(
+    tool: &'static str,
+    kind: ArtifactKind,
+    environment: Option<&ExecutionEnvironment>,
+) -> Tool {
     let (document, defs) = published(kind);
     let properties = json!({ "document": document });
+    let runs_under = match (kind, environment) {
+        (ArtifactKind::Tasks | ArtifactKind::Spec, Some(environment)) => format!(
+            " Its commands run under `{}`, looking programs up in this PATH, in order: {}. \
+             A program found nowhere on it cannot answer, and the document is refused for it.",
+            environment.shell,
+            environment.path.join(":")
+        ),
+        _ => String::new(),
+    };
     Tool::new(
         tool,
         format!(
@@ -337,7 +359,7 @@ fn submit_tool(tool: &'static str, kind: ArtifactKind) -> Tool {
              and the document's own rules — and writes the artifact file itself once it \
              is accepted. A refusal lists every problem to fix; submit again until it is \
              accepted. An acceptance reports what the engine read, so you can see your \
-             meaning survived. Submitting again replaces the document."
+             meaning survived. Submitting again replaces the document.{runs_under}"
         ),
         tool_schema(
             properties.as_object().cloned().unwrap_or_default(),
