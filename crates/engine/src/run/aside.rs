@@ -63,8 +63,11 @@ impl<'a> Aside<'a> {
             stepped = &mut step => stepped,
             measured = measurement => {
                 self.under_way = None;
-                measured?;
-                step.await
+                // The step goes on to its own end whatever the measurement
+                // came to: dropping it would cut its sessions off with no
+                // close on the log. A failed measurement says so after.
+                let stepped = step.await;
+                measured.and(stepped)
             }
         }
     }

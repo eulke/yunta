@@ -108,3 +108,46 @@ nodes:
         });
     assert_eq!(first, Some("measured"));
 }
+
+/// A measurement that fails on its way to the log leaves the node beside
+/// it running to its own end: the node closes on the log, and the failure
+/// comes after. The suite plants a file where its capture's directory goes.
+#[tokio::test]
+async fn a_measurement_error_does_not_drop_the_node_beside_it() {
+    let bench = Bench::new();
+    let blocked = bench.run_dir().join("baseline");
+    let finished = bench.run_dir().with_extension("finished");
+    let config = format!(
+        "{MOCK_CONFIG}baseline:\n  suite: \"printf x > {}\"\n",
+        blocked.display()
+    );
+    let workflow = format!(
+        r#"
+name: measured-beside
+nodes:
+  - {{ id: work, kind: bash, run: "sleep 2; touch {finished}" }}
+  - {{ id: regressions, kind: check, builtin: baseline_compare, depends_on: [work] }}
+"#,
+        finished = finished.display()
+    );
+    bench.create(&workflow, "sessions: []", &config).await;
+
+    let woke = bench.try_wake().await;
+
+    assert!(woke.is_err(), "{woke:?}");
+    assert!(
+        finished.exists(),
+        "the node beside the measurement ran to its end"
+    );
+    let closed = bench.events().iter().any(|event| {
+        event
+            .node_id
+            .as_ref()
+            .is_some_and(|node| node.as_str() == "work")
+            && matches!(
+                event.payload(),
+                Some(EventPayload::Node(NodeEvent::Finished(_)))
+            )
+    });
+    assert!(closed, "its close is on the log");
+}
