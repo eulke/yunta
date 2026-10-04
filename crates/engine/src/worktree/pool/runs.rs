@@ -63,7 +63,7 @@ impl CheckoutPool {
                     .await?;
                 if on.trim() != branch {
                     let switch = ["switch", "--discard-changes", "-q", branch.as_str()];
-                    crate::git::output(&checkout, &switch, supervision).await?;
+                    super::mutating(&checkout, &switch, supervision).await?;
                     crate::git::output(&checkout, &["clean", "-q", "-ffd"], supervision).await?;
                 }
                 Ok((checkout, lease))

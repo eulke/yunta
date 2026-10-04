@@ -22,8 +22,8 @@ pub async fn retire_unit_branch(
     if branch.is_empty() {
         return Ok(());
     }
-    crate::git::output(&unit.worktree, &["switch", "--detach", "-q"], supervision).await?;
-    if let Err(error) = crate::git::output(into, &["branch", "-d", branch], supervision).await {
+    super::mutating(&unit.worktree, &["switch", "--detach", "-q"], supervision).await?;
+    if let Err(error) = super::mutating(into, &["branch", "-d", branch], supervision).await {
         tracing::debug!(%error, branch, "a landed unit's branch stays");
     }
     Ok(())
@@ -58,7 +58,7 @@ pub async fn release_unit_checkouts(
         )
         .await?;
         if landed_there && kept.iter().all(|still| still != &branch) {
-            super::super::run_git(into, &["branch", "-D", &branch], supervision).await?;
+            super::mutating(into, &["branch", "-D", &branch], supervision).await?;
         }
     }
     Ok(())
@@ -98,7 +98,7 @@ pub async fn release_run_checkout(
     };
     let on = crate::git::output(&tree, &["branch", "--show-current"], supervision).await?;
     if on.trim() == super::super::run_branch(run_id) && slot::is_clean(&tree, supervision).await {
-        crate::git::output(&tree, &["switch", "--detach", "-q"], supervision).await?;
+        super::mutating(&tree, &["switch", "--detach", "-q"], supervision).await?;
     }
     Ok(())
 }
@@ -132,7 +132,7 @@ pub async fn hand_over_run_checkout(
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
     let branch = super::super::run_branch(successor);
-    crate::git::output(tree, &["switch", "-q", "-c", &branch], supervision).await?;
+    super::mutating(tree, &["switch", "-q", "-c", &branch], supervision).await?;
     Ok(())
 }
 
@@ -150,7 +150,7 @@ pub async fn forget_run_units(
     let kept = let_go(&home, &ours, pool.holder.as_deref(), supervision).await?;
     for branch in branches(repo, &ours, supervision).await? {
         if kept.iter().all(|still| still != &branch) {
-            super::super::run_git(repo, &["branch", "-D", &branch], supervision).await?;
+            super::mutating(repo, &["branch", "-D", &branch], supervision).await?;
         }
     }
     Ok(())
@@ -231,7 +231,7 @@ async fn let_go(
         let held = slot::hold(home, number, Contention::Refuse, holder, supervision).await?;
         match held {
             Some(_lease) if slot::is_clean(&path, supervision).await => {
-                crate::git::output(&path, &["switch", "--detach", "-q"], supervision).await?;
+                super::mutating(&path, &["switch", "--detach", "-q"], supervision).await?;
             }
             _ => kept.push(branch),
         }

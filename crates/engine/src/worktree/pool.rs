@@ -192,18 +192,14 @@ impl CheckoutPool {
     ) -> Result<(PathBuf, Lease), WorktreeError> {
         match self.take(None, base, supervision).await? {
             Some((checkout, lease)) => {
-                crate::git::output(
-                    &checkout,
-                    &[
-                        "switch",
-                        "--discard-changes",
-                        "-q",
-                        "--detach",
-                        base.as_str(),
-                    ],
-                    supervision,
-                )
-                .await?;
+                let detach = [
+                    "switch",
+                    "--discard-changes",
+                    "-q",
+                    "--detach",
+                    base.as_str(),
+                ];
+                mutating(&checkout, &detach, supervision).await?;
                 crate::git::output(&checkout, &["clean", "-q", "-ffd"], supervision).await?;
                 Ok((checkout, lease))
             }
@@ -412,6 +408,39 @@ async fn add(
     Ok(())
 }
 
+/// Runs git `args` in `cwd` with every worktree mutation of its repository
+/// held off. A switch that cuts, moves or lets go of a branch, and a
+/// branch deletion, read every checkout's metadata — which an `add` beside
+/// them may have half written, and git then fails to read — so they take
+/// the lock an `add` takes.
+pub(super) async fn mutating(
+    cwd: &Path,
+    args: &[&str],
+    supervision: Supervision<'_>,
+) -> Result<String, WorktreeError> {
+    let common_dir = match common_dir_of(cwd).await {
+        Some(found) => found,
+        None => super::common_git_dir(cwd, supervision).await?,
+    };
+    let _mutation_lock = super::lock_worktree_mutations(&common_dir, supervision.clock).await?;
+    Ok(crate::git::output(cwd, args, supervision).await?)
+}
+
+/// The common git directory of the checkout at `cwd`, read off its `.git`
+/// as git reads it — `None` when that does not answer, and git is asked.
+async fn common_dir_of(cwd: &Path) -> Option<PathBuf> {
+    let dot_git = cwd.join(".git");
+    if tokio::fs::metadata(&dot_git).await.ok()?.is_dir() {
+        return Some(dot_git);
+    }
+    let pointer = tokio::fs::read_to_string(&dot_git).await.ok()?;
+    let admin = cwd.join(pointer.strip_prefix("gitdir:")?.trim());
+    let common = tokio::fs::read_to_string(admin.join("commondir"))
+        .await
+        .ok()?;
+    Some(admin.join(common.trim()))
+}
+
 /// Puts `checkout` on a new `branch` at `base`, with nothing of the unit
 /// that worked there before but what git ignores.
 async fn reset(
@@ -420,19 +449,15 @@ async fn reset(
     base: &CommitSha,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
-    crate::git::output(
-        checkout,
-        &[
-            "switch",
-            "--discard-changes",
-            "-q",
-            "-C",
-            branch,
-            base.as_str(),
-        ],
-        supervision,
-    )
-    .await?;
+    let cut = [
+        "switch",
+        "--discard-changes",
+        "-q",
+        "-C",
+        branch,
+        base.as_str(),
+    ];
+    mutating(checkout, &cut, supervision).await?;
     crate::git::output(checkout, &["clean", "-q", "-ffd"], supervision).await?;
     let request = checkout.join(crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE);
     match tokio::fs::remove_file(&request).await {

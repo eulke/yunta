@@ -44,6 +44,10 @@ path again, never from sharing or copying what a path built.
    — two runs — never share one. A gone holder's lock is taken back, unless the
    run that held it still has agents at work. A checkout a crash left half added
    is made again. Owning lives in the branch, which outlives every process.
+   Every switch the pool makes and every branch it deletes takes the lock that
+   adding a checkout takes, after the checkout's own: git reads every
+   checkout's metadata to cut, move or delete a branch, and one being added
+   beside it may be half written.
 4. **Nearest first.** A unit with no checkout of its own takes the free one whose
    commit differs from where it starts in the fewest paths.
 5. **A landed task lets go of its branch.** When a task's work lands on the run's

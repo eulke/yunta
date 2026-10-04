@@ -8,6 +8,7 @@
 mod pool_world;
 
 use std::path::Path;
+use std::time::Duration;
 
 use pool_world::{write, World};
 use yunta_core::{Pid, RunId};
@@ -216,4 +217,35 @@ async fn resume_continues_on_a_persons_branch_in_the_bound_checkout() {
 
     assert!(a_persons);
     assert!(!another_runs);
+}
+
+/// Putting a free checkout on a unit's branch reads every checkout of the
+/// repository, so it waits for a checkout another process is adding
+/// beside it, whose metadata may be half written.
+#[tokio::test]
+async fn a_reused_checkout_waits_for_a_worktree_being_added_beside_it() {
+    let world = World::new();
+    let (first, held) = world.open("T001").await;
+    world.land(&first).await;
+    drop(held);
+    let common = yunta_testkit::git_output(&world.repo, &["rev-parse", "--git-common-dir"]);
+    let lock = world.repo.join(common.trim()).join("yunta-worktree.lock");
+    let mut adding = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let holder = Pid::try_from(adding.id()).unwrap();
+    let probe = yunta_engine::lock::SystemProbe;
+    yunta_engine::lock::hand_over(&lock, holder, &probe, &yunta_testkit_core::FixedClock).unwrap();
+
+    let waited = tokio::time::timeout(Duration::from_millis(500), world.open("T002")).await;
+    adding.kill().unwrap();
+    adding.wait().unwrap();
+
+    assert!(
+        waited.is_err(),
+        "the reuse went ahead while a checkout was being added"
+    );
+    let (second, _held) = world.open("T002").await;
+    assert_eq!(second.worktree, first.worktree);
 }
