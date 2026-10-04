@@ -342,7 +342,7 @@ they are gone, and the task's next cycle reads the answer.
 |---|---|---|---|
 | `task_id` | string | sí, en `scope_expansion_denied` | — |
 | `task_id` | `Option<string>` | no, en `scope_expansion_granted` | la tarea que la concesión amplía; ausente en la concesión al scope de un nodo — el que figura en el evento — que una persona hace desde el menú de su falla |
-| `decided_by` | enum `rule \| person` + identificador | sí | — |
+| `decided_by` | enum `rule \| person \| evidence` + identificador | sí | `person` lleva quién; `evidence`, el criterio rojo de la tarea cuya salida ubicó cada path (`ruta:línea`) — un hecho que el engine verificó, no una decisión (D240) |
 | `mode` | enum `rules \| ask \| deny` | sí | modo vigente en el momento de la decisión |
 | `count_this_run` | `u32` | sí | para el cap `max_per_run` |
 | `paths` | lista de globs | solo en `scope_expansion_granted` | los paths exactos que la concesión autorizó: el scope efectivo de un intento posterior se deriva del log sin volver a aparear la concesión con el pedido que la precedió. Un log escrito antes del campo lo lee vacío |

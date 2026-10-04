@@ -51,7 +51,7 @@ fn ready(task: &Task, state: &RunState) -> bool {
 
 /// Everything `task` may write: what it declared, and what the log lets
 /// it reach beyond that.
-fn reach(task: &Task, state: &RunState) -> Vec<ScopeGlob> {
+pub(super) fn reach(task: &Task, state: &RunState) -> Vec<ScopeGlob> {
     task.scope
         .iter()
         .cloned()

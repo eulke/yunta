@@ -8,12 +8,20 @@ use crate::hash::CommitSha;
 use crate::ids::{Responder, TaskId};
 use crate::policy::ScopeExpansionMode;
 
-/// `decided_by`: `rule | person` plus an identifier for the latter.
+/// `decided_by`: `rule | person | evidence`, with who the person was, or
+/// which criterion's output was the evidence.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Decider {
     Rule,
-    Person { id: Responder },
+    Person {
+        id: Responder,
+    },
+    /// What a red criterion of the task printed located the paths: a fact
+    /// the engine verified, not a choice anyone made.
+    Evidence {
+        criterion: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -117,7 +117,7 @@ pub(super) enum RunToolError {
     InvalidSubmission { names: String, detail: String },
     #[error(
         "invalid request — requires paths (list) and reason, with an optional \
-         proposed_criterion {{cmd}}"
+         proposed_criterion {{cmd}} or evidence (one of your task's criteria)"
     )]
     InvalidRequest {
         #[source]

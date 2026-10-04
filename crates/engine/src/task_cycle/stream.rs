@@ -47,6 +47,8 @@ pub(super) struct AgentEventCtx<'a> {
     /// How much of this session's writes its adapter's fence covered,
     /// as the opening reported it.
     pub(super) fence: &'a mut Option<yunta_core::fence::Coverage>,
+    /// Every write the fence refused this session, as it reported it.
+    pub(super) refused: &'a mut Vec<yunta_core::events::ToolTarget>,
     /// The task this session works, when a loop opened it.
     pub(super) task: Option<&'a yunta_core::TaskId>,
     /// The session this one resumes, when it does.
@@ -74,6 +76,7 @@ pub(super) async fn apply_agent_event(
         tokens,
         opened,
         fence: covered,
+        refused,
         task,
         continues,
     } = ctx;
@@ -110,6 +113,7 @@ pub(super) async fn apply_agent_event(
             // something this adapter cannot place, and nothing is
             // recorded for it.
             if let Some(session_id) = opened.clone() {
+                refused.push(target.clone());
                 emit_audit(
                     audit,
                     EventPayload::Session(SessionEvent::WriteRefused(

@@ -182,6 +182,7 @@ pub(super) async fn execute_loop(
         let grants = crate::scope_expansion::GrantLedger::new(granted_count(&view.events));
         let batch_env = BatchDispatchEnv {
             events: &view.events,
+            batch: &batch,
             base_commit: &base_commit,
             adapter: prep.adapter.as_ref(),
             scope_expansion: prep.scope_expansion,

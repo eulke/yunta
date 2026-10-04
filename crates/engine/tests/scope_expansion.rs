@@ -21,6 +21,7 @@ fn request(paths: &[&str], criterion: Option<&str>) -> ScopeExpansionRequest {
         proposed_criterion: criterion.map(|cmd| ProposedCriterionEntry {
             cmd: cmd.to_string(),
         }),
+        evidence: None,
     }
 }
 

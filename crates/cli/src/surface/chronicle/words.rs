@@ -341,6 +341,9 @@ fn decider(by: &yunta_core::events::Decider) -> String {
     match by {
         yunta_core::events::Decider::Rule => "the rule".to_string(),
         yunta_core::events::Decider::Person { id } => id.to_string(),
+        yunta_core::events::Decider::Evidence { criterion } => {
+            format!("evidence from `{criterion}`")
+        }
     }
 }
 

@@ -354,7 +354,9 @@ impl fmt::Display for Refusal {
             Advice::RequestExpansion => write!(
                 f,
                 "Ask for more scope with the run tool {}; a granted expansion applies from \
-                 the next attempt. Do not write here.",
+                 the next attempt. When one of your task's own criteria fails pointing at \
+                 this file as `path:line`, the engine grants it itself once the attempt \
+                 ends. Do not write here.",
                 crate::RunTool::RequestScopeExpansion.called(self.naming)
             ),
             Advice::ReportFinding => {

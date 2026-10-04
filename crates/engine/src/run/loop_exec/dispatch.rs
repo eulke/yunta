@@ -100,6 +100,9 @@ fn granted_paths_for(state: &RunState, task_id: &yunta_core::TaskId) -> Vec<Scop
 #[derive(Clone, Copy)]
 pub(super) struct BatchDispatchEnv<'a> {
     pub(super) events: &'a [StoredEvent],
+    /// Every task of the batch: what each member's others may write is
+    /// what evidence alone never grants it.
+    pub(super) batch: &'a [&'a Task],
     pub(super) base_commit: &'a CommitSha,
     pub(super) adapter: &'a dyn yunta_core::port::Adapter,
     pub(super) scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
@@ -127,6 +130,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
 ) -> Result<Dispatched<'a>, RunError> {
     let BatchDispatchEnv {
         events,
+        batch,
         base_commit,
         adapter,
         scope_expansion,
@@ -135,6 +139,11 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         setup,
     } = *env;
     let state = crate::replay::derive(events);
+    let beside: Vec<ScopeGlob> = batch
+        .iter()
+        .filter(|other| other.id != task.id)
+        .flat_map(|other| super::batch::reach(other, &state))
+        .collect();
     let attempt = attempt_number(&state, &task.id);
     let continuation = continuation(ctx, node, task, &state, adapter).await?;
     let (unit, lease, resume) = match continuation {
@@ -218,6 +227,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
             max_expansion_files: ctx.manifest.config.resolved_max_expansion_files(),
             grants,
             already_granted_paths: &granted_paths_for(&state, &task.id),
+            beside: &beside,
         },
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
         cancel,

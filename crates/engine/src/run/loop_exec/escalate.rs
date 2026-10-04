@@ -255,10 +255,10 @@ fn expansion_escalation(
 /// from `run_task`'s own `needs_human_decision`/`Blocked` outcome). Every
 /// `Denied` also becomes a `FindingPosted`, using the agent's own
 /// `reason`/`proposed_criterion` as the finding's evidence rather than the
-/// engine inventing new wording. `decided_by` is always `Decider::Rule`
-/// here — there is no gate node for a person to decide
-/// through, so `ask` mode only ever reaches `Escalate`, never a rendered
-/// verdict.
+/// engine inventing new wording. `decided_by` is `Decider::Rule` here,
+/// or `Decider::Evidence` for a grant a red criterion's output earned —
+/// there is no gate node for a person to decide through, so `ask` mode
+/// otherwise only reaches `Escalate`, never a rendered verdict.
 pub(super) async fn emit_scope_expansion_events(
     ctx: &RunCtx<'_>,
     node: &Node,
@@ -291,7 +291,12 @@ pub(super) async fn emit_scope_expansion_events(
                 Some(&node.id),
                 EventPayload::Scope(ScopeEvent::Granted(ScopeExpansionGrantedPayload {
                     task_id: Some(task_id.clone()),
-                    decided_by: Decider::Rule,
+                    decided_by: match &outcome.request.evidence {
+                        Some(criterion) => Decider::Evidence {
+                            criterion: criterion.clone(),
+                        },
+                        None => Decider::Rule,
+                    },
                     mode,
                     count_this_run: *granted_this_run,
                     paths: outcome.request.paths.clone(),

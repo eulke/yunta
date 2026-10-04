@@ -275,6 +275,8 @@ pub(crate) struct Dispatched {
     /// The session the stream opened, once it did: what the next
     /// attempt resumes when something it asked for changes.
     pub session: Option<yunta_core::SessionId>,
+    /// Every write the fence refused it.
+    pub refused: Vec<yunta_core::events::ToolTarget>,
 }
 
 /// How a session opens: the task it works, if any, and the conversation
@@ -315,6 +317,7 @@ pub(crate) async fn dispatch_session(
                 tokens: TokenUsage::default(),
                 fence: None,
                 session: None,
+                refused: Vec::new(),
             });
         }
     }
@@ -379,6 +382,7 @@ pub(crate) async fn dispatch_session(
     let mut tokens = TokenUsage::default();
     let mut opened: Option<yunta_core::SessionId> = None;
     let mut fence: Option<yunta_core::fence::Coverage> = None;
+    let mut refused = Vec::new();
     let mut terminal = None;
     let mut cancelled = false;
 
@@ -435,6 +439,7 @@ pub(crate) async fn dispatch_session(
                     tokens: &mut tokens,
                     opened: &mut opened,
                     fence: &mut fence,
+                    refused: &mut refused,
                     task: opening.task,
                     continues,
                 },
@@ -463,6 +468,7 @@ pub(crate) async fn dispatch_session(
             tokens,
             fence,
             session: opened,
+            refused,
         });
     }
 
@@ -480,5 +486,6 @@ pub(crate) async fn dispatch_session(
         tokens,
         fence,
         session: opened,
+        refused,
     })
 }

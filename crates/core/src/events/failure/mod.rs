@@ -460,8 +460,8 @@ fn owed_sentence(owed: &[OwedScope]) -> String {
         })
         .collect();
     format!(
-        "{} owe a person's decision about scope: {}",
-        crate::text::counted(owed.len(), "request"),
+        "{} a person's decision about scope: {}",
+        crate::text::counted_as(owed.len(), "request owes", "requests owe"),
         each.join("; ")
     )
 }

@@ -97,6 +97,11 @@ pub struct ScopeExpansionRequest {
     pub reason: String,
     #[serde(default)]
     pub proposed_criterion: Option<ProposedCriterionEntry>,
+    /// One of the task's own criteria, red on the session's work, whose
+    /// output locates every path asked for — `path:line` — in place of a
+    /// proposed criterion: what lets the engine grant the request itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
 }
 
 /// Reads and parses the task's own request file, if the agent wrote one
@@ -189,7 +194,7 @@ impl GrantLedger {
     /// passes through untouched — but an exhausted cap escalates
     /// regardless of what the mode would have said, same precedence a
     /// simple sequential check would apply.
-    async fn commit(&self, cap: Option<u32>, provisional: Decision) -> Decision {
+    pub(crate) async fn commit(&self, cap: Option<u32>, provisional: Decision) -> Decision {
         let mut granted = self.granted.lock().await;
         if let Some(cap) = cap {
             if *granted >= cap {

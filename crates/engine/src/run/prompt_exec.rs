@@ -233,10 +233,7 @@ pub(super) async fn execute_prompt(
         None => request,
     };
     let crate::task_cycle::Dispatched {
-        outcome,
-        tokens,
-        fence: _fence,
-        session: _session,
+        outcome, tokens, ..
     } = dispatch_session(
         adapter.as_ref(),
         request,

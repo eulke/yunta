@@ -1176,7 +1176,7 @@
       ]
     },
     "Decider": {
-      "description": "`decided_by`: `rule | person` plus an identifier for the latter.",
+      "description": "`decided_by`: `rule | person | evidence`, with who the person was, or\nwhich criterion's output was the evidence.",
       "oneOf": [
         {
           "type": "object",
@@ -1204,6 +1204,23 @@
           "required": [
             "type",
             "id"
+          ]
+        },
+        {
+          "description": "What a red criterion of the task printed located the paths: a fact\nthe engine verified, not a choice anyone made.",
+          "type": "object",
+          "properties": {
+            "criterion": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "evidence"
+            }
+          },
+          "required": [
+            "type",
+            "criterion"
           ]
         }
       ]

@@ -300,15 +300,19 @@ fn scope_expansion_tool() -> Tool {
         RunTool::RequestScopeExpansion.name(),
         "Ask for the scope you work to be widened — you never widen it yourself. \
          Provide the paths and the reason; for a task, also a verifiable criterion \
-         that is red today. The request is decided when this attempt ends: a task's by \
-         its loop's rules or a person, and a denial becomes a finding rather than \
-         silence; a node's by a person, who is shown your reason.",
+         that is red today — or, when one of your task's own criteria fails and its \
+         output points at each path as `path:line`, that criterion's command as \
+         `evidence`: the engine runs it and, if it still points there, grants the \
+         paths itself. The request is decided when this attempt ends: a task's by \
+         its evidence, its loop's rules or a person, and a denial becomes a finding \
+         rather than silence; a node's by a person, who is shown your reason.",
         object(json!({
             "type": "object",
             "properties": {
                 "paths": {"type": "array", "items": {"type": "string"}},
                 "reason": {"type": "string"},
                 "proposed_criterion": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]},
+                "evidence": {"type": "string"},
             },
             "required": ["paths", "reason"],
         })),

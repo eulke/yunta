@@ -136,6 +136,7 @@ fn ungoverned(grants: &GrantLedger) -> ScopeGovernance<'_> {
         max_expansion_files: 5,
         grants,
         already_granted_paths: &[],
+        beside: &[],
     }
 }
 

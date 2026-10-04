@@ -13,6 +13,7 @@ mod attempt;
 mod carry;
 mod criteria;
 mod error;
+mod evidence;
 mod expansion;
 mod judge;
 mod outcome;
@@ -132,6 +133,9 @@ pub struct ScopeGovernance<'a> {
     pub max_expansion_files: usize,
     pub grants: &'a crate::scope_expansion::GrantLedger,
     pub already_granted_paths: &'a [ScopeGlob],
+    /// What the other tasks of the batch may write: a path the evidence
+    /// locates there is a person's to grant, never the engine's.
+    pub beside: &'a [ScopeGlob],
 }
 
 /// The resources and retry policy one task's attempts run under —
@@ -235,6 +239,7 @@ async fn cycle(
         max_expansion_files,
         grants,
         already_granted_paths,
+        beside,
     } = governance;
     // Every check reaches the log the moment it runs. A cycle records a
     // pre-check even when it ran no criterion — denied, or cut before it
@@ -302,6 +307,7 @@ async fn cycle(
         max_expansion_files,
         grants,
         already_granted_paths,
+        beside,
         denied: &denied,
         resume: None,
         audit,

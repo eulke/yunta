@@ -34,6 +34,8 @@ pub(super) struct AttemptParams<'a> {
     /// Every path granted before this attempt: on the log when the cycle
     /// began, and what the engine granted in the cycle's earlier attempts.
     pub(super) already_granted_paths: &'a [ScopeGlob],
+    /// What the other tasks of the batch may write.
+    pub(super) beside: &'a [ScopeGlob],
     /// What no session of the run may write — what the project denies to
     /// every run, and every test a person approved: never written, never
     /// granted.
@@ -82,6 +84,7 @@ pub(super) async fn run_one_attempt(
             tokens,
             fence: covered,
             session,
+            refused,
         },
     ) = open_and_dispatch(params).await?;
     let &AttemptParams {
@@ -160,6 +163,13 @@ pub(super) async fn run_one_attempt(
     let recorded = recorder.post_check(&post_runs, &waiting).await?;
     recorder.scope(&scope).await?;
 
+    // A write the fence refused that a red criterion of this attempt
+    // points at is decided here, before anything reads the request: the
+    // engine verified it, so no one is asked.
+    let expansion_outcome = match expansion_outcome {
+        None if !succeeded => super::evidence::of_refusals(params, &refused, &post_runs).await,
+        outcome => outcome,
+    };
     let escalated = matches!(
         expansion_outcome.as_ref().map(|o| &o.decision),
         Some(crate::scope_expansion::Decision::Escalate)
