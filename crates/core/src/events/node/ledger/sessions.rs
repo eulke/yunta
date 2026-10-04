@@ -95,6 +95,9 @@ impl NodeLedger {
                 target: p.target.clone(),
             }),
             SessionEvent::RunToolFailed(p) => record.last_tool_failure = Some(p.clone()),
+            // The refusal itself reaches a reader through the log; for the
+            // node it is a moment of activity and nothing more.
+            SessionEvent::RunToolRefused(_) => {}
             SessionEvent::Message(p) => match p.message_type {
                 AgentMessageType::ToolUse => record.calls.push(ToolCall {
                     tool_name: p.tool_name.clone(),

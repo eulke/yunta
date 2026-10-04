@@ -49,6 +49,7 @@ mod node_close;
 pub(crate) mod node_exec;
 mod node_scope;
 mod node_start;
+mod owed_scope;
 mod parallel_exec;
 mod promote;
 mod prompt_exec;

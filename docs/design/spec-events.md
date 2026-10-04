@@ -12,8 +12,8 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 40 rows and **49 `kind` names**.
-It had 39 rows and 48 kinds before `asking_opened` was added. The table
+The current Run Contract event table has 41 rows and **50 `kind` names**.
+It had 40 rows and 49 kinds before `run_tool_refused` was added. The table
 defines the normative set; this document specifies each payload.
 
 ## 1. Envelope común
@@ -354,7 +354,7 @@ they are gone, and the task's next cycle reads the answer.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `outcome` [inferido] | dato del engine tras verificación, no el `AgentOutcome` crudo del adapter | solo en `node_finished` | el outcome del agente es telemetría, esto es el veredicto |
-| `outcome` / `artifacts` / `died` / `exited` / `outside_scope` / `requested_scope` / `unset` / `unchanged` / `denied_paths` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| `{code, tail, output, origin?}` el comando que salió distinto de cero \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló \| paths que el trabajo escribió y el proyecto niega a todo run | solo en `node_failed` | por qué falló, como dato: uno de los nueve, plano sobre el payload; ver abajo |
+| `outcome` / `artifacts` / `died` / `exited` / `outside_scope` / `requested_scope` / `owed` / `unset` / `unchanged` / `denied_paths` | frase \| lista de artifacts que no cerraron \| la sesión que murió \| `{code, tail, output, origin?}` el comando que salió distinto de cero \| paths que el diff escribió fuera del `scope:` \| `{paths, reason}` que la sesión del nodo pidió \| `[{task_id, paths, reason}]` los pedidos de tareas de un loop que se le deben a una persona \| `{key, ...}` la clave de config que el nodo necesita y la config del run no declara \| `{since, failure}` el intento que corrió sobre el mismo árbol y con qué falló \| paths que el trabajo escribió y el proyecto niega a todo run | solo en `node_failed` | por qué falló, como dato: uno de los diez, plano sobre el payload; ver abajo |
 | `tokens_used` | `{input, output, cached?}` | sí | acumulado desde `Usage` |
 | `commit` | sha de commit git | no; en `node_finished` y `node_failed`, y ausente cuando el cierre no commiteó nada | el commit que el cierre hizo de lo que el nodo dejó en el árbol del run: ausente si nada cambió, si el nodo aterrizó desde un checkout propio, si otro nodo seguía trabajando en el mismo árbol o si el run trabaja sin árbol propio (D201) |
 | `tree` | id de árbol git | no; en `node_finished` y `node_failed`, y ausente en un log escrito antes del campo | el árbol del run tal como el nodo lo dejó, después de lo que aterrizó ahí —un nodo con checkout propio nombra el árbol del run en que aterrizó, no su checkout—; un gate nombra el que vio quien decidió. Es contra lo que se mide si el pase de un invariante sigue hablando del árbol del run (Contrato §11.3) |
@@ -370,7 +370,11 @@ uno de sus hooks, que `origin` nombra cuando no es el `run:` propio— y salió
 distinto de cero, con las últimas líneas que imprimió —stdout y después stderr,
 redactadas como todo el log— y el objeto que guarda la salida entera, `outside_scope:
 [...]`, cada path que el diff del nodo alcanzó fuera de su `scope:`, o
-`requested_scope: {paths, reason}`, la ampliación que pidió la sesión del nodo, o
+`requested_scope: {paths, reason}`, la ampliación que pidió la sesión del nodo,
+`owed: [{task_id, paths, reason}]`, las ampliaciones que pidieron tareas de un loop
+y que nadie estuvo para decidir —el loop siguió con lo que no dependía de ellas y
+termina debiéndolas; su menú ofrece `grant`, que las concede, y cualquier otra
+respuesta las deniega con su finding (D238)—, o
 `unset: {key, ...}` —`baseline_suite`, `coverage`, `executor` (con `executor`),
 `runner` o `command` (con `command`, el nombre del comando del proyecto)—, la clave de config sin la que el nodo no corre y que la config congelada
 del run no declara: ningún intento de ese run puede terminar distinto, así que su
@@ -719,6 +723,17 @@ while the append-only log retains every occurrence.
 | `cause` | `approval_blocked \| call_failed` | yes | A closed classification, never a CLI error message. |
 
 The payload contains no arguments, tool response, or free-form error text.
+
+### 5.25a.1 `run_tool_refused` — engine
+
+Una llamada que este binario rechazó, registrada por el servidor que la rechazó:
+el log dice por qué falló una llamada sin la prosa con que se le respondió a la
+sesión (D238).
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `tool` | nombre de tool de `yunta-run` conocido | sí | el tool que nombró la llamada |
+| `reason` | `request_pending \| invalid_arguments \| not_offered_here \| finding_not_answerable \| refused \| engine_failed` | sí | clasificación cerrada del rechazo del propio engine |
 
 ### 5.25b `host_suspended` — engine
 

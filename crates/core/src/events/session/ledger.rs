@@ -65,7 +65,8 @@ impl DegradationLedger {
             SessionEvent::Opened(_)
             | SessionEvent::Message(_)
             | SessionEvent::WriteRefused(_)
-            | SessionEvent::RunToolFailed(_) => {}
+            | SessionEvent::RunToolFailed(_)
+            | SessionEvent::RunToolRefused(_) => {}
         }
     }
 }

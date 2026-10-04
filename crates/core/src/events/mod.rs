@@ -30,8 +30,8 @@ pub use artifacts::{payloads::*, ArtifactEvent};
 pub use children::{ledger::*, payloads::*, ChildEvent};
 pub use evidence::{Evidence, Fact};
 pub use failure::{
-    CommandExit, CommandOrigin, Failure, RequestedScope, SessionDeath, SessionEnd, SessionExit,
-    TAIL_LINES,
+    CommandExit, CommandOrigin, Failure, OwedScope, RequestedScope, SessionDeath, SessionEnd,
+    SessionExit, TAIL_LINES,
 };
 pub use findings::{payloads::*, FindingEvent};
 pub use gates::{ledger::*, payloads::*, GateEvent, Withheld};
@@ -426,6 +426,7 @@ wire_kinds! {
     CapabilityDegraded => "capability_degraded",
     WriteRefused => "write_refused",
     RunToolFailed => "run_tool_failed",
+    RunToolRefused => "run_tool_refused",
     HostSuspended => "host_suspended",
     RunPaused => "run_paused",
     RunResumed => "run_resumed",

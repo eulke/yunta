@@ -10,6 +10,9 @@ pub enum SessionEvent {
     CapabilityDegraded(CapabilityDegradedPayload),
     WriteRefused(WriteRefusedPayload),
     RunToolFailed(RunToolFailedPayload),
+    /// A call this binary refused, and why; the session was answered with
+    /// the refusal.
+    RunToolRefused(RunToolRefusedPayload),
 }
 
 impl SessionEvent {
@@ -20,6 +23,7 @@ impl SessionEvent {
         "capability_degraded",
         "write_refused",
         "run_tool_failed",
+        "run_tool_refused",
     ];
 
     /// The persisted `kind` string of this fact.
@@ -30,6 +34,7 @@ impl SessionEvent {
             Self::CapabilityDegraded(_) => "capability_degraded",
             Self::WriteRefused(_) => "write_refused",
             Self::RunToolFailed(_) => "run_tool_failed",
+            Self::RunToolRefused(_) => "run_tool_refused",
         }
     }
 
@@ -47,6 +52,7 @@ impl SessionEvent {
             Self::CapabilityDegraded(_) => false,
             Self::WriteRefused(_) => false,
             Self::RunToolFailed(_) => false,
+            Self::RunToolRefused(_) => true,
         }
     }
 

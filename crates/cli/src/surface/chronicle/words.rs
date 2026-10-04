@@ -204,6 +204,13 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
         H::RunToolFailed { tool, cause } => {
             format!("run tool call failed: {} ({})", tool.name(), cause.as_str())
         }
+        H::RunToolRefused { tool, reason } => {
+            format!(
+                "run tool call refused: {} ({})",
+                tool.name(),
+                reason.as_str()
+            )
+        }
     }
 }
 

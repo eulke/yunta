@@ -44,6 +44,11 @@ pub enum Happening {
         tool: crate::RunTool,
         cause: crate::events::RunToolFailureCause,
     },
+    /// A call the engine refused, with why.
+    RunToolRefused {
+        tool: crate::RunTool,
+        reason: crate::events::RunToolRefusal,
+    },
 }
 
 impl From<&SessionEvent> for Happening {
@@ -75,6 +80,10 @@ impl From<&SessionEvent> for Happening {
             SessionEvent::RunToolFailed(p) => Happening::RunToolFailed {
                 tool: p.tool,
                 cause: p.cause,
+            },
+            SessionEvent::RunToolRefused(p) => Happening::RunToolRefused {
+                tool: p.tool,
+                reason: p.reason,
             },
         }
     }

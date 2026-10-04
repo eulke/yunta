@@ -11,9 +11,10 @@ use crate::run::{RunCtx, RunError};
 
 /// A person chose to run this loop again after it failed: every task of
 /// its document the failure left blocked starts a fresh cycle, citing
-/// that decision. Under `continue-work`, a task whose last attempt left
-/// work continues from it; under `retry`, and for a task that left
-/// nothing, the cycle starts from the run's tree alone.
+/// that decision. Under `continue-work`, and under a `grant` that widened
+/// its scope, a task whose last attempt left work continues from it; under
+/// `retry`, and for a task that left nothing, the cycle starts from the
+/// run's tree alone.
 ///
 /// Once per decision. A restart of this same attempt finds the decision
 /// already cited and leaves alone what this attempt blocked in turn, and
@@ -47,7 +48,7 @@ pub(super) async fn after_retry(
         let left_work = record
             .left_work
             .as_ref()
-            .filter(|(by, _)| by == &node.id && chosen == ReservedOption::ContinueWork)
+            .filter(|(by, _)| by == &node.id && chosen.continues_work())
             .map(|(_, work)| work.clone());
         let reopened = match left_work {
             Some(work) => TaskStatusChangedPayload::continuing(task.id.clone(), decision, work),

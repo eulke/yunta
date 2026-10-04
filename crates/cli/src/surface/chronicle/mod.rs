@@ -68,7 +68,8 @@ pub(super) fn kept(happening: &Happening) -> bool {
         Happening::Node(node::happening::Happening::Rerouted(_)) => true,
         Happening::Node(_) => false,
         Happening::Session(session::happening::Happening::Degraded { .. })
-        | Happening::Session(session::happening::Happening::RunToolFailed { .. }) => true,
+        | Happening::Session(session::happening::Happening::RunToolFailed { .. })
+        | Happening::Session(session::happening::Happening::RunToolRefused { .. }) => true,
         Happening::Session(_) => false,
         Happening::Gates(gates::happening::Happening::Escalated(_))
         | Happening::Gates(gates::happening::Happening::Resolved(_))

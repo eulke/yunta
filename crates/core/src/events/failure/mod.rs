@@ -53,6 +53,10 @@ pub enum Failure {
     /// The node's session asked for more scope than it has: its work is
     /// not done until a person answers, and the answer is theirs.
     ScopeRequested { requested_scope: RequestedScope },
+    /// Tasks of a loop asked for scope beyond their own, and nobody was
+    /// there to answer: each request is owed a person's decision, and
+    /// nothing else of the loop can run until it gets one.
+    ScopeOwed { owed: Vec<OwedScope> },
     /// A config key the node cannot run without, left unset in the
     /// config the run froze when it was created — so no attempt of this
     /// run can go differently.
@@ -92,6 +96,15 @@ impl Unchanged {
             self.since, self.since
         )
     }
+}
+
+/// One task's request for scope, owed a person's decision: what it asked
+/// to be allowed to write, and why, in its session's own words.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OwedScope {
+    pub task_id: crate::TaskId,
+    pub paths: Vec<ScopeGlob>,
+    pub reason: String,
 }
 
 /// What a node's session asked to be allowed to write, and why, in its
@@ -185,6 +198,7 @@ impl Failure {
             Failure::SessionDied { .. }
             | Failure::ScopeViolated { .. }
             | Failure::ScopeRequested { .. }
+            | Failure::ScopeOwed { .. }
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
             | Failure::Message { .. } => self.to_string(),
@@ -211,6 +225,17 @@ impl Failure {
                 .iter()
                 .map(|path| path.display().to_string())
                 .collect(),
+            Failure::ScopeOwed { owed } => owed
+                .iter()
+                .map(|owed| {
+                    format!(
+                        "`{}` — {}: {}",
+                        owed.task_id,
+                        listed_globs(&owed.paths),
+                        owed.reason
+                    )
+                })
+                .collect(),
             Failure::SessionDied { .. }
             | Failure::ScopeViolated { .. }
             | Failure::ScopeRequested { .. }
@@ -230,6 +255,7 @@ impl Failure {
             | Failure::SessionDied { .. }
             | Failure::ScopeViolated { .. }
             | Failure::ScopeRequested { .. }
+            | Failure::ScopeOwed { .. }
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
             | Failure::Message { .. } => &[],
@@ -245,6 +271,7 @@ impl Failure {
             | Failure::SessionDied { .. }
             | Failure::ScopeViolated { .. }
             | Failure::ScopeRequested { .. }
+            | Failure::ScopeOwed { .. }
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
             | Failure::Message { .. } => None,
@@ -277,6 +304,7 @@ impl Failure {
             Failure::Artifacts { .. }
             | Failure::SessionDied { .. }
             | Failure::ScopeRequested { .. }
+            | Failure::ScopeOwed { .. }
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
             | Failure::Exited { .. }
@@ -290,6 +318,7 @@ impl Failure {
         match self {
             Failure::ScopeViolated { outside_scope } => !outside_scope.is_empty(),
             Failure::ScopeRequested { requested_scope } => !requested_scope.paths.is_empty(),
+            Failure::ScopeOwed { owed } => owed.iter().any(|owed| !owed.paths.is_empty()),
             Failure::Unchanged { unchanged } => unchanged.failure.wants_scope(),
             Failure::Artifacts { .. }
             | Failure::SessionDied { .. }
@@ -307,6 +336,9 @@ impl Failure {
     pub fn scope_wanted(&self) -> Result<Vec<ScopeGlob>, InvalidScopeGlob> {
         match self {
             Failure::ScopeRequested { requested_scope } => Ok(requested_scope.paths.clone()),
+            // Each task's request is its own to grant: none of it widens
+            // the loop's scope.
+            Failure::ScopeOwed { .. } => Ok(Vec::new()),
             _ => self
                 .outside_scope()
                 .iter()
@@ -320,6 +352,7 @@ impl Failure {
     pub fn scope_wanted_listed(&self) -> String {
         match self {
             Failure::ScopeRequested { requested_scope } => listed_globs(&requested_scope.paths),
+            Failure::ScopeOwed { owed } => listed_globs(&owed_paths(owed)),
             _ => self
                 .outside_scope()
                 .iter()
@@ -348,6 +381,7 @@ impl Failure {
             Failure::SessionDied { .. }
             | Failure::ScopeViolated { .. }
             | Failure::ScopeRequested { .. }
+            | Failure::ScopeOwed { .. }
             | Failure::Unset { .. }
             | Failure::PathsDenied { .. }
             | Failure::Exited { .. }
@@ -399,6 +433,7 @@ impl fmt::Display for Failure {
                 listed_globs(&requested_scope.paths),
                 requested_scope.reason
             ),
+            Failure::ScopeOwed { owed } => f.write_str(&owed_sentence(owed)),
             Failure::Artifacts { artifacts } => {
                 for (position, artifact) in artifacts.iter().enumerate() {
                     if position > 0 {
@@ -410,6 +445,36 @@ impl fmt::Display for Failure {
             }
         }
     }
+}
+
+/// The requests a loop owes a person, as one sentence.
+fn owed_sentence(owed: &[OwedScope]) -> String {
+    let each: Vec<String> = owed
+        .iter()
+        .map(|owed| {
+            format!(
+                "task `{}` asked for {}",
+                owed.task_id,
+                listed_globs(&owed.paths)
+            )
+        })
+        .collect();
+    format!(
+        "{} owe a person's decision about scope: {}",
+        crate::text::counted(owed.len(), "request"),
+        each.join("; ")
+    )
+}
+
+/// Every path the owed requests ask for, each once.
+fn owed_paths(owed: &[OwedScope]) -> Vec<ScopeGlob> {
+    let mut paths: Vec<ScopeGlob> = Vec::new();
+    for path in owed.iter().flat_map(|owed| owed.paths.iter()) {
+        if !paths.contains(path) {
+            paths.push(path.clone());
+        }
+    }
+    paths
 }
 
 /// The lines of `block` after its first `skip`, without their indent.

@@ -378,6 +378,12 @@ pub fn all_kinds() -> Vec<EventPayload> {
             tool: yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
             cause: RunToolFailureCause::ApprovalBlocked,
         })),
+        EventPayload::Session(SessionEvent::RunToolRefused(
+            yunta_core::events::RunToolRefusedPayload {
+                tool: yunta_core::RunTool::RequestScopeExpansion,
+                reason: yunta_core::events::RunToolRefusal::RequestPending,
+            },
+        )),
         EventPayload::Run(RunEvent::HostSuspended(HostSuspendedPayload {
             slept_ms: 3_600_000,
         })),

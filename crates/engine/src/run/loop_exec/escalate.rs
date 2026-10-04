@@ -6,13 +6,11 @@ use yunta_core::events::{
     Decider, Escalation, EventPayload, Fact, Finding, FindingPostedPayload, FindingSeverity,
     GateResolvedPayload, ProposedCriterionPrecheck, ScopeExpansionDeniedPayload,
     ScopeExpansionGrantedPayload, ScopeExpansionRequestedPayload, TaskStatus,
-    TaskStatusChangedPayload, TokenUsage,
+    TaskStatusChangedPayload,
 };
 use yunta_core::{FindingId, Node, NonEmpty};
 
 use crate::reserved::{offers, ReservedOption};
-use crate::run::node_close::fail_with_tokens;
-use crate::run::node_exec::NodeEnd;
 use crate::run::{RunCtx, RunError};
 use yunta_core::events::{FindingEvent, GateEvent, ScopeEvent, TaskEvent};
 use yunta_core::{Location, RelativePath, ScopeGlob};
@@ -20,26 +18,24 @@ use yunta_core::{Location, RelativePath, ScopeGlob};
 /// Resolves each escalated scope-expansion request through the run's human
 /// interaction surface, once the whole batch is on the log: a grant or a
 /// denial (with its finding) is recorded, and a `was_blocked` task returns to
-/// `Pending` for its retry. Returns the node's end when any request goes
-/// unresolved (no live surface) — the run pauses owing that decision.
+/// `Pending` for its retry. Answers the requests nobody was there to decide:
+/// their tasks stay blocked, the loop goes on with what does not depend on
+/// them, and the requests are owed once nothing else can run.
 pub(super) async fn resolve_escalations(
     ctx: &RunCtx<'_>,
     node: &Node,
     pending_escalations: Vec<PendingEscalation>,
     scope_expansion: Option<&yunta_core::ScopeExpansion>,
     expansions_granted_this_run: &mut u32,
-    tokens: TokenUsage,
-) -> Result<Option<NodeEnd>, RunError> {
-    // The whole batch integrates before anything is asked (serial integration
-    // order still holds — this only stops the *next* batch from being
-    // dispatched while a decision is owed): a pending `ask`/exhausted-cap
-    // request must reach a human before the run spends any further budget,
-    // never be bypassed just because the task that raised it happened to
-    // succeed on its own declared scope. With a live surface the human
-    // decides right here; only what stays unresolved pauses the run.
+) -> Result<Vec<PendingEscalation>, RunError> {
+    // The whole batch integrates before anything is asked: a pending
+    // `ask`/exhausted-cap request reaches a person as soon as one is there,
+    // never bypassed just because the task that raised it happened to
+    // succeed on its own declared scope. Nobody there, the task waits and
+    // its request is owed.
     let mode = scope_expansion.map(|se| se.mode).unwrap_or_default();
     let max_per_run = scope_expansion.and_then(|se| se.max_per_run);
-    let mut unresolved: Vec<yunta_core::TaskId> = Vec::new();
+    let mut unresolved: Vec<PendingEscalation> = Vec::new();
     for pending in pending_escalations {
         let escalation =
             expansion_escalation(&pending, mode, max_per_run, *expansions_granted_this_run)
@@ -50,7 +46,7 @@ pub(super) async fn resolve_escalations(
             .ask_human(Some(&node.id), Some(&pending.task_id), &escalation)
             .await?
         else {
-            unresolved.push(pending.task_id);
+            unresolved.push(pending);
             continue;
         };
         // Same convention as every other gate: waiting and resolved land
@@ -165,20 +161,23 @@ pub(super) async fn resolve_escalations(
             .await?;
         }
     }
-    if !unresolved.is_empty() {
-        let mut diagnostic =
-            "a scope expansion request needs a human decision before this run can continue"
-                .to_string();
-        for task_id in &unresolved {
-            diagnostic.push_str(&format!(
-                "; task `{task_id}` has a scope expansion request awaiting a human decision"
-            ));
-        }
-        return Ok(Some(
-            fail_with_tokens(ctx, node, diagnostic, false, tokens).await?,
-        ));
-    }
-    Ok(None)
+    Ok(unresolved)
+}
+
+/// The failure a loop ends on while scope requests are owed a person's
+/// decision and nothing else of it can run: each task's request, which the
+/// person grants or denies from that failure.
+pub(super) fn owed(owed: &[PendingEscalation]) -> Option<yunta_core::events::Failure> {
+    (!owed.is_empty()).then(|| yunta_core::events::Failure::ScopeOwed {
+        owed: owed
+            .iter()
+            .map(|pending| yunta_core::events::OwedScope {
+                task_id: pending.task_id.clone(),
+                paths: pending.outcome.request.paths.clone(),
+                reason: pending.outcome.request.reason.clone(),
+            })
+            .collect(),
+    })
 }
 
 /// One `Escalate`d request waiting for the human's verdict.

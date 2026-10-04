@@ -79,6 +79,7 @@ impl FailureDetail<'_> {
             ),
             Failure::Message { outcome } if outcome.contains('\n') => text(outcome.clone()),
             Failure::Unchanged { .. } => text(self.failure.to_string()),
+            Failure::ScopeOwed { .. } => FailureSays::Text(self.failure.detail()),
             Failure::ScopeViolated { .. }
             | Failure::PathsDenied { .. }
             | Failure::Message { .. }

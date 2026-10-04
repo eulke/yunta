@@ -254,6 +254,45 @@ pub(super) enum RunToolError {
     },
 }
 
+impl RunToolError {
+    /// Why this call was refused, in the closed word the log keeps.
+    fn refusal(&self) -> yunta_core::events::RunToolRefusal {
+        use yunta_core::events::RunToolRefusal as R;
+        match self {
+            RunToolError::RequestPending => R::RequestPending,
+            RunToolError::InvalidSubmission { .. }
+            | RunToolError::InvalidRequest { .. }
+            | RunToolError::InvalidDeparture { .. }
+            | RunToolError::InvalidAnswer { .. }
+            | RunToolError::EmptyAnswer
+            | RunToolError::EmptyDeparture { .. }
+            | RunToolError::NotInThePlan { .. }
+            | RunToolError::SuiteDeparture { .. }
+            | RunToolError::NoArtifacts { .. }
+            | RunToolError::UndeclaredArtifact { .. } => R::InvalidArguments,
+            RunToolError::NoScopeToWiden
+            | RunToolError::NoNodeScope
+            | RunToolError::NotATaskSession { .. }
+            | RunToolError::NotInBlackboardGroup => R::NotOfferedHere,
+            RunToolError::OwnFinding { .. }
+            | RunToolError::SettledFinding { .. }
+            | RunToolError::NoSuchFinding { .. }
+            | RunToolError::WithdrawnFinding { .. } => R::FindingNotAnswerable,
+            RunToolError::Refused { .. } | RunToolError::Superseded => R::Refused,
+            RunToolError::NoStartingTree
+            | RunToolError::Audit { .. }
+            | RunToolError::Handover { .. }
+            | RunToolError::Plan { .. }
+            | RunToolError::Check { .. }
+            | RunToolError::Storage { .. }
+            | RunToolError::Render { .. }
+            | RunToolError::Yaml { .. }
+            | RunToolError::Write { .. }
+            | RunToolError::Accept { .. } => R::EngineFailed,
+        }
+    }
+}
+
 impl SessionTools {
     /// The run's events, as every tool that derives state reads them.
     pub(super) async fn events(&self) -> Result<Vec<StoredEvent>, RunToolError> {
@@ -278,6 +317,20 @@ impl SessionTools {
 
     /// Records `payload` against this session's run and node, stamped
     /// with the run's own clock.
+    /// Records that this binary refused a call to `tool`, and why: the log
+    /// says what the session was answered, in a word a reader can count.
+    async fn refused(&self, tool: RunTool, error: &RunToolError) {
+        let payload = EventPayload::Session(yunta_core::events::SessionEvent::RunToolRefused(
+            yunta_core::events::RunToolRefusedPayload {
+                tool,
+                reason: error.refusal(),
+            },
+        ));
+        if let Err(error) = self.append(payload).await {
+            tracing::debug!(%error, "a refused run tool call went unrecorded");
+        }
+    }
+
     pub(super) async fn append(&self, payload: EventPayload) -> Result<(), RunToolError> {
         self.log()
             .record(Some(&self.node), payload)
@@ -306,35 +359,36 @@ impl ServerHandler for SessionTools {
         _context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::CallToolResponse, McpError> {
         let args = request.arguments.unwrap_or_default();
+        // A tool this server never offered is a call the protocol refuses,
+        // not a tool that ran and failed.
+        let Some(tool) = RunTool::parse(request.name.as_ref()) else {
+            return Err(McpError::invalid_params(
+                format!("unknown tool `{}`", request.name),
+                None,
+            ));
+        };
         // Exhaustive over the same set the catalog mounts from, so a
         // tool offered without an answer here does not compile.
-        let outcome = match RunTool::parse(request.name.as_ref()) {
-            Some(RunTool::CheckArtifact) => self.check_artifact(&args).await,
-            Some(RunTool::PostFinding) => self.post_finding(args).await,
-            Some(RunTool::UpdateFinding) => self.update_finding(args).await,
-            Some(RunTool::WithdrawFinding) => self.withdraw_finding(args).await,
-            Some(RunTool::Findings) => self.findings_standing().await,
-            Some(RunTool::AnswerFinding) => self.answer_finding(args).await,
-            Some(RunTool::GetBlackboard) => self.get_blackboard().await,
-            Some(RunTool::TaskStatus) => self.task_status().await,
-            Some(RunTool::Task) => self.task().await,
-            Some(RunTool::CheckTask) => self.check_task().await,
-            Some(RunTool::CheckScope) => self.check_scope().await,
-            Some(RunTool::RequestScopeExpansion) => self.request_scope_expansion(args).await,
-            Some(RunTool::DeclareDeviation) => self.declare_deviation(args).await,
-            Some(RunTool::Submit(kind)) => self.submit(kind, args).await,
-            // A tool this server never offered is a call the protocol
-            // refuses, not a tool that ran and failed.
-            None => {
-                return Err(McpError::invalid_params(
-                    format!("unknown tool `{}`", request.name),
-                    None,
-                ))
-            }
+        let outcome = match tool {
+            RunTool::CheckArtifact => self.check_artifact(&args).await,
+            RunTool::PostFinding => self.post_finding(args).await,
+            RunTool::UpdateFinding => self.update_finding(args).await,
+            RunTool::WithdrawFinding => self.withdraw_finding(args).await,
+            RunTool::Findings => self.findings_standing().await,
+            RunTool::AnswerFinding => self.answer_finding(args).await,
+            RunTool::GetBlackboard => self.get_blackboard().await,
+            RunTool::TaskStatus => self.task_status().await,
+            RunTool::Task => self.task().await,
+            RunTool::CheckTask => self.check_task().await,
+            RunTool::CheckScope => self.check_scope().await,
+            RunTool::RequestScopeExpansion => self.request_scope_expansion(args).await,
+            RunTool::DeclareDeviation => self.declare_deviation(args).await,
+            RunTool::Submit(kind) => self.submit(kind, args).await,
         };
         Ok(match outcome {
             Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]).into(),
             Err(error) => {
+                self.refused(tool, &error).await;
                 CallToolResult::error(vec![ContentBlock::text(yunta_core::describe(&error))]).into()
             }
         })

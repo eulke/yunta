@@ -54,6 +54,7 @@ pub(super) async fn execute_loop(
         iteration: 0,
         iterations_lifted: false,
         blocked: Vec::new(),
+        owed: Vec::new(),
     };
     loop {
         state.iteration += 1;
@@ -79,6 +80,14 @@ pub(super) async fn execute_loop(
                 })),
             )
             .await?;
+            // A decision owed a person is what nothing else can stand in
+            // for: the loop ends on it, done or not, and the person grants
+            // or denies each request from there.
+            if let Some(failure) = escalate::owed(&state.owed) {
+                let fail =
+                    crate::run::node_close::fail_with(ctx, node, failure, false, state.tokens);
+                return fail.await;
+            }
             if all_done {
                 return close_node(
                     ctx,
@@ -209,20 +218,12 @@ pub(super) async fn execute_loop(
         };
 
         if !pending.is_empty() {
-            if let Some(end) = resolve_escalations(
-                ctx,
-                node,
-                pending,
-                prep.scope_expansion,
-                &mut expansions_granted_this_run,
-                state.tokens,
-            )
-            .await?
-            {
-                return Ok(end);
-            }
-            // Everything resolved — the next iteration re-dispatches the (now
-            // Pending again) tasks with the decisions on the log.
+            // What was decided re-dispatches next iteration with the
+            // decision on the log; what was not stays owed.
+            let scope = prep.scope_expansion;
+            let granted = &mut expansions_granted_this_run;
+            let unresolved = resolve_escalations(ctx, node, pending, scope, granted).await?;
+            state.owed.extend(unresolved);
         }
         if !departures.is_empty() {
             let holders = depart::Holders {
@@ -278,6 +279,9 @@ struct LoopState {
     /// task's status, and the empty-batch tail still names which tasks
     /// are blocked.
     blocked: Vec<(TaskId, BlockedCause)>,
+    /// The scope requests nobody was there to decide, owed once nothing
+    /// else of the loop can run.
+    owed: Vec<escalate::PendingEscalation>,
 }
 
 impl LoopPrep<'_> {

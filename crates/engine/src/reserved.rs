@@ -56,6 +56,12 @@ impl ReservedOption {
 
     /// Whether choosing this runs the failed node again — from scratch,
     /// from the work it left, or with its scope widened first.
+    /// Whether a task this choice runs again picks its last attempt's work
+    /// back up: carrying it on, or carrying it on with a wider scope.
+    pub(crate) fn continues_work(self) -> bool {
+        matches!(self, ReservedOption::ContinueWork | ReservedOption::Grant)
+    }
+
     pub(crate) fn runs_again(self) -> bool {
         matches!(
             self,

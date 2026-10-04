@@ -462,6 +462,7 @@ fn node_diagnostics(events: &[StoredEvent]) -> BTreeMap<String, Vec<ArtifactProb
                 | Failure::ScopeViolated { .. }
                 | Failure::PathsDenied { .. }
                 | Failure::ScopeRequested { .. }
+                | Failure::ScopeOwed { .. }
                 | Failure::Unset { .. }
                 | Failure::Unchanged { .. } => {
                     latest.remove(node_id.as_str());

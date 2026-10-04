@@ -2181,6 +2181,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "run_tool_refused"
+            }
+          },
+          "$ref": "#/$defs/RunToolRefusedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "host_suspended"
             }
           },
@@ -2343,6 +2356,21 @@
           },
           "required": [
             "requested_scope"
+          ]
+        },
+        {
+          "description": "Tasks of a loop asked for scope beyond their own, and nobody was\nthere to answer: each request is owed a person's decision, and\nnothing else of the loop can run until it gets one.",
+          "type": "object",
+          "properties": {
+            "owed": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/OwedScope"
+              }
+            }
+          },
+          "required": [
+            "owed"
           ]
         },
         {
@@ -3177,6 +3205,21 @@
           ]
         },
         {
+          "description": "Tasks of a loop asked for scope beyond their own, and nobody was\nthere to answer: each request is owed a person's decision, and\nnothing else of the loop can run until it gets one.",
+          "type": "object",
+          "properties": {
+            "owed": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/OwedScope"
+              }
+            }
+          },
+          "required": [
+            "owed"
+          ]
+        },
+        {
           "description": "A config key the node cannot run without, left unset in the\nconfig the run froze when it was created — so no attempt of this\nrun can go differently.",
           "type": "object",
           "properties": {
@@ -3391,6 +3434,29 @@
       "description": "An option id: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
       "minLength": 1
+    },
+    "OwedScope": {
+      "description": "One task's request for scope, owed a person's decision: what it asked\nto be allowed to write, and why, in its session's own words.",
+      "type": "object",
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeGlob"
+          }
+        },
+        "reason": {
+          "type": "string"
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id",
+        "paths",
+        "reason"
+      ]
     },
     "Phase": {
       "type": "string",
@@ -4080,6 +4146,57 @@
       "enum": [
         "approval_blocked",
         "call_failed"
+      ]
+    },
+    "RunToolRefusal": {
+      "description": "Why this binary refused a call to one of the tools it serves on\n`yunta-run`: a closed set, so the log says it without the prose the\nsession was answered with.",
+      "oneOf": [
+        {
+          "description": "A request of the same kind was already written and waits on a\ndecision.",
+          "type": "string",
+          "const": "request_pending"
+        },
+        {
+          "description": "The call's arguments do not say what the tool needs.",
+          "type": "string",
+          "const": "invalid_arguments"
+        },
+        {
+          "description": "The tool is not one this session may call here.",
+          "type": "string",
+          "const": "not_offered_here"
+        },
+        {
+          "description": "The finding the call names cannot be answered the way it asks.",
+          "type": "string",
+          "const": "finding_not_answerable"
+        },
+        {
+          "description": "The document handed over was refused, or was already superseded.",
+          "type": "string",
+          "const": "refused"
+        },
+        {
+          "description": "The engine could not do what the call asked of it.",
+          "type": "string",
+          "const": "engine_failed"
+        }
+      ]
+    },
+    "RunToolRefusedPayload": {
+      "description": "A call to a tool this binary serves that it refused, and why.",
+      "type": "object",
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/RunToolRefusal"
+        },
+        "tool": {
+          "$ref": "#/$defs/RunTool"
+        }
+      },
+      "required": [
+        "tool",
+        "reason"
       ]
     },
     "RunnerCandidate": {

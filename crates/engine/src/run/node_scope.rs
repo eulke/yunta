@@ -56,11 +56,14 @@ pub(super) async fn session_access(
 /// decision and leaves it alone, and any other choice — or none — grants
 /// nothing: widening a scope is a person's call, never the engine's.
 pub(super) async fn grant_chosen_scope(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError> {
+    // A loop's owed requests are answered task by task.
+    super::owed_scope::answer(ctx, node).await?;
     let view = ctx.run_view().await?;
     let state = &view.state;
     let Some((decided_at, choice)) = state.choice_after_failure(&node.id) else {
         return Ok(());
     };
+
     let granted_since = state
         .grants
         .last_granted_to_node(&node.id)

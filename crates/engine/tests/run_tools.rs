@@ -2020,3 +2020,32 @@ async fn a_tool_the_server_never_offered_is_refused_by_the_protocol() {
     assert!(error.message.contains("yunta_no_such_tool"), "{error:?}");
     client.cancel().await.unwrap();
 }
+
+/// A call the engine refuses is on the log with why: a second scope request
+/// while the first waits is refused as one already pending.
+#[tokio::test]
+async fn request_pending_records_its_refusal() {
+    let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let session = host.session("implement", Some("T001")).await;
+    let client = client_for(&session, None).await.unwrap();
+    let request = json!({"paths": ["src/other.rs"], "reason": "another"});
+    call(&client, "yunta_request_scope_expansion", request.clone()).await;
+
+    let (is_error, _) = call(&client, "yunta_request_scope_expansion", request).await;
+
+    assert!(is_error);
+    let refused = host
+        .events()
+        .into_iter()
+        .find_map(|event| match event.payload() {
+            Some(yunta_core::events::EventPayload::Session(
+                yunta_core::events::SessionEvent::RunToolRefused(refused),
+            )) => Some(refused.reason),
+            _ => None,
+        });
+    assert_eq!(
+        refused,
+        Some(yunta_core::events::RunToolRefusal::RequestPending)
+    );
+    client.cancel().await.unwrap();
+}

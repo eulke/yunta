@@ -27,6 +27,47 @@ impl RunToolFailureCause {
     }
 }
 
+/// Why this binary refused a call to one of the tools it serves on
+/// `yunta-run`: a closed set, so the log says it without the prose the
+/// session was answered with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RunToolRefusal {
+    /// A request of the same kind was already written and waits on a
+    /// decision.
+    RequestPending,
+    /// The call's arguments do not say what the tool needs.
+    InvalidArguments,
+    /// The tool is not one this session may call here.
+    NotOfferedHere,
+    /// The finding the call names cannot be answered the way it asks.
+    FindingNotAnswerable,
+    /// The document handed over was refused, or was already superseded.
+    Refused,
+    /// The engine could not do what the call asked of it.
+    EngineFailed,
+}
+
+impl RunToolRefusal {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RequestPending => "request_pending",
+            Self::InvalidArguments => "invalid_arguments",
+            Self::NotOfferedHere => "not_offered_here",
+            Self::FindingNotAnswerable => "finding_not_answerable",
+            Self::Refused => "refused",
+            Self::EngineFailed => "engine_failed",
+        }
+    }
+}
+
+/// A call to a tool this binary serves that it refused, and why.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RunToolRefusedPayload {
+    pub tool: crate::RunTool,
+    pub reason: RunToolRefusal,
+}
+
 /// One failed call to a tool this binary serves on `yunta-run`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunToolFailedPayload {
