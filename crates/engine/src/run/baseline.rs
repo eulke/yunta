@@ -63,6 +63,8 @@ impl BirthBaseline {
             origin: BaselineOrigin::Inherited {
                 run: self.measured_by.clone(),
             },
+            tree: None,
+            duration_ms: None,
         }
     }
 }
@@ -102,19 +104,21 @@ pub(super) async fn measure(ctx: &RunCtx<'_>, suite: String) -> Result<(), RunEr
     // costs that and nothing else.
     let measured_on = ctx
         .memo
-        .key_on(&suite, ctx.worktree, ctx.root_supervision())
+        .tree_for(&suite, ctx.worktree, ctx.root_supervision())
         .await
         .ok();
+    let started = std::time::Instant::now();
     let output =
         match super::check_exec::run_command(ctx.root_supervision(), ctx.worktree, &suite).await? {
             super::check_exec::CommandRun::Done(output) => output,
             super::check_exec::CommandRun::Cancelled => return Ok(()),
         };
+    let took = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     // Every task is held to the suite as a guard, and the first of them
     // starts from the tree just measured: a green measurement is its
     // answer there, so the suite is not run twice on one tree.
-    if let Some(key) = measured_on.filter(|_| output.exit_code == 0) {
-        ctx.memo.passed(key);
+    if let Some(tree) = measured_on.as_ref().filter(|_| output.exit_code == 0) {
+        ctx.memo.passed_on(&suite, tree);
     }
 
     keep_capture(ctx.run_dir, output.stdout.as_bytes()).await?;
@@ -128,6 +132,8 @@ pub(super) async fn measure(ctx: &RunCtx<'_>, suite: String) -> Result<(), RunEr
             },
             hash: yunta_core::sha256_hex(output.stdout.as_bytes()),
             origin: BaselineOrigin::Measured,
+            tree: measured_on.map(|tree| tree.content().clone()),
+            duration_ms: Some(took),
         })),
     )
     .await?;

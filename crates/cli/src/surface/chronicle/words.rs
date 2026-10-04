@@ -397,6 +397,7 @@ fn gate_words(happening: &gates::happening::Happening) -> (Option<Mark>, String)
                 None => format!("answered via {}", channel.as_str()),
             },
         ),
+        H::AskingOpened => (Some(Mark::NeedsYou), "asking a person".to_string()),
     }
 }
 

@@ -441,6 +441,13 @@
         },
         "outcome": {
           "$ref": "#/$defs/SubmissionOutcome"
+        },
+        "probes": {
+          "description": "What the engine ran to prove the document, task by task: how each\ncriterion answered on the tree it ran on, which a later invocation\ntakes for that tree. Empty for a document whose commands nothing\nruns, and on a log written before the field.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TaskProbe"
+          }
         }
       },
       "required": [
@@ -475,12 +482,38 @@
         "content_hash"
       ]
     },
+    "AskingOpenedPayload": {
+      "description": "A person at the engine's terminal is being asked something: a gate's\nchoice, an escalation, a round of questions. The answer lands as the\nevent that resolves what was asked; this one says when the asking\nbegan, which only the engine that put the question knows. Audit: no\nledger moves.",
+      "type": "object",
+      "properties": {
+        "task_id": {
+          "description": "The task whose work is waiting on the answer, when a task's\nsession asked; absent when the node asked for itself.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "BaselineCapturedPayload": {
       "description": "What the suite a run's lineage declared did on the tree the run\nopens on, and whose measurement it is.",
       "type": "object",
       "properties": {
         "command": {
           "type": "string"
+        },
+        "duration_ms": {
+          "description": "How long the measurement took. Absent where `tree` is.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
         },
         "hash": {
           "$ref": "#/$defs/ContentHash"
@@ -494,6 +527,17 @@
         },
         "results": {
           "$ref": "#/$defs/BaselineResults"
+        },
+        "tree": {
+          "description": "The git tree the suite was measured on: what a later invocation\ntakes the measurement's answer for. Absent for a measurement the\nrun was born holding — it speaks for the tree its measuring run\nopened on — and on a log written before the field.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TreeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1069,6 +1113,13 @@
           "type": "integer",
           "format": "int32"
         },
+        "head": {
+          "description": "The commit the checkout stood on, kept only for a command that\nruns `git`, whose answer can turn on history as well as on files.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "output": {
           "description": "The run object holding everything the command printed — stdout,\nthen stderr — with the run's secrets taken out. Absent when\nnothing ran (`reused`), and on a log written before a run kept\nwhat its commands printed.",
           "anyOf": [
@@ -1089,6 +1140,17 @@
           "items": {
             "type": "string"
           }
+        },
+        "tree": {
+          "description": "The git tree of what the checkout held when the command answered:\nwhat the answer is kept for, so a later invocation can take it for\nthe same tree. Absent for a check the engine states rather than\nruns, and on a log written before the field.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TreeId"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "type": {
           "anyOf": [
@@ -1889,6 +1951,19 @@
             }
           },
           "$ref": "#/$defs/QuestionsAnsweredPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "asking_opened"
+            }
+          },
+          "$ref": "#/$defs/AskingOpenedPayload",
           "required": [
             "kind"
           ]
@@ -4461,6 +4536,25 @@
       "description": "A task id: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
       "minLength": 1
+    },
+    "TaskProbe": {
+      "description": "How one task's criteria answered where a document's hand-over ran\nthem.",
+      "type": "object",
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CriterionResult"
+          }
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id",
+        "results"
+      ]
     },
     "TaskRegisteredPayload": {
       "type": "object",

@@ -18,6 +18,7 @@ use serde_json::Value;
 use yunta_core::diagnostic::{ArtifactFailure, DocumentRef, Report};
 use yunta_core::events::{
     ArtifactId, ArtifactSubmittedPayload, EventPayload, RecordedOrigin, SubmissionOutcome,
+    TaskProbe,
 };
 use yunta_core::{ArtifactKind, ArtifactSpec};
 
@@ -148,14 +149,15 @@ impl SessionTools {
         kind: ArtifactKind,
         verified: VerifiedArtifact,
     ) -> Result<Offered, RunToolError> {
-        let (broken, told) = match &verified.content {
+        let (broken, told, probes) = match &verified.content {
             crate::artifacts::ArtifactContent::Tasks(tasks) => {
-                (self.handover(tasks).await?, String::new())
+                let (broken, probes) = self.handover(tasks).await?;
+                (broken, String::new(), probes)
             }
             crate::artifacts::ArtifactContent::Spec(spec) => {
                 let proven = self.spec_handover(spec).await?;
                 let told = failing_now(&proven.failing, &self.host.redactor);
-                (proven.broken, told)
+                (proven.broken, told, by_task(&proven.failing))
             }
             _ => return Ok(Offered::told_nothing(Ok(verified))),
         };
@@ -163,14 +165,17 @@ impl SessionTools {
             return Ok(Offered {
                 verdict: Ok(verified),
                 told,
+                probes,
             });
         }
-        Ok(Offered::told_nothing(Err(
-            crate::artifacts::SubmitError::Refused(Report::new(
+        Ok(Offered {
+            verdict: Err(crate::artifacts::SubmitError::Refused(Report::new(
                 DocumentRef::new(kind, verified.path.display().to_string()),
                 broken,
-            )),
-        )))
+            ))),
+            told: String::new(),
+            probes,
+        })
     }
 
     /// Records the engine's verdict on a submitted document and answers
@@ -189,6 +194,7 @@ impl SessionTools {
         let Offered {
             verdict: offered,
             told,
+            probes,
         } = offered;
         let name = ArtifactId::Interpreted { kind }.view_name();
         // The acceptance comes first, because the hash the submission
@@ -228,6 +234,7 @@ impl SessionTools {
                 name: name.clone(),
                 artifact_kind: kind,
                 outcome,
+                probes,
             },
         )))
         .await?;
@@ -293,6 +300,8 @@ fn render_verdict(name: &str, verified: Result<VerifiedArtifact, ArtifactFailure
 struct Offered {
     verdict: Result<VerifiedArtifact, crate::artifacts::SubmitError>,
     told: String,
+    /// What proving the document ran, task by task.
+    probes: Vec<TaskProbe>,
 }
 
 impl Offered {
@@ -300,8 +309,26 @@ impl Offered {
         Offered {
             verdict,
             told: String::new(),
+            probes: Vec::new(),
         }
     }
+}
+
+/// `runs`, gathered under the task each answered for, in the order the
+/// tasks first appear.
+fn by_task(runs: &[(yunta_core::TaskId, crate::task_cycle::CriterionRun)]) -> Vec<TaskProbe> {
+    let mut probes: Vec<TaskProbe> = Vec::new();
+    for (task, run) in runs {
+        let result = crate::task_cycle::to_results(std::slice::from_ref(run));
+        match probes.iter_mut().find(|probe| &probe.task_id == task) {
+            Some(probe) => probe.results.extend(result),
+            None => probes.push(TaskProbe {
+                task_id: task.clone(),
+                results: result,
+            }),
+        }
+    }
+    probes
 }
 
 /// How each test of an accepted spec fails before the work: its exit and

@@ -378,7 +378,7 @@ pub(super) async fn decided(
     if let Some(choice) = pre_seeded_resolution(state, node, escalation) {
         return Ok(Some(choice));
     }
-    let Some(choice) = ctx.ask_human(Some(node), escalation).await? else {
+    let Some(choice) = ctx.ask_human(Some(node), None, escalation).await? else {
         return Ok(None);
     };
     ctx.emit(

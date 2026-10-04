@@ -21,7 +21,7 @@
 use std::path::{Path, PathBuf};
 
 use yunta_core::diagnostic::{Diagnostic, Named, Problem, RuleCode, Subject};
-use yunta_core::events::ExecutionEnvironment;
+use yunta_core::events::{ExecutionEnvironment, TaskProbe};
 use yunta_core::{CommitSha, Spec, SpecFile, Task, TaskId, TasksFile};
 
 use super::session::{RunToolError, SessionTools};
@@ -42,7 +42,7 @@ impl SessionTools {
     pub(super) async fn handover(
         &self,
         tasks: &TasksFile,
-    ) -> Result<Vec<Diagnostic>, RunToolError> {
+    ) -> Result<(Vec<Diagnostic>, Vec<TaskProbe>), RunToolError> {
         // A task the run already finished, handed over unchanged, keeps
         // its `done`: it will not run again, so it is not checked again.
         let events = self.events().await?;
@@ -57,6 +57,7 @@ impl SessionTools {
             false => Vec::new(),
         };
         found.extend(self.specified(tasks, &events).await?);
+        let mut ran = Vec::new();
         for (index, task) in tasks.tasks.iter().enumerate() {
             if crate::tasks::stays_done(task, &prior, &current) {
                 continue;
@@ -65,8 +66,12 @@ impl SessionTools {
                 .await
                 .map_err(|source| RunToolError::Check { source })?;
             found.extend(judged(index, task, &probes, self.host.environment.as_ref()));
+            ran.push(TaskProbe {
+                task_id: task.id.clone(),
+                results: crate::task_cycle::to_results(&probes),
+            });
         }
-        Ok(found)
+        Ok((found, ran))
     }
 
     /// Every rule the spec breaks against the run's plan and where its

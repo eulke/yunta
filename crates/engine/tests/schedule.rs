@@ -412,6 +412,8 @@ fn a_run_born_holding_a_baseline_is_never_told_to_measure() {
         origin: BaselineOrigin::Inherited {
             run: "run-root".into(),
         },
+        tree: None,
+        duration_ms: None,
     }));
     let events = log(vec![(None, created()), (None, held)]);
     let policy = SchedulingPolicy {

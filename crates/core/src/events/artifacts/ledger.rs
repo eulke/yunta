@@ -268,6 +268,7 @@ mod tests {
             name: "tasks.yaml".to_string(),
             artifact_kind: ArtifactKind::Tasks,
             outcome,
+            probes: Vec::new(),
         })
     }
 

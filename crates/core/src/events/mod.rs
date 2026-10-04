@@ -409,6 +409,7 @@ wire_kinds! {
     GateResolved => "gate_resolved",
     QuestionsAsked => "questions_asked",
     QuestionsAnswered => "questions_answered",
+    AskingOpened => "asking_opened",
     LoopIteration => "loop_iteration",
     FindingPosted => "finding_posted",
     FindingUpdated => "finding_updated",

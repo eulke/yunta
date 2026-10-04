@@ -508,6 +508,7 @@ fn handover_events() -> Vec<StoredEvent> {
                 outcome: SubmissionOutcome::Accepted {
                     content_hash: yunta_core::sha256_hex(b"plan"),
                 },
+                probes: Vec::new(),
             })),
         )
         .after(1)
@@ -517,6 +518,7 @@ fn handover_events() -> Vec<StoredEvent> {
                 name: "questions.yaml".to_string(),
                 artifact_kind: yunta_core::ArtifactKind::Questions,
                 outcome: SubmissionOutcome::Refused { report: report() },
+                probes: Vec::new(),
             })),
         )
         .after(1)

@@ -12,62 +12,120 @@ use yunta_core::events::*;
 use yunta_core::{Capability, NonEmpty, QuestionId, RunId};
 use yunta_testkit_core::all_kinds;
 
-/// A compile-time guard for [`all_kinds`], not a runtime check. The match has
-/// one arm per `EventPayload` variant and no wildcard, so adding a variant to
-/// the enum fails this crate's compile until the variant is also constructed
-/// in `all_kinds` above. Without it, a new kind would be silently absent from
+/// A compile-time guard for [`all_kinds`], not a runtime check. Each domain's
+/// match has one arm per variant and no wildcard, so adding a variant to an
+/// event enum fails this crate's compile until the variant is also
+/// constructed in `all_kinds` above. Without it, a new kind would be silently absent from
 /// every round-trip, version, and name test in this file.
 #[allow(dead_code)]
 fn every_variant_is_built_by_all_kinds(payload: &EventPayload) {
     match payload {
-        EventPayload::Run(RunEvent::Created(_))
-        | EventPayload::Node(NodeEvent::RunnerResolved(_))
-        | EventPayload::Run(RunEvent::BaselineCaptured(_))
-        | EventPayload::Node(NodeEvent::Started(_))
-        | EventPayload::Session(SessionEvent::Opened(_))
-        | EventPayload::Session(SessionEvent::Message(_))
-        | EventPayload::Artifacts(ArtifactEvent::Written(_))
-        | EventPayload::Node(NodeEvent::ContextAssembled(_))
-        | EventPayload::Tasks(TaskEvent::Registered(_))
-        | EventPayload::Node(NodeEvent::CriteriaChecked(_))
-        | EventPayload::Tasks(TaskEvent::StatusChanged(_))
-        | EventPayload::Tasks(TaskEvent::CheckStarted(_))
-        | EventPayload::Tasks(TaskEvent::CheckAnswered(_))
-        | EventPayload::Tasks(TaskEvent::DeviationDeclared(_))
-        | EventPayload::Tasks(TaskEvent::DeviationResolved(_))
-        | EventPayload::Node(NodeEvent::ScopeChecked(_))
-        | EventPayload::Scope(ScopeEvent::Requested(_))
-        | EventPayload::Scope(ScopeEvent::Granted(_))
-        | EventPayload::Scope(ScopeEvent::Denied(_))
-        | EventPayload::Node(NodeEvent::Finished(_))
-        | EventPayload::Node(NodeEvent::Failed(_))
-        | EventPayload::Node(NodeEvent::HookExecuted(_))
-        | EventPayload::Node(NodeEvent::Rerouted(_))
-        | EventPayload::Node(NodeEvent::PullRequestOpened(_))
-        | EventPayload::Gates(GateEvent::Waiting(_))
-        | EventPayload::Gates(GateEvent::Resolved(_))
-        | EventPayload::Gates(GateEvent::QuestionsAsked(_))
-        | EventPayload::Gates(GateEvent::QuestionsAnswered(_))
-        | EventPayload::Children(ChildEvent::LoopIteration(_))
-        | EventPayload::Findings(FindingEvent::Posted(_))
-        | EventPayload::Findings(FindingEvent::Updated(_))
-        | EventPayload::Findings(FindingEvent::Withdrawn(_))
-        | EventPayload::Findings(FindingEvent::Refused(_))
-        | EventPayload::Findings(FindingEvent::Answered(_))
-        | EventPayload::Findings(FindingEvent::Proved(_))
-        | EventPayload::Findings(FindingEvent::Settled(_))
-        | EventPayload::Artifacts(ArtifactEvent::Submitted(_))
-        | EventPayload::Artifacts(ArtifactEvent::Accepted(_))
-        | EventPayload::Run(RunEvent::PromotionSignaled(_))
-        | EventPayload::Children(ChildEvent::Created(_))
-        | EventPayload::Children(ChildEvent::Finished(_))
-        | EventPayload::Session(SessionEvent::CapabilityDegraded(_))
-        | EventPayload::Session(SessionEvent::WriteRefused(_))
-        | EventPayload::Session(SessionEvent::RunToolFailed(_))
-        | EventPayload::Run(RunEvent::HostSuspended(_))
-        | EventPayload::Run(RunEvent::Paused(_))
-        | EventPayload::Run(RunEvent::Resumed(_))
-        | EventPayload::Run(RunEvent::Finished(_)) => {}
+        EventPayload::Run(event) => run_kinds(event),
+        EventPayload::Node(event) => node_kinds(event),
+        EventPayload::Session(event) => session_kinds(event),
+        EventPayload::Artifacts(event) => artifacts_kinds(event),
+        EventPayload::Tasks(event) => tasks_kinds(event),
+        EventPayload::Scope(event) => scope_kinds(event),
+        EventPayload::Gates(event) => gates_kinds(event),
+        EventPayload::Children(event) => children_kinds(event),
+        EventPayload::Findings(event) => findings_kinds(event),
+    }
+}
+
+#[allow(dead_code)]
+fn run_kinds(event: &RunEvent) {
+    match event {
+        RunEvent::Created(_)
+        | RunEvent::BaselineCaptured(_)
+        | RunEvent::PromotionSignaled(_)
+        | RunEvent::HostSuspended(_)
+        | RunEvent::Paused(_)
+        | RunEvent::Resumed(_)
+        | RunEvent::Finished(_) => {}
+    }
+}
+
+#[allow(dead_code)]
+fn node_kinds(event: &NodeEvent) {
+    match event {
+        NodeEvent::RunnerResolved(_)
+        | NodeEvent::Started(_)
+        | NodeEvent::ContextAssembled(_)
+        | NodeEvent::CriteriaChecked(_)
+        | NodeEvent::ScopeChecked(_)
+        | NodeEvent::Finished(_)
+        | NodeEvent::Failed(_)
+        | NodeEvent::HookExecuted(_)
+        | NodeEvent::Rerouted(_)
+        | NodeEvent::PullRequestOpened(_) => {}
+    }
+}
+
+#[allow(dead_code)]
+fn session_kinds(event: &SessionEvent) {
+    match event {
+        SessionEvent::Opened(_)
+        | SessionEvent::Message(_)
+        | SessionEvent::CapabilityDegraded(_)
+        | SessionEvent::WriteRefused(_)
+        | SessionEvent::RunToolFailed(_) => {}
+    }
+}
+
+#[allow(dead_code)]
+fn artifacts_kinds(event: &ArtifactEvent) {
+    match event {
+        ArtifactEvent::Written(_) | ArtifactEvent::Submitted(_) | ArtifactEvent::Accepted(_) => {}
+    }
+}
+
+#[allow(dead_code)]
+fn tasks_kinds(event: &TaskEvent) {
+    match event {
+        TaskEvent::Registered(_)
+        | TaskEvent::StatusChanged(_)
+        | TaskEvent::CheckStarted(_)
+        | TaskEvent::CheckAnswered(_)
+        | TaskEvent::DeviationDeclared(_)
+        | TaskEvent::DeviationResolved(_) => {}
+    }
+}
+
+#[allow(dead_code)]
+fn scope_kinds(event: &ScopeEvent) {
+    match event {
+        ScopeEvent::Requested(_) | ScopeEvent::Granted(_) | ScopeEvent::Denied(_) => {}
+    }
+}
+
+#[allow(dead_code)]
+fn gates_kinds(event: &GateEvent) {
+    match event {
+        GateEvent::Waiting(_)
+        | GateEvent::Resolved(_)
+        | GateEvent::QuestionsAsked(_)
+        | GateEvent::QuestionsAnswered(_)
+        | GateEvent::AskingOpened(_) => {}
+    }
+}
+
+#[allow(dead_code)]
+fn children_kinds(event: &ChildEvent) {
+    match event {
+        ChildEvent::LoopIteration(_) | ChildEvent::Created(_) | ChildEvent::Finished(_) => {}
+    }
+}
+
+#[allow(dead_code)]
+fn findings_kinds(event: &FindingEvent) {
+    match event {
+        FindingEvent::Posted(_)
+        | FindingEvent::Updated(_)
+        | FindingEvent::Withdrawn(_)
+        | FindingEvent::Refused(_)
+        | FindingEvent::Answered(_)
+        | FindingEvent::Proved(_)
+        | FindingEvent::Settled(_) => {}
     }
 }
 
@@ -201,12 +259,12 @@ fn every_domain_declares_the_kinds_the_wire_carries() {
 }
 
 #[test]
-fn there_are_exactly_48_kinds_with_distinct_names() {
+fn there_are_exactly_49_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 48);
+    assert_eq!(kinds.len(), 49);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 48, "expected 48 distinct kind names");
+    assert_eq!(names.len(), 49, "expected 49 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -267,6 +325,7 @@ const KIND_NAMES: &[&str] = &[
     "gate_resolved",
     "questions_asked",
     "questions_answered",
+    "asking_opened",
     "loop_iteration",
     "finding_posted",
     "finding_updated",
@@ -591,6 +650,8 @@ fn baseline_captured_is_a_run_kind_that_moves_the_ledger() {
         },
         hash: yunta_core::sha256_hex(b"ok"),
         origin: BaselineOrigin::Measured,
+        tree: None,
+        duration_ms: None,
     });
     assert_eq!(event.kind_name(), "baseline_captured");
     assert!(

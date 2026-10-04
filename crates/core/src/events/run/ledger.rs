@@ -65,10 +65,10 @@ pub struct RunLedger {
     /// number of events — what the run is, what it holds, the
     /// measurement it was handed — and none of them is a wake.
     woken: bool,
-    /// What the run's commands ran with at birth, and at its latest wake
-    /// that recorded one.
-    born_in: Option<ExecutionEnvironment>,
-    woken_in: Option<ExecutionEnvironment>,
+    /// Every invocation of the run — its birth and each wake — from the
+    /// seq it began at, with what its commands ran with when it recorded
+    /// that.
+    invocations: Vec<(Seq, Option<ExecutionEnvironment>)>,
 }
 
 impl RunLedger {
@@ -76,7 +76,30 @@ impl RunLedger {
     /// the run was born, as of its latest wake. `None` when it did not,
     /// or when the log does not say.
     pub fn environment_drift(&self) -> Option<EnvironmentDrift> {
-        self.born_in.as_ref()?.drift_to(self.woken_in.as_ref()?)
+        let (born, wakes) = self.invocations.split_first()?;
+        let woken = wakes
+            .iter()
+            .rev()
+            .find_map(|(_, in_force)| in_force.as_ref())?;
+        born.1.as_ref()?.drift_to(woken)
+    }
+
+    /// What the run's commands ran with at `seq`: the environment the
+    /// invocation that wrote it recorded. `None` before the run was born,
+    /// or when that invocation recorded none.
+    pub fn environment_at(&self, seq: Seq) -> Option<&ExecutionEnvironment> {
+        self.invocations
+            .iter()
+            .rev()
+            .find(|(began, _)| *began <= seq)
+            .and_then(|(_, in_force)| in_force.as_ref())
+    }
+
+    /// What the run's commands run with in its latest invocation.
+    pub fn environment_now(&self) -> Option<&ExecutionEnvironment> {
+        self.invocations
+            .last()
+            .and_then(|(_, in_force)| in_force.as_ref())
     }
 
     /// The measurement this run holds — its own, or the one it was born
@@ -166,7 +189,8 @@ impl RunLedger {
                 self.phase = RunPhaseRaw::Open;
                 self.mode = p.mode.clone();
                 self.left_out = p.left_out.clone();
-                self.born_in = p.environment.as_deref().cloned();
+                self.invocations
+                    .push((meta.seq, p.environment.as_deref().cloned()));
             }
             RunEvent::Paused(p) => {
                 self.woken = true;
@@ -177,9 +201,7 @@ impl RunLedger {
                 self.woken = true;
                 self.phase = RunPhaseRaw::Open;
                 self.resumed_after = Some(meta.seq);
-                if p.environment.is_some() {
-                    self.woken_in = p.environment.clone();
-                }
+                self.invocations.push((meta.seq, p.environment.clone()));
             }
             RunEvent::Finished(p) => {
                 self.phase = RunPhaseRaw::Closed;
@@ -208,5 +230,65 @@ impl RunLedger {
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::{RunCreatedPayload, RunResumedPayload};
+
+    fn environment(path: &str) -> ExecutionEnvironment {
+        ExecutionEnvironment {
+            shell: "/bin/sh".to_string(),
+            path: vec![path.to_string()],
+        }
+    }
+
+    fn at(ledger: &mut RunLedger, seq: u64, event: RunEvent) {
+        let meta = EventMeta {
+            seq: Seq::from(seq),
+            at: chrono::DateTime::UNIX_EPOCH,
+            node: None,
+        };
+        ledger.apply(&event, &meta);
+    }
+
+    /// Each seq is answered with what the invocation that wrote it ran
+    /// with: the birth's before the first wake, then each wake's own —
+    /// and nothing for a wake that recorded none.
+    #[test]
+    fn the_environment_at_a_seq_is_the_one_its_invocation_ran_with() {
+        let mut ledger = RunLedger::default();
+        let created = RunCreatedPayload {
+            manifest_hash: crate::sha256_hex(b"manifest"),
+            inputs: Default::default(),
+            mode: Default::default(),
+            promoted_from: None,
+            yunta_schema: None,
+            base_branch: "main".to_string(),
+            base_commit: crate::sha256_hex(b"base").as_str().into(),
+            environment: Some(Box::new(environment("/born"))),
+            left_out: Vec::new(),
+        };
+        at(&mut ledger, 1, RunEvent::Created(created));
+        let woken = RunResumedPayload::new(Vec::new(), Some(environment("/woken")));
+        at(&mut ledger, 5, RunEvent::Resumed(woken));
+        at(
+            &mut ledger,
+            9,
+            RunEvent::Resumed(RunResumedPayload::new(Vec::new(), None)),
+        );
+
+        let path_at = |seq: u64| {
+            ledger
+                .environment_at(Seq::from(seq))
+                .map(|in_force| in_force.path.join(":"))
+        };
+        assert_eq!(path_at(4).as_deref(), Some("/born"));
+        assert_eq!(path_at(5).as_deref(), Some("/woken"));
+        assert_eq!(path_at(8).as_deref(), Some("/woken"));
+        assert_eq!(path_at(9), None);
+        assert_eq!(ledger.environment_now(), None);
     }
 }

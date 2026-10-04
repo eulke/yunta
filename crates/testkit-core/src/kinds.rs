@@ -43,6 +43,8 @@ pub fn all_kinds() -> Vec<EventPayload> {
             },
             hash: yunta_core::sha256_hex(b"sha256:def"),
             origin: BaselineOrigin::Measured,
+            tree: None,
+            duration_ms: None,
         })),
         EventPayload::Node(NodeEvent::Started(NodeStartedPayload::attempt(1))),
         EventPayload::Session(SessionEvent::Opened(AgentSessionOpenedPayload {
@@ -101,6 +103,8 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 duration_ms: Some(4_200),
                 output: None,
                 tail: Vec::new(),
+                tree: None,
+                head: None,
             }],
             waiting: Vec::new(),
         })),
@@ -123,6 +127,8 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 duration_ms: Some(4_200),
                 output: None,
                 tail: vec!["test graph ... FAILED".to_string()],
+                tree: None,
+                head: None,
             }],
             outside_scope: vec!["notes.md".into()],
             denied: Vec::new(),
@@ -234,6 +240,9 @@ pub fn all_kinds() -> Vec<EventPayload> {
             channel: Channel::Tty,
             responder: Some("eulke".into()),
         })),
+        EventPayload::Gates(GateEvent::AskingOpened(AskingOpenedPayload {
+            task_id: Some("T1".into()),
+        })),
         EventPayload::Children(ChildEvent::LoopIteration(LoopIterationPayload {
             iteration: 3,
             until_result: false,
@@ -307,6 +316,8 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 duration_ms: Some(120),
                 output: None,
                 tail: Vec::new(),
+                tree: None,
+                head: None,
             },
         })),
         EventPayload::Findings(FindingEvent::Settled(FindingSettledPayload {
@@ -320,6 +331,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
             outcome: SubmissionOutcome::Accepted {
                 content_hash: yunta_core::sha256_hex(b"plan"),
             },
+            probes: Vec::new(),
         })),
         EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
             ArtifactId::Interpreted {

@@ -21,6 +21,8 @@ fn measured(exit_code: i32, origin: BaselineOrigin) -> BaselineCapturedPayload {
         },
         hash: yunta_core::sha256_hex(b""),
         origin,
+        tree: None,
+        duration_ms: None,
     }
 }
 

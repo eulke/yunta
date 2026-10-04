@@ -110,25 +110,36 @@ impl Memo {
     }
 
     /// What `cmd`'s answer on `cwd` is kept under, read as `cwd` stands
-    /// now — for a caller that runs the command some other way and
-    /// hands the answer to [`Memo::passed`].
-    pub(crate) async fn key_on(
+    /// now.
+    async fn key_on(
         &self,
         cmd: &str,
         cwd: &Path,
         supervision: Supervision<'_>,
     ) -> Result<ContentHash, TaskCycleError> {
-        let tree = Tree::of(cwd, asks_git(cmd), supervision).await?;
+        let tree = self.tree_for(cmd, cwd, supervision).await?;
         Ok(self.key(cmd, &tree))
     }
 
-    /// Remembers that a command passed under `key`, measured by a
-    /// caller rather than a check: the suite a run measures before its
-    /// first node, which every task is then held to.
-    pub(crate) fn passed(&self, key: ContentHash) {
+    /// `cwd` as an answer of `cmd` is kept for it, read as it stands now
+    /// — for a caller that runs the command some other way and hands the
+    /// answer to [`Memo::passed_on`].
+    pub(crate) async fn tree_for(
+        &self,
+        cmd: &str,
+        cwd: &Path,
+        supervision: Supervision<'_>,
+    ) -> Result<Tree, TaskCycleError> {
+        Tree::of(cwd, asks_git(cmd), supervision).await
+    }
+
+    /// Remembers that `cmd` passed on `tree`, measured by a caller rather
+    /// than a check: the suite a run measures, which every task is then
+    /// held to.
+    pub(crate) fn passed_on(&self, cmd: &str, tree: &Tree) {
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.insert(
-            key,
+            self.key(cmd, tree),
             Answer {
                 exit_code: 0,
                 output: None,
@@ -288,6 +299,8 @@ async fn run_on(
             reused,
             duration_ms,
             output,
+            tree: Some(tree.content.clone()),
+            head: tree.head.clone().filter(|_| asks_git(&criterion.cmd)),
         });
     }
     Ok(runs)

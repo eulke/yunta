@@ -23,6 +23,8 @@ fn result(cmd: &str, duration_ms: Option<u64>) -> CriterionResult {
         duration_ms,
         output: None,
         tail: Vec::new(),
+        tree: None,
+        head: None,
     }
 }
 

@@ -74,6 +74,9 @@ pub(super) fn kept(happening: &Happening) -> bool {
         | Happening::Gates(gates::happening::Happening::Resolved(_))
         | Happening::Gates(gates::happening::Happening::Asked { .. })
         | Happening::Gates(gates::happening::Happening::Answered { .. }) => true,
+        // What asks the person is on their screen already; the line is
+        // the answer's.
+        Happening::Gates(gates::happening::Happening::AskingOpened) => false,
         Happening::Findings(findings::happening::Happening::Finding { change, .. }) => matches!(
             change,
             findings::happening::Change::Posted
@@ -238,6 +241,8 @@ mod tests {
             duration_ms: None,
             output: None,
             tail: tail.iter().map(|line| line.to_string()).collect(),
+            tree: None,
+            head: None,
         };
         let payload = EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
             task_id: "T001".into(),
@@ -271,6 +276,8 @@ mod tests {
                         duration_ms: Some(221_000),
                         output: None,
                         tail: Vec::new(),
+                        tree: None,
+                        head: None,
                     }],
                     outside_scope: outside.iter().map(|path| path.into()).collect(),
                     denied: Vec::new(),
@@ -317,6 +324,8 @@ mod tests {
             },
             hash: yunta_core::sha256_hex(b""),
             origin: BaselineOrigin::Measured,
+            tree: None,
+            duration_ms: None,
         }))
     }
 

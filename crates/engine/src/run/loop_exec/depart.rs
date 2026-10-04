@@ -109,7 +109,10 @@ pub(super) async fn resolve_departures(
         let escalation = escalation(&departure, holders).map_err(|source| RunError::Broken {
             diagnostic: format!("task `{}`'s departure: {source}", departure.task_id),
         })?;
-        let Some(choice) = ctx.ask_human(Some(&node.id), &escalation).await? else {
+        let Some(choice) = ctx
+            .ask_human(Some(&node.id), Some(&departure.task_id), &escalation)
+            .await?
+        else {
             unanswered.push(departure.task_id);
             continue;
         };
@@ -143,6 +146,17 @@ pub(super) async fn resolve_departures(
         )
         .await?;
     }
+    owing(ctx, node, &unanswered, tokens).await
+}
+
+/// The node's end while `unanswered` departures still owe a person's
+/// answer, which the run pauses on; `None` when none does.
+async fn owing(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    unanswered: &[TaskId],
+    tokens: TokenUsage,
+) -> Result<Option<NodeEnd>, RunError> {
     if unanswered.is_empty() {
         return Ok(None);
     }

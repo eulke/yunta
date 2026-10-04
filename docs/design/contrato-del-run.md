@@ -93,6 +93,7 @@ The current table contains 48 event kinds in 39 rows; some rows group related va
 | `pull_request_opened` | engine | url y número del pull request que un nodo `pull_request` abrió —o encontró abierto para este run—, rama del run, rama base |
 | `gate_waiting` / `gate_resolved` | engine/adapter | opciones, elección, quién, feedback |
 | `questions_asked` / `questions_answered` | engine | node_id; hash e ids del documento `questions` y tokens de la sesión que preguntó / hash del artifact de respuestas, canal (tty\\|mcp), respondiente si se conoce |
+| `asking_opened` | engine | node_id y la tarea que espera, si una pregunta; cuándo empezó a preguntarse a una persona en la terminal del engine (auditoría) |
 | `loop_iteration` | engine | iteración N, evaluación de `until` |
 | `artifact_submitted` | engine | node_id, nombre y kind del artifact, veredicto: aceptado con su content hash, o rechazado con el reporte entero (§4.1) |
 | `artifact_accepted` | engine | node_id del productor (ausente para lo que el run adquiere sin nodo), identidad del artifact (kind interpretado o nombre opaco), content hash y origen |

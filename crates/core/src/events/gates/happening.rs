@@ -17,6 +17,8 @@ pub enum Happening {
         channel: Channel,
         responder: Option<Responder>,
     },
+    /// A person at the terminal began to be asked.
+    AskingOpened,
 }
 
 impl From<&GateEvent> for Happening {
@@ -31,6 +33,7 @@ impl From<&GateEvent> for Happening {
                 channel: p.channel,
                 responder: p.responder.clone(),
             },
+            GateEvent::AskingOpened(_) => Happening::AskingOpened,
         }
     }
 }

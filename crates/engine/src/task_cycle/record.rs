@@ -121,6 +121,8 @@ pub(crate) fn to_results(runs: &[CriterionRun]) -> Vec<CriterionResult> {
                 (Some(output), exit_code) if exit_code != 0 => output.tail(),
                 _ => Vec::new(),
             },
+            tree: run.tree.clone(),
+            head: run.head.clone(),
         })
         .collect()
 }

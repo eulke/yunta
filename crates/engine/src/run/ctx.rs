@@ -9,8 +9,7 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateWaitingPayload, HumanChoice,
-    StoredEvent,
+    EventPayload, Finding, FindingPostedPayload, FindingSeverity, StoredEvent,
 };
 use yunta_core::port::{Adapter, Forge};
 use yunta_core::{AdapterId, Clock, FindingId, IdSource, Location, Manifest, NodeId, RunId, Seq};
@@ -245,64 +244,6 @@ impl<'a> RunCtx<'a> {
         Ok(self.log().events().await?)
     }
 
-    /// Puts `escalation` to the run's human surface, with the documents
-    /// it shows, and returns its choice,
-    /// verified against the menu the surface was shown. `None` keeps its
-    /// meaning: no surface can answer right now. An answer the
-    /// escalation does not accept is refused as
-    /// [`RunError::RefusedAnswer`] before anything is recorded. While the
-    /// surface asks, the run's registry says `node` is asking, so a
-    /// reader elsewhere knows the run needs a person.
-    pub(crate) async fn ask_human(
-        &self,
-        node: Option<&NodeId>,
-        escalation: &GateWaitingPayload,
-    ) -> Result<Option<HumanChoice>, RunError> {
-        // A plan is shown as the run judges it — with what a person
-        // accepted departing from it and the suite the run measured,
-        // which only the log holds.
-        let shown = match escalation.shows().is_empty() {
-            true => Vec::new(),
-            false => {
-                let state = self.run_view().await?.state;
-                crate::artifacts::shown::documents(self.run_dir, escalation.shows(), &state).await?
-            }
-        };
-        let asking = crate::Asking {
-            shown: &shown,
-            run: self.run_id,
-        };
-        let answered = {
-            let _asking = self.asking(node);
-            self.human_interaction.resolve_in(escalation, &asking).await
-        };
-        let Some(choice) = answered else {
-            return Ok(None);
-        };
-        escalation
-            .accepts(&choice)
-            .map_err(|refused| RunError::RefusedAnswer {
-                refused,
-                summary: escalation.summary().to_string(),
-            })?;
-        Ok(Some(choice))
-    }
-
-    /// Says in the run's registry that `node` is asking a person at this
-    /// engine's terminal, until what this returns is dropped — however
-    /// the asking ends.
-    pub(crate) fn asking(&self, node: Option<&NodeId>) -> Asking<'_> {
-        if let Some(registry) = &self.process_registry {
-            registry.asking(Some(crate::process_registry::Asked {
-                node: node.cloned(),
-                since: self.clock.now(),
-            }));
-        }
-        Asking {
-            registry: self.process_registry.as_deref(),
-        }
-    }
-
     /// The run's log read and its state derived, together — the pairing
     /// every site that needs the current state goes through, so the load
     /// and the `derive` live in one place rather than at each call.
@@ -469,19 +410,5 @@ impl crate::task_cycle::SessionObserver for RunCtx<'_> {
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<bool, StorageError> {
         self.awake.settled(&self.log(), cancel).await
-    }
-}
-
-/// A question this engine is asking a person at its terminal, recorded
-/// in the run's registry until it is dropped.
-pub(crate) struct Asking<'r> {
-    registry: Option<&'r crate::process_registry::ProcessRegistry>,
-}
-
-impl Drop for Asking<'_> {
-    fn drop(&mut self) {
-        if let Some(registry) = self.registry {
-            registry.asking(None);
-        }
     }
 }

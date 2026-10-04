@@ -197,6 +197,7 @@ fn a_submission_leaves_the_fold_unmoved() {
             outcome: SubmissionOutcome::Accepted {
                 content_hash: yunta_core::sha256_hex(b"plan"),
             },
+            probes: Vec::new(),
         }),
     );
     assert_eq!(ledger.every().count(), 0);

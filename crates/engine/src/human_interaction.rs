@@ -56,6 +56,14 @@ pub trait HumanInteraction: Send + Sync {
     /// that answers off the menu is a bug, not a decision.
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice>;
 
+    /// Whether a person is at this surface to be asked: what makes the
+    /// run say on its log when an asking began. A surface with nobody
+    /// there — none, an automatic answerer — is not one, and the default
+    /// says so.
+    fn present(&self) -> bool {
+        false
+    }
+
     /// [`resolve`](Self::resolve), with what the asking knows: the
     /// documents the escalation shows. They are the asking's context, not
     /// the escalation's — the escalation is what the log records and a

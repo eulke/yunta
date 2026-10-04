@@ -106,6 +106,8 @@ fn priced(entries: &[(&str, &[u64])]) -> TaskLedger {
                 duration_ms: Some(duration_ms),
                 output: None,
                 tail: Vec::new(),
+                tree: None,
+                head: None,
             })
         })
         .collect();
@@ -666,6 +668,37 @@ async fn pre_check_and_post_check_run_every_criterion() {
         .unwrap();
     assert_eq!(runs.len(), 2);
     assert!(surprises(&t, &runs).is_empty());
+}
+
+/// Each answer names the tree it is for — the same for every criterion
+/// of one check — and the commit the checkout stood on only where the
+/// command runs `git`, whose answer can turn on history.
+#[tokio::test]
+async fn a_criterion_s_answer_names_the_tree_it_answered_for() {
+    let owner = Owner::new();
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    tokio::fs::create_dir_all(&repo).await.unwrap();
+    init_repo(&repo);
+    tokio::fs::write(repo.join("a.txt"), "done").await.unwrap();
+    let t = task(
+        "named",
+        &["a.txt"],
+        vec![cmd("test -f a.txt"), cmd("git status --porcelain")],
+    );
+    let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
+
+    let checked = yunta_engine::post_check(&t, &repo, &memo, owner.supervision())
+        .await
+        .unwrap();
+
+    let [files, history] = checked.runs.as_slice() else {
+        panic!("two runs: {:#?}", checked.runs);
+    };
+    assert!(files.tree.is_some() && files.tree == history.tree);
+    assert_eq!(files.head, None);
+    let head = yunta_testkit::git_output(&repo, &["rev-parse", "HEAD"]);
+    assert_eq!(history.head.as_deref(), Some(head.trim()));
 }
 
 #[tokio::test]
@@ -1380,6 +1413,8 @@ fn ran(cmd: &str, exit_code: i32, is_guard: bool) -> CriterionRun {
         reused: false,
         duration_ms: None,
         output: None,
+        tree: None,
+        head: None,
     }
 }
 

@@ -426,6 +426,8 @@ mod tests {
                             duration_ms: Some(1),
                             output: None,
                             tail: Vec::new(),
+                            tree: None,
+                            head: None,
                         },
                         CriterionResult {
                             cmd: "cargo clippy".to_string(),
@@ -435,6 +437,8 @@ mod tests {
                             duration_ms: None,
                             output: None,
                             tail: Vec::new(),
+                            tree: None,
+                            head: None,
                         },
                     ],
                     waiting: Vec::new(),

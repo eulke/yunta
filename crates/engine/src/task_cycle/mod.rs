@@ -68,6 +68,11 @@ pub struct CriterionRun {
     /// a green answer reused, and for a check the engine states rather
     /// than runs.
     pub output: Option<crate::process::CommandOutput>,
+    /// The tree the answer is for — what the checkout held — and, for a
+    /// command that runs `git`, the commit it stood on. `None` for a
+    /// check the engine states rather than runs.
+    pub tree: Option<yunta_core::TreeId>,
+    pub head: Option<String>,
 }
 
 impl CriterionRun {

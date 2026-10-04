@@ -53,6 +53,16 @@ pub struct CriterionResult {
     /// know why, without opening the object. Empty for one that passed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tail: Vec<String>,
+    /// The git tree of what the checkout held when the command answered:
+    /// what the answer is kept for, so a later invocation can take it for
+    /// the same tree. Absent for a check the engine states rather than
+    /// runs, and on a log written before the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<TreeId>,
+    /// The commit the checkout stood on, kept only for a command that
+    /// runs `git`, whose answer can turn on history as well as on files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

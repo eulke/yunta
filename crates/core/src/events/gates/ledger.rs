@@ -100,6 +100,11 @@ impl GateLedger {
 
     /// Folds one gate-domain event.
     pub fn apply(&mut self, event: &GateEvent, meta: &EventMeta<'_>) {
+        // When the asking began is the log's to say, and nothing this
+        // ledger holds turns on it.
+        if let GateEvent::AskingOpened(_) = event {
+            return;
+        }
         let Some(node) = meta.node else {
             // A run-level escalation: it gates the whole invocation, so
             // no node record answers for it.
@@ -108,43 +113,53 @@ impl GateLedger {
             }
             return;
         };
-        let record = self.per_node.entry(node.clone()).or_default();
+        self.per_node
+            .entry(node.clone())
+            .or_default()
+            .apply(event, meta.seq);
+    }
+}
+
+impl GateRecord {
+    /// Folds one gate event of this record's node, written at `seq`.
+    fn apply(&mut self, event: &GateEvent, seq: Seq) {
         match event {
             GateEvent::Waiting(p) => {
                 if let Some(reference) = p.external_ref() {
-                    record.external_ref = Some(reference.to_string());
+                    self.external_ref = Some(reference.to_string());
                 }
-                record.waiting = Some((p.clone(), meta.seq));
+                self.waiting = Some((p.clone(), seq));
             }
             GateEvent::Resolved(p) => {
                 // A merge is an approval whose evidence is the merge
                 // commit, and the payload already reads it as `Approved`.
                 match p {
                     GateResolvedPayload::Approved { sha, .. } => {
-                        record.approved_sha = Some(sha.clone());
+                        self.approved_sha = Some(sha.clone());
                     }
                     // Changes requested end that round of review: what
                     // the correction makes is published, then reviewed.
-                    GateResolvedPayload::ChangesRequested { .. } => record.external_ref = None,
+                    GateResolvedPayload::ChangesRequested { .. } => self.external_ref = None,
                     GateResolvedPayload::Chosen(_)
                     | GateResolvedPayload::Closed
                     | GateResolvedPayload::Unrecognized(_) => {}
                 }
-                record.resolved.push((p.clone(), meta.seq));
-                record.waiting = None;
+                self.resolved.push((p.clone(), seq));
+                self.waiting = None;
             }
-            GateEvent::QuestionsAsked(p) => record.rounds.push(QuestionRound {
+            GateEvent::QuestionsAsked(p) => self.rounds.push(QuestionRound {
                 asked: p.clone(),
-                asked_at: meta.seq,
+                asked_at: seq,
                 answered: None,
                 answered_at: None,
             }),
             GateEvent::QuestionsAnswered(p) => {
-                if let Some(round) = record.rounds.last_mut() {
+                if let Some(round) = self.rounds.last_mut() {
                     round.answered = Some(p.clone());
-                    round.answered_at = Some(meta.seq);
+                    round.answered_at = Some(seq);
                 }
             }
+            GateEvent::AskingOpened(_) => {}
         }
     }
 }

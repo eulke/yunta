@@ -44,6 +44,12 @@ impl ScriptedInteraction {
 
 #[async_trait]
 impl HumanInteraction for ScriptedInteraction {
+    /// Stands in for a person at the terminal, so a run says when it
+    /// began asking as it does for one.
+    fn present(&self) -> bool {
+        true
+    }
+
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         self.seen_options
             .lock()

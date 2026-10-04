@@ -90,6 +90,8 @@ fn criterion(cmd: &str, exit_code: i32) -> CriterionResult {
         duration_ms: None,
         output: None,
         tail: Vec::new(),
+        tree: None,
+        head: None,
     }
 }
 

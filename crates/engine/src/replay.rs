@@ -378,6 +378,9 @@ impl RunState {
                 let prior = self.pre_gate.remove(&node).flatten();
                 self.nodes.set_state(&node, prior);
             }
+            // When the asking began moves no node: the wait it opens is
+            // the gate's or the round's, which their own events say.
+            GateEvent::AskingOpened(_) => {}
         }
         Ok(())
     }

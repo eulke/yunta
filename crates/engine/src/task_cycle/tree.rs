@@ -12,12 +12,17 @@ use crate::process::Supervision;
 /// What a criterion's answer on a checkout turns on: the git tree of
 /// everything the checkout holds, and — read only when a command that
 /// runs `git` asks — the commit it stands on.
-pub(super) struct Tree {
+pub(crate) struct Tree {
     pub(super) content: TreeId,
     pub(super) head: Option<String>,
 }
 
 impl Tree {
+    /// The git tree of what the checkout holds.
+    pub(crate) fn content(&self) -> &TreeId {
+        &self.content
+    }
+
     /// `cwd` as it stands now. The content is every file a checkout
     /// shows — untracked ones included, ignored ones not — staged
     /// through an index of this call's own, which starts as a copy of

@@ -39,6 +39,15 @@ pub struct BaselineCapturedPayload {
     /// [`BaselineOrigin::Measured`], which is what such a log meant.
     #[serde(default)]
     pub origin: BaselineOrigin,
+    /// The git tree the suite was measured on: what a later invocation
+    /// takes the measurement's answer for. Absent for a measurement the
+    /// run was born holding — it speaks for the tree its measuring run
+    /// opened on — and on a log written before the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<crate::TreeId>,
+    /// How long the measurement took. Absent where `tree` is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
 }
 
 impl BaselineCapturedPayload {

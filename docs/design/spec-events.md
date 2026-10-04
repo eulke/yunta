@@ -12,8 +12,8 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 39 rows and **48 `kind` names**.
-It had 32 rows and 39 kinds before `host_suspended` was added. The table
+The current Run Contract event table has 40 rows and **49 `kind` names**.
+It had 39 rows and 48 kinds before `asking_opened` was added. The table
 defines the normative set; this document specifies each payload.
 
 ## 1. Envelope común
@@ -156,6 +156,8 @@ Un nodo con sesión resuelve su runner antes de armar su contexto: el contexto l
 | `results` [inferido] | `{exit_code, summary}` | sí | resultado crudo de correr la suite una vez, en el primer despertar del run que la mide |
 | `hash` | string | sí | hash del resultado, insumo de `baseline_compare` |
 | `origin` | `{type: measured}` \| `{type: inherited, run}` | sí | de quién es la medición: `measured`, este run la tomó; `inherited`, nació teniéndola y `run` nombra a la raíz del linaje que la midió. Un log sin el campo se lee `measured` |
+| `tree` | `Option<TreeId>` | no | el árbol sobre el que se midió la suite: una invocación posterior toma la respuesta para ese árbol. Ausente en una medición heredada —habla del árbol con que abrió el run que la midió— y en un log anterior al campo |
+| `duration_ms` | `Option<u64>` | no | cuánto tardó la medición; ausente donde `tree` lo está |
 
 ### 5.4 `node_started` — engine
 **Fuente:** node_id, intento N
@@ -253,7 +255,7 @@ registra.
 |---|---|---|---|
 | `task_id` | string | sí | — |
 | `phase` | enum `pre \| post` | sí | pre-check en rojo vs. post-check |
-| `results` | lista de `{cmd, exit_code, type?, reused: bool, duration_ms?, output?, tail?}` | sí | `reused=true` cuando la memoización (fuera de alcance de una implementación completa, salvo lo mínimo necesario) sirvió el resultado sin re-ejecutar; `duration_ms` es el costo observado de la ejecución — ausente en `reused=true` y en eventos emitidos antes de que este campo se agregara; `output` es el hash del objeto con lo que imprimió el comando, stdout y después stderr, redactado — en `reused=true`, lo que imprimió la ejecución que dio esa respuesta roja sobre el mismo árbol, y ausente si la respuesta reutilizada pasó; `tail` son sus últimas 20 líneas cuando `exit_code` no es 0, y se omite cuando pasó. Un log anterior a estos dos campos los lee ausentes |
+| `results` | lista de `{cmd, exit_code, type?, reused: bool, duration_ms?, output?, tail?, tree?, head?}` | sí | `reused=true` cuando la memoización (fuera de alcance de una implementación completa, salvo lo mínimo necesario) sirvió el resultado sin re-ejecutar; `duration_ms` es el costo observado de la ejecución — ausente en `reused=true` y en eventos emitidos antes de que este campo se agregara; `output` es el hash del objeto con lo que imprimió el comando, stdout y después stderr, redactado — en `reused=true`, lo que imprimió la ejecución que dio esa respuesta roja sobre el mismo árbol, y ausente si la respuesta reutilizada pasó; `tail` son sus últimas 20 líneas cuando `exit_code` no es 0, y se omite cuando pasó. Un log anterior a estos dos campos los lee ausentes. `tree` es el árbol git de lo que el checkout tenía cuando el comando respondió —para lo que se guarda la respuesta—, y `head` el commit en que estaba, solo para un comando que corre `git`; ambos ausentes en un check que el engine enuncia sin correr, y en un log anterior a ellos |
 | `waiting` | lista de strings (comandos) | vacía —y omitida— cuando ninguna guarda esperó | los `guard` que el check no corrió porque un criterio propio de la tarea estaba en rojo; solo en `post`. Un log anterior al campo lo lee vacío |
 
 ### 5.11 `task_status_changed` — engine
@@ -481,6 +483,20 @@ preguntó nada termina en el mismo cierre.
 | `channel` | enum `tty \| mcp` | sí | — |
 | `responder` | `Option<string>` | no | si el canal lo identifica |
 
+### 5.19a `asking_opened` — engine
+**Fuente:** node_id; la tarea cuyo trabajo espera la respuesta, si una pregunta
+
+Una persona en la terminal del engine empieza a ser preguntada: la elección de un
+gate, una escalación, una ronda de preguntas. La respuesta llega como el evento que
+resuelve lo preguntado; este dice cuándo empezó la pregunta, que solo sabe el
+engine que la hizo. Se registra solo cuando hay una persona a quien preguntar: una
+superficie sin nadie estaciona el run y no abre ninguna espera. Auditoría: ningún
+ledger se mueve.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `task_id` | `Option<string>` | no | la tarea que espera, cuando la pregunta es por una tarea; ausente cuando pregunta el nodo |
+
 ### 5.20 `loop_iteration` — engine
 **Fuente:** iteración N, evaluación de `until`
 
@@ -614,6 +630,7 @@ con origen `submitted`.
 | `artifact_kind` | enum | sí | `tasks` \| `findings` \| `questions`; nombrado `artifact_kind` porque el envelope ya usa `kind` |
 | `outcome.accepted.content_hash` | string | en aceptación | hash del YAML canónico, que es el objeto bajo `objects/` que el `artifact_accepted` de esa entrega nombra |
 | `outcome.refused.report` | objeto | en rechazo | el documento y cada problema, con la forma de §5.15 |
+| `probes` | lista de `{task_id, results}` | vacía —y omitida— cuando la entrega no corrió nada | lo que el engine corrió para probar el documento, tarea por tarea: cada criterio con la forma de `criteria_checked.results` (§5.10), su árbol incluido, de modo que una invocación posterior toma esas respuestas para esos árboles |
 
 ### 5.21.5 `artifact_accepted` — engine
 **Fuente:** node_id del productor, identidad del artifact, content hash y origen

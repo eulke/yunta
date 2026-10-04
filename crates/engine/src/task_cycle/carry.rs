@@ -153,5 +153,7 @@ fn stopped_on(left: &CommitSha, paths: &[std::path::PathBuf]) -> CriterionRun {
         is_guard: false,
         reused: false,
         duration_ms: None,
+        tree: None,
+        head: None,
     }
 }

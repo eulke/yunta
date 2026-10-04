@@ -89,6 +89,8 @@ mod tests {
                             duration_ms: None,
                             output: None,
                             tail: Vec::new(),
+                            tree: None,
+                            head: None,
                         },
                     },
                 )),

@@ -42,7 +42,7 @@ pub(super) async fn execute_ask(ctx: &RunCtx<'_>, node: &Node) -> Result<AskOutc
         })?;
 
     let reply = {
-        let _asking = ctx.asking(Some(&node.id));
+        let _asking = ctx.asking(Some(&node.id), None).await?;
         ctx.human_interaction.ask(&node.id, &file).await
     };
     let Some(reply) = reply else {

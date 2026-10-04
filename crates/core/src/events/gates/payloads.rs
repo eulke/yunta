@@ -416,6 +416,19 @@ impl From<GateResolvedPayload> for GateResolvedWire {
     }
 }
 
+/// A person at the engine's terminal is being asked something: a gate's
+/// choice, an escalation, a round of questions. The answer lands as the
+/// event that resolves what was asked; this one says when the asking
+/// began, which only the engine that put the question knows. Audit: no
+/// ledger moves.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AskingOpenedPayload {
+    /// The task whose work is waiting on the answer, when a task's
+    /// session asked; absent when the node asked for itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<crate::ids::TaskId>,
+}
+
 /// A node handed its questions over and closed on them: what it asked
 /// from, which ids await an answer, and what the session that asked
 /// spent.

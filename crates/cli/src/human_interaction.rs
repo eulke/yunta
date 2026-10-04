@@ -100,6 +100,10 @@ impl ConsoleInteraction {
 
 #[async_trait]
 impl HumanInteraction for ConsoleInteraction {
+    fn present(&self) -> bool {
+        Console::attended()
+    }
+
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         let escalation = escalation.clone();
         self.prompted(move |console| decide(console, &escalation, &[], ""))

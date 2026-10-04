@@ -44,6 +44,20 @@ pub struct ArtifactSubmittedPayload {
     /// claims `kind` in the serialized JSON.
     pub artifact_kind: crate::workflow::ArtifactKind,
     pub outcome: SubmissionOutcome,
+    /// What the engine ran to prove the document, task by task: how each
+    /// criterion answered on the tree it ran on, which a later invocation
+    /// takes for that tree. Empty for a document whose commands nothing
+    /// runs, and on a log written before the field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probes: Vec<TaskProbe>,
+}
+
+/// How one task's criteria answered where a document's hand-over ran
+/// them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskProbe {
+    pub task_id: crate::ids::TaskId,
+    pub results: Vec<crate::events::CriterionResult>,
 }
 
 /// Accepted, and the file the engine wrote from it; or refused, and

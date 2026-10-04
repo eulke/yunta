@@ -542,6 +542,8 @@ fn checked(phase: Phase, exits: [i32; 2]) -> EventPayload {
                 duration_ms: None,
                 output: None,
                 tail: Vec::new(),
+                tree: None,
+                head: None,
             },
             CriterionResult {
                 cmd: "true".to_string(),
@@ -551,6 +553,8 @@ fn checked(phase: Phase, exits: [i32; 2]) -> EventPayload {
                 duration_ms: None,
                 output: None,
                 tail: Vec::new(),
+                tree: None,
+                head: None,
             },
         ],
         waiting: Vec::new(),
@@ -729,6 +733,8 @@ async fn a_task_session_reads_which_guard_is_the_runs_suite() {
         },
         hash: yunta_core::sha256_hex(b""),
         origin: yunta_core::events::BaselineOrigin::Measured,
+        tree: None,
+        duration_ms: None,
     };
     let task = yunta_engine::judged_task(&greeting_task(), Some(&baseline));
     let session = host

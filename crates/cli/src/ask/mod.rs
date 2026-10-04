@@ -198,6 +198,12 @@ impl Console {
     /// draw — `yunta init`, `yunta new` — passes
     /// [`Diagnostics::none`](crate::surface::Diagnostics::none), which
     /// is the same door onto nothing.
+    /// Whether a prompt here reaches a person: stdin and stderr both on
+    /// a terminal, which is what [`Console::open`] asks before it opens.
+    pub(crate) fn attended() -> bool {
+        std::io::stdin().is_terminal() && Term::stderr().is_term()
+    }
+
     pub(crate) async fn open(diagnostics: &Diagnostics, escape: Escape) -> Option<Self> {
         if !std::io::stdin().is_terminal() {
             return None;

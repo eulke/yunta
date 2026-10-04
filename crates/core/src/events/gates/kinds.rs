@@ -9,6 +9,7 @@ pub enum GateEvent {
     Resolved(GateResolvedPayload),
     QuestionsAsked(QuestionsAskedPayload),
     QuestionsAnswered(QuestionsAnsweredPayload),
+    AskingOpened(AskingOpenedPayload),
 }
 
 impl GateEvent {
@@ -18,6 +19,7 @@ impl GateEvent {
         "gate_resolved",
         "questions_asked",
         "questions_answered",
+        "asking_opened",
     ];
 
     /// The persisted `kind` string of this fact.
@@ -27,6 +29,7 @@ impl GateEvent {
             Self::Resolved(_) => "gate_resolved",
             Self::QuestionsAsked(_) => "questions_asked",
             Self::QuestionsAnswered(_) => "questions_answered",
+            Self::AskingOpened(_) => "asking_opened",
         }
     }
 
@@ -43,6 +46,7 @@ impl GateEvent {
             Self::Resolved(_) => false,
             Self::QuestionsAsked(_) => false,
             Self::QuestionsAnswered(_) => false,
+            Self::AskingOpened(_) => true,
         }
     }
 
