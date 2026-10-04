@@ -14,9 +14,10 @@
 //! A spec is proven the same way, against the plan the run holds: every
 //! task it names is the plan's, every file is new to the run's tree — one
 //! that is not would replace what the tree holds, and deny it to the work
-//! — and in a checkout of that tree with every one of its files written
-//! in, each test runs and fails: a test that passes before the work holds
-//! the work to nothing.
+//! — and in a checkout of that tree with the task's own files written in,
+//! each of its tests runs and fails: a test that passes before the work
+//! holds the work to nothing. A plan the run will write a spec for is held
+//! only to programs the engine can find: its tests are the spec's to write.
 
 use std::path::{Path, PathBuf};
 
@@ -47,8 +48,6 @@ impl SessionTools {
         let events = self.events().await?;
         let prior = crate::tasks::prior_registrations(&events);
         let current = crate::replay::derive(&events).tasks;
-        let probing = self.handover_checkout().await?;
-        let checkout = probing.checkout.clone();
         let supervision = self.host.supervision(&self.stop);
         // A plan a gate shows a person says what it changes and why.
         let mut found = match crate::tasks::plan_reviewed(&self.host.workflow, &events, &self.node)
@@ -57,6 +56,25 @@ impl SessionTools {
             false => Vec::new(),
         };
         found.extend(self.specified(tasks, &events).await?);
+        // The tests a plan's criteria run are the spec's to write and to
+        // prove failing; until then the plan is held only to programs the
+        // engine can find.
+        if crate::tasks::plan_specified(&self.host.workflow, &events) {
+            let asked = |task: &Task| !crate::tasks::stays_done(task, &prior, &current);
+            found.extend(
+                super::findable::unfindable(
+                    tasks,
+                    asked,
+                    &self.host.worktree,
+                    supervision,
+                    self.host.environment.as_ref(),
+                )
+                .await?,
+            );
+            return Ok((found, Vec::new()));
+        }
+        let probing = self.handover_checkout().await?;
+        let checkout = probing.checkout.clone();
         let mut ran = Vec::new();
         for (index, task) in tasks.tasks.iter().enumerate() {
             if crate::tasks::stays_done(task, &prior, &current) {
@@ -103,12 +121,21 @@ impl SessionTools {
         let (checkout, base) = (probing.checkout.clone(), probing.base.clone());
         let supervision = self.host.supervision(&self.stop);
         broken.extend(already_held(&checkout, &base, spec, &asked, supervision).await?);
-        write_test_files(&checkout, spec).await?;
         let mut proven = SpecProven {
             broken,
             failing: Vec::new(),
         };
+        // Each task's tests are proven on the tree its work will start
+        // from: the run's, with that task's files in it and no other's —
+        // the tree the loop's first check of the task reads, which then
+        // takes these answers instead of running them again.
         for (index, one) in spec.specs.iter().enumerate().filter(|(_, one)| asked(one)) {
+            crate::worktree::put_back(&checkout, supervision)
+                .await
+                .map_err(|source| RunToolError::Handover {
+                    detail: source.to_string(),
+                })?;
+            write_test_files(&checkout, &one.files).await?;
             let (broken, runs) = self.tested(index, one, plan.as_ref(), &checkout).await?;
             proven.broken.extend(broken);
             proven
@@ -121,8 +148,8 @@ impl SessionTools {
 
     /// What one spec breaks where its tests run — a task the plan does
     /// not declare, or a test that cannot run or already passes in
-    /// `checkout`, which holds every file of the document — and how each
-    /// of its tests answered there.
+    /// `checkout`, which holds the task's own files — and how each of its
+    /// tests answered there.
     async fn tested(
         &self,
         index: usize,
@@ -435,10 +462,13 @@ fn cannot_run(run: &CriterionRun, environment: Option<&ExecutionEnvironment>) ->
     detail
 }
 
-/// Writes every file `spec` gives its tasks into `checkout`, where its
-/// tests run as they will once each task's work starts from them.
-async fn write_test_files(checkout: &Path, spec: &SpecFile) -> Result<(), RunToolError> {
-    for test_file in spec.specs.iter().flat_map(|one| &one.files) {
+/// Writes `files` into `checkout`, where their tests run as they will once
+/// the task's work starts from them.
+async fn write_test_files(
+    checkout: &Path,
+    files: &[yunta_core::TestFile],
+) -> Result<(), RunToolError> {
+    for test_file in files {
         let path = checkout.join(test_file.in_repo());
         let written = match path.parent() {
             Some(parent) => tokio::fs::create_dir_all(parent).await,

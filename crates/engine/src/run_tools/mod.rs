@@ -45,6 +45,7 @@ mod answer;
 mod blackboard;
 pub mod catalog;
 mod deviation;
+mod findable;
 mod findings;
 mod handover;
 mod host;

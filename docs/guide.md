@@ -307,9 +307,11 @@ live in, whole, and the commands that run them, each saying what it proves. It
 arrives through `yunta_submit_spec` and is proven against the run the moment it
 does: every task it names is the plan's, every file is new to the run's tree — one
 that is not would replace what the project holds and deny it to the work — and in
-a checkout of the run's tree with every one of its files written in, each test runs
-and fails: a test that already passes holds the work to nothing, and the session
-hears which in the same call. An accepted spec is answered with how each test fails
+a checkout of the run's tree with that task's files written in, each of a task's
+tests runs and fails: a test that already passes holds the work to nothing, and the
+session hears which in the same call. That checkout is the tree the task's work
+starts from, so the loop's first check of the task takes those answers instead of
+running the tests again. An accepted spec is answered with how each test fails
 now — its exit and the last line it printed — so a test failing for anything but
 the missing behavior shows before anyone approves it.
 
@@ -725,7 +727,9 @@ A criterion runs under `sh` with the run's own `PATH`, not in the shell of the
 agent that wrote it — an agent's CLI can put tools on its own `PATH` (a bundled
 `rg`, say) that the engine's commands never see. When a planner submits a tasks
 document, the engine runs every criterion there before accepting it and refuses one
-that cannot run, quoting what the shell said. A criterion that calls a file the task
+that cannot run, quoting what the shell said. In a run that writes a spec, the tests
+a plan's criteria run are the spec's to write, so the plan is not run: the engine
+only checks that each program its criteria start is on that `PATH`. A criterion that calls a file the task
 itself will create checks for it first, so it fails before the work instead of not
 running at all:
 

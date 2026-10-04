@@ -2,8 +2,9 @@
 
 The full reference pipeline, end to end: an ambiguity-resolving grill, a
 plan registered as a verified tasks document, the tests its tasks are held
-to written before any is built, implementation checked task by task, a lint→fix cycle, a baseline check, a two-runner review, the work held
-to the plan a person approved, and a PR.
+to written before any is built, implementation checked task by task, a
+two-runner review beside a check of the work against the plan a person
+approved, one round of fixes, a lint→fix cycle, a baseline check, and a PR.
 Open modes throughout (`quick`/`standard`/`full`) and the plan distilled to
 knowledge on finish. Installable and removable like any third-party pack —
 the engine grants it no special status.
@@ -33,13 +34,19 @@ before you are asked again.
 ## Held to its plan
 
 Green criteria say the work passes its tests, not that it is what the plan
-says. In `standard` and `full`, two reviewers read the brief and the diff,
-and `fix-findings` answers each finding they report — fixed, or declined and
-why; a fix whose finding proposes a criterion is proved by it, which settles
-the finding. Then, in every mode, `conform` — a read-only `reviewer` — reads
-the plan, every departure from it a task's session declared with the answer
-it got, and the diff of everything going into the pull request, and posts a
-finding for each difference nobody accepted.
+says. In every mode, `conform` — a read-only `reviewer` — reads the plan,
+every departure from it a task's session declared with the answer it got,
+and the diff of everything the run changed, and posts a finding for each
+difference nobody accepted. In `standard` and `full`, two reviewers read the
+brief and the diff beside it, and `fix-findings` answers what all three
+found in one round — fixed, or declined and why; a fix whose finding
+proposes a criterion is proved by it, which settles the finding. `lint` and
+the comparison against the suite run after that, on the work as it goes into
+the pull request, once.
+
+The reviewers and `conform` read the same work and wait on nothing of each
+other's: with `defaults.max_parallel_nodes: 2` in your config they read it
+at the same time; with the default of 1 they read it one after the other.
 
 `ship` shows you the plan, headed by the departures you accepted, and every
 finding the run holds, each with the node that found it and how it was

@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use yunta_adapters::{MockForge, MockForgeState};
-use yunta_core::events::run_left_out;
+use yunta_core::events::{run_left_out, EventPayload, NodeEvent};
 use yunta_engine::{NodeState, RunReport, RunTerminal};
 use yunta_testkit::{
     bare_origin, git, write, ApproveEverything, Bench, INITIAL_BRANCH, MOCK_CONFIG,
@@ -118,6 +118,32 @@ async fn quick_run(extra: &str) -> (Bench, MockForgeState, RunReport) {
     (bench, forge, report)
 }
 
+/// The work is held to its plan first; lint and the comparison run once,
+/// after the last node that could change it.
+fn checks_follow_the_work(bench: &Bench) {
+    let started = started_in_order(bench);
+    let at = |node: &str| started.iter().position(|seen| seen == node);
+    assert!(
+        at("implement") < at("conform") && at("conform") < at("lint") && at("lint") < at("tests"),
+        "{started:?}"
+    );
+}
+
+/// Each node, the first time the log has it start.
+fn started_in_order(bench: &Bench) -> Vec<String> {
+    let mut started: Vec<String> = Vec::new();
+    for event in bench.events() {
+        if let (Some(EventPayload::Node(NodeEvent::Started(_))), Some(node)) =
+            (event.payload(), event.node_id.as_ref())
+        {
+            if !started.iter().any(|seen| seen == node.as_str()) {
+                started.push(node.to_string());
+            }
+        }
+    }
+    started
+}
+
 fn finished(state: &yunta_engine::RunState, node: &str) -> bool {
     matches!(state.nodes.state(node), Some(NodeState::Finished { .. }))
 }
@@ -153,6 +179,7 @@ async fn yunta_fragua_runs_end_to_end_in_quick_mode_with_mock() {
         "fix-lint ran despite lint passing on the first try: {:?}",
         state.nodes.state("fix-lint")
     );
+    checks_follow_the_work(&bench);
     let prs = forge.pull_requests();
     assert_eq!(prs.len(), 1, "{prs:?}");
     assert_eq!(
@@ -183,4 +210,35 @@ async fn yunta_fragua_leaves_lint_out_where_the_project_declares_none() {
         assert!(finished(&state, node), "node `{node}` did not finish");
     }
     assert_eq!(forge.pull_requests().len(), 1);
+}
+
+/// What each node of fragua waits on in a mode, read off the workflow:
+/// in `standard` the reviewers and `conform` read the work side by side
+/// and one round of fixes answers both before `lint`; in `quick`, where
+/// no review runs, `lint` follows `conform`.
+#[test]
+fn fragua_s_checks_follow_the_last_node_that_changes_the_work() {
+    let text = std::fs::read_to_string(Path::new(WORKFLOWS).join("fragua.yaml")).unwrap();
+    let workflow: yunta_core::Workflow = yunta_core::yaml::parse(&text).unwrap();
+    let waits = |mode: &str, node: &str| -> Vec<String> {
+        let included = yunta_engine::mode_included_nodes(&workflow, &mode.into());
+        let mut deps: Vec<String> =
+            yunta_engine::dependencies_in_mode(&workflow, included.as_ref())
+                .remove(&yunta_core::NodeId::from(node))
+                .unwrap_or_default()
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+        deps.sort();
+        deps
+    };
+
+    assert_eq!(waits("standard", "review"), vec!["implement"]);
+    assert_eq!(waits("standard", "conform"), vec!["implement"]);
+    assert_eq!(waits("standard", "fix-findings"), vec!["conform", "review"]);
+    assert_eq!(waits("standard", "lint"), vec!["fix-findings"]);
+    assert_eq!(waits("standard", "ship"), vec!["tests"]);
+    assert_eq!(waits("quick", "conform"), vec!["implement"]);
+    assert_eq!(waits("quick", "lint"), vec!["conform", "implement"]);
+    assert_eq!(waits("quick", "ship"), vec!["tests"]);
 }

@@ -10,12 +10,14 @@
 # it reads the tests beside it, and nobody who builds a task writes the
 # test that judges it. `review` reads the brief and the diff of what the
 # run changed — a read-only session may have no shell to find it with.
-# `fix-findings` answers each finding, fixed or declined, and a fix whose
-# finding proposes a criterion is proved by it. `conform` then holds the
-# work going into the pull request to the plan a person approved, in
-# every mode: green criteria say the work passes its tests, not that it
-# is what the plan says. `ship` shows the plan and every finding the run
-# holds with its answer, and going on settles what it showed.
+# `conform` holds the work to the plan a person approved, in every mode:
+# green criteria say the work passes its tests, not that it is what the
+# plan says. It reads the work beside `review`, and `fix-findings`
+# answers what both found in one round, fixed or declined; a fix whose
+# finding proposes a criterion is proved by it. `lint` and the
+# comparison against the suite run after the last change to the work,
+# once. `ship` shows the plan and every finding the run holds with its
+# answer, and going on settles what it showed.
 #
 # A pack runs in repositories its author has never seen, so it names
 # capabilities and never a tool or a layout: `lint` runs whatever the
@@ -25,7 +27,7 @@
 # reads `docs/architecture.md` as optional, since the planner can explore
 # the code without it.
 name: fragua
-description: Full feature cycle — grill, verified tasks document, lint/fix, baseline, multi-runner review, the work held to its plan, PR
+description: Full feature cycle — grill, verified tasks document, multi-runner review and the work held to its plan, one fix round, lint/fix, baseline, PR
 yunta_schema: ">=1 <2"
 inputs:
   idea:
@@ -143,11 +145,51 @@ nodes:
       - Check your task as you go, not only before you finish: the check runs
         its criteria exactly as the engine will.
 
+  - id: review
+    kind: prompt
+    depends_on: [implement]
+    runners: [reviewer, reviewer-alt]
+    permissions: read-only
+    context:
+      - artifact: { node: brief, name: brief.md }
+      - command: "git diff {{run.base}}"
+    prompt: { file: prompts/review.md }
+    artifacts:
+      produces: [findings]
+
+  - id: conform
+    kind: prompt
+    runner: reviewer
+    permissions: read-only
+    depends_on: [implement]
+    context:
+      - artifact: { node: plan, kind: tasks }
+      - run-events: { filter: deviations }
+      - command: "git diff {{run.base}}"
+    prompt: { file: prompts/conform.md }
+    artifacts:
+      produces: [findings]
+
+  - id: fix-findings
+    kind: prompt
+    runner: executor
+    depends_on: [review, conform]
+    prompt: |
+      Read the findings this run holds that are not settled — each with the
+      node that reported it and how others answered it. Answer every one: fix
+      it and answer it fixed, or answer it declined and say why — it is wrong,
+      or its fix belongs to another change. Fix every `blocking` and `major`
+      finding that is right; a `minor` or a `note` only where the fix stays
+      where it points. Change what each finding points to and nothing else,
+      and never weaken a test to make one go away. A finding that proposes a
+      criterion is settled when that criterion passes on what you leave; lint
+      and the test suite run after you.
+
   - id: lint
     kind: bash
     invariant: true
     optional: true
-    depends_on: [implement]
+    depends_on: [fix-findings]
     run: { command: lint }
     on_failure: { goto: fix-lint, max_reroutes: 1 }
 
@@ -167,49 +209,9 @@ nodes:
     invariant: true
     depends_on: [lint]
 
-  - id: review
-    kind: prompt
-    depends_on: [tests]
-    runners: [reviewer, reviewer-alt]
-    permissions: read-only
-    context:
-      - artifact: { node: brief, name: brief.md }
-      - command: "git diff {{run.base}}"
-    prompt: { file: prompts/review.md }
-    artifacts:
-      produces: [findings]
-
-  - id: fix-findings
-    kind: prompt
-    runner: executor
-    depends_on: [review]
-    prompt: |
-      Read the findings this run holds that are not settled — each with the
-      node that reported it and how others answered it. Answer every one: fix
-      it and answer it fixed, or answer it declined and say why — it is wrong,
-      or its fix belongs to another change. Fix every `blocking` and `major`
-      finding that is right; a `minor` or a `note` only where the fix stays
-      where it points. Change what each finding points to and nothing else,
-      and never weaken a test to make one go away. A finding that proposes a
-      criterion is settled when that criterion passes on what you leave; lint
-      and the test suite run again after you.
-
-  - id: conform
-    kind: prompt
-    runner: reviewer
-    permissions: read-only
-    depends_on: [fix-findings]
-    context:
-      - artifact: { node: plan, kind: tasks }
-      - run-events: { filter: deviations }
-      - command: "git diff {{run.base}}"
-    prompt: { file: prompts/conform.md }
-    artifacts:
-      produces: [findings]
-
   - id: ship
     kind: gate
-    depends_on: [conform]
+    depends_on: [tests]
     assignee: lead
     message: "The work beside its plan, and every finding the run holds with its answer. Create the PR?"
     shows:

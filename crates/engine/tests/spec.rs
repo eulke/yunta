@@ -83,6 +83,77 @@ async fn a_task_closes_on_the_tests_its_spec_gives_it_and_they_land_with_its_wor
     assert_eq!(landed, GREETS);
 }
 
+/// Two tasks the loop works at once, each held to a test of its own.
+const TWO_TASKS: &str = "\
+tasks:
+  - id: greet
+    title: \"Write the greeting\"
+    scope: [\"greeting.txt\"]
+    criteria:
+      - cmd: \"test -f greeting.txt\"
+  - id: wave
+    title: \"Write the wave\"
+    scope: [\"wave.txt\"]
+    criteria:
+      - cmd: \"test -f wave.txt\"
+";
+
+/// A spec giving `greet` and `wave` a test each.
+const TWO_SPECS: &str = "{ specs: [\
+    { task: greet, files: [{ path: tests/greet.sh, content: \"test -f greeting.txt\\n\" }], \
+      tests: [{ cmd: \"sh tests/greet.sh\", proves: \"the greeting is there\" }] }, \
+    { task: wave, files: [{ path: tests/wave.sh, content: \"test -f wave.txt\\n\" }], \
+      tests: [{ cmd: \"sh tests/wave.sh\", proves: \"the wave is there\" }] }] }";
+
+/// The spec proves each task's tests on the tree the task's work starts
+/// from — the run's, with that task's files in it and no other's — so the
+/// loop's first check of each task takes those answers instead of running
+/// them again.
+#[tokio::test]
+async fn a_task_s_first_check_takes_what_its_spec_proved() {
+    let workflow = specified_loop().replace(
+        "    until: all_tasks_complete\n",
+        "    until: all_tasks_complete\n    concurrency: 2\n",
+    );
+    let building = |task: &str, file: &str| {
+        format!(
+            "  - match_prompt_contains: \"{task}\"\n    effects:\n      - {{ path: {file}, content: done }}\n    outcome: {{ type: completed, summary: built }}\n"
+        )
+    };
+    let fixture = plan_session(TWO_TASKS)
+        + &specifying(&[(TWO_SPECS, true)])
+        + &building("greet", "greeting.txt")
+        + &building("wave", "wave.txt");
+    let bench = Bench::new();
+
+    let RunReport { terminal, .. } = bench.run(&workflow, &fixture).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    let mut reused: Vec<(String, bool)> = bench
+        .events()
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Some(EventPayload::Node(NodeEvent::CriteriaChecked(p)))
+                if p.phase == yunta_core::events::Phase::Pre =>
+            {
+                Some(p.results.clone())
+            }
+            _ => None,
+        })
+        .flatten()
+        .filter(|result| result.cmd.starts_with("sh tests/"))
+        .map(|result| (result.cmd, result.reused))
+        .collect();
+    reused.sort();
+    assert_eq!(
+        reused,
+        vec![
+            ("sh tests/greet.sh".to_string(), true),
+            ("sh tests/wave.sh".to_string(), true)
+        ]
+    );
+}
+
 #[tokio::test]
 async fn the_suite_answers_for_the_tree_before_the_tests_are_laid_over_it() {
     // A suite that goes red while a test file is in the tree without the

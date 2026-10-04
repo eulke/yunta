@@ -1,9 +1,9 @@
 ---
 number: D227
 title: "The spec governs: a plan that cannot be proven as written is refused when handed over, and no gate offers to go on with one"
-status: accepted
+status: revised
 revises: [D194, D225]
-revised_by: []
+revised_by: [D233]
 ---
 
 # D227 — The spec governs: a plan that cannot be proven as written is refused when handed over, and no gate offers to go on with one

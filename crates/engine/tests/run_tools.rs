@@ -1468,6 +1468,44 @@ async fn a_plan_proven_by_a_name_is_refused_when_it_is_handed_over() {
     assert!(!text.contains("the spec writes a task's tests"), "{text}");
 }
 
+/// A plan the run writes a spec for is not run when it is handed over:
+/// the tests its criteria run are the spec's to write, so a criterion
+/// whose test the spec has still to write is not refused for it — where
+/// no spec is planned, the same criterion cannot run and is.
+#[tokio::test]
+async fn a_specified_plan_is_not_run_before_its_tests_exist() {
+    let tasks = json!([
+        { "id": "t1", "title": "First", "scope": ["tests/first.sh"],
+          "criteria": [{ "cmd": "sh tests/first.sh" }] },
+    ]);
+
+    let specified = ToolsHost::over(PLANNED_THEN_SPECIFIED);
+    let (refused, text) = submitted(&specified, tasks.clone()).await;
+    assert!(!refused, "got: {text}");
+
+    let unspecified = ToolsHost::over(BLACKBOARD_WORKFLOW);
+    let (refused, text) = submitted(&unspecified, tasks).await;
+    assert!(refused, "got: {text}");
+}
+
+/// What a specified plan is held to is that the programs its criteria
+/// start can be found — asked, with nothing run.
+#[tokio::test]
+async fn a_specified_plan_starting_a_missing_program_is_refused_unrun() {
+    let host = ToolsHost::over(PLANNED_THEN_SPECIFIED);
+    let marker = host.run_dir.with_extension("ran");
+    let tasks = json!([
+        { "id": "t1", "title": "First", "scope": ["a.txt"],
+          "criteria": [{ "cmd": format!("touch {}; no-such-program-anywhere", marker.display()) }] },
+    ]);
+
+    let (refused, text) = submitted(&host, tasks).await;
+
+    assert!(refused, "got: {text}");
+    assert!(text.contains("`no-such-program-anywhere`"), "{text}");
+    assert!(!marker.exists(), "nothing the criterion says was run");
+}
+
 #[tokio::test]
 async fn only_a_task_that_starts_from_this_tree_is_refused_for_passing_already() {
     let host = ToolsHost::over(BLACKBOARD_WORKFLOW);
