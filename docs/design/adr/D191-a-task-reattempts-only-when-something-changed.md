@@ -3,7 +3,7 @@ number: D191
 title: "A task gets one session per attempt; another opens on its own only when an engine grant changed what it may write"
 status: revised
 revises: [D146]
-revised_by: [D192, D240]
+revised_by: [D192, D240, D242]
 ---
 
 # D191 — A task gets one session per attempt; another opens on its own only when an engine grant changed what it may write

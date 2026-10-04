@@ -69,7 +69,9 @@ fn session_kinds(event: &SessionEvent) {
         | SessionEvent::CapabilityDegraded(_)
         | SessionEvent::WriteRefused(_)
         | SessionEvent::RunToolFailed(_)
-        | SessionEvent::RunToolRefused(_) => {}
+        | SessionEvent::RunToolRefused(_)
+        | SessionEvent::ServiceUnreachable(_)
+        | SessionEvent::ServiceReachable(_) => {}
     }
 }
 
@@ -263,12 +265,12 @@ fn every_domain_declares_the_kinds_the_wire_carries() {
 }
 
 #[test]
-fn there_are_exactly_51_kinds_with_distinct_names() {
+fn there_are_exactly_53_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 51);
+    assert_eq!(kinds.len(), 53);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 51, "expected 51 distinct kind names");
+    assert_eq!(names.len(), 53, "expected 53 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -348,6 +350,8 @@ const KIND_NAMES: &[&str] = &[
     "write_refused",
     "run_tool_failed",
     "run_tool_refused",
+    "service_unreachable",
+    "service_reachable",
     "host_suspended",
     "run_paused",
     "run_resumed",

@@ -98,6 +98,9 @@ impl NodeLedger {
             // The refusal itself reaches a reader through the log; for the
             // node it is a moment of activity and nothing more.
             SessionEvent::RunToolRefused(_) => {}
+            // A session waiting for its service is still the attempt's;
+            // how long it waited is `stats`' to read off the log.
+            SessionEvent::ServiceUnreachable(_) | SessionEvent::ServiceReachable(_) => {}
             SessionEvent::Message(p) => match p.message_type {
                 AgentMessageType::ToolUse => record.calls.push(ToolCall {
                     tool_name: p.tool_name.clone(),

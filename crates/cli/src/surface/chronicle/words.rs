@@ -7,7 +7,7 @@
 //! formats a domain type with `Debug`.
 
 use yunta_core::events::{
-    artifacts, children, findings, gates, node, run, scope, session, tasks, AgentMessageType,
+    artifacts, children, findings, gates, node, run, session, tasks, AgentMessageType,
     BaselineOrigin, GateResolvedPayload, TaskStatus, ToolTarget,
 };
 use yunta_core::fence::Coverage;
@@ -27,7 +27,7 @@ pub(super) fn carried(happening: &Happening, sep: char) -> (Option<Mark>, String
         Happening::Node(it) => node_words(it, sep),
         Happening::Session(it) => (None, session_words(it, sep)),
         Happening::Tasks(it) => (None, task_words(it)),
-        Happening::Scope(it) => (None, scope_words(it)),
+        Happening::Scope(it) => (None, super::scope_words::scope_words(it)),
         Happening::Findings(it) => (None, finding_words(it)),
         Happening::Artifacts(it) => (None, artifact_words(it)),
         Happening::Gates(it) => gate_words(it),
@@ -211,6 +211,23 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
                 reason.as_str()
             )
         }
+        H::CutOff { message } => service_words(Some(message), None),
+        H::Reconnected { waited } => service_words(None, Some(*waited)),
+    }
+}
+
+/// A session losing its service, saying what its CLI said, or finding it
+/// again after a wait.
+fn service_words(lost: Option<&str>, waited: Option<std::time::Duration>) -> String {
+    match (lost, waited) {
+        (Some(said), _) => detailed(
+            "lost its service; waiting for it to answer".to_string(),
+            &one_line(said),
+        ),
+        (None, waited) => format!(
+            "its service answers again after {}; the session goes on",
+            yunta_core::units::duration(waited.unwrap_or_default())
+        ),
     }
 }
 
@@ -281,70 +298,6 @@ fn task_words(happening: &tasks_happening::Happening) -> String {
 /// Rust identifier.
 fn status(status: TaskStatus) -> &'static str {
     status.as_str()
-}
-
-fn scope_words(happening: &scope::happening::Happening) -> String {
-    use scope::happening::{Happening as H, Step};
-    let (task, step) = match happening {
-        H::Expansion { task, step } => (task, step),
-        H::Derived {
-            task,
-            paths,
-            common,
-        } => return derived_words(task, paths, common),
-    };
-    let said = match step {
-        Step::Requested { paths } => format!(
-            "asks for {}",
-            paths
-                .iter()
-                .map(|glob| glob.as_str().to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
-        Step::Granted { by } => format!("scope granted by {}", decider(by)),
-        Step::Denied { by, reason } => detailed(
-            format!("scope denied by {}", decider(by)),
-            &one_line(reason.as_deref().unwrap_or_default()),
-        ),
-    };
-    // A node's own request needs no name in front of it: the moment
-    // already carries the node it is written under.
-    match task {
-        Some(task) => format!("{task} {said}"),
-        None => said,
-    }
-}
-
-/// What a task may write because a shape it owns is named there, and the
-/// shapes named too widely to follow.
-fn derived_words(
-    task: &yunta_core::TaskId,
-    paths: &[yunta_core::ScopeGlob],
-    common: &[String],
-) -> String {
-    let reach = match paths {
-        [] => format!("{task} reaches no file beyond its scope through its shapes"),
-        _ => format!(
-            "{task} may also write {}, which name shapes it owns",
-            yunta_core::listed_globs(paths)
-        ),
-    };
-    match common {
-        [] => reach,
-        _ => format!("{reach}; named too widely to follow: {}", common.join(", ")),
-    }
-}
-
-/// Who settled a scope request.
-fn decider(by: &yunta_core::events::Decider) -> String {
-    match by {
-        yunta_core::events::Decider::Rule => "the rule".to_string(),
-        yunta_core::events::Decider::Person { id } => id.to_string(),
-        yunta_core::events::Decider::Evidence { criterion } => {
-            format!("evidence from `{criterion}`")
-        }
-    }
 }
 
 fn finding_words(happening: &findings::happening::Happening) -> String {

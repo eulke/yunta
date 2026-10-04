@@ -22,7 +22,7 @@ pub mod persisted;
 pub mod stubs;
 
 pub use capture::Captured;
-pub use clock::{fixed_now, AtClock, FixedClock, HostClock, FIXED_NOW};
+pub use clock::{fixed_now, AtClock, FixedClock, HostClock, RushingClock, FIXED_NOW};
 pub use ids::SeqIdSource;
 pub use kinds::all_kinds;
 pub use log::Log;

@@ -428,6 +428,8 @@ wire_kinds! {
     WriteRefused => "write_refused",
     RunToolFailed => "run_tool_failed",
     RunToolRefused => "run_tool_refused",
+    ServiceUnreachable => "service_unreachable",
+    ServiceReachable => "service_reachable",
     HostSuspended => "host_suspended",
     RunPaused => "run_paused",
     RunResumed => "run_resumed",

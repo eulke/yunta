@@ -23,7 +23,7 @@ use yunta_core::{ModelName, SessionId};
 use super::run_tool::call_run_tool;
 use super::{MockOutcome, MockStep, OnInterrupt, ToolExpectation};
 use yunta_core::port::RunToolsEndpoint;
-use yunta_core::port::{AgentError, AgentEvent, AgentOutcome};
+use yunta_core::port::{AgentError, AgentEvent, AgentOutcome, FailureCause};
 
 /// One session's script, cut loose from the fixture it was claimed from.
 pub(super) struct Script {
@@ -118,7 +118,7 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
             Err(message) => {
                 let _ = events.send(AgentEvent::Failed {
                     error: AgentError::message(message),
-                    retryable: false,
+                    cause: FailureCause::Final,
                 });
                 return;
             }
@@ -219,7 +219,7 @@ async fn called(
             );
             events.push(AgentEvent::Failed {
                 error: AgentError::message(message),
-                retryable: false,
+                cause: FailureCause::Final,
             });
             Ok(events)
         }
@@ -238,9 +238,16 @@ async fn end(outcome: MockOutcome, events: &mpsc::UnboundedSender<AgentEvent>, s
             });
         }
         MockOutcome::Failed { message, retryable } => {
+            // Read the way a real adapter reads its CLI's message, so a
+            // fixture that prints what a cut-off CLI prints is one.
+            let cause = match crate::failure::classify(&message) {
+                crate::failure::FailureKind::Unreachable => FailureCause::Unreachable,
+                _ if retryable => FailureCause::Retryable,
+                _ => FailureCause::Final,
+            };
             let _ = events.send(AgentEvent::Failed {
                 error: AgentError::message(message),
-                retryable,
+                cause,
             });
         }
         // Both end with no terminal event — a real crash: the

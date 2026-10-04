@@ -71,9 +71,9 @@ outcome: { type: failed, message: "criteria still red", retryable: true }
 
     assert!(matches!(events[0], AgentEvent::SessionOpened { .. }));
     match events.last().unwrap() {
-        AgentEvent::Failed { error, retryable } => {
+        AgentEvent::Failed { error, cause } => {
             assert_eq!(error.message, "criteria still red");
-            assert!(retryable);
+            assert!(cause.retryable());
         }
         other => panic!("expected Failed, got {other:?}"),
     }
@@ -276,7 +276,7 @@ sessions:
     .await;
     assert!(matches!(
         second.last().unwrap(),
-        AgentEvent::Failed { error, retryable: false } if error.message == "second session"
+        AgentEvent::Failed { error, cause: yunta_core::port::FailureCause::Final } if error.message == "second session"
     ));
 }
 

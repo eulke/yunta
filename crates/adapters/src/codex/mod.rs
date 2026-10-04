@@ -280,6 +280,11 @@ impl Adapter for CodexAdapter {
         Ok(subprocess::probe_version(&self.binary).await)
     }
 
+    /// The OpenAI API, or the endpoint or proxy the session is pointed at.
+    async fn reachable(&self, req: &SessionRequest) -> Option<bool> {
+        crate::reach::answers(req, "OPENAI_BASE_URL", "api.openai.com").await
+    }
+
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>> {
         self.launch(req, None).await
     }

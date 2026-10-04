@@ -33,6 +33,10 @@ pub struct MockFixture {
     /// to the directories it confines.
     pub fence_coverage: Option<FixtureCoverage>,
     pub sessions: Vec<SessionScript>,
+    /// How many times the service the mock stands for answers that it
+    /// cannot be reached before it answers that it can — what a session
+    /// cut off from it waits on.
+    pub service_down_for: u32,
 }
 
 /// The run directories a fixture names. They are the caller's to
@@ -124,6 +128,8 @@ impl<'de> Deserialize<'de> for MockFixture {
                 #[serde(default)]
                 fence_coverage: Option<FixtureCoverage>,
                 sessions: Vec<SessionScript>,
+                #[serde(default)]
+                service_down_for: u32,
             }
             let multi: Multi = yaml::from_value(value).map_err(D::Error::custom)?;
             let capabilities: Capabilities = multi.capabilities.into();
@@ -133,6 +139,7 @@ impl<'de> Deserialize<'de> for MockFixture {
                     .or_else(|| FixtureCoverage::of(capabilities.fence)),
                 capabilities,
                 sessions: multi.sessions,
+                service_down_for: multi.service_down_for,
             })
         } else {
             // The single-session form is a script with `capabilities`
@@ -159,6 +166,7 @@ impl<'de> Deserialize<'de> for MockFixture {
                 fence_coverage: declared.or_else(|| FixtureCoverage::of(capabilities.fence)),
                 capabilities,
                 sessions: vec![script],
+                service_down_for: 0,
             })
         }
     }

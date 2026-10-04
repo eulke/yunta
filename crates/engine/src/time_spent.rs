@@ -6,6 +6,10 @@
 //! host slept through are left out, as every other duration `stats` gives
 //! leaves them out.
 //!
+//! A session is without its service from the `service_unreachable` that
+//! says it lost it until the `service_reachable` that says it answers
+//! again, or its node's end: that wait is nobody's work.
+//!
 //! A person is being asked from the `asking_opened` the engine writes when
 //! it begins asking until the answer the asking ends with — a gate
 //! resolved, questions answered — or the invocation stops asking: the run
@@ -19,7 +23,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use yunta_core::events::{
     CriterionResult, CriterionType, EventPayload, GateEvent, NodeEvent, Phase, RunEvent,
-    StoredEvent, Suspensions, TaskEvent,
+    SessionEvent, StoredEvent, Suspensions, TaskEvent,
 };
 use yunta_core::{NodeId, TaskId};
 
@@ -39,6 +43,9 @@ pub struct TimeSpent {
     pub measuring: Duration,
     /// A person deciding: questions, a gate, an escalation.
     pub people: Duration,
+    /// Sessions cut off from their service, waiting for it to answer,
+    /// with nothing else at work.
+    pub offline: Duration,
     /// Parked between a pause and the wake that followed it.
     pub parked: Duration,
     /// Nothing open: the engine between one step and the next.
@@ -48,7 +55,13 @@ pub struct TimeSpent {
 impl TimeSpent {
     /// Every stretch, counted once.
     pub fn total(&self) -> Duration {
-        self.working + self.checks + self.measuring + self.people + self.parked + self.between
+        self.working
+            + self.checks
+            + self.measuring
+            + self.people
+            + self.offline
+            + self.parked
+            + self.between
     }
 }
 
@@ -63,6 +76,8 @@ struct Open {
     /// published to a forge, a round of questions.
     waiting: HashSet<NodeId>,
     checking: HashSet<TaskId>,
+    /// Nodes whose session lost its service and waits for it.
+    offline: HashSet<NodeId>,
     paused: bool,
 }
 
@@ -108,6 +123,9 @@ impl TimeSpent {
             _ if open.paused => &mut self.parked,
             _ if !open.asking.is_empty() || !open.waiting.is_empty() => &mut self.people,
             _ if !open.checking.is_empty() => &mut self.checks,
+            _ if !open.offline.is_empty() && open.attempts.is_subset(&open.offline) => {
+                &mut self.offline
+            }
             _ if !open.attempts.is_empty() => &mut self.working,
             _ => &mut self.between,
         }
@@ -132,6 +150,15 @@ impl Open {
             Some(EventPayload::Node(NodeEvent::Finished(_) | NodeEvent::Failed(_))) => {
                 if let Some(node) = &node {
                     self.attempts.remove(node);
+                    self.offline.remove(node);
+                }
+            }
+            Some(EventPayload::Session(SessionEvent::ServiceUnreachable(_))) => {
+                self.offline.extend(node);
+            }
+            Some(EventPayload::Session(SessionEvent::ServiceReachable(_))) => {
+                if let Some(node) = &node {
+                    self.offline.remove(node);
                 }
             }
             Some(EventPayload::Gates(gate)) => self.read_gate(gate, node),

@@ -7,13 +7,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
-use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{EventPayload, SessionEvent, TokenUsage};
 use yunta_core::port::{Adapter, SessionRequest};
-use yunta_core::AdapterError;
 use yunta_storage::StorageError;
 
+use super::dispatch::{DispatchError, Dispatched, Opening};
 use super::DispatchOutcome;
 
 /// Everything about *how* one node's sessions open, resolved
@@ -225,18 +224,11 @@ pub trait SessionObserver: Sync {
     async fn host_settled(&self, _cancel: &CancellationToken) -> Result<bool, StorageError> {
         Ok(true)
     }
-}
-
-/// How [`dispatch_session`] failed: the adapter refused, or a session
-/// audit event could not be appended. The two have different owners —
-/// the adapter boundary versus the run's own storage — so callers route
-/// each to its own node/run failure.
-#[derive(Debug, Error)]
-pub enum DispatchError {
-    #[error(transparent)]
-    Adapter(#[from] AdapterError),
-    #[error("failed to append a session audit event")]
-    Audit(#[source] StorageError),
+    /// The run's reading of the time the host has been awake — what a
+    /// wait that must not count the host's sleep measures itself by.
+    fn awake(&self) -> std::time::Instant {
+        std::time::Instant::now()
+    }
 }
 
 /// The only shape of a note the log ever carries: its size and
@@ -254,55 +246,22 @@ pub(super) fn note_summary(text: &str) -> String {
 /// sooner is killed — what is left of its group — the moment it does.
 const INTERRUPT_GRACE_PERIOD: Duration = Duration::from_millis(200);
 
-/// Spawns one session from `request`, drains it to a terminal outcome
-/// and reports the tokens it consumed. Shared by the task cycle and by
-/// prompt-node execution: the request differs, the enforcement
-/// does not.
+/// Spawns one session from `request`, drains it to a terminal outcome and
+/// reports what it spent — and whether it ended because it lost the
+/// service behind it.
 ///
-/// The adapter passes `request.budget` along if its CLI supports it,
-/// but enforcement is the engine's job either way — this counts `Usage`
-/// and races the timeout — time the host is awake — independent of
-/// that, and cuts the
-/// session with `interrupt` → grace → `kill` when either budget is
-/// exceeded.
-/// What one session left behind: how it ended, what it spent, and how
-/// much of its writes its adapter's fence covered — a cache of one
-/// invocation of what the log already carries.
-pub(crate) struct Dispatched {
-    pub outcome: DispatchOutcome,
-    pub tokens: TokenUsage,
-    pub fence: Option<yunta_core::fence::Coverage>,
-    /// The session the stream opened, once it did: what the next
-    /// attempt resumes when something it asked for changes.
-    pub session: Option<yunta_core::SessionId>,
-    /// Every write the fence refused it.
-    pub refused: Vec<yunta_core::events::ToolTarget>,
-}
-
-/// How a session opens: the task it works, if any, and the conversation
-/// it continues, if any.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct Opening<'a> {
-    pub(crate) task: Option<&'a yunta_core::TaskId>,
-    pub(crate) resume: Option<Resume<'a>>,
-}
-
-/// A conversation to pick back up, and what a fresh session is told
-/// instead when the adapter cannot pick it up — `None` when there is no
-/// such way back and not resuming is the caller's failure to report.
-#[derive(Clone, Copy)]
-pub(crate) struct Resume<'a> {
-    pub(crate) session: &'a yunta_core::SessionId,
-    pub(crate) fresh_prompt: Option<&'a str>,
-}
-
-pub(crate) async fn dispatch_session(
+/// The adapter passes `request.budget` along if its CLI supports it, but
+/// enforcement is the engine's job either way: this counts `Usage` and
+/// races the timeout — time the host is awake — independent of that, and
+/// cuts the session with `interrupt` → grace → `kill` when either budget
+/// is exceeded.
+pub(super) async fn stream_session(
     adapter: &dyn Adapter,
     request: SessionRequest,
     cancel: &CancellationToken,
     audit: Option<(&dyn SessionObserver, &yunta_core::NodeId)>,
     opening: Opening<'_>,
-) -> Result<Dispatched, DispatchError> {
+) -> Result<(Dispatched, bool), DispatchError> {
     // A host that just woke may sleep again within the minute, and a
     // session opened then hangs until its timeout: none opens until the
     // host has stayed awake.
@@ -312,13 +271,14 @@ pub(crate) async fn dispatch_session(
             .await
             .map_err(DispatchError::Audit)?
         {
-            return Ok(Dispatched {
+            let nothing = Dispatched {
                 outcome: DispatchOutcome::Cancelled,
                 tokens: TokenUsage::default(),
                 fence: None,
                 session: None,
                 refused: Vec::new(),
-            });
+            };
+            return Ok((nothing, false));
         }
     }
     let budget = request.budget;
@@ -383,6 +343,7 @@ pub(crate) async fn dispatch_session(
     let mut opened: Option<yunta_core::SessionId> = None;
     let mut fence: Option<yunta_core::fence::Coverage> = None;
     let mut refused = Vec::new();
+    let mut cut_off = false;
     let mut terminal = None;
     let mut cancelled = false;
 
@@ -440,6 +401,7 @@ pub(crate) async fn dispatch_session(
                     opened: &mut opened,
                     fence: &mut fence,
                     refused: &mut refused,
+                    cut_off: &mut cut_off,
                     task: opening.task,
                     continues,
                 },
@@ -463,13 +425,14 @@ pub(crate) async fn dispatch_session(
     adapter.unstage(&staging)?;
 
     if cancelled {
-        return Ok(Dispatched {
+        let cancelled = Dispatched {
             outcome: DispatchOutcome::Cancelled,
             tokens,
             fence,
             session: opened,
             refused,
-        });
+        };
+        return Ok((cancelled, false));
     }
 
     let outcome = match terminal {
@@ -481,11 +444,12 @@ pub(crate) async fn dispatch_session(
             exit: session.exit().await?,
         },
     };
-    Ok(Dispatched {
+    let dispatched = Dispatched {
         outcome,
         tokens,
         fence,
         session: opened,
         refused,
-    })
+    };
+    Ok((dispatched, cut_off))
 }

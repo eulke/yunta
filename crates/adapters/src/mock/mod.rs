@@ -86,6 +86,8 @@ pub struct MockAdapter {
     /// engine's own rule: the question is put only to a session whose
     /// stream ended saying nothing.
     interrogated: Arc<AtomicBool>,
+    /// How many times its service was probed.
+    probes: AtomicU64,
 }
 
 impl MockAdapter {
@@ -103,6 +105,7 @@ impl MockAdapter {
             requests_seen: Mutex::new(Vec::new()),
             next_session: AtomicU64::new(1),
             interrogated: Arc::new(AtomicBool::new(false)),
+            probes: AtomicU64::new(0),
         }
     }
 
@@ -226,6 +229,12 @@ impl Adapter for MockAdapter {
         Ok(ProbeReport::Healthy {
             version: Some("mock-0.1".to_string()),
         })
+    }
+
+    /// Down for as many probes as the fixture says, then up.
+    async fn reachable(&self, _req: &SessionRequest) -> Option<bool> {
+        let probed = self.probes.fetch_add(1, Ordering::SeqCst);
+        Some(probed >= u64::from(self.fixture.service_down_for))
     }
 
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>> {

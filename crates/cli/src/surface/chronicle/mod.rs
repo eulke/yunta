@@ -12,6 +12,7 @@
 //! `Capability::as_str`. Nothing here formats a domain type with
 //! `Debug`: a reader is owed a word, not a Rust identifier.
 
+mod scope_words;
 mod words;
 
 use yunta_core::events::{children, findings, gates, node, run, session};
@@ -69,7 +70,9 @@ pub(super) fn kept(happening: &Happening) -> bool {
         Happening::Node(_) => false,
         Happening::Session(session::happening::Happening::Degraded { .. })
         | Happening::Session(session::happening::Happening::RunToolFailed { .. })
-        | Happening::Session(session::happening::Happening::RunToolRefused { .. }) => true,
+        | Happening::Session(session::happening::Happening::RunToolRefused { .. })
+        | Happening::Session(session::happening::Happening::CutOff { .. })
+        | Happening::Session(session::happening::Happening::Reconnected { .. }) => true,
         Happening::Session(_) => false,
         Happening::Gates(gates::happening::Happening::Escalated(_))
         | Happening::Gates(gates::happening::Happening::Resolved(_))

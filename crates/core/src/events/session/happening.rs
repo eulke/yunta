@@ -49,6 +49,10 @@ pub enum Happening {
         tool: crate::RunTool,
         reason: crate::events::RunToolRefusal,
     },
+    /// The session lost its service, saying this.
+    CutOff { message: String },
+    /// Its service answers again, after this long.
+    Reconnected { waited: std::time::Duration },
 }
 
 impl From<&SessionEvent> for Happening {
@@ -84,6 +88,12 @@ impl From<&SessionEvent> for Happening {
             SessionEvent::RunToolRefused(p) => Happening::RunToolRefused {
                 tool: p.tool,
                 reason: p.reason,
+            },
+            SessionEvent::ServiceUnreachable(p) => Happening::CutOff {
+                message: p.message.clone(),
+            },
+            SessionEvent::ServiceReachable(p) => Happening::Reconnected {
+                waited: std::time::Duration::from_millis(p.waited_ms),
             },
         }
     }

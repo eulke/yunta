@@ -98,6 +98,7 @@ struct TimeJson {
     decided_checks_secs: f64,
     measuring_secs: f64,
     people_secs: f64,
+    offline_secs: f64,
     parked_secs: f64,
     between_secs: f64,
 }
@@ -110,6 +111,7 @@ impl TimeJson {
             decided_checks_secs: time.decided_checks.as_secs_f64(),
             measuring_secs: time.measuring.as_secs_f64(),
             people_secs: time.people.as_secs_f64(),
+            offline_secs: time.offline.as_secs_f64(),
             parked_secs: time.parked.as_secs_f64(),
             between_secs: time.between.as_secs_f64(),
         }

@@ -101,7 +101,7 @@ fn thread_started(value: &Value, fence: &Coverage) -> Option<AgentEvent> {
             // The failure keeps what rejected the id, so a reader
             // following the chain reaches the rule the value broke.
             error: AgentError::caused_by("the CLI's `thread.started` line is malformed", error),
-            retryable: false,
+            cause: yunta_core::port::FailureCause::Final,
         },
     })
 }
@@ -247,9 +247,9 @@ fn failed(carrier: Option<&Value>, fallback: &str) -> AgentEvent {
             || format!("{fallback} with no error message"),
             str::to_string,
         );
-    let retryable = failure::classify(&message).retryable();
+    let cause = failure::classify(&message).cause();
     AgentEvent::Failed {
         error: AgentError::message(message),
-        retryable,
+        cause,
     }
 }

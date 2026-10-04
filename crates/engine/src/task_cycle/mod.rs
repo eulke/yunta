@@ -12,6 +12,7 @@ mod answer;
 mod attempt;
 mod carry;
 mod criteria;
+mod dispatch;
 mod error;
 mod evidence;
 mod expansion;
@@ -44,10 +45,10 @@ use record::Recorder;
 
 pub(crate) use criteria::{could_not_run, pre_check_unless_cut, probe, probe_command};
 pub use criteria::{post_check, pre_check, Memo, Memoized, PostCheck};
+pub use dispatch::DispatchError;
+pub(crate) use dispatch::{dispatch_session, Dispatched, Opening, Resume};
 pub(crate) use judge::{judge, Judgement, Work};
-pub(crate) use session::dispatch_session;
-pub use session::{DispatchError, RunToolsNeed, SessionObserver, SessionSetup};
-pub(crate) use session::{Dispatched, Opening, Resume};
+pub use session::{RunToolsNeed, SessionObserver, SessionSetup};
 pub use suite::SuiteGate;
 pub(crate) use tree::content_of;
 

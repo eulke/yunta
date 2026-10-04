@@ -25,6 +25,7 @@ mod codex;
 pub mod failure;
 mod forge;
 mod mock;
+mod reach;
 mod session;
 
 pub use claude_code::{ClaudeCodeAdapter, ID as CLAUDE_CODE_ID};

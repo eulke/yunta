@@ -13,6 +13,10 @@ pub enum SessionEvent {
     /// A call this binary refused, and why; the session was answered with
     /// the refusal.
     RunToolRefused(RunToolRefusedPayload),
+    /// The session lost the service behind it and waits for it.
+    ServiceUnreachable(ServiceUnreachablePayload),
+    /// The service answers again, and the same session goes on.
+    ServiceReachable(ServiceReachablePayload),
 }
 
 impl SessionEvent {
@@ -24,6 +28,8 @@ impl SessionEvent {
         "write_refused",
         "run_tool_failed",
         "run_tool_refused",
+        "service_unreachable",
+        "service_reachable",
     ];
 
     /// The persisted `kind` string of this fact.
@@ -35,6 +41,8 @@ impl SessionEvent {
             Self::WriteRefused(_) => "write_refused",
             Self::RunToolFailed(_) => "run_tool_failed",
             Self::RunToolRefused(_) => "run_tool_refused",
+            Self::ServiceUnreachable(_) => "service_unreachable",
+            Self::ServiceReachable(_) => "service_reachable",
         }
     }
 
@@ -53,6 +61,8 @@ impl SessionEvent {
             Self::WriteRefused(_) => false,
             Self::RunToolFailed(_) => false,
             Self::RunToolRefused(_) => true,
+            Self::ServiceUnreachable(_) => true,
+            Self::ServiceReachable(_) => true,
         }
     }
 

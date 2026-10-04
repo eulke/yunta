@@ -12,8 +12,9 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 42 rows and **51 `kind` names**.
-It had 41 rows and 50 kinds before `scope_derived` was added. The table
+The current Run Contract event table has 43 rows and **53 `kind` names**.
+It had 42 rows and 51 kinds before `service_unreachable` and
+`service_reachable` were added. The table
 defines the normative set; this document specifies each payload.
 
 ## 1. Envelope común
@@ -754,6 +755,28 @@ sesión (D238).
 |---|---|---|---|
 | `tool` | nombre de tool de `yunta-run` conocido | sí | el tool que nombró la llamada |
 | `reason` | `request_pending \| invalid_arguments \| not_offered_here \| finding_not_answerable \| refused \| engine_failed` | sí | clasificación cerrada del rechazo del propio engine |
+
+### 5.25a.2 `service_unreachable` / `service_reachable` — engine
+**Fuente:** la sesión que perdió su servicio y lo que dijo su CLI / cuánto esperó
+
+Una sesión cuyo CLI no alcanzó el servicio que la atiende no falló por su trabajo:
+el engine registra `service_unreachable`, espera —con cancelación y un tope de
+tiempo despierto— a que el servicio responda y el host se asiente, registra
+`service_reachable` y retoma la misma sesión. Pasado el tope no hay
+`service_reachable`, y la sesión falla como cualquier otra (D242).
+
+`service_unreachable`:
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `session_id` | `SessionId` | sí | la sesión que perdió su servicio, la que se retoma |
+| `message` | string | sí | lo que dijo su CLI, redactado como todo el log |
+
+`service_reachable`:
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `waited_ms` | `u64` | sí | lo que esperó, en tiempo despierto del host |
 
 ### 5.25b `host_suspended` — engine
 

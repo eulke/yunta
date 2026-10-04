@@ -280,8 +280,30 @@ pub enum AgentEvent {
     },
     Failed {
         error: AgentError,
-        retryable: bool,
+        cause: FailureCause,
     },
+}
+
+/// What a session's failure says about what comes after it, as far as the
+/// adapter can tell from what its CLI reported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailureCause {
+    /// Another session with the same request may do better.
+    Retryable,
+    /// Another session with the same request fails the same way: the
+    /// credential was refused, or the model is not one the account can
+    /// use.
+    Final,
+    /// The session could not reach the service behind it. Nothing about
+    /// the work: the same session can go on once the service answers.
+    Unreachable,
+}
+
+impl FailureCause {
+    /// Whether another session with the same request may do better.
+    pub fn retryable(self) -> bool {
+        !matches!(self, FailureCause::Final)
+    }
 }
 
 /// Converts a session request into a stream of typed events — nothing
@@ -320,6 +342,14 @@ pub trait Adapter: Send + Sync {
     }
 
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>>;
+
+    /// Whether the service a session opened for `req` talks to answers
+    /// from this machine now — `None` when the adapter cannot tell where
+    /// that service is. What a session cut off from its service waits on
+    /// before it picks its work back up. Default: cannot tell.
+    async fn reachable(&self, _req: &SessionRequest) -> Option<bool> {
+        None
+    }
 
     /// Default: unsupported. Only called if `capabilities().resume_session`.
     async fn resume(

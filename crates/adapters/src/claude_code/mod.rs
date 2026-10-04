@@ -302,6 +302,19 @@ impl Adapter for ClaudeCodeAdapter {
         Ok(subprocess::probe_version(&self.binary).await)
     }
 
+    /// The Anthropic API, or the gateway or proxy the session is pointed
+    /// at. A session routed through a cloud provider's own endpoint is
+    /// one this cannot locate.
+    async fn reachable(&self, req: &SessionRequest) -> Option<bool> {
+        let routed = ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"]
+            .into_iter()
+            .any(|name| crate::reach::var(req, name).is_some_and(|value| value != "0"));
+        if routed {
+            return None;
+        }
+        crate::reach::answers(req, "ANTHROPIC_BASE_URL", "api.anthropic.com").await
+    }
+
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>> {
         self.launch(req, None).await
     }

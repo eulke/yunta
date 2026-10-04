@@ -93,3 +93,34 @@ impl Clock for HostClock {
         *self.awake.lock().expect("the awake reading")
     }
 }
+
+/// A [`Clock`] for a host whose awake time runs ahead of the test: every
+/// reading of it is `step` later than the one before, while the wall
+/// stands still — for a wait bounded by the host's awake time that a test
+/// cannot sit through.
+pub struct RushingClock {
+    step: Duration,
+    awake: Mutex<Instant>,
+}
+
+impl RushingClock {
+    /// Each awake reading `step` after the last.
+    pub fn by(step: Duration) -> Self {
+        RushingClock {
+            step,
+            awake: Mutex::new(Instant::now()),
+        }
+    }
+}
+
+impl Clock for RushingClock {
+    fn now(&self) -> DateTime<Utc> {
+        fixed_now()
+    }
+
+    fn awake(&self) -> Instant {
+        let mut awake = self.awake.lock().expect("the awake reading");
+        *awake += self.step;
+        *awake
+    }
+}

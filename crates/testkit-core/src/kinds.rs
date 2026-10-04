@@ -391,6 +391,15 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 reason: yunta_core::events::RunToolRefusal::RequestPending,
             },
         )),
+        EventPayload::Session(SessionEvent::ServiceUnreachable(
+            yunta_core::events::ServiceUnreachablePayload {
+                session_id: "sess-1".into(),
+                message: "API Error: Can't reach the API server (ENOTFOUND)".to_string(),
+            },
+        )),
+        EventPayload::Session(SessionEvent::ServiceReachable(
+            yunta_core::events::ServiceReachablePayload { waited_ms: 42_000 },
+        )),
         EventPayload::Run(RunEvent::HostSuspended(HostSuspendedPayload {
             slept_ms: 3_600_000,
         })),

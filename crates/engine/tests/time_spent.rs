@@ -103,6 +103,7 @@ fn every_stretch_of_a_run_is_the_time_of_one_thing() {
             decided_checks: Duration::from_secs(80),
             working: Duration::from_secs(30),
             people: Duration::from_secs(90 + 300),
+            offline: Duration::ZERO,
             parked: Duration::from_secs(1000),
             between: Duration::from_secs(1),
         }
@@ -168,4 +169,23 @@ fn a_person_s_wait_ends_when_the_run_pauses() {
     assert_eq!(time.people, Duration::from_secs(30));
     assert_eq!(time.parked, Duration::from_secs(60));
     assert_eq!(time.between, Duration::from_secs(10));
+}
+
+const CUT_OFF: &str = r#"{"kind":"service_unreachable","session_id":"s1","message":"API Error: Can't reach the API server (ENOTFOUND)"}"#;
+const BACK: &str = r#"{"kind":"service_reachable","waited_ms":60000}"#;
+
+#[test]
+fn unreachable_time_is_not_working() {
+    let events = log(&[
+        (0, None, CREATED),
+        (0, Some("a"), STARTED),
+        (10, Some("a"), CUT_OFF),
+        (70, Some("a"), BACK),
+        (80, Some("a"), FINISHED),
+    ]);
+
+    let time = time_of(&events);
+
+    assert_eq!(time.offline, Duration::from_secs(60));
+    assert_eq!(time.working, Duration::from_secs(20));
 }

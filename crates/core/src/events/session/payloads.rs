@@ -68,6 +68,22 @@ pub struct RunToolRefusedPayload {
     pub reason: RunToolRefusal,
 }
 
+/// A session cut off from the service behind it: it waits for the service
+/// to answer, and goes on as the same session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ServiceUnreachablePayload {
+    pub session_id: SessionId,
+    /// What the session's CLI said when it lost the service.
+    pub message: String,
+}
+
+/// The service a session lost answers again, and the session goes on.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ServiceReachablePayload {
+    /// How long the session waited for it, in the host's awake time.
+    pub waited_ms: u64,
+}
+
 /// One failed call to a tool this binary serves on `yunta-run`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunToolFailedPayload {

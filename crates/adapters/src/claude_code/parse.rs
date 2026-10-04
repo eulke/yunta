@@ -198,7 +198,7 @@ fn unreadable(what: &str, cause: InvalidId) -> AgentEvent {
 fn failed(error: AgentError) -> AgentEvent {
     AgentEvent::Failed {
         error,
-        retryable: false,
+        cause: yunta_core::port::FailureCause::Final,
     }
 }
 
@@ -315,10 +315,10 @@ fn result_events(value: &Value) -> Vec<AgentEvent> {
             .and_then(Value::as_str)
             .unwrap_or("session ended with an error and no result text")
             .to_string();
-        let retryable = failure::classify(&message).retryable();
+        let cause = failure::classify(&message).cause();
         AgentEvent::Failed {
             error: AgentError::message(message),
-            retryable,
+            cause,
         }
     } else {
         AgentEvent::Completed {

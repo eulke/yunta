@@ -48,7 +48,7 @@ pub(super) fn render(time: &TimeSpent, look: &Look) -> String {
 }
 
 /// Each share with what it says beside its figure.
-fn shares(time: &TimeSpent) -> [(&'static str, Duration, String); 6] {
+fn shares(time: &TimeSpent) -> [(&'static str, Duration, String); 7] {
     let decided = match time.decided_checks.is_zero() {
         true => String::new(),
         false => format!(
@@ -65,6 +65,11 @@ fn shares(time: &TimeSpent) -> [(&'static str, Duration, String); 6] {
             "the suite, while nothing else ran".to_string(),
         ),
         ("people", time.people, "a person deciding".to_string()),
+        (
+            "offline",
+            time.offline,
+            "sessions waiting for their service to answer".to_string(),
+        ),
         ("parked", time.parked, String::new()),
         (
             "between",

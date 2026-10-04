@@ -135,9 +135,9 @@ async fn a_failed_result_ends_the_stream_with_failed_and_retryable() {
     let events = drain(session).await;
 
     match events.last().unwrap() {
-        AgentEvent::Failed { error, retryable } => {
+        AgentEvent::Failed { error, cause } => {
             assert_eq!(error.message, "rate limited");
-            assert!(*retryable);
+            assert!(cause.retryable());
         }
         other => panic!("expected Failed, got {other:?}"),
     }
@@ -687,8 +687,12 @@ async fn spawn_with(
 
 fn non_retryable_failure(event: &AgentEvent) -> &str {
     match event {
-        AgentEvent::Failed { error, retryable } => {
-            assert!(!retryable, "not a failure to retry: {}", error.message);
+        AgentEvent::Failed { error, cause } => {
+            assert!(
+                !cause.retryable(),
+                "not a failure to retry: {}",
+                error.message
+            );
             &error.message
         }
         other => panic!("expected Failed, got {other:?}"),
@@ -1185,10 +1189,10 @@ async fn a_session_id_that_cannot_be_one_fails_keeping_what_rejected_it() {
     ])
     .await;
 
-    let AgentEvent::Failed { error, retryable } = &events[0] else {
+    let AgentEvent::Failed { error, cause } = &events[0] else {
         panic!("expected Failed, got {:?}", events[0]);
     };
-    assert!(!retryable, "not a failure to retry: {error}");
+    assert!(!cause.retryable(), "not a failure to retry: {error}");
     let described = yunta_core::describe(error);
     assert!(
         described.starts_with("the CLI's init line's `session_id`"),

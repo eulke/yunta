@@ -213,6 +213,15 @@ pub(crate) fn with_prompt(
     yunta_core::port::SessionRequest { prompt, ..request }
 }
 
+/// `request` with `budget` instead of its own: what a session picked back
+/// up has left of what it was given.
+pub(crate) fn with_budget(
+    request: yunta_core::port::SessionRequest,
+    budget: yunta_core::port::Budget,
+) -> yunta_core::port::SessionRequest {
+    yunta_core::port::SessionRequest { budget, ..request }
+}
+
 /// What one session is: its prompt, where it works, and the decisions
 /// that belong to it rather than to the node it serves.
 pub(crate) struct SessionPlan<'a> {

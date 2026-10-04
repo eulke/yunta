@@ -154,7 +154,7 @@ pub async fn open(launch: Launch<'_>) -> Result<Box<dyn AgentSession>> {
                             "the CLI reported {} before opening the session",
                             describe(&other)
                         )),
-                        retryable: false,
+                        cause: crate::port::FailureCause::Final,
                     },
                 };
                 opened = true;

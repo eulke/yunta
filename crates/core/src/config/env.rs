@@ -149,6 +149,14 @@ impl SecretSource for ProcessSecrets {
     }
 }
 
+/// What a CLI an adapter spawns inherits for `name`: the process
+/// environment, read here and only here. An adapter that has to reach the
+/// same service its CLI will — the proxy, the base URL it is pointed at —
+/// asks this rather than reading the process itself.
+pub fn inherited(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
 /// Every declared secret's value, for keeping them out of the log.
 ///
 /// A secret reaches a session's environment on purpose, and the session

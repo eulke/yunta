@@ -61,7 +61,7 @@ pub mod yaml;
 pub use capabilities::{Capabilities, Capability, FenceLevel, ToolNaming};
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
+    inherited, permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
     CommandPermissions, ConfigKey, ConfigLayer, CoverageConfig, DefaultOnFailure, DefaultsConfig,
     Env, ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, HomeExpansionError,
     Isolation, LimitsConfig, McpServerConfig, NetworkPermissions, PackExecutorPolicy,

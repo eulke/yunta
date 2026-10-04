@@ -10,9 +10,10 @@ use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::Task;
 
 use super::criteria::Memo;
+use super::dispatch::{dispatch_session, DispatchError};
 use super::judge::{judge, Judgement, Work};
 use super::record::Recorder;
-use super::session::{dispatch_session, DispatchError, SessionObserver, SessionSetup};
+use super::session::{SessionObserver, SessionSetup};
 use super::{AttemptRecord, DispatchOutcome, TaskCycleError, TaskOutcome};
 use crate::process::Supervision;
 
@@ -390,9 +391,9 @@ async fn open_and_dispatch(
         ),
         None => request,
     };
-    let opening = crate::task_cycle::session::Opening {
+    let opening = crate::task_cycle::Opening {
         task: Some(&task.id),
-        resume: resume.map(|continuing| crate::task_cycle::session::Resume {
+        resume: resume.map(|continuing| crate::task_cycle::Resume {
             session: &continuing.session,
             fresh_prompt: Some(&brief),
         }),

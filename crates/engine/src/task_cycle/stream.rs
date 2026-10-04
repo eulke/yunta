@@ -9,7 +9,8 @@ use yunta_core::events::{EventPayload, SessionEvent, TokenUsage};
 use yunta_core::port::{Adapter, AgentEvent, AgentOutcome};
 use yunta_storage::StorageError;
 
-use super::session::{note_summary, DispatchError, SessionObserver};
+use super::dispatch::DispatchError;
+use super::session::{note_summary, SessionObserver};
 use super::DispatchOutcome;
 
 /// The server is up and the endpoint reached the session; what did not
@@ -49,6 +50,8 @@ pub(super) struct AgentEventCtx<'a> {
     pub(super) fence: &'a mut Option<yunta_core::fence::Coverage>,
     /// Every write the fence refused this session, as it reported it.
     pub(super) refused: &'a mut Vec<yunta_core::events::ToolTarget>,
+    /// Set when the session failed because it lost its service.
+    pub(super) cut_off: &'a mut bool,
     /// The task this session works, when a loop opened it.
     pub(super) task: Option<&'a yunta_core::TaskId>,
     /// The session this one resumes, when it does.
@@ -77,6 +80,7 @@ pub(super) async fn apply_agent_event(
         opened,
         fence: covered,
         refused,
+        cut_off,
         task,
         continues,
     } = ctx;
@@ -226,12 +230,13 @@ pub(super) async fn apply_agent_event(
         AgentEvent::Completed {
             result: AgentOutcome { summary },
         } => return Ok(Some(DispatchOutcome::Completed { summary })),
-        AgentEvent::Failed { error, retryable } => {
+        AgentEvent::Failed { error, cause } => {
+            *cut_off = cause == yunta_core::port::FailureCause::Unreachable;
             return Ok(Some(DispatchOutcome::Failed {
                 // Whatever the adapter caught travels with the sentence
                 // it states: the cause is read here or it is lost.
                 message: yunta_core::describe(&error),
-                retryable,
+                retryable: cause.retryable(),
             }));
         }
     }

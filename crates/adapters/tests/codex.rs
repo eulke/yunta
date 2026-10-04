@@ -134,9 +134,9 @@ async fn a_failed_turn_ends_the_stream_with_failed_and_retryable() {
     let events = drain(session).await;
 
     match events.last().unwrap() {
-        AgentEvent::Failed { error, retryable } => {
+        AgentEvent::Failed { error, cause } => {
             assert_eq!(error.message, "model response stream ended unexpectedly");
-            assert!(*retryable);
+            assert!(cause.retryable());
         }
         other => panic!("expected Failed, got {other:?}"),
     }
@@ -881,8 +881,12 @@ async fn auth_errors_are_not_retryable() {
     .await;
 
     match events.last().unwrap() {
-        AgentEvent::Failed { error, retryable } => {
-            assert!(!retryable, "not a failure to retry: {}", error.message);
+        AgentEvent::Failed { error, cause } => {
+            assert!(
+                !cause.retryable(),
+                "not a failure to retry: {}",
+                error.message
+            );
             assert!(error.message.contains("401"));
         }
         other => panic!("expected Failed, got {other:?}"),
@@ -898,8 +902,8 @@ async fn a_fatal_error_event_ends_the_session_as_failed() {
     .await;
 
     match events.last().unwrap() {
-        AgentEvent::Failed { error, retryable } => {
-            assert!(retryable, "a transport failure is one to retry");
+        AgentEvent::Failed { error, cause } => {
+            assert!(cause.retryable(), "a transport failure is one to retry");
             assert_eq!(error.message, "stream disconnected before completion");
         }
         other => panic!("expected Failed, got {other:?}"),
@@ -1301,10 +1305,10 @@ async fn a_session_never_opens_under_settings_that_do_not_read() {
 async fn a_thread_id_that_cannot_be_one_fails_keeping_what_rejected_it() {
     let events = events_of(&[r#"{"type":"thread.started","thread_id":""}"#]).await;
 
-    let AgentEvent::Failed { error, retryable } = &events[0] else {
+    let AgentEvent::Failed { error, cause } = &events[0] else {
         panic!("expected Failed, got {:?}", events[0]);
     };
-    assert!(!retryable, "not a failure to retry: {error}");
+    assert!(!cause.retryable(), "not a failure to retry: {error}");
     let described = yunta_core::describe(error);
     assert!(
         described.starts_with("the CLI's `thread.started` line is malformed"),

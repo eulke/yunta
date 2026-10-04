@@ -414,4 +414,8 @@ impl crate::task_cycle::SessionObserver for RunCtx<'_> {
     ) -> Result<bool, StorageError> {
         self.awake.settled(&self.log(), cancel).await
     }
+
+    fn awake(&self) -> std::time::Instant {
+        self.clock.awake()
+    }
 }
