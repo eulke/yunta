@@ -382,6 +382,7 @@ fn run_created_in_mode(mode: &str) -> Vec<StoredEvent> {
     Log::for_run("run-1")
         .event(EventPayload::Run(RunEvent::Created(
             yunta_core::events::RunCreatedPayload {
+                checkout: None,
                 manifest_hash: yunta_core::sha256_hex(b"h"),
                 inputs: std::collections::BTreeMap::new(),
                 mode: mode.into(),

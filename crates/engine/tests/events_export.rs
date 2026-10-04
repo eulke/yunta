@@ -14,6 +14,7 @@ use yunta_testkit_core::Log;
 fn sample_events() -> Vec<StoredEvent> {
     Log::for_run("run-1")
         .event(EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+            checkout: None,
             manifest_hash: yunta_core::sha256_hex(b"deadbeef"),
             inputs: Default::default(),
             mode: "default".into(),

@@ -16,6 +16,7 @@ use yunta_core::{Capability, RunId, RunnerCandidate, ScopeExpansionMode};
 pub fn all_kinds() -> Vec<EventPayload> {
     vec![
         EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+            checkout: None,
             manifest_hash: yunta_core::sha256_hex(b"sha256:abc"),
             inputs: BTreeMap::new(),
             mode: "default".into(),
@@ -384,6 +385,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
             "gate waiting".to_string(),
         ))),
         EventPayload::Run(RunEvent::Resumed(RunResumedPayload {
+            checkout: None,
             resume_policy_applied: Some("restart_node".to_string()),
             policies: Vec::new(),
             environment: None,

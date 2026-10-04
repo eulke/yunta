@@ -442,12 +442,21 @@ async fn resume_child(
     let child_tree = match child_manifest.isolation {
         Isolation::None => ctx.worktree.to_path_buf(),
         Isolation::Worktree => {
-            let root = child_manifest
-                .paths
-                .as_ref()
-                .map(|paths| paths.worktrees_root().to_path_buf())
-                .unwrap_or_else(|| worktrees_root(ctx));
-            let tree = root.join(child_id.as_str());
+            // The checkout the child's own log names; a log that names none
+            // was written when a child's tree was named after it.
+            let child_events = ctx.storage.events_for_run(child_id.clone()).await?;
+            let bound = crate::replay::derive(&child_events)
+                .run
+                .checkout()
+                .map(Path::to_path_buf);
+            let tree = bound.unwrap_or_else(|| {
+                child_manifest
+                    .paths
+                    .as_ref()
+                    .map(|paths| paths.worktrees_root().to_path_buf())
+                    .unwrap_or_else(|| worktrees_root(ctx))
+                    .join(child_id.as_str())
+            });
             if !tree.exists() {
                 return fail(
                     ctx,

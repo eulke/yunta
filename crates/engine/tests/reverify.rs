@@ -91,6 +91,7 @@ fn failed() -> EventPayload {
 /// What the run does next after `attempts`, in order, under `yaml`.
 fn next(yaml: &str, attempts: Vec<Vec<(&'static str, EventPayload)>>) -> Decision {
     let created = EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+        checkout: None,
         manifest_hash: ContentHash::sha256(b"manifest"),
         inputs: BTreeMap::new(),
         mode: "default".into(),

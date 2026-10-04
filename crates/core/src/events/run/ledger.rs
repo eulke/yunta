@@ -72,9 +72,18 @@ pub struct RunLedger {
     /// Whether the run was born in a checkout holding exactly the commit
     /// it opened on.
     opens_on_base: bool,
+    /// The checkout of its own the run works in, as its log last named it.
+    checkout: Option<std::path::PathBuf>,
 }
 
 impl RunLedger {
+    /// The checkout of its own the run works in, as its log names it:
+    /// where it was born, or where a later wake moved it. `None` for a run
+    /// working in a person's checkout, or one whose log never named it.
+    pub fn checkout(&self) -> Option<&std::path::Path> {
+        self.checkout.as_deref()
+    }
+
     /// How the environment the run's commands run with changed since
     /// the run was born, as of its latest wake. `None` when it did not,
     /// or when the log does not say.
@@ -199,6 +208,7 @@ impl RunLedger {
                 self.mode = p.mode.clone();
                 self.left_out = p.left_out.clone();
                 self.opens_on_base = p.opens_on_base;
+                self.checkout = p.checkout.clone();
                 self.invocations
                     .push((meta.seq, p.environment.as_deref().cloned()));
             }
@@ -212,6 +222,9 @@ impl RunLedger {
                 self.phase = RunPhaseRaw::Open;
                 self.resumed_after = Some(meta.seq);
                 self.invocations.push((meta.seq, p.environment.clone()));
+                if let Some(checkout) = &p.checkout {
+                    self.checkout = Some(checkout.clone());
+                }
             }
             RunEvent::Finished(p) => {
                 self.phase = RunPhaseRaw::Closed;
@@ -271,6 +284,7 @@ mod tests {
     fn the_environment_at_a_seq_is_the_one_its_invocation_ran_with() {
         let mut ledger = RunLedger::default();
         let created = RunCreatedPayload {
+            checkout: None,
             manifest_hash: crate::sha256_hex(b"manifest"),
             inputs: Default::default(),
             mode: Default::default(),
@@ -301,5 +315,68 @@ mod tests {
         assert_eq!(path_at(8).as_deref(), Some("/woken"));
         assert_eq!(path_at(9), None);
         assert_eq!(ledger.environment_now(), None);
+    }
+
+    fn born_in(checkout: Option<&str>) -> RunCreatedPayload {
+        RunCreatedPayload {
+            checkout: checkout.map(std::path::PathBuf::from),
+            manifest_hash: crate::sha256_hex(b"manifest"),
+            inputs: Default::default(),
+            mode: Default::default(),
+            promoted_from: None,
+            yunta_schema: None,
+            base_branch: "main".to_string(),
+            base_commit: crate::sha256_hex(b"base").as_str().into(),
+            environment: None,
+            left_out: Vec::new(),
+            opens_on_base: false,
+        }
+    }
+
+    /// The run's checkout is the one its log last named: where it was born,
+    /// unchanged by a wake that names none, and moved by one that does.
+    #[test]
+    fn the_checkout_is_the_one_the_log_last_named() {
+        let mut ledger = RunLedger::default();
+        at(
+            &mut ledger,
+            1,
+            RunEvent::Created(born_in(Some("/pool/slot-1"))),
+        );
+        let still = RunResumedPayload::new(Vec::new(), None);
+        at(&mut ledger, 2, RunEvent::Resumed(still));
+        assert_eq!(
+            ledger.checkout(),
+            Some(std::path::Path::new("/pool/slot-1"))
+        );
+
+        let moved = RunResumedPayload::new(Vec::new(), None).in_checkout("/pool/slot-3".into());
+        at(&mut ledger, 3, RunEvent::Resumed(moved));
+
+        assert_eq!(
+            ledger.checkout(),
+            Some(std::path::Path::new("/pool/slot-3"))
+        );
+    }
+
+    /// A log written before the field names no checkout, and reads back.
+    #[test]
+    fn an_old_log_names_no_checkout() {
+        let written = serde_json::to_value(born_in(None)).unwrap();
+        assert!(written.get("checkout").is_none(), "{written}");
+        let read: RunCreatedPayload = serde_json::from_value(written).unwrap();
+        let mut ledger = RunLedger::default();
+        at(&mut ledger, 1, RunEvent::Created(read));
+
+        assert_eq!(ledger.checkout(), None);
+    }
+
+    /// A checkout the log names round-trips as written.
+    #[test]
+    fn run_created_round_trips_its_checkout() {
+        let born = born_in(Some("/pool/slot-1"));
+        let written = serde_json::to_string(&born).unwrap();
+        let read: RunCreatedPayload = serde_json::from_str(&written).unwrap();
+        assert_eq!(read, born);
     }
 }

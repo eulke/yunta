@@ -39,10 +39,13 @@ struct Parked {
 /// the worktree it works in is the one its own frozen roots name.
 async fn parked(ctx: &Context, run_id: &RunId) -> Result<Parked, CliError> {
     let open = ctx.open_run(run_id).await?;
+    let bound = crate::project::bound_checkout(&open.events);
     let (run_dir, manifest) = (open.run_dir, open.manifest.doc);
     let adapters = super::real_adapters(&manifest.config);
     super::refuse_unrunnable(&manifest.workflow, &adapters)?;
-    let worktree = ctx.project.run_tree(&manifest, run_id, &ctx.cwd);
+    let worktree = ctx
+        .project
+        .run_tree(&manifest, bound.as_deref(), run_id, &ctx.cwd);
     Ok(Parked {
         run_dir,
         manifest,

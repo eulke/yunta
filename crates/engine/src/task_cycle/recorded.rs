@@ -132,6 +132,7 @@ mod tests {
 
     fn created(path: &str) -> EventPayload {
         EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+            checkout: None,
             manifest_hash: yunta_core::sha256_hex(b"manifest"),
             inputs: Default::default(),
             mode: Default::default(),

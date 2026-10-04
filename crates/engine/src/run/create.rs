@@ -226,6 +226,10 @@ pub async fn create_run(
         None,
         EventPayload::Run(RunEvent::Created(RunCreatedPayload {
             manifest_hash: manifest.manifest_hash(),
+            // Every reader of the run's tree reads it here, rather than
+            // composing a path of its own.
+            checkout: (manifest.isolation == yunta_core::Isolation::Worktree)
+                .then(|| worktree.to_path_buf()),
             // Every declared input as the manifest froze it — provided
             // or defaulted, already validated: what the run used.
             inputs: manifest

@@ -53,12 +53,21 @@ impl Project {
             .unwrap_or_else(|| self.worktrees_root.clone())
     }
 
-    /// The tree run `run_id` works in: its own checkout under the
-    /// worktrees root its manifest froze, or — for a run that isolates
-    /// nothing — the checkout this invocation runs in, `cwd`.
-    pub fn run_tree(&self, manifest: &Manifest, run_id: &RunId, cwd: &Path) -> PathBuf {
+    /// The tree run `run_id` works in: the checkout of its own its log
+    /// names — `bound` — or, for a log that names none, the one named after
+    /// it under the worktrees root its manifest froze; for a run that
+    /// isolates nothing, the checkout this invocation runs in, `cwd`.
+    pub fn run_tree(
+        &self,
+        manifest: &Manifest,
+        bound: Option<&Path>,
+        run_id: &RunId,
+        cwd: &Path,
+    ) -> PathBuf {
         match manifest.isolation {
-            Isolation::Worktree => self.worktrees_root_for(manifest).join(run_id.as_str()),
+            Isolation::Worktree => bound
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| self.worktrees_root_for(manifest).join(run_id.as_str())),
             Isolation::None => cwd.to_path_buf(),
         }
     }
@@ -224,4 +233,12 @@ pub fn resolve(cwd: &Path) -> Result<Project, ProjectError> {
         worktrees_root,
         storage_path,
     })
+}
+
+/// The checkout of its own a run's log names, when it names one.
+pub fn bound_checkout(events: &[yunta_core::events::StoredEvent]) -> Option<PathBuf> {
+    yunta_engine::derive(events)
+        .run
+        .checkout()
+        .map(Path::to_path_buf)
 }

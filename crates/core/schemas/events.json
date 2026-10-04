@@ -3868,6 +3868,13 @@
         "base_commit": {
           "$ref": "#/$defs/CommitSha"
         },
+        "checkout": {
+          "description": "The checkout of its own the run works in. Absent for a run working\nin a person's checkout, and from a log written before it was\nrecorded, where the run's checkout is the one named after it under\nthe worktrees root its manifest froze.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "environment": {
           "description": "What the run's commands ran with when it was born. Absent from a\nlog written before it was recorded. Boxed: every stored event is\nas large as the largest payload, and this one is read once.",
           "anyOf": [
@@ -3992,6 +3999,13 @@
     "RunResumedPayload": {
       "type": "object",
       "properties": {
+        "checkout": {
+          "description": "The checkout the run works in from this wake on, when it is not the\none it worked in before: the one it last held was given back while\nit was parked.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "environment": {
           "description": "What the run's commands run with from this wake on. Absent from a\nlog written before it was recorded.",
           "anyOf": [

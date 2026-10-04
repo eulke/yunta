@@ -94,6 +94,7 @@ fn frame(workflow: &Workflow, events: &[StoredEvent], now_secs: i64) -> RunFrame
 
 fn created(mode: &str) -> EventPayload {
     EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+        checkout: None,
         manifest_hash: ContentHash::sha256(b"manifest"),
         inputs: BTreeMap::new(),
         mode: mode.into(),
@@ -1167,6 +1168,7 @@ fn a_node_parked_while_the_run_moves_again_quotes_no_pause() {
             4,
             None,
             EventPayload::Run(RunEvent::Resumed(RunResumedPayload {
+                checkout: None,
                 resume_policy_applied: None,
                 policies: Vec::new(),
                 environment: None,

@@ -128,6 +128,7 @@ marcando `[inferido]` lo que no tiene respaldo textual directo.
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `manifest_hash` | string (hash) | sí | identifica el manifest congelado |
+| `checkout` | ruta | no; omitido en un run que trabaja en el checkout de una persona | el checkout propio en que trabaja el run; todo lector toma de acá el árbol del run (D235). Un log anterior al campo no nombra ninguno, y su árbol es el que lleva el nombre del run bajo la raíz de worktrees que congeló el manifest |
 | `inputs` | mapa string→valor | sí | inputs resueltos y validados, defaults incluidos |
 | `mode` | string | sí | nombre del modo elegido |
 | `promoted_from` | `Option<RunId>` | no | presente solo si este run nace de una promoción |
@@ -744,6 +745,7 @@ the run reports leaves the span out (D199).
 | `resume_policy_applied` [inferido] | `Option<string>` | solo en `run_resumed` | el único `on_interrupt` que todos los huérfanos resolvieron; ausente sin huérfanos o con políticas distintas |
 | `policies` | lista de `{node, on_interrupt}` | solo en `run_resumed` (puede ser vacía) | cada nodo que el log dejó `running` sin evento terminal y la política a la que resolvió: la propia o el default de la config |
 | `environment` | `{shell, path}` | no, solo en `run_resumed` | con qué corren los comandos desde este wake; si difiere del de `run_created`, `yunta status` lo dice |
+| `checkout` | ruta | no, solo en `run_resumed` | el checkout en que trabaja el run desde este wake, cuando no es el último que nombró su log (D235) |
 | `terminal_state` | estado | solo en `run_finished` | — |
 | `metrics` | `{cptv?, tokens, ...}` | solo en `run_finished` | derivadas del log, nunca estimadas |
 | `closed_by` | responder | no, solo en `run_finished` | quién cerró un run detenido que nadie iba a continuar (`yunta close`), con `terminal_state: cancelled`; ausente cuando el engine cerró el run llevándolo a su fin |

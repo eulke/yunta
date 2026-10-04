@@ -76,6 +76,7 @@ fn tokens(input: u64, output: u64, cached: Option<u64>) -> TokenUsage {
 fn fixture_events() -> Vec<StoredEvent> {
     Log::for_run("run-1")
         .event(EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+            checkout: None,
             manifest_hash: yunta_core::sha256_hex(b"h"),
             inputs: Default::default(),
             mode: "default".into(),
@@ -230,6 +231,7 @@ fn cache_rate_is_none_without_input() {
     let wf = workflow(vec![node("a", &[])]);
     let events = Log::for_run("run-1")
         .event(EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+            checkout: None,
             manifest_hash: yunta_core::sha256_hex(b"h"),
             inputs: Default::default(),
             mode: "default".into(),

@@ -67,6 +67,7 @@ fn log(entries: Vec<(Option<&str>, EventPayload)>) -> Vec<StoredEvent> {
 
 fn created() -> EventPayload {
     EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+        checkout: None,
         manifest_hash: ContentHash::sha256(b"manifest"),
         inputs: BTreeMap::new(),
         mode: "default".into(),

@@ -108,7 +108,10 @@ pub async fn status(
             out.push_str(&part);
         }
     }
-    let tree = ctx.project.run_tree(&manifest, run_id, &ctx.cwd);
+    let bound = crate::project::bound_checkout(&events);
+    let tree = ctx
+        .project
+        .run_tree(&manifest, bound.as_deref(), run_id, &ctx.cwd);
     let shown = match &decision {
         Some((_, escalation)) => crate::json::shown_of(&run_dir, escalation, &events).await?,
         None => Vec::new(),

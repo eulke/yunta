@@ -106,6 +106,7 @@ pub fn status_changed_carrying(
 /// the hash of `manifest`, born on `base_commit`, nothing else declared.
 pub(crate) fn born(manifest: &[u8], base_commit: &str) -> EventPayload {
     EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+        checkout: None,
         manifest_hash: yunta_core::sha256_hex(manifest),
         inputs: Default::default(),
         mode: Default::default(),

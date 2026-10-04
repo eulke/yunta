@@ -130,7 +130,8 @@ fn reclaim(ctx: &Context, dry_run: bool) -> Result<Vec<RunId>, CliError> {
         // previous gc, or a human) has its rows purged now.
         match ctx.project.run_dir(run_id.as_str()) {
             Some(run_dir) => {
-                if remove_run(ctx, &run_dir, &run_id, dry_run) {
+                let bound = state.run.checkout();
+                if remove_run(ctx, &run_dir, &run_id, bound, dry_run) {
                     reclaimed += 1;
                     if !dry_run {
                         removed.push(run_id.clone());
@@ -179,8 +180,14 @@ fn reclaim(ctx: &Context, dry_run: bool) -> Result<Vec<RunId>, CliError> {
 /// is never counted as reclaimed while some of its disk survives. Under
 /// `dry_run` nothing is removed and every present directory counts as if
 /// it had been.
-fn remove_run(ctx: &Context, run_dir: &Path, run_id: &RunId, dry_run: bool) -> bool {
-    let worktree = worktree_of(&ctx.project, run_dir, run_id);
+fn remove_run(
+    ctx: &Context,
+    run_dir: &Path,
+    run_id: &RunId,
+    bound: Option<&Path>,
+    dry_run: bool,
+) -> bool {
+    let worktree = worktree_of(&ctx.project, run_dir, run_id, bound);
     let shown = |dir: &Path| crate::render::paths::shown(dir, &ctx.cwd, ctx.env.home.as_deref());
     let mut removed_any = false;
     let mut all_removed = true;
@@ -213,7 +220,12 @@ fn remove_run(ctx: &Context, run_dir: &Path, run_id: &RunId, dry_run: bool) -> b
 /// manifest that cannot be read is surfaced and treated as no worktree —
 /// `run.dir` is still reclaimed, its worktree (if any) left for a human,
 /// never guessed at from the current config.
-fn worktree_of(project: &Project, run_dir: &Path, run_id: &RunId) -> Option<PathBuf> {
+fn worktree_of(
+    project: &Project,
+    run_dir: &Path,
+    run_id: &RunId,
+    bound: Option<&Path>,
+) -> Option<PathBuf> {
     let manifest: Manifest =
         match crate::load_manifest(&yunta_engine::run_dir::manifest_path(run_dir))
             .map(|manifest| manifest.doc)
@@ -225,7 +237,11 @@ fn worktree_of(project: &Project, run_dir: &Path, run_id: &RunId) -> Option<Path
             }
         };
     match manifest.isolation {
-        Isolation::Worktree => Some(project.worktrees_root_for(&manifest).join(run_id.as_str())),
+        Isolation::Worktree => Some(
+            bound
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| project.worktrees_root_for(&manifest).join(run_id.as_str())),
+        ),
         Isolation::None => None,
     }
 }

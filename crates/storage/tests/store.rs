@@ -612,6 +612,7 @@ fn created_draft(run_id: &str) -> EventDraft {
         run_id: RunId::from(run_id),
         node_id: None,
         payload: EventPayload::Run(RunEvent::Created(yunta_core::events::RunCreatedPayload {
+            checkout: None,
             manifest_hash: yunta_core::sha256_hex(b"abc123manifest"),
             inputs: Default::default(),
             mode: "default".into(),

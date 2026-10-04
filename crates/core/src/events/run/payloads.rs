@@ -110,6 +110,12 @@ impl HostSuspendedPayload {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunCreatedPayload {
     pub manifest_hash: ContentHash,
+    /// The checkout of its own the run works in. Absent for a run working
+    /// in a person's checkout, and from a log written before it was
+    /// recorded, where the run's checkout is the one named after it under
+    /// the worktrees root its manifest froze.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<std::path::PathBuf>,
     pub inputs: BTreeMap<String, serde_json::Value>,
     pub mode: ModeName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -395,6 +401,11 @@ pub struct RunResumedPayload {
     /// log written before it was recorded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<ExecutionEnvironment>,
+    /// The checkout the run works in from this wake on, when it is not the
+    /// one it worked in before: the one it last held was given back while
+    /// it was parked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkout: Option<std::path::PathBuf>,
 }
 
 impl RunResumedPayload {
@@ -416,6 +427,15 @@ impl RunResumedPayload {
             resume_policy_applied: agreed,
             policies,
             environment,
+            checkout: None,
+        }
+    }
+
+    /// The same wake, in `checkout` from now on.
+    pub fn in_checkout(self, checkout: std::path::PathBuf) -> Self {
+        RunResumedPayload {
+            checkout: Some(checkout),
+            ..self
         }
     }
 }

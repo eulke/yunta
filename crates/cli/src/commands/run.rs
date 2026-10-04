@@ -431,7 +431,7 @@ pub(super) async fn create_run_from(
     }
 
     let run_id = ctx.ids.mint_run_id(ctx.clock.now());
-    let worktree = ctx.project.run_tree(manifest, &run_id, &ctx.cwd);
+    let worktree = ctx.project.run_tree(manifest, None, &run_id, &ctx.cwd);
     match yunta_engine::prepare_worktree(
         &ctx.cwd,
         &worktree,
