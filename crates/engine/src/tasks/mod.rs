@@ -3,6 +3,7 @@
 //! hands over carries into the tree this run works in.
 
 mod crossing;
+mod derived;
 mod judged;
 mod respecified;
 mod review;
@@ -21,6 +22,7 @@ use crate::run_log::RunLog;
 use yunta_core::events::TaskEvent;
 
 pub(crate) use crossing::{carried_into, standing_of, Standing};
+pub(crate) use derived::derive_reach;
 pub use judged::{held_by, judged_plan, judged_task, suite_of, HeldBy};
 pub(crate) use respecified::respecifications_owed;
 pub use review::review as plan_review;

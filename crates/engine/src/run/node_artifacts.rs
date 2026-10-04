@@ -303,6 +303,14 @@ async fn register_tasks(
         None => Provenance::Fresh,
     };
     crate::tasks::register(&ctx.log(), Some(&node.id), tasks, provenance).await?;
+    crate::tasks::derive_reach(
+        &ctx.log(),
+        Some(&node.id),
+        tasks,
+        ctx.worktree,
+        ctx.root_supervision(),
+    )
+    .await?;
     Ok(())
 }
 

@@ -28,7 +28,10 @@ they can see what will be built and disagree with it:
   owned by the one task that builds it — whose scope covers that file. A
   task that builds on a shape another task owns lists it under `uses` and
   waits for its owner. If a later task needs the shape to grow, the owner
-  builds it whole; no other task may change its file.
+  builds it whole; no other task may change its file. Name a shape the
+  code calls by name with that identifier: the engine lets its owner write
+  every file that names it, so the callers a changed signature reaches need
+  not be in the owner's scope.
 - `design`: how the parts fit together, in prose and code examples, when the
   shapes alone do not say it.
 - `risks` and `out_of_scope`, when there are any.

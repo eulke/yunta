@@ -2,12 +2,15 @@
 
 use super::payloads::*;
 
-/// A node asking to write outside the scope it declared, and the answer — one variant per kind.
+/// A node asking to write outside the scope it declared, and the answer;
+/// and what a task may write beyond it because a shape it owns is named
+/// there — one variant per kind.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScopeEvent {
     Requested(ScopeExpansionRequestedPayload),
     Granted(ScopeExpansionGrantedPayload),
     Denied(ScopeExpansionDeniedPayload),
+    Derived(ScopeDerivedPayload),
 }
 
 impl ScopeEvent {
@@ -16,6 +19,7 @@ impl ScopeEvent {
         "scope_expansion_requested",
         "scope_expansion_granted",
         "scope_expansion_denied",
+        "scope_derived",
     ];
 
     /// The persisted `kind` string of this fact.
@@ -24,6 +28,7 @@ impl ScopeEvent {
             Self::Requested(_) => "scope_expansion_requested",
             Self::Granted(_) => "scope_expansion_granted",
             Self::Denied(_) => "scope_expansion_denied",
+            Self::Derived(_) => "scope_derived",
         }
     }
 
@@ -39,6 +44,7 @@ impl ScopeEvent {
             Self::Requested(_) => false,
             Self::Granted(_) => false,
             Self::Denied(_) => false,
+            Self::Derived(_) => false,
         }
     }
 

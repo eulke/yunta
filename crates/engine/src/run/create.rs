@@ -261,7 +261,7 @@ pub async fn create_run(
     )
     .await?;
 
-    register_birth_documents(&log, &run_dir, artifacts, &documents).await?;
+    register_birth_documents(&log, &run_dir, artifacts, &documents, worktree, supervision).await?;
     if promoted_from.is_some() {
         hold_inherited_findings(&log, artifacts).await?;
     }
@@ -389,7 +389,8 @@ async fn hold_inherited_findings(
 }
 
 /// Accepts every birth artifact in order and, for each tasks document,
-/// registers what the run has to do about it.
+/// registers what the run has to do about it and what its tasks may reach
+/// in `tree`.
 ///
 /// Interleaved rather than accepted in one pass and registered in
 /// another, so a second tasks document is planned against a log that
@@ -399,6 +400,8 @@ async fn register_birth_documents(
     run_dir: &Path,
     artifacts: &[BirthArtifact],
     documents: &[Option<BirthDocument>],
+    tree: &Path,
+    supervision: crate::process::Supervision<'_>,
 ) -> Result<(), RunError> {
     for (artifact, birth) in artifacts.iter().zip(documents) {
         accept(
@@ -412,6 +415,7 @@ async fn register_birth_documents(
         .await?;
         if let Some(birth) = birth {
             crate::tasks::register(log, None, &birth.document, birth.provenance()).await?;
+            crate::tasks::derive_reach(log, None, &birth.document, tree, supervision).await?;
         }
     }
     Ok(())

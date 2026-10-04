@@ -77,11 +77,12 @@ async fn continuation(
     Ok(Some((unit, Continuing { session, answer })))
 }
 
-/// Every path a prior `scope_expansion_granted` on the log authorized
-/// for `task_id` — the retry after a human grant derives its
-/// widened scope from here, never from in-memory state.
+/// Everything the log lets `task_id` reach beyond its declared scope:
+/// the files that name a shape it owns, and every path a prior
+/// `scope_expansion_granted` authorized — the retry after a human grant
+/// derives its widened scope from here, never from in-memory state.
 fn granted_paths_for(state: &RunState, task_id: &yunta_core::TaskId) -> Vec<ScopeGlob> {
-    state.grants.paths_for(task_id).to_vec()
+    state.grants.reach_for(task_id)
 }
 
 /// Isolates one batch member in its own worktree — each task in the

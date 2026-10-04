@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::glob::ScopeGlob;
+use crate::hash::CommitSha;
 use crate::ids::{Responder, TaskId};
 use crate::policy::ScopeExpansionMode;
 
@@ -66,4 +67,23 @@ pub struct ScopeExpansionDeniedPayload {
     pub count_this_run: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub denial_reason: Option<String>,
+}
+
+/// What a task may write beyond its declared scope because a shape it owns
+/// is named there — derived by the engine from the plan and the run's
+/// tree, never asked for and never decided.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ScopeDerivedPayload {
+    pub task_id: TaskId,
+    /// Each file, exactly, outside the task's declared scope that names a
+    /// shape it owns. Replaces whatever an earlier derivation stated.
+    pub paths: Vec<ScopeGlob>,
+    /// The shapes those files name.
+    pub shapes: Vec<String>,
+    /// The shapes the task owns that so many files name that following
+    /// them would reach half the tree: they reach nothing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub common: Vec<String>,
+    /// The commit the files were read at.
+    pub at: CommitSha,
 }

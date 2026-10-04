@@ -95,7 +95,10 @@ fn tasks_kinds(event: &TaskEvent) {
 #[allow(dead_code)]
 fn scope_kinds(event: &ScopeEvent) {
     match event {
-        ScopeEvent::Requested(_) | ScopeEvent::Granted(_) | ScopeEvent::Denied(_) => {}
+        ScopeEvent::Requested(_)
+        | ScopeEvent::Granted(_)
+        | ScopeEvent::Denied(_)
+        | ScopeEvent::Derived(_) => {}
     }
 }
 
@@ -260,12 +263,12 @@ fn every_domain_declares_the_kinds_the_wire_carries() {
 }
 
 #[test]
-fn there_are_exactly_50_kinds_with_distinct_names() {
+fn there_are_exactly_51_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 50);
+    assert_eq!(kinds.len(), 51);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 50, "expected 50 distinct kind names");
+    assert_eq!(names.len(), 51, "expected 51 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -317,6 +320,7 @@ const KIND_NAMES: &[&str] = &[
     "scope_expansion_requested",
     "scope_expansion_granted",
     "scope_expansion_denied",
+    "scope_derived",
     "node_finished",
     "node_failed",
     "hook_executed",

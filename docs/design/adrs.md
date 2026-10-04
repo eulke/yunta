@@ -79,7 +79,7 @@ lista.
 **D70 — Política de schema de eventos (Contrato §3.2).** `accepted` → [`adr/D70-politica-de-schema-de-eventos-contrato-3-2.md`](adr/D70-politica-de-schema-de-eventos-contrato-3-2.md)
 **D71 — El audit de packs inventaría, no juzga: sin detección de patrones en prompts.** `accepted` → [`adr/D71-el-audit-de-packs-inventaria-no-juzga.md`](adr/D71-el-audit-de-packs-inventaria-no-juzga.md)
 **D72 — Confianza sobre publishers: cerrada por D51, sin granularidad adicional.** `accepted` → [`adr/D72-confianza-sobre-publishers-cerrada-por-d51.md`](adr/D72-confianza-sobre-publishers-cerrada-por-d51.md)
-**D73 — Ampliación de scope solicitada por el agente y concedida por el engine o por una persona (Contrato §6.2).** `revised` *(Revisada por D238.)* → [`adr/D73-ampliacion-de-scope-solicitada-por-el-agente.md`](adr/D73-ampliacion-de-scope-solicitada-por-el-agente.md)
+**D73 — Ampliación de scope solicitada por el agente y concedida por el engine o por una persona (Contrato §6.2).** `revised` *(Revisada por D238, D239.)* → [`adr/D73-ampliacion-de-scope-solicitada-por-el-agente.md`](adr/D73-ampliacion-de-scope-solicitada-por-el-agente.md)
 **D74 — Descubrimiento por parte del agente cliente: skill de mecanismo + catálogo consultado, nunca escrito.** `accepted` → [`adr/D74-descubrimiento-por-parte-del-agente-cliente.md`](adr/D74-descubrimiento-por-parte-del-agente-cliente.md)
 **D75 — `yunta graph` en v1; constructor visual solo con demanda demostrada.** `accepted` → [`adr/D75-yunta-graph-en-v1-constructor-visual-solo.md`](adr/D75-yunta-graph-en-v1-constructor-visual-solo.md)
 **D76 — Coherencia interna de modo: error de `check`, no warning (Contrato §10.1).** `accepted` → [`adr/D76-coherencia-interna-de-modo-error-de-check.md`](adr/D76-coherencia-interna-de-modo-error-de-check.md)
@@ -245,3 +245,4 @@ lista.
 **D236 — A run works in a checkout of its project's pool, reserved by its branch for as long as it lives.** `accepted` → [`adr/D236-a-run-works-in-a-checkout-of-its-project.md`](adr/D236-a-run-works-in-a-checkout-of-its-project.md)
 **D237 — A loop starts beside the measurement, and only a guard's verdict waits for it.** `accepted` → [`adr/D237-a-loop-starts-beside-the-measurement.md`](adr/D237-a-loop-starts-beside-the-measurement.md)
 **D238 — A scope decision owed to a person survives the run's pause, and a refused tool says why.** `accepted` → [`adr/D238-an-owed-scope-decision-survives-its-run-s-pause.md`](adr/D238-an-owed-scope-decision-survives-its-run-s-pause.md)
+**D239 — A task may write every file that names a shape it owns.** `accepted` → [`adr/D239-a-task-may-write-every-file-that-names-a-shape-it-owns.md`](adr/D239-a-task-may-write-every-file-that-names-a-shape-it-owns.md)

@@ -400,6 +400,7 @@ wire_kinds! {
     ScopeExpansionRequested => "scope_expansion_requested",
     ScopeExpansionGranted => "scope_expansion_granted",
     ScopeExpansionDenied => "scope_expansion_denied",
+    ScopeDerived => "scope_derived",
     NodeFinished => "node_finished",
     NodeFailed => "node_failed",
     HookExecuted => "hook_executed",

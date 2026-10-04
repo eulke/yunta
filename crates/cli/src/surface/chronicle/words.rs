@@ -285,7 +285,14 @@ fn status(status: TaskStatus) -> &'static str {
 
 fn scope_words(happening: &scope::happening::Happening) -> String {
     use scope::happening::{Happening as H, Step};
-    let H::Expansion { task, step } = happening;
+    let (task, step) = match happening {
+        H::Expansion { task, step } => (task, step),
+        H::Derived {
+            task,
+            paths,
+            common,
+        } => return derived_words(task, paths, common),
+    };
     let said = match step {
         Step::Requested { paths } => format!(
             "asks for {}",
@@ -306,6 +313,26 @@ fn scope_words(happening: &scope::happening::Happening) -> String {
     match task {
         Some(task) => format!("{task} {said}"),
         None => said,
+    }
+}
+
+/// What a task may write because a shape it owns is named there, and the
+/// shapes named too widely to follow.
+fn derived_words(
+    task: &yunta_core::TaskId,
+    paths: &[yunta_core::ScopeGlob],
+    common: &[String],
+) -> String {
+    let reach = match paths {
+        [] => format!("{task} reaches no file beyond its scope through its shapes"),
+        _ => format!(
+            "{task} may also write {}, which name shapes it owns",
+            yunta_core::listed_globs(paths)
+        ),
+    };
+    match common {
+        [] => reach,
+        _ => format!("{reach}; named too widely to follow: {}", common.join(", ")),
     }
 }
 

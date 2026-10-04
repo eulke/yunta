@@ -3,7 +3,7 @@ number: D73
 title: "Ampliación de scope solicitada por el agente y concedida por el engine o por una persona (Contrato §6.2)"
 status: revised
 revises: []
-revised_by: [D238]
+revised_by: [D238, D239]
 ---
 
 # D73 — Ampliación de scope solicitada por el agente y concedida por el engine o por una persona (Contrato §6.2)

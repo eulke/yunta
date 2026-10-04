@@ -177,6 +177,13 @@ pub fn all_kinds() -> Vec<EventPayload> {
             count_this_run: 2,
             denial_reason: Some("out of declared scope".to_string()),
         })),
+        EventPayload::Scope(ScopeEvent::Derived(ScopeDerivedPayload {
+            task_id: "graph-cmd".into(),
+            paths: vec!["crates/cli/src/commands/run.rs".into()],
+            shapes: vec!["build_manifest".to_string()],
+            common: vec!["run".to_string()],
+            at: "deadbeef".into(),
+        })),
         EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
             "criteria green",
             TokenUsage {

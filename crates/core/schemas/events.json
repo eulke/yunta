@@ -1843,6 +1843,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "scope_derived"
+            }
+          },
+          "$ref": "#/$defs/ScopeDerivedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "node_finished"
             }
           },
@@ -4296,6 +4309,46 @@
       "required": [
         "diff",
         "violations"
+      ]
+    },
+    "ScopeDerivedPayload": {
+      "description": "What a task may write beyond its declared scope because a shape it owns\nis named there — derived by the engine from the plan and the run's\ntree, never asked for and never decided.",
+      "type": "object",
+      "properties": {
+        "at": {
+          "description": "The commit the files were read at.",
+          "$ref": "#/$defs/CommitSha"
+        },
+        "common": {
+          "description": "The shapes the task owns that so many files name that following\nthem would reach half the tree: they reach nothing.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "paths": {
+          "description": "Each file, exactly, outside the task's declared scope that names a\nshape it owns. Replaces whatever an earlier derivation stated.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeGlob"
+          }
+        },
+        "shapes": {
+          "description": "The shapes those files name.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "required": [
+        "task_id",
+        "paths",
+        "shapes",
+        "at"
       ]
     },
     "ScopeExpansionDeniedPayload": {

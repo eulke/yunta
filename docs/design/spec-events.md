@@ -12,8 +12,8 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 41 rows and **50 `kind` names**.
-It had 40 rows and 49 kinds before `run_tool_refused` was added. The table
+The current Run Contract event table has 42 rows and **51 `kind` names**.
+It had 41 rows and 50 kinds before `scope_derived` was added. The table
 defines the normative set; this document specifies each payload.
 
 ## 1. Envelope común
@@ -347,6 +347,23 @@ they are gone, and the task's next cycle reads the answer.
 | `count_this_run` | `u32` | sí | para el cap `max_per_run` |
 | `paths` | lista de globs | solo en `scope_expansion_granted` | los paths exactos que la concesión autorizó: el scope efectivo de un intento posterior se deriva del log sin volver a aparear la concesión con el pedido que la precedió. Un log escrito antes del campo lo lee vacío |
 | `denial_reason` | `Option<string>` | solo en `scope_expansion_denied` | toda denegación produce además un `finding_posted` — no lo reemplaza, lo acompaña |
+
+### 5.14a `scope_derived` — engine
+**Fuente:** task_id, los archivos que nombran una shape suya fuera de su scope, las shapes, las demasiado comunes y el commit
+
+Lo que una tarea puede escribir además de su scope porque ahí se nombra una shape
+que es suya: el engine lo lee del árbol del run al registrar el documento de
+tareas —al nacer el run o cuando un nodo lo produce— y nadie lo pide ni lo decide
+(D239). No es una concesión: no cuenta para `max_per_run` ni toca el registro de
+la tarea.
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `task_id` | string | sí | la dueña de las shapes |
+| `paths` | lista de globs | sí | cada archivo exacto fuera del scope declarado que nombra, como palabra entera, una shape de la tarea con nombre de identificador, entre los del tipo de archivo de la shape. Reemplaza lo que dijo una derivación anterior |
+| `shapes` | lista de strings | sí | las shapes que nombran esos archivos |
+| `common` | lista de strings | sí; vacía —y omitida del log— cuando no hay ninguna | las shapes que nombran más de 20 archivos: no alcanzan ninguno |
+| `at` | sha de commit git | sí | el commit en que se leyeron los archivos |
 
 ### 5.15 `node_finished` / `node_failed` — engine
 **Fuente:** resultado, tokens, ¿reintentable?

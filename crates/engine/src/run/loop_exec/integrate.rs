@@ -388,17 +388,18 @@ async fn integrate_task(
     Ok(IntegrationOutcome::Integrated { commit })
 }
 
-/// What this task may touch: what it declared, plus every path a
-/// `scope_expansion_granted` on the log authorized for it. Derived from
-/// the log rather than carried from the attempt, so a re-verification
-/// after a crash grants exactly what the attempt was granted.
+/// What this task may touch: what it declared, plus the files that name a
+/// shape it owns and every path a `scope_expansion_granted` on the log
+/// authorized for it. Derived from the log rather than carried from the
+/// attempt, so a re-verification after a crash grants exactly what the
+/// attempt was granted.
 async fn effective_scope(ctx: &RunCtx<'_>, task: &Task) -> Result<Vec<ScopeGlob>, RunError> {
     let view = ctx.run_view().await?;
     Ok(task
         .scope
         .iter()
         .cloned()
-        .chain(view.state.grants.paths_for(&task.id).iter().cloned())
+        .chain(view.state.grants.reach_for(&task.id))
         .collect())
 }
 

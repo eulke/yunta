@@ -5,10 +5,20 @@ use crate::{ScopeGlob, TaskId};
 
 /// One step of a request to work outside a declared scope: a task's,
 /// or — with no task named — the node's own, the one the event is
-/// written under.
+/// written under. Or what a task may write beyond it because a shape it
+/// owns is named there.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Happening {
-    Expansion { task: Option<TaskId>, step: Step },
+    Expansion {
+        task: Option<TaskId>,
+        step: Step,
+    },
+    Derived {
+        task: TaskId,
+        paths: Vec<ScopeGlob>,
+        /// The shapes named too widely to follow.
+        common: Vec<String>,
+    },
 }
 
 /// Where a request stands: asked for, granted, or turned down.
@@ -50,6 +60,11 @@ impl From<&ScopeEvent> for Happening {
                     by: p.decided_by.clone(),
                     reason: p.denial_reason.clone(),
                 },
+            },
+            ScopeEvent::Derived(p) => Happening::Derived {
+                task: p.task_id.clone(),
+                paths: p.paths.clone(),
+                common: p.common.clone(),
             },
         }
     }

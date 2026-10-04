@@ -234,6 +234,32 @@ pub async fn success<S: AsRef<OsStr>>(
     Ok(run(cwd, args, supervision).await?.status.success())
 }
 
+/// The files `commit` holds, among the ones `pathspec` selects, that name
+/// `word` as a whole word — `git grep -l`, where finding none is an empty
+/// list rather than the non-zero exit git answers it with.
+pub async fn files_naming(
+    cwd: &Path,
+    commit: &str,
+    word: &str,
+    pathspec: &str,
+    supervision: Supervision<'_>,
+) -> Result<Vec<String>, GitError> {
+    let args = [
+        "grep", "-l", "-z", "-w", "-F", "-e", word, commit, "--", pathspec,
+    ];
+    let output = run(cwd, &args, supervision).await?;
+    if output.status.code() == Some(1) && output.stderr.is_empty() {
+        return Ok(Vec::new());
+    }
+    let listed = interpret(cwd, &args, output)?;
+    let prefix = format!("{commit}:");
+    Ok(listed
+        .split('\0')
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| entry.strip_prefix(&prefix).unwrap_or(entry).to_string())
+        .collect())
+}
+
 /// Who a commit made in `repo` is by — `Name <email>`, as git resolves
 /// its author and committer from config and environment — or git's own
 /// explanation of why it cannot name one, which is a repository no

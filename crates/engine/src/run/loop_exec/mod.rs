@@ -7,6 +7,7 @@
 //! 1` (the default) walks the exact same path with a batch of one —
 //! there is no special case for it.
 
+mod batch;
 mod depart;
 mod dispatch;
 mod escalate;
@@ -17,7 +18,7 @@ mod respecify;
 use yunta_core::events::{
     EventPayload, Failure, LoopIterationPayload, SessionDeath, StoredEvent, TaskStatus, TokenUsage,
 };
-use yunta_core::{Node, NodeKind, PromptSource, Task, TaskId, TasksFile};
+use yunta_core::{Node, NodeKind, PromptSource, TaskId, TasksFile};
 
 use crate::task_cycle::BlockedCause;
 
@@ -29,6 +30,7 @@ use super::prompt_exec::prompt_text;
 use super::runner_resolve::{report_declarative_network, resolve_node_runner};
 use super::step::Step;
 use super::{RunCtx, RunError};
+use batch::select_batch;
 use depart::resolve_departures;
 use dispatch::{dispatch_task_in_isolation, BatchDispatchEnv};
 use escalate::{resolve_escalations, PendingEscalation};
@@ -418,31 +420,6 @@ async fn prepare_loop<'a>(
         // The only net under a tasks document whose state oscillates forever.
         max_iterations: ctx.manifest.config.resolved_max_loop_iterations(),
     })))
-}
-
-/// Up to `concurrency` tasks this iteration may work on, in
-/// declaration order: a task whose dependencies are all `Done` and is
-/// itself still `Pending`, or an orphaned `Running` task with no
-/// terminal event after it (a crash mid-batch — orphaned tasks always
-/// get re-run on resume). Scope disjointness between independent tasks
-/// is **not** re-checked here: `tasks::register` already refuses two
-/// tasks without a `depends_on` edge declaring overlapping scope, so
-/// any two tasks that can both be `ready` at once are disjoint by
-/// construction.
-fn select_batch<'a>(tasks: &'a TasksFile, state: &RunState, concurrency: u32) -> Vec<&'a Task> {
-    tasks
-        .tasks
-        .iter()
-        .filter(|task| match state.tasks.status(&task.id) {
-            Some(TaskStatus::Pending) => task
-                .depends_on
-                .iter()
-                .all(|dep| state.tasks.status(dep) == Some(TaskStatus::Done)),
-            Some(TaskStatus::Running) => true,
-            _ => false,
-        })
-        .take(concurrency as usize)
-        .collect()
 }
 
 /// How many `scope_expansion_granted` events the run's whole log already
