@@ -33,8 +33,11 @@ grace before the kill, even when it had already left.
    killed before it leaves, or runs on outside it; it is never frozen. The leader
    stays unreaped until the close ends, as D185 decided.
 2. **Bounded drain.** Once the group is closed nothing in it can write: what is
-   buffered reads at once, and a pipe still open a moment later — 250ms — is held
+   buffered reads at once, and a pipe still open a moment later — two seconds,
+   long enough for a process starved of CPU to read what is buffered — is held
    by a process outside the group. Reading stops there and keeps what was read.
+   The moment is paid only when a pipe is held: without a holder, the end of the
+   pipe comes first.
    The same holds for an agent session's stderr.
 3. **The exit is heard.** A child's exit wakes the waiter through the kernel: a
    pidfd on Linux, `NOTE_EXIT` on a kqueue on macOS, both on the runtime's own
@@ -53,7 +56,7 @@ grace before the kill, even when it had already left.
 
 The frozen daemon exists only because something stops processes; without the
 stop, the race has no bad outcome. The drain bound turns a daemon's pipe into a
-cost of at most a quarter second instead of a hung run, and a command never waits
+cost of at most two seconds instead of a hung run, and a command never waits
 for a process it does not own. Hearing the exit removes a fixed delay from every
 git, criterion and suite the engine runs.
 

@@ -305,8 +305,10 @@ pub async fn spawn_governed(
     // Nothing in the group can write any more: what is still buffered
     // reads at once, and a pipe still open after a moment is held by a
     // process that left the group — a detached daemon — which this
-    // command does not wait for.
-    let drained_by = tokio::time::Instant::now() + Duration::from_millis(250);
+    // command does not wait for. The moment is long enough for a process
+    // starved of CPU to read what is buffered: it is paid only when a
+    // pipe is held, since without a holder the end of the pipe comes first.
+    let drained_by = tokio::time::Instant::now() + Duration::from_secs(2);
     let mut pipe_failure = None;
     let mut abort_pipes = cleanup_result.is_err();
     while !pipes.is_empty() && !abort_pipes {

@@ -299,7 +299,7 @@ impl SubprocessSession {
             self.stderr_drain.abort();
         }
         let stdout = (&mut self.reader).await;
-        let stderr = match tokio::time::timeout(Duration::from_millis(250), &mut self.stderr_drain)
+        let stderr = match tokio::time::timeout(Duration::from_secs(2), &mut self.stderr_drain)
             .await
         {
             Ok(drained) => drained,
