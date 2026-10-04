@@ -36,10 +36,12 @@ pub(crate) struct RunCtx<'a> {
     pub storage: &'a AsyncStorage,
     pub clock: Arc<dyn Clock>,
     pub ids: &'a dyn IdSource,
-    /// Criteria memoization — one cache per `execute_run`
-    /// call, never persisted: a resume simply starts cold, which is safe
-    /// (over-verifying) rather than risking a stale cross-run hit.
+    /// Criteria memoization — one cache per `execute_run` call, seeded
+    /// at a wake with what the log says earlier invocations answered.
     pub memo: Arc<Memo>,
+    /// The checkouts the run's units work in, reused from one unit to
+    /// the next.
+    pub pool: Arc<crate::worktree::CheckoutPool>,
     /// The one surface every escalation goes through:
     /// exhausted re-routes and scope-expansion `ask` alike — on the ctx
     /// so the deep execution paths (loop_exec) reach it without threading
@@ -163,6 +165,7 @@ impl<'a> RunCtx<'a> {
             clock: self.clock.clone(),
             ids: self.ids,
             memo: self.memo.clone(),
+            pool: self.pool.clone(),
             human_interaction: self.human_interaction,
             budget_lifted: self.budget_lifted.clone(),
             process_registry: self.process_registry.clone(),

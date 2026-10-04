@@ -432,6 +432,8 @@ pub struct PostCheck {
     /// The guards that did not run, by command, because one of the
     /// task's own criteria is red.
     pub waiting: Vec<String>,
+    /// The tree the checkout held, which every answer is for.
+    pub tree: yunta_core::TreeId,
 }
 
 impl PostCheck {
@@ -462,11 +464,16 @@ pub async fn post_check(
     let mut runs = run_on(&task.id, &own, &tree, cwd, memo, supervision).await?;
     if !runs.iter().all(|run| run.exit_code == 0) {
         let waiting = guards.into_iter().map(|guard| guard.cmd).collect();
-        return Ok(PostCheck { runs, waiting });
+        return Ok(PostCheck {
+            runs,
+            waiting,
+            tree: tree.content,
+        });
     }
     runs.extend(run_on(&task.id, &guards, &tree, cwd, memo, supervision).await?);
     Ok(PostCheck {
         runs,
         waiting: Vec::new(),
+        tree: tree.content,
     })
 }

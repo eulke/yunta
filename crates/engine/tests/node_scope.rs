@@ -388,9 +388,14 @@ async fn a_granted_request_resumes_the_node_session_that_asked() {
         bench.mock().resumes_seen(),
         vec![opened[0].session_id.clone()]
     );
-    let resumed = bench.mock().requests_seen()[1].clone();
+    let requests = bench.mock().requests_seen();
+    let resumed = requests[1].clone();
+    assert_eq!(
+        resumed.cwd, requests[0].cwd,
+        "the session picks back up in the checkout it saw"
+    );
     assert!(
-        resumed.cwd.ends_with("unit-worktrees/node/fix-1"),
+        resumed.cwd.to_string_lossy().contains("unit-worktrees"),
         "{}",
         resumed.cwd.display()
     );

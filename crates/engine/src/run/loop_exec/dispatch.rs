@@ -7,7 +7,7 @@ use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TaskStatusChange
 use yunta_core::{CommitSha, Node, Task};
 
 use crate::task_cycle::{run_task, AttemptEnv, Continuing, ScopeGovernance, TaskCycleReport};
-use crate::worktree::{open_unit, reopen_unit, Unit, UnitHome, UnitId};
+use crate::worktree::{reopen_unit, Lease, Unit, UnitHome, UnitId};
 
 use crate::replay::RunState;
 use crate::run::{RunCtx, RunError};
@@ -53,7 +53,8 @@ async fn continuation(
         return Ok(None);
     };
     let reopened = reopen_unit(
-        ctx.run_dir,
+        ctx.worktree,
+        ctx.run_id,
         UnitId::Task(task.id.clone()),
         Some(work),
         ctx.root_supervision(),
@@ -106,13 +107,23 @@ pub(super) struct BatchDispatchEnv<'a> {
     pub(super) setup: &'a crate::task_cycle::SessionSetup,
 }
 
+/// One batch member's dispatch: its task, the unit it worked in and the
+/// hold on that unit's checkout — kept until the task is integrated or
+/// set aside — and what its cycle reported.
+pub(super) struct Dispatched<'a> {
+    pub(super) task: &'a Task,
+    pub(super) unit: Unit,
+    pub(super) lease: Lease,
+    pub(super) report: TaskCycleReport,
+}
+
 pub(super) async fn dispatch_task_in_isolation<'a>(
     ctx: &RunCtx<'_>,
     node: &Node,
     env: &BatchDispatchEnv<'_>,
     task: &'a Task,
     instruction: &str,
-) -> Result<(&'a Task, Unit, TaskCycleReport), RunError> {
+) -> Result<Dispatched<'a>, RunError> {
     let BatchDispatchEnv {
         events,
         base_commit,
@@ -125,23 +136,28 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     let state = crate::replay::derive(events);
     let attempt = attempt_number(&state, &task.id);
     let continuation = continuation(ctx, node, task, &state, adapter).await?;
-    let (unit, resume) = match continuation {
-        Some((unit, continuing)) => (unit, Some(continuing)),
-        None => (
-            open_unit(
-                UnitHome {
-                    repo: ctx.worktree,
-                    run_dir: ctx.run_dir,
-                    run_id: ctx.run_id,
-                    base: base_commit,
-                },
-                UnitId::Task(task.id.clone()),
-                attempt,
-                ctx.root_supervision(),
-            )
-            .await?,
-            None,
-        ),
+    let (unit, lease, resume) = match continuation {
+        Some((unit, continuing)) => {
+            let lease = ctx.pool.hold(unit.worktree.clone()).await;
+            (unit, lease, Some(continuing))
+        }
+        None => {
+            let (unit, lease) = ctx
+                .pool
+                .open(
+                    UnitHome {
+                        repo: ctx.worktree,
+                        run_dir: ctx.run_dir,
+                        run_id: ctx.run_id,
+                        base: base_commit,
+                    },
+                    UnitId::Task(task.id.clone()),
+                    attempt,
+                    ctx.root_supervision(),
+                )
+                .await?;
+            (unit, lease, None)
+        }
     };
 
     let registered_seq = events
@@ -205,5 +221,10 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     )
     .await?;
 
-    Ok((task, unit, report))
+    Ok(Dispatched {
+        task,
+        unit,
+        lease,
+        report,
+    })
 }

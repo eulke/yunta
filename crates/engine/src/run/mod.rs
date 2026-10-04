@@ -24,6 +24,7 @@ mod bash_exec;
 mod budget;
 pub(crate) mod capability;
 mod check_exec;
+mod cleanup;
 mod close;
 mod console_gate;
 mod context_resolve;

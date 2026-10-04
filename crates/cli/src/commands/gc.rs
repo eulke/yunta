@@ -31,9 +31,47 @@ use crate::error::{warn, CliError, Outcome};
 use crate::project::Project;
 use yunta_core::events::RunEvent;
 
-pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
+pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
+    let removed = reclaim(&ctx, dry_run)?;
+    for run_id in &removed {
+        forget_units(&ctx, run_id).await;
+    }
+    Ok(Outcome::Success)
+}
 
+/// What git still holds of a run whose files are gone: the checkouts its
+/// units worked in, and the branches they worked on — a blocked task's
+/// left work among them, which nothing reads once the run is collected.
+async fn forget_units(ctx: &Context, run_id: &RunId) {
+    let supervision = ctx.supervision();
+    if let Err(e) = yunta_engine::git::output(&ctx.cwd, &["worktree", "prune"], supervision).await {
+        warn(format!("run {}: {e}", run_id.handle()));
+        return;
+    }
+    let ours = format!("refs/heads/{}/", yunta_engine::run_units(run_id));
+    let branches = match yunta_engine::git::output(
+        &ctx.cwd,
+        &["for-each-ref", "--format=%(refname:short)", &ours],
+        supervision,
+    )
+    .await
+    {
+        Ok(branches) => branches,
+        Err(e) => return warn(format!("run {}: {e}", run_id.handle())),
+    };
+    for branch in branches.lines().map(str::trim).filter(|b| !b.is_empty()) {
+        if let Err(e) =
+            yunta_engine::git::output(&ctx.cwd, &["branch", "-D", branch], supervision).await
+        {
+            warn(format!("run {}: {e}", run_id.handle()));
+        }
+    }
+}
+
+/// Removes every terminal run past retention — its files on this pass,
+/// its rows on a later one — and answers the runs whose files went.
+fn reclaim(ctx: &Context, dry_run: bool) -> Result<Vec<RunId>, CliError> {
     let Some(retention_days) = ctx
         .project
         .config
@@ -45,7 +83,7 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
             "`storage.retention_days` isn't configured — nothing to reclaim until it is, \
              since `gc` has no default retention to guess"
         );
-        return Ok(Outcome::Success);
+        return Ok(Vec::new());
     };
 
     let storage = ctx.storage()?;
@@ -55,6 +93,7 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
 
     let now = yunta_core::Clock::now(&ctx.clock);
     let mut reclaimed = 0usize;
+    let mut removed = Vec::new();
     for run_id in run_ids {
         let events = match storage.events_for_run(&run_id) {
             Ok(events) => events,
@@ -88,8 +127,11 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
         // previous gc, or a human) has its rows purged now.
         match ctx.project.run_dir(run_id.as_str()) {
             Some(run_dir) => {
-                if remove_run(&ctx, &run_dir, &run_id, dry_run) {
+                if remove_run(ctx, &run_dir, &run_id, dry_run) {
                     reclaimed += 1;
+                    if !dry_run {
+                        removed.push(run_id.clone());
+                    }
                 }
             }
             None if dry_run => {
@@ -124,7 +166,7 @@ pub fn gc(dry_run: bool) -> Result<Outcome, CliError> {
     } else {
         println!("{} reclaimed", yunta_core::text::counted(reclaimed, "run"));
     }
-    Ok(Outcome::Success)
+    Ok(removed)
 }
 
 /// Removes a terminal run's on-disk footprint — its `run.dir` and, for a

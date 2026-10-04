@@ -87,7 +87,6 @@ impl SessionTools {
             },
             Work {
                 unit: &access.unit,
-                index: &access.index,
                 staged: access.staged.get().map_or(&[], Vec::as_slice),
             },
             &self.host.memo,

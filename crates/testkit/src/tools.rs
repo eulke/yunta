@@ -60,13 +60,13 @@ impl ToolsHost {
                 storage: storage.async_handle(),
                 run_id: run_id.clone(),
                 clock: clock.clone(),
-                // A test here reads what a tool call lands on the log;
-                // the mirror of it has its own test.
+                // A test here reads the log a tool call lands on; its mirror has its own test.
                 observer: None,
                 run_dir: run_dir.clone(),
                 max_artifact_bytes: None,
                 redactor: yunta_core::Redactor::default(),
                 memo: Arc::new(Memo::new(sha256_hex(b"test-config"))),
+                pool: yunta_engine::CheckoutPool::new(&run_dir),
                 process_registry: None,
                 subprocess_vars: Vec::new(),
                 environment: Some(tools_environment()),

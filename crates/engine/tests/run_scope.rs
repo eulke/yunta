@@ -1046,12 +1046,18 @@ async fn a_granted_request_resumes_the_session_that_asked_on_its_own_work() {
         bench.mock().resumes_seen(),
         vec![opened[0].session_id.clone()]
     );
-    let resumed = bench.mock().requests_seen().last().cloned().unwrap();
-    assert!(
-        resumed.cwd.ends_with("unit-worktrees/task/task-h-1"),
-        "the checkout the session saw: {}",
-        resumed.cwd.display()
+    let requests = bench.mock().requests_seen();
+    let in_units: Vec<_> = requests
+        .iter()
+        .filter(|request| request.cwd.to_string_lossy().contains("unit-worktrees"))
+        .map(|request| request.cwd.clone())
+        .collect();
+    assert_eq!(in_units.len(), 2, "{in_units:?}");
+    assert_eq!(
+        in_units[1], in_units[0],
+        "the session picks back up in the checkout it saw"
     );
+    let resumed = requests.last().unwrap();
     assert!(resumed.prompt.contains("yunta_task"), "{}", resumed.prompt);
 }
 

@@ -15,9 +15,9 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{CommitSha, Isolation, NodeId, RunId, TaskId, TreeId};
+use yunta_core::{CommitSha, NodeId, RunId, TaskId, TreeId};
 
-use super::{head_commit, prepare_worktree, WorktreeError};
+use super::{head_commit, WorktreeError};
 use crate::process::Supervision;
 
 /// Which unit of work owns a tree, a branch and a private index.
@@ -31,10 +31,6 @@ pub enum UnitId {
     Node(NodeId),
     /// A task of a `loop` node.
     Task(TaskId),
-    /// The checkout a node's handed-over document is proven in: a tasks
-    /// document's criteria, run where the engine runs criteria before
-    /// the document is accepted.
-    Handover(NodeId),
 }
 
 impl std::fmt::Display for UnitId {
@@ -45,7 +41,6 @@ impl std::fmt::Display for UnitId {
         match self {
             UnitId::Node(id) => write!(f, "node/{id}"),
             UnitId::Task(id) => write!(f, "task/{id}"),
-            UnitId::Handover(id) => write!(f, "handover/{id}"),
         }
     }
 }
@@ -122,40 +117,6 @@ pub async fn snapshot_commit(
         })
 }
 
-/// Opens `who`'s own checkout at the run's base commit, on a branch of
-/// its own, and records the tree it therefore starts from.
-///
-/// The attempt number is part of both names: a unit re-dispatched after
-/// an orphaned attempt gets a tree of its own rather than whatever the
-/// interrupted attempt left in its.
-pub async fn open_unit(
-    home: UnitHome<'_>,
-    who: UnitId,
-    attempt: u32,
-    supervision: Supervision<'_>,
-) -> Result<Unit, WorktreeError> {
-    let worktree = crate::run_dir::unit_worktrees(home.run_dir).join(format!("{who}-{attempt}"));
-    prepare_worktree(
-        home.repo,
-        &worktree,
-        home.base,
-        &super::unit_branch(home.run_id, &who, attempt),
-        Isolation::Worktree,
-        supervision,
-    )
-    .await?;
-    // The checkout was just made at `base`, so its `HEAD` is exactly
-    // what this unit begins with — no capture of the working tree is
-    // owed for a tree nobody else has touched.
-    let from = super::head_tree(&worktree, supervision).await?;
-    Ok(Unit {
-        who,
-        worktree,
-        base: home.base.clone(),
-        from,
-    })
-}
-
 /// Reopens the checkout a session saw, for a session picked back up:
 /// the unit of `who` that holds `left` — the work a blocked task's attempt
 /// committed on its branch — or, with no `left`, the last unit `who`
@@ -165,15 +126,17 @@ pub async fn open_unit(
 ///
 /// Found by what the checkout holds, not by an attempt number: a
 /// session picked back up works on in the unit it saw, so an attempt
-/// does not always open a unit of its own. `None` when no such checkout
-/// is still there — cleaned up, or moved by something else.
+/// does not always open a unit of its own. The checkouts are found by
+/// the branch each is on, wherever its directory is. `None` when no such
+/// checkout is still there — cleaned up, or moved by something else.
 pub async fn reopen_unit(
-    run_dir: &Path,
+    repo: &Path,
+    run_id: &RunId,
     who: UnitId,
     left: Option<&CommitSha>,
     supervision: Supervision<'_>,
 ) -> Result<Option<Unit>, WorktreeError> {
-    for worktree in units_of(run_dir, &who).await {
+    for worktree in units_of(repo, run_id, &who, supervision).await? {
         let Ok(head) = head_commit(&worktree, supervision).await else {
             if left.is_none() {
                 return Ok(None);
@@ -196,28 +159,27 @@ pub async fn reopen_unit(
     Ok(None)
 }
 
-/// Every checkout `who` opened in this run, the latest first.
-async fn units_of(run_dir: &Path, who: &UnitId) -> Vec<PathBuf> {
-    let named = who.to_string();
-    let (kind, stem) = named.split_once('/').unwrap_or(("", named.as_str()));
-    let Ok(mut entries) =
-        tokio::fs::read_dir(crate::run_dir::unit_worktrees(run_dir).join(kind)).await
-    else {
-        return Vec::new();
-    };
-    let mut opened: Vec<(u32, PathBuf)> = Vec::new();
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let attempt = name
-            .strip_prefix(stem)
-            .and_then(|rest| rest.strip_prefix('-'))
-            .and_then(|number| number.parse().ok());
-        if let Some(attempt) = attempt {
-            opened.push((attempt, entry.path()));
-        }
-    }
+/// Every checkout `who` opened in this run, the latest attempt first:
+/// the ones on a branch of `who`'s attempts, as `repo`'s own list of
+/// worktrees names them.
+async fn units_of(
+    repo: &Path,
+    run_id: &RunId,
+    who: &UnitId,
+    supervision: Supervision<'_>,
+) -> Result<Vec<PathBuf>, WorktreeError> {
+    let listing =
+        crate::git::output(repo, &["worktree", "list", "--porcelain"], supervision).await?;
+    let ours = format!("refs/heads/{}", super::unit_branches(run_id, who));
+    let mut opened: Vec<(u32, PathBuf)> = super::checkouts(&listing)
+        .into_iter()
+        .filter_map(|(path, branch)| {
+            let attempt = branch?.strip_prefix(&ours)?.parse().ok()?;
+            Some((attempt, path))
+        })
+        .collect();
     opened.sort_by_key(|(attempt, _)| std::cmp::Reverse(*attempt));
-    opened.into_iter().map(|(_, path)| path).collect()
+    Ok(opened.into_iter().map(|(_, path)| path).collect())
 }
 
 /// Puts the work committed at `left` back as uncommitted changes on the

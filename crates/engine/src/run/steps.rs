@@ -3,9 +3,8 @@
 //! serves so the loop reads as the schedule it runs.
 
 use yunta_core::events::{
-    EventPayload, Evidence, Failure, FindingSeverity, NodeReroutedPayload, PauseReason,
-    PromotionSignaledPayload, RerouteCause, RerouteOrigin, RunFinishedPayload, TerminalState,
-    TokenUsage,
+    EventPayload, Evidence, Failure, NodeReroutedPayload, PauseReason, PromotionSignaledPayload,
+    RerouteCause, RerouteOrigin, RunFinishedPayload, TerminalState, TokenUsage,
 };
 use yunta_core::{ModeName, NodeId};
 
@@ -18,7 +17,6 @@ use super::{
     schedule, RunCtx, RunError, RunReport, RunTerminal,
 };
 use yunta_core::events::{NodeEvent, RunEvent};
-use yunta_core::{Location, RelativePath};
 
 /// A corrupt log is exactly the one you most want exported — each event
 /// serializes on its own, so a broken *sequence* doesn't stop the forensic
@@ -63,49 +61,7 @@ pub(super) async fn finish(
     if terminal != TerminalState::Done {
         return Ok(state);
     }
-    let wants_cleanup = ctx.manifest.workflow.on_finish.iter().any(|step| {
-        matches!(
-            step,
-            yunta_core::OnFinishStep::Cleanup {
-                cleanup: yunta_core::CleanupTarget::Worktree
-            }
-        )
-    });
-    if wants_cleanup && ctx.manifest.isolation == yunta_core::Isolation::Worktree {
-        match crate::worktree::cleanup_worktree(
-            ctx.worktree,
-            &crate::worktree::run_branch(ctx.run_id),
-            ctx.root_supervision(),
-        )
-        .await
-        {
-            Ok(crate::worktree::WorktreeCleanup::Removed) => {}
-            Ok(crate::worktree::WorktreeCleanup::NotALinkedWorktree) => {
-                ctx.engine_finding(
-                    None,
-                    "cleanup-not-a-worktree",
-                    FindingSeverity::Minor,
-                    "on_finish.cleanup: worktree skipped".to_string(),
-                    Location::work(RelativePath::here(), None),
-                    "the run's tree is not a linked git worktree, so removing it would delete a \
-                     primary checkout — nothing was touched"
-                        .to_string(),
-                )
-                .await?;
-            }
-            Err(e) => {
-                ctx.engine_finding(
-                    None,
-                    "cleanup-failed",
-                    FindingSeverity::Minor,
-                    "on_finish.cleanup: worktree failed".to_string(),
-                    Location::work(RelativePath::here(), None),
-                    format!("the run's linked worktree could not be removed: {e}"),
-                )
-                .await?;
-            }
-        }
-    }
+    super::cleanup::worktrees(ctx).await?;
     Ok(state)
 }
 

@@ -5,7 +5,7 @@
 //! after the run was created never loses it; a removal that fails is
 //! warned and left uncounted, never reported as reclaimed.
 
-use yunta_testkit::{init_repo, run_id_from, stderr, stdout, write, yunta_in};
+use yunta_testkit::{git_output, init_repo, run_id_from, stderr, stdout, write, yunta_in};
 
 const ONE_NODE: &str = "name: only-node\nnodes:\n  - id: only\n    kind: bash\n    run: \"true\"\n";
 
@@ -45,6 +45,48 @@ fn gc_reclaims_a_finished_run_past_its_retention_window() {
     assert!(gc.status.success(), "stderr: {}", stderr(&gc));
     assert!(stdout(&gc).contains("reclaimed"), "got: {}", stdout(&gc));
     assert!(!run_dir.exists(), "run.dir should have been removed");
+}
+
+/// What git held of a collected run goes with its files: the checkouts
+/// its units worked in, and the branches they worked on.
+#[test]
+fn gc_takes_a_collected_run_s_unit_checkouts_and_branches() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "storage:\n  retention_days: 0\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: scoped\nnodes:\n  - id: only\n    kind: bash\n    run: \"echo a > a.txt\"\n    scope: [\"a.txt\"]\n",
+    );
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success(), "stderr: {}", stderr(&run));
+    let units = || {
+        git_output(
+            &repo,
+            &[
+                "for-each-ref",
+                "--format=%(refname)",
+                "refs/heads/yunta/unit/",
+            ],
+        )
+    };
+    assert!(
+        !units().trim().is_empty(),
+        "the scoped node worked on a branch of its own"
+    );
+
+    let gc = yunta_in!(&repo, &home, &["gc"]);
+
+    assert!(gc.status.success(), "stderr: {}", stderr(&gc));
+    assert_eq!(units().trim(), "");
+    let listing = git_output(&repo, &["worktree", "list", "--porcelain"]);
+    assert!(!listing.contains("unit-worktrees"), "{listing}");
 }
 
 #[test]

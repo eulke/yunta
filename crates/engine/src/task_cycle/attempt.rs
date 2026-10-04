@@ -158,7 +158,6 @@ pub(super) async fn run_one_attempt(
         },
         Work {
             unit,
-            index: &crate::run_dir::index_for(&params.setup.run_dir, &unit.who),
             staged: &last_staged,
         },
         memo,

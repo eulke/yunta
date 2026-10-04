@@ -89,7 +89,9 @@ async fn refuse_denied(
     let supervision = ctx.root_supervision();
     let tree = crate::worktree::capture_tree(ctx.worktree, index, supervision).await?;
     let head = crate::worktree::head_commit(ctx.worktree, supervision).await?;
-    let added = crate::scope::changed_between(ctx.worktree, &head, &tree, supervision).await?;
+    let added =
+        crate::scope::changed_between(ctx.worktree, head.as_str(), tree.as_str(), supervision)
+            .await?;
     let refused = crate::scope::denied(&added, &deny, &[])?;
     crate::worktree::restore(ctx.worktree, &refused, supervision).await?;
     Ok(refused)

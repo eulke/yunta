@@ -26,7 +26,6 @@ use yunta_core::{CommitSha, Spec, SpecFile, Task, TaskId, TasksFile};
 
 use super::session::{RunToolError, SessionTools};
 use crate::task_cycle::{probe, CriterionRun};
-use crate::worktree::{open_unit, UnitHome, UnitId};
 
 /// What a spec's handover found: every rule it breaks, and how each test
 /// of a task the plan declares answered in the run's tree with every
@@ -48,7 +47,8 @@ impl SessionTools {
         let events = self.events().await?;
         let prior = crate::tasks::prior_registrations(&events);
         let current = crate::replay::derive(&events).tasks;
-        let (checkout, _) = self.handover_checkout().await?;
+        let probing = self.handover_checkout().await?;
+        let checkout = probing.checkout.clone();
         let supervision = self.host.supervision(&self.stop);
         // A plan a gate shows a person says what it changes and why.
         let mut found = match crate::tasks::plan_reviewed(&self.host.workflow, &events, &self.node)
@@ -71,6 +71,7 @@ impl SessionTools {
                 results: crate::task_cycle::to_results(&probes),
             });
         }
+        probing.done(supervision).await;
         Ok((found, ran))
     }
 
@@ -98,7 +99,8 @@ impl SessionTools {
         // A test that runs none of the spec's files judges the work by
         // nothing the spec wrote; a file nothing runs judges nothing.
         broken.extend(spec.untested());
-        let (checkout, base) = self.handover_checkout().await?;
+        let probing = self.handover_checkout().await?;
+        let (checkout, base) = (probing.checkout.clone(), probing.base.clone());
         let supervision = self.host.supervision(&self.stop);
         broken.extend(already_held(&checkout, &base, spec, &asked, supervision).await?);
         write_test_files(&checkout, spec).await?;
@@ -113,6 +115,7 @@ impl SessionTools {
                 .failing
                 .extend(runs.into_iter().map(|run| (one.task.clone(), run)));
         }
+        probing.done(supervision).await;
         Ok(proven)
     }
 
@@ -157,11 +160,13 @@ impl SessionTools {
         id: &yunta_core::FindingId,
         cmd: &str,
     ) -> Result<Option<Diagnostic>, RunToolError> {
-        let (checkout, _) = self.handover_checkout().await?;
+        let probing = self.handover_checkout().await?;
         let supervision = self.host.supervision(&self.stop);
-        let run = crate::task_cycle::probe_command(cmd, &checkout, &self.host.memo, supervision)
-            .await
-            .map_err(|source| RunToolError::Check { source })?;
+        let run =
+            crate::task_cycle::probe_command(cmd, &probing.checkout, &self.host.memo, supervision)
+                .await
+                .map_err(|source| RunToolError::Check { source })?;
+        probing.done(supervision).await;
         let problem = if run.could_not_run().is_some() {
             Problem::rule(
                 RuleCode::CriterionCannotRun,
@@ -222,48 +227,48 @@ impl SessionTools {
         )
     }
 
-    /// A checkout of the run's tree as it stands, for this node's
-    /// handed-over documents alone, and the commit it holds: made once,
-    /// and put back to the run's tree before each later submission. What
-    /// its builds leave in ignored directories stays, so a second
-    /// submission does not pay a cold build again.
-    async fn handover_checkout(&self) -> Result<(PathBuf, CommitSha), RunToolError> {
+    /// A checkout of the run's tree as it stands, held for this
+    /// submission's probes, and the commit it holds. What builds leave in
+    /// ignored directories stays from one probe to the next — and from a
+    /// unit's work to a probe — so a submission does not pay a cold build.
+    async fn handover_checkout(&self) -> Result<Probing, RunToolError> {
         let supervision = self.host.supervision(&self.stop);
         let base = crate::worktree::head_commit(&self.host.worktree, supervision)
             .await
             .map_err(|source| RunToolError::Handover {
                 detail: source.to_string(),
             })?;
-        let who = UnitId::Handover(self.node.clone());
-        let checkout = crate::run_dir::unit_worktrees(&self.host.run_dir).join(format!("{who}-1"));
-        let reset = if checkout.is_dir() {
-            crate::git::output(
-                &checkout,
-                &["reset", "-q", "--hard", base.as_str()],
-                supervision,
-            )
+        let (checkout, held) = self
+            .host
+            .pool
+            .open_detached(&self.host.worktree, &base, supervision)
             .await
-            .and(crate::git::output(&checkout, &["clean", "-q", "-fd"], supervision).await)
-            .map(|_| ())
-            .map_err(|failed| failed.detail())
-        } else {
-            open_unit(
-                UnitHome {
-                    repo: &self.host.worktree,
-                    run_dir: &self.host.run_dir,
-                    run_id: &self.host.run_id,
-                    base: &base,
-                },
-                who,
-                1,
-                supervision,
-            )
-            .await
-            .map(|_| ())
-            .map_err(|failed| failed.to_string())
-        };
-        reset.map_err(|detail| RunToolError::Handover { detail })?;
-        Ok((checkout, base))
+            .map_err(|source| RunToolError::Handover {
+                detail: source.to_string(),
+            })?;
+        Ok(Probing {
+            checkout,
+            base,
+            _held: held,
+        })
+    }
+}
+
+/// A checkout held for one submission's probes.
+struct Probing {
+    checkout: PathBuf,
+    base: CommitSha,
+    _held: crate::worktree::Lease,
+}
+
+impl Probing {
+    /// Gives the checkout back with nothing the probes wrote in it, so
+    /// the pool can hand it to the next unit. One that could not be put
+    /// back stays out of the pool.
+    async fn done(self, supervision: crate::process::Supervision<'_>) {
+        if let Err(error) = crate::worktree::put_back(&self.checkout, supervision).await {
+            tracing::debug!(%error, "a probe's checkout stays out of the pool");
+        }
     }
 }
 

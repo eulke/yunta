@@ -169,7 +169,7 @@ pub use view::{
 pub use wakefulness::SETTLE_AFTER_SUSPENSION;
 pub use worktree::{
     capture_tree, cleanup_worktree, commit_tree, commit_work, hand_over_worktree, head_commit,
-    head_tree, land, open_unit, prepare_worktree, rebase_onto, release_worktree, run_branch,
-    snapshot_commit, unit_branch, Rebase, RunWorktree, Unit, UnitHome, UnitId, WorktreeCleanup,
-    WorktreeError, WorktreeIntegrity, WorktreePrepared,
+    head_tree, land, prepare_worktree, rebase_onto, release_worktree, reopen_unit, run_branch,
+    run_units, snapshot_commit, unit_branch, CheckoutPool, Lease, Rebase, RunWorktree, Unit,
+    UnitHome, UnitId, WorktreeCleanup, WorktreeError, WorktreeIntegrity, WorktreePrepared,
 };

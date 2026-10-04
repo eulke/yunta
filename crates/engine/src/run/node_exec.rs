@@ -100,7 +100,9 @@ pub(super) async fn execute_node(
     if !crate::audits(node) {
         return Box::pin(execute_in_its_tree(ctx, node, attempt, cancel)).await;
     }
-    let (unit, continuing) = node_unit(ctx, node, attempt).await?;
+    // The checkout stays held until the node's attempt has ended — its
+    // work landed, or left for a session to continue.
+    let (unit, _held, continuing) = node_unit(ctx, node, attempt).await?;
     Box::pin(execute_in_its_tree(
         &ctx.in_unit(&unit, continuing.as_ref()),
         node,
@@ -110,24 +112,39 @@ pub(super) async fn execute_node(
     .await
 }
 
-/// The checkout this attempt works in, and the session it picks back up
-/// there. A session that asked for scope and got it continues in the
-/// checkout it saw; with that checkout gone, the attempt opens a unit of
-/// its own on the run's tree, fresh, and the log says the session was not
-/// resumed.
+/// The checkout this attempt works in, held for it, and the session it
+/// picks back up there. A session that asked for scope and got it
+/// continues in the checkout it saw; with that checkout gone, the attempt
+/// opens a unit of its own on the run's tree, fresh, and the log says the
+/// session was not resumed.
 async fn node_unit(
     ctx: &RunCtx<'_>,
     node: &Node,
     attempt: u32,
-) -> Result<(crate::worktree::Unit, Option<crate::task_cycle::Continuing>), RunError> {
+) -> Result<
+    (
+        crate::worktree::Unit,
+        crate::worktree::Lease,
+        Option<crate::task_cycle::Continuing>,
+    ),
+    RunError,
+> {
     let who = crate::worktree::UnitId::Node(node.id.clone());
     let continuing = super::continuation::continuation(ctx, node).await?;
     if continuing.is_some() {
-        let reopened =
-            crate::worktree::reopen_unit(ctx.run_dir, who.clone(), None, ctx.root_supervision())
-                .await?;
+        let reopened = crate::worktree::reopen_unit(
+            ctx.worktree,
+            ctx.run_id,
+            who.clone(),
+            None,
+            ctx.root_supervision(),
+        )
+        .await?;
         match reopened {
-            Some(unit) => return Ok((unit, continuing)),
+            Some(unit) => {
+                let held = ctx.pool.hold(unit.worktree.clone()).await;
+                return Ok((unit, held, continuing));
+            }
             None => super::continuation::not_resumed(ctx, node).await?,
         }
     }
@@ -140,19 +157,21 @@ async fn node_unit(
         ctx.root_supervision(),
     )
     .await?;
-    let unit = crate::worktree::open_unit(
-        crate::worktree::UnitHome {
-            repo: ctx.worktree,
-            run_dir: ctx.run_dir,
-            run_id: ctx.run_id,
-            base: &base,
-        },
-        who,
-        attempt,
-        ctx.root_supervision(),
-    )
-    .await?;
-    Ok((unit, None))
+    let (unit, held) = ctx
+        .pool
+        .open(
+            crate::worktree::UnitHome {
+                repo: ctx.worktree,
+                run_dir: ctx.run_dir,
+                run_id: ctx.run_id,
+                base: &base,
+            },
+            who,
+            attempt,
+            ctx.root_supervision(),
+        )
+        .await?;
+    Ok((unit, held, None))
 }
 
 async fn execute_in_its_tree(

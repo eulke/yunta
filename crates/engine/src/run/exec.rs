@@ -349,6 +349,7 @@ fn build_ctx(
     // One cache of criterion results per invocation, read by every task
     // cycle and by every check a task session asks for through the host.
     let memo = std::sync::Arc::new(Memo::new(manifest.config_hash.clone()));
+    let pool = crate::worktree::CheckoutPool::new(run_dir);
     let registry_for_host = registry.clone();
     let subprocess_vars = subprocess_vars(ambient, &manifest.config);
     let ctx = RunCtx {
@@ -362,6 +363,7 @@ fn build_ctx(
         clock,
         ids,
         memo: memo.clone(),
+        pool: pool.clone(),
         human_interaction,
         adapter_override,
         budget_lifted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -395,6 +397,7 @@ fn build_ctx(
                     .and_then(|limits| limits.max_artifact_bytes),
                 redactor,
                 memo,
+                pool,
                 process_registry: registry_for_host,
                 subprocess_vars,
                 environment: crate::process::execution_environment(ambient),

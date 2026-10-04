@@ -79,7 +79,7 @@ pub(super) async fn dispatch(command: Command) -> Result<Outcome, CliError> {
         }
         Command::Doctor { session } => commands::doctor::doctor(session).await,
         Command::Mcp => commands::mcp::mcp().await,
-        Command::Gc { dry_run } => commands::gc::gc(dry_run),
+        Command::Gc { dry_run } => commands::gc::gc(dry_run).await,
         Command::Graph {
             workflow,
             run,

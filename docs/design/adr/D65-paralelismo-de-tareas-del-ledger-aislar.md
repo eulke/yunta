@@ -3,14 +3,16 @@ number: D65
 title: "Paralelismo de tareas del ledger: aislar para trabajar, serializar para verificar (Contrato §5.5)"
 status: revised
 revises: []
-revised_by: [D196]
+revised_by: [D196, D231]
 ---
 
 # D65 — Paralelismo de tareas del ledger: aislar para trabajar, serializar para verificar (Contrato §5.5)
 
 *(Revisada por D196: guards y suites globales corren una vez por árbol
 distinto, no una vez por lote; cada intento y cada integración dejan un árbol
-propio, y la suite del linaje sostiene a cada tarea como `guard`.)*
+propio, y la suite del linaje sostiene a cada tarea como `guard`. Revisada por
+D231: el checkout de cada unidad sale de un pool del run y conserva lo que git
+ignora.)*
 
 `concurrency: N` en el loop; lotes formados con tareas `ready` de scopes
 disjuntos (la validación de scopes pasa de advertencia a criterio de

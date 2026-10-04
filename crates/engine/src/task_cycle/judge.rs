@@ -7,14 +7,14 @@
 //! here — the same criteria, the same cache, the same audit — so the
 //! answer a session gets is the answer its close would give that tree.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use yunta_core::Task;
 
 use super::criteria::{post_check, Memo, PostCheck};
 use super::{CriterionRun, TaskCycleError};
 use crate::process::Supervision;
-use crate::scope::{audit, ScopeCheckResult};
+use crate::scope::{audit_tree, ScopeCheckResult};
 use crate::worktree::Unit;
 
 /// What judging a task's work found.
@@ -46,8 +46,6 @@ pub(crate) struct Work<'a> {
     /// the diff is taken against, so an attempt answers for what an
     /// earlier one of its own left behind.
     pub unit: &'a Unit,
-    /// The private index the audit stages the diff through.
-    pub index: &'a Path,
     /// What the adapter staged for its own mechanics, which no audit
     /// counts against the task.
     pub staged: &'a [PathBuf],
@@ -68,11 +66,14 @@ pub(crate) async fn judge(
     let PostCheck {
         runs: criteria,
         waiting,
+        tree,
     } = post_check(task, cwd, memo, supervision).await?;
-    let scope = audit(
+    // The tree the criteria answered for is the tree the audit measures:
+    // the checkout is read once.
+    let scope = audit_tree(
         cwd,
         &work.unit.from,
-        work.index,
+        &tree,
         ceiling,
         work.staged,
         supervision,

@@ -92,7 +92,6 @@ async fn judged(params: &AttemptParams<'_>) -> Result<Judgement, TaskCycleError>
         task,
         unit,
         memo,
-        setup,
         already_granted_paths,
         supervision,
         ..
@@ -109,11 +108,7 @@ async fn judged(params: &AttemptParams<'_>) -> Result<Judgement, TaskCycleError>
             scope: &scope,
             deny: params.denied,
         },
-        Work {
-            unit,
-            index: &crate::run_dir::index_for(&setup.run_dir, &unit.who),
-            staged: &[],
-        },
+        Work { unit, staged: &[] },
         memo,
         supervision,
     )

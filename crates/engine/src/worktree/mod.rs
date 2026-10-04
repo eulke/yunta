@@ -28,7 +28,9 @@
 mod branches;
 mod commit;
 mod integrity;
+mod listing;
 mod overlay;
+mod pool;
 mod unit;
 
 use std::path::{Path, PathBuf};
@@ -41,14 +43,17 @@ use yunta_core::{CommitSha, InvalidId, Isolation, Pid, TreeId};
 use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
 
 use crate::process::Supervision;
+pub(crate) use branches::unit_branches;
 pub(crate) use branches::RUN_BRANCHES;
-pub use branches::{run_branch, unit_branch};
+pub use branches::{run_branch, run_units, unit_branch};
 pub use commit::{commit_tree, restore};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
+pub(crate) use listing::checkouts;
 pub use overlay::{remove_files, tree_with, write_files};
+pub use pool::{put_back, release_unit_checkouts, CheckoutPool, Lease};
 pub use unit::{
-    carry_work, commit_work, land, open_unit, rebase_onto, reopen_unit, snapshot_commit, Carried,
-    Rebase, Unit, UnitHome, UnitId,
+    carry_work, commit_work, land, rebase_onto, reopen_unit, snapshot_commit, Carried, Rebase,
+    Unit, UnitHome, UnitId,
 };
 
 #[derive(Debug, Error)]
@@ -451,6 +456,12 @@ pub async fn capture_tree(
     supervision: Supervision<'_>,
 ) -> Result<TreeId, WorktreeError> {
     let index = private_index(index).await?;
+    // A private index begins as a copy of the checkout's own, so the
+    // first capture hashes only what changed since the checkout last
+    // staged anything — not every file it holds.
+    if !tokio::fs::try_exists(&index).await.unwrap_or(false) {
+        seed_index(cwd, &index, supervision).await;
+    }
     // The index travels the way every other value this engine hands a
     // child does: through the supervision it is already governed by.
     let mut env: Vec<(String, String)> = supervision.env.to_vec();
@@ -468,6 +479,25 @@ pub async fn capture_tree(
             cwd: cwd.to_path_buf(),
             source,
         })
+}
+
+/// Copies `cwd`'s own index to `index`. A checkout with no index of its
+/// own, or one that cannot be copied, leaves the private index to start
+/// from nothing, which costs time and nothing else.
+async fn seed_index(cwd: &Path, index: &Path, supervision: Supervision<'_>) {
+    let own = crate::git::output(
+        cwd,
+        &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+        supervision,
+    )
+    .await;
+    let copied = match own {
+        Ok(own) => tokio::fs::copy(own.trim(), index).await.map(|_| ()),
+        Err(error) => Err(std::io::Error::other(error)),
+    };
+    if let Err(error) = copied {
+        tracing::debug!(%error, "a private index starts from nothing");
+    }
 }
 
 /// `index` made absolute, with its directory in place.

@@ -37,7 +37,18 @@ pub fn run_branch(run_id: &RunId) -> String {
 /// both start at 1. A name built from the unit alone asks git for one
 /// branch twice, and the second run cannot have it.
 pub fn unit_branch(run_id: &RunId, who: &UnitId, attempt: u32) -> String {
-    format!("{UNIT_BRANCHES}/{run_id}/{who}/{attempt}")
+    format!("{}{attempt}", unit_branches(run_id, who))
+}
+
+/// What every branch of `who`'s attempts in `run_id` starts with: the
+/// attempt number follows it.
+pub(crate) fn unit_branches(run_id: &RunId, who: &UnitId) -> String {
+    format!("{}/{who}/", run_units(run_id))
+}
+
+/// Where the branches of every unit of `run_id` live.
+pub fn run_units(run_id: &RunId) -> String {
+    format!("{UNIT_BRANCHES}/{run_id}")
 }
 
 #[cfg(test)]

@@ -15,8 +15,8 @@ use yunta_core::process::signal::Liveness;
 use yunta_core::{CommitSha, Isolation, Pid, SystemClock};
 use yunta_engine::lock::{acquire, Acquired, Contention, LockError, LockOwner, OwnerProbe};
 use yunta_engine::{
-    commit_work, land, open_unit, prepare_worktree, rebase_onto, release_worktree, run_branch,
-    unit_branch, Rebase, Unit, UnitHome, UnitId, WorktreeError,
+    commit_work, land, prepare_worktree, rebase_onto, release_worktree, run_branch, unit_branch,
+    Rebase, Unit, UnitHome, UnitId, WorktreeError,
 };
 use yunta_testkit::{git_output, init_repo, Owner};
 
@@ -673,19 +673,20 @@ async fn a_unit_at_odds_with_its_tree(root: &Path, run: &str) -> (std::path::Pat
     yunta_testkit::git(&repo, &["add", "-A"]);
     yunta_testkit::git(&repo, &["commit", "-q", "-m", "shared"]);
 
-    let unit = open_unit(
-        UnitHome {
-            repo: &repo,
-            run_dir: root,
-            run_id: &yunta_core::RunId::from(run),
-            base: &head(&repo),
-        },
-        UnitId::Task("T001".into()),
-        1,
-        owner.supervision(),
-    )
-    .await
-    .expect("the unit opens in a tree of its own");
+    let (unit, _held) = yunta_engine::CheckoutPool::new(root)
+        .open(
+            UnitHome {
+                repo: &repo,
+                run_dir: root,
+                run_id: &yunta_core::RunId::from(run),
+                base: &head(&repo),
+            },
+            UnitId::Task("T001".into()),
+            1,
+            owner.supervision(),
+        )
+        .await
+        .expect("the unit opens in a tree of its own");
 
     tokio::fs::write(unit.worktree.join("shared.txt"), "the unit's\n")
         .await
@@ -758,19 +759,20 @@ async fn a_unit_that_lands_moves_the_tree_it_landed_in() {
     init_repo(&repo);
     let run = yunta_core::RunId::from("01JUNITLANDSCLEAN00000000A");
 
-    let unit = open_unit(
-        UnitHome {
-            repo: &repo,
-            run_dir: root.path(),
-            run_id: &run,
-            base: &head(&repo),
-        },
-        UnitId::Node("build".into()),
-        1,
-        owner.supervision(),
-    )
-    .await
-    .expect("the unit opens in a tree of its own");
+    let (unit, _held) = yunta_engine::CheckoutPool::new(root.path())
+        .open(
+            UnitHome {
+                repo: &repo,
+                run_dir: root.path(),
+                run_id: &run,
+                base: &head(&repo),
+            },
+            UnitId::Node("build".into()),
+            1,
+            owner.supervision(),
+        )
+        .await
+        .expect("the unit opens in a tree of its own");
     tokio::fs::write(unit.worktree.join("mine.txt"), "work\n")
         .await
         .unwrap();
@@ -808,19 +810,20 @@ async fn a_unit_that_changed_nothing_commits_nothing() {
     init_repo(&repo);
     let base_commit = head(&repo);
 
-    let unit = open_unit(
-        UnitHome {
-            repo: &repo,
-            run_dir: root.path(),
-            run_id: &yunta_core::RunId::from("01JUNITCHANGEDNOTHING0000A"),
-            base: &base_commit,
-        },
-        UnitId::Task("T001".into()),
-        1,
-        owner.supervision(),
-    )
-    .await
-    .expect("the unit opens in a tree of its own");
+    let (unit, _held) = yunta_engine::CheckoutPool::new(root.path())
+        .open(
+            UnitHome {
+                repo: &repo,
+                run_dir: root.path(),
+                run_id: &yunta_core::RunId::from("01JUNITCHANGEDNOTHING0000A"),
+                base: &base_commit,
+            },
+            UnitId::Task("T001".into()),
+            1,
+            owner.supervision(),
+        )
+        .await
+        .expect("the unit opens in a tree of its own");
 
     commit_work(&unit, "nothing at all", owner.supervision())
         .await

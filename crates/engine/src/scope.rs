@@ -92,13 +92,7 @@ pub async fn changed_since(
     supervision: Supervision<'_>,
 ) -> Result<Vec<PathBuf>, ScopeCheckError> {
     let now = crate::worktree::capture_tree(cwd, index, supervision).await?;
-    let bytes = git_bytes(
-        cwd,
-        &["diff", "--name-only", "-z", from.as_str(), now.as_str()],
-        supervision,
-    )
-    .await?;
-    Ok(nul_separated_paths(&bytes))
+    changed_between(cwd, from.as_str(), now.as_str(), supervision).await
 }
 
 /// What a diff and a declared scope mean together — a function of its
@@ -132,7 +126,22 @@ pub async fn audit(
     staged: &[PathBuf],
     supervision: Supervision<'_>,
 ) -> Result<ScopeCheckResult, ScopeCheckError> {
-    let diff = changed_since(cwd, from, index, supervision).await?;
+    let now = crate::worktree::capture_tree(cwd, index, supervision).await?;
+    audit_tree(cwd, from, &now, ceiling, staged, supervision).await
+}
+
+/// [`audit`] of the tree `now`, which the caller already captured from
+/// `cwd` — a check that read the checkout a moment ago does not read it
+/// again.
+pub async fn audit_tree(
+    cwd: &Path,
+    from: &TreeId,
+    now: &TreeId,
+    ceiling: Ceiling<'_>,
+    staged: &[PathBuf],
+    supervision: Supervision<'_>,
+) -> Result<ScopeCheckResult, ScopeCheckError> {
+    let diff = changed_between(cwd, from.as_str(), now.as_str(), supervision).await?;
     let denied = denied(&diff, ceiling.deny, staged)?;
     let mut violations = violations(&diff, ceiling.scope, staged)?;
     for path in &denied {
@@ -241,20 +250,16 @@ pub fn effective_scope(node: &yunta_core::Node, state: &RunState) -> Option<Vec<
     )
 }
 
-/// The paths that differ between commit `from` and tree `to`: what a run
-/// changed between its base and the tree an attempt starts from.
+/// The paths that differ between `from` and `to` — each a commit or a
+/// tree, by git's name for it: what a run changed between its base and
+/// the tree an attempt starts from, or what a unit changed since it began.
 pub async fn changed_between(
     cwd: &Path,
-    from: &yunta_core::CommitSha,
-    to: &TreeId,
+    from: &str,
+    to: &str,
     supervision: Supervision<'_>,
 ) -> Result<Vec<PathBuf>, ScopeCheckError> {
-    let bytes = git_bytes(
-        cwd,
-        &["diff", "--name-only", "-z", from.as_str(), to.as_str()],
-        supervision,
-    )
-    .await?;
+    let bytes = git_bytes(cwd, &["diff", "--name-only", "-z", from, to], supervision).await?;
     Ok(nul_separated_paths(&bytes))
 }
 

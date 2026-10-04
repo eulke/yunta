@@ -52,8 +52,8 @@ pub(super) async fn emit_started(
 async fn changed_by_the_run(ctx: &RunCtx<'_>, from: &TreeId) -> Result<Vec<ScopeGlob>, RunError> {
     let paths = crate::scope::changed_between(
         ctx.worktree,
-        &ctx.manifest.base_commit,
-        from,
+        ctx.manifest.base_commit.as_str(),
+        from.as_str(),
         ctx.root_supervision(),
     )
     .await?;

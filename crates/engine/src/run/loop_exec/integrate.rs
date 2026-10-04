@@ -11,8 +11,7 @@ use yunta_core::events::{
 };
 use yunta_core::{CommitSha, Node, ScopeGlob, Seq, Task};
 
-use crate::scope::audit;
-use crate::task_cycle::{post_check, to_results, BlockedCause, Memo, TaskCycleReport, TaskOutcome};
+use crate::task_cycle::{post_check, to_results, BlockedCause, Memo, TaskOutcome};
 use crate::worktree::{commit_work, land, rebase_onto, Rebase, Unit};
 
 use super::depart::PendingDeparture;
@@ -32,7 +31,7 @@ use yunta_core::events::{NodeEvent, TaskEvent};
 pub(super) async fn integrate_batch(
     ctx: &RunCtx<'_>,
     node: &Node,
-    dispatches: Vec<Result<(&Task, Unit, TaskCycleReport), RunError>>,
+    dispatches: Vec<Result<super::dispatch::Dispatched<'_>, RunError>>,
     scope_expansion: Option<&yunta_core::ScopeExpansion>,
     cancel: &tokio_util::sync::CancellationToken,
     state: &mut LoopState,
@@ -44,7 +43,14 @@ pub(super) async fn integrate_batch(
     // one its sessions declared is on the log by the time they ended.
     let owed = ctx.run_view().await?.state.tasks;
     for dispatch in dispatches {
-        let (task, unit, mut report) = dispatch?;
+        // The checkout stays held until this task is integrated or set
+        // aside below.
+        let super::dispatch::Dispatched {
+            task,
+            unit,
+            lease: _held,
+            mut report,
+        } = dispatch?;
         if let Some(cause) = super::depart::owed_first(&owed, &report) {
             report.outcome = TaskOutcome::Blocked { cause };
         }
@@ -340,10 +346,10 @@ async fn integrate_task(
     // Every test a person approved, the task's own among them: its own
     // are what it staged, which the audit leaves out of its diff.
     let deny = crate::run::denied::Denied::of(ctx).await?.every();
-    let scope = audit(
+    let scope = crate::scope::audit_tree(
         task_worktree,
         &onto,
-        &crate::run_dir::index_for(ctx.run_dir, &unit.who),
+        &checked.tree,
         crate::scope::Ceiling {
             scope: &effective_scope(ctx, task).await?,
             deny: &deny,

@@ -45,6 +45,8 @@ pub struct HostOf {
     /// cycle reads, so a check a session asks for and the check its
     /// close runs answer the same tree once.
     pub memo: Arc<Memo>,
+    /// The run's checkouts, which a handed-over document is proven in.
+    pub pool: Arc<crate::worktree::CheckoutPool>,
     /// Where the run keeps the process groups it started, so a command
     /// a tool runs is one the run can account for and stop.
     pub process_registry: Option<Arc<ProcessRegistry>>,
@@ -93,6 +95,8 @@ pub struct RunToolsHost {
     pub(super) observer: Option<Arc<dyn RunObserver>>,
     /// The invocation's criterion results, shared with every task cycle.
     pub(super) memo: Arc<Memo>,
+    /// The run's checkouts, shared with every unit of the run.
+    pub(super) pool: Arc<crate::worktree::CheckoutPool>,
     /// The run's process registry, which every command a tool runs joins.
     process_registry: Option<Arc<ProcessRegistry>>,
     /// What the run sets on every subprocess it starts.
@@ -106,6 +110,33 @@ pub struct RunToolsHost {
     pub(super) workflow: Workflow,
 }
 
+/// Each blackboard group's members, by group.
+type Blackboards = HashMap<NodeId, Vec<NodeId>>;
+
+/// Every `coordination: blackboard` group of `workflow` with its members,
+/// and the group each member sits in.
+fn blackboards(workflow: &Workflow) -> (Blackboards, HashMap<NodeId, NodeId>) {
+    let mut groups = HashMap::new();
+    let mut member_of = HashMap::new();
+    for node in &workflow.nodes {
+        if let NodeKind::Parallel {
+            coordination: Coordination::Blackboard,
+            nodes: children,
+            ..
+        } = &node.kind
+        {
+            for child in children {
+                member_of.insert(child.id.clone(), node.id.clone());
+            }
+            groups.insert(
+                node.id.clone(),
+                children.iter().map(|c| c.id.clone()).collect(),
+            );
+        }
+    }
+    (groups, member_of)
+}
+
 impl RunToolsHost {
     pub fn new(workflow: &Workflow, host: HostOf) -> Self {
         let HostOf {
@@ -117,29 +148,13 @@ impl RunToolsHost {
             max_artifact_bytes,
             redactor,
             memo,
+            pool,
             process_registry,
             subprocess_vars,
             environment,
             worktree,
         } = host;
-        let mut groups = HashMap::new();
-        let mut member_of = HashMap::new();
-        for node in &workflow.nodes {
-            if let NodeKind::Parallel {
-                coordination: Coordination::Blackboard,
-                nodes: children,
-                ..
-            } = &node.kind
-            {
-                for child in children {
-                    member_of.insert(child.id.clone(), node.id.clone());
-                }
-                groups.insert(
-                    node.id.clone(),
-                    children.iter().map(|c| c.id.clone()).collect(),
-                );
-            }
-        }
+        let (groups, member_of) = blackboards(workflow);
         Self {
             storage,
             run_id,
@@ -151,6 +166,7 @@ impl RunToolsHost {
             run_dir,
             max_artifact_bytes,
             memo,
+            pool,
             process_registry,
             subprocess_vars,
             environment,
