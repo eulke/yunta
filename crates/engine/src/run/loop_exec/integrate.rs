@@ -382,6 +382,9 @@ async fn integrate_task(
     // with anything to reconcile is that invariant breaking, which
     // `land` reports as the engine error it is.
     let commit = land(unit, ctx.worktree, supervision).await?;
+    // Landed, its checkout goes back to the pool with no branch, and the
+    // branch goes: the run's tree holds its work.
+    crate::worktree::retire_unit_branch(unit, ctx.worktree, supervision).await?;
     Ok(IntegrationOutcome::Integrated { commit })
 }
 

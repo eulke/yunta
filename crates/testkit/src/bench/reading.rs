@@ -20,6 +20,33 @@ impl Bench {
         self.runs_root.join(self.run_id.as_str())
     }
 
+    /// Where the project's pool of checkouts lives — the pool every run of
+    /// this bench takes its checkouts from — known before any run, so a
+    /// fixture can name a path inside one of them.
+    pub fn pool(&self) -> std::path::PathBuf {
+        let common = std::fs::canonicalize(self.worktree.join(".git")).unwrap();
+        let root = self
+            .runs_root
+            .parent()
+            .map(|parent| parent.join("worktrees"))
+            .unwrap_or_else(|| self.runs_root.join("worktrees"));
+        yunta_engine::pool_home(&root, &common)
+    }
+
+    /// The checkouts of the project's pool, by name.
+    pub fn checkouts(&self) -> Vec<String> {
+        let Ok(entries) = std::fs::read_dir(self.pool()) else {
+            return Vec::new();
+        };
+        let mut names: Vec<String> = entries
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
     /// The directory one node writes the files it declares into — known
     /// before the run exists, so a fixture can embed the absolute paths a
     /// session is granted and writes to.

@@ -66,7 +66,11 @@ impl ToolsHost {
                 max_artifact_bytes: None,
                 redactor: yunta_core::Redactor::default(),
                 memo: Arc::new(Memo::new(sha256_hex(b"test-config"))),
-                pool: yunta_engine::CheckoutPool::new(&run_dir),
+                pool: yunta_engine::CheckoutPool::new(
+                    &root.path().join("worktrees"),
+                    &worktree,
+                    &run_dir,
+                ),
                 process_registry: None,
                 subprocess_vars: Vec::new(),
                 environment: Some(tools_environment()),

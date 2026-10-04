@@ -268,7 +268,7 @@ impl SessionTools {
         let (checkout, held) = self
             .host
             .pool
-            .open_detached(&self.host.worktree, &base, supervision)
+            .open_detached(&base, supervision)
             .await
             .map_err(|source| RunToolError::Handover {
                 detail: source.to_string(),

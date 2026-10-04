@@ -34,10 +34,23 @@ pub fn sessions_root(run_dir: &Path) -> PathBuf {
     run_dir.join(SCRATCH_DIR).join("sessions")
 }
 
-/// Where the run's units get a worktree each, so two units of one run
-/// never share a checkout.
+/// Where a run made before its project kept checkouts kept its units'
+/// checkouts, which it takes away when it ends.
 pub fn unit_worktrees(run_dir: &Path) -> PathBuf {
     run_dir.join("unit-worktrees")
+}
+
+/// Where a run's checkouts live: the root its manifest froze, or else the
+/// `worktrees` directory beside the runs root its directory sits in — so
+/// a library caller without frozen paths gets a place next to its runs.
+pub fn worktrees_root(manifest: &yunta_core::Manifest, run_dir: &Path) -> PathBuf {
+    if let Some(paths) = &manifest.paths {
+        return paths.worktrees_root().to_path_buf();
+    }
+    let runs = run_dir.parent().unwrap_or(run_dir);
+    runs.parent()
+        .map(|parent| parent.join("worktrees"))
+        .unwrap_or_else(|| runs.join("worktrees"))
 }
 
 /// The run's baseline: what its suite wrote on the tree the run woke

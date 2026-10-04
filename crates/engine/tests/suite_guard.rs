@@ -449,8 +449,8 @@ async fn the_suite_is_measured_aside_while_the_nodes_before_its_readers_run() {
     let ran = tokio::fs::read_to_string(&ran_in).await.unwrap();
     let measured_in = ran.lines().next().unwrap().to_string();
     assert!(
-        measured_in.contains("unit-worktrees/slot-"),
-        "measured in a checkout of the pool, not the run's own tree: {measured_in}"
+        measured_in.contains("/pool/") && measured_in.contains("/slot-"),
+        "measured in a checkout of the project's pool, not the run's own tree: {measured_in}"
     );
 }
 

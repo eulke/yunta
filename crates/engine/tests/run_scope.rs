@@ -1049,7 +1049,7 @@ async fn a_granted_request_resumes_the_session_that_asked_on_its_own_work() {
     let requests = bench.mock().requests_seen();
     let in_units: Vec<_> = requests
         .iter()
-        .filter(|request| request.cwd.to_string_lossy().contains("unit-worktrees"))
+        .filter(|request| request.cwd.to_string_lossy().contains("/pool/"))
         .map(|request| request.cwd.clone())
         .collect();
     assert_eq!(in_units.len(), 2, "{in_units:?}");

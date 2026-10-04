@@ -138,7 +138,10 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     let continuation = continuation(ctx, node, task, &state, adapter).await?;
     let (unit, lease, resume) = match continuation {
         Some((unit, continuing)) => {
-            let lease = ctx.pool.hold(unit.worktree.clone()).await;
+            let lease = ctx
+                .pool
+                .hold(unit.worktree.clone(), ctx.root_supervision())
+                .await?;
             (unit, lease, Some(continuing))
         }
         None => {

@@ -1,112 +1,20 @@
-//! The checkouts a run's units work in. A unit takes a free checkout of the
-//! run's pool, put back to the commit it starts from, and what git ignores
-//! — a build's output — stays for the next unit. A checkout holding work
-//! that is still somebody's — committed and not landed, or uncommitted — is
-//! never handed to another unit.
+//! The checkouts a run's units work in, taken from their project's pool.
+//! A unit takes a free checkout, put back to the commit it starts from,
+//! and what git ignores — a build's output — stays for the next unit. A
+//! checkout on a unit's branch is that unit's, and work that is still
+//! somebody's — committed and not landed, or uncommitted — is never handed
+//! to another unit.
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+mod pool_world;
 
-use yunta_core::{CommitSha, RunId};
-use yunta_engine::{CheckoutPool, Unit, UnitHome, UnitId};
-use yunta_testkit::{git, git_output, init_repo, Owner};
+use pool_world::{canonical, delete, ignore_builds, write, World, RUN};
+use yunta_engine::UnitId;
+use yunta_testkit::{git, git_output};
 
-const RUN: &str = "01JPOOLEDCHECKOUTS0000000A";
-
-/// A repository that ignores `target/`, and the pool of a run over it.
-struct World {
-    _root: tempfile::TempDir,
-    repo: PathBuf,
-    run_dir: PathBuf,
-    run: RunId,
-    pool: Arc<CheckoutPool>,
-    owner: Owner,
-}
-
-impl World {
-    fn new() -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let repo = root.path().join("repo");
-        std::fs::create_dir_all(&repo).unwrap();
-        init_repo(&repo);
-        ignore_builds(&repo);
-        let run_dir = root.path().join("run");
-        let pool = CheckoutPool::new(&run_dir);
-        World {
-            _root: root,
-            repo,
-            run_dir,
-            run: RunId::from(RUN),
-            pool,
-            owner: Owner::new(),
-        }
-    }
-
-    fn head(&self) -> CommitSha {
-        git_output(&self.repo, &["rev-parse", "HEAD"])
-            .trim()
-            .parse()
-            .unwrap()
-    }
-
-    /// Opens `task`'s unit, handing back the hold on its checkout.
-    async fn open(&self, task: &str) -> (Unit, yunta_engine::Lease) {
-        self.pool
-            .open(
-                UnitHome {
-                    repo: &self.repo,
-                    run_dir: &self.run_dir,
-                    run_id: &self.run,
-                    base: &self.head(),
-                },
-                UnitId::Task(task.into()),
-                1,
-                self.owner.supervision(),
-            )
-            .await
-            .expect("a unit opens in the pool")
-    }
-
-    /// The checkouts the pool holds on disk, by name.
-    fn slots(&self) -> Vec<String> {
-        checkouts_of(&self.run_dir)
-    }
-}
-
-/// Commits a `.gitignore` that ignores `target/` in `repo`.
-fn ignore_builds(repo: &Path) {
-    std::fs::write(repo.join(".gitignore"), "target/\n").unwrap();
-    git(repo, &["add", "-A"]);
-    git(repo, &["commit", "-q", "-m", "ignore builds"]);
-}
-
-/// The checkouts under `run_dir`, by name.
-fn checkouts_of(run_dir: &Path) -> Vec<String> {
-    let mut names: Vec<String> = std::fs::read_dir(run_dir.join("unit-worktrees"))
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    names.sort();
-    names
-}
-
-fn canonical(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap()
-}
-
-fn delete(path: &Path) {
-    std::fs::remove_file(path).unwrap();
-}
-
-fn write(path: &Path, text: &str) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, text).unwrap();
-}
-
-/// A unit done with its checkout leaves it to the next, which finds what
-/// git ignores where the first left it and nothing else of its work.
+/// A unit whose work landed leaves its checkout to the next, which finds
+/// what git ignores where the first left it and nothing else of its work.
 #[tokio::test]
-async fn a_free_checkout_is_reused_with_its_ignored_files_and_nothing_else() {
+async fn a_landed_units_checkout_is_reused_with_its_ignored_files_and_nothing_else() {
     let world = World::new();
     let (first, held) = world.open("T001").await;
     write(&first.worktree.join("target/marker"), "built");
@@ -116,6 +24,7 @@ async fn a_free_checkout_is_reused_with_its_ignored_files_and_nothing_else() {
             .join(yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE),
         "asked",
     );
+    world.land(&first).await;
     drop(held);
 
     let (second, _held) = world.open("T002").await;
@@ -130,7 +39,7 @@ async fn a_free_checkout_is_reused_with_its_ignored_files_and_nothing_else() {
         git_output(&second.worktree, &["branch", "--show-current"]).trim(),
         format!("yunta/unit/{RUN}/task/T002/1")
     );
-    assert_eq!(world.slots(), vec!["slot-1"]);
+    assert_eq!(world.slots().await, vec!["slot-1"]);
 }
 
 /// Two units at work at once never share a checkout.
@@ -142,7 +51,7 @@ async fn a_held_checkout_is_never_given_to_another_unit() {
     let (second, _also) = world.open("T002").await;
 
     assert_ne!(second.worktree, first.worktree);
-    assert_eq!(world.slots(), vec!["slot-1", "slot-2"]);
+    assert_eq!(world.slots().await, vec!["slot-1", "slot-2"]);
 }
 
 /// Work that is still somebody's keeps its checkout: committed and not
@@ -163,7 +72,7 @@ async fn a_checkout_holding_work_not_landed_stays_out_of_the_pool() {
 
     assert_ne!(third.worktree, blocked.worktree);
     assert_ne!(third.worktree, dirty.worktree);
-    assert_eq!(world.slots(), vec!["slot-1", "slot-2", "slot-3"]);
+    assert_eq!(world.slots().await, vec!["slot-1", "slot-2", "slot-3"]);
 }
 
 /// A unit that reopens finds its checkout by the branch it is on, though
@@ -231,22 +140,24 @@ async fn a_loop_s_tasks_build_in_one_warm_checkout() {
         .await;
 
     assert_eq!(report.terminal, yunta_engine::RunTerminal::Finished);
-    assert_eq!(checkouts_of(&bench.run_dir()), vec!["slot-1"]);
+    assert_eq!(bench.checkouts(), vec!["slot-1"]);
 }
 
-/// A run that closes asking to clean up takes its units' checkouts with
-/// it, and the branches whose work its tree holds.
+/// A unit's branch goes as its work lands on the run's tree: a finished
+/// run leaves its checkouts in the pool on no branch, and no branch of a
+/// unit whose work landed — without being asked to clean anything up.
 #[tokio::test]
-async fn a_finished_run_leaves_no_unit_checkout_and_no_landed_unit_branch() {
+async fn a_landed_units_branch_is_gone() {
     let bench = yunta_testkit::Bench::new();
     ignore_builds(&bench.worktree);
-    let workflow = format!("{SECOND_FINDS_THE_FIRST_S_BUILD}on_finish:\n  - cleanup: worktree\n");
 
-    let report = bench.run(&workflow, BUILDS_THEN_WRITES).await;
+    let report = bench
+        .run(SECOND_FINDS_THE_FIRST_S_BUILD, BUILDS_THEN_WRITES)
+        .await;
 
     assert_eq!(report.terminal, yunta_engine::RunTerminal::Finished);
     let listing = git_output(&bench.worktree, &["worktree", "list", "--porcelain"]);
-    assert!(!listing.contains("unit-worktrees"), "{listing}");
+    assert!(!listing.contains("refs/heads/yunta/unit/"), "{listing}");
     let branches = git_output(
         &bench.worktree,
         &[

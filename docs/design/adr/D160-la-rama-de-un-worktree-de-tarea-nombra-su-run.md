@@ -1,9 +1,9 @@
 ---
 number: D160
 title: "La rama de un worktree de tarea nombra su run, y las dos familias de rama son hermanas bajo prefijos fijos"
-status: accepted
+status: revised
 revises: []
-revised_by: []
+revised_by: [D234]
 ---
 
 # D160 — La rama de un worktree de tarea nombra su run, y las dos familias de rama son hermanas bajo prefijos fijos

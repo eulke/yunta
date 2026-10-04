@@ -94,11 +94,7 @@ async fn measure_aside(
 ) -> Result<(), RunError> {
     let supervision = ctx.supervision(&stop);
     let base = &ctx.manifest.base_commit;
-    let (checkout, _held) = match ctx
-        .pool
-        .open_detached(ctx.worktree, base, supervision)
-        .await
-    {
+    let (checkout, _held) = match ctx.pool.open_detached(base, supervision).await {
         // Stopped while its checkout was being made, it measured nothing,
         // like a suite stopped while it ran.
         Err(stopped) if stopped.cancelled() => return Ok(()),

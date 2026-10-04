@@ -50,7 +50,10 @@ pub use commit::{commit_tree, restore};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
 pub(crate) use listing::checkouts;
 pub use overlay::{remove_files, tree_with, write_files};
-pub use pool::{put_back, release_unit_checkouts, CheckoutPool, Lease};
+pub use pool::{
+    forget_run_units, pool_home, put_back, release_unit_checkouts, retire_unit_branch, trim_pool,
+    CheckoutPool, Lease,
+};
 pub use unit::{
     carry_work, commit_work, land, rebase_onto, reopen_unit, snapshot_commit, Carried, Rebase,
     Unit, UnitHome, UnitId,
@@ -122,6 +125,10 @@ pub enum WorktreeError {
         lock_path: PathBuf,
         owner_pid: Option<Pid>,
     },
+    /// A checkout of the project's pool a unit went back to is held by
+    /// another process, which did not let go of it in the moment given.
+    #[error("the checkout `{}` is held by another process", .path.display())]
+    CheckoutHeld { path: PathBuf },
     /// A run's own linked worktree is not at the path its manifest
     /// froze — moved, deleted, or replaced by something git does not
     /// know as a working tree. Not a broken run: the log and the objects

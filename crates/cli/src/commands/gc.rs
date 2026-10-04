@@ -34,8 +34,12 @@ use yunta_core::events::RunEvent;
 pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
     let ctx = Context::load()?;
     let removed = reclaim(&ctx, dry_run)?;
+    let pool = yunta_engine::CheckoutPool::upkeep(&ctx.project.worktrees_root, &ctx.cwd);
     for run_id in &removed {
-        forget_units(&ctx, run_id).await;
+        forget_units(&ctx, &pool, run_id).await;
+    }
+    if !dry_run {
+        trim(&ctx, &pool).await;
     }
     Ok(Outcome::Success)
 }
@@ -43,29 +47,28 @@ pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
 /// What git still holds of a run whose files are gone: the checkouts its
 /// units worked in, and the branches they worked on — a blocked task's
 /// left work among them, which nothing reads once the run is collected.
-async fn forget_units(ctx: &Context, run_id: &RunId) {
+/// The project's checkouts stay, with no branch, for the runs to come.
+async fn forget_units(ctx: &Context, pool: &yunta_engine::CheckoutPool, run_id: &RunId) {
     let supervision = ctx.supervision();
     if let Err(e) = yunta_engine::git::output(&ctx.cwd, &["worktree", "prune"], supervision).await {
         warn(format!("run {}: {e}", run_id.handle()));
         return;
     }
-    let ours = format!("refs/heads/{}/", yunta_engine::run_units(run_id));
-    let branches = match yunta_engine::git::output(
-        &ctx.cwd,
-        &["for-each-ref", "--format=%(refname:short)", &ours],
-        supervision,
-    )
-    .await
-    {
-        Ok(branches) => branches,
-        Err(e) => return warn(format!("run {}: {e}", run_id.handle())),
-    };
-    for branch in branches.lines().map(str::trim).filter(|b| !b.is_empty()) {
-        if let Err(e) =
-            yunta_engine::git::output(&ctx.cwd, &["branch", "-D", branch], supervision).await
-        {
-            warn(format!("run {}: {e}", run_id.handle()));
+    if let Err(e) = yunta_engine::forget_run_units(pool, &ctx.cwd, run_id, supervision).await {
+        warn(format!("run {}: {e}", run_id.handle()));
+    }
+}
+
+/// Takes away the project's free checkouts beyond as many as its runs had
+/// busy at once lately.
+async fn trim(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
+    match yunta_engine::trim_pool(pool, ctx.supervision()).await {
+        Ok(removed) => {
+            for checkout in removed {
+                println!("removed the unused checkout {}", checkout.display());
+            }
         }
+        Err(e) => warn(format!("the project's checkouts: {e}")),
     }
 }
 

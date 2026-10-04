@@ -142,7 +142,10 @@ async fn node_unit(
         .await?;
         match reopened {
             Some(unit) => {
-                let held = ctx.pool.hold(unit.worktree.clone()).await;
+                let held = ctx
+                    .pool
+                    .hold(unit.worktree.clone(), ctx.root_supervision())
+                    .await?;
                 return Ok((unit, held, continuing));
             }
             None => super::continuation::not_resumed(ctx, node).await?,

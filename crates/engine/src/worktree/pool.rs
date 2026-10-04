@@ -1,68 +1,148 @@
-//! The checkouts a run's units work in, reused from one unit to the next.
+//! The checkouts a project's runs work in, reused from one unit and one
+//! run to the next.
 //!
-//! A unit of work used to open a checkout of its own and leave it behind:
-//! a loop of ten tasks made ten checkouts, and a project whose criteria
-//! build something built it from nothing ten times. A run instead keeps a
-//! pool of checkouts — as many as it ever has units at work at once — and
-//! a unit takes a free one, put back to the commit the unit starts from on
-//! a branch of its own. What git ignores — a build's output — stays where
-//! the last unit left it, so the next build starts warm.
+//! A build is right only at the path that built it: what a build leaves
+//! names the directory it ran in, and build tools judge their own output
+//! fresh by time, so a build shared between checkouts — or copied into
+//! another — runs one checkout's code in another's. A project instead
+//! keeps a pool of checkouts at paths of their own, and every checkout a
+//! run works in comes from it: a unit's, a probe's, the measurement's. A
+//! checkout is handed out again where it is, put back to the commit its
+//! next user starts from, and what git ignores — the build — stays there
+//! for that user.
 //!
-//! A checkout is free when no unit holds it and nothing in it is anybody's
-//! still: its work landed on the run's tree, or it never made any, and
-//! nothing in it is uncommitted. A blocked task's committed work, or a
-//! node's uncommitted work a session may continue on, keeps its checkout
-//! out of the pool until the run is done with it.
+//! A checkout is free when nothing in it is uncommitted, no live process
+//! holds it, and nothing it committed is still somebody's: it is on no
+//! branch, or its branch's work is in the commit its next user starts
+//! from. The attempts of one unit take back the checkout one of them
+//! worked in first; work that has not landed keeps its checkout its
+//! unit's. Holding a checkout lasts as long as
+//! the process ([`slot`]); owning one is the branch it is on, which
+//! outlives every process.
 
-use std::collections::BTreeSet;
+mod release;
+mod slot;
+
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
+
+use yunta_core::CommitSha;
 
 use super::{head_tree, prepare_worktree, Unit, UnitHome, UnitId, WorktreeError};
+use crate::lock::Contention;
 use crate::process::Supervision;
 
-/// What every checkout of the pool is called, followed by its number.
-const SLOT: &str = "slot-";
+pub use release::{forget_run_units, release_unit_checkouts, retire_unit_branch, trim_pool};
+use slot::SLOT;
 
-/// A run's checkouts, for one invocation.
+/// A project's checkouts, as one run's invocation reaches them.
 pub struct CheckoutPool {
-    /// Where the checkouts live.
-    home: PathBuf,
-    /// The checkouts a unit holds this moment.
-    held: Mutex<BTreeSet<PathBuf>>,
-    /// One unit chooses at a time, so two never choose the same checkout.
-    choosing: tokio::sync::Mutex<()>,
+    /// Where every project keeps its pool.
+    root: PathBuf,
+    /// A checkout of the project: what its pool is told apart by, and what
+    /// a new checkout is added from.
+    repo: PathBuf,
+    /// The directory of the run taking checkouts through this handle; none
+    /// for the pool's own upkeep.
+    holder: Option<PathBuf>,
+    /// The project's pool directory, read once.
+    home: tokio::sync::OnceCell<PathBuf>,
 }
 
-/// A unit's hold on a checkout of the pool, given back when dropped.
+/// A hold on one checkout of the pool, given back when dropped.
 pub struct Lease {
-    pool: Arc<CheckoutPool>,
-    checkout: PathBuf,
+    lock: Option<PathBuf>,
+}
+
+impl Lease {
+    fn of(lock: PathBuf) -> Self {
+        Lease { lock: Some(lock) }
+    }
+
+    /// The hold on a checkout the pool does not keep — one a run made
+    /// before its project kept checkouts — which nothing else takes.
+    fn outside() -> Self {
+        Lease { lock: None }
+    }
 }
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        self.pool
-            .held
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(&self.checkout);
+        if let Some(lock) = self.lock.take() {
+            // blocking: a `Drop` has no `await` to give, and removing one
+            // lock file is a single syscall. Doing it here is what makes an
+            // early `?` unable to leak the hold.
+            if let Err(error) = std::fs::remove_file(&lock) {
+                tracing::debug!(%error, lock = %lock.display(), "a checkout's hold outlived it");
+            }
+        }
     }
 }
 
+/// What a new checkout of the pool starts as.
+enum Fresh<'a> {
+    /// On a branch of its own, cut from `base`.
+    Unit {
+        branch: &'a str,
+        base: &'a CommitSha,
+    },
+    /// On `base`, with no branch.
+    Detached { base: &'a CommitSha },
+}
+
+/// Where the pool of the project whose git directory is `common_dir`
+/// lives under `root`: one directory per repository, named after it so a
+/// person can tell which is which.
+pub fn pool_home(root: &Path, common_dir: &Path) -> PathBuf {
+    let named = match common_dir.file_name().and_then(|name| name.to_str()) {
+        Some(".git") => common_dir.parent().and_then(Path::file_name),
+        _ => common_dir.file_name(),
+    };
+    let name = named.and_then(|name| name.to_str()).unwrap_or("repository");
+    let hash = yunta_core::sha256_hex(common_dir.to_string_lossy().as_bytes());
+    root.join("pool")
+        .join(format!("{name}-{}", &hash.as_str()[..8]))
+}
+
 impl CheckoutPool {
-    /// The pool of the run whose directory is `run_dir`.
-    pub fn new(run_dir: &Path) -> Arc<Self> {
+    /// The pool of the project `repo` is a checkout of, kept under `root`,
+    /// for the run whose directory is `holder`.
+    pub fn new(root: &Path, repo: &Path, holder: &Path) -> Arc<Self> {
+        Self::reached(root, repo, Some(holder.to_path_buf()))
+    }
+
+    /// The same pool, for its own upkeep: what it holds to tidy is never
+    /// recorded as used.
+    pub fn upkeep(root: &Path, repo: &Path) -> Arc<Self> {
+        Self::reached(root, repo, None)
+    }
+
+    fn reached(root: &Path, repo: &Path, holder: Option<PathBuf>) -> Arc<Self> {
         Arc::new(Self {
-            home: crate::run_dir::unit_worktrees(run_dir),
-            held: Mutex::new(BTreeSet::new()),
-            choosing: tokio::sync::Mutex::new(()),
+            root: root.to_path_buf(),
+            repo: repo.to_path_buf(),
+            holder,
+            home: tokio::sync::OnceCell::new(),
         })
     }
 
+    /// The pool's directory, which exists once the pool has a checkout.
+    pub async fn home(&self, supervision: Supervision<'_>) -> Result<PathBuf, WorktreeError> {
+        self.home
+            .get_or_try_init(|| async {
+                let common_dir = super::common_git_dir(&self.repo, supervision).await?;
+                let common_dir = tokio::fs::canonicalize(&common_dir)
+                    .await
+                    .unwrap_or(common_dir);
+                Ok(pool_home(&self.root, &common_dir))
+            })
+            .await
+            .cloned()
+    }
+
     /// Opens `who`'s unit in a checkout of the pool, on a branch of its own
-    /// cut from `home.base`: a free checkout put back to that commit, or a
-    /// new one when none is free.
+    /// cut from `home.base`: the checkout one of its attempts worked in, a
+    /// free one put back to that commit, or a new one when none is free.
     pub async fn open(
         self: &Arc<Self>,
         home: UnitHome<'_>,
@@ -71,27 +151,20 @@ impl CheckoutPool {
         supervision: Supervision<'_>,
     ) -> Result<(Unit, Lease), WorktreeError> {
         let branch = super::unit_branch(home.run_id, &who, attempt);
-        let _turn = self.choosing.lock().await;
-        let checkout = match self.free(home.base, &branch, supervision).await? {
-            Some(checkout) => {
+        let owner = super::unit_branches(home.run_id, &who);
+        let (checkout, lease) = match self.take(Some(&owner), home.base, supervision).await? {
+            Some((checkout, lease)) => {
                 reset(&checkout, &branch, home.base, supervision).await?;
-                checkout
+                (checkout, lease)
             }
             None => {
-                let checkout = self.next_slot().await;
-                prepare_worktree(
-                    home.repo,
-                    &checkout,
-                    home.base,
-                    &branch,
-                    yunta_core::Isolation::Worktree,
-                    supervision,
-                )
-                .await?;
-                tokio::fs::canonicalize(&checkout).await.unwrap_or(checkout)
+                let fresh = Fresh::Unit {
+                    branch: &branch,
+                    base: home.base,
+                };
+                self.add(home.repo, fresh, supervision).await?
             }
         };
-        let lease = self.hold_canonical(checkout.clone());
         let from = head_tree(&checkout, supervision).await?;
         let unit = Unit {
             who,
@@ -102,18 +175,17 @@ impl CheckoutPool {
         Ok((unit, lease))
     }
 
-    /// A checkout of the pool on `base` with no branch of its own — what
-    /// a probe of the run's tree runs in — held for its caller. A free
-    /// one is put back to `base`; a new one is added when none is free.
+    /// A checkout of the pool on `base` with no branch of its own — what a
+    /// probe or the measurement runs in — held for its caller. The free one
+    /// nearest to `base` is put back to it; a new one is added when none is
+    /// free.
     pub async fn open_detached(
         self: &Arc<Self>,
-        repo: &Path,
-        base: &yunta_core::CommitSha,
+        base: &CommitSha,
         supervision: Supervision<'_>,
     ) -> Result<(PathBuf, Lease), WorktreeError> {
-        let _turn = self.choosing.lock().await;
-        let checkout = match self.free(base, "", supervision).await? {
-            Some(checkout) => {
+        match self.take(None, base, supervision).await? {
+            Some((checkout, lease)) => {
                 crate::git::output(
                     &checkout,
                     &[
@@ -127,100 +199,138 @@ impl CheckoutPool {
                 )
                 .await?;
                 crate::git::output(&checkout, &["clean", "-q", "-ffd"], supervision).await?;
-                checkout
+                Ok((checkout, lease))
             }
             None => {
-                let checkout = self.next_slot().await;
-                add_detached(repo, &checkout, base, supervision).await?;
-                tokio::fs::canonicalize(&checkout).await.unwrap_or(checkout)
-            }
-        };
-        let lease = self.hold_canonical(checkout.clone());
-        Ok((checkout, lease))
-    }
-
-    /// Holds `checkout` for a unit that reopened it, so no other unit is
-    /// given it while that unit works there. Held by its canonical path,
-    /// which is how git names a checkout and how the pool finds its own.
-    pub async fn hold(self: &Arc<Self>, checkout: PathBuf) -> Lease {
-        let checkout = tokio::fs::canonicalize(&checkout).await.unwrap_or(checkout);
-        self.hold_canonical(checkout)
-    }
-
-    /// Holds `checkout`, already named canonically.
-    fn hold_canonical(self: &Arc<Self>, checkout: PathBuf) -> Lease {
-        self.held
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(checkout.clone());
-        Lease {
-            pool: self.clone(),
-            checkout,
-        }
-    }
-
-    /// The checkouts of the pool on disk, by number.
-    async fn slots(&self) -> Vec<(u32, PathBuf)> {
-        let Ok(mut entries) = tokio::fs::read_dir(&self.home).await else {
-            return Vec::new();
-        };
-        let mut slots = Vec::new();
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if let Some(number) = name.strip_prefix(SLOT).and_then(|n| n.parse::<u32>().ok()) {
-                let path = entry.path();
-                let path = tokio::fs::canonicalize(&path).await.unwrap_or(path);
-                slots.push((number, path));
+                let repo = self.repo.clone();
+                self.add(&repo, Fresh::Detached { base }, supervision).await
             }
         }
-        slots.sort();
-        slots
     }
 
-    /// The checkout a unit on `branch` takes: the one already on that
-    /// branch when it is free, or else the lowest free one.
-    async fn free(
-        &self,
-        base: &yunta_core::CommitSha,
-        branch: &str,
+    /// Holds `checkout` for a unit that reopened it, so nobody else is
+    /// given it while that unit works there. Another process may be
+    /// looking at it for a moment, so this waits that moment out.
+    pub async fn hold(
+        self: &Arc<Self>,
+        checkout: PathBuf,
         supervision: Supervision<'_>,
-    ) -> Result<Option<PathBuf>, WorktreeError> {
-        let held = self
-            .held
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        let mut candidates: Vec<PathBuf> = self
-            .slots()
-            .await
-            .into_iter()
-            .map(|(_, path)| path)
-            .filter(|path| !held.contains(path))
-            .collect();
-        let named = (!branch.is_empty()).then_some(branch);
-        if let Some(on_branch) = match named {
-            Some(branch) => on_branch(&candidates, branch, supervision).await,
-            None => None,
-        } {
-            candidates.retain(|path| path != &on_branch);
-            candidates.insert(0, on_branch);
+    ) -> Result<Lease, WorktreeError> {
+        let home = self.home(supervision).await?;
+        let checkout = tokio::fs::canonicalize(&checkout).await.unwrap_or(checkout);
+        let number = checkout
+            .parent()
+            .filter(|parent| *parent == home)
+            .and_then(|_| {
+                checkout
+                    .file_name()?
+                    .to_str()?
+                    .strip_prefix(SLOT)?
+                    .parse()
+                    .ok()
+            });
+        let Some(number) = number else {
+            return Ok(Lease::outside());
+        };
+        let moment = Contention::Wait {
+            patience: std::time::Duration::from_secs(5),
+            poll: std::time::Duration::from_millis(15),
+        };
+        slot::hold(&home, number, moment, self.holder.as_deref(), supervision)
+            .await?
+            .ok_or(WorktreeError::CheckoutHeld { path: checkout })
+    }
+
+    /// The most fitting checkout for a user owning the branches starting
+    /// with `owner` and starting from `target`, held for it.
+    async fn take(
+        &self,
+        owner: Option<&str>,
+        target: &CommitSha,
+        supervision: Supervision<'_>,
+    ) -> Result<Option<(PathBuf, Lease)>, WorktreeError> {
+        let home = self.home(supervision).await?;
+        let mut ranked = Vec::new();
+        for (number, path) in slot::listed(&home).await {
+            if let Some(rank) = slot::rank(&path, owner, target, supervision).await {
+                ranked.push((rank, number, path));
+            }
         }
-        for candidate in candidates {
-            if is_free(&candidate, base, supervision).await {
-                return Ok(Some(candidate));
+        ranked.sort();
+        for (_, number, path) in ranked {
+            let held = slot::hold(
+                &home,
+                number,
+                Contention::Refuse,
+                self.holder.as_deref(),
+                supervision,
+            );
+            let Some(lease) = held.await? else {
+                continue;
+            };
+            // Held, then looked at again: another process may have taken
+            // and changed it between the look that ranked it and the hold.
+            if slot::rank(&path, owner, target, supervision)
+                .await
+                .is_some()
+            {
+                return Ok(Some((path, lease)));
             }
         }
         Ok(None)
     }
 
-    /// Where the pool's next new checkout goes.
-    async fn next_slot(&self) -> PathBuf {
-        let next = self
-            .slots()
+    /// Adds a checkout to the pool under the lowest number nobody uses,
+    /// held for its caller.
+    async fn add(
+        &self,
+        repo: &Path,
+        fresh: Fresh<'_>,
+        supervision: Supervision<'_>,
+    ) -> Result<(PathBuf, Lease), WorktreeError> {
+        let home = self.home(supervision).await?;
+        tokio::fs::create_dir_all(&home)
             .await
-            .last()
-            .map_or(1, |(number, _)| number + 1);
-        self.home.join(format!("{SLOT}{next}"))
+            .map_err(|source| WorktreeError::Io {
+                action: "create the project's checkouts directory".to_string(),
+                path: home.clone(),
+                source,
+            })?;
+        let mut number = 0;
+        loop {
+            number += 1;
+            let path = home.join(format!("{SLOT}{number}"));
+            if slot::is_checkout(&path, supervision).await {
+                continue;
+            }
+            let held = slot::hold(
+                &home,
+                number,
+                Contention::Refuse,
+                self.holder.as_deref(),
+                supervision,
+            );
+            let Some(lease) = held.await? else {
+                continue;
+            };
+            if tokio::fs::try_exists(&path).await.unwrap_or(false) {
+                // Added by another process since the look above, or left
+                // half added by one that crashed.
+                if slot::is_checkout(&path, supervision).await {
+                    continue;
+                }
+                slot::clear(repo, &path, supervision).await?;
+            }
+            match fresh {
+                Fresh::Unit { branch, base } => {
+                    let isolation = yunta_core::Isolation::Worktree;
+                    prepare_worktree(repo, &path, base, branch, isolation, supervision).await?;
+                }
+                Fresh::Detached { base } => add_detached(repo, &path, base, supervision).await?,
+            }
+            let path = tokio::fs::canonicalize(&path).await.unwrap_or(path);
+            return Ok((path, lease));
+        }
     }
 }
 
@@ -236,7 +346,7 @@ pub async fn put_back(checkout: &Path, supervision: Supervision<'_>) -> Result<(
 async fn add_detached(
     repo: &Path,
     checkout: &Path,
-    base: &yunta_core::CommitSha,
+    base: &CommitSha,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
     if let Some(parent) = checkout.parent() {
@@ -260,57 +370,12 @@ async fn add_detached(
     Ok(())
 }
 
-/// The candidate already on `branch`, when one is.
-async fn on_branch(
-    candidates: &[PathBuf],
-    branch: &str,
-    supervision: Supervision<'_>,
-) -> Option<PathBuf> {
-    for candidate in candidates {
-        let on = crate::git::output(candidate, &["branch", "--show-current"], supervision).await;
-        if on.is_ok_and(|on| on.trim() == branch) {
-            return Some(candidate.clone());
-        }
-    }
-    None
-}
-
-/// Whether nothing in `checkout` is anybody's still: whatever it
-/// committed is in `base` — landed on the run's tree, or never made — and
-/// nothing in it is uncommitted beyond what a unit writes for the engine
-/// to read.
-async fn is_free(
-    checkout: &Path,
-    base: &yunta_core::CommitSha,
-    supervision: Supervision<'_>,
-) -> bool {
-    let request = format!(
-        ":(exclude){}",
-        crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE
-    );
-    let clean = crate::git::output(
-        checkout,
-        &["status", "--porcelain", "--", ".", request.as_str()],
-        supervision,
-    )
-    .await
-    .is_ok_and(|status| status.trim().is_empty());
-    clean
-        && crate::git::success(
-            checkout,
-            &["merge-base", "--is-ancestor", "HEAD", base.as_str()],
-            supervision,
-        )
-        .await
-        .unwrap_or(false)
-}
-
 /// Puts `checkout` on a new `branch` at `base`, with nothing of the unit
 /// that worked there before but what git ignores.
 async fn reset(
     checkout: &Path,
     branch: &str,
-    base: &yunta_core::CommitSha,
+    base: &CommitSha,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
     crate::git::output(
@@ -336,48 +401,4 @@ async fn reset(
         }),
         _ => Ok(()),
     }
-}
-
-/// Takes away every checkout the run's units worked in under `run_dir`,
-/// and every branch of theirs whose work is in what `repo` — the run's
-/// tree as it closes — stands on. A branch holding work that never landed
-/// — a blocked task's — stays for whoever wants it, until the run is
-/// collected.
-pub async fn release_unit_checkouts(
-    repo: &Path,
-    run_dir: &Path,
-    run_id: &yunta_core::RunId,
-    supervision: Supervision<'_>,
-) -> Result<(), WorktreeError> {
-    let landed = super::head_commit(repo, supervision).await?;
-    let home = crate::run_dir::unit_worktrees(run_dir);
-    let home = tokio::fs::canonicalize(&home).await.unwrap_or(home);
-    let listing = super::run_git(repo, &["worktree", "list", "--porcelain"], supervision).await?;
-    let common_dir = super::common_git_dir(repo, supervision).await?;
-    let _mutation_lock = super::lock_worktree_mutations(&common_dir, supervision.clock).await?;
-    for (checkout, _) in super::checkouts(&listing) {
-        if checkout.starts_with(&home) {
-            let path = checkout.display().to_string();
-            super::run_git(repo, &["worktree", "remove", "--force", &path], supervision).await?;
-        }
-    }
-    let ours = format!("refs/heads/{}/", super::run_units(run_id));
-    let branches = super::run_git(
-        repo,
-        &["for-each-ref", "--format=%(refname:short)", &ours],
-        supervision,
-    )
-    .await?;
-    for branch in branches.lines().map(str::trim).filter(|b| !b.is_empty()) {
-        if crate::git::success(
-            repo,
-            &["merge-base", "--is-ancestor", branch, landed.as_str()],
-            supervision,
-        )
-        .await?
-        {
-            super::run_git(repo, &["branch", "-D", branch], supervision).await?;
-        }
-    }
-    Ok(())
 }

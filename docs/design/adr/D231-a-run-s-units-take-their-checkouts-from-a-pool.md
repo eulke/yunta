@@ -1,9 +1,9 @@
 ---
 number: D231
 title: "A run's units take their checkouts from a pool of its own, and keep what git ignores"
-status: accepted
+status: revised
 revises: [D65]
-revised_by: []
+revised_by: [D234]
 ---
 
 # D231 — A run's units take their checkouts from a pool of its own, and keep what git ignores

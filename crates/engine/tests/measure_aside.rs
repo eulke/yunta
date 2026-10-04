@@ -1,6 +1,6 @@
 //! The lineage's measurement taken aside. A run born in a checkout holding
 //! exactly the commit it opened on measures its suite in a checkout of its
-//! pool while its first nodes run; an invocation that ends before the suite
+//! project's pool while its first nodes run; an invocation that ends before the suite
 //! answers records nothing, and the next wake measures again in the same
 //! checkout, on what the stopped suite already built.
 
@@ -37,7 +37,7 @@ fn measurements(bench: &Bench) -> usize {
 async fn a_measurement_an_invocation_stopped_starts_again_on_its_warm_checkout() {
     let bench = Bench::new();
     ignore_builds(&bench);
-    let warm = bench.run_dir().join("unit-worktrees/slot-1/target/warm");
+    let warm = bench.pool().join("slot-1/target/warm");
     let said = bench.run_dir().with_extension("suite-said");
     let suite = format!(
         "if test -f target/warm; then echo warm >> {said}; else mkdir -p target; touch target/warm; \

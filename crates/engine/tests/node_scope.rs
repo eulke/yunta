@@ -395,7 +395,7 @@ async fn a_granted_request_resumes_the_node_session_that_asked() {
         "the session picks back up in the checkout it saw"
     );
     assert!(
-        resumed.cwd.to_string_lossy().contains("unit-worktrees"),
+        resumed.cwd.to_string_lossy().contains("/pool/"),
         "{}",
         resumed.cwd.display()
     );

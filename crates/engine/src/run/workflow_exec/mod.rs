@@ -70,18 +70,9 @@ fn runs_root(ctx: &RunCtx<'_>) -> PathBuf {
         .unwrap_or_else(|| ctx.run_dir.to_path_buf())
 }
 
-/// The worktrees root for child trees: the parent manifest's frozen
-/// paths when present; otherwise the `runs`-sibling `worktrees`
-/// directory the project layout uses — library callers (tests) without
-/// frozen paths get a deterministic location next to their runs root.
+/// The worktrees root for child trees: the parent's own.
 fn worktrees_root(ctx: &RunCtx<'_>) -> PathBuf {
-    if let Some(paths) = &ctx.manifest.paths {
-        return paths.worktrees_root().to_path_buf();
-    }
-    let runs = runs_root(ctx);
-    runs.parent()
-        .map(|parent| parent.join("worktrees"))
-        .unwrap_or_else(|| runs.join("worktrees"))
+    crate::run_dir::worktrees_root(ctx.manifest, ctx.run_dir)
 }
 
 /// What a `kind: workflow` node declares: which workflow to run, what
