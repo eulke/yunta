@@ -253,6 +253,10 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
         // holding, so what separates the two is what the log says
         // happened, never how much of it there is.
         super::wake::resume(&ctx, &view).await?;
+        // What earlier invocations answered stays answered for the trees
+        // they named, as long as the commands still run as they did.
+        let woken = ctx.run_view().await?;
+        ctx.memo.seed(&woken.events, &woken.state.run);
     }
 
     // "On wake" means once per invocation, not once per scheduling

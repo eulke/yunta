@@ -31,7 +31,7 @@ use environment::SHELL;
 use error::captured_output;
 pub use error::{CapturedOutput, PipeKind, SpawnError};
 use leader::Leader;
-pub use output::CommandOutput;
+pub use output::{CommandOutput, Printed};
 use pipes::{read_to_capture, stdio, write_then_close, Captured, PipeFailure};
 use state::{wait_for_deadline, Waited};
 

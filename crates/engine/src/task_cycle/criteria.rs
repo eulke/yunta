@@ -12,16 +12,17 @@ use yunta_core::{ContentHash, Task, TaskId};
 
 use super::tree::{asks_git, Tree};
 use super::{CriterionRun, TaskCycleError};
-use crate::process::{spawn_governed, CommandOutput, GovernedCommand, Outcome, Supervision};
+use crate::process::{
+    spawn_governed, CommandOutput, GovernedCommand, Outcome, Printed, Supervision,
+};
 
-/// Per-invocation memoization cache: a criterion's result is reused
-/// when its command, the working tree's content and the resolved config
-/// are all unchanged since the last time it ran *in this invocation*.
-/// One `Memo` per `execute_run` call is what the cache is for: a
-/// resumed run starts cold and verifies once more than strictly
-/// necessary, which is safe (over-verifying), unlike a result carried
-/// across invocations onto a tree no event in between speaks for (which
-/// would risk under-verifying).
+/// The run's memoization cache: a criterion's result is reused when its
+/// command, the working tree's content and the resolved config are all
+/// unchanged since it last answered. One `Memo` per `execute_run` call
+/// holds what this invocation answered, seeded at a wake with what the
+/// log says earlier invocations answered — only for the trees each
+/// answer names, and only from an invocation whose commands ran with the
+/// environment this one's do.
 ///
 /// The key is `sha256(cmd \0 content \0 head \0 config_hash)`: the
 /// command as written, the git tree of what the checkout holds, and the
@@ -50,7 +51,7 @@ pub struct Memo {
 #[derive(Clone)]
 struct Answer {
     exit_code: i32,
-    output: Option<CommandOutput>,
+    output: Option<Printed>,
 }
 
 impl Memo {
@@ -103,7 +104,7 @@ impl Memo {
         }
         let answer = Answer {
             exit_code,
-            output: (exit_code != 0).then(|| output.clone()),
+            output: (exit_code != 0).then(|| Printed::Ran(output.clone())),
         };
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         cache.insert(key, answer);
@@ -119,6 +120,26 @@ impl Memo {
     ) -> Result<ContentHash, TaskCycleError> {
         let tree = self.tree_for(cmd, cwd, supervision).await?;
         Ok(self.key(cmd, &tree))
+    }
+
+    /// Takes in what earlier invocations of the run answered — every
+    /// answer the log holds that still speaks for this one.
+    pub(crate) fn seed(
+        &self,
+        events: &[yunta_core::events::StoredEvent],
+        run: &yunta_core::events::RunLedger,
+    ) {
+        let answers = super::recorded::answers(events, run);
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        for answer in answers {
+            cache.insert(
+                self.key(&answer.cmd, &answer.tree),
+                Answer {
+                    exit_code: answer.exit_code,
+                    output: answer.printed,
+                },
+            );
+        }
     }
 
     /// `cwd` as an answer of `cmd` is kept for it, read as it stands now
@@ -180,7 +201,7 @@ impl Memo {
         Ok(Memoized {
             exit_code,
             reused: false,
-            output: Some(output),
+            output: Some(Printed::Ran(output)),
         })
     }
 }
@@ -220,7 +241,7 @@ pub struct Memoized {
     pub exit_code: i32,
     pub reused: bool,
     /// What the command printed, as [`CriterionRun::output`] keeps it.
-    pub output: Option<CommandOutput>,
+    pub output: Option<Printed>,
 }
 
 /// Runs one criterion command, measuring its wall-clock cost —
@@ -289,7 +310,12 @@ async fn run_on(
                 let (exit_code, duration_ms, output) =
                     run_criterion(task_id, cwd, &criterion.cmd, supervision).await?;
                 memo.put(key, exit_code, &output);
-                (exit_code, false, Some(duration_ms), Some(output))
+                (
+                    exit_code,
+                    false,
+                    Some(duration_ms),
+                    Some(Printed::Ran(output)),
+                )
             }
         };
         runs.push(CriterionRun {

@@ -66,6 +66,45 @@ impl CommandOutput {
     }
 }
 
+/// What a command printed, as a check holds it: everything it printed in
+/// this invocation, or what an earlier invocation's log kept of it — the
+/// object that holds it, when one was kept, and its last lines.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Printed {
+    Ran(CommandOutput),
+    Recorded {
+        object: Option<yunta_core::ContentHash>,
+        tail: Vec<String>,
+    },
+}
+
+impl Printed {
+    /// The last non-empty line, cut to a line's worth of characters.
+    pub fn last_words(&self) -> Option<String> {
+        match self {
+            Printed::Ran(output) => output.last_words(),
+            Printed::Recorded { tail, .. } => last_line(tail.join("\n").as_bytes()),
+        }
+    }
+
+    /// The line it concluded with: the last on stdout when the whole
+    /// output is at hand, the last of what was kept otherwise.
+    pub fn concluded(&self) -> Option<String> {
+        match self {
+            Printed::Ran(output) => output.concluded(),
+            Printed::Recorded { .. } => self.last_words(),
+        }
+    }
+
+    /// Its last lines, in order.
+    pub fn tail(&self) -> Vec<String> {
+        match self {
+            Printed::Ran(output) => output.tail(),
+            Printed::Recorded { tail, .. } => tail.clone(),
+        }
+    }
+}
+
 /// The last non-empty line of `bytes`, cut to a line's worth of
 /// characters.
 fn last_line(bytes: &[u8]) -> Option<String> {

@@ -3,13 +3,15 @@ number: D59
 title: "Memoización de criterios por hash de árbol + short-circuit del pre-check (Contrato §5.4)"
 status: revised
 revises: []
-revised_by: [D177]
+revised_by: [D177, D230]
 ---
 
 # D59 — Memoización de criterios por hash de árbol + short-circuit del pre-check (Contrato §5.4)
 
 *(Revisada por D177: el corto-circuito del pre-check se retira; la fase
-evalúa el conjunto entero y nombra cada sorpresa.)* El engine no reejecuta un comando cuyo resultado ya conoce: clave =
+evalúa el conjunto entero y nombra cada sorpresa. Revisada por D230: las
+respuestas cruzan las invocaciones del run para el árbol y el entorno en que
+se dieron.)* El engine no reejecuta un comando cuyo resultado ya conoce: clave =
 hash(comando + tree_hash + env declarado + versión de config); el tree_hash de
 git captura todas las entradas, así que cualquier cambio — edición de agente,
 hook, instalación — invalida automáticamente. Elimina la única redundancia

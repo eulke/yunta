@@ -1194,9 +1194,12 @@ async fn a_reused_red_answer_still_says_why_and_a_reused_green_one_names_nothing
         ],
     );
     let printed = |run: &CriterionRun| {
-        run.output
-            .as_ref()
-            .map(|output| String::from_utf8_lossy(output.bytes()).into_owned())
+        run.output.as_ref().map(|output| match output {
+            yunta_engine::process::Printed::Ran(output) => {
+                String::from_utf8_lossy(output.bytes()).into_owned()
+            }
+            yunta_engine::process::Printed::Recorded { tail, .. } => tail.join("\n"),
+        })
     };
 
     let ran = yunta_engine::pre_check(&t, dir.path(), &memo, &unpriced(), owner.supervision())

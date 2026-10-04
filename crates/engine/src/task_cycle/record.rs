@@ -14,6 +14,7 @@ use yunta_core::events::{
 use yunta_core::{NodeId, Seq, TaskId};
 
 use super::{CriterionRun, SessionObserver, TaskCycleError};
+use crate::process::Printed;
 use crate::scope::ScopeCheckResult;
 
 /// Where one task's checks are written: the cycle's observer and the
@@ -56,15 +57,19 @@ impl Recorder<'_> {
         // the check names it, and quotes the end of what did not pass.
         if let Some((observer, _)) = self.audit {
             for (result, run) in results.iter_mut().zip(runs) {
-                let Some(output) = &run.output else {
-                    continue;
-                };
-                result.output = Some(observer.keep_output(output).await.map_err(|source| {
-                    TaskCycleError::KeepOutput {
-                        task: self.task.clone(),
-                        source,
+                result.output = match &run.output {
+                    Some(Printed::Ran(output)) => {
+                        Some(observer.keep_output(output).await.map_err(|source| {
+                            TaskCycleError::KeepOutput {
+                                task: self.task.clone(),
+                                source,
+                            }
+                        })?)
                     }
-                })?);
+                    // Kept already, by the invocation that ran it.
+                    Some(Printed::Recorded { object, .. }) => object.clone(),
+                    None => None,
+                };
             }
         }
         self.record(EventPayload::Node(NodeEvent::CriteriaChecked(

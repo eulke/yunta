@@ -17,6 +17,7 @@ mod expansion;
 mod judge;
 mod outcome;
 mod record;
+mod recorded;
 mod session;
 mod spec;
 mod stream;
@@ -67,7 +68,7 @@ pub struct CriterionRun {
     /// a red answer the cache reused, in the run that gave it. `None` for
     /// a green answer reused, and for a check the engine states rather
     /// than runs.
-    pub output: Option<crate::process::CommandOutput>,
+    pub output: Option<crate::process::Printed>,
     /// The tree the answer is for — what the checkout held — and, for a
     /// command that runs `git`, the commit it stood on. `None` for a
     /// check the engine states rather than runs.
