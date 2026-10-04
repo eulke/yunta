@@ -103,6 +103,7 @@ fn created(mode: &str) -> EventPayload {
         base_commit: CommitSha::from("abc1234"),
         environment: None,
         left_out: Vec::new(),
+        opens_on_base: false,
     }))
 }
 

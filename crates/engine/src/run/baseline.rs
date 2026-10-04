@@ -27,14 +27,32 @@ use crate::replay::RunState;
 /// compares against it, a loop holds its tasks to it, or a composed run
 /// — whose workflow is resolved only when it is born — may do either.
 pub fn reads_the_baseline(workflow: &yunta_core::Workflow) -> bool {
-    workflow.iter_nodes().any(|node| {
-        matches!(
-            node.kind,
-            yunta_core::NodeKind::Check(yunta_core::CheckBuiltin::BaselineCompare)
-                | yunta_core::NodeKind::Loop { .. }
-                | yunta_core::NodeKind::Workflow { .. }
-        )
-    })
+    workflow.nodes.iter().any(reads_the_measurement)
+}
+
+/// Whether running `node` reads the lineage's measurement: it compares
+/// against it, holds tasks to it, hands it to a run it gives birth to —
+/// whose workflow is resolved only then — or puts a plan in front of a
+/// person, whose every task the suite holds. A group reads it when any
+/// node it runs does.
+///
+/// The one reading of what reads the measurement: what makes a run
+/// measure at all, and what waits for a measurement taken aside.
+pub fn reads_the_measurement(node: &yunta_core::Node) -> bool {
+    use yunta_core::{ArtifactKind, ArtifactRefId, CheckBuiltin, NodeKind};
+    match &node.kind {
+        NodeKind::Check(CheckBuiltin::BaselineCompare)
+        | NodeKind::Loop { .. }
+        | NodeKind::Workflow { .. } => true,
+        NodeKind::Gate { shows, .. } => shows.iter().any(|shown| {
+            shown.id
+                == ArtifactRefId::Kind {
+                    kind: ArtifactKind::Tasks,
+                }
+        }),
+        NodeKind::Parallel { nodes, .. } => nodes.iter().any(reads_the_measurement),
+        _ => false,
+    }
 }
 
 /// The measurement a run hands to one it gives birth to: the fact,
@@ -97,22 +115,27 @@ pub fn inherited(from: &RunId, from_state: &RunState) -> Option<BirthBaseline> {
 /// loop's next turn sees the token fired and pauses the run. The next
 /// invocation finds no measurement on the log and measures then.
 pub(super) async fn measure(ctx: &RunCtx<'_>, suite: String) -> Result<(), RunError> {
+    measure_in(ctx, suite, ctx.worktree, ctx.root_supervision()).await
+}
+
+/// [`measure`], with the suite run in `cwd` under `supervision`.
+pub(super) async fn measure_in(
+    ctx: &RunCtx<'_>,
+    suite: String,
+    cwd: &Path,
+    supervision: crate::process::Supervision<'_>,
+) -> Result<(), RunError> {
     // Read before the suite runs: what it measured is the tree as it
     // found it, whatever the run leaves behind in it. Only a shortcut
     // hangs on it — without it the first check runs the suite itself —
     // so a tree that could not be read, a cancelled one among them,
     // costs that and nothing else.
-    let measured_on = ctx
-        .memo
-        .tree_for(&suite, ctx.worktree, ctx.root_supervision())
-        .await
-        .ok();
+    let measured_on = ctx.memo.tree_for(&suite, cwd, supervision).await.ok();
     let started = std::time::Instant::now();
-    let output =
-        match super::check_exec::run_command(ctx.root_supervision(), ctx.worktree, &suite).await? {
-            super::check_exec::CommandRun::Done(output) => output,
-            super::check_exec::CommandRun::Cancelled => return Ok(()),
-        };
+    let output = match super::check_exec::run_command(supervision, cwd, &suite).await? {
+        super::check_exec::CommandRun::Done(output) => output,
+        super::check_exec::CommandRun::Cancelled => return Ok(()),
+    };
     let took = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
     // Every task is held to the suite as a guard, and the first of them
     // starts from the tree just measured: a green measurement is its

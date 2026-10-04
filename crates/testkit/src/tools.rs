@@ -13,7 +13,7 @@ use std::sync::{Arc, OnceLock};
 
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
-use yunta_core::events::{EventDraft, EventPayload, RunCreatedPayload, RunEvent, StoredEvent};
+use yunta_core::events::{EventDraft, EventPayload, StoredEvent};
 use yunta_core::{
     sha256_hex, Clock, CommitSha, NodeId, RunId, Seq, SystemClock, Task, TaskId, TreeId, Workflow,
 };
@@ -83,20 +83,7 @@ impl ToolsHost {
         };
         // Every log opens with `run_created` — the listener's own
         // appends land on an already-born run in production too.
-        hosted.record(
-            None,
-            EventPayload::Run(RunEvent::Created(RunCreatedPayload {
-                manifest_hash: yunta_core::sha256_hex(b"test-manifest"),
-                inputs: Default::default(),
-                mode: Default::default(),
-                promoted_from: None,
-                yunta_schema: None,
-                base_branch: "main".to_string(),
-                base_commit: "deadbeef".into(),
-                environment: None,
-                left_out: Vec::new(),
-            })),
-        );
+        hosted.record(None, crate::events::born(b"test-manifest", "deadbeef"));
         hosted
     }
 

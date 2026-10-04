@@ -215,6 +215,8 @@ pub async fn create_run(
             source,
         })?;
 
+    let opens_on_base = manifest.isolation == yunta_core::Isolation::Worktree
+        && holds_its_base(worktree, &manifest.base_commit, supervision).await;
     // A birth is written before a run exists to declare secrets
     // against: `run_created` carries the manifest's hash and the
     // inputs the caller resolved, never a session's words.
@@ -250,6 +252,7 @@ pub async fn create_run(
             // off the log by every wake: a run's graph never depends on
             // a config read after its birth.
             left_out: yunta_core::left_out(&manifest.workflow, &manifest.config),
+            opens_on_base,
         })),
     )
     .await?;
@@ -408,4 +411,21 @@ async fn register_birth_documents(
         }
     }
     Ok(())
+}
+
+/// Whether `worktree` holds exactly what `base` does: nothing a person
+/// left uncommitted in it, nothing a birth brought with it. A tree that
+/// cannot be read answers no, and the run measures in it.
+async fn holds_its_base(
+    worktree: &std::path::Path,
+    base: &yunta_core::CommitSha,
+    supervision: crate::process::Supervision<'_>,
+) -> bool {
+    let holds = crate::task_cycle::content_of(worktree, supervision).await;
+    let base_tree = format!("{base}^{{tree}}");
+    let committed = crate::git::output(worktree, &["rev-parse", &base_tree], supervision).await;
+    match (holds, committed) {
+        (Ok(holds), Ok(committed)) => holds.as_str() == committed.trim(),
+        _ => false,
+    }
 }

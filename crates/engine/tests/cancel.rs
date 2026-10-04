@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::EventPayload;
 use yunta_core::events::{NodeEvent, RunEvent};
 use yunta_engine::{RunReport, RunTerminal};
-use yunta_testkit::{wait_until_async, Bench};
+use yunta_testkit::{wait_until_async, Bench, MOCK_CONFIG};
 
 const HANGING_WORKFLOW: &str = "\
 name: cancel-me
@@ -152,25 +152,8 @@ async fn cancel_once_written(marker: &std::path::Path, token: &CancellationToken
     token.cancel();
 }
 
-/// The lineage's measurement is a step the run owns, so `yunta cancel`
-/// reaches it: the suite dies with the rest of the tree, the log holds
-/// no measurement, and the next wake takes it from the top.
-#[tokio::test]
-async fn a_suite_the_cancellation_stops_leaves_no_measurement_and_the_run_pauses() {
-    let token = CancellationToken::new();
-    let bench = Bench::new().with_cancel(token.clone());
-    // A suite that ends only when something kills it — the shape of a
-    // measurement a person interrupts.
-    let config = "\
-runners:
-  planner:
-    - { adapter: mock, model: mock-model }
-  executor:
-    - { adapter: mock, model: mock-model }
-baseline:
-  suite: \"sleep 3600\"
-";
-    let workflow = "\
+/// Work, then the comparison that reads the lineage's measurement.
+const WORK_THEN_COMPARED: &str = "\
 name: measure-me
 nodes:
   - id: work
@@ -182,9 +165,25 @@ nodes:
     depends_on: [work]
 ";
 
+/// The lineage's measurement is a step the run owns, so `yunta cancel`
+/// reaches it: the suite dies with the rest of the tree, the log holds
+/// no measurement, the node that reads it never starts, and the next
+/// wake takes it from the top.
+#[tokio::test]
+async fn a_suite_the_cancellation_stops_leaves_no_measurement_and_the_run_pauses() {
+    let token = CancellationToken::new();
+    let bench = Bench::new().with_cancel(token.clone());
+    // A suite that ends only when something kills it — the shape of a
+    // measurement a person interrupts — and says when it is under way.
+    let started = bench.run_dir().with_extension("suite-started");
+    let config = format!(
+        "{MOCK_CONFIG}baseline:\n  suite: \"touch {}; sleep 3600\"\n",
+        started.display()
+    );
+
     let (report, ()) = tokio::join!(
-        bench.run_with_config(workflow, "sessions: []", config),
-        cancel_once_the_suite_is_registered(&bench, &token)
+        bench.run_with_config(WORK_THEN_COMPARED, "sessions: []", &config),
+        cancel_once_written(&started, &token)
     );
 
     let RunReport { terminal, .. } = report;
@@ -202,40 +201,19 @@ nodes:
     );
     assert!(
         bench.events().iter().all(|event| !matches!(
-            event.payload(),
-            Some(EventPayload::Node(NodeEvent::Started(_)))
+            (
+                event.payload(),
+                event.node_id.as_ref().map(|id| id.as_str())
+            ),
+            (
+                Some(EventPayload::Node(NodeEvent::Started(_))),
+                Some("regressions")
+            )
         )),
-        "and no node ran before the measurement the run still owes"
+        "and the node that reads the measurement never started"
     );
 }
 
-/// Fires `token` once the run's registry lists the suite's process
-/// group: the suite is the only thing this run has spawned, so the
-/// registry naming a group is the suite being under way.
-async fn cancel_once_the_suite_is_registered(bench: &Bench, token: &CancellationToken) {
-    let run_dir = bench.run_dir();
-    wait_until_async(
-        || {
-            let run_dir = run_dir.clone();
-            async move {
-                matches!(
-                    yunta_engine::read_registry(&run_dir),
-                    yunta_engine::Registry::Read(registry)
-                        if !registry.doc.process_groups.is_empty()
-                )
-            }
-        },
-        || "the suite never registered a process group".to_string(),
-    )
-    .await;
-    token.cancel();
-}
-
-/// A birth runs git: a tasks document another run handed over is held to
-/// the tree the receiving run opens on, and the answer is a `git
-/// merge-base`. Under a token that already fired, that git dies with its
-/// tree and the birth says so — a run with no log of its own answers its
-/// caller, and nothing is left on disk to resume.
 #[tokio::test]
 async fn a_cancelled_token_stops_the_git_a_birth_runs() {
     let token = CancellationToken::new();

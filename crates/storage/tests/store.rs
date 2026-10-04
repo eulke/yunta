@@ -621,6 +621,7 @@ fn created_draft(run_id: &str) -> EventDraft {
             base_commit: "deadbeef".into(),
             environment: None,
             left_out: Vec::new(),
+            opens_on_base: false,
         })),
     }
 }

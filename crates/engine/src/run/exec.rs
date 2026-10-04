@@ -127,6 +127,12 @@ pub(crate) async fn execute_run_at_depth(
 
 /// The scheduler loop: replays the log, asks what is next, and runs it
 /// until the answer is terminal.
+///
+/// A run that measures its suite aside starts measuring as soon as it
+/// owes the measurement, and every step runs beside it until a step that
+/// reads it waits for it. The measurement never outlives the loop: when a
+/// step ends the invocation, a measurement still under way stops,
+/// records nothing, and the next wake takes it again.
 async fn drive(ready: &Ready<'_>) -> Result<RunReport, RunError> {
     let Ready {
         ctx,
@@ -134,29 +140,44 @@ async fn drive(ready: &Ready<'_>) -> Result<RunReport, RunError> {
         mode_name,
         policy,
     } = ready;
-    loop {
+    let mut aside = super::aside::Aside::new(root_cancel);
+    let ended = loop {
         // A Ctrl-C (or any root cancellation) between scheduler
         // steps pauses here; one that lands mid-batch is honored by the
         // per-node child tokens below, whose failed nodes land in the
         // log first and then reach this same check.
         if root_cancel.is_cancelled() {
-            return pause(ctx, PauseReason::Cancelled).await;
+            aside.stop().await;
+            break pause(ctx, PauseReason::Cancelled).await;
         }
         // One read and one replay per iteration: the decision and every
         // handler that needs the run's state read the same derivation.
         let events = ctx.load_events().await?;
         let state = crate::replay::derive(&events);
+        if let Some(suite) = schedule::owed_baseline(&state, policy) {
+            if policy.measures_aside {
+                aside.start(ctx, suite);
+            }
+        }
         let decision = schedule::decide(&ctx.manifest.workflow, &state, policy);
-        match take_step(ctx, &state, mode_name, decision).await {
-            Ok(Some(report)) => return Ok(report),
+        if matches!(decision, Decision::MeasureBaseline { .. }) && aside.finish().await? {
+            continue;
+        }
+        match aside
+            .beside(take_step(ctx, &state, mode_name, decision))
+            .await
+        {
+            Ok(Some(report)) => break Ok(report),
             Ok(None) => {}
             // A cancellation that reached the step's own git said so on
             // the way out; it is the same Ctrl-C the loop's next turn
             // reads, and it pauses the run the same way.
             Err(RunError::Cancelled) if root_cancel.is_cancelled() => {}
-            Err(error) => return Err(error),
+            Err(error) => break Err(error),
         }
-    }
+    };
+    aside.stop().await;
+    ended
 }
 
 /// Takes one step the scheduler decided, answering with the report of a
@@ -287,7 +308,7 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
     // "resolved once, reused forever" discipline runner resolution
     // already follows.
     let mode_name = yunta_core::events::run_mode(&view.events);
-    let policy = schedule::Policy::of(ctx.manifest, &mode_name, view.state.run.left_out());
+    let policy = schedule::Policy::of(ctx.manifest, &mode_name, &view.state.run);
     Ok(Startup::Ready(Box::new(Ready {
         ctx,
         root_cancel,

@@ -391,6 +391,7 @@ fn run_created_in_mode(mode: &str) -> Vec<StoredEvent> {
                 base_commit: "deadbeef".into(),
                 environment: None,
                 left_out: Vec::new(),
+                opens_on_base: false,
             },
         )))
         .build()

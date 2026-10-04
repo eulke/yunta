@@ -18,6 +18,7 @@
 //! `distill.rs`; the close sequence is distill → `run_finished` →
 //! export → cleanup.
 
+mod aside;
 mod asking;
 pub mod baseline;
 mod bash_exec;

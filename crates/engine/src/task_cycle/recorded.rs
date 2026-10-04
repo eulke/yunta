@@ -141,6 +141,7 @@ mod tests {
             base_commit: yunta_core::sha256_hex(b"base").as_str().into(),
             environment: Some(Box::new(environment(path))),
             left_out: Vec::new(),
+            opens_on_base: false,
         }))
     }
 

@@ -39,7 +39,10 @@ use yunta_core::{
     DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, ScopeExpansionMode, Workflow,
 };
 
+mod baseline;
 mod reverify;
+
+pub use baseline::owed_baseline;
 
 use crate::modes::dependencies_in_mode;
 use crate::replay::{NodeState, RunState};
@@ -274,6 +277,15 @@ pub struct Policy {
     /// The suite this run's lineage measures, from `baseline.suite`;
     /// `None` when the config names none and nothing is measured.
     pub baseline_suite: Option<String>,
+    /// Whether the suite is measured in a checkout of its own while the
+    /// run goes on: a run born in a checkout holding exactly the commit
+    /// it opened on. Otherwise it is measured in the run's own tree,
+    /// before anything of the run's changes it.
+    pub measures_aside: bool,
+    /// Whether a later mode follows this run's, so that an exhausted
+    /// re-route offers to promote to it — and a successor is born holding
+    /// this run's measurement.
+    pub may_promote: bool,
     /// Whether a person may widen a node's scope from the menu of a
     /// failure it had on that scope: `false` only under a permission
     /// ceiling of `scope_expansion.max_mode: deny`.
@@ -291,19 +303,21 @@ impl Policy {
     pub fn of(
         manifest: &yunta_core::Manifest,
         mode_name: &ModeName,
-        left_out: &[yunta_core::LeftOut],
+        run: &yunta_core::events::RunLedger,
     ) -> Self {
         Policy {
             max_parallel_nodes: manifest.max_parallel_nodes,
             on_interrupt: manifest.config.resolved_on_interrupt(),
             on_failure: manifest.config.resolved_on_failure(),
-            mode_nodes: crate::modes::included_nodes(&manifest.workflow, mode_name, left_out),
+            mode_nodes: crate::modes::included_nodes(&manifest.workflow, mode_name, run.left_out()),
             baseline_suite: manifest
                 .config
                 .baseline
                 .as_ref()
                 .filter(|_| crate::run::baseline::reads_the_baseline(&manifest.workflow))
                 .map(|baseline| baseline.suite.clone()),
+            measures_aside: run.opens_on_base(),
+            may_promote: next_mode_after(&manifest.workflow, mode_name).is_some(),
             grants_scope: person_may_grant_scope(&manifest.config),
             denied: manifest.config.denied_paths().to_vec(),
         }
@@ -459,30 +473,14 @@ pub fn decide(workflow: &Workflow, state: &RunState, policy: &Policy) -> Decisio
         };
     }
     let board = Board::of(workflow, state, policy);
-    baseline_step(&board)
-        .or_else(|| gate_step(&board))
+    let next = gate_step(&board)
         .or_else(|| waiting_step(&board))
         .or_else(|| answered_step(&board))
         .or_else(|| orphan_step(&board))
         .or_else(|| failure_step(&board))
         .or_else(|| reverify::reverify_step(&board))
-        .unwrap_or_else(|| ready_batch(&board))
-}
-
-/// What the run owes before anything of its own runs: the measurement
-/// its lineage declared and does not hold. A run born holding one — a
-/// `kind: workflow` child, a promotion successor — never reaches here,
-/// because the measurement is already on its log.
-fn baseline_step(board: &Board<'_>) -> Option<Decision> {
-    let suite = board.policy.baseline_suite.as_ref()?;
-    board
-        .state
-        .run
-        .baseline()
-        .is_none()
-        .then(|| Decision::MeasureBaseline {
-            suite: suite.clone(),
-        })
+        .unwrap_or_else(|| ready_batch(&board));
+    baseline::before(workflow, state, policy, next)
 }
 
 /// A `Running` gate node is never a crash orphan (`on_interrupt` is

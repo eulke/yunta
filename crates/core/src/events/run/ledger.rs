@@ -69,6 +69,9 @@ pub struct RunLedger {
     /// seq it began at, with what its commands ran with when it recorded
     /// that.
     invocations: Vec<(Seq, Option<ExecutionEnvironment>)>,
+    /// Whether the run was born in a checkout holding exactly the commit
+    /// it opened on.
+    opens_on_base: bool,
 }
 
 impl RunLedger {
@@ -93,6 +96,12 @@ impl RunLedger {
             .rev()
             .find(|(began, _)| *began <= seq)
             .and_then(|(_, in_force)| in_force.as_ref())
+    }
+
+    /// Whether the run was born in a checkout of its own holding exactly
+    /// the commit it opened on: what lets its suite be measured aside.
+    pub fn opens_on_base(&self) -> bool {
+        self.opens_on_base
     }
 
     /// What the run's commands run with in its latest invocation.
@@ -189,6 +198,7 @@ impl RunLedger {
                 self.phase = RunPhaseRaw::Open;
                 self.mode = p.mode.clone();
                 self.left_out = p.left_out.clone();
+                self.opens_on_base = p.opens_on_base;
                 self.invocations
                     .push((meta.seq, p.environment.as_deref().cloned()));
             }
@@ -270,6 +280,7 @@ mod tests {
             base_commit: crate::sha256_hex(b"base").as_str().into(),
             environment: Some(Box::new(environment("/born"))),
             left_out: Vec::new(),
+            opens_on_base: false,
         };
         at(&mut ledger, 1, RunEvent::Created(created));
         let woken = RunResumedPayload::new(Vec::new(), Some(environment("/woken")));

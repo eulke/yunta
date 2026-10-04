@@ -401,3 +401,72 @@ async fn an_integration_that_changes_nothing_reuses_what_the_close_answered() {
         "the close runs the suite on the work, the integration reuses it"
     );
 }
+
+// --- when the suite is measured -------------------------------------------
+
+/// The suite is measured in a checkout of the run's pool while the nodes
+/// that do not read the measurement run. The two wait on each other:
+/// `wait` passes only once the suite has started, and the suite answers
+/// only once `plan` has handed its document over — a run that measured
+/// before its first node, or only when its loop asked, would fail `wait`.
+#[tokio::test]
+async fn the_suite_is_measured_aside_while_the_nodes_before_its_readers_run() {
+    let bench = Bench::new();
+    let started = bench.run_dir().with_extension("suite-started");
+    let handed_over = bench.run_dir().join("artifacts/plan/tasks.yaml");
+    let ran_in = bench.run_dir().with_extension("suite-ran-in");
+    let suite = format!(
+        "touch {started}; for i in $(seq 1 600); do test -f {plan} && break; sleep 0.05; \
+         done; pwd >> {ran_in}; test -f {plan}",
+        started = started.display(),
+        plan = handed_over.display(),
+        ran_in = ran_in.display(),
+    );
+    let config = format!("{MOCK_CONFIG}baseline:\n  suite: \"{suite}\"\n");
+    let wait = format!(
+        "
+  - id: wait
+    kind: bash
+    run: \"for i in $(seq 1 600); do test -f {started} && break; sleep 0.05; done; test -f {started}\"",
+        started = started.display(),
+    );
+
+    let RunReport { terminal, .. } = bench
+        .run_with_config(&workflow("[made.txt]", &wait), &session(false), &config)
+        .await;
+
+    assert_eq!(
+        terminal,
+        RunTerminal::Finished,
+        "`wait` saw the suite start"
+    );
+    let order = starts_and_measurement(&bench);
+    let at = |what: &str| order.iter().position(|said| said == what);
+    assert!(
+        at("measured: exit 0") < at("implement started"),
+        "the loop holds its task to the suite, so it waits for it: {order:?}"
+    );
+    let ran = tokio::fs::read_to_string(&ran_in).await.unwrap();
+    let measured_in = ran.lines().next().unwrap().to_string();
+    assert!(
+        measured_in.contains("unit-worktrees/slot-"),
+        "measured in a checkout of the pool, not the run's own tree: {measured_in}"
+    );
+}
+
+/// Each node's start and the measurement, in the order the log has them.
+fn starts_and_measurement(bench: &Bench) -> Vec<String> {
+    bench
+        .events()
+        .iter()
+        .filter_map(|event| match (event.payload(), event.node_id.as_ref()) {
+            (Some(EventPayload::Run(yunta_core::events::RunEvent::BaselineCaptured(p))), _) => {
+                Some(format!("measured: exit {}", p.results.exit_code))
+            }
+            (Some(EventPayload::Node(NodeEvent::Started(_))), Some(node)) => {
+                Some(format!("{node} started"))
+            }
+            _ => None,
+        })
+        .collect()
+}

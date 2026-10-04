@@ -23,6 +23,7 @@ fn sample_events() -> Vec<StoredEvent> {
             base_commit: "deadbeef".into(),
             environment: None,
             left_out: Vec::new(),
+            opens_on_base: false,
         })))
         .node(
             "lint",

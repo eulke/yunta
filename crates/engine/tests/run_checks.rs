@@ -255,8 +255,8 @@ async fn a_resumed_run_measures_nothing_again() {
         .expect("the suite ran at least once");
     assert_eq!(
         ran.lines().count(),
-        2,
-        "the measurement once and the comparison once: never measured again"
+        1,
+        "measured once, and the comparison on the same tree takes that answer"
     );
 }
 

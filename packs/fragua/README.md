@@ -73,8 +73,10 @@ The pack names capabilities; your config says how your project does each.
   `"cargo clippy --all-targets -- -D warnings"` — and a failing lint goes to
   `fix-lint` once before asking you. A project that declares no `lint` runs
   without both; `yunta status` says why they are not in the run.
-- **`baseline.suite`**: the suite `tests` compares against, measured before
-  the run's first node.
+- **`baseline.suite`**: the suite `tests` compares against and every task is
+  held to. A run in a checkout of its own measures it in another checkout of
+  the commit it started from while `grill`, `brief` and `plan` run; the loop,
+  and a gate that shows the plan, wait for it.
 - **`forge.github`**: `pr` pushes the run's branch to `origin` and opens a
   pull request of it into your base branch, reading the token from the
   variable `token_env` names. A run is refused while the config declares no

@@ -128,6 +128,14 @@ pub struct RunCreatedPayload {
     /// here, so replay never re-reads a config to know its own graph.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub left_out: Vec<crate::LeftOut>,
+    /// Whether the run's tree, when it was born in a checkout of its own,
+    /// held exactly the commit it opened on — what lets the suite be
+    /// measured in another checkout of that commit while the run goes
+    /// on. Absent — false — for a run working in a person's checkout, one
+    /// whose tree held more, and a log written before the field: those
+    /// measure in their own tree, before anything changes it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub opens_on_base: bool,
 }
 
 /// What the engine hands every command it runs — criteria, `bash` nodes,

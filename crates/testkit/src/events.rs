@@ -102,6 +102,23 @@ pub fn status_changed_carrying(
     serde_json::from_value(wire).expect("the wire shape of a task_status_changed")
 }
 
+/// The `run_created` a log written by hand opens with: a manifest named by
+/// the hash of `manifest`, born on `base_commit`, nothing else declared.
+pub(crate) fn born(manifest: &[u8], base_commit: &str) -> EventPayload {
+    EventPayload::Run(RunEvent::Created(RunCreatedPayload {
+        manifest_hash: yunta_core::sha256_hex(manifest),
+        inputs: Default::default(),
+        mode: Default::default(),
+        promoted_from: None,
+        yunta_schema: None,
+        base_branch: "main".to_string(),
+        base_commit: base_commit.into(),
+        environment: None,
+        left_out: Vec::new(),
+        opens_on_base: false,
+    }))
+}
+
 /// Another run's log, written by hand: what a run that hands something
 /// over already said about it.
 ///
@@ -126,17 +143,10 @@ impl<'a> SourceLog<'a> {
             run_id: run_id.clone(),
             clock,
         };
-        log.record(EventPayload::Run(RunEvent::Created(RunCreatedPayload {
-            manifest_hash: yunta_core::sha256_hex(run_id.as_str().as_bytes()),
-            inputs: Default::default(),
-            mode: Default::default(),
-            promoted_from: None,
-            yunta_schema: None,
-            base_branch: "main".to_string(),
-            base_commit: yunta_core::sha256_hex(b"base").as_str().into(),
-            environment: None,
-            left_out: Vec::new(),
-        })));
+        log.record(born(
+            run_id.as_str().as_bytes(),
+            yunta_core::sha256_hex(b"base").as_str(),
+        ));
         log
     }
 

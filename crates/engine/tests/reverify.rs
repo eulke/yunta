@@ -38,6 +38,8 @@ fn policy() -> SchedulingPolicy {
         on_failure: DefaultOnFailure::Pause,
         mode_nodes: None,
         baseline_suite: None,
+        measures_aside: false,
+        may_promote: false,
         grants_scope: true,
         denied: Vec::new(),
     }
@@ -98,6 +100,7 @@ fn next(yaml: &str, attempts: Vec<Vec<(&'static str, EventPayload)>>) -> Decisio
         base_commit: CommitSha::from("abc1234"),
         environment: None,
         left_out: Vec::new(),
+        opens_on_base: false,
     }));
     let events: Vec<StoredEvent> = std::iter::once((None, created))
         .chain(

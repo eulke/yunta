@@ -9,11 +9,10 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, TimeZone, Utc};
 use yunta_core::events::{
-    AgentMessagePayload, AgentMessageType, BaselineCapturedPayload, BaselineOrigin,
-    BaselineResults, Escalation, EventBody, EventPayload, Fact, Failure, GateEvent, GateOption,
-    GateResolvedPayload, HookExecutedPayload, HookPhase, HumanChoice, NodeEvent, NodeFailedPayload,
-    NodeFinishedPayload, NodeStartedPayload, RunCreatedPayload, RunEvent, SessionEvent,
-    StoredEvent, TokenUsage,
+    AgentMessagePayload, AgentMessageType, Escalation, EventBody, EventPayload, Fact, Failure,
+    GateEvent, GateOption, GateResolvedPayload, HookExecutedPayload, HookPhase, HumanChoice,
+    NodeEvent, NodeFailedPayload, NodeFinishedPayload, NodeStartedPayload, RunCreatedPayload,
+    RunEvent, SessionEvent, StoredEvent, TokenUsage,
 };
 use yunta_core::{
     CommitSha, ContentHash, DefaultOnFailure, NodeId, NonEmpty, OnInterrupt, Workflow,
@@ -45,6 +44,8 @@ fn policy() -> SchedulingPolicy {
         on_failure: DefaultOnFailure::Pause,
         mode_nodes: None,
         baseline_suite: None,
+        measures_aside: false,
+        may_promote: false,
         grants_scope: true,
         denied: Vec::new(),
     }
@@ -75,6 +76,7 @@ fn created() -> EventPayload {
         base_commit: CommitSha::from("abc1234"),
         environment: None,
         left_out: Vec::new(),
+        opens_on_base: false,
     }))
 }
 
@@ -383,53 +385,6 @@ fn grant_is_not_offered_for_a_denied_path() {
 
 /// The suite a run owes is a decision of the scheduler, like every other
 /// thing a run does next: a pure read of what the log says the run holds.
-#[test]
-fn a_run_owing_a_baseline_is_told_to_measure_it_before_any_node() {
-    let events = log(vec![(None, created())]);
-    let policy = SchedulingPolicy {
-        baseline_suite: Some("cargo test".to_string()),
-        ..policy()
-    };
-
-    assert_eq!(
-        decide(&workflow(), &derive(&events), &policy),
-        Decision::MeasureBaseline {
-            suite: "cargo test".to_string()
-        },
-        "a run whose config names a suite and whose log holds no measurement owes one"
-    );
-}
-
-#[test]
-fn a_run_born_holding_a_baseline_is_never_told_to_measure() {
-    let held = EventPayload::Run(RunEvent::BaselineCaptured(BaselineCapturedPayload {
-        command: "cargo test".to_string(),
-        results: BaselineResults {
-            exit_code: 0,
-            summary: "ok".to_string(),
-        },
-        hash: yunta_core::sha256_hex(b"ok"),
-        origin: BaselineOrigin::Inherited {
-            run: "run-root".into(),
-        },
-        tree: None,
-        duration_ms: None,
-    }));
-    let events = log(vec![(None, created()), (None, held)]);
-    let policy = SchedulingPolicy {
-        baseline_suite: Some("cargo test".to_string()),
-        ..policy()
-    };
-
-    assert!(
-        !matches!(
-            decide(&workflow(), &derive(&events), &policy),
-            Decision::MeasureBaseline { .. }
-        ),
-        "a run born holding its lineage's measurement owes nothing"
-    );
-}
-
 /// What the node waits on decides what the run does about it, never
 /// what kind of node it is: a gate node whose own questions are
 /// unanswered is asked again, not republished.

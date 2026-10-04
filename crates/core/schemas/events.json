@@ -3896,6 +3896,10 @@
         "mode": {
           "$ref": "#/$defs/ModeName"
         },
+        "opens_on_base": {
+          "description": "Whether the run's tree, when it was born in a checkout of its own,\nheld exactly the commit it opened on — what lets the suite be\nmeasured in another checkout of that commit while the run goes\non. Absent — false — for a run working in a person's checkout, one\nwhose tree held more, and a log written before the field: those\nmeasure in their own tree, before anything changes it.",
+          "type": "boolean"
+        },
         "promoted_from": {
           "anyOf": [
             {

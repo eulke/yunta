@@ -373,6 +373,25 @@ async fn a_successor_is_born_holding_its_predecessors_measurement() {
     tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
         .await
         .unwrap();
+    born_holding_the_measurement(&bench).await;
+}
+
+/// The same for a run that measures aside, while its nodes run: the
+/// question that may promote it waits for the measurement it hands on.
+#[tokio::test]
+async fn a_successor_of_a_run_measuring_aside_is_born_holding_its_measurement() {
+    let bench = Bench::new().in_mode("quick");
+    tokio::fs::write(bench.worktree.join("marker.txt"), "ok\n")
+        .await
+        .unwrap();
+    yunta_testkit::git(&bench.worktree, &["add", "marker.txt"]);
+    yunta_testkit::git(&bench.worktree, &["commit", "-q", "-m", "the marker"]);
+    born_holding_the_measurement(&bench).await;
+}
+
+/// Promotes the run `bench` drives and checks its successor is born
+/// holding the measurement it took.
+async fn born_holding_the_measurement(bench: &Bench) {
     let interaction = ScriptedInteraction::choose("promote");
     // The comparison is the later mode's; the lineage measures at its
     // root because the workflow reads the measurement somewhere.
@@ -388,7 +407,7 @@ async fn a_successor_is_born_holding_its_predecessors_measurement() {
     let manifest = bench.manifest();
     let run_dir = bench.run_dir();
     let ids = SeqIdSource::new("minted");
-    let successor = successor_of(predecessor_of(&bench, &manifest, &run_dir), &bench, &ids).await;
+    let successor = successor_of(predecessor_of(bench, &manifest, &run_dir), bench, &ids).await;
 
     let held = baselines(&bench.storage.events_for_run(&successor.run_id).unwrap());
     assert_eq!(held.len(), 1, "the successor is born holding a measurement");

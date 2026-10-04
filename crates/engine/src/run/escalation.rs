@@ -247,7 +247,7 @@ fn current_decision(
     let decision = schedule::decide(
         &manifest.workflow,
         state,
-        &schedule::Policy::of(manifest, mode_name, state.run.left_out()),
+        &schedule::Policy::of(manifest, mode_name, &state.run),
     );
     match decision {
         Decision::GateExhaustedReroutes { .. }

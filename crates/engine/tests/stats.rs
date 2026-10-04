@@ -85,6 +85,7 @@ fn fixture_events() -> Vec<StoredEvent> {
             base_commit: "deadbeef".into(),
             environment: None,
             left_out: Vec::new(),
+            opens_on_base: false,
         })))
         .node(
             "a",
@@ -238,6 +239,7 @@ fn cache_rate_is_none_without_input() {
             base_commit: "deadbeef".into(),
             environment: None,
             left_out: Vec::new(),
+            opens_on_base: false,
         })))
         .node(
             "a",
