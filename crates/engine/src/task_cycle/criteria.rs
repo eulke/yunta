@@ -41,6 +41,9 @@ pub struct Memo {
     /// take turns, and the second reuses what the first answered instead
     /// of running the command alongside it.
     asking: Mutex<HashMap<ContentHash, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    /// What the lineage's measurement says about the suite every task is
+    /// held to, as this invocation learns it.
+    suite: super::SuiteGate,
 }
 
 /// What a command answered on one tree. A red answer keeps what the
@@ -60,7 +63,13 @@ impl Memo {
             config_hash,
             cache: Mutex::new(HashMap::new()),
             asking: Mutex::new(HashMap::new()),
+            suite: super::SuiteGate::default(),
         }
+    }
+
+    /// The suite every task is held to, as the measurement settles it.
+    pub fn suite(&self) -> &super::SuiteGate {
+        &self.suite
     }
 
     fn key(&self, cmd: &str, tree: &Tree) -> ContentHash {
@@ -399,7 +408,13 @@ pub async fn pre_check(
     history: &TaskLedger,
     supervision: Supervision<'_>,
 ) -> Result<Vec<CriterionRun>, TaskCycleError> {
-    let mut ordered: Vec<&Criterion> = task.criteria.iter().collect();
+    // The suite still being measured is left out: the measurement is the
+    // answer on the tree the task starts from.
+    let mut ordered: Vec<&Criterion> = task
+        .criteria
+        .iter()
+        .filter(|criterion| !memo.suite().pending(criterion))
+        .collect();
     // Stable sort: criteria the log never priced (u64::MAX key) keep
     // declared order among themselves.
     ordered.sort_by_key(|criterion| median_duration(history, &criterion.cmd).unwrap_or(u64::MAX));
@@ -470,6 +485,9 @@ pub async fn post_check(
             tree: tree.content,
         });
     }
+    // The suite still being measured is waited for here, where its answer
+    // is what decides whether it holds the task at all.
+    let guards = memo.suite().judging(guards, supervision.cancel).await;
     runs.extend(run_on(&task.id, &guards, &tree, cwd, memo, supervision).await?);
     Ok(PostCheck {
         runs,

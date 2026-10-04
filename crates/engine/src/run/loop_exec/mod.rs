@@ -286,12 +286,9 @@ impl LoopPrep<'_> {
     /// plan as it is judged.
     async fn rejudge(&mut self, ctx: &RunCtx<'_>) -> Result<(), RunError> {
         let view = ctx.run_view().await?;
-        self.tasks = crate::tasks::judged_plan(
-            &self.document,
-            view.state.run.baseline(),
-            self.setup.spec.as_deref(),
-            &view.state.tasks,
-        );
+        let suite = ctx.memo.suite().holding(view.state.run.baseline());
+        let (spec, tasks) = (self.setup.spec.as_deref(), &view.state.tasks);
+        self.tasks = crate::tasks::judged_plan(&self.document, suite.as_deref(), spec, tasks);
         self.setup.plan = Some(std::sync::Arc::new(self.tasks.clone()));
         Ok(())
     }
@@ -367,12 +364,12 @@ async fn prepare_loop<'a>(
     // here: its pre-check, its session's own checks, its close and its
     // integration all read these criteria — its own, the suite the run
     // measured, and the tests the run's spec gives it.
-    let baseline = view.state.run.baseline();
+    let suite = ctx.memo.suite().holding(view.state.run.baseline());
     let spec = crate::artifacts::latest::<yunta_core::SpecFile>(ctx.run_dir, &view.events)
         .await?
         .map(|held| std::sync::Arc::new(held.document));
-    let tasks =
-        crate::tasks::judged_plan(&held.document, baseline, spec.as_deref(), &view.state.tasks);
+    let (held_by, ledger) = (suite.as_deref(), &view.state.tasks);
+    let tasks = crate::tasks::judged_plan(&held.document, held_by, spec.as_deref(), ledger);
     // Every task session reads the plan its task belongs to: the design
     // it names, and the tasks that own what it may not touch.
     let writer = respecify::writer(ctx, &view.events, &view.state);
@@ -380,7 +377,7 @@ async fn prepare_loop<'a>(
     let setup = crate::task_cycle::SessionSetup {
         plan: Some(std::sync::Arc::new(tasks.clone())),
         spec,
-        suite: crate::tasks::suite_of(baseline).map(str::to_string),
+        suite,
         superseded,
         ..setup
     };

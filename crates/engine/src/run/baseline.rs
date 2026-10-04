@@ -38,6 +38,17 @@ pub fn reads_the_baseline(workflow: &yunta_core::Workflow) -> bool {
 ///
 /// The one reading of what reads the measurement: what makes a run
 /// measure at all, and what waits for a measurement taken aside.
+/// Whether running `node` waits for the measurement: what reads it, but a
+/// loop, whose tasks wait for it only where one of their guards is judged
+/// — a check whose own criteria pass. Its tasks start beside it.
+pub fn waits_for_the_measurement(node: &yunta_core::Node) -> bool {
+    match &node.kind {
+        yunta_core::NodeKind::Loop { .. } => false,
+        yunta_core::NodeKind::Parallel { nodes, .. } => nodes.iter().any(waits_for_the_measurement),
+        _ => reads_the_measurement(node),
+    }
+}
+
 pub fn reads_the_measurement(node: &yunta_core::Node) -> bool {
     use yunta_core::{ArtifactKind, ArtifactRefId, CheckBuiltin, NodeKind};
     match &node.kind {
@@ -145,6 +156,7 @@ pub(super) async fn measure_in(
     }
 
     keep_capture(ctx.run_dir, output.stdout.as_bytes()).await?;
+    let command = suite.clone();
     ctx.emit(
         None,
         EventPayload::Run(RunEvent::BaselineCaptured(BaselineCapturedPayload {
@@ -160,6 +172,9 @@ pub(super) async fn measure_in(
         })),
     )
     .await?;
+    // The checks of a loop that started beside the measurement wait for
+    // this answer.
+    ctx.memo.suite().settle(&command, output.exit_code == 0);
     Ok(())
 }
 

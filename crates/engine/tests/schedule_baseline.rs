@@ -220,7 +220,7 @@ fn a_run_born_holding_a_baseline_is_never_told_to_measure() {
 }
 
 /// A group runs its nodes together, so a group holding a node that reads
-/// the measurement reads it: the loop inside waits for it with the group.
+/// the measurement reads it: the comparison inside waits for it with the group.
 #[test]
 fn a_group_holding_a_reader_waits_for_the_measurement() {
     let workflow: Workflow = yunta_core::yaml::parse(
@@ -233,7 +233,7 @@ nodes:
     depends_on: [plan]
     nodes:
       - { id: lint, kind: bash, run: "true" }
-      - { id: implement, kind: loop, runner: executor, until: all_tasks_complete, prompt: work }
+      - { id: regressions, kind: check, builtin: baseline_compare }
 "#,
     )
     .expect("the test workflow parses");

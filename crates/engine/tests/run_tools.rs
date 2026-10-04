@@ -736,7 +736,7 @@ async fn a_task_session_reads_which_guard_is_the_runs_suite() {
         tree: None,
         duration_ms: None,
     };
-    let task = yunta_engine::judged_task(&greeting_task(), Some(&baseline));
+    let task = yunta_engine::judged_task(&greeting_task(), yunta_engine::suite_of(Some(&baseline)));
     let session = host
         .task_session(
             "implement",

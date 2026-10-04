@@ -21,6 +21,7 @@ mod recorded;
 mod session;
 mod spec;
 mod stream;
+mod suite;
 mod tree;
 
 use std::path::PathBuf;
@@ -46,6 +47,7 @@ pub(crate) use judge::{judge, Judgement, Work};
 pub(crate) use session::dispatch_session;
 pub use session::{DispatchError, RunToolsNeed, SessionObserver, SessionSetup};
 pub(crate) use session::{Dispatched, Opening, Resume};
+pub use suite::SuiteGate;
 pub(crate) use tree::content_of;
 
 pub use answer::{Answer, Continuing, RespecifiedTask, Respecify, Review};

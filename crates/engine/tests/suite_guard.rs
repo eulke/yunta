@@ -7,7 +7,7 @@ use yunta_core::events::{
     EventPayload, NodeEvent, Phase, SessionEvent, TaskStatus,
 };
 use yunta_core::{Criterion, RunId, Task};
-use yunta_engine::{judged_task, RunReport, RunTerminal};
+use yunta_engine::{judged_task, suite_of, RunReport, RunTerminal};
 use yunta_testkit::{Bench, MOCK_CONFIG};
 
 const SUITE: &str = "test ! -f broken.txt";
@@ -61,7 +61,10 @@ fn commands(task: &Task) -> Vec<(&str, bool)> {
 #[test]
 fn a_task_is_judged_by_the_suite_its_lineage_measured_green() {
     let task = task_with(vec![criterion("test -f made.txt", None)]);
-    let judged = judged_task(&task, Some(&measured(0, BaselineOrigin::Measured)));
+    let judged = judged_task(
+        &task,
+        suite_of(Some(&measured(0, BaselineOrigin::Measured))),
+    );
     assert_eq!(
         commands(&judged),
         vec![("test -f made.txt", false), (SUITE, true)]
@@ -77,7 +80,10 @@ fn a_task_is_judged_by_the_suite_its_lineage_measured_green() {
 fn a_red_measurement_adds_no_guard_to_any_task() {
     let task = task_with(vec![criterion("test -f made.txt", None)]);
     assert_eq!(
-        judged_task(&task, Some(&measured(1, BaselineOrigin::Measured))),
+        judged_task(
+            &task,
+            suite_of(Some(&measured(1, BaselineOrigin::Measured)))
+        ),
         task
     );
     assert_eq!(judged_task(&task, None), task, "nor does no measurement");
@@ -91,7 +97,10 @@ fn a_task_that_declares_the_suite_is_judged_by_its_own_declaration() {
             criterion(&format!("  {SUITE} "), declared),
         ]);
         assert_eq!(
-            judged_task(&task, Some(&measured(0, BaselineOrigin::Measured))),
+            judged_task(
+                &task,
+                suite_of(Some(&measured(0, BaselineOrigin::Measured)))
+            ),
             task
         );
     }
@@ -107,7 +116,7 @@ fn an_inherited_measurement_holds_tasks_to_the_same_suite() {
         },
     );
     assert_eq!(
-        commands(&judged_task(&task, Some(&inherited))),
+        commands(&judged_task(&task, suite_of(Some(&inherited)))),
         vec![("test -f made.txt", false), (SUITE, true)]
     );
 }

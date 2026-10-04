@@ -106,31 +106,7 @@ pub(super) async fn run_one_attempt(
     let cancelled =
         matches!(dispatch_outcome, DispatchOutcome::Cancelled) || supervision.cancel.is_cancelled();
     if cancelled {
-        // Nothing was checked, and the log says so in the attempt's own
-        // place: an empty post-check and an empty scope audit.
-        let scope = crate::scope::ScopeCheckResult::default();
-        let recorded = recorder.criteria(Phase::Post, &[]).await?;
-        recorder.scope(&scope).await?;
-        let record = AttemptRecord {
-            attempt,
-            session,
-            dispatch: DispatchOutcome::Cancelled,
-            tokens,
-            fence_breach: None,
-            post_check: Vec::new(),
-            scope,
-            succeeded: false,
-            scope_expansion: None,
-            recorded,
-        };
-        return Ok((
-            last_staged,
-            AttemptStep::Stop {
-                record,
-                outcome: TaskOutcome::Interrupted,
-                needs_human_decision: false,
-            },
-        ));
+        return interrupted(&recorder, attempt, session, tokens, last_staged).await;
     }
 
     let expansion_outcome = super::expansion::evaluate_scope_expansion(params).await?;
@@ -163,7 +139,16 @@ pub(super) async fn run_one_attempt(
         memo,
         supervision,
     )
-    .await?;
+    .await;
+    // A cancellation that lands while the work is judged — a check waiting
+    // for the measurement, a criterion running — cuts the attempt the same
+    // way: nothing it answered is a verdict on the task.
+    let judgement = match judgement {
+        _ if supervision.cancel.is_cancelled() => {
+            return interrupted(&recorder, attempt, session, tokens, last_staged).await;
+        }
+        judged => judged?,
+    };
     let succeeded = judgement.closes();
     let Judgement {
         criteria: post_runs,
@@ -415,4 +400,40 @@ async fn open_and_dispatch(
             },
         })?;
     Ok((last_staged, dispatched))
+}
+
+/// An attempt a cancellation cut: nothing was checked, and the log says so
+/// in the attempt's own place — an empty post-check and an empty scope
+/// audit. What the cancellation means for the task is the caller's
+/// decision, because only it knows which token fired.
+async fn interrupted(
+    recorder: &Recorder<'_>,
+    attempt: u32,
+    session: Option<yunta_core::SessionId>,
+    tokens: yunta_core::events::TokenUsage,
+    last_staged: Vec<PathBuf>,
+) -> Result<(Vec<PathBuf>, AttemptStep), TaskCycleError> {
+    let scope = crate::scope::ScopeCheckResult::default();
+    let recorded = recorder.criteria(Phase::Post, &[]).await?;
+    recorder.scope(&scope).await?;
+    let record = AttemptRecord {
+        attempt,
+        session,
+        dispatch: DispatchOutcome::Cancelled,
+        tokens,
+        fence_breach: None,
+        post_check: Vec::new(),
+        scope,
+        succeeded: false,
+        scope_expansion: None,
+        recorded,
+    };
+    Ok((
+        last_staged,
+        AttemptStep::Stop {
+            record,
+            outcome: TaskOutcome::Interrupted,
+            needs_human_decision: false,
+        },
+    ))
 }

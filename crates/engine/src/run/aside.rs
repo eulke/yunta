@@ -33,9 +33,11 @@ impl<'a> Aside<'a> {
         }
     }
 
-    /// Starts measuring `suite`, unless a measurement is under way.
+    /// Starts measuring `suite`, unless a measurement is under way. The
+    /// checks of a loop that starts beside it wait for its answer.
     pub(super) fn start(&mut self, ctx: &'a RunCtx<'_>, suite: &str) {
         if self.under_way.is_none() {
+            ctx.memo.suite().expect(suite);
             let stop = self.stop.clone();
             self.under_way = Some(Box::pin(measure_aside(ctx, suite.to_string(), stop)));
         }
@@ -97,12 +99,18 @@ async fn measure_aside(
     let (checkout, _held) = match ctx.pool.open_detached(base, supervision).await {
         // Stopped while its checkout was being made, it measured nothing,
         // like a suite stopped while it ran.
-        Err(stopped) if stopped.cancelled() => return Ok(()),
-        opened => opened?,
+        Err(stopped) if stopped.cancelled() => {
+            ctx.memo.suite().give_up();
+            return Ok(());
+        }
+        opened => opened.inspect_err(|_| ctx.memo.suite().give_up())?,
     };
     let measured = super::baseline::measure_in(ctx, suite, &checkout, supervision).await;
     if let Err(error) = crate::worktree::put_back(&checkout, supervision).await {
         tracing::debug!(%error, "the checkout the suite was measured in stays out of the pool");
     }
+    // A measurement that ended without an answer leaves nobody waiting for
+    // one: a guard runs the suite itself, as with no measurement at all.
+    ctx.memo.suite().give_up();
     measured
 }

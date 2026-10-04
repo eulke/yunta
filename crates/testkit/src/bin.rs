@@ -142,6 +142,20 @@ pub fn pool_checkouts(home: &std::path::Path) -> Vec<std::path::PathBuf> {
     checkouts
 }
 
+/// The checkouts of one project's pool at `pool`.
+pub fn pool_checkouts_in(pool: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let Ok(slots) = std::fs::read_dir(pool) else {
+        return Vec::new();
+    };
+    let mut checkouts: Vec<std::path::PathBuf> = slots
+        .flatten()
+        .map(|slot| slot.path())
+        .filter(|slot| slot.is_dir())
+        .collect();
+    checkouts.sort();
+    checkouts
+}
+
 /// The run id `yunta run` prints, parsed from a `run <id>: …` line or the
 /// id alone `--quiet` prints — the
 /// handle every follow-up command (`status`, `receipt`, `graph --run`)

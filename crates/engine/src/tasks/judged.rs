@@ -13,8 +13,9 @@ use yunta_core::{Criterion, SpecFile, Task, TaskId, TasksFile};
 const SUITE_PROVES: &str =
     "what passed before this run changed anything still passes after this task's change";
 
-/// `task` as the run judges it: its own criteria and, when the run's
-/// lineage measured its suite green, that suite as a guard.
+/// `task` as the run judges it: its own criteria and, as a guard, the
+/// suite that holds the run's tasks — `suite`, the one its lineage measured
+/// green, or the one being measured while the run goes on.
 ///
 /// A change that breaks what passed is then judged against the task that
 /// made it, while the session that made it can still answer for it —
@@ -25,12 +26,11 @@ const SUITE_PROVES: &str =
 ///
 /// The document the planner wrote stays as it is: this is how the run
 /// judges the task, not what the task says.
-pub fn judged_task(task: &Task, baseline: Option<&BaselineCapturedPayload>) -> Task {
+pub fn judged_task(task: &Task, suite: Option<&str>) -> Task {
     let mut judged = task.clone();
-    let Some(baseline) = baseline.filter(|baseline| baseline.passed()) else {
+    let Some(suite) = suite.map(str::trim) else {
         return judged;
     };
-    let suite = baseline.command.trim();
     if task
         .criteria
         .iter()
@@ -39,7 +39,7 @@ pub fn judged_task(task: &Task, baseline: Option<&BaselineCapturedPayload>) -> T
         return judged;
     }
     judged.criteria.push(Criterion {
-        cmd: baseline.command.clone(),
+        cmd: suite.to_string(),
         r#type: Some(CriterionType::Guard),
         proves: Some(SUITE_PROVES.to_string()),
     });
@@ -129,21 +129,20 @@ pub fn waived(
 }
 
 /// Every task of `plan` as the run judges it now: its own criteria, the
-/// suite the run measured, the tests its spec gives it, less every
-/// criterion of the plan a person accepted departing from.
+/// suite that holds the run's tasks, the tests its spec gives it, less
+/// every criterion of the plan a person accepted departing from.
 pub fn judged_plan(
     plan: &TasksFile,
-    baseline: Option<&BaselineCapturedPayload>,
+    suite: Option<&str>,
     spec: Option<&SpecFile>,
     ledger: &TaskLedger,
 ) -> TasksFile {
-    let suite = suite_of(baseline);
     TasksFile {
         tasks: plan
             .tasks
             .iter()
             .map(|task| {
-                let judged = specified(judged_task(task, baseline), spec);
+                let judged = specified(judged_task(task, suite), spec);
                 let accepted = ledger
                     .get(&task.id)
                     .map_or(&[][..], |record| record.departures_accepted.as_slice());

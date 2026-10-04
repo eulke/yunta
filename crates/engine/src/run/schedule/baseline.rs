@@ -10,7 +10,7 @@ use yunta_core::{NodeId, Workflow};
 
 use super::{Decision, Policy};
 use crate::replay::RunState;
-use crate::run::baseline::reads_the_measurement;
+use crate::run::baseline::waits_for_the_measurement;
 
 /// The measurement this run's lineage declared and its log does not hold.
 /// A run born holding one — a `kind: workflow` child, a promotion
@@ -39,19 +39,22 @@ pub(super) fn before(
     }
 }
 
-/// Whether `step` reads the measurement: it runs a node that does, it asks
-/// a person about a gate that shows a plan, or it offers to promote the run,
-/// whose successor is born holding the measurement.
+/// Whether `step` waits for the measurement: it runs a node that does, it
+/// asks a person about a gate that shows a plan, or it offers to promote
+/// the run, whose successor is born holding the measurement. A loop starts
+/// beside it.
 fn reads(workflow: &Workflow, policy: &Policy, step: &Decision) -> bool {
     let node = |id: &NodeId| workflow.iter_nodes().find(|node| node.id == *id);
     match step {
         Decision::Execute(batch) => batch
             .iter()
             .filter_map(|(id, _)| node(id))
-            .any(reads_the_measurement),
+            .any(waits_for_the_measurement),
         Decision::PublishGate { node: id }
         | Decision::PollGate { node: id, .. }
-        | Decision::ResolveInternalGate { node: id } => node(id).is_some_and(reads_the_measurement),
+        | Decision::ResolveInternalGate { node: id } => {
+            node(id).is_some_and(waits_for_the_measurement)
+        }
         Decision::GateExhaustedReroutes { .. } => policy.may_promote,
         _ => false,
     }

@@ -1,9 +1,9 @@
 ---
 number: D232
 title: "A run born on its base commit measures its suite aside, and only what reads the measurement waits for it"
-status: accepted
+status: revised
 revises: [D176]
-revised_by: []
+revised_by: [D237]
 ---
 
 # D232 — A run born on its base commit measures its suite aside, and only what reads the measurement waits for it
