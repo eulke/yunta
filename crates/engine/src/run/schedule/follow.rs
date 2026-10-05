@@ -2,8 +2,10 @@
 //! checkout holds a build of exactly the commit its work landed at, and
 //! the run's own tree, which nothing built in since, would build the same
 //! commit again from cold for the next node that works there. So before
-//! such a node, a run whose units' work landed since anything last built
-//! in its tree takes that unit's checkout — warm — as its tree.
+//! the first node that works at that commit — in the run's tree, or in a
+//! unit of its own opened there, which would take that warm checkout for
+//! itself — a run whose units' work landed since anything last built in
+//! its tree takes that checkout as its tree.
 
 use yunta_core::events::NodeState;
 use yunta_core::{Isolation, Node, NodeId, NodeKind, Workflow};
@@ -13,9 +15,9 @@ use crate::replay::RunState;
 
 /// Whether the batch `batch` is the moment for the run to look for the
 /// checkout its last unit built in: the run works in a checkout of its
-/// own, nothing else is under way, a node of the batch builds in the
-/// run's tree, and units' work landed since the run took that checkout
-/// and since a node last started building there.
+/// own, nothing else is under way, a node of the batch works at the run's
+/// commit outside a loop, and units' work landed since the run took that
+/// checkout and since a node last started building there.
 pub fn follows_build(
     workflow: &Workflow,
     state: &RunState,
@@ -28,11 +30,19 @@ pub fn follows_build(
             Some(NodeState::Running { .. } | NodeState::Waiting { .. })
         )
     });
-    let builds_here = batch
+    let works_here = batch
         .iter()
         .filter_map(|(id, _)| workflow.iter_nodes().find(|node| &node.id == id))
-        .any(builds_in_the_runs_tree);
-    policy.follows_builds && !busy && builds_here && landed_since_built(workflow, state)
+        .any(works_at_the_runs_commit);
+    policy.follows_builds && !busy && works_here && landed_since_built(workflow, state)
+}
+
+/// Whether running `node` works at the commit the run stands at: in the
+/// run's tree, or in a unit of its own opened there. A loop's tasks are
+/// not counted: they land, and the run follows the last of them.
+fn works_at_the_runs_commit(node: &Node) -> bool {
+    let unit_of_its_own = crate::scope::audits(node) && !matches!(node.kind, NodeKind::Loop { .. });
+    builds_in_the_runs_tree(node) || unit_of_its_own
 }
 
 /// Whether running `node` builds in the run's own tree: a command or a

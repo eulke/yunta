@@ -23,9 +23,10 @@ its units and its measurement built in colder ones.
 
 1. **The run moves into the build.** Between two steps, when units' work has
    landed since the run took its checkout and since a node last started
-   building in it, the next node that builds in the run's tree runs in the
-   free checkout of the pool that stands exactly at the run's commit and was
-   given back last with a build — the one its last unit built in. Its build
+   building in it, the run takes, before the first node that works at its
+   commit outside a loop — in its tree, or in a unit of its own opened there —
+   the free checkout of the pool that stands exactly at the run's commit and
+   was given back last with a build: the one its last unit built in. Its build
    is of that commit; the tree's is of whatever the tree last built, before
    the units' work landed. The run moves only while nothing of it runs or
    measures, when its tree is clean on its branch, and when the other
@@ -77,6 +78,12 @@ run's tree held 38 GB built at an older commit, and the checkout its unit
 built in held the suite's 18 GB build of the run's own commit; comparing sizes
 kept the run in the tree, where its tests would build again everything the
 units' work changed.
+
+**Moving only before a node that builds in the run's tree.** On a real run a
+read-only review, which works in a unit of its own, ran between the loop and
+the lint: its unit took the checkout the last task built in, and kept it for
+its session. The run found nothing to follow, and its lint and tests built
+the whole commit from cold in the checkout it was born in.
 
 **Moving only when the last node to finish landed units.** A gate between a
 loop and the lint would keep a light-born run in a checkout holding nothing,

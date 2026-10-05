@@ -124,6 +124,24 @@ async fn a_run_follows_its_tasks_build_past_a_gate() {
     assert_eq!(moves(&bench.events()), vec![bench.tree()]);
 }
 
+/// A node that works in a unit of its own at the run's commit — a review
+/// between the loop and the lint — would take the checkout the task built
+/// in and keep it for its session: the run claims that build first.
+#[tokio::test]
+async fn a_run_claims_its_tasks_build_before_a_node_of_its_own_unit_takes_it() {
+    let bench = Bench::new().pooled();
+    ignore(&bench, "target/\n");
+    let review = "  - { id: review, kind: bash, depends_on: [implement], scope: [review.txt], run: \"echo ok > review.txt\" }\n";
+    let lint = TESTS_THE_BUILD.replace("[implement]", "[review]");
+
+    let RunReport { terminal, .. } = bench
+        .run(&builds_then(&format!("{review}{lint}")), BUILDS)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert!(bench.tree().join("target/marker").exists());
+}
+
 /// A tree warm from before its task's work landed holds a build of an
 /// older commit, however large: the run follows its task's build of the
 /// commit it stands at.
