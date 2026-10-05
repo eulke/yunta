@@ -4,8 +4,6 @@
 //! flags — builds them again beside the suite's build. One that extends
 //! the suite's own command reuses that build.
 
-use super::proof::segments;
-
 /// The suite a run measures, as the command a criterion extends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Suite {
@@ -21,9 +19,8 @@ impl Suite {
     /// The suite `cmd` runs, read from its first command — `None` when
     /// it names no program.
     pub fn of(cmd: &str) -> Option<Suite> {
-        let first = segments(cmd).into_iter().next()?;
-        let program = first.split('|').next().unwrap_or_default();
-        let command: Vec<String> = words(program).map(str::to_string).collect();
+        let first = crate::shell::simple_commands(cmd).into_iter().next()?;
+        let command: Vec<String> = words(&first).map(str::to_string).collect();
         let runner = command
             .iter()
             .position(|word| word.starts_with('-'))
@@ -34,7 +31,7 @@ impl Suite {
     /// Each command of `cmd` that runs the project's tests without
     /// extending the suite.
     pub fn outside(&self, cmd: &str) -> Vec<String> {
-        segments(cmd)
+        crate::shell::pipelines(cmd)
             .into_iter()
             .filter(|segment| {
                 let words: Vec<&str> = words(segment).collect();
@@ -99,6 +96,10 @@ mod tests {
             .is_empty());
         assert!(suite.outside("cargo clippy -p yunta-engine").is_empty());
         assert!(suite.outside("sh check.sh").is_empty());
+        assert!(
+            suite.outside("echo 'ready; cargo test -p x'").is_empty(),
+            "a separator inside quotes starts no command"
+        );
     }
 
     #[test]

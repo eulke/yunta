@@ -1,8 +1,8 @@
 //! What a command proves about the files it names: whether it runs a
 //! file at all, and whether it only finds a name in one.
 //!
-//! A criterion is read as the shell reads it: segments joined by `&&`,
-//! `||` or `;`, each a program and its words. A segment that pipes reads
+//! A criterion is read as the shell reads it: pipelines joined by `&&`,
+//! `||` or `;`, each a program and its words ([`crate::shell`]). A segment that pipes reads
 //! what another program printed, so what it finds is behavior; one that
 //! reads a file the task writes passes once the task writes a name in it,
 //! whatever the code does.
@@ -42,7 +42,7 @@ pub fn passes_by_a_name(task: &Task) -> Vec<(String, String)> {
         .iter()
         .filter(|criterion| !criterion.is_guard())
     {
-        let segments = segments(&criterion.cmd);
+        let segments = crate::shell::pipelines(&criterion.cmd);
         for (at, segment) in segments.iter().enumerate() {
             let words: Vec<&str> = segment.split_whitespace().collect();
             let Some(file) = changed
@@ -53,7 +53,7 @@ pub fn passes_by_a_name(task: &Task) -> Vec<(String, String)> {
             };
             let presence = match words.first().copied() {
                 Some("grep" | "egrep" | "fgrep" | "rg") => {
-                    !segment.contains('|') && !finds_a_comment(&words)
+                    crate::shell::simple_commands(segment).len() == 1 && !finds_a_comment(&words)
                 }
                 Some("test" | "[") => {
                     words.iter().any(|word| matches!(*word, "-f" | "-e" | "-s"))
@@ -94,16 +94,6 @@ pub(super) fn documentation(path: &str) -> bool {
         extension.map(str::to_ascii_lowercase).as_deref(),
         Some("md" | "markdown" | "txt" | "rst" | "adoc")
     )
-}
-
-/// The shell segments of `cmd`: what `&&`, `||` and `;` separate.
-pub(super) fn segments(cmd: &str) -> Vec<String> {
-    cmd.replace("&&", ";")
-        .replace("||", ";")
-        .split([';', '\n'])
-        .map(|segment| segment.trim().to_string())
-        .filter(|segment| !segment.is_empty())
-        .collect()
 }
 
 /// Whether `said` appears in `text` with no word character on either

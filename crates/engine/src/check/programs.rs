@@ -43,45 +43,20 @@ pub fn programs_named(workflow: &Workflow, config: &ConfigLayer) -> Vec<(NodeId,
     named
 }
 
-/// The first word of every simple command in `script`: split on lines
-/// (a trailing `\` joins two), `;`, `&` and `|`, skipping the body of a
-/// heredoc.
+/// The first word of every simple command in `script`, as a shell splits
+/// the script into commands ([`yunta_core::shell`]).
 pub(crate) fn leading_programs(script: &str) -> Vec<String> {
-    let mut programs = Vec::new();
-    let mut heredoc: Option<String> = None;
-    let joined = script.replace("\\\n", " ");
-    for line in joined.lines() {
-        if let Some(end) = &heredoc {
-            if line.trim() == end {
-                heredoc = None;
-            }
-            continue;
-        }
-        heredoc = heredoc_delimiter(line);
-        for segment in line.split(['|', ';', '&']) {
-            let first = segment.split_whitespace().find(|word| {
+    yunta_core::shell::simple_commands(script)
+        .iter()
+        .filter_map(|command| {
+            let first = command.split_whitespace().find(|word| {
                 !word.contains('=')
                     && !matches!(*word, "!" | "{" | "(" | "then" | "do" | "else" | "time")
-            });
-            if let Some(program) = first.map(|word| word.trim_start_matches(['(', '{'])) {
-                if is_program(program) {
-                    programs.push(program.to_string());
-                }
-            }
-        }
-    }
-    programs
-}
-
-/// The word that ends a heredoc a line opens, if it opens one.
-fn heredoc_delimiter(line: &str) -> Option<String> {
-    let (_, rest) = line.split_once("<<")?;
-    let word = rest
-        .trim_start_matches('-')
-        .split_whitespace()
-        .next()?
-        .trim_matches(['\'', '"']);
-    (!word.is_empty()).then(|| word.to_string())
+            })?;
+            let program = first.trim_start_matches(['(', '{']);
+            is_program(program).then(|| program.to_string())
+        })
+        .collect()
 }
 
 fn is_program(word: &str) -> bool {
@@ -133,6 +108,18 @@ mod tests {
         assert_eq!(
             leading_programs("if true; then echo ok; fi"),
             Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_quoted_line_or_a_redirection_starts_no_program() {
+        assert_eq!(
+            leading_programs("printf 'tasks:\n  - id: T001\n    scope: [a.txt]\n' > tasks.yaml"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            leading_programs("cargo test 2>&1 | tail -5"),
+            vec!["cargo", "tail"]
         );
     }
 

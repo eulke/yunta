@@ -50,6 +50,7 @@ pub mod schema;
 mod schema_range;
 mod secret;
 pub mod shape;
+pub mod shell;
 pub mod shown;
 mod spec;
 mod tasks;
