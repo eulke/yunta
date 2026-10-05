@@ -9,33 +9,47 @@ use yunta_core::CommitSha;
 
 use super::survey::{Slot, Standing};
 
-/// Whose a checkout is, for a user owning the branches starting with
-/// `owner` (none, for a user that works on no branch). Only a clean
-/// checkout is ever handed out: what is uncommitted in one is somebody's,
-/// which the look taken once it is held tells.
+/// Who takes a checkout of the pool.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum User<'a> {
+    /// A run, which works on its own branch.
+    Run { branch: &'a str },
+    /// A unit, whose attempts' refs all start with `refs`: it works on no
+    /// branch, and the checkout's record says it is the unit's.
+    Unit { refs: &'a str },
+    /// A probe or a measurement, which owns nothing.
+    Passing,
+}
+
+/// Whose a checkout is, for its next user. Only a clean checkout is ever
+/// handed out: what is uncommitted in one is somebody's, which the look
+/// taken once it is held tells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Claim {
-    /// On one of the user's own branches: it goes back to its owner
-    /// first.
+    /// The user's own — on its branch, or kept for it: it goes back to
+    /// its owner first.
     Own,
-    /// On no branch: anybody's.
+    /// Anybody's: on no branch, kept for nobody.
     Free,
-    /// On another unit's branch: anybody's once that unit's work is in
-    /// where the user starts — kept on its branch until somebody takes it,
-    /// so its owner can still pick its session back up there. Only git
-    /// can say whether it landed, so it is asked last.
+    /// Kept for another unit, whose work it holds: anybody's once that
+    /// work is in where the user starts — kept for its unit until then,
+    /// so the unit can still pick its session back up there. Only git can
+    /// say whether it landed, so it is asked last.
     Landed,
 }
 
-/// Whose `standing` makes a checkout — `None` when it is not the user's
-/// to take: on a run's branch, which is that run's for as long as it
-/// lives, or on any other branch, a person's.
-pub(super) fn claim(standing: &Standing, owner: Option<&str>) -> Option<Claim> {
-    match standing.branch.as_deref() {
-        None => Some(Claim::Free),
-        Some(on) if owner.is_some_and(|owner| on.starts_with(owner)) => Some(Claim::Own),
-        Some(on) if crate::worktree::is_unit_branch(on) => Some(Claim::Landed),
-        Some(_) => None,
+/// Whose a checkout standing at `standing`, kept for `unit` as its record
+/// says, is for `user` — `None` when it is not the user's to take: on a
+/// run's branch, which is that run's for as long as it lives, or on any
+/// other branch, a person's.
+pub(super) fn claim(standing: &Standing, unit: Option<&str>, user: User<'_>) -> Option<Claim> {
+    match (standing.branch.as_deref(), unit, user) {
+        (Some(on), _, User::Run { branch }) if on == branch => Some(Claim::Own),
+        (Some(on), _, _) if crate::worktree::is_legacy_unit_branch(on) => Some(Claim::Landed),
+        (Some(_), _, _) => None,
+        (None, Some(kept), User::Unit { refs }) if kept.starts_with(refs) => Some(Claim::Own),
+        (None, Some(_), _) => Some(Claim::Landed),
+        (None, None, _) => Some(Claim::Free),
     }
 }
 
@@ -86,17 +100,18 @@ impl Candidate {
     }
 }
 
-/// The checkouts of a survey `owner` may take to start from `target`,
+/// The checkouts of a survey `user` may take to start from `target`,
 /// best first, with what it takes to tell how far each is left aside:
 /// one already at `target` counts as no distance, any other as one, so
 /// the most recently used at a commit of its own comes after every one at
 /// `target` with the same build.
-pub(super) fn ranked(slots: Vec<Slot>, owner: Option<&str>, target: &CommitSha) -> Vec<Candidate> {
+pub(super) fn ranked(slots: Vec<Slot>, user: User<'_>, target: &CommitSha) -> Vec<Candidate> {
     let mut candidates: Vec<Candidate> = slots
         .into_iter()
         .filter_map(|slot| {
             let standing = slot.standing.as_ref()?;
-            let claim = claim(standing, owner)?;
+            let unit = slot.held.as_ref().and_then(|held| held.unit.as_deref());
+            let claim = claim(standing, unit, user)?;
             let at_target = standing.head.as_ref() == Some(target);
             let build = match slot.built {
                 Some(built) if built.bytes > 0 => Build::Held,

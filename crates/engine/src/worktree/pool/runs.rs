@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use yunta_core::CommitSha;
 
-use super::{reset, CheckoutPool, Fresh, Lease, Taken};
+use super::{fit, reset, CheckoutPool, Fresh, Lease, Taken};
 use crate::process::Supervision;
 use crate::worktree::WorktreeError;
 
@@ -23,9 +23,12 @@ impl CheckoutPool {
         supervision: Supervision<'_>,
     ) -> Result<(PathBuf, Lease), WorktreeError> {
         let branch = crate::worktree::run_branch(run_id);
-        match self.take(Some(&branch), base, supervision).await? {
+        match self
+            .take(fit::User::Run { branch: &branch }, base, supervision)
+            .await?
+        {
             Taken::Held(checkout, lease) => {
-                reset(&checkout, &branch, base, supervision).await?;
+                reset(&checkout, Some(&branch), base, supervision).await?;
                 Ok((checkout, lease))
             }
             Taken::Nothing { listed } => {
@@ -57,7 +60,8 @@ impl CheckoutPool {
                 cwd: self.repo.clone(),
                 source,
             })?;
-        match self.take(Some(&branch), &head, supervision).await? {
+        let user = fit::User::Run { branch: &branch };
+        match self.take(user, &head, supervision).await? {
             Taken::Held(checkout, lease) => {
                 let on = crate::git::output(&checkout, &["branch", "--show-current"], supervision)
                     .await?;

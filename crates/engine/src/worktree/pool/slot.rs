@@ -22,12 +22,18 @@ use crate::process::Supervision;
 /// What every checkout of the pool is called, followed by its number.
 pub(super) const SLOT: &str = "slot-";
 
-/// Who held a checkout last, and when.
+/// Who held a checkout last, and when — and the unit it is kept for, if
+/// one owns it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct Held {
     /// The directory of the run that held it.
     pub(super) by: PathBuf,
     pub(super) at: DateTime<Utc>,
+    /// The ref of the unit whose checkout this is while its work has not
+    /// landed: that unit's attempts take it back first, and nobody else
+    /// takes it while what it holds is not in where they start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) unit: Option<String>,
 }
 
 /// The checkouts under `home`, by number.
@@ -99,9 +105,11 @@ pub(super) async fn hold(
     };
     if let Some(holder) = holder {
         let now = supervision.clock.now();
+        let unit = last_held(home, number).await.and_then(|held| held.unit);
         let held = Held {
             by: holder.to_path_buf(),
             at: now,
+            unit,
         };
         record(&held_path(home, number), &held).await;
         record_busy(home, now).await;
@@ -177,14 +185,24 @@ async fn record(path: &Path, value: &impl Serialize) {
 /// `holder` — or by whoever its record already names, for the pool's own
 /// upkeep.
 pub(super) async fn used(home: &Path, number: u32, holder: Option<&Path>, at: DateTime<Utc>) {
-    let by = match holder {
-        Some(holder) => holder.to_path_buf(),
-        None => match last_held(home, number).await {
-            Some(held) => held.by,
-            None => return,
-        },
+    let last = last_held(home, number).await;
+    let by = match (holder, &last) {
+        (Some(holder), _) => holder.to_path_buf(),
+        (None, Some(held)) => held.by.clone(),
+        (None, None) => return,
     };
-    record(&held_path(home, number), &Held { by, at }).await;
+    let unit = last.and_then(|held| held.unit);
+    record(&held_path(home, number), &Held { by, at, unit }).await;
+}
+
+/// Records that checkout `number`, held by its caller, is kept for `unit`
+/// — or for nobody: its unit's work landed, or its run let it go.
+pub(super) async fn owned(home: &Path, number: u32, unit: Option<&crate::worktree::UnitRef>) {
+    let Some(mut held) = last_held(home, number).await else {
+        return;
+    };
+    held.unit = unit.map(|unit| unit.name().to_string());
+    record(&held_path(home, number), &held).await;
 }
 
 /// Who held checkout `number` last, when it says.

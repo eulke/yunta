@@ -525,6 +525,11 @@ fn unit_at(worktree: std::path::PathBuf) -> yunta_engine::Unit {
         worktree,
         base: yunta_core::CommitSha::from_static("deadbeef"),
         from: yunta_core::TreeId::from_static("deadbeef"),
+        keeps: yunta_engine::UnitRef::of(
+            &yunta_core::RunId::from("run-tools-1"),
+            &yunta_engine::UnitId::Task(TaskId::from("T001")),
+            1,
+        ),
     }
 }
 

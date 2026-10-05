@@ -30,7 +30,7 @@ fn lock_slot_one_for(home: &Path, pid: u32) {
 async fn a_slot_locked_by_a_live_foreign_pid_is_skipped() {
     let world = World::new();
     let (first, held) = world.open("T001").await;
-    world.land(&first).await;
+    world.land(&first, &held).await;
     drop(held);
     let home = world.pool.home(world.owner.supervision()).await.unwrap();
     let mut alive = std::process::Command::new("sleep")
@@ -52,7 +52,7 @@ async fn a_slot_locked_by_a_live_foreign_pid_is_skipped() {
 async fn a_slot_whose_holder_died_is_taken_back() {
     let world = World::new();
     let (first, held) = world.open("T001").await;
-    world.land(&first).await;
+    world.land(&first, &held).await;
     drop(held);
     let home = world.pool.home(world.owner.supervision()).await.unwrap();
     let mut gone = std::process::Command::new("true").spawn().unwrap();
@@ -88,7 +88,7 @@ async fn a_second_runs_unit_reuses_the_first_runs_checkout_at_its_path() {
     let world = World::new();
     let (first, held) = world.open("T001").await;
     write(&first.worktree.join("target/marker"), "built");
-    world.land(&first).await;
+    world.land(&first, &held).await;
     drop(held);
     let later = RunId::from("01JPOOLEDCHECKOUTSLATER00A");
     let their_pool = World::pool_of(world.root.path(), &world.repo, "later-run");
@@ -149,7 +149,18 @@ async fn gc_keeps_as_many_free_slots_as_were_busy() {
         units.push(unit);
     }
     for unit in &units {
-        world.land(unit).await;
+        let (unit, held) = world
+            .pool
+            .reopen_unit(
+                &world.run,
+                unit.who.clone(),
+                None,
+                world.owner.supervision(),
+            )
+            .await
+            .unwrap()
+            .expect("each unit's checkout is still its own");
+        world.land(&unit, &held).await;
     }
     let upkeep =
         yunta_engine::CheckoutPool::upkeep(&world.root.path().join("worktrees"), &world.repo);
@@ -226,7 +237,7 @@ async fn resume_continues_on_a_persons_branch_in_the_bound_checkout() {
 async fn a_reused_checkout_waits_for_a_worktree_being_added_beside_it() {
     let world = World::new();
     let (first, held) = world.open("T001").await;
-    world.land(&first).await;
+    world.land(&first, &held).await;
     drop(held);
     let common = yunta_testkit::git_output(&world.repo, &["rev-parse", "--git-common-dir"]);
     let lock = world.repo.join(common.trim()).join("yunta-worktree.lock");

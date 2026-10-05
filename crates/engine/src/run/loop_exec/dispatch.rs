@@ -7,7 +7,7 @@ use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TaskStatusChange
 use yunta_core::{CommitSha, Node, Task};
 
 use crate::task_cycle::{run_task, AttemptEnv, Continuing, ScopeGovernance, TaskCycleReport};
-use crate::worktree::{reopen_unit, Lease, Unit, UnitHome, UnitId};
+use crate::worktree::{Lease, Unit, UnitHome, UnitId};
 
 use crate::replay::RunState;
 use crate::run::{RunCtx, RunError};
@@ -22,8 +22,9 @@ pub(super) fn attempt_number(state: &RunState, task_id: &yunta_core::TaskId) -> 
 }
 
 /// The checkout and the session a task reopened to resume picks back
-/// up: the unit holding the work its session left, and that session with
-/// the answer it waited for. `None` for a task reopened any other way —
+/// up: the unit holding the work its session left, held for it, and that
+/// session with the answer it waited for. `None` for a task reopened any
+/// other way —
 /// and for one whose checkout is gone, which then continues from the work
 /// in a fresh unit, with the log saying the session was not resumed.
 async fn continuation(
@@ -32,7 +33,7 @@ async fn continuation(
     task: &Task,
     state: &RunState,
     adapter: &dyn yunta_core::port::Adapter,
-) -> Result<Option<(Unit, Continuing)>, RunError> {
+) -> Result<Option<(Unit, Lease, Continuing)>, RunError> {
     let Some(record) = state.tasks.get(&task.id) else {
         return Ok(None);
     };
@@ -52,15 +53,13 @@ async fn continuation(
     else {
         return Ok(None);
     };
-    let reopened = reopen_unit(
-        ctx.worktree,
+    let reopened = ctx.pool.reopen_unit(
         ctx.run_id,
         UnitId::Task(task.id.clone()),
         Some(work),
         ctx.root_supervision(),
-    )
-    .await?;
-    let Some(unit) = reopened else {
+    );
+    let Some((unit, lease)) = reopened.await? else {
         ctx.emit(
             Some(&node.id),
             EventPayload::Session(yunta_core::events::SessionEvent::CapabilityDegraded(
@@ -74,7 +73,7 @@ async fn continuation(
         .await?;
         return Ok(None);
     };
-    Ok(Some((unit, Continuing { session, answer })))
+    Ok(Some((unit, lease, Continuing { session, answer })))
 }
 
 /// Everything the log lets `task_id` reach beyond its declared scope:
@@ -147,13 +146,7 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     let attempt = attempt_number(&state, &task.id);
     let continuation = continuation(ctx, node, task, &state, adapter).await?;
     let (unit, lease, resume) = match continuation {
-        Some((unit, continuing)) => {
-            let lease = ctx
-                .pool
-                .hold(unit.worktree.clone(), ctx.root_supervision())
-                .await?;
-            (unit, lease, Some(continuing))
-        }
+        Some((unit, lease, continuing)) => (unit, lease, Some(continuing)),
         None => {
             let (unit, lease) = ctx
                 .pool

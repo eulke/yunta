@@ -54,11 +54,14 @@ async fn a_unit(owner: &Owner) -> (tempfile::TempDir, tempfile::TempDir, Unit) {
     let base = yunta_engine::head_commit(dir.path(), owner.supervision())
         .await
         .expect("and which commit that is");
+    let who = UnitId::Task("test-unit".into());
+    let keeps = yunta_engine::UnitRef::of(&yunta_core::RunId::from("run-test"), &who, 1);
     let unit = Unit {
-        who: UnitId::Task("test-unit".into()),
+        who,
         worktree: dir.path().to_path_buf(),
         base,
         from,
+        keeps,
     };
     (dir, run, unit)
 }
@@ -1567,8 +1570,10 @@ async fn a_unit_the_left_work_no_longer_fits(
     yunta_testkit::git(repo, &["checkout", "-q", yunta_testkit::INITIAL_BRANCH]);
     yunta_testkit::write(&repo.join("a.txt"), "moved\n");
     yunta_testkit::git(repo, &["commit", "-q", "-am", "moved"]);
+    let who = UnitId::Task("carried".into());
+    let keeps = yunta_engine::UnitRef::of(&yunta_core::RunId::from("run-test"), &who, 1);
     let unit = Unit {
-        who: UnitId::Task("carried".into()),
+        who,
         worktree: repo.to_path_buf(),
         base: yunta_engine::head_commit(repo, owner.supervision())
             .await
@@ -1576,6 +1581,7 @@ async fn a_unit_the_left_work_no_longer_fits(
         from: yunta_engine::head_tree(repo, owner.supervision())
             .await
             .unwrap(),
+        keeps,
     };
     (unit, left)
 }

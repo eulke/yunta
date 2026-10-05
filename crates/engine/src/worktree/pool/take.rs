@@ -12,14 +12,14 @@ use crate::process::Supervision;
 use crate::worktree::WorktreeError;
 
 impl CheckoutPool {
-    /// The most fitting checkout for a user owning the branches starting
-    /// with `owner` and starting from `target`, held for it: ranked from
-    /// one survey of the pool, the best few told apart by how many paths
-    /// separate each from `target`, and looked at once held — another
-    /// process may have changed it since the survey.
+    /// The most fitting checkout for `user` to start from `target`, held
+    /// for it and kept for nobody until its user says otherwise: ranked
+    /// from one survey of the pool, the best few told apart by how many
+    /// paths separate each from `target`, and looked at once held —
+    /// another process may have changed it since the survey.
     pub(super) async fn take(
         &self,
-        owner: Option<&str>,
+        user: fit::User<'_>,
         target: &CommitSha,
         supervision: Supervision<'_>,
     ) -> Result<Taken, WorktreeError> {
@@ -30,7 +30,7 @@ impl CheckoutPool {
             .filter(|slot| slot.standing.is_some())
             .map(|slot| slot.number)
             .collect();
-        let mut ranked = fit::ranked(slots, owner, target);
+        let mut ranked = fit::ranked(slots, user, target);
         // How far each stands from `target` tells apart only candidates
         // the survey could not: with one, there is nothing to tell apart.
         let best = match ranked.len() {
@@ -61,8 +61,9 @@ impl CheckoutPool {
             let Some(lease) = held.await? else {
                 continue;
             };
-            let path = candidate.slot.path;
-            if still_fits(&path, owner, target, supervision).await {
+            let (number, path) = (candidate.slot.number, candidate.slot.path);
+            if still_fits(&home, number, &path, user, target, supervision).await {
+                slot::owned(&home, number, None).await;
                 return Ok(Taken::Held(path, lease));
             }
         }
@@ -70,12 +71,15 @@ impl CheckoutPool {
     }
 }
 
-/// Whether `checkout`, held, is still one its user may take: clean, and
-/// on a branch the user owns, on none, or on another unit's whose work
-/// is in `target` — which only here is asked of git.
+/// Whether `checkout` — checkout `number` of the pool at `home`, held —
+/// is still one `user` may take: clean, and its user's own, free, or
+/// kept for another unit whose work is in `target`, which only here is
+/// asked of git.
 async fn still_fits(
+    home: &Path,
+    number: u32,
     checkout: &Path,
-    owner: Option<&str>,
+    user: fit::User<'_>,
     target: &CommitSha,
     supervision: Supervision<'_>,
 ) -> bool {
@@ -85,7 +89,10 @@ async fn still_fits(
     if !look.clean {
         return false;
     }
-    match fit::claim(&look.standing, owner) {
+    let unit = slot::last_held(home, number)
+        .await
+        .and_then(|held| held.unit);
+    match fit::claim(&look.standing, unit.as_deref(), user) {
         Some(fit::Claim::Own | fit::Claim::Free) => true,
         Some(fit::Claim::Landed) => crate::git::success(
             checkout,

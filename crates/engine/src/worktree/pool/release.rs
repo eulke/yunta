@@ -1,43 +1,23 @@
-//! How checkouts go back to their project's pool: a unit's when its work
-//! lands, a run's when it ends, and the ones a project no longer uses when
-//! it collects what is old.
+//! How checkouts go back to their project's pool: a run's units' and its
+//! own when it ends, and the ones a project no longer uses when it
+//! collects what is old — and how legacy unit branches are taken in.
 
 use std::path::{Path, PathBuf};
 
-use super::super::{head_commit, run_units, Unit, WorktreeError};
+use super::super::WorktreeError;
 use super::{slot, survey, CheckoutPool};
 use crate::lock::Contention;
 use crate::process::Supervision;
 
-/// Lets go of `unit`'s branch once its work landed on `into`: the checkout
-/// stays where it stands with no branch — free for the pool — and the
-/// branch goes, since `into` holds its work.
-pub async fn retire_unit_branch(
-    unit: &Unit,
-    into: &Path,
-    supervision: Supervision<'_>,
-) -> Result<(), WorktreeError> {
-    let on = crate::git::output(&unit.worktree, &["branch", "--show-current"], supervision).await?;
-    let branch = on.trim();
-    if branch.is_empty() {
-        return Ok(());
-    }
-    super::mutating(&unit.worktree, &["switch", "--detach", "-q"], supervision).await?;
-    if let Err(error) = super::mutating(into, &["branch", "-d", branch], supervision).await {
-        tracing::debug!(%error, branch, "a landed unit's branch stays");
-    }
-    Ok(())
-}
-
-/// Gives back every checkout the units of `run_id` still hold, as the run
-/// ends: each lets go of its unit's branch, and a branch whose work is in
-/// `into` — the run's tree as it closes — goes with it. A branch holding
-/// work that never landed — a blocked task's — stays for whoever wants it,
-/// until the run is collected. A checkout with something uncommitted in it
-/// stays its unit's.
+/// Gives back every checkout the units of `run_id` were kept in, as the
+/// run ends: a clean one is kept for nobody, and the refs whose work is
+/// in `into` — the run's tree as it closes — go. A blocked task's ref
+/// stays, holding what it left, until the run is collected; a checkout
+/// with something uncommitted in it stays its unit's.
 ///
-/// A run made before its project kept checkouts kept them under its own
-/// directory; those are taken away as they always were.
+/// What a run made before its project kept checkouts is taken in first:
+/// the checkouts it kept under its own directory are taken away, and its
+/// units' branches become their refs.
 pub async fn release_unit_checkouts(
     pool: &CheckoutPool,
     into: &Path,
@@ -45,23 +25,9 @@ pub async fn release_unit_checkouts(
     run_id: &yunta_core::RunId,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
-    let landed = head_commit(into, supervision).await?;
     remove_own_checkouts(into, run_dir, supervision).await?;
-    let ours = format!("{}/", run_units(run_id));
-    let home = pool.home(supervision).await?;
-    let kept = let_go(pool, &home, &ours, supervision).await?;
-    for branch in branches(into, &ours, supervision).await? {
-        let landed_there = crate::git::success(
-            into,
-            &["merge-base", "--is-ancestor", &branch, landed.as_str()],
-            supervision,
-        )
-        .await?;
-        if landed_there && kept.iter().all(|still| still != &branch) {
-            super::mutating(into, &["branch", "-D", &branch], supervision).await?;
-        }
-    }
-    Ok(())
+    adopt_unit_branches(pool, into, Some(run_id), supervision).await?;
+    pool.free_units_of(into, run_id, supervision).await
 }
 
 /// Gives back the checkout run `run_id` worked in, as the run ends: it
@@ -121,7 +87,7 @@ pub async fn still_the_runs(
     let on = look.standing.branch.as_deref().unwrap_or_default();
     on == super::super::run_branch(run_id)
         || !(on.is_empty() || on.starts_with(&format!("{}/", super::super::RUN_BRANCHES)))
-            && !super::super::is_unit_branch(on)
+            && !super::super::is_legacy_unit_branch(on)
 }
 
 /// Hands the checkout a run worked in to the run that carries on from it:
@@ -137,24 +103,17 @@ pub async fn hand_over_run_checkout(
     Ok(())
 }
 
-/// Lets go of every branch of `run_id`'s units in the pool and deletes
-/// them all, landed or not: the run is being collected, and nothing will
-/// continue its work.
+/// Lets go of everything the units of `run_id` kept, landed or not: the
+/// run is being collected, and nothing will continue its work. Its units'
+/// legacy unit branches go too.
 pub async fn forget_run_units(
     pool: &CheckoutPool,
     repo: &Path,
     run_id: &yunta_core::RunId,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
-    let ours = format!("{}/", run_units(run_id));
-    let home = pool.home(supervision).await?;
-    let kept = let_go(pool, &home, &ours, supervision).await?;
-    for branch in branches(repo, &ours, supervision).await? {
-        if kept.iter().all(|still| still != &branch) {
-            super::mutating(repo, &["branch", "-D", &branch], supervision).await?;
-        }
-    }
-    Ok(())
+    adopt_unit_branches(pool, repo, Some(run_id), supervision).await?;
+    pool.forget_units_of(repo, run_id, supervision).await
 }
 
 /// Takes away the free checkouts of the pool beyond as many as were busy
@@ -215,60 +174,108 @@ async fn busiest(home: &Path, now: chrono::DateTime<chrono::Utc>) -> usize {
     }
 }
 
-/// Lets every clean checkout under `home` on a branch starting with
-/// `ours` go of it. Answers the branches still held: by a checkout with
-/// something uncommitted, or held by a live process.
-async fn let_go(
+/// Takes in the legacy unit branches — `run`'s, or every run's — as the refs units keep their work by: each branch's commit is kept by
+/// its unit's ref, a clean checkout of the pool on it lets it go and is
+/// kept for that unit, and the branch goes. A branch checked out where
+/// something is uncommitted, held by a live process, or checked out
+/// outside the pool, stays. Answers the branches taken in.
+pub async fn adopt_unit_branches(
     pool: &CheckoutPool,
-    home: &Path,
-    ours: &str,
-    supervision: Supervision<'_>,
-) -> Result<Vec<String>, WorktreeError> {
-    let mut kept = Vec::new();
-    for slot in survey::survey(home, &pool.repo, supervision).await? {
-        let Some(branch) = slot.standing.and_then(|standing| standing.branch) else {
-            continue;
-        };
-        if !branch.starts_with(ours) {
-            continue;
-        }
-        let holder = pool.holder.as_deref();
-        let held = slot::hold(home, slot.number, Contention::Refuse, holder, supervision).await?;
-        let clean = match &held {
-            Some(_) => survey::look(&slot.path, supervision)
-                .await
-                .is_some_and(|look| look.clean),
-            None => false,
-        };
-        match clean {
-            true => {
-                super::mutating(&slot.path, &["switch", "--detach", "-q"], supervision).await?;
-            }
-            false => kept.push(branch),
-        }
-    }
-    Ok(kept)
-}
-
-/// The branches of `repo` starting with `prefix`.
-async fn branches(
     repo: &Path,
-    prefix: &str,
+    run: Option<&yunta_core::RunId>,
     supervision: Supervision<'_>,
 ) -> Result<Vec<String>, WorktreeError> {
-    let refs = format!("refs/heads/{prefix}");
-    let listed = super::super::run_git(
+    let prefix = match run {
+        Some(run) => super::super::legacy_unit_branches_of(run),
+        None => format!("{}/", super::super::LEGACY_UNIT_BRANCHES),
+    };
+    let listed = crate::git::output(
         repo,
-        &["for-each-ref", "--format=%(refname:short)", &refs],
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)",
+            &format!("refs/heads/{prefix}"),
+        ],
         supervision,
     )
     .await?;
-    Ok(listed
-        .lines()
-        .map(str::trim)
-        .filter(|branch| !branch.is_empty())
-        .map(str::to_string)
-        .collect())
+    let branches: Vec<&str> = listed.lines().filter(|line| !line.is_empty()).collect();
+    if branches.is_empty() {
+        return Ok(Vec::new());
+    }
+    let home = pool.home(supervision).await?;
+    let listing =
+        crate::git::output(repo, &["worktree", "list", "--porcelain"], supervision).await?;
+    let mut checked_out = std::collections::HashMap::new();
+    for listed in super::super::checkouts(&listing) {
+        if let Some(branch) = listed.branch {
+            let short = branch.trim_start_matches("refs/heads/").to_string();
+            checked_out.insert(short, listed.path);
+        }
+    }
+    let mut taken = Vec::new();
+    for branch in branches {
+        let Some(unit) = super::super::UnitRef::of_legacy(branch) else {
+            continue;
+        };
+        if let Some(path) = checked_out.get(branch) {
+            if !let_go(pool, &home, path, &unit, supervision).await? {
+                continue;
+            }
+        }
+        let tip = format!("refs/heads/{branch}");
+        crate::git::output(repo, &["update-ref", unit.name(), &tip], supervision).await?;
+        super::mutating(repo, &["branch", "-D", branch], supervision).await?;
+        taken.push(branch.to_string());
+    }
+    Ok(taken)
+}
+
+/// Lets the checkout at `path` go of the branch it is on, kept for `unit`
+/// from here — when it is one of the pool's, nobody holds it, and nothing
+/// in it is uncommitted. Answers whether it did.
+async fn let_go(
+    pool: &CheckoutPool,
+    home: &Path,
+    path: &Path,
+    unit: &super::super::UnitRef,
+    supervision: Supervision<'_>,
+) -> Result<bool, WorktreeError> {
+    let path = tokio::fs::canonicalize(path)
+        .await
+        .unwrap_or_else(|_| path.to_path_buf());
+    let number = path
+        .parent()
+        .filter(|parent| *parent == home)
+        .and_then(|_| {
+            path.file_name()?
+                .to_str()?
+                .strip_prefix(slot::SLOT)?
+                .parse()
+                .ok()
+        });
+    let Some(number) = number else {
+        return Ok(false);
+    };
+    let held = slot::hold(
+        home,
+        number,
+        Contention::Refuse,
+        pool.holder.as_deref(),
+        supervision,
+    );
+    let Some(lease) = held.await? else {
+        return Ok(false);
+    };
+    if !survey::look(&path, supervision)
+        .await
+        .is_some_and(|look| look.clean)
+    {
+        return Ok(false);
+    }
+    super::mutating(&path, &["switch", "--detach", "-q"], supervision).await?;
+    lease.keep_for(Some(unit)).await;
+    Ok(true)
 }
 
 /// Takes away the checkouts a run made under its own directory before its

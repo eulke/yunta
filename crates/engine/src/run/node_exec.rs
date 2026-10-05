@@ -130,22 +130,12 @@ async fn node_unit(
     let who = crate::worktree::UnitId::Node(node.id.clone());
     let continuing = super::continuation::continuation(ctx, node).await?;
     if continuing.is_some() {
-        let reopened = crate::worktree::reopen_unit(
-            ctx.worktree,
-            ctx.run_id,
-            who.clone(),
-            None,
-            ctx.root_supervision(),
-        )
-        .await?;
+        let reopened = ctx
+            .pool
+            .reopen_unit(ctx.run_id, who.clone(), None, ctx.root_supervision())
+            .await?;
         match reopened {
-            Some(unit) => {
-                let held = ctx
-                    .pool
-                    .hold(unit.worktree.clone(), ctx.root_supervision())
-                    .await?;
-                return Ok((unit, held, continuing));
-            }
+            Some((unit, held)) => return Ok((unit, held, continuing)),
             None => super::continuation::not_resumed(ctx, node).await?,
         }
     }

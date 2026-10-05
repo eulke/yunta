@@ -1,13 +1,9 @@
-//! Every branch name the engine composes.
+//! Every branch and ref name the engine composes.
 //!
-//! Two families — a run's own branch, and the branch of one attempt by
-//! one unit of work — that share a repository's ref namespace and therefore have
-//! to be designed together. Git refuses a ref that is a directory of
-//! another (`refs/heads/a` and `refs/heads/a/b` never coexist, in either
-//! order), so the two diverge at the segment right after `yunta/`, both
-//! of them literals this module chooses. Diverging there is what makes
-//! them coexist for every run id, rather than for the ones that happen
-//! not to collide.
+//! A run's own branch, under `refs/heads`, and the refs that keep the
+//! work of units, under `refs/yunta`, where no list of branches shows
+//! them. Units once kept their work on branches of their own; that
+//! family's name is kept only to take such a branch's work in.
 
 use yunta_core::RunId;
 
@@ -15,8 +11,12 @@ use super::UnitId;
 
 /// Where a run's own branches live.
 pub(crate) const RUN_BRANCHES: &str = "yunta/run";
-/// Where the branches of units' attempts live.
-const UNIT_BRANCHES: &str = "yunta/unit";
+/// Where units kept their work on branches, before refs outside
+/// `refs/heads` kept it. Read only to take such a branch's work in.
+pub(crate) const LEGACY_UNIT_BRANCHES: &str = "yunta/unit";
+/// Where the refs that keep units' work live: outside `refs/heads`, so no
+/// list of a person's branches shows them.
+const UNIT_REFS: &str = "refs/yunta/unit";
 
 /// The branch a run's own commits live on: the branch its worktree is
 /// created on, what `{{run.branch}}` renders, what the run's cleanup
@@ -27,68 +27,106 @@ pub fn run_branch(run_id: &RunId) -> String {
     format!("{RUN_BRANCHES}/{run_id}")
 }
 
-/// The branch one attempt by one unit of work works on, inside the tree
-/// that unit was opened in.
+/// The ref that keeps the work of one attempt by one unit of work. The
+/// unit works on no branch; what it commits is kept by this ref until it
+/// lands — or, for a blocked task's work, until its run is collected.
 ///
-/// It names the run because a worktree is the run's but a ref is the
-/// whole repository's: two runs over one checkout reach the same unit id
-/// — the same plan run twice, a successor re-doing what its predecessor
-/// left open — and the attempt number counts that run's log alone, so
-/// both start at 1. A name built from the unit alone asks git for one
-/// branch twice, and the second run cannot have it.
-pub fn unit_branch(run_id: &RunId, who: &UnitId, attempt: u32) -> String {
-    format!("{}{attempt}", unit_branches(run_id, who))
+/// It names the run because a checkout is the run's but a ref is the
+/// whole repository's: two runs over one repository reach the same unit
+/// id — the same plan run twice, a successor re-doing what its
+/// predecessor left open — and the attempt number counts that run's log
+/// alone, so both start at 1.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnitRef(String);
+
+impl UnitRef {
+    pub fn of(run_id: &RunId, who: &UnitId, attempt: u32) -> UnitRef {
+        UnitRef(format!("{}{attempt}", Self::of_unit(run_id, who)))
+    }
+
+    /// The ref a name read back from git or a record is, when it is one.
+    pub fn named(name: &str) -> Option<UnitRef> {
+        name.starts_with(&format!("{UNIT_REFS}/"))
+            .then(|| UnitRef(name.to_string()))
+    }
+
+    /// What every ref of `who`'s attempts in `run_id` starts with: the
+    /// attempt number follows it.
+    pub fn of_unit(run_id: &RunId, who: &UnitId) -> String {
+        format!("{}{who}/", Self::of_run(run_id))
+    }
+
+    /// What every ref of a unit of `run_id` starts with.
+    pub fn of_run(run_id: &RunId) -> String {
+        format!("{UNIT_REFS}/{run_id}/")
+    }
+
+    pub fn name(&self) -> &str {
+        &self.0
+    }
+
+    /// The attempt this ref keeps the work of.
+    pub fn attempt(&self) -> Option<u32> {
+        self.0.rsplit('/').next()?.parse().ok()
+    }
+
+    /// The ref that takes in what the legacy unit branch `branch`
+    /// held — `yunta/unit/<run>/<unit>/<attempt>` — when it is one.
+    pub(crate) fn of_legacy(branch: &str) -> Option<UnitRef> {
+        let rest = branch.strip_prefix(&format!("{LEGACY_UNIT_BRANCHES}/"))?;
+        Some(UnitRef(format!("{UNIT_REFS}/{rest}")))
+    }
 }
 
-/// What every branch of `who`'s attempts in `run_id` starts with: the
-/// attempt number follows it.
-pub(crate) fn unit_branches(run_id: &RunId, who: &UnitId) -> String {
-    format!("{}/{who}/", run_units(run_id))
+impl std::fmt::Display for UnitRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
-/// Where the branches of every unit of `run_id` live.
-pub fn run_units(run_id: &RunId) -> String {
-    format!("{UNIT_BRANCHES}/{run_id}")
+/// What every legacy unit branch of `run_id` starts with.
+pub(crate) fn legacy_unit_branches_of(run_id: &RunId) -> String {
+    format!("{LEGACY_UNIT_BRANCHES}/{run_id}/")
 }
 
-/// Whether `branch` is the branch of a unit's attempt.
-pub(crate) fn is_unit_branch(branch: &str) -> bool {
-    branch.starts_with(&format!("{UNIT_BRANCHES}/"))
+/// Whether `branch` is a legacy unit branch.
+pub(crate) fn is_legacy_unit_branch(branch: &str) -> bool {
+    branch.starts_with(&format!("{LEGACY_UNIT_BRANCHES}/"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const RUN: &str = "01JEXAMPLERUNID0000000000";
+
     #[test]
-    fn neither_family_is_reachable_by_walking_into_the_other() {
-        let run = RunId::from("01JEXAMPLERUNID0000000000");
-        let unit = unit_branch(&run, &UnitId::Task("T001".into()), 1);
-        assert!(
-            !unit.starts_with(&format!("{}/", run_branch(&run))),
-            "a unit branch under the run's own branch is a ref git cannot create: {unit}"
-        );
-        assert!(
-            !run_branch(&run).starts_with(&format!("{unit}/")),
-            "and neither direction of the same conflict"
-        );
+    fn a_unit_s_work_is_kept_outside_every_branch() {
+        let kept = UnitRef::of(&RunId::from(RUN), &UnitId::Task("T001".into()), 1);
+        assert!(!kept.name().starts_with("refs/heads/"), "{kept}");
+        assert_eq!(kept.attempt(), Some(1));
+        assert_eq!(UnitRef::named(kept.name()), Some(kept));
     }
 
     #[test]
-    fn a_unit_branch_separates_two_runs_at_the_same_unit_and_attempt() {
-        let unit = UnitId::Task("T001".into());
-        assert_ne!(
-            unit_branch(&RunId::from("01JFIRSTRUN00000000000000"), &unit, 1),
-            unit_branch(&RunId::from("01JSECONDRUN0000000000000"), &unit, 1),
-        );
+    fn a_unit_ref_separates_two_runs_and_a_node_from_a_task() {
+        let task = UnitId::Task("build".into());
+        let first = UnitRef::of(&RunId::from("01JFIRSTRUN00000000000000"), &task, 1);
+        let second = UnitRef::of(&RunId::from("01JSECONDRUN0000000000000"), &task, 1);
+        let node = UnitRef::of(&RunId::from(RUN), &UnitId::Node("build".into()), 1);
+        assert_ne!(first, second);
+        assert_ne!(UnitRef::of(&RunId::from(RUN), &task, 1), node);
     }
 
     #[test]
-    fn a_node_and_a_task_of_one_name_get_their_own_branches() {
-        let run = RunId::from("01JEXAMPLERUNID0000000000");
-        assert_ne!(
-            unit_branch(&run, &UnitId::Node("build".into()), 1),
-            unit_branch(&run, &UnitId::Task("build".into()), 1),
+    fn a_branch_of_the_old_layout_is_taken_in_by_the_ref_of_its_unit() {
+        let branch = format!("yunta/unit/{RUN}/task/T001/2");
+        let taken = UnitRef::of_legacy(&branch).unwrap();
+        assert_eq!(
+            taken,
+            UnitRef::of(&RunId::from(RUN), &UnitId::Task("T001".into()), 2)
         );
+        assert!(is_legacy_unit_branch(&branch));
+        assert!(UnitRef::of_legacy(&run_branch(&RunId::from(RUN))).is_none());
     }
 }

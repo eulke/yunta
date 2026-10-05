@@ -60,6 +60,8 @@ pub struct Unit {
     /// held as its own value because an audit compares trees and never
     /// asks git again.
     pub from: TreeId,
+    /// The ref that keeps what it commits: it works on no branch.
+    pub keeps: super::UnitRef,
 }
 
 /// Where a run opens its units: the repository their checkouts are
@@ -117,75 +119,10 @@ pub async fn snapshot_commit(
         })
 }
 
-/// Reopens the checkout a session saw, for a session picked back up:
-/// the unit of `who` that holds `left` — the work a blocked task's attempt
-/// committed on its branch — or, with no `left`, the last unit `who`
-/// opened, whose attempt left its work as it was. The work goes back to
-/// where the attempt had it: uncommitted changes on the tree the unit
-/// began from, which is what its audit answers for.
-///
-/// Found by what the checkout holds, not by an attempt number: a
-/// session picked back up works on in the unit it saw, so an attempt
-/// does not always open a unit of its own. The checkouts are found by
-/// the branch each is on, wherever its directory is. `None` when no such
-/// checkout is still there — cleaned up, or moved by something else.
-pub async fn reopen_unit(
-    repo: &Path,
-    run_id: &RunId,
-    who: UnitId,
-    left: Option<&CommitSha>,
-    supervision: Supervision<'_>,
-) -> Result<Option<Unit>, WorktreeError> {
-    for worktree in units_of(repo, run_id, &who, supervision).await? {
-        let Ok(head) = head_commit(&worktree, supervision).await else {
-            if left.is_none() {
-                return Ok(None);
-            }
-            continue;
-        };
-        let base = match left {
-            None => head,
-            Some(left) if head == *left => back_to_base(&worktree, left, supervision).await?,
-            Some(_) => continue,
-        };
-        let from = super::head_tree(&worktree, supervision).await?;
-        return Ok(Some(Unit {
-            who,
-            worktree,
-            base,
-            from,
-        }));
-    }
-    Ok(None)
-}
-
-/// Every checkout `who` opened in this run, the latest attempt first:
-/// the ones on a branch of `who`'s attempts, as `repo`'s own list of
-/// worktrees names them.
-async fn units_of(
-    repo: &Path,
-    run_id: &RunId,
-    who: &UnitId,
-    supervision: Supervision<'_>,
-) -> Result<Vec<PathBuf>, WorktreeError> {
-    let listing =
-        crate::git::output(repo, &["worktree", "list", "--porcelain"], supervision).await?;
-    let ours = format!("refs/heads/{}", super::unit_branches(run_id, who));
-    let mut opened: Vec<(u32, PathBuf)> = super::checkouts(&listing)
-        .into_iter()
-        .filter_map(|listed| {
-            let attempt = listed.branch?.strip_prefix(&ours)?.parse().ok()?;
-            Some((attempt, listed.path))
-        })
-        .collect();
-    opened.sort_by_key(|(attempt, _)| std::cmp::Reverse(*attempt));
-    Ok(opened.into_iter().map(|(_, path)| path).collect())
-}
-
 /// Puts the work committed at `left` back as uncommitted changes on the
 /// commit it was made on — where an attempt's own edits sit — and
 /// answers that commit.
-async fn back_to_base(
+pub(super) async fn back_to_base(
     worktree: &Path,
     left: &CommitSha,
     supervision: Supervision<'_>,
@@ -257,7 +194,9 @@ pub async fn carry_work(
     })
 }
 
-/// Commits everything the unit did, under `message`.
+/// Commits everything the unit did, under `message`, and points the
+/// unit's ref at it: the unit works on no branch, and the ref is what
+/// keeps the commit when its checkout goes to somebody else.
 ///
 /// A unit that changed nothing produces no commit and is not an error:
 /// work whose criteria are met by side effects that leave no diff is
@@ -285,6 +224,8 @@ pub async fn commit_work(
         supervision,
     )
     .await?;
+    let keep = ["update-ref", unit.keeps.name(), "HEAD"];
+    crate::git::output(&unit.worktree, &keep, supervision).await?;
     Ok(())
 }
 

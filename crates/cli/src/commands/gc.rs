@@ -45,6 +45,7 @@ pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
         for (run_id, tree) in &given_back {
             give_back(&ctx, &pool, run_id, tree).await;
         }
+        adopt(&ctx, &pool).await;
         trim(&ctx, &pool).await;
     }
     Ok(Outcome::Success)
@@ -79,6 +80,19 @@ async fn forget_units(ctx: &Context, pool: &yunta_engine::CheckoutPool, run_id: 
     }
     if let Err(e) = yunta_engine::forget_run_units(pool, &ctx.cwd, run_id, supervision).await {
         warn(format!("run {}: {e}", run_id.handle()));
+    }
+}
+
+/// Takes in the units' branches runs made before refs kept their work:
+/// what each unit committed stays, kept by its ref, and no list of the
+/// project's branches shows it.
+async fn adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
+    match yunta_engine::adopt_unit_branches(pool, &ctx.cwd, None, ctx.supervision()).await {
+        Ok(taken) if !taken.is_empty() => {
+            println!("kept the work of {} unit branches by refs", taken.len());
+        }
+        Ok(_) => {}
+        Err(e) => warn(format!("the units' branches: {e}")),
     }
 }
 

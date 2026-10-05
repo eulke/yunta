@@ -76,6 +76,7 @@ fn gc_takes_a_collected_run_s_unit_branches() {
                 "for-each-ref",
                 "--format=%(refname)",
                 "refs/heads/yunta/unit/",
+                "refs/yunta/unit/",
             ],
         )
     };
@@ -87,6 +88,39 @@ fn gc_takes_a_collected_run_s_unit_branches() {
     assert_eq!(units().trim(), "");
     let listing = git_output(&repo, &["worktree", "list", "--porcelain"]);
     assert!(!listing.contains("refs/heads/yunta/unit/"), "{listing}");
+}
+
+/// A unit's branch a run made before refs kept units' work is taken in by
+/// the ref of its unit: the work stays, at the same commit, and no list of
+/// branches shows it.
+#[test]
+fn gc_keeps_a_live_runs_unit_branch_work_by_a_ref() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "storage:\n  retention_days: 30\n",
+    );
+    write(&repo.join("wf.yaml"), ONE_NODE);
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success(), "stderr: {}", stderr(&run));
+    let run_id = run_id_from(&run);
+    let branch = format!("yunta/unit/{run_id}/task/T1/1");
+    git(&repo, &["branch", &branch]);
+    let left = git_output(&repo, &["rev-parse", &branch]);
+
+    let gc = yunta_in!(&repo, &home, &["gc"]);
+
+    assert!(gc.status.success(), "stderr: {}", stderr(&gc));
+    let kept = format!("refs/yunta/unit/{run_id}/task/T1/1");
+    assert_eq!(git_output(&repo, &["rev-parse", &kept]), left);
+    assert_eq!(
+        git_output(&repo, &["branch", "--list", "yunta/unit/*"]).trim(),
+        ""
+    );
 }
 
 #[test]

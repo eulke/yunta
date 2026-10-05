@@ -44,19 +44,19 @@ use crate::lock::{self, Acquired, Contention, LockError, SystemProbe};
 
 use crate::process::Supervision;
 pub(crate) use branches::RUN_BRANCHES;
-pub(crate) use branches::{is_unit_branch, unit_branches};
-pub use branches::{run_branch, run_units, unit_branch};
+pub(crate) use branches::{is_legacy_unit_branch, legacy_unit_branches_of, LEGACY_UNIT_BRANCHES};
+pub use branches::{run_branch, UnitRef};
 pub use commit::{commit_tree, restore, Captured};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
 pub(crate) use listing::checkouts;
 pub use overlay::{remove_files, tree_with, write_files};
 pub use pool::{
-    clear_work, forget_run_units, hand_over_run_checkout, pool_home, release_run_checkout,
-    release_unit_checkouts, retire_unit_branch, still_the_runs, trim_pool, CheckoutPool, Lease,
+    adopt_unit_branches, clear_work, forget_run_units, hand_over_run_checkout, pool_home,
+    release_run_checkout, release_unit_checkouts, still_the_runs, trim_pool, CheckoutPool, Lease,
 };
 pub use unit::{
-    carry_work, commit_work, land, rebase_onto, reopen_unit, snapshot_commit, Carried, Rebase,
-    Unit, UnitHome, UnitId,
+    carry_work, commit_work, land, rebase_onto, snapshot_commit, Carried, Rebase, Unit, UnitHome,
+    UnitId,
 };
 
 #[derive(Debug, Error)]

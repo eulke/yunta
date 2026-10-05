@@ -13,12 +13,13 @@
 //!
 //! A checkout is free when nothing in it is uncommitted, no live process
 //! holds it, and nothing it committed is still somebody's: it is on no
-//! branch, or its branch's work is in the commit its next user starts
-//! from. The attempts of one unit take back the checkout one of them
-//! worked in first; work that has not landed keeps its checkout its
-//! unit's. Holding a checkout lasts as long as
-//! the process ([`slot`]); owning one is the branch it is on, which
-//! outlives every process.
+//! branch and kept for no unit, or the unit it is kept for has its work
+//! in the commit its next user starts from. The attempts of one unit take
+//! back the checkout kept for it first; work that has not landed keeps
+//! its checkout its unit's. Holding a checkout lasts as long as the
+//! process ([`slot`]). Owning one outlives every process: a run owns its
+//! checkout by its branch, and a unit — which works on no branch, its
+//! work kept by its ref — by the checkout's record ([`units`]).
 //!
 //! A checkout is taken from one survey of the pool ([`survey`], [`take`]):
 //! one listing of the repository's checkouts, whatever their number, and
@@ -34,6 +35,7 @@ mod slot;
 mod space;
 mod survey;
 mod take;
+mod units;
 mod walk;
 
 use std::path::{Path, PathBuf};
@@ -42,13 +44,12 @@ use std::sync::Arc;
 use yunta_core::CommitSha;
 
 use super::{head_tree, Unit, UnitHome, UnitId, WorktreeError};
-use crate::lock::Contention;
 use crate::process::Supervision;
 
 pub use give::clear_work;
 pub use release::{
-    forget_run_units, hand_over_run_checkout, release_run_checkout, release_unit_checkouts,
-    retire_unit_branch, still_the_runs, trim_pool,
+    adopt_unit_branches, forget_run_units, hand_over_run_checkout, release_run_checkout,
+    release_unit_checkouts, still_the_runs, trim_pool,
 };
 use slot::SLOT;
 
@@ -93,38 +94,39 @@ pub(super) enum Taken {
 /// ([`CheckoutPool::give_back`]), which records the use and the build it
 /// leaves.
 pub struct Lease {
-    lock: Option<PathBuf>,
-    /// The checkout held: its number in the pool at `home`.
-    slot: Option<(PathBuf, u32)>,
+    /// The pool the checkout is one of.
+    home: PathBuf,
+    /// Its number there.
+    number: u32,
 }
 
 impl Lease {
-    fn of(home: &Path, number: u32) -> Self {
-        Lease {
-            lock: Some(home.join(format!("{SLOT}{number}.lock"))),
-            slot: Some((home.to_path_buf(), number)),
-        }
+    /// Records that the checkout held is kept for `unit` — or for nobody.
+    pub(super) async fn keep_for(&self, unit: Option<&super::UnitRef>) {
+        slot::owned(&self.home, self.number, unit).await;
     }
 
-    /// The hold on a checkout the pool does not keep — one a run made
-    /// before its project kept checkouts — which nothing else takes.
-    fn outside() -> Self {
+    /// The checkout held.
+    pub(super) fn checkout(&self) -> PathBuf {
+        self.home.join(format!("{SLOT}{}", self.number))
+    }
+
+    fn of(home: &Path, number: u32) -> Self {
         Lease {
-            lock: None,
-            slot: None,
+            home: home.to_path_buf(),
+            number,
         }
     }
 }
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        if let Some(lock) = self.lock.take() {
-            // blocking: a `Drop` has no `await` to give, and removing one
-            // lock file is a single syscall. Doing it here is what makes an
-            // early `?` unable to leak the hold.
-            if let Err(error) = std::fs::remove_file(&lock) {
-                tracing::debug!(%error, lock = %lock.display(), "a checkout's hold outlived it");
-            }
+        let lock = self.home.join(format!("{SLOT}{}.lock", self.number));
+        // blocking: a `Drop` has no `await` to give, and removing one
+        // lock file is a single syscall. Doing it here is what makes an
+        // early `?` unable to leak the hold.
+        if let Err(error) = std::fs::remove_file(&lock) {
+            tracing::debug!(%error, lock = %lock.display(), "a checkout's hold outlived it");
         }
     }
 }
@@ -222,9 +224,11 @@ impl CheckoutPool {
             .await
     }
 
-    /// Opens `who`'s unit in a checkout of the pool, on a branch of its own
-    /// cut from `home.base`: the checkout one of its attempts worked in, a
-    /// free one put back to that commit, or a new one when none is free.
+    /// Opens `who`'s unit in a checkout of the pool, on `home.base` and on
+    /// no branch: the checkout one of its attempts worked in, a free one
+    /// put back to that commit, or a new one when none is free. The
+    /// checkout's record keeps it for the unit, and the unit's ref keeps
+    /// what it commits there.
     pub async fn open(
         self: &Arc<Self>,
         home: UnitHome<'_>,
@@ -232,27 +236,27 @@ impl CheckoutPool {
         attempt: u32,
         supervision: Supervision<'_>,
     ) -> Result<(Unit, Lease), WorktreeError> {
-        let branch = super::unit_branch(home.run_id, &who, attempt);
-        let owner = super::unit_branches(home.run_id, &who);
-        let (checkout, lease) = match self.take(Some(&owner), home.base, supervision).await? {
+        let keeps = super::UnitRef::of(home.run_id, &who, attempt);
+        let refs = super::UnitRef::of_unit(home.run_id, &who);
+        let user = fit::User::Unit { refs: &refs };
+        let (checkout, lease) = match self.take(user, home.base, supervision).await? {
             Taken::Held(checkout, lease) => {
-                reset(&checkout, &branch, home.base, supervision).await?;
+                reset(&checkout, None, home.base, supervision).await?;
                 (checkout, lease)
             }
             Taken::Nothing { listed } => {
-                let fresh = Fresh::Cut {
-                    branch: &branch,
-                    base: home.base,
-                };
+                let fresh = Fresh::Detached { base: home.base };
                 self.add(listed, home.repo, fresh, supervision).await?
             }
         };
+        lease.keep_for(Some(&keeps)).await;
         let from = head_tree(&checkout, supervision).await?;
         let unit = Unit {
             who,
             worktree: checkout,
             base: home.base.clone(),
             from,
+            keeps,
         };
         Ok((unit, lease))
     }
@@ -266,7 +270,7 @@ impl CheckoutPool {
         base: &CommitSha,
         supervision: Supervision<'_>,
     ) -> Result<(PathBuf, Lease), WorktreeError> {
-        match self.take(None, base, supervision).await? {
+        match self.take(fit::User::Passing, base, supervision).await? {
             Taken::Held(checkout, lease) => {
                 let detach = [
                     "switch",
@@ -285,39 +289,6 @@ impl CheckoutPool {
                     .await
             }
         }
-    }
-
-    /// Holds `checkout` for a unit that reopened it, so nobody else is
-    /// given it while that unit works there. Another process may be
-    /// looking at it for a moment, so this waits that moment out.
-    pub async fn hold(
-        self: &Arc<Self>,
-        checkout: PathBuf,
-        supervision: Supervision<'_>,
-    ) -> Result<Lease, WorktreeError> {
-        let home = self.home(supervision).await?;
-        let checkout = tokio::fs::canonicalize(&checkout).await.unwrap_or(checkout);
-        let number = checkout
-            .parent()
-            .filter(|parent| *parent == home)
-            .and_then(|_| {
-                checkout
-                    .file_name()?
-                    .to_str()?
-                    .strip_prefix(SLOT)?
-                    .parse()
-                    .ok()
-            });
-        let Some(number) = number else {
-            return Ok(Lease::outside());
-        };
-        let moment = Contention::Wait {
-            patience: std::time::Duration::from_secs(5),
-            poll: std::time::Duration::from_millis(15),
-        };
-        slot::hold(&home, number, moment, self.holder.as_deref(), supervision)
-            .await?
-            .ok_or(WorktreeError::CheckoutHeld { path: checkout })
     }
 }
 
@@ -378,23 +349,21 @@ async fn common_dir_of(cwd: &Path) -> Option<PathBuf> {
     Some(admin.join(common.trim()))
 }
 
-/// Puts `checkout` on a new `branch` at `base`, with nothing of the unit
-/// that worked there before but what git ignores.
+/// Puts `checkout` at `base` — on `branch`, cut anew there, or on none —
+/// with nothing of whoever worked there before but what git ignores.
 async fn reset(
     checkout: &Path,
-    branch: &str,
+    branch: Option<&str>,
     base: &CommitSha,
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
-    let cut = [
-        "switch",
-        "--discard-changes",
-        "-q",
-        "-C",
-        branch,
-        base.as_str(),
-    ];
-    mutating(checkout, &cut, supervision).await?;
+    let mut switch = vec!["switch", "--discard-changes", "-q"];
+    match branch {
+        Some(branch) => switch.extend(["-C", branch]),
+        None => switch.push("--detach"),
+    }
+    switch.push(base.as_str());
+    mutating(checkout, &switch, supervision).await?;
     crate::git::output(checkout, &["clean", "-q", "-ffd"], supervision).await?;
     let request = checkout.join(crate::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE);
     match tokio::fs::remove_file(&request).await {

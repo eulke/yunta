@@ -7,7 +7,7 @@
 
 mod pool_world;
 
-use pool_world::{canonical, delete, ignore_builds, write, World, RUN};
+use pool_world::{canonical, delete, ignore_builds, write, World};
 use yunta_engine::UnitId;
 use yunta_testkit::{git, git_output};
 
@@ -24,7 +24,7 @@ async fn a_landed_units_checkout_is_reused_with_its_ignored_files_and_nothing_el
             .join(yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE),
         "asked",
     );
-    world.land(&first).await;
+    world.land(&first, &held).await;
     drop(held);
 
     let (second, _held) = world.open("T002").await;
@@ -37,7 +37,8 @@ async fn a_landed_units_checkout_is_reused_with_its_ignored_files_and_nothing_el
         .exists());
     assert_eq!(
         git_output(&second.worktree, &["branch", "--show-current"]).trim(),
-        format!("yunta/unit/{RUN}/task/T002/1")
+        "",
+        "a unit works on no branch"
     );
     assert_eq!(world.slots().await, vec!["slot-1"]);
 }
@@ -75,27 +76,38 @@ async fn a_checkout_holding_work_not_landed_stays_out_of_the_pool() {
     assert_eq!(world.slots().await, vec!["slot-1", "slot-2", "slot-3"]);
 }
 
-/// A unit that reopens finds its checkout by the branch it is on, though
-/// its directory is the pool's and not its own.
+/// A blocked task's checkout is reopened by its record: the session
+/// picked back up works on where it saw its work, though the checkout is
+/// the pool's and on no branch.
 #[tokio::test]
-async fn a_unit_is_reopened_by_its_branch() {
+async fn a_blocked_tasks_checkout_is_reopened_by_its_record() {
     let world = World::new();
     let (unit, held) = world.open("T001").await;
     write(&unit.worktree.join("a.txt"), "work");
-    drop(held);
+    yunta_engine::commit_work(&unit, "left work", world.owner.supervision())
+        .await
+        .unwrap();
+    let left = world.head_of(&unit.worktree);
+    world.give_back(&unit, held).await;
+    let (_other, _held) = world.open("T002").await;
 
-    let reopened = yunta_engine::reopen_unit(
-        &world.repo,
-        &world.run,
-        UnitId::Task("T001".into()),
-        None,
-        world.owner.supervision(),
-    )
-    .await
-    .unwrap()
-    .expect("the checkout it worked in");
+    let (reopened, _held) = world
+        .pool
+        .reopen_unit(
+            &world.run,
+            UnitId::Task("T001".into()),
+            Some(&left),
+            world.owner.supervision(),
+        )
+        .await
+        .unwrap()
+        .expect("the checkout it worked in");
 
     assert_eq!(canonical(&reopened.worktree), canonical(&unit.worktree));
+    assert!(
+        reopened.worktree.join("a.txt").exists(),
+        "its work is back, uncommitted"
+    );
 }
 
 /// Two tasks worked one after the other: the second's criterion passes
@@ -143,11 +155,10 @@ async fn a_loop_s_tasks_build_in_one_warm_checkout() {
     assert_eq!(bench.checkouts(), vec!["slot-1"]);
 }
 
-/// A unit's branch goes as its work lands on the run's tree: a finished
-/// run leaves its checkouts in the pool on no branch, and no branch of a
-/// unit whose work landed — without being asked to clean anything up.
+/// A finished run leaves no branch of a unit, and no ref of one whose
+/// work landed — without being asked to clean anything up.
 #[tokio::test]
-async fn a_landed_units_branch_is_gone() {
+async fn a_finished_runs_units_leave_no_branch() {
     let bench = yunta_testkit::Bench::new();
     ignore_builds(&bench.worktree);
 
@@ -156,17 +167,16 @@ async fn a_landed_units_branch_is_gone() {
         .await;
 
     assert_eq!(report.terminal, yunta_engine::RunTerminal::Finished);
-    let listing = git_output(&bench.worktree, &["worktree", "list", "--porcelain"]);
-    assert!(!listing.contains("refs/heads/yunta/unit/"), "{listing}");
-    let branches = git_output(
+    let units = git_output(
         &bench.worktree,
         &[
             "for-each-ref",
             "--format=%(refname)",
             "refs/heads/yunta/unit/",
+            "refs/yunta/unit/",
         ],
     );
-    assert_eq!(branches.trim(), "", "every unit's work landed");
+    assert_eq!(units.trim(), "", "every unit's work landed");
 }
 
 /// A private index that starts as a copy of the checkout's own captures
@@ -214,8 +224,8 @@ async fn a_build_is_known_by_the_record_its_checkout_was_given_back_with() {
     let (warm, warm_held) = world.open("T001").await;
     let (cold, cold_held) = world.open("T002").await;
     write(&warm.worktree.join("target/debug/built"), "built");
-    world.land(&warm).await;
-    world.land(&cold).await;
+    world.land(&warm, &warm_held).await;
+    world.land(&cold, &cold_held).await;
     world.give_back(&warm, warm_held).await;
     world.give_back(&cold, cold_held).await;
     write(&world.repo.join("moved.txt"), "moved");
@@ -253,7 +263,7 @@ async fn asked_to_open_beside(free: usize) -> usize {
         opened.push(world.open(&format!("T{n:03}")).await);
     }
     for (unit, lease) in opened {
-        world.land(&unit).await;
+        world.land(&unit, &lease).await;
         world.give_back(&unit, lease).await;
     }
     let log = world.root.path().join("git.log");
@@ -267,4 +277,45 @@ async fn asked_to_open_beside(free: usize) -> usize {
 
     let asked = tokio::fs::read_to_string(&log).await.unwrap_or_default();
     asked.lines().count()
+}
+
+/// As its run ends, a blocked task's clean checkout goes back to the pool
+/// for anybody, while the ref that keeps its work stays until the run is
+/// collected.
+#[tokio::test]
+async fn run_end_frees_a_blocked_units_clean_checkout_and_keeps_its_ref() {
+    let world = World::new();
+    let (blocked, held) = world.open("T001").await;
+    write(&blocked.worktree.join("a.txt"), "left");
+    yunta_engine::commit_work(&blocked, "left work", world.owner.supervision())
+        .await
+        .unwrap();
+    world.give_back(&blocked, held).await;
+    let run_dir = world.root.path().join("run");
+
+    yunta_engine::release_unit_checkouts(
+        &world.pool,
+        &world.repo,
+        &run_dir,
+        &world.run,
+        world.owner.supervision(),
+    )
+    .await
+    .unwrap();
+
+    let other = World::pool_of(world.root.path(), &world.repo, "other");
+    let (taken, _held) = world
+        .open_through(
+            &other,
+            &yunta_core::RunId::from("01JOTHERRUN000000000000000"),
+            "T001",
+            1,
+        )
+        .await;
+    assert_eq!(canonical(&taken.worktree), canonical(&blocked.worktree));
+    let kept = git_output(
+        &world.repo,
+        &["for-each-ref", "--format=%(refname)", "refs/yunta/unit/"],
+    );
+    assert_eq!(kept.trim(), blocked.keeps.name());
 }

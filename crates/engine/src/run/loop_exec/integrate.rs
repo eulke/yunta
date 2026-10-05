@@ -124,6 +124,7 @@ pub(super) async fn integrate_batch(
                     VerifiedTask {
                         task,
                         unit: &unit,
+                        lease: &lease,
                         staged: &report.staged,
                     },
                     &ctx.memo,
@@ -252,6 +253,8 @@ enum IntegrationOutcome {
 struct VerifiedTask<'a> {
     task: &'a Task,
     unit: &'a Unit,
+    /// The hold on the unit's checkout, which landing lets go of.
+    lease: &'a crate::worktree::Lease,
     staged: &'a [PathBuf],
 }
 
@@ -273,7 +276,12 @@ async fn integrate_task(
     last_check_seq: &mut Seq,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<IntegrationOutcome, RunError> {
-    let VerifiedTask { task, unit, staged } = verified;
+    let VerifiedTask {
+        task,
+        unit,
+        lease,
+        staged,
+    } = verified;
     // This task's own token: a cancelled task takes its git with it.
     let supervision = ctx.supervision(cancel);
     commit_work(
@@ -389,9 +397,9 @@ async fn integrate_task(
     // with anything to reconcile is that invariant breaking, which
     // `land` reports as the engine error it is.
     let commit = land(unit, ctx.worktree, supervision).await?;
-    // Landed, its checkout goes back to the pool with no branch, and the
-    // branch goes: the run's tree holds its work.
-    crate::worktree::retire_unit_branch(unit, ctx.worktree, supervision).await?;
+    // Landed, its checkout is kept for nobody, and the ref that kept its
+    // work goes: the run's tree holds it.
+    ctx.pool.retire(unit, lease, supervision).await?;
     Ok(IntegrationOutcome::Integrated { commit })
 }
 

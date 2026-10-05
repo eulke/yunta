@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use super::{slot::SLOT, space, CheckoutPool, Lease};
+use super::{space, CheckoutPool, Lease};
 use crate::process::Supervision;
 use crate::worktree::WorktreeError;
 
@@ -13,11 +13,9 @@ impl CheckoutPool {
     /// build takes is measured — out of the caller's way — so the next
     /// user, who takes a checkout holding a build first, knows.
     pub async fn give_back(&self, lease: Lease, supervision: Supervision<'_>) {
-        let Some((home, number)) = lease.slot.clone() else {
-            return;
-        };
+        let (home, number) = (lease.home.clone(), lease.number);
         let now = supervision.clock.now();
-        let checkout = home.join(format!("{SLOT}{number}"));
+        let checkout = lease.checkout();
         let roots = space::ignored(&checkout, supervision).await;
         super::slot::used(&home, number, self.holder.as_deref(), now).await;
         drop(lease);
@@ -30,10 +28,7 @@ impl CheckoutPool {
     /// nothing a probe wrote left in it but what git ignores, and gives it
     /// back. One that cannot be put back stays out of the pool.
     pub async fn put_back(&self, lease: Lease, supervision: Supervision<'_>) {
-        let Some((home, number)) = lease.slot.clone() else {
-            return;
-        };
-        let checkout = home.join(format!("{SLOT}{number}"));
+        let checkout = lease.checkout();
         match clear_work(&checkout, supervision).await {
             Ok(()) => self.give_back(lease, supervision).await,
             Err(error) => tracing::debug!(%error, "a probe's checkout stays out of the pool"),

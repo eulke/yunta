@@ -15,8 +15,8 @@ use yunta_core::process::signal::Liveness;
 use yunta_core::{CommitSha, Isolation, Pid, SystemClock};
 use yunta_engine::lock::{acquire, Acquired, Contention, LockError, LockOwner, OwnerProbe};
 use yunta_engine::{
-    commit_work, land, prepare_worktree, rebase_onto, release_worktree, run_branch, unit_branch,
-    Rebase, Unit, UnitHome, UnitId, WorktreeError,
+    commit_work, land, prepare_worktree, rebase_onto, release_worktree, Rebase, Unit, UnitHome,
+    UnitId, WorktreeError,
 };
 use yunta_testkit::{git_output, init_repo, Owner};
 
@@ -589,74 +589,42 @@ async fn both_locks_share_one_protocol() {
     );
 }
 
-/// A run's own branch and the branches of its units' worktrees share a
-/// repository's ref namespace, and git refuses a ref that is a directory
-/// of another: `refs/heads/a` and `refs/heads/a/b` cannot both exist. The
-/// two shapes have to be siblings, whatever a run is called.
+/// A unit works on no branch: what it commits is kept by its ref, which
+/// no list of the repository's branches shows.
 #[tokio::test]
-async fn a_run_branch_and_its_unit_branches_coexist() {
+async fn a_unit_works_detached_and_its_commits_are_kept_by_its_ref() {
     let owner = Owner::new();
     let root = tempfile::tempdir().unwrap();
     let repo = root.path().join("repo");
     std::fs::create_dir_all(&repo).unwrap();
     init_repo(&repo);
-    let base_commit = head(&repo);
-    let run = yunta_core::RunId::from("01JBRANCHCOEXISTENCE0000AB");
-
-    prepare_worktree(
-        &repo,
-        &root.path().join("trees/run"),
-        &base_commit,
-        &run_branch(&run),
-        Isolation::Worktree,
-        owner.supervision(),
-    )
-    .await
-    .expect("the run's own branch");
-    prepare_worktree(
-        &repo,
-        &root.path().join("trees/task"),
-        &base_commit,
-        &unit_branch(&run, &UnitId::Task("T001".into()), 1),
-        Isolation::Worktree,
-        owner.supervision(),
-    )
-    .await
-    .expect("a unit branch of the same run, beside it and not under it");
-}
-
-/// A unit branch names the run that made it: the worktree it belongs to
-/// is the run's, but a ref belongs to the whole repository, so two runs
-/// working the same unit id in one checkout would otherwise ask git for
-/// the same branch — and the second one fails.
-#[tokio::test]
-async fn two_runs_working_the_same_unit_get_their_own_branches() {
-    let owner = Owner::new();
-    let root = tempfile::tempdir().unwrap();
-    let repo = root.path().join("repo");
-    std::fs::create_dir_all(&repo).unwrap();
-    init_repo(&repo);
-    let base_commit = head(&repo);
-    let first = yunta_core::RunId::from("01JBRANCHFIRSTRUN00000000A");
-    let second = yunta_core::RunId::from("01JBRANCHSECONDRUN0000000B");
+    let run = yunta_core::RunId::from("01JUNITKEPTBYITSREF0000000");
+    let pool = yunta_engine::CheckoutPool::new(&root.path().join("worktrees"), &repo, root.path());
+    let home = UnitHome {
+        repo: &repo,
+        run_dir: root.path(),
+        run_id: &run,
+        base: &head(&repo),
+    };
     let task = UnitId::Task("T001".into());
+    let (unit, _held) = pool.open(home, task, 1, owner.supervision()).await.unwrap();
 
-    assert_ne!(
-        unit_branch(&first, &task, 1),
-        unit_branch(&second, &task, 1)
-    );
-    for (run, tree) in [(&first, "trees/first"), (&second, "trees/second")] {
-        prepare_worktree(
-            &repo,
-            &root.path().join(tree),
-            &base_commit,
-            &unit_branch(run, &task, 1),
-            Isolation::Worktree,
-            owner.supervision(),
-        )
+    tokio::fs::write(unit.worktree.join("made.txt"), "made\n")
         .await
-        .expect("each run's own unit branch");
-    }
+        .unwrap();
+    commit_work(&unit, "the unit's work", owner.supervision())
+        .await
+        .unwrap();
+
+    let on = git_output(&unit.worktree, &["branch", "--show-current"]);
+    let kept = git_output(&repo, &["rev-parse", unit.keeps.name()]);
+    let branches = git_output(&repo, &["branch", "--list", "yunta/unit/*"]);
+    assert_eq!(on.trim(), "", "the unit works on no branch");
+    assert_eq!(
+        kept.trim(),
+        git_output(&unit.worktree, &["rev-parse", "HEAD"]).trim()
+    );
+    assert_eq!(branches.trim(), "");
 }
 
 /// A repository whose tree and whose unit both changed one file, which

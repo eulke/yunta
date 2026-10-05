@@ -47,6 +47,14 @@ impl World {
         CheckoutPool::new(&root.join("worktrees"), repo, &root.join(run_dir))
     }
 
+    /// The commit `checkout` stands on.
+    pub fn head_of(&self, checkout: &Path) -> CommitSha {
+        git_output(checkout, &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .unwrap()
+    }
+
     pub fn head(&self) -> CommitSha {
         git_output(&self.repo, &["rev-parse", "HEAD"])
             .trim()
@@ -100,9 +108,11 @@ impl World {
         .expect("a unit opens in the pool")
     }
 
-    /// What landing does to a unit's checkout: it lets go of the branch.
-    pub async fn land(&self, unit: &Unit) {
-        yunta_engine::retire_unit_branch(unit, &self.repo, self.owner.supervision())
+    /// What landing does to a unit's checkout, held by `lease`: the ref
+    /// that kept its work goes, and the checkout is kept for nobody.
+    pub async fn land(&self, unit: &Unit, lease: &yunta_engine::Lease) {
+        self.pool
+            .retire(unit, lease, self.owner.supervision())
             .await
             .unwrap();
     }

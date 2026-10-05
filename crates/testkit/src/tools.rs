@@ -164,6 +164,11 @@ impl ToolsHost {
                     worktree: self.attempt_dir(),
                     base: CommitSha::from_static("deadbeef"),
                     from: TreeId::from_static("deadbeef"),
+                    keeps: yunta_engine::UnitRef::of(
+                        &self.run_id,
+                        &UnitId::Task(TaskId::from(id)),
+                        1,
+                    ),
                 },
             )
         });
