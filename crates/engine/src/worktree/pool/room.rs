@@ -101,24 +101,40 @@ fn emptiable(slot: &Slot) -> Option<Emptiable> {
 }
 
 impl CheckoutPool {
-    /// Makes room for what `user` builds in `best` — the checkout about to
-    /// be taken, or a new one when there is none: nothing much in one that
-    /// holds a build, or for a user that leaves the building to others, a
-    /// whole build otherwise.
-    pub(super) async fn room_for(
+    /// `slots` ranked for `user` to start from `target`, with room made for
+    /// what it builds. For a user that builds, the checkout it is about to
+    /// take is spared, and room is made for a whole build in one that holds
+    /// none. A user that builds nothing needs no room, and takes the
+    /// emptiest checkout: the budget is kept first, so a build it empties
+    /// is one the user may take.
+    pub(super) async fn ranked_with_room(
         &self,
+        mut slots: Vec<Slot>,
         user: super::fit::User<'_>,
-        best: Option<&super::fit::Candidate>,
-        builds: Builds,
+        target: &yunta_core::CommitSha,
         supervision: Supervision<'_>,
-    ) -> Result<(), WorktreeError> {
+    ) -> Result<Vec<super::fit::Candidate>, WorktreeError> {
+        let builds = Builds::of(&slots);
+        if !user.builds() {
+            let emptied = self.keep_within(builds, 0, None, supervision).await?;
+            let now = supervision.clock.now();
+            for slot in slots
+                .iter_mut()
+                .filter(|slot| emptied.contains(&slot.number))
+            {
+                slot.built = Some(space::Built::empty(now));
+            }
+            return Ok(super::fit::ranked(slots, user, target));
+        }
+        let ranked = super::fit::ranked(slots, user, target);
+        let best = ranked.first();
         let need = match best {
             Some(best) if !best.is_empty() => 0,
-            _ if !user.builds() => 0,
             _ => builds.largest,
         };
         let spare = best.map(|best| best.slot.number);
-        self.keep_within(builds, need, spare, supervision).await
+        self.keep_within(builds, need, spare, supervision).await?;
+        Ok(ranked)
     }
 
     /// Makes room for `need` more bytes: keeps the pool's builds within
@@ -126,19 +142,21 @@ impl CheckoutPool {
     /// by emptying builds of free checkouts — never `spare`'s, the
     /// checkout about to be taken, and never a held one's. Fails with
     /// [`WorktreeError::NoRoom`] when that still leaves too little.
+    /// Answers the checkouts whose build it emptied.
     pub(super) async fn keep_within(
         &self,
         builds: Builds,
         need: u64,
         spare: Option<u32>,
         supervision: Supervision<'_>,
-    ) -> Result<(), WorktreeError> {
+    ) -> Result<Vec<u32>, WorktreeError> {
         let home = self.home(supervision).await?;
         let space = space_of(&home)?;
         let limits = Limits::of(&self.limits, space, builds.largest);
         let mut held = builds.held;
         let mut available = space.available;
         let short = |available: u64| available < need.saturating_add(limits.keep_free);
+        let mut emptied = Vec::new();
         for build in builds.emptiable {
             if held <= limits.budget && !short(available) {
                 break;
@@ -146,6 +164,7 @@ impl CheckoutPool {
             if Some(build.number) == spare || !self.empty(&home, &build, supervision).await? {
                 continue;
             }
+            emptied.push(build.number);
             held = held.saturating_sub(build.bytes);
             available = space_of(&home).map_or(available, |space| space.available);
         }
@@ -157,7 +176,7 @@ impl CheckoutPool {
                     keep_free: limits.keep_free,
                 },
             }),
-            false => Ok(()),
+            false => Ok(emptied),
         }
     }
 
@@ -190,6 +209,7 @@ impl CheckoutPool {
         let slots = super::survey::survey(&home, &self.repo, supervision).await?;
         self.keep_within(Builds::of(&slots), 0, None, supervision)
             .await
+            .map(drop)
     }
 }
 

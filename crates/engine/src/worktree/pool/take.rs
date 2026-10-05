@@ -6,7 +6,7 @@ use std::path::Path;
 
 use yunta_core::CommitSha;
 
-use super::{fit, room, slot, space, survey, CheckoutPool, Taken};
+use super::{fit, slot, space, survey, CheckoutPool, Taken};
 use crate::lock::Contention;
 use crate::process::Supervision;
 use crate::worktree::WorktreeError;
@@ -32,9 +32,8 @@ impl CheckoutPool {
             .map(|slot| slot.number)
             .collect();
         space::count_pending(&home, &slots, &self.walking);
-        let builds = room::Builds::of(&slots);
-        let ranked = fit::ranked(slots, user, target);
-        self.room_for(user, ranked.first(), builds, supervision)
+        let ranked = self
+            .ranked_with_room(slots, user, target, supervision)
             .await?;
         let ordered = nearest_first(ranked, target, supervision).await;
         for candidate in ordered {

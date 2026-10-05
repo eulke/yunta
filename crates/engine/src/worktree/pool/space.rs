@@ -29,6 +29,15 @@ pub(super) struct Built {
 }
 
 impl Built {
+    /// No build, as of `at`.
+    pub(super) fn empty(at: DateTime<Utc>) -> Built {
+        Built {
+            roots: Vec::new(),
+            bytes: Some(0),
+            at,
+        }
+    }
+
     /// Whether the checkout holds a build at all.
     pub(super) fn holds(&self) -> bool {
         !self.roots.is_empty() || self.bytes.is_some_and(|bytes| bytes > 0)
@@ -163,12 +172,7 @@ pub(super) async fn measure_now(
 /// Records that checkout `number` of the pool at `home` holds no build
 /// since `at`.
 pub(super) async fn emptied(home: &Path, number: u32, at: DateTime<Utc>) {
-    let built = Built {
-        roots: Vec::new(),
-        bytes: Some(0),
-        at,
-    };
-    record(&built_path(home, number), &built).await;
+    record(&built_path(home, number), &Built::empty(at)).await;
 }
 
 /// The paths git ignores in `checkout`, whole directories named once —

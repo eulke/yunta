@@ -120,11 +120,9 @@ impl Candidate {
         let warmth = match self.builds {
             true => (self.build, 0),
             false => {
-                let bytes = self
-                    .slot
-                    .built
-                    .as_ref()
-                    .map_or(0, super::space::Built::counted);
+                // What nobody has counted is not known to be light.
+                let built = self.slot.built.as_ref();
+                let bytes = built.and_then(|built| built.bytes).unwrap_or(u64::MAX);
                 (self.build.lightest_first(), bytes)
             }
         };
