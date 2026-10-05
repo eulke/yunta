@@ -294,8 +294,8 @@ async fn closed(
     closing: super::shared_tree::Closing,
 ) -> Result<Closed, RunError> {
     let at_close = super::shared_tree::at_close(ctx, node, closing).await?;
-    let (commit, tree) = match at_close.committed {
-        Some((commit, tree)) => (Some(commit), tree),
+    let (commit, tree) = match at_close.captured {
+        Some(captured) => (captured.commit, captured.tree),
         None => (None, left_tree(ctx, node).await?),
     };
     Ok(Closed {

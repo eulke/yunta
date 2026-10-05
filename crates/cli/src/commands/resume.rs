@@ -71,11 +71,8 @@ async fn still_or_again(
     {
         return Ok(named);
     }
-    let pool = yunta_engine::CheckoutPool::new(
-        &ctx.project.worktrees_root_for(manifest),
-        &ctx.cwd,
-        &ctx.project.runs_root.join(run_id.as_str()),
-    );
+    let run_dir = ctx.project.runs_root.join(run_id.as_str());
+    let pool = ctx.project.pool_of(manifest, &ctx.cwd, &run_dir);
     let (checkout, _held) = pool.reopen_run(run_id, supervision).await?;
     Ok(checkout)
 }

@@ -46,7 +46,7 @@ use crate::process::Supervision;
 pub(crate) use branches::RUN_BRANCHES;
 pub(crate) use branches::{is_unit_branch, unit_branches};
 pub use branches::{run_branch, run_units, unit_branch};
-pub use commit::{commit_tree, restore};
+pub use commit::{commit_tree, restore, Captured};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
 pub(crate) use listing::checkouts;
 pub use overlay::{remove_files, tree_with, write_files};
@@ -385,7 +385,7 @@ pub async fn cleanup_worktree(
 /// would kill the undo before it started, and the caller asked to stop
 /// making a worktree, not to be left with half of one. A bound of its
 /// own keeps it from becoming the thing that hangs a Ctrl-C.
-async fn undo_half_added(
+pub(super) async fn undo_half_added(
     repo: &Path,
     worktree_path: &Path,
     branch_name: &str,

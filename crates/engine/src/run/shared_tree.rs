@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use yunta_core::commit_message::CommitMessage;
 
-use yunta_core::{CommitSha, Isolation, Node, NodeId, NodeKind, TreeId};
+use yunta_core::{Isolation, Node, NodeId, NodeKind};
 
 use super::{RunCtx, RunError};
 use crate::replay::{NodeState, RunState};
@@ -28,7 +28,9 @@ pub(super) enum Closing {
 /// that commit holds, when it made one, and the paths it refused.
 #[derive(Default)]
 pub(super) struct AtClose {
-    pub(super) committed: Option<(CommitSha, TreeId)>,
+    /// The run's tree as the close read it to commit it — `None` when it
+    /// committed nothing there — and the commit it made, if any.
+    pub(super) captured: Option<crate::worktree::Captured>,
     /// What the work left that no session of the run may write: never
     /// committed, and in a run with a worktree of its own put back as the
     /// branch had it.
@@ -65,14 +67,17 @@ pub(super) async fn at_close(
         crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
     // Boxed: a close runs at the bottom of every composed run's stack.
     let refused = Box::pin(refuse_denied(ctx, node, &index)).await?;
-    let committed = Box::pin(crate::worktree::commit_tree(
+    let captured = Box::pin(crate::worktree::commit_tree(
         ctx.worktree,
         &index,
         &message,
         ctx.root_supervision(),
     ))
     .await?;
-    Ok(AtClose { committed, refused })
+    Ok(AtClose {
+        captured: Some(captured),
+        refused,
+    })
 }
 
 /// What the run's tree would commit that the run denies `node`, put back
@@ -112,7 +117,7 @@ async fn refused_in_place(ctx: &RunCtx<'_>, node: &Node) -> Result<AtClose, RunE
     let diff =
         crate::scope::changed_since(ctx.worktree, &from, &index, ctx.root_supervision()).await?;
     Ok(AtClose {
-        committed: None,
+        captured: None,
         refused: crate::scope::denied(&diff, &deny, &[])?,
     })
 }
@@ -138,7 +143,7 @@ async fn commit_message(
 /// Commits what the run's tree holds that no node committed, as `node`
 /// starts from it — a person's edits while the run was parked, or what
 /// an interrupted attempt left — and answers with the commit and the
-/// tree it holds.
+/// tree it holds — the tree whether or not there was anything to commit.
 ///
 /// A node that works in the run's tree starts from a branch that holds
 /// it. A node given a checkout of its own was opened on everything the
@@ -156,7 +161,7 @@ async fn commit_message(
 pub(super) async fn found(
     ctx: &RunCtx<'_>,
     node: &Node,
-) -> Result<Option<(CommitSha, TreeId)>, RunError> {
+) -> Result<Option<crate::worktree::Captured>, RunError> {
     let tree = match ctx.unit {
         None => ctx.worktree,
         Some(mine) if mine.into_the_runs_tree && owns(&mine, node) => mine.into,
@@ -170,13 +175,15 @@ pub(super) async fn found(
     };
     let index =
         crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
-    Ok(Box::pin(crate::worktree::commit_tree(
-        tree,
-        &index,
-        &message,
-        ctx.root_supervision(),
+    Ok(Some(
+        Box::pin(crate::worktree::commit_tree(
+            tree,
+            &index,
+            &message,
+            ctx.root_supervision(),
+        ))
+        .await?,
     ))
-    .await?)
 }
 
 /// Whether `mine` is `node`'s own checkout, not one its group opened.

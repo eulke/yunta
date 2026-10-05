@@ -435,11 +435,8 @@ pub(super) async fn create_run_from(
         // A run of its own works in a checkout of the project's pool, on a
         // branch of its own: warm with whatever the last run there built.
         yunta_core::Isolation::Worktree => {
-            let pool = yunta_engine::CheckoutPool::new(
-                &ctx.project.worktrees_root_for(manifest),
-                &ctx.cwd,
-                &ctx.project.runs_root.join(run_id.as_str()),
-            );
+            let run_dir = ctx.project.runs_root.join(run_id.as_str());
+            let pool = ctx.project.pool_of(manifest, &ctx.cwd, &run_dir);
             let (checkout, _held) = pool
                 .open_run(&run_id, &manifest.base_commit, ctx.supervision())
                 .await?;

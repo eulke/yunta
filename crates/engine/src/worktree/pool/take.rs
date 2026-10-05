@@ -2,11 +2,11 @@
 //! one survey of the pool, held and looked at again before it is handed
 //! out.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use yunta_core::CommitSha;
 
-use super::{fit, slot, survey, CheckoutPool, Lease};
+use super::{fit, slot, survey, CheckoutPool, Taken};
 use crate::lock::Contention;
 use crate::process::Supervision;
 use crate::worktree::WorktreeError;
@@ -22,11 +22,21 @@ impl CheckoutPool {
         owner: Option<&str>,
         target: &CommitSha,
         supervision: Supervision<'_>,
-    ) -> Result<Option<(PathBuf, Lease)>, WorktreeError> {
+    ) -> Result<Taken, WorktreeError> {
         let home = self.home(supervision).await?;
         let slots = survey::survey(&home, &self.repo, supervision).await?;
+        let listed = slots
+            .iter()
+            .filter(|slot| slot.standing.is_some())
+            .map(|slot| slot.number)
+            .collect();
         let mut ranked = fit::ranked(slots, owner, target);
-        let best = ranked.len().min(3);
+        // How far each stands from `target` tells apart only candidates
+        // the survey could not: with one, there is nothing to tell apart.
+        let best = match ranked.len() {
+            0 | 1 => 0,
+            many => many.min(3),
+        };
         let mut nearest = Vec::with_capacity(best);
         for candidate in ranked.drain(..best) {
             let away = match candidate.at_target() {
@@ -53,10 +63,10 @@ impl CheckoutPool {
             };
             let path = candidate.slot.path;
             if still_fits(&path, owner, target, supervision).await {
-                return Ok(Some((path, lease)));
+                return Ok(Taken::Held(path, lease));
             }
         }
-        Ok(None)
+        Ok(Taken::Nothing { listed })
     }
 }
 

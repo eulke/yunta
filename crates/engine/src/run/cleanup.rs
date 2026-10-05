@@ -12,8 +12,15 @@ use super::{RunCtx, RunError};
 
 /// Gives the checkouts the run's units hold back to the project's pool.
 /// One that cannot be given back stays its unit's until `gc` collects the
-/// run: a warning, never an un-finished run.
+/// run: a warning, never an un-finished run. A run whose workflow opens no
+/// unit — no loop, no audited node — has none to give back.
 pub(super) async fn units(ctx: &RunCtx<'_>) {
+    let opens_units = ctx.manifest.workflow.iter_nodes().any(|node| {
+        matches!(node.kind, yunta_core::NodeKind::Loop { .. }) || crate::scope::audits(node)
+    });
+    if !opens_units {
+        return;
+    }
     let released = crate::worktree::release_unit_checkouts(
         &ctx.pool,
         ctx.worktree,

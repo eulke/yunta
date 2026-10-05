@@ -59,11 +59,7 @@ async fn give_back(ctx: &Context, open: &crate::context::Opened, run_id: &RunId)
     let tree = ctx
         .project
         .run_tree(manifest, bound.as_deref(), run_id, &ctx.cwd);
-    let pool = yunta_engine::CheckoutPool::new(
-        &ctx.project.worktrees_root_for(manifest),
-        &ctx.cwd,
-        &open.run_dir,
-    );
+    let pool = ctx.project.pool_of(manifest, &ctx.cwd, &open.run_dir);
     let supervision = ctx.supervision();
     let units =
         yunta_engine::release_unit_checkouts(&pool, &tree, &open.run_dir, run_id, supervision);

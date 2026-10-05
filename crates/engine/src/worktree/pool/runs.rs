@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use yunta_core::CommitSha;
 
-use super::{reset, CheckoutPool, Fresh, Lease};
+use super::{reset, CheckoutPool, Fresh, Lease, Taken};
 use crate::process::Supervision;
 use crate::worktree::WorktreeError;
 
@@ -24,17 +24,17 @@ impl CheckoutPool {
     ) -> Result<(PathBuf, Lease), WorktreeError> {
         let branch = crate::worktree::run_branch(run_id);
         match self.take(Some(&branch), base, supervision).await? {
-            Some((checkout, lease)) => {
+            Taken::Held(checkout, lease) => {
                 reset(&checkout, &branch, base, supervision).await?;
                 Ok((checkout, lease))
             }
-            None => {
+            Taken::Nothing { listed } => {
                 let repo = self.repo.clone();
                 let fresh = Fresh::Cut {
                     branch: &branch,
                     base,
                 };
-                self.add(&repo, fresh, supervision).await
+                self.add(listed, &repo, fresh, supervision).await
             }
         }
     }
@@ -58,7 +58,7 @@ impl CheckoutPool {
                 source,
             })?;
         match self.take(Some(&branch), &head, supervision).await? {
-            Some((checkout, lease)) => {
+            Taken::Held(checkout, lease) => {
                 let on = crate::git::output(&checkout, &["branch", "--show-current"], supervision)
                     .await?;
                 if on.trim() != branch {
@@ -68,9 +68,9 @@ impl CheckoutPool {
                 }
                 Ok((checkout, lease))
             }
-            None => {
+            Taken::Nothing { listed } => {
                 let repo = self.repo.clone();
-                self.add(&repo, Fresh::On { branch: &branch }, supervision)
+                self.add(listed, &repo, Fresh::On { branch: &branch }, supervision)
                     .await
             }
         }

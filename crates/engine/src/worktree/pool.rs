@@ -25,6 +25,7 @@
 //! a look at the one taken. A checkout given back records its use and the
 //! build it leaves ([`give`], [`space`]), which is what ranks it next.
 
+mod add;
 mod fit;
 mod give;
 mod release;
@@ -40,7 +41,7 @@ use std::sync::Arc;
 
 use yunta_core::CommitSha;
 
-use super::{head_tree, prepare_worktree, Unit, UnitHome, UnitId, WorktreeError};
+use super::{head_tree, Unit, UnitHome, UnitId, WorktreeError};
 use crate::lock::Contention;
 use crate::process::Supervision;
 
@@ -61,8 +62,30 @@ pub struct CheckoutPool {
     /// The directory of the run taking checkouts through this handle; none
     /// for the pool's own upkeep.
     holder: Option<PathBuf>,
-    /// The project's pool directory, read once.
-    home: tokio::sync::OnceCell<PathBuf>,
+    /// The project's common git directory as its run recorded it, which
+    /// spares asking git while it is still there.
+    known: Option<PathBuf>,
+    /// Where the pool is, read once.
+    located: tokio::sync::OnceCell<Located>,
+}
+
+/// Where a pool is: its own directory, and the common git directory of
+/// the project it keeps checkouts of — what every checkout's change is
+/// held off by.
+struct Located {
+    home: PathBuf,
+    common_dir: PathBuf,
+}
+
+/// What taking a checkout came to.
+pub(super) enum Taken {
+    /// A checkout that fits its user, held for it.
+    Held(PathBuf, Lease),
+    /// None fits: the numbers of the checkouts the survey found, which a
+    /// new checkout does not take.
+    Nothing {
+        listed: std::collections::HashSet<u32>,
+    },
 }
 
 /// A hold on one checkout of the pool, let go when dropped. A user done
@@ -137,36 +160,66 @@ impl CheckoutPool {
     /// The pool of the project `repo` is a checkout of, kept under `root`,
     /// for the run whose directory is `holder`.
     pub fn new(root: &Path, repo: &Path, holder: &Path) -> Arc<Self> {
-        Self::reached(root, repo, Some(holder.to_path_buf()))
+        Self::reached(root, repo, Some(holder.to_path_buf()), None)
+    }
+
+    /// The pool of the project a run's manifest names, for that run: what
+    /// the manifest recorded of the project is taken rather than asked
+    /// for again.
+    pub fn of_run(
+        root: &Path,
+        repo: &Path,
+        holder: &Path,
+        project: Option<&yunta_core::ProjectIdentity>,
+    ) -> Arc<Self> {
+        let known = project.map(|project| project.git_common_dir.clone());
+        Self::reached(root, repo, Some(holder.to_path_buf()), known)
     }
 
     /// The same pool, for its own upkeep: what it holds to tidy is never
     /// recorded as used.
     pub fn upkeep(root: &Path, repo: &Path) -> Arc<Self> {
-        Self::reached(root, repo, None)
+        Self::reached(root, repo, None, None)
     }
 
-    fn reached(root: &Path, repo: &Path, holder: Option<PathBuf>) -> Arc<Self> {
+    fn reached(
+        root: &Path,
+        repo: &Path,
+        holder: Option<PathBuf>,
+        known: Option<PathBuf>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             root: root.to_path_buf(),
             repo: repo.to_path_buf(),
             holder,
-            home: tokio::sync::OnceCell::new(),
+            known,
+            located: tokio::sync::OnceCell::new(),
         })
     }
 
     /// The pool's directory, which exists once the pool has a checkout.
     pub async fn home(&self, supervision: Supervision<'_>) -> Result<PathBuf, WorktreeError> {
-        self.home
+        Ok(self.located(supervision).await?.home.clone())
+    }
+
+    async fn located(&self, supervision: Supervision<'_>) -> Result<&Located, WorktreeError> {
+        self.located
             .get_or_try_init(|| async {
-                let common_dir = super::common_git_dir(&self.repo, supervision).await?;
-                let common_dir = tokio::fs::canonicalize(&common_dir)
-                    .await
-                    .unwrap_or(common_dir);
-                Ok(settled(&pool_home(&self.root, &common_dir)).await)
+                let recorded = match &self.known {
+                    Some(known) => tokio::fs::canonicalize(known).await.ok(),
+                    None => None,
+                };
+                let common_dir = match recorded {
+                    Some(recorded) => recorded,
+                    None => {
+                        let asked = super::common_git_dir(&self.repo, supervision).await?;
+                        tokio::fs::canonicalize(&asked).await.unwrap_or(asked)
+                    }
+                };
+                let home = settled(&pool_home(&self.root, &common_dir)).await;
+                Ok(Located { home, common_dir })
             })
             .await
-            .cloned()
     }
 
     /// Opens `who`'s unit in a checkout of the pool, on a branch of its own
@@ -182,16 +235,16 @@ impl CheckoutPool {
         let branch = super::unit_branch(home.run_id, &who, attempt);
         let owner = super::unit_branches(home.run_id, &who);
         let (checkout, lease) = match self.take(Some(&owner), home.base, supervision).await? {
-            Some((checkout, lease)) => {
+            Taken::Held(checkout, lease) => {
                 reset(&checkout, &branch, home.base, supervision).await?;
                 (checkout, lease)
             }
-            None => {
+            Taken::Nothing { listed } => {
                 let fresh = Fresh::Cut {
                     branch: &branch,
                     base: home.base,
                 };
-                self.add(home.repo, fresh, supervision).await?
+                self.add(listed, home.repo, fresh, supervision).await?
             }
         };
         let from = head_tree(&checkout, supervision).await?;
@@ -214,7 +267,7 @@ impl CheckoutPool {
         supervision: Supervision<'_>,
     ) -> Result<(PathBuf, Lease), WorktreeError> {
         match self.take(None, base, supervision).await? {
-            Some((checkout, lease)) => {
+            Taken::Held(checkout, lease) => {
                 let detach = [
                     "switch",
                     "--discard-changes",
@@ -226,9 +279,10 @@ impl CheckoutPool {
                 crate::git::output(&checkout, &["clean", "-q", "-ffd"], supervision).await?;
                 Ok((checkout, lease))
             }
-            None => {
+            Taken::Nothing { listed } => {
                 let repo = self.repo.clone();
-                self.add(&repo, Fresh::Detached { base }, supervision).await
+                self.add(listed, &repo, Fresh::Detached { base }, supervision)
+                    .await
             }
         }
     }
@@ -265,59 +319,6 @@ impl CheckoutPool {
             .await?
             .ok_or(WorktreeError::CheckoutHeld { path: checkout })
     }
-
-    /// Adds a checkout to the pool under the lowest number nobody uses,
-    /// held for its caller.
-    async fn add(
-        &self,
-        repo: &Path,
-        fresh: Fresh<'_>,
-        supervision: Supervision<'_>,
-    ) -> Result<(PathBuf, Lease), WorktreeError> {
-        let home = self.home(supervision).await?;
-        tokio::fs::create_dir_all(&home)
-            .await
-            .map_err(|source| WorktreeError::Io {
-                action: "create the project's checkouts directory".to_string(),
-                path: home.clone(),
-                source,
-            })?;
-        let listed: std::collections::HashSet<u32> = survey::survey(&home, &self.repo, supervision)
-            .await?
-            .into_iter()
-            .filter(|slot| slot.standing.is_some())
-            .map(|slot| slot.number)
-            .collect();
-        let mut number = 0;
-        loop {
-            number += 1;
-            if listed.contains(&number) {
-                continue;
-            }
-            let path = home.join(format!("{SLOT}{number}"));
-            let held = slot::hold(
-                &home,
-                number,
-                Contention::Refuse,
-                self.holder.as_deref(),
-                supervision,
-            );
-            let Some(lease) = held.await? else {
-                continue;
-            };
-            if tokio::fs::try_exists(&path).await.unwrap_or(false) {
-                // Added by another process since the survey, or left half
-                // added by one that crashed.
-                if survey::look(&path, supervision).await.is_some() {
-                    continue;
-                }
-                slot::clear(repo, &path, supervision).await?;
-            }
-            make(repo, &path, fresh, supervision).await?;
-            let path = tokio::fs::canonicalize(&path).await.unwrap_or(path);
-            return Ok((path, lease));
-        }
-    }
 }
 
 /// `path` named the way the file system names it — every link resolved —
@@ -342,52 +343,6 @@ async fn settled(path: &Path) -> PathBuf {
             _ => return path.to_path_buf(),
         }
     }
-}
-
-/// Makes the checkout of `repo` at `path` that `fresh` says.
-async fn make(
-    repo: &Path,
-    path: &Path,
-    fresh: Fresh<'_>,
-    supervision: Supervision<'_>,
-) -> Result<(), WorktreeError> {
-    match fresh {
-        Fresh::Cut { branch, base } => {
-            let isolation = yunta_core::Isolation::Worktree;
-            prepare_worktree(repo, path, base, branch, isolation, supervision).await?;
-            Ok(())
-        }
-        Fresh::On { branch } => add(repo, path, &[branch], supervision).await,
-        Fresh::Detached { base } => {
-            add(repo, path, &["--detach", base.as_str()], supervision).await
-        }
-    }
-}
-
-/// Adds a checkout of `repo` at `checkout`, on what `on` names: a branch,
-/// or `--detach` and a commit.
-async fn add(
-    repo: &Path,
-    checkout: &Path,
-    on: &[&str],
-    supervision: Supervision<'_>,
-) -> Result<(), WorktreeError> {
-    if let Some(parent) = checkout.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|source| WorktreeError::Io {
-                action: "create the worktrees directory".to_string(),
-                path: parent.to_path_buf(),
-                source,
-            })?;
-    }
-    let common_dir = super::common_git_dir(repo, supervision).await?;
-    let _mutation_lock = super::lock_worktree_mutations(&common_dir, supervision.clock).await?;
-    let path = checkout.display().to_string();
-    let mut args = vec!["worktree", "add", path.as_str()];
-    args.extend_from_slice(on);
-    super::run_git(repo, &args, supervision).await?;
-    Ok(())
 }
 
 /// Runs git `args` in `cwd` with every worktree mutation of its repository

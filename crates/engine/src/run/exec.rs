@@ -370,10 +370,11 @@ fn build_ctx(
     // One cache of criterion results per invocation, read by every task
     // cycle and by every check a task session asks for through the host.
     let memo = std::sync::Arc::new(Memo::new(manifest.config_hash.clone()));
-    let pool = crate::worktree::CheckoutPool::new(
+    let pool = crate::worktree::CheckoutPool::of_run(
         &crate::run_dir::worktrees_root(manifest, run_dir),
         worktree,
         run_dir,
+        manifest.project.as_ref(),
     );
     let registry_for_host = registry.clone();
     let subprocess_vars = subprocess_vars(ambient, &manifest.config);

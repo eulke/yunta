@@ -40,7 +40,7 @@ pub(super) async fn emit_started(
         node,
         attempt,
         from,
-        found.map(|(commit, _)| commit),
+        found.and_then(|captured| captured.commit),
         run_scope,
     )
     .await
@@ -72,8 +72,8 @@ async fn in_the_runs_tree(
     ctx: &RunCtx<'_>,
     node: &Node,
 ) -> Result<(Option<CommitSha>, TreeId), RunError> {
-    if let Some((commit, tree)) = super::shared_tree::found(ctx, node).await? {
-        return Ok((Some(commit), tree));
+    if let Some(captured) = super::shared_tree::found(ctx, node).await? {
+        return Ok((captured.commit, captured.tree));
     }
     let index =
         crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));

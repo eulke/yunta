@@ -53,6 +53,22 @@ impl Project {
             .unwrap_or_else(|| self.worktrees_root.clone())
     }
 
+    /// The pool of checkouts run `manifest` takes its trees from, for the
+    /// run whose directory is `run_dir`, reached from the checkout `repo`.
+    pub fn pool_of(
+        &self,
+        manifest: &Manifest,
+        repo: &Path,
+        run_dir: &Path,
+    ) -> std::sync::Arc<yunta_engine::CheckoutPool> {
+        yunta_engine::CheckoutPool::of_run(
+            &self.worktrees_root_for(manifest),
+            repo,
+            run_dir,
+            manifest.project.as_ref(),
+        )
+    }
+
     /// The tree run `run_id` works in: the checkout of its own its log
     /// names — `bound` — or, for a log that names none, the one named after
     /// it under the worktrees root its manifest froze; for a run that

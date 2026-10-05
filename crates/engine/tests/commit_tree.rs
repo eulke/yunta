@@ -27,10 +27,16 @@ async fn committing_a_clean_tree_makes_no_commit() {
     .await
     .unwrap();
 
-    assert_eq!(made, None);
+    assert_eq!(made.commit, None);
     assert_eq!(
         head_commit(&repo, owner.supervision()).await.unwrap(),
         before
+    );
+    let head_tree = git_output(&repo, &["rev-parse", "HEAD^{tree}"]);
+    assert_eq!(
+        made.tree.as_str(),
+        head_tree.trim(),
+        "the tree is answered whole"
     );
 }
 
@@ -48,15 +54,15 @@ async fn a_committed_tree_leaves_its_checkout_clean_and_its_tree_id_unchanged() 
         .await
         .unwrap();
 
-    let (commit, tree) = commit_tree(
+    let made = commit_tree(
         &repo,
         &root.path().join("index"),
         "made it",
         owner.supervision(),
     )
     .await
-    .unwrap()
-    .expect("a changed tree is committed");
+    .unwrap();
+    let (commit, tree) = (made.commit.expect("a changed tree is committed"), made.tree);
 
     assert_eq!(tree, captured);
     assert_eq!(
@@ -100,7 +106,7 @@ async fn a_commit_of_the_tree_runs_no_hook() {
     .unwrap();
 
     assert!(
-        made.is_some(),
+        made.commit.is_some(),
         "a hook that refuses every commit refused nothing here"
     );
 }

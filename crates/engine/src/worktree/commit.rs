@@ -9,10 +9,19 @@ use yunta_core::{CommitSha, InvalidId, TreeId};
 use super::{capture_tree, head_commit, head_tree, run_git, WorktreeError};
 use crate::process::Supervision;
 
+/// What a checkout held when it was committed: the tree, read once, and
+/// the commit made of it — `None` when the tree was `HEAD`'s already.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Captured {
+    pub tree: TreeId,
+    pub commit: Option<CommitSha>,
+}
+
 /// Commits everything `repo` holds — its `HEAD` plus whatever lies in it
 /// uncommitted, less what git ignores — on top of `HEAD`, moving its
-/// branch, and answers with the commit and the tree it holds. `None`
-/// when the tree is `HEAD`'s already: nothing changed, nothing to commit.
+/// branch, and answers with the tree it holds and the commit made of it.
+/// A tree that is `HEAD`'s already makes no commit: nothing changed. The
+/// tree is answered either way, so nobody reads it again.
 ///
 /// No hook runs. The tree committed is exactly the one captured, the
 /// same tree id the log names, and a hook that reformats a file or fails
@@ -24,10 +33,10 @@ pub async fn commit_tree(
     index: &Path,
     message: &str,
     supervision: Supervision<'_>,
-) -> Result<Option<(CommitSha, TreeId)>, WorktreeError> {
+) -> Result<Captured, WorktreeError> {
     let tree = capture_tree(repo, index, supervision).await?;
     if tree == head_tree(repo, supervision).await? {
-        return Ok(None);
+        return Ok(Captured { tree, commit: None });
     }
     let head = head_commit(repo, supervision).await?;
     let printed = run_git(
@@ -66,7 +75,10 @@ pub async fn commit_tree(
     )
     .await?;
     run_git(repo, &["reset", "-q"], supervision).await?;
-    Ok(Some((commit, tree)))
+    Ok(Captured {
+        tree,
+        commit: Some(commit),
+    })
 }
 
 /// Puts `paths` in `repo` back as its `HEAD` holds them: a path `HEAD`
