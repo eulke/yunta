@@ -21,7 +21,7 @@ specs:
 "##;
 
 fn codes(spec: &SpecFile) -> Vec<String> {
-    spec.untested()
+    spec.unspecifiable(None)
         .iter()
         .map(|diagnostic| diagnostic.problem.code().to_string())
         .collect()
@@ -55,4 +55,29 @@ specs:
     )
     .unwrap();
     assert!(codes(&runs).is_empty(), "{:?}", codes(&runs));
+}
+
+#[test]
+fn a_spec_test_that_runs_the_tests_outside_the_suite_is_refused() {
+    let spec: SpecFile = yunta_core::yaml::parse(
+        r##"
+specs:
+  - task: cli
+    files: [{ path: tests/global_pack_cmd.rs, content: "#[test] fn t() {}" }]
+    tests:
+      - { cmd: "cargo test -p yunta --test global_pack_cmd", proves: p }
+      - { cmd: "cargo test --workspace --test global_pack_cmd", proves: p }
+"##,
+    )
+    .unwrap();
+    let suite = yunta_core::Suite::of("cargo test --workspace").unwrap();
+
+    let refused: Vec<String> = spec
+        .unspecifiable(Some(&suite))
+        .iter()
+        .map(|diagnostic| diagnostic.to_string())
+        .collect();
+
+    assert_eq!(refused.len(), 1, "{refused:?}");
+    assert!(refused[0].contains("`cargo test -p yunta --test global_pack_cmd`"));
 }

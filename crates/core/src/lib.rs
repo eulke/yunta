@@ -105,7 +105,7 @@ pub use schema_range::{SchemaRange, SchemaRangeError};
 pub use secret::Secret;
 pub use spec::{in_repo, Spec, SpecFile, SpecTest, TestFile};
 pub use tasks::{
-    names_file, passes_by_a_name, Change, Criterion, Decision, Shape, Task, TasksFile,
+    names_file, passes_by_a_name, Change, Criterion, Decision, Shape, Suite, Task, TasksFile,
 };
 pub use workflow::{
     followers, left_out, node_commands, reroute_sources, ArtifactContextRef, ArtifactKind,

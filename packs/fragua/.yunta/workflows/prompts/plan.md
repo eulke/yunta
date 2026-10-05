@@ -58,8 +58,9 @@ they can see what will be built and disagree with it:
   the behavior — a test, not a check that a file exists or a line appears.
   It must run today and fail: a test filter that matches nothing usually
   passes, and a script that is not there yet may not run at all, which the
-  engine refuses — name a test that does not exist yet through the
-  project's own test runner, and whoever writes the task's tests writes it.
+  engine refuses — name a test that does not exist yet by extending the
+  suite command the run measures, named in your contract, and whoever
+  writes the task's tests writes it.
   The files a task's tests live in are inside its scope and outside its
   `changes`.
 

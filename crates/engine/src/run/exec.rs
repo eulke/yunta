@@ -427,6 +427,7 @@ fn build_ctx(
                 subprocess_vars,
                 environment: crate::process::execution_environment(ambient),
                 worktree: worktree.to_path_buf(),
+                suite: crate::run::baseline::suite(manifest).and_then(yunta_core::Suite::of),
             },
         )),
     };

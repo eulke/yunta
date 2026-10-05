@@ -156,6 +156,9 @@ rule_codes! {
     CriterionChecksPresence => "criterion-checks-presence",
     /// Two tasks are judged by the same command.
     SharedCriterion => "shared-criterion",
+    /// A criterion, or a spec's test, runs the project's tests without
+    /// extending the suite the run measures.
+    OutsideTheSuite => "outside-the-suite",
     /// A task `uses` a shape it builds itself.
     UsesItsOwnShape => "uses-its-own-shape",
     /// A task changes the test file its criterion runs, where the spec

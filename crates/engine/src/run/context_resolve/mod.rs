@@ -164,7 +164,7 @@ async fn assemble(
     naming: yunta_core::ToolNaming,
     cancel: &CancellationToken,
 ) -> Result<Step<Option<String>>, RunError> {
-    if node.context.is_empty() && artifact_shapes(node, naming).is_empty() {
+    if node.context.is_empty() && artifact_shapes(node, naming, None).is_empty() {
         return Ok(Step::Value(None));
     }
 

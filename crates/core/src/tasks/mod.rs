@@ -229,8 +229,10 @@ mod owned;
 mod proof;
 mod rules;
 mod specified;
+mod suite;
 
 pub use proof::{names_file, passes_by_a_name};
+pub use suite::Suite;
 
 /// The shape this document publishes, as the YAML it is.
 ///

@@ -75,6 +75,7 @@ impl ToolsHost {
                 subprocess_vars: Vec::new(),
                 environment: Some(tools_environment()),
                 worktree,
+                suite: None,
             },
         ));
         let hosted = ToolsHost {

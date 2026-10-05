@@ -3914,6 +3914,11 @@
           "const": "shared-criterion"
         },
         {
+          "description": "A criterion, or a spec's test, runs the project's tests without\nextending the suite the run measures.",
+          "type": "string",
+          "const": "outside-the-suite"
+        },
+        {
           "description": "A task `uses` a shape it builds itself.",
           "type": "string",
           "const": "uses-its-own-shape"

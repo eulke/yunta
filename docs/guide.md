@@ -727,6 +727,15 @@ can still answer for it — instead of surfacing after every task closed, at a
 suite in a task's criteria; a task that declares it is judged by its own
 declaration. A suite that was already red when measured holds no task to it.
 
+Narrow, but through the suite's own command: a criterion that runs the project's
+tests extends `baseline.suite` — `cargo test --workspace --test pool` under a suite of
+`cargo test --workspace` — and the engine refuses one that runs them another way,
+`cargo test -p engine` say, when the plan is handed over. A test runner settles what
+it builds for each invocation, so the same test run differently builds the project
+again beside the suite's build, which costs the run its time and the disk its space.
+A spec's tests are held to the same rule, and the session writing a plan or a spec
+is told the suite it extends.
+
 The price is the suite's duration per check. Each task works in its own checkout,
 so a build tool that keeps its output inside the tree builds from scratch there
 once per task; a shared directory (below) keeps later builds warm. A

@@ -157,6 +157,14 @@ documento de vuelta, así que un plan que un run anterior aceptó sigue leyéndo
   un documento, o de un comentario en código, sí chequea el trabajo.
 - `shared-criterion` — dos tareas no se juzgan con el mismo comando: el de la
   segunda pasa en cuanto aterriza la primera, antes de su propio trabajo.
+- `outside-the-suite` — un criterio que corre los tests del proyecto extiende el
+  suite que el run mide: su comando, seguido de lo que elige los tests de la
+  tarea. El runner del suite resuelve qué compila en cada invocación, así que el
+  mismo test corrido de otra forma —un paquete solo, otras flags— compila todo
+  de nuevo al lado del build del suite. Corre los tests del proyecto el segmento
+  que empieza con el programa del suite y sus palabras antes de la primera
+  opción (`cargo test` en `cargo test --workspace`); tiene que empezar con el
+  comando entero. El contrato de quien planifica nombra el suite (D245).
 - `uses-its-own-shape` — `uses` nombra sólo formas que construye otra tarea.
 - `task-writes-its-test` — cuando el workflow escribe una spec, ninguna tarea
   cambia el archivo de test que corre uno de sus criterios: los tests los escribe
@@ -169,7 +177,8 @@ documento de vuelta, así que un plan que un run anterior aceptó sigue leyéndo
 La spec que se escribe para el plan se juzga igual al entregarla: sus tests corren
 los archivos que escribe. `unrun-spec-file` rechaza un archivo que ningún test
 corre, y `spec-test-runs-no-spec-file` un test que no corre ninguno de los archivos
-de la spec, porque juzgaría a la tarea con lo que la tarea misma escribe. Así un
+de la spec, porque juzgaría a la tarea con lo que la tarea misma escribe;
+`outside-the-suite` le pide a cada test lo mismo que a un criterio. Así un
 test que no chequea nada tiene que correr, pasa antes del trabajo, y
 `criterion-already-passes` lo rechaza.
 

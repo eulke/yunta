@@ -10,8 +10,9 @@ the shapes it builds on, then the code it touches, and give it:
   person or a caller observes, through the interfaces the plan declares,
   not how the task builds it.
 - `tests`: the commands that run them, each saying what passing it
-  `proves`. Each runs one of your files, and each of your files is run by
-  one: a test that runs only what the task writes judges the task by its
+  `proves` — the suite command the run measures, named in your contract,
+  extended with what selects the file. Each runs one of your files, and
+  each of your files is run by one: a test that runs only what the task writes judges the task by its
   own work, and the engine refuses it. Where one of the task's criteria
   runs a test that does not exist yet in a file of its own, write that
   test there and run it with the criterion's own command; where the

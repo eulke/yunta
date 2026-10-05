@@ -97,7 +97,7 @@ pub(super) fn documentation(path: &str) -> bool {
 }
 
 /// The shell segments of `cmd`: what `&&`, `||` and `;` separate.
-fn segments(cmd: &str) -> Vec<String> {
+pub(super) fn segments(cmd: &str) -> Vec<String> {
     cmd.replace("&&", ";")
         .replace("||", ";")
         .split([';', '\n'])

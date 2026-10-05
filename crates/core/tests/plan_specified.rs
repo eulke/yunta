@@ -38,7 +38,7 @@ tasks:
 fn a_plan_proven_by_a_name_is_refused_and_writing_its_own_test_only_where_a_spec_writes_them() {
     let tasks: TasksFile = yunta_core::yaml::parse(PROVEN_BY_A_NAME).unwrap();
     assert_eq!(
-        codes(&tasks.unspecifiable(true)),
+        codes(&tasks.unspecifiable(true, None)),
         [
             "criterion-checks-presence",
             "task-writes-its-test",
@@ -46,7 +46,7 @@ fn a_plan_proven_by_a_name_is_refused_and_writing_its_own_test_only_where_a_spec
         ]
     );
     assert_eq!(
-        codes(&tasks.unspecifiable(false)),
+        codes(&tasks.unspecifiable(false, None)),
         ["criterion-checks-presence", "criterion-checks-presence"],
         "without a spec, a task writes its own tests"
     );
@@ -73,7 +73,7 @@ tasks:
     )
     .unwrap();
     assert_eq!(
-        codes(&tasks.unspecifiable(false)),
+        codes(&tasks.unspecifiable(false, None)),
         ["uses-its-own-shape", "shared-criterion"]
     );
 }
@@ -112,5 +112,56 @@ tasks:
         refused[0].to_string().contains("global-command"),
         "{}",
         refused[0]
+    );
+}
+
+/// A plan whose tasks run the project's tests three ways: one package on
+/// its own, the suite extended, and a program of their own.
+const RUN_THREE_WAYS: &str = r#"
+tasks:
+  - id: package
+    title: Package
+    scope: [src/a.rs]
+    criteria: [{ cmd: "cargo build && cargo test -p engine --test retry" }]
+  - id: extended
+    title: Extended
+    scope: [src/b.rs]
+    criteria: [{ cmd: "cargo test --workspace --test pool" }]
+  - id: script
+    title: Script
+    scope: [src/c.rs]
+    criteria: [{ cmd: "sh tests/c.sh" }, { cmd: "cargo clippy -p engine", type: guard }]
+"#;
+
+#[test]
+fn a_package_criterion_outside_the_suite_is_refused_naming_it() {
+    let tasks: TasksFile = yunta_core::yaml::parse(RUN_THREE_WAYS).unwrap();
+    let suite = yunta_core::Suite::of("cargo test --workspace").unwrap();
+
+    let broken = tasks.unspecifiable(false, Some(&suite));
+
+    assert_eq!(codes(&broken), ["outside-the-suite"]);
+    let said = broken[0].to_string();
+    assert!(
+        said.contains("`cargo test -p engine --test retry`")
+            && said.contains("`cargo test --workspace` followed by"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_criterion_extending_the_suite_or_running_another_program_is_accepted() {
+    let tasks: TasksFile = yunta_core::yaml::parse(RUN_THREE_WAYS).unwrap();
+    let suite = yunta_core::Suite::of("cargo test --workspace").unwrap();
+
+    let refused: Vec<String> = tasks
+        .unspecifiable(false, Some(&suite))
+        .iter()
+        .map(|diagnostic| diagnostic.to_string())
+        .collect();
+
+    assert!(
+        refused.iter().all(|said| said.contains("`package`")),
+        "only the package task is held: {refused:?}"
     );
 }

@@ -58,6 +58,9 @@ pub struct HostOf {
     /// The run's own tree: what a handed-over document's commands are
     /// proven against, in a checkout of their own.
     pub worktree: PathBuf,
+    /// The suite the run measures, which a handed-over document's
+    /// commands extend when they run the project's tests.
+    pub suite: Option<yunta_core::Suite>,
 }
 
 pub struct RunToolsHost {
@@ -105,6 +108,8 @@ pub struct RunToolsHost {
     pub(super) environment: Option<ExecutionEnvironment>,
     /// The run's own tree.
     pub(super) worktree: PathBuf,
+    /// The suite the run measures.
+    pub(super) suite: Option<yunta_core::Suite>,
     /// The frozen workflow, for what a document handed over is held to
     /// by the nodes around the one that hands it over.
     pub(super) workflow: Workflow,
@@ -153,6 +158,7 @@ impl RunToolsHost {
             subprocess_vars,
             environment,
             worktree,
+            suite,
         } = host;
         let (groups, member_of) = blackboards(workflow);
         Self {
@@ -171,6 +177,7 @@ impl RunToolsHost {
             subprocess_vars,
             environment,
             worktree,
+            suite,
             workflow: workflow.clone(),
         }
     }

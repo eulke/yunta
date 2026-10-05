@@ -5,7 +5,7 @@
 //! stays readable; a plan handed over now is held to them.
 
 use crate::diagnostic::{Diagnostic, Named, Problem, Rule, RuleCode, Subject};
-use crate::{QuestionId, SpecFile, Task, TaskId, TasksFile};
+use crate::{QuestionId, SpecFile, Suite, Task, TaskId, TasksFile};
 
 pub(super) const SPECIFIED_RULES: &[Rule] = &[
     Rule {
@@ -18,6 +18,12 @@ pub(super) const SPECIFIED_RULES: &[Rule] = &[
         code: RuleCode::SharedCriterion,
         demand: "no two tasks are judged by the same command: the second passes as soon as the \
                  first lands, before any work of its own",
+    },
+    Rule {
+        code: RuleCode::OutsideTheSuite,
+        demand: "a criterion that runs the project's tests extends the suite the run measures — \
+                 its command, followed by what selects the task's tests — so the build the \
+                 suite leaves serves it",
     },
     Rule {
         code: RuleCode::UsesItsOwnShape,
@@ -42,11 +48,16 @@ impl TasksFile {
     /// Every rule the plan breaks that it can tell on its own: a criterion
     /// that passes by a name, two tasks judged by one command, a task that
     /// uses its own shape — and, when the run's workflow writes a spec, a
-    /// task that changes the test its criterion runs.
-    pub fn unspecifiable(&self, spec_planned: bool) -> Vec<Diagnostic> {
+    /// task that changes the test its criterion runs; when the run
+    /// measures a `suite`, a criterion that runs the project's tests
+    /// without extending it.
+    pub fn unspecifiable(&self, spec_planned: bool, suite: Option<&Suite>) -> Vec<Diagnostic> {
         let mut broken = Vec::new();
         for (index, task) in self.tasks.iter().enumerate() {
             broken.extend(by_a_name(index, task));
+            if let Some(suite) = suite {
+                broken.extend(outside_the_suite(index, task, suite));
+            }
             broken.extend(own_shapes(index, task, self));
             if spec_planned {
                 broken.extend(writes_its_test(index, task));
@@ -133,6 +144,25 @@ fn by_a_name(index: usize, task: &Task) -> Vec<Diagnostic> {
                      run the test that observes the behavior"
                 ),
             )
+        })
+        .collect()
+}
+
+/// Each criterion of `task` that runs the project's tests without
+/// extending `suite`, which builds them again beside the suite's build.
+fn outside_the_suite(index: usize, task: &Task, suite: &Suite) -> Vec<Diagnostic> {
+    task.criteria
+        .iter()
+        .flat_map(|criterion| {
+            suite.outside(&criterion.cmd).into_iter().map(|command| {
+                criterion_of(
+                    index,
+                    task,
+                    &criterion.cmd,
+                    RuleCode::OutsideTheSuite,
+                    suite.outside_detail(&command),
+                )
+            })
         })
         .collect()
 }

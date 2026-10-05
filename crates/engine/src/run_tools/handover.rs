@@ -116,7 +116,7 @@ impl SessionTools {
         };
         // A test that runs none of the spec's files judges the work by
         // nothing the spec wrote; a file nothing runs judges nothing.
-        broken.extend(spec.untested());
+        broken.extend(spec.unspecifiable(self.host.suite.as_ref()));
         let probing = self.handover_checkout().await?;
         let (checkout, base) = (probing.checkout.clone(), probing.base.clone());
         let supervision = self.host.supervision(&self.stop);
@@ -227,7 +227,7 @@ impl SessionTools {
         events: &[yunta_core::events::StoredEvent],
     ) -> Result<Vec<Diagnostic>, RunToolError> {
         let spec_planned = crate::tasks::plan_specified(&self.host.workflow, events);
-        let mut found = tasks.unspecifiable(spec_planned);
+        let mut found = tasks.unspecifiable(spec_planned, self.host.suite.as_ref());
         found.extend(tasks.against_spec(&self.held_spec(events).await?));
         let answered: Vec<yunta_core::QuestionId> =
             crate::artifacts::latest::<yunta_core::AnswersFile>(&self.host.run_dir, events)

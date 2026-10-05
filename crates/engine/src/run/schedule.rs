@@ -307,12 +307,7 @@ impl Policy {
             on_interrupt: manifest.config.resolved_on_interrupt(),
             on_failure: manifest.config.resolved_on_failure(),
             mode_nodes: crate::modes::included_nodes(&manifest.workflow, mode_name, run.left_out()),
-            baseline_suite: manifest
-                .config
-                .baseline
-                .as_ref()
-                .filter(|_| crate::run::baseline::reads_the_baseline(&manifest.workflow))
-                .map(|baseline| baseline.suite.clone()),
+            baseline_suite: crate::run::baseline::suite(manifest).map(str::to_string),
             measures_aside: run.opens_on_base(),
             may_promote: next_mode_after(&manifest.workflow, mode_name).is_some(),
             grants_scope: person_may_grant_scope(&manifest.config),

@@ -23,6 +23,17 @@ use yunta_core::{ContentHash, RunId};
 use super::{RunCtx, RunError};
 use crate::replay::RunState;
 
+/// The suite a run of `manifest` measures — `baseline.suite` — when its
+/// workflow reads the measurement at all; `None` otherwise.
+pub fn suite(manifest: &yunta_core::Manifest) -> Option<&str> {
+    manifest
+        .config
+        .baseline
+        .as_ref()
+        .filter(|_| reads_the_baseline(&manifest.workflow))
+        .map(|baseline| baseline.suite.as_str())
+}
+
 /// Whether a run of `workflow` reads its lineage's measurement: a node
 /// compares against it, a loop holds its tasks to it, or a composed run
 /// — whose workflow is resolved only when it is born — may do either.
