@@ -1,6 +1,7 @@
 //! The ambient environment a layer resolves against: `$HOME`,
 //! `$YUNTA_HOME`, and the `~` expansion of the paths a layer names.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::Secret;
@@ -63,6 +64,36 @@ pub struct Env {
     /// process. Empty in production: subprocesses inherit the run's own
     /// environment unchanged.
     pub subprocess_vars: Vec<(String, String)>,
+    /// What the shell had for each variable an adapter reaches its
+    /// service by — a proxy, a base URL — which its CLI inherits: what a
+    /// probe of that service has to look at to reach the same endpoint.
+    pub service: BTreeMap<String, String>,
+}
+
+impl Env {
+    /// The process environment, read once here, at the shell's edge, so
+    /// nothing below reads it live: what core and the engine resolve
+    /// against, and the value of every name in `service` that is set.
+    pub fn of_process(service: &[&str]) -> Env {
+        let var = std::env::var_os;
+        Env {
+            home: var("HOME").map(PathBuf::from),
+            yunta_home: var("YUNTA_HOME").map(PathBuf::from),
+            org_config: var("YUNTA_ORG_CONFIG").map(PathBuf::from),
+            path: var("PATH")
+                .map(|path| std::env::split_paths(&path).collect())
+                .unwrap_or_default(),
+            fence_var: var(crate::fence::ENV_VAR).and_then(|value| value.into_string().ok()),
+            subprocess_vars: Vec::new(),
+            service: service
+                .iter()
+                .filter_map(|name| {
+                    let value = var(name)?.into_string().ok()?;
+                    Some((name.to_string(), value))
+                })
+                .collect(),
+        }
+    }
 }
 
 /// The user state root: `$YUNTA_HOME` when set, otherwise `~/.yunta`.
@@ -147,14 +178,6 @@ impl SecretSource for ProcessSecrets {
     fn get(&self, name: &str) -> Option<Secret<String>> {
         std::env::var(name).ok().map(Secret::from)
     }
-}
-
-/// What a CLI an adapter spawns inherits for `name`: the process
-/// environment, read here and only here. An adapter that has to reach the
-/// same service its CLI will — the proxy, the base URL it is pointed at —
-/// asks this rather than reading the process itself.
-pub fn inherited(name: &str) -> Option<String> {
-    std::env::var(name).ok()
 }
 
 /// Every declared secret's value, for keeping them out of the log.

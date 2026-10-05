@@ -418,4 +418,8 @@ impl crate::task_cycle::SessionObserver for RunCtx<'_> {
     fn awake(&self) -> std::time::Instant {
         self.clock.awake()
     }
+
+    fn shell_service(&self) -> Option<&std::collections::BTreeMap<String, String>> {
+        self.ambient.map(|ambient| &ambient.service)
+    }
 }

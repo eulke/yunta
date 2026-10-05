@@ -142,6 +142,19 @@ pub(crate) fn built_adapters(
     ]
 }
 
+/// Every variable a built adapter reaches its service by, once each: what
+/// the shell captures so a probe reaches the endpoint the adapter's CLI
+/// will, without anything below the shell reading the process.
+pub(crate) fn service_vars() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = built_adapters(|_| AdapterSettings::default())
+        .iter()
+        .flat_map(|adapter| adapter.service_vars().iter().copied())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
 /// What every adapter this binary builds declares it can do — what
 /// `check` judges a workflow's `permissions:` and `agent:` against.
 /// `None` for an adapter this binary does not build: a capability it

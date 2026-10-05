@@ -343,11 +343,24 @@ pub trait Adapter: Send + Sync {
 
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>>;
 
+    /// The variables this adapter's CLI reaches its service by — a
+    /// proxy, a base URL — which the shell captures for [`Self::reachable`].
+    /// Default: none.
+    fn service_vars(&self) -> &'static [&'static str] {
+        &[]
+    }
+
     /// Whether the service a session opened for `req` talks to answers
     /// from this machine now — `None` when the adapter cannot tell where
-    /// that service is. What a session cut off from its service waits on
-    /// before it picks its work back up. Default: cannot tell.
-    async fn reachable(&self, _req: &SessionRequest) -> Option<bool> {
+    /// that service is. `shell` is what the shell had for
+    /// [`Self::service_vars`], which the session's CLI inherits. What a
+    /// session cut off from its service waits on before it picks its work
+    /// back up. Default: cannot tell.
+    async fn reachable(
+        &self,
+        _req: &SessionRequest,
+        _shell: &std::collections::BTreeMap<String, String>,
+    ) -> Option<bool> {
         None
     }
 

@@ -229,6 +229,11 @@ pub trait SessionObserver: Sync {
     fn awake(&self) -> std::time::Instant {
         std::time::Instant::now()
     }
+    /// What the shell had for the variables adapters reach their service
+    /// by, which every session's CLI inherits. Default: nothing captured.
+    fn shell_service(&self) -> Option<&std::collections::BTreeMap<String, String>> {
+        None
+    }
 }
 
 /// The only shape of a note the log ever carries: its size and

@@ -202,7 +202,11 @@ impl Away {
             .map_err(DispatchError::Audit)?;
         let awake = || audit.map_or_else(Instant::now, |(observer, _)| observer.awake());
         let from = awake();
-        let back = self.wait(adapter, request, cancel, awake).await;
+        let shell = audit
+            .and_then(|(observer, _)| observer.shell_service())
+            .cloned()
+            .unwrap_or_default();
+        let back = self.wait(adapter, request, &shell, cancel, awake).await;
         let waited = awake().saturating_duration_since(from);
         self.waited += waited;
         if !matches!(back, Back::Answered) {
@@ -233,6 +237,7 @@ impl Away {
         &mut self,
         adapter: &dyn Adapter,
         request: &SessionRequest,
+        shell: &std::collections::BTreeMap<String, String>,
         cancel: &CancellationToken,
         awake: impl Fn() -> Instant,
     ) -> Back {
@@ -242,7 +247,7 @@ impl Away {
         // on a service that is gone.
         let bound = Duration::from_secs(30 * 60);
         loop {
-            let answers = adapter.reachable(request).await;
+            let answers = adapter.reachable(request, shell).await;
             if answers == Some(true) {
                 return Back::Answered;
             }

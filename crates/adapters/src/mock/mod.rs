@@ -232,7 +232,11 @@ impl Adapter for MockAdapter {
     }
 
     /// Down for as many probes as the fixture says, then up.
-    async fn reachable(&self, _req: &SessionRequest) -> Option<bool> {
+    async fn reachable(
+        &self,
+        _req: &SessionRequest,
+        _shell: &std::collections::BTreeMap<String, String>,
+    ) -> Option<bool> {
         let probed = self.probes.fetch_add(1, Ordering::SeqCst);
         Some(probed >= u64::from(self.fixture.service_down_for))
     }

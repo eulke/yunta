@@ -105,36 +105,21 @@ pub enum ProjectError {
     },
 }
 
-/// The process environment, read once here at the CLI's boundary so no
-/// code below reads it live — `std::env` stays at the shell's edge and
-/// everything downstream (core's `user_state_root`, a run's ambient) takes
-/// the resulting [`Env`](yunta_core::Env). A run leaves `subprocess_vars`
-/// empty: its nodes inherit this process's environment unchanged.
+/// The process environment as the CLI's boundary captures it, with every
+/// variable a built adapter reaches its service by, so no code below
+/// reads it live and everything downstream (core's `user_state_root`, a
+/// run's ambient, a service probe) takes the resulting
+/// [`Env`](yunta_core::Env). A run leaves `subprocess_vars` empty: its
+/// nodes inherit this process's environment unchanged.
 pub(crate) fn process_env() -> yunta_core::Env {
-    let var = std::env::var_os;
-    yunta_core::Env {
-        home: var("HOME").map(PathBuf::from),
-        yunta_home: var("YUNTA_HOME").map(PathBuf::from),
-        org_config: var("YUNTA_ORG_CONFIG").map(PathBuf::from),
-        path: var("PATH")
-            .map(|path| std::env::split_paths(&path).collect())
-            .unwrap_or_default(),
-        fence_var: var(yunta_core::fence::ENV_VAR).and_then(|value| value.into_string().ok()),
-        subprocess_vars: Vec::new(),
-    }
+    yunta_core::Env::of_process(&crate::commands::service_vars())
 }
 
 pub(crate) fn user_root() -> Result<PathBuf, ProjectError> {
     yunta_core::user_state_root(&process_env()).ok_or(ProjectError::NoStateRoot)
 }
 
-fn org_config_path() -> PathBuf {
-    process_env()
-        .org_config
-        .unwrap_or_else(|| PathBuf::from("/etc/yunta/config.yaml"))
-}
-
-fn load_layer(path: &Path) -> Result<Option<ConfigLayer>, ProjectError> {
+fn load_layer(path: &Path, home: Option<&Path>) -> Result<Option<ConfigLayer>, ProjectError> {
     let contents = match std::fs::read_to_string(path) {
         Ok(contents) => contents,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -150,13 +135,10 @@ fn load_layer(path: &Path) -> Result<Option<ConfigLayer>, ProjectError> {
             path: path.to_path_buf(),
             detail: e.to_string(),
         })?;
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    layer
-        .expand_home(home.as_deref())
-        .map_err(|e| ProjectError::Parse {
-            path: path.to_path_buf(),
-            detail: e.to_string(),
-        })?;
+    layer.expand_home(home).map_err(|e| ProjectError::Parse {
+        path: path.to_path_buf(),
+        detail: e.to_string(),
+    })?;
     if let Some(declared) = layer.version {
         if declared != CONFIG_VERSION {
             return Err(ProjectError::UnsupportedVersion {
@@ -173,16 +155,21 @@ fn load_layer(path: &Path) -> Result<Option<ConfigLayer>, ProjectError> {
 /// named so `permissions` conflicts can cite which layer tried to loosen
 /// which. Shared by [`resolve`] and by `yunta check`'s layered path.
 pub fn load_named_layers(cwd: &Path) -> Result<Vec<(&'static str, ConfigLayer)>, ProjectError> {
-    let user_root = user_root()?;
+    let env = process_env();
+    let user_root = yunta_core::user_state_root(&env).ok_or(ProjectError::NoStateRoot)?;
+    let org = env
+        .org_config
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("/etc/yunta/config.yaml"));
     let candidates = [
-        ("org", org_config_path()),
+        ("org", org),
         ("user", user_root.join("config.yaml")),
         ("repo", cwd.join(".yunta/config.yaml")),
     ];
 
     let mut layers = Vec::new();
     for (name, path) in candidates {
-        if let Some(layer) = load_layer(&path)? {
+        if let Some(layer) = load_layer(&path, env.home.as_deref())? {
             layers.push((name, layer));
         }
     }

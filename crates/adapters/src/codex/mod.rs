@@ -280,9 +280,23 @@ impl Adapter for CodexAdapter {
         Ok(subprocess::probe_version(&self.binary).await)
     }
 
+    fn service_vars(&self) -> &'static [&'static str] {
+        &[
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+            "OPENAI_BASE_URL",
+        ]
+    }
+
     /// The OpenAI API, or the endpoint or proxy the session is pointed at.
-    async fn reachable(&self, req: &SessionRequest) -> Option<bool> {
-        crate::reach::answers(req, "OPENAI_BASE_URL", "api.openai.com").await
+    async fn reachable(
+        &self,
+        req: &SessionRequest,
+        shell: &std::collections::BTreeMap<String, String>,
+    ) -> Option<bool> {
+        crate::reach::answers(req, shell, "OPENAI_BASE_URL", "api.openai.com").await
     }
 
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>> {

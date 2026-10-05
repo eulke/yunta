@@ -29,8 +29,7 @@ use env::expand_path;
 use merge::merge;
 
 pub use env::{
-    inherited, user_state_root, Env, HomeExpansionError, ProcessSecrets, Redactor, SecretSource,
-    REDACTED,
+    user_state_root, Env, HomeExpansionError, ProcessSecrets, Redactor, SecretSource, REDACTED,
 };
 pub use keys::ConfigKey;
 pub use permissions::{
