@@ -11,7 +11,8 @@ use std::path::PathBuf;
 
 use yunta_core::Task;
 
-use super::criteria::{post_check, Memo, PostCheck};
+use super::criteria::{post_check, PostCheck};
+use super::memo::Memo;
 use super::{CriterionRun, TaskCycleError};
 use crate::process::Supervision;
 use crate::scope::{audit_tree, ScopeCheckResult};

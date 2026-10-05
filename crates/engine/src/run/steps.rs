@@ -317,6 +317,12 @@ pub(super) async fn execute_batch(
             }
         }
     }
+    // A person who chose to run a node again after its failure says the
+    // world it failed in may have changed: every red the run holds is
+    // asked again, and what passed stays passed.
+    if batch.iter().any(|(node, _)| state.run_again_chosen(node)) {
+        ctx.memo.forget_failures();
+    }
     // Top-level DAG fan-out never interrupts a still-running sibling the
     // moment one fails — that's `join: any`'s own semantics, scoped to a
     // named `parallel` group, not implicit `max_parallel_nodes` batches — so

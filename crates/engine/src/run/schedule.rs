@@ -32,9 +32,7 @@
 
 use std::collections::HashSet;
 
-use yunta_core::events::{
-    Failure, GateResolvedPayload, NodeWait, PauseReason, RerouteCause, ResumePolicy,
-};
+use yunta_core::events::{Failure, NodeWait, PauseReason, RerouteCause, ResumePolicy};
 use yunta_core::{
     DefaultOnFailure, ModeName, Node, NodeId, NodeKind, OnInterrupt, ScopeExpansionMode, Workflow,
 };
@@ -46,7 +44,6 @@ pub use baseline::owed_baseline;
 
 use crate::modes::dependencies_in_mode;
 use crate::replay::{NodeState, RunState};
-use crate::reserved::ReservedOption;
 
 /// The mode immediately after `mode_name` in `modes:`'s own declaration
 /// order — the *only* direction promotion ever moves (going back to an
@@ -410,17 +407,10 @@ impl<'a> Board<'a> {
         self.state.nodes.get(id).map_or(0, |r| r.attempts) + 1
     }
 
-    /// Whether a person chose `retry` for this node after its latest
-    /// failure. The decision's window is [`RunState::pre_seeded`]'s: one
-    /// recorded after the failure and after the run's last pause, which
-    /// nothing has consumed — the attempt it starts closes it, so it runs
-    /// the node once.
+    /// Whether a person chose to run this node again after its latest
+    /// failure — see [`RunState::run_again_chosen`].
     fn retry_chosen(&self, id: &NodeId) -> bool {
-        matches!(
-            self.state.pre_seeded(id),
-            Some(GateResolvedPayload::Chosen(choice))
-                if ReservedOption::of(&choice.option).is_some_and(ReservedOption::runs_again)
-        )
+        self.state.run_again_chosen(id)
     }
 
     /// Whether a person may widen `node`'s scope by what `failure`

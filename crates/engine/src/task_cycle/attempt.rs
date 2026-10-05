@@ -9,9 +9,9 @@ use yunta_core::events::{Phase, SessionDeath};
 use yunta_core::port::{Adapter, Budget, PermissionProfile};
 use yunta_core::Task;
 
-use super::criteria::Memo;
 use super::dispatch::{dispatch_session, DispatchError};
 use super::judge::{judge, Judgement, Work};
+use super::memo::Memo;
 use super::record::Recorder;
 use super::session::{SessionObserver, SessionSetup};
 use super::{AttemptRecord, DispatchOutcome, TaskCycleError, TaskOutcome};

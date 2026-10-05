@@ -142,9 +142,9 @@ pub(crate) mod offers {
     pub(crate) fn retry_node(node: &NodeId, attempt: u32) -> GateOption {
         ReservedOption::Retry.offer(
             format!("Run `{node}` again (attempt {attempt})"),
-            "Starts a fresh attempt from the run's tree as it stands, under the same scope, \
-             and reuses nothing the failed one did; change what it failed on in that tree \
-             first, or it fails the same way and asks again",
+            "Starts a fresh attempt from the run's tree as it stands, under the same scope: \
+             what failed is asked again and what passed stays passed; change what it failed \
+             on first, or it fails the same way and asks again",
         )
     }
 

@@ -1,9 +1,9 @@
 ---
 number: D230
 title: "A run's criteria keep their answers across its invocations, for the tree and the environment they were asked in"
-status: accepted
+status: revised
 revises: [D59]
-revised_by: []
+revised_by: [D243]
 ---
 
 # D230 — A run's criteria keep their answers across its invocations, for the tree and the environment they were asked in
