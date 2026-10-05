@@ -24,7 +24,8 @@ impl CheckoutPool {
         supervision: Supervision<'_>,
     ) -> Result<Taken, WorktreeError> {
         let home = self.home(supervision).await?;
-        let slots = survey::survey(&home, &self.repo, supervision).await?;
+        let mut slots = survey::survey(&home, &self.repo, supervision).await?;
+        space::learn(&home, &mut slots, &self.walking, supervision).await;
         let listed = slots
             .iter()
             .filter(|slot| slot.standing.is_some())

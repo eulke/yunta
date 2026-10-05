@@ -4,7 +4,8 @@
 //! held — and the walk that counts its bytes runs off the way of whoever
 //! gave it back: it takes seconds on a large build. A walk a process did
 //! not live to finish is finished by the next one that surveys the pool,
-//! or by `gc`; the pool reads what was last counted.
+//! or by `gc`, and a checkout kept before builds were recorded is learned
+//! by the next take; the pool reads what was last counted.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -58,12 +59,37 @@ pub(super) async fn given_back(
     roots: Vec<PathBuf>,
     at: DateTime<Utc>,
     walking: &Walking,
-) {
+) -> Built {
     let bytes = roots.is_empty().then_some(0);
     let built = Built { roots, bytes, at };
     record(&built_path(home, number), &built).await;
     if built.bytes.is_none() {
-        walking.count(built_path(home, number), built);
+        walking.count(built_path(home, number), built.clone());
+    }
+    built
+}
+
+/// Learns the build of every checkout of `slots` that has no record of
+/// one — added before builds were recorded — from what git ignores in it,
+/// listed once and recorded as of its last use, its bytes counted off the
+/// caller's way. Until then its next user could not tell a warm checkout
+/// from an empty one.
+pub(super) async fn learn(
+    home: &Path,
+    slots: &mut [super::survey::Slot],
+    walking: &Walking,
+    supervision: Supervision<'_>,
+) {
+    let now = supervision.clock.now();
+    for slot in slots.iter_mut() {
+        if slot.built.is_some() || slot.standing.is_none() {
+            continue;
+        }
+        let Some(roots) = ignored(&slot.path, supervision).await else {
+            continue;
+        };
+        let used = slot.held.as_ref().map_or(now, |held| held.at);
+        slot.built = Some(given_back(home, slot.number, roots, used, walking).await);
     }
 }
 

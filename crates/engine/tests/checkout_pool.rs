@@ -354,3 +354,50 @@ async fn born(
         .await
         .unwrap()
 }
+
+/// A checkout kept before builds were recorded is known by what git
+/// ignores in it at the next take: the warm one goes to a user that
+/// builds, however long ago it was used, and the empty one to a run whose
+/// units build.
+#[tokio::test]
+async fn a_checkout_nobody_recorded_is_known_by_what_it_holds() {
+    let world = World::new();
+    let (warm, warm_held) = world.open("T001").await;
+    let (empty, empty_held) = world.open("T002").await;
+    write(&warm.worktree.join("target/build"), &"b".repeat(64 * 1024));
+    world.land(&warm, &warm_held).await;
+    world.land(&empty, &empty_held).await;
+    world
+        .give_back_at(&warm, warm_held, "2026-01-01T00:00:00Z")
+        .await;
+    world
+        .give_back_at(&empty, empty_held, "2026-01-02T00:00:00Z")
+        .await;
+    for unit in [&warm, &empty] {
+        let name = unit.worktree.file_name().unwrap().to_string_lossy();
+        delete(&unit.worktree.with_file_name(format!("{name}.built")));
+    }
+    let supervision = world.owner.supervision();
+
+    let (measured, _held) = world
+        .pool
+        .open_detached(&world.head(), supervision)
+        .await
+        .unwrap();
+    let (following, _also) = born(&world, yunta_engine::Birth::FollowsUnits).await;
+
+    assert_eq!(canonical(&measured), canonical(&warm.worktree));
+    assert_eq!(canonical(&following), canonical(&empty.worktree));
+}
+
+/// A checkout the pool adds holds its source and no build, and says so.
+#[tokio::test]
+async fn a_checkout_the_pool_adds_is_recorded_without_a_build() {
+    let world = World::new();
+
+    let (unit, _held) = world.open("T001").await;
+
+    let name = unit.worktree.file_name().unwrap().to_string_lossy();
+    let record = std::fs::read_to_string(unit.worktree.with_file_name(format!("{name}.built")));
+    assert!(record.unwrap().contains("\"bytes\":0"));
+}
