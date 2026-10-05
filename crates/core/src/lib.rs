@@ -22,10 +22,12 @@
 
 mod capabilities;
 mod clock;
+pub mod commit_message;
 mod config;
 pub mod diagnostic;
 mod error;
 pub mod events;
+pub mod fence;
 mod findings;
 mod glob;
 pub mod graph;
@@ -34,61 +36,86 @@ mod id_source;
 mod ids;
 mod inputs;
 mod manifest;
+mod nonempty;
 mod pack;
+pub mod persisted;
 pub mod policy;
+pub mod port;
+pub mod process;
 mod questions;
+pub mod receipt;
+mod run_tool;
 pub mod schema;
+mod schema_range;
 mod secret;
 pub mod shape;
+pub mod shown;
+mod spec;
 mod tasks;
+pub mod template;
 pub mod text;
-mod workflow;
+pub mod units;
+pub mod workflow;
 pub mod yaml;
 
-pub use capabilities::{Capabilities, Capability};
+pub use capabilities::{Capabilities, Capability, FenceLevel, ToolNaming};
 pub use clock::{Clock, SystemClock};
 pub use config::{
-    permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
-    CommandPermissions, ConfigLayer, CoverageConfig, DefaultOnFailure, DefaultsConfig, Env,
-    ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, HomeExpansionError,
+    inherited, permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
+    CommandPermissions, ConfigKey, ConfigLayer, CoverageConfig, DefaultOnFailure, DefaultsConfig,
+    Env, ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, HomeExpansionError,
     Isolation, LimitsConfig, McpServerConfig, NetworkPermissions, PackExecutorPolicy,
-    PackPermissions, PathsConfig, PermissionsConfig, PricingEntry, ProjectConfig,
-    PublisherPermissions, RunnerCandidate, SkillsConfig, StorageConfig,
+    PackPermissions, PathsConfig, PermissionsConfig, PricingEntry, ProcessSecrets, ProjectConfig,
+    PublisherPermissions, Redactor, RunnerCandidate, SecretSource, SkillsConfig, StorageConfig,
+    REDACTED,
 };
 pub use diagnostic::{
     ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, Rule, RuleCode,
     Subject,
 };
-pub use error::{describe, AdapterError, Result};
-pub use findings::{FindingEntry, FindingsFile, ProposedCriterionEntry, Withdrawal};
-pub use glob::{might_overlap, scope_glob, scope_globset};
-pub use hash::{sha256_hex, CommitSha, ContentHash};
-#[cfg(any(test, feature = "testkit"))]
-pub use id_source::SeqIdSource;
+pub use error::{describe, with_causes, AdapterError, Result, Unbuildable};
+pub use findings::{
+    FindingEntry, FindingsFile, InvalidLocation, LineRange, Location, ProposedCriterionEntry,
+    RelativePath, Withdrawal,
+};
+pub use glob::{
+    listed_globs, might_overlap, reaches_any, scope_globset, InvalidScopeGlob, ScopeGlob,
+};
+pub use hash::{sha256_hex, CommitSha, ContentHash, TreeId};
 pub use id_source::{IdSource, SystemIdSource};
 pub use ids::{
-    is_path_segment, AdapterId, AgentName, ExecutorName, FindingId, GitHubRepo, InvalidId,
-    ModeName, ModelName, NodeId, OptionId, PackName, PackRef, Pid, Publisher, QuestionId,
-    Responder, RunId, RunnerName, Seq, SessionId, TaskId,
+    is_path_segment, AdapterId, AgentName, CommandName, ExecutorName, FindingId, GitHubRepo,
+    InputName, InvalidId, McpServerName, ModeName, ModelName, NodeId, OptionId, PackName, PackRef,
+    Pid, Publisher, QuestionId, Responder, RunId, RunnerName, Seq, SessionId, SharedDirVar,
+    SkillName, TaskId, WorkflowName,
 };
 pub use inputs::{InputSpec, InputSpecError};
-pub use manifest::{content_hash, FrozenPaths, Manifest, PackProvenance, RelativeRootError};
+pub use manifest::{
+    content_hash, FrozenPaths, Manifest, PackProvenance, ProjectIdentity, RelativeRootError,
+};
+pub use nonempty::{Empty, NonEmpty};
 pub use pack::{
-    stays_inside, PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest,
-    PackManifestError, PackRequires, RequiredRunner,
+    PackContents, PackDeclares, PackLock, PackLockEntry, PackManifest, PackManifestError,
+    PackRequires, RequiredRunner,
 };
 pub use policy::ScopeExpansionMode;
-pub use questions::{validate_answers, Answer, AnswerType, AnswersFile, Question, QuestionsFile};
+pub use questions::{Answer, AnswerType, AnswersFile, Question, QuestionsFile};
+pub use run_tool::RunTool;
+pub use schema_range::{SchemaRange, SchemaRangeError};
 pub use secret::Secret;
-pub use tasks::{Criterion, Task, TasksFile};
+pub use spec::{in_repo, Spec, SpecFile, SpecTest, TestFile};
+pub use tasks::{
+    names_file, passes_by_a_name, Change, Criterion, Decision, Shape, Task, TasksFile,
+};
 pub use workflow::{
-    ArtifactContextRef, ArtifactKind, ArtifactRefId, ArtifactSpec, Artifacts, CheckBuiltin,
-    CleanupTarget, ContextSpec, Coordination, DistillArtifact, ExternalGate, ForgeKind,
-    HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeLayer, KnowledgeParams, LoopUntil,
-    McpQueryParams, ModeInclude, ModeSpec, MountArtifact, MountSpec, Node, NodeDefaults, NodeIter,
-    NodeKind, NodeOutputParams, NodePermissions, OnFailure, OnFinishStep, OnInterrupt,
-    PromptSource, RunEventsFilter, RunEventsParams, ScopeExpansion, TasksParams, Workflow,
-    WorkflowIsolation, ARTIFACTS_DIR,
+    followers, left_out, node_commands, reroute_sources, ArtifactContextRef, ArtifactKind,
+    ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, Because, CheckBuiltin, CleanupTarget,
+    ContextFile, ContextSpec, Coordination, DistillArtifact, ExternalGate, ForgeKind,
+    HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeLayer, KnowledgeParams, LeftOut,
+    LoopUntil, McpQueryParams, ModeInclude, ModeSpec, MountArtifact, MountSpec, Node, NodeDefaults,
+    NodeIter, NodeKind, NodeOutputParams, NodePermissions, NodeScope, OnFailure, OnFinishStep,
+    OnInterrupt, PromptSource, ReservedIdentity, Resolved, RunCommand, RunEventsFilter,
+    RunEventsParams, ScopeExpansion, TasksParams, UnknownArtifactKind, Workflow, ARTIFACTS_DIR,
 };
 
 /// The schema major this binary speaks — what a

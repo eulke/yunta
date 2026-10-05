@@ -1,5 +1,5 @@
-//! How a node ends: verifying what it declared, recording a failure, and
-//! refreshing `progress.md` either way.
+//! How a node ends: verifying what it declared, and recording how it
+//! finished or why it failed.
 //!
 //! Every kind closes through [`close_node`], so every kind gets the same
 //! after-hooks, the same scope check and the same artifact verification
@@ -9,21 +9,23 @@
 //! rather than to every kind of node.
 
 use std::path::{Path, PathBuf};
+use yunta_core::commit_message::CommitMessage;
 
 use yunta_core::events::{
-    EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload, TokenUsage,
+    EventPayload, Failure, HookPhase, NodeFailedPayload, NodeFinishedPayload,
+    QuestionsAskedPayload, TokenUsage,
 };
 use yunta_core::{HookFailurePolicy, Node, RunId};
 
 use crate::artifacts::close_artifacts;
-use crate::scope::scope_check;
 
 use super::hooks_exec::{effective_hooks, run_hook, HookRun};
-use super::node_artifacts::{
-    acquire_from_child, derive_findings, pending_questions, record_artifacts,
-};
+use super::node_artifacts::{acquire_from_child, asked, derive_findings, record_artifacts};
 use super::node_exec::{render_artifact_names, NodeEnd};
 use super::{RunCtx, RunError};
+use yunta_core::events::ArtifactId;
+use yunta_core::events::{GateEvent, NodeEvent};
+use yunta_core::{ArtifactKind, ContentHash, NodeId};
 
 /// The child run a `kind: workflow` node closes on: what it produced is
 /// what that node produced, and the run's log is where that is stated.
@@ -94,26 +96,30 @@ pub(super) async fn close_node(
             HookRun::Violation(rule) => {
                 return fail_with_tokens(ctx, node, rule, false, tokens).await
             }
-            HookRun::Ran(false) if step.on_failure == HookFailurePolicy::Fail => {
-                return fail_with_tokens(
-                    ctx,
-                    node,
-                    format!("after hook `{}` failed", step.run),
-                    false,
-                    tokens,
-                )
-                .await;
+            HookRun::Unset(key) => {
+                return fail_with(ctx, node, Failure::unset(key), false, tokens).await
             }
-            HookRun::Ran(_) => {}
+            HookRun::Failed(exit) if step.on_failure == HookFailurePolicy::Fail => {
+                return fail_with(ctx, node, Failure::exited(exit), false, tokens).await;
+            }
+            HookRun::Passed | HookRun::Failed(_) => {}
         }
     }
 
-    if let Some(end) = scope_violation(ctx, node, close.staged, tokens).await? {
+    if let Some(end) = super::node_scope::scope_request(ctx, node, tokens).await? {
         return Ok(end);
     }
+    if let Some(end) = super::node_scope::scope_violation(ctx, node, close.staged, tokens).await? {
+        return Ok(end);
+    }
+    if let Some(end) = land_unit(ctx, node, tokens).await? {
+        return Ok(end);
+    }
+    // The tree this node leaves is the one its answers are proved on.
+    super::finding_proofs::prove(ctx, node).await?;
 
     // An opaque artifact's name can carry a template
-    // (`report-{{runner.role}}.md`) — rendered per node so every fan-out
+    // (`report-{{runner.name}}.md`) — rendered per node so every fan-out
     // sibling verifies its own file. A document the engine reads has no
     // name to render: its kind is its identity, in every sibling.
     let node_rendered = match render_artifact_names(ctx, node) {
@@ -151,90 +157,228 @@ pub(super) async fn close_node(
     let (verified, standing) = match &acquired {
         Some(acquired) => (acquired.verified.as_slice(), Some(&acquired.standing)),
         None => {
-            own = match close_artifacts(node, ctx.run_dir, &ctx.load_events().await?, ceiling) {
+            let events = ctx.load_events().await?;
+            own = match close_artifacts(node, ctx.run_dir, &events, ceiling).await {
                 Ok(verified) => verified,
                 Err(failures) => {
                     return fail_with(ctx, node, Failure::artifacts(failures), false, tokens).await
                 }
             };
+            if let Some(failure) = unexplained_plan(ctx, node, &events, &own) {
+                return fail_with(ctx, node, Failure::artifacts(vec![failure]), false, tokens)
+                    .await;
+            }
             (own.as_slice(), None)
         }
     };
 
     record_artifacts(ctx, node, verified, standing).await?;
-    let pending = pending_questions(verified);
-    if !pending.is_empty() {
-        return fail_with_tokens(
-            ctx,
-            node,
-            format!(
-                "node `{}` asked {} question(s) awaiting an answer: {}",
-                node.id,
-                pending.len(),
-                pending.join(", ")
-            ),
-            false,
-            tokens,
-        )
-        .await;
+    // A node that asked has done its work: what is left is an answer,
+    // and that is a person's to give. It closed here like every other
+    // node — hooks, scope, artifacts — and the fact it records instead
+    // of a terminal is what makes the wait a wait rather than a failure
+    // read as one.
+    match asked(verified) {
+        Some(asked) => {
+            // The hash the fact names is the one the run's own store
+            // answers for, read back off the log rather than taken from
+            // the bytes the close happened to hold: the round that
+            // follows resolves the same acceptance, and one number that
+            // came from two places is one that can disagree with itself.
+            let questions_hash = held_questions(ctx, &node.id).await?;
+            match QuestionsAskedPayload::new(questions_hash, asked.ids, tokens) {
+                Some(payload) => {
+                    ctx.emit(
+                        Some(&node.id),
+                        EventPayload::Gates(GateEvent::QuestionsAsked(payload)),
+                    )
+                    .await?;
+                    if asked.waits {
+                        return Ok(NodeEnd::Asked);
+                    }
+                    // Nothing it asked is required: each question says what
+                    // the work assumes without an answer, and the run goes
+                    // on with that rather than waiting for a person.
+                    crate::answers::record_assumed(&ctx.log(), ctx.run_dir, &node.id)
+                        .await
+                        .map_err(|source| RunError::Broken {
+                            diagnostic: source.to_string(),
+                        })?;
+                    finish_node(ctx, node, "questions assumed", TokenUsage::default()).await
+                }
+                // A questions document with no questions asked nothing.
+                // Its answers still exist, empty and the engine's own,
+                // so the node after it mounts what it declared to mount.
+                None => {
+                    crate::answers::record_nothing_asked(&ctx.log(), ctx.run_dir, &node.id)
+                        .await
+                        .map_err(|source| RunError::Broken {
+                            diagnostic: source.to_string(),
+                        })?;
+                    finish_node(ctx, node, close.outcome, tokens).await
+                }
+            }
+        }
+        None => finish_node(ctx, node, close.outcome, tokens).await,
     }
+}
 
+/// The hash the run holds `node`'s questions document under.
+///
+/// Read from the log, which is the run's only answer to what it holds:
+/// the round that answers these questions resolves the same acceptance
+/// and compares the two, so both have to come from there.
+async fn held_questions(ctx: &RunCtx<'_>, node: &NodeId) -> Result<ContentHash, RunError> {
+    let events = ctx.load_events().await?;
+    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
+    held.held(
+        &ArtifactId::Interpreted {
+            kind: ArtifactKind::Questions,
+        },
+        Some(node),
+    )
+    .map(|found| found.content_hash.clone())
+    .ok_or_else(|| RunError::Broken {
+        diagnostic: format!("node `{node}` handed over a questions document the run does not hold"),
+    })
+}
+
+/// The one place `node_finished` is written.
+///
+/// Every way a node reaches its end passes through here — the close that
+/// verified what it declared, and the round that recorded the answer a
+/// node was waiting on — so a node has exactly one terminal however it
+/// got there.
+pub(super) async fn finish_node(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    outcome: impl Into<String>,
+    tokens: TokenUsage,
+) -> Result<NodeEnd, RunError> {
+    let closed = Box::pin(closed(ctx, node, super::shared_tree::Closing::Finished)).await?;
+    // Work that reached what the project denies is not work that
+    // finished: it fails, and nothing denied was committed.
+    if !closed.refused.is_empty() {
+        let failure = Failure::paths_denied(closed.refused.clone());
+        return emit_failed(ctx, node, failure, false, tokens, closed).await;
+    }
     ctx.emit(
         Some(&node.id),
-        EventPayload::NodeFinished(NodeFinishedPayload {
-            outcome: close.outcome,
-            tokens_used: tokens,
-        }),
+        EventPayload::Node(NodeEvent::Finished(
+            NodeFinishedPayload::leaving(outcome, tokens, closed.tree).committed(closed.commit),
+        )),
     )
     .await?;
-    write_progress(ctx).await?;
     Ok(NodeEnd::Finished)
 }
 
-/// The node's whole diff against its declared `scope:`, audited as
-/// `scope_checked` and failing the node when anything falls outside.
-/// `staged` is what the adapter declared it wrote for itself, which is
-/// not the node's doing and so is not the node's diff.
+/// What a node's close leaves on the run: the commit it made of its work
+/// in the run's own tree, when it made one, and the tree the run stands
+/// at after it — the committed one, or the tree as it is.
 ///
-/// `None` when the node owes no audit at all, or when its diff is
-/// inside what it may touch. Which scope that is — a declared one, or
-/// nothing whatsoever for a `read-only` node — is
-/// [`audited_scope`](crate::audited_scope)'s call, not this one's.
-async fn scope_violation(
+/// Its callers box it: every node closes through here, a child run's
+/// included, and its git calls would otherwise ride inline in every level
+/// of a composed run's recursion.
+async fn closed(
     ctx: &RunCtx<'_>,
     node: &Node,
-    staged: &[PathBuf],
+    closing: super::shared_tree::Closing,
+) -> Result<Closed, RunError> {
+    let at_close = super::shared_tree::at_close(ctx, node, closing).await?;
+    let (commit, tree) = match at_close.committed {
+        Some((commit, tree)) => (Some(commit), tree),
+        None => (None, left_tree(ctx, node).await?),
+    };
+    Ok(Closed {
+        commit,
+        tree,
+        refused: at_close.refused,
+    })
+}
+
+/// What a node's close leaves on the run, as its terminal event names it.
+struct Closed {
+    commit: Option<yunta_core::CommitSha>,
+    tree: yunta_core::TreeId,
+    refused: Vec<PathBuf>,
+}
+
+/// The run's tree as `node` leaves it, after whatever the node landed
+/// there: a node with a checkout of its own names the tree it landed in,
+/// not its checkout.
+async fn left_tree(ctx: &RunCtx<'_>, node: &Node) -> Result<yunta_core::TreeId, RunError> {
+    let run_tree = ctx.unit.as_ref().map_or(ctx.worktree, |mine| mine.into);
+    let index =
+        crate::run_dir::index_for(ctx.run_dir, &crate::worktree::UnitId::Node(node.id.clone()));
+    Ok(crate::worktree::capture_tree(run_tree, &index, ctx.root_supervision()).await?)
+}
+
+/// Lands what a node did in its own checkout onto the run's tree, and
+/// says nothing for a node that never had one.
+///
+/// A unit lands the moment its work passes its audit: from there what it
+/// wrote is the run's, and a later failure about what the node
+/// *declared* — a missing artifact — is about the node, not about its
+/// edits, exactly as it is for a node that worked in the run's own tree
+/// all along. A node that failed its audit never reaches here, so a
+/// write outside every glob never becomes the run's.
+///
+/// A replay git cannot finish fails the node naming the paths: two nodes
+/// that can be open at once had their scopes proved disjoint by `check`,
+/// so a conflict here is a workflow that got past it.
+async fn land_unit(
+    ctx: &RunCtx<'_>,
+    node: &Node,
     tokens: TokenUsage,
 ) -> Result<Option<NodeEnd>, RunError> {
-    let Some(scope) = crate::audited_scope(node) else {
+    let Some(mine) = ctx.unit else {
         return Ok(None);
     };
-    let result = scope_check(ctx.worktree, scope, staged).await?;
-    ctx.emit(
-        Some(&node.id),
-        EventPayload::ScopeChecked(yunta_core::events::ScopeCheckedPayload {
-            task_id: None,
-            diff: result.diff.clone(),
-            violations: result.violations.clone(),
-        }),
+    let supervision = ctx.root_supervision();
+    crate::worktree::commit_work(
+        mine.unit,
+        &CommitMessage::new(
+            yunta_core::text::detailed(format!("node {}", node.id), &close_title(node)),
+            ctx.run_id,
+        )
+        .node(&node.id)
+        .text(),
+        supervision,
     )
     .await?;
-    if result.violations.is_empty() {
-        return Ok(None);
+    let landing = ctx.landing.lock().await;
+    match crate::worktree::rebase_onto(mine.unit, mine.into, supervision).await? {
+        crate::worktree::Rebase::Onto(_) => {}
+        crate::worktree::Rebase::Conflicts(paths) => {
+            // Released before the node fails: a close takes the same lock
+            // to decide what it commits.
+            drop(landing);
+            return fail_with_tokens(
+                ctx,
+                node,
+                format!(
+                    "landing `{}` on the run's tree: git could not replay it over {}",
+                    node.id,
+                    yunta_core::text::counted(paths.len(), "path"),
+                ),
+                false,
+                tokens,
+            )
+            .await
+            .map(Some);
+        }
     }
-    Ok(Some(
-        fail_with_tokens(
-            ctx,
-            node,
-            format!(
-                "scope violated: {} file(s) outside the declared globs",
-                result.violations.len()
-            ),
-            false,
-            tokens,
-        )
-        .await?,
-    ))
+    crate::worktree::land(mine.unit, mine.into, supervision).await?;
+    Ok(None)
+}
+
+/// What a node's landing commit is about, for a person reading the
+/// branch: what the node declares it does, or its id when it says
+/// nothing about itself.
+fn close_title(node: &Node) -> String {
+    node.description
+        .clone()
+        .unwrap_or_else(|| node.id.to_string())
 }
 
 pub(super) async fn fail(
@@ -244,18 +388,6 @@ pub(super) async fn fail(
     retryable: bool,
 ) -> Result<NodeEnd, RunError> {
     fail_with_tokens(ctx, node, outcome, retryable, TokenUsage::default()).await
-}
-
-/// Regenerates `progress.md` at `run.dir`'s root — the engine's own
-/// call, right after the `node_finished` that triggers it (`node_failed`
-/// is not itself a regeneration point).
-pub(super) async fn write_progress(ctx: &RunCtx<'_>) -> Result<(), RunError> {
-    let events = ctx.load_events().await?;
-    let markdown = crate::progress::render_progress(&ctx.manifest.workflow, &events);
-    std::fs::write(ctx.run_dir.join("progress.md"), markdown).map_err(|source| RunError::Io {
-        context: "write progress.md".to_string(),
-        source,
-    })
 }
 
 /// Fails a node with a failure the engine states in one sentence — a
@@ -283,10 +415,57 @@ pub(super) async fn fail_with(
     retryable: bool,
     tokens: TokenUsage,
 ) -> Result<NodeEnd, RunError> {
+    let closed = Box::pin(closed(ctx, node, super::shared_tree::Closing::Failed)).await?;
+    emit_failed(ctx, node, failure, retryable, tokens, closed).await
+}
+
+async fn emit_failed(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    failure: Failure,
+    retryable: bool,
+    tokens: TokenUsage,
+    closed: Closed,
+) -> Result<NodeEnd, RunError> {
     ctx.emit(
         Some(&node.id),
-        EventPayload::NodeFailed(NodeFailedPayload::new(failure, retryable, tokens)),
+        EventPayload::Node(NodeEvent::Failed(
+            NodeFailedPayload::new(failure, retryable, tokens)
+                .leaving(closed.tree)
+                .committed(closed.commit)
+                .refusing(closed.refused),
+        )),
     )
     .await?;
     Ok(NodeEnd::Failed)
+}
+
+/// A tasks document `node` closes with that a gate shows a person, and
+/// that does not say what it changes and why. The submission tool
+/// refuses one when it is handed over; this holds one that arrived as a
+/// file to the same rule.
+fn unexplained_plan(
+    ctx: &RunCtx<'_>,
+    node: &yunta_core::Node,
+    events: &[yunta_core::events::StoredEvent],
+    verified: &[crate::artifacts::VerifiedArtifact],
+) -> Option<yunta_core::diagnostic::ArtifactFailure> {
+    if !crate::tasks::plan_reviewed(&ctx.manifest.workflow, events, &node.id) {
+        return None;
+    }
+    verified.iter().find_map(|artifact| {
+        let crate::artifacts::ArtifactContent::Tasks(tasks) = &artifact.content else {
+            return None;
+        };
+        let broken = tasks.unexplained();
+        (!broken.is_empty()).then(|| {
+            yunta_core::diagnostic::ArtifactFailure::Content(yunta_core::diagnostic::Report::new(
+                yunta_core::diagnostic::DocumentRef::new(
+                    ArtifactKind::Tasks,
+                    artifact.path.display().to_string(),
+                ),
+                broken,
+            ))
+        })
+    })
 }

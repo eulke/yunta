@@ -32,6 +32,28 @@ itself, which wins) names a custom agent definition, for adapters that
 support one (`custom_agents` capability) — an adapter that doesn't declares
 this openly rather than silently ignoring the field.
 
+## What a session may write
+
+A node declares a `scope:`, and every session runs behind a **fence**: the
+globs it may write under the worktree, plus the run's own directories, which
+stay writable wherever the session sits. One function decides whether a path
+is inside it, and every adapter asks that same function — what differs is how
+much of the fence each CLI can be made to enforce, and each session's opening
+says which:
+
+| Adapter | How it fences | What it covers |
+|---|---|---|
+| `claude-code` | A `PreToolUse` hook on every writing tool runs `yunta fence`, which answers before the write happens. | Exact under `edit` and `read-only`; tool calls only under `full`, which also exposes a shell. |
+| `codex` | The sandbox the process itself runs under, by directory. | The worktree and the run's directories — by directory, never by glob. |
+| `mock` | The fixture says which of the three levels it builds, and every scripted effect goes through the same judge. | Whatever the fixture declares. |
+
+A refusal reaches the model with the reason and the way out — ask for more
+scope, or report the need as a finding — and reaches the log as
+`write_refused`. The fence is what keeps a write outside the scope from
+happening; the diff Yunta takes after the session is still the guarantee, and
+a write that reaches that diff despite an exact fence is reported as a finding
+against the adapter.
+
 Whatever the adapter, the session's prompt reaches the CLI on its standard
 input, never as a command-line argument, so it is not readable from the
 process list; and the values of the secrets a config declares live only in
@@ -54,7 +76,18 @@ never settings. Each adapter reads its own, and `yunta doctor` (and every
 `run`, before opening a session) refuses a key it does not read, naming the
 keys it does. `codex` reads `sandbox`: the `codex exec --sandbox` mode the
 `edit` profile runs under (`workspace-write` by default; `read-only` narrows
-it, `danger-full-access` widens it). `claude-code` reads none.
+it, `danger-full-access` widens it). It also reads `network_access`: the
+`workspace-write` sandbox keeps every socket off, loopback included, so a
+test suite that listens on `127.0.0.1` fails inside a session; `true` opens
+the network to those sessions. The CLI has no loopback-only switch, so it
+opens all of it. `claude-code` reads none.
+
+```yaml
+adapters:
+  codex:
+    adapter_settings:
+      network_access: true
+```
 
 The three permission profiles map onto each CLI's own mechanism. On
 `claude-code`, `read-only` allows the non-mutating tools, `edit` allows file
@@ -62,7 +95,11 @@ editing and nothing that reaches a shell or the network, and `full` leaves the
 whole tool set available; on `codex`, they are the `read-only`,
 `workspace-write` and `danger-full-access` sandbox modes. `budget.max_turns`
 reaches `claude-code` as `--max-turns`; `codex exec` has no turn cap, so there
-the engine's own timeout and token budget bound the session.
+the engine's own timeout and token budget bound the session. The timeout
+counts time the host is awake: a machine that sleeps spends none of it, and
+the run's log records the suspension. After a suspension, no session opens
+until the host has been awake for two minutes, so a session is not lost to a
+laptop that wakes briefly and sleeps again.
 
 ## `mock`: not a test helper, a first-class adapter
 
@@ -89,19 +126,113 @@ yunta doctor
 Runs the exact same health probe `yunta run`/`yunta resume` run before
 spending anything — binary present, version compatible, auth valid — for
 every adapter your `runners:` names, and reports every one of them instead of
-stopping at the first failure:
+stopping at the first failure. Each check is a row: `✓` when it holds, `▲` when
+it is worth a look and stops nothing, `✗` when a run would stop on it — and
+`doctor` exits non-zero only for a `✗`:
 
 ```
-claude-code: healthy (1.2.3)
-codex: unhealthy — `codex` not found on PATH
+  ✓ claude-code  healthy (1.2.3)
+  ✗ codex        unhealthy — `codex` not found on PATH
 ```
+
+A config whose `runners:` names no adapter has nothing to probe, and `doctor`
+says so with the runner to declare, on the adapter CLIs this machine answers for
+and the model left for you to name:
+
+```
+  ✗ runners  none declared, and `lint-fix` needs one
+
+  declare a runner in .yunta/config.yaml — this machine answers for `claude-code`:
+      runners:
+        implementer:
+          - { adapter: claude-code, model: <model> }
+      defaults:
+        runner: implementer
+```
+
+That is a `✗` only when a workflow in the catalog has an agent node that would
+stop on it; with none, it is a `▲`. The same holds for a forge whose
+token variable is not set: `doctor` fails for it only when a workflow in the
+catalog opens a pull request, since a gate published to the forge asks on the
+console without one. `yunta init` ends with the same runner step, and `yunta
+check` adds it under a workflow that names a runner the config lacks.
 
 It also validates every installed pack's own `requires:` against your merged
 config: a `runners:` entry the merged `runners:` doesn't define (or defines with zero
-candidates), an `mcp_servers:` name nothing declares, and a `commands:`
+candidates), an `mcp_servers:` name nothing declares, and a `programs:`
 binary missing from `PATH` are each reported with what to add, naming the
 pack that needs it. None of this blocks anything by itself — a pack can be
 installed and configured later, the same way an adapter that isn't set up
 yet doesn't stop `yunta init`. Run `yunta doctor` after adding a pack, or
 whenever a run fails in a way that looks like a missing binary or an
 unresolved role.
+
+### `--session`: opening one for real
+
+A probe asks the CLI for its version. That tells you the binary is there,
+answers and authenticates; it does not tell you a session opens, because
+`--version` never touches the configuration a run writes the CLI. A CLI
+that refuses that configuration says so on stderr and exits before its
+first line — from the outside, a node that failed with no exit and no
+tokens.
+
+```bash
+yunta doctor --session
+```
+
+opens the smallest run there is — one `kind: prompt` node that declares a
+`questions` document, with run tools mounted, driven through the same
+machinery a workflow is — once per *binding*: an adapter, a model and an agent that some runner names. The
+binding and not the runner name, because a session exercises a binding:
+two runners naming the same one are not two things to check, and one a
+runner falls back to is checked too, since a run reaches it exactly when
+the first is down.
+
+```
+claude-code/claude-sonnet-5 (executor, reviewer): ok — 812 tokens
+codex/gpt-5-codex (planner fallback): session died — session `codex` exited with code 2 before any terminal event — url is not supported for stdio
+```
+
+The prompt asks the session to call `yunta_submit_questions` with
+`{"document":{"questions":[]}}`. `ok` means the run recorded acceptance of
+that document, finished the node and finished the run. A session that opens
+but does not submit it reports `session opened, no questions document`;
+a CLI that exits before completing the session reports `session died`.
+The empty document requires no human answer.
+
+It spends one prompt per binding, which is why it is opt-in. It runs in a
+sandbox of its own — nothing of your tree is touched, and your
+`baseline:` suite is never measured, because the question is whether a
+session can deliver a document, not what the tree measures.
+
+## The two MCP servers
+
+Two different servers carry the name of this system, and they are not the
+same thing:
+
+- **The control plane**, `yunta mcp`, which you register in your own
+  CLI's configuration, under whatever name you give it. It talks over
+  stdio and offers `list_workflows`, `run_workflow`, `workflow_status`
+  and the rest.
+- **The per-run server**, which the engine mounts into each session
+  itself and always calls `yunta-run`. It talks over streamable HTTP,
+  lives as long as the run does, and carries the tools a node uses to
+  post findings and submit documents.
+
+When Codex receives that per-run endpoint, Yunta sets
+`mcp_servers.yunta-run.default_tools_approval_mode="approve"` for the spawned
+CLI so its run tools can be called. The bearer token is passed through the
+process environment; the CLI arguments contain only the environment variable's
+name. Claude Code allows the run tools through its `--allowedTools` list, and
+the mock adapter calls the server directly.
+
+A CLI merges both entries into one table by key, so the per-run server
+carries a name of its own: registering the control plane as `yunta` — the
+natural thing to call it — leaves both intact.
+
+Each CLI hands the server's tools to its model under a name of its own:
+Claude Code as `mcp__yunta-run__yunta_task`, Codex as
+`mcp__yunta_run__yunta_task`. An adapter declares that rule as its
+`tool_naming` capability, and every text the engine shows a session names a
+run tool by it, so a session calls the name its CLI has on the first try
+rather than the bare `yunta_task`, which reaches nothing.

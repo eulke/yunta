@@ -24,38 +24,74 @@
 mod canonical;
 mod ingest;
 mod integrity;
+pub mod shown;
 pub mod store;
 
 use std::path::Path;
 
 use yunta_core::events::artifacts::{ArtifactLedger, ArtifactRef};
 use yunta_core::events::{
-    ArtifactAcceptedPayload, ArtifactId, ArtifactOrigin, EventPayload, StoredEvent,
+    ArtifactAcceptedPayload, ArtifactId, EventPayload, RecordedOrigin, StoredEvent,
 };
 use yunta_core::{ArtifactKind, NodeId, NodeKind, ARTIFACTS_DIR};
 
 use crate::run_log::RunLog;
 use store::ObjectStore;
+use yunta_core::events::ArtifactEvent;
 
 pub(crate) use canonical::{canonical, canonical_document, derive_findings, submit, SubmitError};
-pub use ingest::{close_artifacts, ArtifactContent, VerifiedArtifact};
+pub use ingest::{close_artifacts, ArtifactContent, StagedHash, VerifiedArtifact};
 pub(crate) use ingest::{held_document, interpreted, verify_one};
 pub use integrity::{ArtifactFault, ArtifactIntegrity};
 pub use store::ObjectError;
 
-/// What the engine appends to the `questions` kind's own name when it
-/// records the answers beside them.
-pub(crate) const ANSWERS_SUFFIX: &str = ".answers.yaml";
+/// Why a document the run holds could not be read back: its bytes, or
+/// what they say.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum HeldError {
+    #[error(transparent)]
+    Object(#[from] ObjectError),
+    #[error("{0}")]
+    Unreadable(#[from] yunta_core::diagnostic::Report),
+}
 
-/// The artifact a node's answers are: an opaque one, named after the
-/// questions it answers, so the two sit side by side in the node's view.
-///
-/// Opaque because the engine carries it rather than reading it: a node
-/// holds one questions document, and its answers are the file beside it.
-pub(crate) fn answers_artifact() -> ArtifactId {
-    ArtifactId::Opaque {
-        name: format!("{}{ANSWERS_SUFFIX}", ArtifactKind::Questions),
+impl From<HeldError> for crate::run::RunError {
+    fn from(error: HeldError) -> Self {
+        match error {
+            HeldError::Object(source) => Self::Object(source),
+            HeldError::Unreadable(report) => Self::UnreadableArtifact(report),
+        }
     }
+}
+
+/// A document the run holds, read into its type, and how a reader
+/// names it: where its view sits, which is the file a person opens.
+pub(crate) struct Held<T> {
+    pub document: T,
+    pub describe: String,
+}
+
+/// The document of `T`'s kind the run accepted last, whoever produced
+/// it, read out of the object store through the same door a close reads
+/// it through — so one that stopped being readable is reported as the
+/// document it is, with every problem named.
+///
+/// The log is the answer, so a reader long after its producer finds the
+/// document whatever became of the `artifacts/` view. `None` when the
+/// run holds none: no node produced one, no input named one, and nothing
+/// was handed over.
+pub(crate) async fn latest<T: yunta_core::shape::Document>(
+    run_dir: &Path,
+    events: &[StoredEvent],
+) -> Result<Option<Held<T>>, HeldError> {
+    let held = RunArtifacts::of(run_dir, events);
+    let Some(last) = held.ledger().of_kind(T::KIND).last().cloned() else {
+        return Ok(None);
+    };
+    let bytes = held.bytes(&last).await?;
+    let describe = describe(&last);
+    let document = yunta_core::shape::read::<T>(&bytes, describe.clone())?;
+    Ok(Some(Held { document, describe }))
 }
 
 /// Why an artifact the run acquired did not become a fact of the run.
@@ -81,27 +117,38 @@ pub enum AcceptError {
     },
 }
 
-/// Whether the run's own log answers for an artifact a node of
-/// `node_kind` declares under `kind`, rather than a file that node wrote
-/// in its staging.
+/// Who answers for one artifact a node declared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Answerer {
+    /// The run's own log: the artifact entered where it was produced,
+    /// with the origin that produced it, so the acceptance standing now
+    /// is both the only answer and the whole answer.
+    Log,
+    /// A file the node wrote in its own staging, which the close reads.
+    Staging,
+}
+
+/// Who answers for an artifact a node of `node_kind` declares under
+/// `kind`.
 ///
 /// A typed artifact of a session node is never a file that session
 /// wrote: `tasks` and `questions` arrive through the submission tool and
 /// `findings` are derived from what the node posted. A `kind: workflow`
 /// node produces no file at all: everything it declares is taken over
-/// from its child run's log. Each is accepted where it is produced, with
-/// the origin that produced it — so for those the log is both the only
-/// answer and the whole answer. Everything else a node declares is a
-/// file it wrote, and the close is where that file enters the run.
+/// from its child run's log. The answers to a questions document are the
+/// engine's own whatever node asked, because a person replied and the
+/// engine wrote them. Everything else a node declares is a file it
+/// wrote, and the close is where that file enters the run.
 ///
-/// Two decisions turn on this one question — where a close looks for
-/// what a node declared, and whether its acceptance is still owed — so
-/// it is answered once here.
-pub(crate) fn answered_by_the_log(node_kind: &NodeKind, kind: Option<ArtifactKind>) -> bool {
-    match node_kind {
-        NodeKind::Prompt { .. } | NodeKind::Loop { .. } => kind.is_some(),
-        NodeKind::Workflow { .. } => true,
-        _ => false,
+/// Three decisions turn on this one question — where a close looks for
+/// what a node declared, whether its acceptance is still owed, and what
+/// a session reads back when it asks — so it is answered once here.
+pub(crate) fn answerer(node_kind: &NodeKind, kind: Option<ArtifactKind>) -> Answerer {
+    match (node_kind, kind) {
+        (_, Some(ArtifactKind::Answers)) => Answerer::Log,
+        (NodeKind::Prompt { .. } | NodeKind::Loop { .. }, Some(_)) => Answerer::Log,
+        (NodeKind::Workflow { .. }, _) => Answerer::Log,
+        _ => Answerer::Staging,
     }
 }
 
@@ -121,22 +168,25 @@ pub(crate) async fn accept(
     producer: Option<&NodeId>,
     artifact: ArtifactId,
     bytes: &[u8],
-    origin: ArtifactOrigin,
+    origin: RecordedOrigin,
 ) -> Result<ArtifactRef, AcceptError> {
     let store = ObjectStore::at(run_dir);
     let name = artifact.view_name();
-    let content_hash = store.put(bytes).map_err(|source| AcceptError::Store {
-        name: name.clone(),
-        source,
-    })?;
+    let content_hash = store
+        .put(bytes)
+        .await
+        .map_err(|source| AcceptError::Store {
+            name: name.clone(),
+            source,
+        })?;
     let seq = log
         .record(
             producer,
-            EventPayload::ArtifactAccepted(ArtifactAcceptedPayload {
-                artifact: artifact.clone(),
-                content_hash: content_hash.clone(),
-                origin: origin.clone(),
-            }),
+            EventPayload::Artifacts(ArtifactEvent::Accepted(ArtifactAcceptedPayload::new(
+                artifact.clone(),
+                content_hash.clone(),
+                origin.clone(),
+            ))),
         )
         .await
         .map_err(|source| AcceptError::Log {
@@ -145,12 +195,16 @@ pub(crate) async fn accept(
         })?;
     store
         .project(producer, &name, &content_hash)
-        .map_err(|source| AcceptError::Project { name, source })?;
+        .await
+        .map_err(|source| AcceptError::Project {
+            name: name.clone(),
+            source,
+        })?;
     Ok(ArtifactRef {
         producer: producer.cloned(),
         artifact,
         content_hash,
-        origin,
+        origin: yunta_core::events::ArtifactOrigin::Recorded(origin),
         seq,
     })
 }
@@ -192,8 +246,8 @@ impl<'a> RunArtifacts<'a> {
     }
 
     /// The bytes `held` names, verified against its hash.
-    pub(crate) fn bytes(&self, held: &ArtifactRef) -> Result<Vec<u8>, ObjectError> {
-        self.store.get(&held.content_hash)
+    pub(crate) async fn bytes(&self, held: &ArtifactRef) -> Result<Vec<u8>, ObjectError> {
+        self.store.get(&held.content_hash).await
     }
 }
 

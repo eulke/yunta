@@ -1,8 +1,18 @@
-//! `audited_scope` — which scope a node's own worktree diff is held to.
-//! The pure half of the node-level scope check; the imperative call site
-//! lives in `run::node_close`.
+//! `effective_scope` — which scope a node's own worktree diff is held
+//! to. The pure half of the node-level scope check; the imperative call
+//! site lives in `run::node_close`.
 
-use yunta_engine::audited_scope;
+use yunta_engine::{audits, effective_scope, RunState};
+
+/// What `node` is held to on a run whose log granted it nothing and
+/// recorded no start.
+fn audited_scope(node: &yunta_core::Node) -> Option<Vec<yunta_core::ScopeGlob>> {
+    assert_eq!(
+        audits(node),
+        effective_scope(node, &RunState::default()).is_some()
+    );
+    effective_scope(node, &RunState::default())
+}
 
 fn node(yaml: &str) -> yunta_core::Node {
     yunta_core::yaml::parse(yaml).expect("a node")
@@ -19,7 +29,7 @@ fn a_declared_scope_is_what_the_diff_is_held_to() {
     let node = node("id: build\nkind: prompt\nprompt: go\nscope: [\"src/**\"]\n");
     assert_eq!(
         audited_scope(&node),
-        Some(["src/**".to_string()].as_slice())
+        Some(vec![yunta_core::ScopeGlob::from("src/**")])
     );
 }
 
@@ -31,7 +41,7 @@ fn read_only_is_audited_against_nothing_so_any_project_edit_fails_it() {
     let node = node("id: plan\nkind: prompt\nprompt: go\npermissions: read-only\n");
     assert_eq!(
         audited_scope(&node),
-        Some([].as_slice()),
+        Some(vec![]),
         "read-only means the worktree comes back untouched"
     );
 }
@@ -40,5 +50,14 @@ fn read_only_is_audited_against_nothing_so_any_project_edit_fails_it() {
 fn read_only_outranks_a_declared_scope() {
     let node =
         node("id: plan\nkind: prompt\nprompt: go\npermissions: read-only\nscope: [\"src/**\"]\n");
-    assert_eq!(audited_scope(&node), Some([].as_slice()));
+    assert_eq!(audited_scope(&node), Some(vec![]));
+}
+
+/// A node scoped to the run is audited like any scoped node; what it may
+/// change is what its start recorded, and a start that recorded nothing
+/// leaves it nothing.
+#[test]
+fn a_node_scoped_to_the_run_is_audited_against_what_its_start_recorded() {
+    let node = node("id: fix\nkind: prompt\nprompt: go\nscope: run\n");
+    assert_eq!(audited_scope(&node), Some(vec![]));
 }

@@ -43,6 +43,7 @@ use serde::Deserialize;
 use thiserror::Error;
 use yunta_core::ProposedCriterionEntry;
 use yunta_core::ScopeExpansionMode;
+use yunta_core::ScopeGlob;
 
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
 
@@ -59,9 +60,11 @@ pub enum ScopeExpansionError {
     Read { path: String, detail: String },
     #[error("`{path}` does not parse as a scope expansion request: {detail}")]
     Malformed { path: String, detail: String },
-    #[error("invalid glob `{glob}` in scope expansion request or `within`")]
-    InvalidGlob {
-        glob: String,
+    /// Every pattern compiled when the request or the config was read,
+    /// so the only failure left is the set's own limit on how many it
+    /// holds.
+    #[error("this scope expansion has more globs than one set can hold")]
+    GlobSet {
         #[source]
         source: globset::Error,
     },
@@ -77,7 +80,7 @@ pub enum ScopeExpansionError {
         #[source]
         source: std::io::Error,
     },
-    #[error("`git {command}` exited with status {status}: {stderr}")]
+    #[error("{}", crate::git::exited_with(.command, .status, .stderr))]
     GitFailed {
         command: String,
         status: i32,
@@ -90,10 +93,15 @@ pub enum ScopeExpansionError {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScopeExpansionRequest {
-    pub paths: Vec<String>,
+    pub paths: Vec<ScopeGlob>,
     pub reason: String,
     #[serde(default)]
     pub proposed_criterion: Option<ProposedCriterionEntry>,
+    /// One of the task's own criteria, red on the session's work, whose
+    /// output locates every path asked for — `path:line` — in place of a
+    /// proposed criterion: what lets the engine grant the request itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
 }
 
 /// Reads and parses the task's own request file, if the agent wrote one
@@ -107,29 +115,33 @@ pub struct ScopeExpansionRequest {
 /// aside. Consumption also gives "one request per attempt" its only real
 /// enforcement: a second `load_request` against the same worktree sees
 /// nothing left to read.
-pub fn load_request(
+pub async fn load_request(
     task_worktree: &Path,
 ) -> Result<Option<ScopeExpansionRequest>, ScopeExpansionError> {
     let path = task_worktree.join(SCOPE_EXPANSION_REQUEST_FILE);
     if !path.exists() {
         return Ok(None);
     }
-    let bytes = std::fs::read(&path).map_err(|source| ScopeExpansionError::Read {
-        path: path.display().to_string(),
-        detail: source.to_string(),
-    })?;
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|source| ScopeExpansionError::Read {
+            path: path.display().to_string(),
+            detail: source.to_string(),
+        })?;
     let request =
         yunta_core::yaml::parse_bytes(&bytes).map_err(|e| ScopeExpansionError::Malformed {
             path: path.display().to_string(),
             detail: e.to_string(),
         })?;
-    std::fs::remove_file(&path).map_err(|source| ScopeExpansionError::Io {
-        action: format!(
-            "remove consumed scope expansion request `{}`",
-            path.display()
-        ),
-        source,
-    })?;
+    tokio::fs::remove_file(&path)
+        .await
+        .map_err(|source| ScopeExpansionError::Io {
+            action: format!(
+                "remove consumed scope expansion request `{}`",
+                path.display()
+            ),
+            source,
+        })?;
     Ok(Some(request))
 }
 
@@ -182,7 +194,7 @@ impl GrantLedger {
     /// passes through untouched — but an exhausted cap escalates
     /// regardless of what the mode would have said, same precedence a
     /// simple sequential check would apply.
-    async fn commit(&self, cap: Option<u32>, provisional: Decision) -> Decision {
+    pub(crate) async fn commit(&self, cap: Option<u32>, provisional: Decision) -> Decision {
         let mut granted = self.granted.lock().await;
         if let Some(cap) = cap {
             if *granted >= cap {
@@ -194,6 +206,35 @@ impl GrantLedger {
         }
         provisional
     }
+}
+
+/// A request that reaches what the task may never write — what the
+/// project denies to every run, or a file its tests live in — refused by
+/// rule before any mode is asked: no person and no rule widens a deny.
+/// The request back when it reaches none.
+pub(crate) fn refuse_what_is_denied(
+    request: ScopeExpansionRequest,
+    denied: &[ScopeGlob],
+) -> Result<ScopeExpansionOutcome, ScopeExpansionRequest> {
+    let reached: Vec<String> = request
+        .paths
+        .iter()
+        .filter(|glob| yunta_core::reaches_any(glob, denied))
+        .map(|glob| format!("`{glob}`"))
+        .collect();
+    if reached.is_empty() {
+        return Err(request);
+    }
+    let reason = format!(
+        "it reaches {}, which the task may never write: the project denies it to every run \
+         (permissions.paths.deny), or it holds a test the task is held to",
+        reached.join(", ")
+    );
+    Ok(ScopeExpansionOutcome {
+        request,
+        precheck_exit: None,
+        decision: Decision::Denied(reason),
+    })
 }
 
 /// Decides one request: the proposed criterion's own pre-check
@@ -208,7 +249,7 @@ impl GrantLedger {
 #[allow(clippy::too_many_arguments)]
 pub async fn evaluate(
     mode: ScopeExpansionMode,
-    within: &[String],
+    within: &[ScopeGlob],
     max_per_run: Option<u32>,
     max_expansion_files: usize,
     grants: &GrantLedger,
@@ -235,29 +276,40 @@ pub async fn evaluate(
         }
         ScopeExpansionMode::Ask => Decision::Escalate,
         ScopeExpansionMode::Rules => {
-            evaluate_rules(within, request, task_worktree, max_expansion_files).await?
+            evaluate_rules(
+                within,
+                request,
+                task_worktree,
+                max_expansion_files,
+                supervision,
+            )
+            .await?
         }
     };
     Ok((precheck_exit, grants.commit(max_per_run, provisional).await))
 }
 
 async fn evaluate_rules(
-    within: &[String],
+    within: &[ScopeGlob],
     request: &ScopeExpansionRequest,
     task_worktree: &Path,
     max_expansion_files: usize,
+    supervision: Supervision<'_>,
 ) -> Result<Decision, ScopeExpansionError> {
     let ceiling = build_globset(within)?;
     let requested = build_globset(&request.paths)?;
 
-    if !request
+    let outside: Vec<ScopeGlob> = request
         .paths
         .iter()
-        .all(|path| ceiling.is_match(Path::new(path)))
-    {
+        .filter(|path| !ceiling.is_match(Path::new(path.as_str())))
+        .cloned()
+        .collect();
+    if !outside.is_empty() {
         return Ok(Decision::Denied(format!(
-            "requested path(s) fall outside the declared `within` ceiling: {:?}",
-            request.paths
+            "requested {} outside the declared `within` ceiling: {}",
+            yunta_core::text::agreeing(outside.len(), "path falls", "paths fall"),
+            yunta_core::listed_globs(&outside)
         )));
     }
 
@@ -267,28 +319,31 @@ async fn evaluate_rules(
         ));
     }
 
-    let touched = diff_paths(task_worktree).await?;
+    let touched = diff_paths(task_worktree, supervision).await?;
     let matched: Vec<_> = touched
         .iter()
         .filter(|path| requested.is_match(path))
         .collect();
     if matched.len() > max_expansion_files {
         return Ok(Decision::Denied(format!(
-            "diff at the requested paths touches {} file(s), over the {max_expansion_files}-file bound",
-            matched.len()
+            "diff at the requested paths touches {}, over the {max_expansion_files}-file bound",
+            yunta_core::text::counted(matched.len(), "file")
         )));
     }
 
     Ok(Decision::Granted)
 }
 
-fn build_globset(patterns: &[String]) -> Result<globset::GlobSet, ScopeExpansionError> {
-    yunta_core::scope_globset(patterns)
-        .map_err(|(glob, source)| ScopeExpansionError::InvalidGlob { glob, source })
+fn build_globset(patterns: &[ScopeGlob]) -> Result<globset::GlobSet, ScopeExpansionError> {
+    yunta_core::scope_globset(patterns).map_err(|source| ScopeExpansionError::GlobSet { source })
 }
 
-async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, ScopeExpansionError> {
-    crate::git::output(cwd, args)
+async fn run_git(
+    cwd: &Path,
+    args: &[&str],
+    supervision: Supervision<'_>,
+) -> Result<String, ScopeExpansionError> {
+    crate::git::output(cwd, args, supervision)
         .await
         .map_err(|e| match e.source {
             Some(source) => ScopeExpansionError::Io {
@@ -303,31 +358,41 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, ScopeExpansionErro
         })
 }
 
-async fn diff_paths(cwd: &Path) -> Result<Vec<std::path::PathBuf>, ScopeExpansionError> {
-    let mut paths: Vec<std::path::PathBuf> = run_git(cwd, &["diff", "--name-only", "HEAD"])
-        .await?
-        .lines()
-        .map(std::path::PathBuf::from)
-        .collect();
-    paths.extend(
-        run_git(cwd, &["ls-files", "--others", "--exclude-standard"])
+async fn diff_paths(
+    cwd: &Path,
+    supervision: Supervision<'_>,
+) -> Result<Vec<std::path::PathBuf>, ScopeExpansionError> {
+    let mut paths: Vec<std::path::PathBuf> =
+        run_git(cwd, &["diff", "--name-only", "HEAD"], supervision)
             .await?
             .lines()
-            .map(std::path::PathBuf::from),
+            .map(std::path::PathBuf::from)
+            .collect();
+    paths.extend(
+        run_git(
+            cwd,
+            &["ls-files", "--others", "--exclude-standard"],
+            supervision,
+        )
+        .await?
+        .lines()
+        .map(std::path::PathBuf::from),
     );
     paths.sort();
     paths.dedup();
     Ok(paths)
 }
 
+/// Only the exit code of a proposed criterion's pre-check is recorded,
+/// so what it prints is dropped rather than reaching the terminal.
 async fn run_criterion(
     cwd: &Path,
     cmd: &str,
     supervision: Supervision<'_>,
 ) -> Result<i32, ScopeExpansionError> {
     let command = GovernedCommand::shell(cwd, cmd)
-        .stdout(Capture::Inherit)
-        .stderr(Capture::Inherit);
+        .stdout(Capture::Discard)
+        .stderr(Capture::Discard);
     Ok(
         match spawn_governed(command, supervision)
             .await

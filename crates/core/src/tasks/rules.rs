@@ -62,13 +62,225 @@ pub(super) const RULES: &[Rule] = &[
                  either give them disjoint scopes or declare the dependency",
     },
     Rule {
-        code: RuleCode::ManualReviewWithoutJustification,
-        demand: "`manual_review: true` carries a non-empty `justification` — and the task's \
-                 criteria still apply",
+        code: RuleCode::DuplicateShape,
+        demand: "each shape's `name` is declared once",
+    },
+    Rule {
+        code: RuleCode::DuplicateDecision,
+        demand: "each decision's `id` is declared once",
+    },
+    Rule {
+        code: RuleCode::UnknownShapeOwner,
+        demand: "a shape's `owner` names a task this file declares",
+    },
+    Rule {
+        code: RuleCode::ShapeOutsideOwnerScope,
+        demand: "a shape's `file` lies inside its owner's `scope`",
+    },
+    Rule {
+        code: RuleCode::UnknownShape,
+        demand: "`uses` names only shapes `shapes` declares",
+    },
+    Rule {
+        code: RuleCode::ShapeUsedBeforeItsOwner,
+        demand: "a task that `uses` a shape another task owns waits for that task, directly \
+                 or through others",
+    },
+    Rule {
+        code: RuleCode::ChangeOutsideScope,
+        demand: "every place a task `changes` lies inside its own `scope`",
     },
 ];
 
-fn broke(index: usize, id: &TaskId, code: RuleCode, detail: impl Into<String>) -> Diagnostic {
+/// What the engine demands of a task's criteria where it runs them,
+/// checked by running each one when the document is submitted: in a
+/// checkout of the run's tree, with the shell and `PATH` the run's
+/// commands get. A task that depends on another is checked only for the
+/// first: its criteria meet the tree only after that other task's work.
+pub(super) const RUN_RULES: &[Rule] = &[
+    Rule {
+        code: RuleCode::CriterionCannotRun,
+        demand: "every criterion runs where the engine runs criteria: each program it calls is \
+                 on that `PATH`, and a file the task will create is only run after checking \
+                 it exists (`test -f x && ./x`)",
+    },
+    Rule {
+        code: RuleCode::CriterionAlreadyPasses,
+        demand: "in a task with no `depends_on`, every criterion that is not a `guard` fails \
+                 before the work",
+    },
+    Rule {
+        code: RuleCode::GuardAlreadyRed,
+        demand: "in a task with no `depends_on`, every `guard` passes before the work",
+    },
+];
+
+/// What a person reviewing the plan needs it to say, demanded when the
+/// workflow has a gate show it: the change in a line and in prose, and
+/// for each task and each criterion what it is there for. The shapes, the
+/// risks and what is left out are asked for by whoever writes the prompt
+/// — a plan that only touches documentation creates no shape.
+pub(super) const REVIEW_RULES: &[Rule] = &[
+    Rule {
+        code: RuleCode::NoSummary,
+        demand: "`summary` says what the plan changes, in one non-empty line",
+    },
+    Rule {
+        code: RuleCode::NoDescription,
+        demand: "the plan and every task carry a `description`: what changes and why, in \
+                 Markdown",
+    },
+    Rule {
+        code: RuleCode::UnexplainedCriterion,
+        demand: "every criterion says what passing it `proves`, in words",
+    },
+    Rule {
+        code: RuleCode::NoOutcome,
+        demand: "every task says what a person will observe once it is done, in `outcome`",
+    },
+    Rule {
+        code: RuleCode::NoChanges,
+        demand: "every task says what it `changes`, place by place",
+    },
+    Rule {
+        code: RuleCode::UnexplainedDecision,
+        demand: "every decision says `why` it chose what it chose",
+    },
+    Rule {
+        code: RuleCode::ChangeWithoutCode,
+        demand: "every change shows its `code` — the declarations it adds or changes, each \
+                 type with its fields and each signature whole — unless its task declares a \
+                 shape in that file",
+    },
+    Rule {
+        code: RuleCode::ChangeCodeMissesAName,
+        demand: "a change's `code` shows every symbol its `at` names — `pack.rs::add/update` \
+                 shows `add` and `update` — or a shape its task declares in that file does",
+    },
+    Rule {
+        code: RuleCode::ChangeCodeIsAComment,
+        demand: "a change's `code` is code, not a comment about what the code will do, unless \
+                 the change is to a document",
+    },
+];
+
+/// Every way the plan leaves a person reviewing it without an
+/// explanation, collected rather than stopped at the first.
+pub(super) fn reviewed(tasks: &TasksFile) -> Vec<Diagnostic> {
+    let document = |code: RuleCode, detail: &str| {
+        Diagnostic::new(Subject::Document, Problem::rule(code, detail))
+    };
+    let mut broken = Vec::new();
+    if !said(&tasks.summary) {
+        broken.push(document(
+            RuleCode::NoSummary,
+            "`summary` is missing; say what the plan changes, in one line",
+        ));
+    }
+    if !said(&tasks.description) {
+        broken.push(document(
+            RuleCode::NoDescription,
+            "`description` is missing; say what changes, why and how the work is approached",
+        ));
+    }
+    for decision in &tasks.decisions {
+        if !said(&decision.why) {
+            broken.push(document(
+                RuleCode::UnexplainedDecision,
+                &format!(
+                    "decision `{}` does not say `why` it chose `{}`",
+                    decision.id, decision.choice
+                ),
+            ));
+        }
+    }
+    for (index, task) in tasks.tasks.iter().enumerate() {
+        broken.extend(task_reviewed(index, task));
+        broken.extend(codeless(index, task, &tasks.shapes));
+        broken.extend(super::code::unshown(index, task, &tasks.shapes));
+    }
+    broken
+}
+
+/// Each change of `task` a person reviewing the plan could not see the
+/// code of: it shows none, and the task declares no shape in its file.
+fn codeless(index: usize, task: &Task, shapes: &[crate::Shape]) -> Vec<Diagnostic> {
+    task.changes
+        .iter()
+        .filter(|change| !said(&change.code))
+        .filter(|change| {
+            !shapes
+                .iter()
+                .any(|shape| shape.owner == task.id && shape.file == change.file())
+        })
+        .map(|change| {
+            broke(
+                index,
+                &task.id,
+                RuleCode::ChangeWithoutCode,
+                format!(
+                    "the change at `{}` shows no `code`; give the declarations it adds or \
+                     changes — each type with its fields, each signature whole — so a person \
+                     sees how the work will look",
+                    change.at
+                ),
+            )
+        })
+        .collect()
+}
+
+/// Every way one task leaves a person reviewing the plan without an
+/// explanation.
+fn task_reviewed(index: usize, task: &Task) -> Vec<Diagnostic> {
+    let mut broken = Vec::new();
+    let missing = [
+        (
+            !said(&task.description),
+            RuleCode::NoDescription,
+            "`description` is missing; say what the task does and why",
+        ),
+        (
+            !said(&task.outcome),
+            RuleCode::NoOutcome,
+            "`outcome` is missing; say what a person will observe once the task is done",
+        ),
+        (
+            task.changes.is_empty(),
+            RuleCode::NoChanges,
+            "`changes` is empty; say what the task changes, place by place",
+        ),
+    ];
+    for (_, code, detail) in missing.into_iter().filter(|(lacks, _, _)| *lacks) {
+        broken.push(broke(index, &task.id, code, detail));
+    }
+    for (at, criterion) in task.criteria.iter().enumerate() {
+        if !said(&criterion.proves) {
+            broken.push(Diagnostic::new(
+                Subject::Criterion {
+                    task: Named::new(task.id.clone(), index),
+                    index: at,
+                },
+                Problem::rule(
+                    RuleCode::UnexplainedCriterion,
+                    format!("`{}` does not say what it `proves`", criterion.cmd),
+                ),
+            ));
+        }
+    }
+    broken
+}
+
+/// Whether `text` says something.
+fn said(text: &Option<String>) -> bool {
+    text.as_deref().is_some_and(|t| !t.trim().is_empty())
+}
+
+pub(super) fn broke(
+    index: usize,
+    id: &TaskId,
+    code: RuleCode,
+    detail: impl Into<String>,
+) -> Diagnostic {
     Diagnostic::new(
         Subject::Task(Named::new(id.clone(), index)),
         Problem::rule(code, detail),
@@ -85,6 +297,7 @@ pub(super) fn check(tasks: &TasksFile) -> Vec<Diagnostic> {
     }
     broken.extend(cycle(tasks));
     broken.extend(overlapping_scopes(&tasks.tasks));
+    broken.extend(super::owned::check(tasks));
     broken
 }
 
@@ -139,22 +352,6 @@ fn task_rules(index: usize, task: &Task, known_ids: &HashSet<TaskId>) -> Vec<Dia
         ));
     }
     broken.extend(criteria_rules(index, task));
-    if task.manual_review
-        && task
-            .justification
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .is_empty()
-    {
-        broken.push(broke(
-            index,
-            &task.id,
-            RuleCode::ManualReviewWithoutJustification,
-            "`manual_review: true` without `justification`; say why no command can verify \
-             this task",
-        ));
-    }
     broken
 }
 

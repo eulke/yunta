@@ -15,16 +15,19 @@
 //! session to choose.
 
 use serde_json::Value;
-use yunta_core::diagnostic::ArtifactFailure;
+use yunta_core::diagnostic::{ArtifactFailure, DocumentRef, Report};
 use yunta_core::events::{
-    ArtifactId, ArtifactOrigin, ArtifactSubmittedPayload, EventPayload, SubmissionOutcome,
+    ArtifactId, ArtifactSubmittedPayload, EventPayload, RecordedOrigin, SubmissionOutcome,
+    TaskProbe,
 };
 use yunta_core::{ArtifactKind, ArtifactSpec};
 
 use crate::artifacts::{accept, VerifiedArtifact};
 
+use super::catalog::RunTool;
 use super::session::{RunToolError, SessionTools};
-use super::verdicts::{failure_heading, numbered, read_as, submission_refusal};
+use super::verdicts::{failure_heading, numbered, read_as, submission_refusal, Reply};
+use yunta_core::events::ArtifactEvent;
 
 impl SessionTools {
     /// The verdict this node's close will reach, while the session can
@@ -50,7 +53,10 @@ impl SessionTools {
         }
         let events = self.events().await?;
         let held = crate::artifacts::RunArtifacts::of(&self.host.run_dir, &events);
-        let verdicts: Vec<String> = specs.iter().map(|spec| self.verdict(spec, &held)).collect();
+        let mut verdicts: Vec<String> = Vec::with_capacity(specs.len());
+        for spec in &specs {
+            verdicts.push(self.verdict(spec, &held).await);
+        }
         Ok(verdicts.join("\n\n"))
     }
 
@@ -64,15 +70,24 @@ impl SessionTools {
     /// the close reaches, through these same two functions — which is
     /// what keeps the verdict a session can still act on and the verdict
     /// that decides the node one answer.
-    fn verdict(&self, spec: &ArtifactSpec, held: &crate::artifacts::RunArtifacts<'_>) -> String {
-        let verified = match spec.kind() {
-            Some(_) => crate::artifacts::held_document(&self.node, spec, held),
-            None => crate::artifacts::verify_one(
-                &self.node,
-                spec,
-                &self.host.run_dir,
-                self.host.max_artifact_bytes,
-            ),
+    async fn verdict(
+        &self,
+        spec: &ArtifactSpec,
+        held: &crate::artifacts::RunArtifacts<'_>,
+    ) -> String {
+        let verified = match crate::artifacts::answerer(&self.node_kind, spec.kind()) {
+            crate::artifacts::Answerer::Log => {
+                crate::artifacts::held_document(&self.node, spec, held).await
+            }
+            crate::artifacts::Answerer::Staging => {
+                crate::artifacts::verify_one(
+                    &self.node,
+                    spec,
+                    &self.host.run_dir,
+                    self.host.max_artifact_bytes,
+                )
+                .await
+            }
         };
         render_verdict(&spec.to_string(), verified)
     }
@@ -118,7 +133,49 @@ impl SessionTools {
             document.clone(),
             self.host.max_artifact_bytes,
         );
+        let offered = match offered {
+            Ok(verified) => self.proven(kind, verified).await?,
+            refused => Offered::told_nothing(refused),
+        };
         self.record(kind, offered).await
+    }
+
+    /// A readable document, held to what only running its commands can
+    /// settle: a tasks document's criteria, or a spec's tests, run where
+    /// the engine runs them. Refused with every rule they break, exactly
+    /// as a document that broke its shape is.
+    async fn proven(
+        &self,
+        kind: ArtifactKind,
+        verified: VerifiedArtifact,
+    ) -> Result<Offered, RunToolError> {
+        let (broken, told, probes) = match &verified.content {
+            crate::artifacts::ArtifactContent::Tasks(tasks) => {
+                let (broken, probes) = self.handover(tasks).await?;
+                (broken, String::new(), probes)
+            }
+            crate::artifacts::ArtifactContent::Spec(spec) => {
+                let proven = self.spec_handover(spec).await?;
+                let told = failing_now(&proven.failing, &self.host.redactor);
+                (proven.broken, told, by_task(&proven.failing))
+            }
+            _ => return Ok(Offered::told_nothing(Ok(verified))),
+        };
+        if broken.is_empty() {
+            return Ok(Offered {
+                verdict: Ok(verified),
+                told,
+                probes,
+            });
+        }
+        Ok(Offered {
+            verdict: Err(crate::artifacts::SubmitError::Refused(Report::new(
+                DocumentRef::new(kind, verified.path.display().to_string()),
+                broken,
+            ))),
+            told: String::new(),
+            probes,
+        })
     }
 
     /// Records the engine's verdict on a submitted document and answers
@@ -133,52 +190,71 @@ impl SessionTools {
     /// the run now holds, which is what [`accept`] states — so a reader
     /// asking what the run holds never has to know that a session is
     /// what handed it over.
-    async fn record(
-        &self,
-        kind: ArtifactKind,
-        offered: Result<crate::artifacts::VerifiedArtifact, crate::artifacts::SubmitError>,
-    ) -> Result<String, RunToolError> {
+    async fn record(&self, kind: ArtifactKind, offered: Offered) -> Result<String, RunToolError> {
+        let Offered {
+            verdict: offered,
+            told,
+            probes,
+        } = offered;
         let name = ArtifactId::Interpreted { kind }.view_name();
-        let (outcome, answer, accepted) = match offered {
-            Ok(verified) => (
-                SubmissionOutcome::Accepted {
-                    content_hash: verified.content_hash.clone(),
-                },
-                Ok(format!("{name} — accepted. {}", read_as(&verified))),
-                Some(verified),
-            ),
+        // The acceptance comes first, because the hash the submission
+        // names is the one the run's own store answers for — a session
+        // handed bytes over, and what the run holds for them is
+        // `accept`'s to say. A store that cannot take them is a log that
+        // cannot take either fact.
+        let (outcome, answer) = match offered {
+            Ok(verified) => {
+                let accepted = accept(
+                    &self.log(),
+                    &self.host.run_dir,
+                    Some(&self.node),
+                    verified.artifact.clone(),
+                    &verified.bytes,
+                    RecordedOrigin::Submitted,
+                )
+                .await?;
+                (
+                    SubmissionOutcome::Accepted {
+                        content_hash: accepted.content_hash,
+                    },
+                    Ok(format!("{name} — accepted. {}{told}", read_as(&verified))),
+                )
+            }
             Err(crate::artifacts::SubmitError::Refused(report)) => {
                 let text = submission_refusal(&report, &name);
                 (
                     SubmissionOutcome::Refused { report },
                     Err(RunToolError::Refused { text }),
-                    None,
                 )
             }
-            Err(other) => {
-                return Err(RunToolError::Refused {
-                    text: other.to_string(),
-                })
-            }
+            Err(other) => return Err(self.not_submitted(other)),
         };
-        self.append(EventPayload::ArtifactSubmitted(ArtifactSubmittedPayload {
-            name: name.clone(),
-            artifact_kind: kind,
-            outcome,
-        }))
+        self.append(EventPayload::Artifacts(ArtifactEvent::Submitted(
+            ArtifactSubmittedPayload {
+                name: name.clone(),
+                artifact_kind: kind,
+                outcome,
+                probes,
+            },
+        )))
         .await?;
-        if let Some(verified) = accepted {
-            accept(
-                &self.log(),
-                &self.host.run_dir,
-                Some(&self.node),
-                verified.artifact.clone(),
-                &verified.bytes,
-                ArtifactOrigin::Submitted,
-            )
-            .await?;
-        }
         answer
+    }
+
+    /// Why a submission never became a document to judge, told the way
+    /// this session calls the tool that does take it.
+    fn not_submitted(&self, error: crate::artifacts::SubmitError) -> RunToolError {
+        let reply = Reply::new(error.to_string());
+        let text = match error {
+            crate::artifacts::SubmitError::Accumulated => reply
+                .next(format!(
+                    "report each finding with `{}`",
+                    self.called(RunTool::PostFinding)
+                ))
+                .text(),
+            _ => reply.text(),
+        };
+        RunToolError::Refused { text }
     }
 
     /// Whether this node declares a document of `kind` — which is
@@ -217,4 +293,69 @@ fn render_verdict(name: &str, verified: Result<VerifiedArtifact, ArtifactFailure
             None => format!("{name} — {failure}"),
         },
     }
+}
+
+/// A document's verdict, and what an acceptance tells the session beside
+/// what the engine read out of it.
+struct Offered {
+    verdict: Result<VerifiedArtifact, crate::artifacts::SubmitError>,
+    told: String,
+    /// What proving the document ran, task by task.
+    probes: Vec<TaskProbe>,
+}
+
+impl Offered {
+    fn told_nothing(verdict: Result<VerifiedArtifact, crate::artifacts::SubmitError>) -> Self {
+        Offered {
+            verdict,
+            told: String::new(),
+            probes: Vec::new(),
+        }
+    }
+}
+
+/// `runs`, gathered under the task each answered for, in the order the
+/// tasks first appear.
+fn by_task(runs: &[(yunta_core::TaskId, crate::task_cycle::CriterionRun)]) -> Vec<TaskProbe> {
+    let mut probes: Vec<TaskProbe> = Vec::new();
+    for (task, run) in runs {
+        let result = crate::task_cycle::to_results(std::slice::from_ref(run));
+        match probes.iter_mut().find(|probe| &probe.task_id == task) {
+            Some(probe) => probe.results.extend(result),
+            None => probes.push(TaskProbe {
+                task_id: task.clone(),
+                results: result,
+            }),
+        }
+    }
+    probes
+}
+
+/// How each test of an accepted spec fails before the work: its exit and
+/// the last line it printed, redacted the way the log would be. A test
+/// that fails for anything but the missing behavior — a typo, a wrong
+/// path — fails after the work too, and this is where its writer sees it.
+fn failing_now(
+    failing: &[(yunta_core::TaskId, crate::task_cycle::CriterionRun)],
+    redactor: &yunta_core::Redactor,
+) -> String {
+    if failing.is_empty() {
+        return String::new();
+    }
+    let mut text = String::from(
+        "\n\nHow each test fails now, before any work — one that fails for anything but the \
+         missing behavior fails after the work too:",
+    );
+    for (task, run) in failing {
+        let said = match run.said() {
+            Some(said) => format!(" — it said `{}`", redactor.text(&said)),
+            None => ", printing nothing".to_string(),
+        };
+        text.push_str(&format!(
+            "\n  `{}` (task `{task}`): exit {}{said}",
+            run.cmd,
+            run.exit_described()
+        ));
+    }
+    text
 }

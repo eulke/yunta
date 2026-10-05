@@ -1,0 +1,231 @@
+# The full reference pipeline (yunta/fragua) — a runnable copy of the
+# schema's own canonical example (also crates/core/tests/fixtures/
+# build-feature.yaml, the parse fixture). Two deliberate trims from that
+# reference: the `mcp:` context source is dropped (it needs a live MCP
+# server, which a pack's own mock self-test has no reason to stand up)
+# and `node_defaults.hooks` is dropped (an ecosystem-specific
+# convenience, not something a reference pack needs to demonstrate).
+# Additions. `spec` writes the tests the plan's tasks are held to before
+# any is built, in the modes that approve the plan: the person approving
+# it reads the tests beside it, and nobody who builds a task writes the
+# test that judges it. `review` reads the brief and the diff of what the
+# run changed — a read-only session may have no shell to find it with.
+# `conform` holds the work to the plan a person approved, in every mode:
+# green criteria say the work passes its tests, not that it is what the
+# plan says. It reads the work beside `review`, and `fix-findings`
+# answers what both found in one round, fixed or declined; a fix whose
+# finding proposes a criterion is proved by it. `lint` and the
+# comparison against the suite run after the last change to the work,
+# once. `ship` shows the plan and every finding the run holds with its
+# answer, and going on settles what it showed.
+#
+# A pack runs in repositories its author has never seen, so it names
+# capabilities and never a tool or a layout: `lint` runs whatever the
+# project declares as its `lint` command, and a project that declares
+# none runs without it; `fix-lint` may edit what the run itself changed;
+# `pr` opens its pull request through the project's forge; and `plan`
+# reads `docs/architecture.md` as optional, since the planner can explore
+# the code without it.
+name: fragua
+description: Full feature cycle — grill, verified tasks document, multi-runner review and the work held to its plan, one fix round, lint/fix, baseline, PR
+yunta_schema: ">=1 <2"
+inputs:
+  idea:
+    type: string
+    required: true
+    description: "What to build — becomes the brief"
+
+modes:
+  quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, conform, ship, pr] }
+  standard: { include: [grill, brief, plan, spec, approve-plan, implement, lint, fix-lint, tests, review, conform, fix-findings, ship, pr] }
+  full:     { include: all }
+
+nodes:
+  - id: grill
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    prompt: |
+      Find what in "{{inputs.idea}}" only a person can decide. Read the code
+      first: what it already answers is not a question, and neither is
+      anything a sensible default settles. Ask only what changes what gets
+      built — its behavior, its reach, what it must not break.
+
+      A person answers every question at once, without the code in front of
+      them: make each one stand alone, say what depends on the answer and
+      what you would choose. Prefer `boolean`, or `choice` with the options
+      you see; use `text` only when the answer cannot be listed. A question
+      is `required` only when the brief cannot be written without it; any
+      other says in `assumes` what the work takes as its answer when nobody
+      gives one. Only a required question stops the run: a round of optional
+      ones goes on with what each assumes. When nothing needs deciding, hand
+      over an empty list.
+    artifacts:
+      produces: [questions]
+
+  - id: brief
+    kind: prompt
+    runner: planner
+    depends_on: [grill]
+    context:
+      - artifact: { node: grill, kind: questions }
+      - artifact: { node: grill, kind: answers }
+    prompt: |
+      Write the brief for "{{inputs.idea}}" from the idea and the answers a
+      person gave to the questions in your context. It is what the plan is
+      built from:
+
+      - What changes, for whom, and why.
+      - What is in, and what is out.
+      - Each answer, as the requirement it sets.
+      - Open points: every question left unanswered — with the assumption it
+        states in `assumes` — and anything the answers do not settle, each
+        with the assumption you would make. The plan closes them.
+
+      Add nothing the idea and the answers do not say: a guess is an open
+      point, not a requirement.
+    artifacts:
+      produces: [brief.md]
+
+  - id: plan
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    depends_on: [brief]
+    context:
+      - artifact: { node: brief, name: brief.md }
+      - artifact: { node: grill, kind: questions }
+      - artifact: { node: grill, kind: answers }
+      - knowledge: {}
+      - files: [{ path: docs/architecture.md, optional: true }]
+      - command: "git log --oneline -20"
+    prompt: { file: prompts/plan.md }
+    artifacts:
+      produces: [tasks]
+
+  - id: spec
+    kind: prompt
+    runner: planner
+    permissions: read-only
+    depends_on: [plan]
+    context:
+      - artifact: { node: plan, kind: tasks }
+      - knowledge: {}
+    prompt: { file: prompts/spec.md }
+    artifacts:
+      produces: [spec]
+
+  - id: approve-plan
+    kind: gate
+    depends_on: [spec]
+    assignee: lead
+    message: "Plan and its tests registered. Approve?"
+    options: [approve, adjust]
+    on: { adjust: plan }
+    shows:
+      - { node: brief, name: brief.md }
+      - { node: plan, kind: tasks }
+      - { node: spec, kind: spec }
+
+  - id: implement
+    kind: loop
+    runner: executor
+    depends_on: [approve-plan]
+    until: all_tasks_complete
+    invariant: true
+    concurrency: 2
+    scope_expansion:
+      mode: ask
+      max_per_run: 3
+    prompt: |
+      Build your task as its plan declares it, inside its scope.
+
+      - Where one of its criteria runs a test that is not there, write it so
+        it checks what the criterion `proves`. Never weaken a test or a guard
+        to turn it green.
+      - Keep every `invariant` the task lists, and write like the code around
+        you.
+      - Check your task as you go, not only before you finish: the check runs
+        its criteria exactly as the engine will.
+
+  - id: review
+    kind: prompt
+    depends_on: [implement]
+    runners: [reviewer, reviewer-alt]
+    permissions: read-only
+    context:
+      - artifact: { node: brief, name: brief.md }
+      - command: "git diff {{run.base}}"
+    prompt: { file: prompts/review.md }
+    artifacts:
+      produces: [findings]
+
+  - id: conform
+    kind: prompt
+    runner: reviewer
+    permissions: read-only
+    depends_on: [implement]
+    context:
+      - artifact: { node: plan, kind: tasks }
+      - run-events: { filter: deviations }
+      - command: "git diff {{run.base}}"
+    prompt: { file: prompts/conform.md }
+    artifacts:
+      produces: [findings]
+
+  - id: fix-findings
+    kind: prompt
+    runner: executor
+    depends_on: [review, conform]
+    prompt: |
+      Read the findings this run holds that are not settled — each with the
+      node that reported it and how others answered it. Answer every one: fix
+      it and answer it fixed, or answer it declined and say why — it is wrong,
+      or its fix belongs to another change. Fix every `blocking` and `major`
+      finding that is right; a `minor` or a `note` only where the fix stays
+      where it points. Change what each finding points to and nothing else,
+      and never weaken a test to make one go away. A finding that proposes a
+      criterion is settled when that criterion passes on what you leave; lint
+      and the test suite run after you.
+
+  - id: lint
+    kind: bash
+    invariant: true
+    optional: true
+    depends_on: [fix-findings]
+    run: { command: lint }
+    on_failure: { goto: fix-lint, max_reroutes: 1 }
+
+  - id: fix-lint
+    kind: prompt
+    runner: mechanical
+    context: [{ node-output: { node: lint } }]
+    prompt: |
+      Fix every error in the lint report, and nothing else. Change the code
+      the way each message asks; never silence a rule — no disable comment,
+      no config change — and never change what the code does.
+    scope: run
+
+  - id: tests
+    kind: check
+    builtin: baseline_compare
+    invariant: true
+    depends_on: [lint]
+
+  - id: ship
+    kind: gate
+    depends_on: [tests]
+    assignee: lead
+    message: "The work beside its plan, and every finding the run holds with its answer. Create the PR?"
+    shows:
+      - { node: plan, kind: tasks }
+      - { kind: findings }
+
+  - id: pr
+    kind: pull_request
+    depends_on: [ship]
+    title: "{{inputs.idea}}"
+
+on_finish:
+  - cleanup: worktree
+  - distill: [{ node: plan, kind: tasks }]

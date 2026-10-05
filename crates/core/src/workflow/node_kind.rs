@@ -7,7 +7,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::parse::{describe, nested, take};
 use super::{ArtifactRefId, ArtifactSpec, LoopUntil, Node, ScopeExpansion};
-use crate::ids::{ExecutorName, NodeId, OptionId};
+use crate::config::Isolation;
+use crate::ids::{ExecutorName, InputName, NodeId, OptionId};
 use crate::yaml::Value;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -17,7 +18,7 @@ pub enum NodeKind {
         prompt: PromptSource,
     },
     Bash {
-        run: String,
+        run: super::RunCommand,
     },
     Loop {
         until: LoopUntil,
@@ -124,6 +125,12 @@ pub enum NodeKind {
         /// the gate and the DAG continues.
         #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
         on: IndexMap<OptionId, NodeId>,
+        /// The artifacts the person decides on, put in front of them
+        /// with the question — `[{ node: plan, kind: tasks }]` shows the
+        /// plan an `approve-plan` gate approves. Read like a context
+        /// artifact, so the gate waits for what it shows.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        shows: Vec<super::ArtifactContextRef>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         external: Option<ExternalGate>,
     },
@@ -145,13 +152,13 @@ pub enum NodeKind {
         /// before the child validates them against its declared
         /// `inputs:`. Absent means the child must get by on defaults.
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        inputs: BTreeMap<String, String>,
+        inputs: BTreeMap<InputName, String>,
         /// `worktree` (default) gives the child its own tree branched
-        /// off the parent's HEAD; `inherit` shares the parent's tree
-        /// for phases of one piece of work — parallel `inherit`
-        /// siblings must declare disjoint `scope` (checked).
-        #[serde(default, skip_serializing_if = "is_default_workflow_isolation")]
-        isolation: WorkflowIsolation,
+        /// off the tree this node works in; `none` shares that tree, for
+        /// phases of one piece of work — parallel children sharing a
+        /// tree must declare disjoint `scope` (checked).
+        #[serde(default, skip_serializing_if = "crate::config::is_default_isolation")]
+        isolation: Isolation,
         /// `mounts:` — artifacts of the parent's own graph
         /// copied into the child's `run.dir/artifacts/` at birth: the
         /// promotion inheritance mechanism generalized (promotion is
@@ -165,12 +172,36 @@ pub enum NodeKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         mounts: Vec<MountSpec>,
     },
+    /// Pushes the run's own branch and opens a pull request of it into
+    /// the project's base branch, through the forge the project
+    /// configures — the same one on a rerun, found by the run's marker.
+    PullRequest {
+        /// The pull request's title, template-rendered.
+        title: String,
+        /// Its body, template-rendered; the run's receipt and its marker
+        /// follow it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+        /// Whether the body carries the run's receipt — what it held its
+        /// work to and what it found, read off its log as the pull
+        /// request opens. On unless set `false`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        receipt: Option<bool>,
+    },
 }
 
 impl NodeKind {
     /// Every `kind:` a node can declare, as written in YAML.
     pub const KINDS: &'static [&'static str] = &[
-        "prompt", "bash", "loop", "parallel", "check", "executor", "gate", "workflow",
+        "prompt",
+        "bash",
+        "loop",
+        "parallel",
+        "check",
+        "executor",
+        "gate",
+        "workflow",
+        "pull_request",
     ];
 
     /// Whether a node of this kind runs one session of its own, which an
@@ -187,6 +218,24 @@ impl NodeKind {
         matches!(self, NodeKind::Prompt { .. })
     }
 
+    /// The `kind:` this node declares, spelled as YAML spells it — the
+    /// name in [`KINDS`](Self::KINDS) that the serialized `kind` tag
+    /// carries. Exhaustive: a new variant does not compile until it
+    /// names itself here.
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            NodeKind::Prompt { .. } => "prompt",
+            NodeKind::Bash { .. } => "bash",
+            NodeKind::Loop { .. } => "loop",
+            NodeKind::Parallel { .. } => "parallel",
+            NodeKind::Check(_) => "check",
+            NodeKind::Executor { .. } => "executor",
+            NodeKind::Gate { .. } => "gate",
+            NodeKind::Workflow { .. } => "workflow",
+            NodeKind::PullRequest { .. } => "pull_request",
+        }
+    }
+
     /// The keys a node of `kind` accepts besides the node-level ones,
     /// or `None` for a kind that does not exist. The lists mirror the
     /// variants above; a test serializes each kind with every field set
@@ -199,8 +248,9 @@ impl NodeKind {
             "parallel" => &["join", "coordination", "nodes"],
             "check" => &["builtin", "max_severity"],
             "executor" => &["executor", "with", "timeout_seconds"],
-            "gate" => &["assignee", "message", "options", "on", "external"],
+            "gate" => &["assignee", "message", "options", "on", "shows", "external"],
             "workflow" => &["use", "inputs", "isolation", "mounts"],
+            "pull_request" => &["title", "body", "receipt"],
             _ => return None,
         })
     }
@@ -251,23 +301,6 @@ impl<'de> Deserialize<'de> for MountArtifact {
     }
 }
 
-fn is_default_workflow_isolation(isolation: &WorkflowIsolation) -> bool {
-    *isolation == WorkflowIsolation::default()
-}
-
-/// A `kind: workflow` node's `isolation:` — deliberately its own
-/// enum, not [`crate::Isolation`]: `inherit` only exists for workflow
-/// nodes, and a run-level `none` is not a per-node choice.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum WorkflowIsolation {
-    #[default]
-    Worktree,
-    Inherit,
-}
-
 /// `kind: gate`'s `external:` block.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -312,6 +345,18 @@ pub enum CheckBuiltin {
     FindingsGate {
         max_severity: crate::events::FindingSeverity,
     },
+}
+
+impl CheckBuiltin {
+    /// Whether the check's verdict is a function of the run's tree: it
+    /// runs a command there, as deterministic as a criterion, so the same
+    /// tree always answers the same. `findings_gate` reads the log.
+    pub fn judges_the_tree(&self) -> bool {
+        match self {
+            CheckBuiltin::BaselineCompare | CheckBuiltin::CoverageGate => true,
+            CheckBuiltin::FindingsGate { .. } => false,
+        }
+    }
 }
 
 /// `parallel.coordination` — see the field's own doc on

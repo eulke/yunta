@@ -8,20 +8,21 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::{Adapter, Forge};
 use yunta_core::events::{
-    EventPayload, Finding, FindingPostedPayload, FindingSeverity, GateWaitingPayload, HumanChoice,
-    StoredEvent,
+    EventPayload, Finding, FindingPostedPayload, FindingSeverity, StoredEvent,
 };
-use yunta_core::{AdapterId, Clock, FindingId, IdSource, Manifest, NodeId, RunId, Seq};
+use yunta_core::port::{Adapter, Forge};
+use yunta_core::{AdapterId, Clock, FindingId, IdSource, Location, Manifest, NodeId, RunId, Seq};
 use yunta_storage::{AsyncStorage, StorageError};
 
 use crate::human_interaction::HumanInteraction;
+use crate::observer::RunObserver;
 use crate::replay::RunView;
 use crate::run_log::RunLog;
 use crate::task_cycle::Memo;
 
-use super::{budget, RunError};
+use super::RunError;
+use yunta_core::events::FindingEvent;
 
 /// Everything node execution needs, borrowed once. Also owns the small
 /// emit helper so every event gets its timestamp from the same injected
@@ -35,11 +36,12 @@ pub(crate) struct RunCtx<'a> {
     pub storage: &'a AsyncStorage,
     pub clock: Arc<dyn Clock>,
     pub ids: &'a dyn IdSource,
-    pub max_task_retries: u32,
-    /// Criteria memoization — one cache per `execute_run`
-    /// call, never persisted: a resume simply starts cold, which is safe
-    /// (over-verifying) rather than risking a stale cross-run hit.
-    pub memo: Memo,
+    /// Criteria memoization — one cache per `execute_run` call, seeded
+    /// at a wake with what the log says earlier invocations answered.
+    pub memo: Arc<Memo>,
+    /// The checkouts the run's units work in, reused from one unit to
+    /// the next.
+    pub pool: Arc<crate::worktree::CheckoutPool>,
     /// The one surface every escalation goes through:
     /// exhausted re-routes and scope-expansion `ask` alike — on the ctx
     /// so the deep execution paths (loop_exec) reach it without threading
@@ -49,19 +51,22 @@ pub(crate) struct RunCtx<'a> {
     /// this invocation only — in memory, never derived from the log, so
     /// every resume asks again before spending new money. Atomic because
     /// concurrent batch members read it while the scheduler loop writes.
-    pub budget_lifted: std::sync::atomic::AtomicBool,
+    pub budget_lifted: Arc<std::sync::atomic::AtomicBool>,
     /// `run.dir/scratch/engine.json`, so a separate process can
     /// find this run's live process tree. `None` when the file could not
     /// be written — the run proceeds, degraded loudly (an external
     /// cancellation loses its map to this run's processes; internal
     /// paths never needed it).
-    pub process_registry: Option<crate::process_registry::ProcessRegistry>,
+    pub process_registry: Option<Arc<crate::process_registry::ProcessRegistry>>,
     /// The invocation's root cancellation (Ctrl-C, `yunta
     /// cancel`). Execution paths consult it to tell a user cancellation
     /// (leave the node orphaned — resume re-treats it per
     /// `on_interrupt`) apart from a `join: any` sibling race
     /// (record the loss as failed so the group can close).
     pub root_cancel: CancellationToken,
+    /// The fence hook this invocation was given, handed to every
+    /// session the run opens.
+    pub fence_hook: Option<yunta_core::fence::FenceHook>,
     pub(crate) adapter_override: Option<&'a AdapterId>,
     /// The forge this invocation was given — on the ctx so a
     /// `kind: workflow` node can hand it down to its child run (whose
@@ -77,32 +82,154 @@ pub(crate) struct RunCtx<'a> {
     pub run_tools_host: Arc<crate::run_tools::RunToolsHost>,
     /// The ambient environment this run executes in, injected by the
     /// caller: the user state root the user knowledge layer resolves
-    /// against, and the variables layered onto every subprocess.
+    /// against, and the variables a caller layers onto every subprocess.
     pub ambient: Option<&'a yunta_core::Env>,
+    /// Every variable layered onto a subprocess of this run: the
+    /// ambient ones, then each shared directory under its variable.
+    pub(crate) subprocess_vars: Arc<[(String, String)]>,
+    /// Where a declared secret's value comes from. `None` reaches no
+    /// secret at all, which is what a run declaring none needs.
+    pub secrets: Option<std::sync::Arc<dyn yunta_core::SecretSource>>,
+    /// What those secrets' values are, for taking them back out of
+    /// every event this run appends.
+    pub redactor: yunta_core::Redactor,
+    /// The invocation's display surface, fed by every append this
+    /// context makes as the event lands — on the ctx so a `kind:
+    /// workflow` node hands the same one down to its child run, whose
+    /// frames then carry the child's own `run_id`. Owned rather than
+    /// borrowed: the run-tools host keeps a clone of it and outlives
+    /// every borrow of ours.
+    pub observer: Option<Arc<dyn RunObserver>>,
+    /// The checkout this node was given of its own, and the tree its
+    /// work lands in once that work passes its audit. `None` for a node
+    /// working in the run's own tree, whose work is committed there when
+    /// it closes.
+    pub(crate) unit: Option<NodeUnit<'a>>,
+    /// Held while one unit replays its work onto the run's tree and
+    /// moves that tree onto it.
+    ///
+    /// The replay reads where the tree stands and the move asserts it
+    /// has not moved since, so the two are one step. Two units landing
+    /// at once would each replay onto what the other is about to
+    /// replace, and the second move would be a merge — the one thing it
+    /// refuses. Landing is therefore serial, in whatever order the units
+    /// finish, exactly as a loop's own integration already is.
+    pub(crate) landing: Arc<tokio::sync::Mutex<()>>,
+    /// The last reading of the run's clock, shared by every append this
+    /// invocation makes, so a suspension of the host is recorded once,
+    /// before whatever comes after it.
+    pub(crate) awake: Arc<crate::wakefulness::Wakefulness>,
 }
 
-impl RunCtx<'_> {
-    /// The supervision every subprocess of this run gets: its registry,
-    /// and `cancel` — a node's own token, or the run's root token.
-    pub(crate) fn supervision<'a>(
-        &'a self,
-        cancel: &'a CancellationToken,
-    ) -> crate::process::Supervision<'a> {
-        crate::process::Supervision {
-            registry: self.process_registry.as_ref(),
-            cancel: Some(cancel),
-            env: self
-                .ambient
-                .map(|ambient| ambient.subprocess_vars.as_slice())
-                .unwrap_or(&[]),
+/// A node's own checkout, and the tree its work lands in.
+#[derive(Clone, Copy)]
+pub(crate) struct NodeUnit<'a> {
+    pub(crate) unit: &'a crate::worktree::Unit,
+    pub(crate) into: &'a Path,
+    /// Whether `into` is the run's own tree rather than a checkout a
+    /// group opened.
+    pub(crate) into_the_runs_tree: bool,
+    /// The session this node's attempt picks back up in the unit, with
+    /// the answer it is told; `None` for an attempt that opens fresh.
+    pub(crate) continues: Option<&'a crate::task_cycle::Continuing>,
+}
+
+impl<'a> RunCtx<'a> {
+    /// This same run, as a node working in `unit` sees it.
+    ///
+    /// Everything a run holds once — its log, its budget, its process
+    /// registry, its criteria cache — is shared with the context it came
+    /// from, not copied: a unit is a tree of its own and nothing else.
+    /// What changes is the checkout every command, session, hook and
+    /// audit of that node reaches, which is the whole of what working in
+    /// a unit means; the tree this context points at now becomes the one
+    /// the unit lands in.
+    ///
+    /// `continues` is the session an attempt picks back up in the unit
+    /// that session saw, when it does.
+    pub(crate) fn in_unit<'b>(
+        &'b self,
+        unit: &'b crate::worktree::Unit,
+        continues: Option<&'b crate::task_cycle::Continuing>,
+    ) -> RunCtx<'b>
+    where
+        'a: 'b,
+    {
+        RunCtx {
+            run_id: self.run_id,
+            manifest: self.manifest,
+            run_dir: self.run_dir,
+            worktree: &unit.worktree,
+            adapters: self.adapters,
+            storage: self.storage,
+            clock: self.clock.clone(),
+            ids: self.ids,
+            memo: self.memo.clone(),
+            pool: self.pool.clone(),
+            human_interaction: self.human_interaction,
+            budget_lifted: self.budget_lifted.clone(),
+            process_registry: self.process_registry.clone(),
+            root_cancel: self.root_cancel.clone(),
+            fence_hook: self.fence_hook.clone(),
+            adapter_override: self.adapter_override,
+            forge: self.forge,
+            depth: self.depth,
+            run_tools_host: self.run_tools_host.clone(),
+            ambient: self.ambient,
+            subprocess_vars: self.subprocess_vars.clone(),
+            secrets: self.secrets.clone(),
+            redactor: self.redactor.clone(),
+            observer: self.observer.clone(),
+            landing: self.landing.clone(),
+            awake: self.awake.clone(),
+            unit: Some(NodeUnit {
+                unit,
+                into: self.worktree,
+                into_the_runs_tree: self.unit.is_none(),
+                continues,
+            }),
         }
     }
 
-    /// This run's log: its storage handle, its identity and its clock,
-    /// for the sites that append through [`RunLog`] rather than through
-    /// [`RunCtx::emit`].
+    /// The supervision every subprocess of this run gets: its registry,
+    /// and `cancel` — a node's own token, or the run's root token.
+    pub(crate) fn supervision<'s>(
+        &'s self,
+        cancel: &'s CancellationToken,
+    ) -> crate::process::Supervision<'s> {
+        crate::process::Supervision {
+            registry: self.process_registry.as_deref(),
+            cancel,
+            env: &self.subprocess_vars,
+            clock: self.clock.as_ref(),
+        }
+    }
+
+    /// The supervision for a subprocess the run owns but no single node
+    /// does — a worktree it prepares, a commit it makes at the end. The
+    /// run's own token governs it, so Ctrl-C reaches it like anything
+    /// else the run started.
+    pub(crate) fn root_supervision(&self) -> crate::process::Supervision<'_> {
+        self.supervision(&self.root_cancel)
+    }
+
+    /// This run's log: its storage handle, its identity, its clock and
+    /// the invocation's observer, for the sites that append through
+    /// [`RunLog`] rather than through [`RunCtx::emit`].
+    ///
+    /// Every append this run makes reaches the observer because every
+    /// append goes through here — which is what lets a site that records
+    /// something hand over a payload and nothing else, and still feed a
+    /// live view.
     pub(crate) fn log(&self) -> RunLog<'_> {
-        RunLog::new(self.storage, self.run_id, self.clock.as_ref())
+        RunLog::new(
+            self.storage,
+            self.run_id,
+            self.clock.as_ref(),
+            &self.redactor,
+        )
+        .observed_by(self.observer.as_deref())
+        .awake(Some(&self.awake))
     }
 
     /// Appends one event and returns the seq storage assigned to it.
@@ -120,28 +247,6 @@ impl RunCtx<'_> {
         Ok(self.log().events().await?)
     }
 
-    /// Puts `escalation` to the run's human surface and returns its
-    /// choice, verified against the menu the surface was shown. `None`
-    /// keeps its meaning: no surface can answer right now. An answer off
-    /// the menu is refused as [`RunError::OffMenuAnswer`] before anything
-    /// is recorded.
-    pub(crate) async fn ask_human(
-        &self,
-        escalation: &GateWaitingPayload,
-    ) -> Result<Option<HumanChoice>, RunError> {
-        let Some(choice) = self.human_interaction.resolve(escalation).await else {
-            return Ok(None);
-        };
-        if !escalation.offers(&choice.option) {
-            return Err(RunError::OffMenuAnswer {
-                answer: choice.option,
-                offered: escalation.menu(),
-                summary: escalation.summary.clone(),
-            });
-        }
-        Ok(Some(choice))
-    }
-
     /// The run's log read and its state derived, together — the pairing
     /// every site that needs the current state goes through, so the load
     /// and the `derive` live in one place rather than at each call.
@@ -152,10 +257,9 @@ impl RunCtx<'_> {
     /// Exports the run's whole log to `run.dir/events.jsonl` — called
     /// at every terminal close (`Finish` and `Pause`; see this module's
     /// own doc comment on the trigger decision). Re-exports
-    /// in full each time, same "regenerate from the log" principle
-    /// `progress.md` already follows — a run that pauses, resumes, and
-    /// later finishes just gets the file rewritten with the fuller log,
-    /// never appended to.
+    /// in full each time, regenerated from the log — a run that pauses,
+    /// resumes, and later finishes just gets the file rewritten with the
+    /// fuller log, never appended to.
     pub(crate) async fn export_events_jsonl(&self) -> Result<(), RunError> {
         let events = self.load_events().await?;
         let jsonl = crate::events_export::render_events_jsonl(&events)?;
@@ -179,12 +283,12 @@ impl RunCtx<'_> {
         id: &str,
         severity: FindingSeverity,
         title: String,
-        location: String,
+        location: Location,
         detail: String,
     ) -> Result<(), RunError> {
         self.emit(
             node,
-            EventPayload::FindingPosted(FindingPostedPayload {
+            EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
                 finding: Finding {
                     id: FindingId::try_from(id.to_string())?,
                     severity,
@@ -193,67 +297,64 @@ impl RunCtx<'_> {
                     detail,
                     proposed_criterion: None,
                 },
-            }),
+            })),
         )
         .await?;
         Ok(())
     }
 
-    /// The [`Budget`] for one agent session: an equal
-    /// share of the remaining run cap
-    /// ([`budget::session_token_budget`]'s policy). Unlimited — exactly
-    /// the pre-limits behavior — when no cap is declared, or when a
-    /// human already answered `continue` this invocation (their lift
-    /// must not resurface as a zero-token session budget). `timeout`
-    /// stays `None`: `defaults.timeout_minutes` is resolved separately,
-    /// outside this function's scope.
-    pub(crate) async fn session_budget(&self) -> Result<yunta_adapters::Budget, RunError> {
-        // `defaults.timeout_minutes` applies on every path —
-        // the wall clock is orthogonal to the token cap and to a
-        // human's `continue`.
-        let timeout = self.manifest.config.resolved_session_timeout();
-        if self
-            .budget_lifted
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            return Ok(yunta_adapters::Budget {
-                timeout,
-                ..Default::default()
-            });
-        }
-        let Some(cap) = self
-            .manifest
-            .config
-            .limits
-            .as_ref()
-            .and_then(|limits| limits.max_tokens_per_run)
-        else {
-            return Ok(yunta_adapters::Budget {
-                timeout,
-                ..Default::default()
-            });
-        };
-        let state = self.run_view().await?.state;
-        let non_terminal = self
-            .manifest
-            .workflow
-            .iter_nodes()
-            .filter(|node| {
-                !matches!(
-                    state.nodes.get(&node.id),
-                    Some(crate::replay::NodeState::Finished { .. })
-                )
-            })
-            .count();
-        Ok(yunta_adapters::Budget {
-            max_tokens: Some(budget::session_token_budget(
-                cap,
-                state.total_tokens.total(),
-                non_terminal,
-            )),
-            timeout,
-            ..Default::default()
-        })
+    /// How much of its last session's writes the adapter's fence
+    /// covered. What a post-check diff is read against: a violation
+    /// under an exact fence is one the adapter said could not happen.
+    pub(crate) async fn last_coverage(
+        &self,
+        node: &NodeId,
+    ) -> Result<Option<yunta_core::fence::Coverage>, RunError> {
+        Ok(self
+            .run_view()
+            .await?
+            .state
+            .nodes
+            .get(node)
+            .and_then(|record| record.sessions.last())
+            .and_then(|session| session.fence.clone()))
+    }
+
+    /// The adapter this node's runner resolved to; `None` before it
+    /// resolved one.
+    pub(crate) async fn resolved_adapter(
+        &self,
+        node: &NodeId,
+    ) -> Result<Option<AdapterId>, RunError> {
+        Ok(self
+            .run_view()
+            .await?
+            .state
+            .nodes
+            .get(node)
+            .and_then(|record| record.runner.as_ref())
+            .map(|resolved| resolved.chosen.adapter.clone()))
+    }
+
+    /// Records a write the fence should have stopped, when the coverage
+    /// says it should have. A breach is the adapter's to answer for, so
+    /// it is filed beside the failure the violation already causes,
+    /// never instead of it.
+    pub(crate) async fn record_breach(
+        &self,
+        node: &NodeId,
+        adapter: &AdapterId,
+        breach: &crate::scope::Breach,
+    ) -> Result<(), RunError> {
+        self.engine_finding(
+            Some(node),
+            crate::scope::Breach::ID,
+            FindingSeverity::Major,
+            crate::scope::Breach::title(),
+            breach.location(),
+            breach.detail(adapter),
+        )
+        .await
     }
 
     /// The opaque `adapter_settings` the config declares for `adapter`
@@ -274,26 +375,47 @@ impl RunCtx<'_> {
 
 /// `RunCtx` is the one real [`SessionObserver`] — audit events
 /// land in the run's own log as they arrive, so a concurrent `status`
-/// sees the live session. A failed append warns instead of aborting the
-/// stream: the run's next mandatory event hits the same storage and
-/// fails the run properly if it's really down.
+/// sees the live session, and they reach the invocation's display
+/// surface on the same path every other event of the run takes. An
+/// append that fails carries its storage cause back to the dispatch,
+/// which fails the node with it.
 #[async_trait::async_trait]
 impl crate::task_cycle::SessionObserver for RunCtx<'_> {
-    async fn emit_session_event(
+    async fn record(
         &self,
         node_id: &NodeId,
         payload: EventPayload,
-    ) -> Result<(), StorageError> {
-        // A session audit event that cannot be appended is not
+    ) -> Result<yunta_core::Seq, StorageError> {
+        // An event of the cycle that cannot be appended is not
         // dropped: it would silently thin the trail `status` and replay
         // read (a lost `agent_session_opened` even changes what a resume
-        // finds), so the storage cause travels back to the dispatch and
+        // finds), so the storage cause travels back to the cycle and
         // fails the node — the same storage the run's next mandatory
         // event would hit anyway, surfaced now instead of masked.
-        self.log().record(Some(node_id), payload).await.map(|_| ())
+        self.log().record(Some(node_id), payload).await
+    }
+
+    async fn keep_output(
+        &self,
+        output: &crate::process::CommandOutput,
+    ) -> std::io::Result<yunta_core::ContentHash> {
+        crate::artifacts::store::ObjectStore::at(self.run_dir)
+            .put_redacted(output.bytes(), &self.redactor)
+            .await
     }
 
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry> {
-        self.process_registry.as_ref()
+        self.process_registry.as_deref()
+    }
+
+    async fn host_settled(
+        &self,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<bool, StorageError> {
+        self.awake.settled(&self.log(), cancel).await
+    }
+
+    fn awake(&self) -> std::time::Instant {
+        self.clock.awake()
     }
 }

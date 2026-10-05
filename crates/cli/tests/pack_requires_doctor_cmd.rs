@@ -16,7 +16,7 @@ fn write_pack_with_requires(dir: &Path) {
          requires:\n  \
            runners: [{ name: reviewer }]\n  \
            mcp_servers: [internal-docs]\n  \
-           commands: [this-binary-almost-certainly-does-not-exist-anywhere]\n\
+           programs: [this-binary-almost-certainly-does-not-exist-anywhere]\n\
          declares:\n  permissions: read-only\n  network: false\n  executors: []\n\
          contents:\n  workflows: [workflows/review.yaml]\n",
     )
@@ -56,24 +56,27 @@ fn doctor_flags_a_pack_whose_requires_the_local_config_cannot_satisfy() {
     let doctor_out = yunta_in!(&repo, &home, &["doctor"]);
     assert!(!doctor_out.status.success());
     let text = stdout(&doctor_out);
+    let gaps = yunta_testkit::checks(&text, "pack acme/review-pack");
     assert!(
-        text.lines().any(|l| l == "pack acme/review-pack requires:"),
-        "the pack's unmet requirements are reported under one header: {text}"
+        gaps.iter()
+            .any(|said| said.starts_with("requires runner `reviewer`, which `runners:`")),
+        "the unresolvable runner is a row of the pack's: {text}"
     );
     assert!(
-        text.lines()
-            .any(|l| l.starts_with("  runner `reviewer` — ")),
-        "the unresolvable runner is named: {text}"
-    );
-    assert!(
-        text.lines().any(|l| l
-            == "  mcp_server `internal-docs` — not defined under `mcp_servers:`; add it there"),
+        gaps.iter()
+            .any(|said| said
+                == "requires mcp_server `internal-docs`, not defined under `mcp_servers:`"),
         "the undefined mcp_server is named: {text}"
     );
     assert!(
-        text.lines().any(|l| l
-            == "  command `this-binary-almost-certainly-does-not-exist-anywhere` — not found on PATH"),
-        "the missing command is named: {text}"
+        gaps.iter().any(|said| said.starts_with("requires program")
+            && said.contains("this-binary-almost-certainly-does-not-exist-anywhere")
+            && said.ends_with("not found on PATH")),
+        "the missing program is named: {text}"
+    );
+    assert!(
+        text.contains("declare runner `reviewer` in .yunta/config.yaml:"),
+        "and under the list, the runner to declare: {text}"
     );
 }
 
@@ -110,4 +113,281 @@ fn doctor_is_silent_about_a_pack_with_no_unmet_requires() {
     let doctor_out = yunta_in!(&repo, &home, &["doctor"]);
     assert!(doctor_out.status.success(), "{}", stderr(&doctor_out));
     assert!(!stdout(&doctor_out).contains("requires"));
+}
+
+// --- `doctor --session` ---------------------------------------------------
+
+/// A project whose runners all resolve to a `codex` that refuses
+/// whatever it is given: it writes the refusal on stderr and exits
+/// before its first line, which is what a CLI rejecting the
+/// configuration this engine writes it actually does.
+///
+/// `probe()` sees none of that — the stub answers `--version` like the
+/// real CLI — so a plain `doctor` calls it healthy and only a session
+/// finds out.
+fn a_project_whose_cli_dies(root: &Path, repo: &Path, runners: &str) {
+    let said = root.join("stderr.txt");
+    std::fs::write(&said, "url is not supported for stdio\n").unwrap();
+    std::fs::create_dir_all(repo.join(".yunta")).unwrap();
+    std::fs::write(
+        repo.join(".yunta/config.yaml"),
+        format!(
+            "runners:\n{runners}adapters:\n  codex:\n    binary: {stub}\nbaseline:\n  suite: \
+             \"touch {measured}\"\nsecrets: [CODEX_STUB_STDERR_FILE, CODEX_STUB_EXIT]\n",
+            stub = yunta_testkit_core::stubs::codex().display(),
+            measured = root.join("measured.txt").display(),
+        ),
+    )
+    .unwrap();
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-q", "-m", "project"]);
+}
+
+/// Runs `yunta doctor` with the stub armed to die, and hands back what
+/// it printed.
+fn doctor_with(repo: &Path, home: &Path, root: &Path, args: &[&str]) -> std::process::Output {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, repo, home);
+    command
+        .args(args)
+        .env("CODEX_STUB_STDERR_FILE", root.join("stderr.txt"))
+        .env("CODEX_STUB_EXIT", "2")
+        .output()
+        .expect("the yunta binary runs")
+}
+
+#[test]
+fn doctor_session_reports_a_binding_whose_cli_dies_at_startup_with_its_stderr() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    a_project_whose_cli_dies(
+        root.path(),
+        &repo,
+        "  executor:\n    - { adapter: codex, model: codex-model }\n",
+    );
+
+    let plain = doctor_with(&repo, &home, root.path(), &["doctor"]);
+    assert!(plain.status.success(), "{}", stderr(&plain));
+    assert!(
+        yunta_testkit::checked(&stdout(&plain), "codex")
+            .is_some_and(|said| said.starts_with("healthy")),
+        "a probe is the binary answering, and it does: {}",
+        stdout(&plain)
+    );
+
+    let opened = doctor_with(&repo, &home, root.path(), &["doctor", "--session"]);
+    let text = stdout(&opened);
+    assert!(
+        !opened.status.success(),
+        "a binding no session opens on is something to act on: {text}"
+    );
+    assert!(
+        yunta_testkit::checked(&text, "codex/codex-model (executor)")
+            .is_some_and(|said| said.starts_with("session died")),
+        "the binding is named, and so is every runner that reaches it: {text}"
+    );
+    let died = yunta_testkit::checked(&text, "codex/codex-model (executor)").unwrap_or_default();
+    assert!(
+        died.contains("exited with code 2") && died.contains("url is not supported for stdio"),
+        "with how the process went and what it said on its way out: {text}"
+    );
+}
+
+#[test]
+fn doctor_session_refuses_a_reply_without_the_questions_submission() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    std::fs::create_dir_all(repo.join(".yunta")).unwrap();
+    std::fs::write(
+        repo.join(".yunta/config.yaml"),
+        format!("defaults:\n  runner: executor\nrunners:\n  executor:\n    - {{ adapter: codex, model: codex-model }}\nadapters:\n  codex:\n    binary: {}\nsecrets: [CODEX_STUB_LINES_FILE]\n", yunta_testkit_core::stubs::codex().display()),
+    ).unwrap();
+    std::fs::write(
+        repo.join(".codex-stub-lines.jsonl"),
+        "{\"type\":\"thread.started\",\"thread_id\":\"doctor-no-delivery\"}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\n",
+    ).unwrap();
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-q", "-m", "project"]);
+
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, &repo, &home);
+    let output = command
+        .args(["doctor", "--session"])
+        .env(
+            "CODEX_STUB_LINES_FILE",
+            repo.join(".codex-stub-lines.jsonl"),
+        )
+        .output()
+        .expect("doctor runs");
+    let text = stdout(&output);
+    assert!(!output.status.success(), "{text}");
+    assert!(
+        text.contains("session opened, no questions document"),
+        "{text}"
+    );
+}
+
+#[test]
+fn doctor_session_names_every_runner_that_reaches_a_binding() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    // One binding two runners reach, the second of them only when its
+    // own first choice is down — and the same binding is worth as much
+    // there as it is first.
+    a_project_whose_cli_dies(
+        root.path(),
+        &repo,
+        "  reviewer:\n    - { adapter: codex, model: codex-model }\n  \
+         planner:\n    - { adapter: codex, model: other-model }\n    \
+         - { adapter: codex, model: codex-model }\n",
+    );
+
+    let text = stdout(&doctor_with(
+        &repo,
+        &home,
+        root.path(),
+        &["doctor", "--session"],
+    ));
+    assert!(
+        text.contains("codex/codex-model (planner fallback, reviewer)"),
+        "each runner that reaches it, and which of them falls back to it: {text}"
+    );
+    assert!(
+        text.contains("codex/other-model (planner)"),
+        "and a binding held first is its own line: {text}"
+    );
+}
+
+#[test]
+fn doctor_session_never_measures_the_projects_baseline() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    a_project_whose_cli_dies(
+        root.path(),
+        &repo,
+        "  executor:\n    - { adapter: codex, model: codex-model }\n",
+    );
+
+    doctor_with(&repo, &home, root.path(), &["doctor", "--session"]);
+    assert!(
+        !root.path().join("measured.txt").exists(),
+        "a probe asks whether a session opens, never what the tree measured"
+    );
+}
+
+#[test]
+fn doctor_without_session_opens_none() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    a_project_whose_cli_dies(
+        root.path(),
+        &repo,
+        "  executor:\n    - { adapter: codex, model: codex-model }\n",
+    );
+
+    let text = stdout(&doctor_with(&repo, &home, root.path(), &["doctor"]));
+    assert!(
+        !text.contains("session died"),
+        "nothing was opened, so nothing died: {text}"
+    );
+    assert!(
+        text.lines()
+            .any(|line| line.trim_start().starts_with("yunta doctor --session")),
+        "and the command names the check it did not run: {text}"
+    );
+}
+
+/// What a pack requires is what its workflows cannot run without: a run
+/// that lacks it stops where the need is, so `check` and `run` refuse
+/// before the first token instead of leaving it to `doctor`.
+#[test]
+fn check_and_run_refuse_a_pack_workflow_whose_requires_are_unmet() {
+    let (root, upstream, home) = setup();
+    let repo = root.path().join("repo");
+    let add_out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(add_out.status.success(), "{}", stderr(&add_out));
+
+    let check_out = yunta_in!(&repo, &home, &["check", "acme/review"]);
+    assert!(!check_out.status.success(), "{}", stdout(&check_out));
+    let said = stderr(&check_out);
+    for named in [
+        "pack `acme/review-pack` requires runner `reviewer`",
+        "pack `acme/review-pack` requires MCP server `internal-docs`",
+        "pack `acme/review-pack` requires program \
+         `this-binary-almost-certainly-does-not-exist-anywhere`",
+    ] {
+        assert!(said.contains(named), "`{named}` in: {said}");
+    }
+
+    let run_out = yunta_in!(&repo, &home, &["run", "acme/review"]);
+    assert!(!run_out.status.success(), "{}", stdout(&run_out));
+    assert!(
+        stderr(&run_out).contains("requires program"),
+        "{}",
+        stderr(&run_out)
+    );
+    let runs = home.join("runs");
+    assert!(
+        !runs.exists() || std::fs::read_dir(&runs).unwrap().next().is_none(),
+        "a refused workflow never becomes a run"
+    );
+}
+
+/// A pack's workflows are checked against this project's config the way
+/// `yunta run` would check them: a comparison against a baseline this
+/// config never measures is named right after the pack is installed.
+#[test]
+fn doctor_names_what_this_config_leaves_an_installed_workflow_without() {
+    let root = tempfile::tempdir().unwrap();
+    let upstream = root.path().join("upstream");
+    std::fs::create_dir_all(upstream.join("workflows")).unwrap();
+    init_repo(&upstream);
+    std::fs::write(
+        upstream.join("pack.yaml"),
+        "name: guard-pack\n\
+         publisher: acme\n\
+         version: 1.0.0\n\
+         declares:\n  permissions: read-only\n  network: false\n  executors: []\n\
+         contents:\n  workflows: [workflows/guard.yaml]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        upstream.join("workflows/guard.yaml"),
+        "name: guard\nnodes:\n  - { id: tests, kind: check, builtin: baseline_compare }\n",
+    )
+    .unwrap();
+    git(&upstream, &["add", "."]);
+    git(&upstream, &["commit", "-q", "-m", "v1"]);
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    let add = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(add.status.success(), "{}", stderr(&add));
+
+    let doctor = yunta_in!(&repo, &home, &["doctor"]);
+    assert!(!doctor.status.success(), "{}", stdout(&doctor));
+    let text = stdout(&doctor);
+    assert!(
+        yunta_testkit::checks(&text, "pack acme/guard-pack")
+            .iter()
+            .any(|said| said.starts_with("node `tests`") && said.contains("`baseline.suite`")),
+        "{text}"
+    );
 }

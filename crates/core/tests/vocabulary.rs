@@ -6,8 +6,10 @@
 //! deliberate cost, and these tests are what it buys: a list that cannot
 //! drift from the parser without failing here, before the merge.
 
+use yunta_core::diagnostic::DiagnosticCode;
 use yunta_core::events::FindingSeverity;
 use yunta_core::shape::Document;
+use yunta_core::template::TemplateVar;
 use yunta_core::{AnswerType, ArtifactKind, FindingsFile, QuestionsFile, TasksFile};
 
 /// What serde writes for a value, unquoted.
@@ -47,6 +49,62 @@ fn a_kind_that_does_not_exist_names_the_ones_that_do() {
 }
 
 #[test]
+fn every_diagnostic_code_is_published() {
+    // A code is a promise to whoever greps a log or counts a receipt, so
+    // it is published where the compatibility contract is — and this is
+    // what stops a new one being minted without saying so.
+    let contract = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/compatibility.md"),
+    )
+    .expect("the compatibility contract is in the repository");
+    for code in DiagnosticCode::all() {
+        assert!(
+            contract.contains(&format!("`{code}`")),
+            "`{code}` is a code this system reports and the contract does not publish"
+        );
+    }
+}
+
+#[test]
+fn a_template_variable_reads_back_from_the_name_it_publishes() {
+    for variable in TemplateVar::FIXED {
+        assert_eq!(
+            variable
+                .to_string()
+                .parse::<TemplateVar>()
+                .expect("round-trips"),
+            variable
+        );
+    }
+    let input = TemplateVar::Input("idea".parse().expect("an input name"));
+    assert_eq!(input.to_string(), "inputs.idea");
+    assert_eq!(
+        input
+            .to_string()
+            .parse::<TemplateVar>()
+            .expect("round-trips"),
+        input
+    );
+}
+
+#[test]
+fn a_template_variable_that_does_not_exist_names_the_ones_that_do() {
+    let error = "run.directory"
+        .parse::<TemplateVar>()
+        .expect_err("no such variable");
+    let text = error.to_string();
+    assert!(text.contains("{{run.directory}}"), "{text}");
+    for variable in TemplateVar::FIXED {
+        assert!(text.contains(&variable.to_string()), "{text}");
+    }
+}
+
+#[test]
+fn a_template_variable_is_braced_in_one_place() {
+    assert_eq!(TemplateVar::RunDir.braced(), "{{run.dir}}");
+}
+
+#[test]
 fn the_severity_ladder_a_diagnostic_lists_is_the_one_the_parser_accepts() {
     let parsed: Vec<String> = FindingSeverity::NAMES
         .iter()
@@ -80,6 +138,7 @@ fn the_answer_types_a_diagnostic_lists_are_the_ones_the_parser_accepts() {
 fn the_schema_a_door_publishes_is_the_one_the_repository_checked() {
     for (kind, schema) in [
         (ArtifactKind::Tasks, yunta_core::schema::tasks()),
+        (ArtifactKind::Spec, yunta_core::schema::spec()),
         (ArtifactKind::Findings, yunta_core::schema::findings()),
         (ArtifactKind::Questions, yunta_core::schema::questions()),
     ] {
@@ -101,6 +160,7 @@ fn every_kind_publishes_a_shape_and_a_schema() {
 #[test]
 fn a_documents_kind_is_the_one_its_own_type_declares() {
     assert_eq!(<TasksFile as Document>::KIND, ArtifactKind::Tasks);
+    assert_eq!(<yunta_core::SpecFile as Document>::KIND, ArtifactKind::Spec);
     assert_eq!(<FindingsFile as Document>::KIND, ArtifactKind::Findings);
     assert_eq!(<QuestionsFile as Document>::KIND, ArtifactKind::Questions);
 }
@@ -119,16 +179,27 @@ fn a_documents_kind_is_the_one_its_own_type_declares() {
 
 use std::collections::BTreeSet;
 
-use yunta_core::diagnostic::{Rule, RuleCode};
+use yunta_core::diagnostic::{DocumentKind, Rule, RuleCode};
 
-fn all_rules() -> Vec<(ArtifactKind, &'static Rule)> {
+/// Every rule every document publishes, with the document it belongs
+/// to — a workflow's among them, since a workflow is a document this
+/// system reads and holds to rules like any other.
+fn all_rules() -> Vec<(DocumentKind, &'static Rule)> {
     ArtifactKind::ALL
         .into_iter()
         .flat_map(|kind| {
             yunta_core::shape::rules(kind)
                 .iter()
-                .map(move |rule| (kind, rule))
+                .chain(yunta_core::shape::run_rules(kind))
+                .chain(yunta_core::shape::review_rules(kind))
+                .chain(yunta_core::shape::specified_rules(kind))
+                .map(move |rule| (DocumentKind::Artifact(kind), rule))
         })
+        .chain(
+            yunta_core::workflow::read::RULES
+                .iter()
+                .map(|rule| (DocumentKind::Workflow, rule)),
+        )
         .collect()
 }
 
@@ -179,7 +250,11 @@ fn the_contract_a_door_hands_out_carries_the_shape_and_every_rule() {
             contract.contains(yunta_core::shape::contract(kind).lines().next().unwrap()),
             "{kind}"
         );
-        for rule in yunta_core::shape::rules(kind) {
+        for rule in yunta_core::shape::rules(kind)
+            .iter()
+            .chain(yunta_core::shape::run_rules(kind))
+            .chain(yunta_core::shape::review_rules(kind))
+        {
             let demand = yunta_core::text::one_line(rule.demand);
             assert!(
                 contract.contains(&demand),

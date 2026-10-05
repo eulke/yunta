@@ -41,18 +41,27 @@
 //! and the two text modules hold every sentence a session reads:
 //! [`notice`] before it calls anything, [`verdicts`] in answer to a call.
 
+mod answer;
 mod blackboard;
-mod catalog;
+pub mod catalog;
+mod deviation;
+mod findable;
 mod findings;
+mod handover;
 mod host;
 mod listener;
 mod notice;
+mod scope;
 mod session;
 mod submission;
 mod tasks;
 mod verdicts;
 
 pub use blackboard::consolidate_blackboard;
-pub use host::{RunToolsAccess, RunToolsHost};
+pub use host::{HostOf, NodeScopeAccess, RunToolsAccess, RunToolsHost, TaskAccess};
 pub use listener::{open_session_listener, RunToolsSession};
-pub(crate) use notice::submission_notice;
+pub(crate) use notice::{
+    continuation_notice, fresh_respecify_notice, fresh_review_notice, naming_notice,
+    submission_notice, task_notice, Asker,
+};
+pub use yunta_core::RunTool;

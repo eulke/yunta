@@ -11,32 +11,81 @@
 
 use rmcp::model::Tool;
 use serde_json::{json, Value};
+use yunta_core::events::ExecutionEnvironment;
 use yunta_core::ArtifactKind;
+pub use yunta_core::RunTool;
 
 use super::session::SessionTools;
 
+trait RunToolCatalog {
+    fn offered_to(self, session: &SessionTools) -> bool;
+    fn declared(self, session: &SessionTools) -> Tool;
+}
+
+impl RunToolCatalog for RunTool {
+    /// Whether `session` is served this tool.
+    fn offered_to(self, session: &SessionTools) -> bool {
+        match self {
+            RunTool::Task | RunTool::CheckTask => session.task.is_some(),
+            RunTool::CheckScope => session.node_scope.is_some(),
+            RunTool::DeclareDeviation => session.task.is_some(),
+            RunTool::RequestScopeExpansion => {
+                session.task.is_some()
+                    || session
+                        .node_scope
+                        .as_ref()
+                        .is_some_and(|access| access.may_ask)
+            }
+            RunTool::GetBlackboard => session.in_blackboard_group(),
+            RunTool::Submit(kind) => session.submits(kind),
+            _ => true,
+        }
+    }
+
+    /// The tool as the session is offered it: its name, what it does —
+    /// naming any other tool the way this session's CLI does — and the
+    /// shape of what it takes.
+    fn declared(self, session: &SessionTools) -> Tool {
+        match self {
+            RunTool::CheckArtifact => check_artifact_tool(),
+            RunTool::TaskStatus => task_status_tool(),
+            RunTool::Task => task_tool(),
+            RunTool::CheckTask => check_task_tool(),
+            RunTool::GetBlackboard => blackboard_tool(),
+            RunTool::CheckScope => check_scope_tool(session),
+            RunTool::RequestScopeExpansion => scope_expansion_tool(),
+            RunTool::DeclareDeviation => deviation_tool(),
+            RunTool::PostFinding => post_finding_tool(session),
+            RunTool::UpdateFinding => update_finding_tool(session),
+            RunTool::WithdrawFinding => withdraw_finding_tool(),
+            RunTool::Findings => findings_tool(session),
+            RunTool::AnswerFinding => answer_finding_tool(session),
+            RunTool::Submit(kind) => {
+                submit_tool(self.name(), kind, session.host.environment.as_ref())
+            }
+        }
+    }
+}
+
 /// The tools this session is served, in the order it reads them.
 pub(super) fn mounted(session: &SessionTools) -> Vec<Tool> {
-    let mut tools = vec![
-        check_artifact_tool(),
-        post_finding_tool(),
-        update_finding_tool(),
-        withdraw_finding_tool(),
-    ];
-    tools.extend(submission_tools(session));
-    tools.push(task_status_tool());
-    if session.task.is_some() {
-        tools.push(scope_expansion_tool());
-    }
-    if session.in_blackboard_group() {
-        tools.push(blackboard_tool());
-    }
-    tools
+    offered(session)
+        .into_iter()
+        .map(|tool| tool.declared(session))
+        .collect()
+}
+
+/// Which run tools this session is served, in the order it reads them.
+pub(super) fn offered(session: &SessionTools) -> Vec<RunTool> {
+    RunTool::all()
+        .into_iter()
+        .filter(|tool| tool.offered_to(session))
+        .collect()
 }
 
 fn check_artifact_tool() -> Tool {
     Tool::new(
-        "yunta_check_artifact",
+        RunTool::CheckArtifact.name(),
         "Check an artifact this node declares, before your session ends: for a \
          file you wrote, that it is there and within its size; for a document you \
          submitted, what the engine read out of the file it wrote. Runs exactly the \
@@ -56,30 +105,38 @@ fn check_artifact_tool() -> Tool {
     )
 }
 
-fn post_finding_tool() -> Tool {
+fn post_finding_tool(session: &SessionTools) -> Tool {
     finding_tool(
         ArtifactKind::POST_FINDING_TOOL,
-        "Report a structured finding the moment you see it — one call per \
+        &format!(
+            "Report a structured finding the moment you see it — one call per \
          finding. The engine validates it at once: unknown keys, wrong types, \
          empty fields, and an id this node already used are refused with what \
          to fix, and nothing else you reported is lost. An accepted finding is \
          counted, deduplicated and consulted with every other finding on the \
          run, survives this session, and — when this node declares a `findings` \
          artifact — is written into that file at the end. Never write a findings \
-         file yourself. To change a finding you reported, use \
-         `yunta_update_finding`; to take one back, `yunta_withdraw_finding`.",
+         file yourself. A `proposed_criterion` is a command that fails on the run's \
+         tree now and passes once the finding is fixed: one that already passes, or \
+         cannot run, is refused. To change a finding you reported, use `{update}`; to \
+         take one back, `{withdraw}`.",
+            update = session.called(RunTool::UpdateFinding),
+            withdraw = session.called(RunTool::WithdrawFinding),
+        ),
     )
 }
 
-fn update_finding_tool() -> Tool {
+fn update_finding_tool(session: &SessionTools) -> Tool {
     finding_tool(
         ArtifactKind::UPDATE_FINDING_TOOL,
-        "Replace a finding this node already reported, by id, with its whole \
-         new content — same fields as `yunta_post_finding`, validated the same \
-         way. Use it when a finding turns out to be more or less severe, wrongly \
-         located, or better explained. Only a finding this node reported can be \
-         updated, and a withdrawn one cannot; the previous state stays in the \
-         run's log.",
+        &format!(
+            "Replace a finding this node already reported, by id, with its whole \
+             new content — same fields as `{post}`, validated the same way. Use it when \
+             a finding turns out to be more or less severe, wrongly located, or better \
+             explained. Only a finding this node reported can be updated, and a \
+             withdrawn one cannot; the previous state stays in the run's log.",
+            post = session.called(RunTool::PostFinding),
+        ),
     )
 }
 
@@ -95,28 +152,167 @@ fn withdraw_finding_tool() -> Tool {
     )
 }
 
+fn findings_tool(session: &SessionTools) -> Tool {
+    Tool::new(
+        RunTool::Findings.name(),
+        format!(
+            "Read the findings standing in this run: each with the `node` that reported it — \
+             none for one the engine reported about the run itself — its id, severity, title, \
+             location, detail and proposed criterion, and the `answers` other nodes gave it \
+             with `{answer}`. A finding taken back is not here. What a gate shows a person \
+             about the run's findings is this same view.",
+            answer = session.called(RunTool::AnswerFinding),
+        ),
+        no_arguments(),
+    )
+}
+
+fn answer_finding_tool(session: &SessionTools) -> Tool {
+    Tool::new(
+        RunTool::AnswerFinding.name(),
+        format!(
+            "Answer a finding another node reported: `fixed` when your work fixed it, \
+             `declined` when it is wrong or its fix belongs to another change — always saying \
+             `why`. Name it by the node that reported it and its id, as `{findings}` shows \
+             them. The answer stands beside \
+             the finding for a person to read, and answering it again replaces what you \
+             answered before. A finding your own node reported is yours to change with \
+             `{update}` or take back with `{withdraw}`.",
+            update = session.called(RunTool::UpdateFinding),
+            withdraw = session.called(RunTool::WithdrawFinding),
+            findings = session.called(RunTool::Findings),
+        ),
+        object(json!({
+            "type": "object",
+            "properties": {
+                "node": {"type": "string", "description": "The node that reported the finding."},
+                "id": {"type": "string", "description": "The finding's id, as its node reported it."},
+                "answer": {"type": "string", "enum": ["fixed", "declined"]},
+                "why": {"type": "string"},
+            },
+            "required": ["node", "id", "answer", "why"],
+            "additionalProperties": false,
+        })),
+    )
+}
+
 fn task_status_tool() -> Tool {
     Tool::new(
-        "yunta_task_status",
+        RunTool::TaskStatus.name(),
         "Read-only view of the run's tasks document (task id -> status) — the same data \
          the `tasks` context source mounts, queryable mid-session.",
         no_arguments(),
     )
 }
 
+fn task_tool() -> Tool {
+    Tool::new(
+        RunTool::Task.name(),
+        "Read the task this session works, from the run's tasks document: its id, title \
+         and notes; `scope`, the globs every change must stay inside (what the task declared \
+         plus what was granted to it); `denied`, what no change may touch whatever the scope \
+         — what the project denies, and the files of every test a person approved, this \
+         task's own among them; and `criteria`, the commands that must all exit 0 \
+         when your session ends — a criterion is red before the work starts, and a `guard` \
+         is green before it and must stay green; each may say what it `proves`. When the run \
+         measured its suite green before changing anything, that suite is among the guards: \
+         a change that breaks what passed keeps the task open. `cycles` lists what the engine found each \
+         time the task ran, the current cycle last: its pre-check, then each attempt's \
+         criteria and the paths it changed outside the scope. `plan` is the plan the task \
+         belongs to: its summary, description and `design` — the shapes it creates, which \
+         your task names rather than restates — its risks, what it leaves out, and \
+         `other_tasks`, which own what your scope leaves out. The tasks document is not \
+         in your checkout; this is where it is read.",
+        no_arguments(),
+    )
+}
+
+fn check_task_tool() -> Tool {
+    Tool::new(
+        RunTool::CheckTask.name(),
+        "Judge your work on this task exactly as the engine will when your session \
+         ends: run the task's criteria on the checkout as it stands and audit what \
+         changed against the task's scope. Its guards run once every other criterion \
+         passes; until then `guards_waiting` names them. `closes` is true when every \
+         criterion and guard exits 0 and nothing changed lies outside the scope — the \
+         task is then done if the tree does not change again. A scope expansion you \
+         asked for counts only once granted. \
+         It answers when the criteria have, however long they take. Calling it again on \
+         an unchanged checkout waits for the check already running and reuses its \
+         answers; calling it after changing the checkout stops that check, whose tree \
+         nobody will close any more.",
+        no_arguments(),
+    )
+}
+
+fn check_scope_tool(session: &SessionTools) -> Tool {
+    Tool::new(
+        RunTool::CheckScope.name(),
+        format!(
+            "Audit what this node changed against its scope exactly as the engine will \
+             when your session ends. `scope` is what you may write — what the node \
+             declared plus what a person granted it — and `outside_scope` lists every \
+             path you changed outside it. A path outside fails the node; if your fix \
+             needs one, ask with `{ask}` instead of writing it — unless no session of \
+             the run may write it (what the project denies, or a test a person \
+             approved), which no request widens.",
+            ask = session.called(RunTool::RequestScopeExpansion),
+        ),
+        no_arguments(),
+    )
+}
+
+fn deviation_tool() -> Tool {
+    let named = |key: &str| {
+        json!({"type": "object", "properties": {key: {"type": "string"}}, "required": [key],
+               "additionalProperties": false})
+    };
+    Tool::new(
+        RunTool::DeclareDeviation.name(),
+        "Declare that your work departs from the plan: what of it (`from`: one of the plan's \
+         shapes or decisions by name, one of your task's `changes` by where it is, one of its \
+         criteria by its command, or `\"outcome\"`), what the plan says (`planned`), what \
+         your work does or needs instead (`instead`), and `why`. Call it whenever you cannot \
+         build what the plan declares within your scope — never build something else and say \
+         nothing. Your task does not close on a departure: when your session ends a person \
+         accepts it, or sends it back with what to do instead. Accepted, a criterion of the \
+         plan you depart from stops holding your task, and a test the run's spec gave it is \
+         written again by whoever wrote the spec. The suite the run measured holds every \
+         task and is no plan's to depart from.",
+        object(json!({
+            "type": "object",
+            "properties": {
+                "from": {"oneOf": [
+                    named("shape"), named("decision"), named("change"), named("criterion"),
+                    {"const": "outcome"},
+                ]},
+                "planned": {"type": "string"},
+                "instead": {"type": "string"},
+                "why": {"type": "string"},
+            },
+            "required": ["from", "planned", "instead", "why"],
+        })),
+    )
+}
+
 fn scope_expansion_tool() -> Tool {
     Tool::new(
-        "yunta_request_scope_expansion",
-        "Ask the engine to widen this task's scope — you never widen it \
-         yourself. Provide the paths, the reason, and a verifiable criterion that \
-         is red today; the request is evaluated when this attempt ends, and a \
-         denial becomes a finding rather than silence.",
+        RunTool::RequestScopeExpansion.name(),
+        "Ask for the scope you work to be widened — you never widen it yourself. \
+         Provide the paths and the reason; for a task, also a verifiable criterion \
+         that is red today — or, when one of your task's own criteria fails and its \
+         output points at each path as `path:line`, that criterion's command as \
+         `evidence`: the engine runs it and, if it still points there, grants the \
+         paths itself. The request is decided when this attempt ends: a task's by \
+         its evidence, its loop's rules or a person, and a denial becomes a finding \
+         rather than silence; a node's by a person, who is shown your reason.",
         object(json!({
             "type": "object",
             "properties": {
                 "paths": {"type": "array", "items": {"type": "string"}},
                 "reason": {"type": "string"},
                 "proposed_criterion": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]},
+                "evidence": {"type": "string"},
             },
             "required": ["paths", "reason"],
         })),
@@ -125,30 +321,12 @@ fn scope_expansion_tool() -> Tool {
 
 fn blackboard_tool() -> Tool {
     Tool::new(
-        "yunta_get_blackboard",
+        RunTool::GetBlackboard.name(),
         "Read this group's blackboard — your OWN posts only while the group runs \
          (siblings' posts become readable after the join, through the \
          group's consolidated output, so results never depend on arrival order).",
         no_arguments(),
     )
-}
-
-/// One tool per submittable kind this node declares.
-///
-/// A node produces at most one document of each kind, so declaring the
-/// kind is the whole decision: the tool exists exactly when the close
-/// will look for that document, and there is nothing left for the
-/// session to name.
-fn submission_tools(session: &SessionTools) -> Vec<Tool> {
-    let mut tools = Vec::new();
-    for kind in ArtifactKind::ALL {
-        if let Some(tool) = kind.submit_tool() {
-            if session.submits(kind) {
-                tools.push(submit_tool(tool, kind));
-            }
-        }
-    }
-    tools
 }
 
 /// The tool a session submits a whole `kind` document through.
@@ -157,9 +335,26 @@ fn submission_tools(session: &SessionTools) -> Vec<Tool> {
 /// shape the engine already validates rather than transcribing a format
 /// — and it is the only argument: the node declared the kind, so which
 /// document this is was settled before the session started.
-fn submit_tool(tool: &'static str, kind: ArtifactKind) -> Tool {
+///
+/// A document whose commands the engine runs before accepting it says
+/// where they run, so a command that names a program the engine cannot
+/// find is not written in the first place.
+fn submit_tool(
+    tool: &'static str,
+    kind: ArtifactKind,
+    environment: Option<&ExecutionEnvironment>,
+) -> Tool {
     let (document, defs) = published(kind);
     let properties = json!({ "document": document });
+    let runs_under = match (kind, environment) {
+        (ArtifactKind::Tasks | ArtifactKind::Spec, Some(environment)) => format!(
+            " Its commands run under `{}`, looking programs up in this PATH, in order: {}. \
+             A program found nowhere on it cannot answer, and the document is refused for it.",
+            environment.shell,
+            environment.path.join(":")
+        ),
+        _ => String::new(),
+    };
     Tool::new(
         tool,
         format!(
@@ -168,7 +363,7 @@ fn submit_tool(tool: &'static str, kind: ArtifactKind) -> Tool {
              and the document's own rules — and writes the artifact file itself once it \
              is accepted. A refusal lists every problem to fix; submit again until it is \
              accepted. An acceptance reports what the engine read, so you can see your \
-             meaning survived. Submitting again replaces the document."
+             meaning survived. Submitting again replaces the document.{runs_under}"
         ),
         tool_schema(
             properties.as_object().cloned().unwrap_or_default(),
@@ -184,11 +379,11 @@ const FINDING_FIELDS: [&str; 5] = ["id", "severity", "title", "location", "detai
 
 /// A tool that takes one finding, under the entry schema the findings
 /// document publishes.
-fn finding_tool(name: &'static str, description: &'static str) -> Tool {
+fn finding_tool(name: &'static str, description: &str) -> Tool {
     let (properties, defs) = finding_entry_schema();
     Tool::new(
         name,
-        description,
+        description.to_string(),
         tool_schema(properties, &FINDING_FIELDS, defs),
     )
 }

@@ -3,11 +3,11 @@
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::TokenUsage;
-use yunta_core::Node;
+use yunta_core::{ConfigKey, Node, Resolved, RunCommand};
 
 use crate::process::{spawn_governed, GovernedCommand, Outcome};
 
-use super::node_close::{close_node, fail, Close};
+use super::node_close::{close_node, fail, fail_with, Close};
 use super::node_exec::{cancelled_end, render_or_fail, NodeEnd};
 use super::step::Step;
 use super::{RunCtx, RunError};
@@ -22,12 +22,23 @@ use super::{RunCtx, RunError};
 pub(super) async fn execute_bash(
     ctx: &RunCtx<'_>,
     node: &Node,
-    run: &str,
+    run: &RunCommand,
     cancel: &CancellationToken,
 ) -> Result<NodeEnd, RunError> {
-    let rendered = match render_or_fail(ctx, node, run).await? {
-        Step::Value(rendered) => rendered,
-        Step::Ended(end) => return Ok(end),
+    // A script is the workflow's and is rendered with its templates; a
+    // project's command runs as the project wrote it.
+    let rendered = match run.resolve(&ctx.manifest.config) {
+        Ok(Resolved::Script(script)) => match render_or_fail(ctx, node, script).await? {
+            Step::Value(rendered) => rendered,
+            Step::Ended(end) => return Ok(end),
+        },
+        Ok(Resolved::Project { text, .. }) => text.to_string(),
+        Err(command) => {
+            let key = ConfigKey::Command {
+                command: command.clone(),
+            };
+            return super::check_exec::unset(ctx, node, key).await;
+        }
     };
 
     // The runtime moment: the rendered command against the merged
@@ -40,47 +51,27 @@ pub(super) async fn execute_bash(
     }
 
     let command = GovernedCommand::shell(ctx.worktree, &rendered);
-    let (status, stdout_bytes, stderr_bytes) =
-        match spawn_governed(command, ctx.supervision(cancel)).await? {
-            Outcome::Exited {
-                status,
-                stdout,
-                stderr,
-            } => (status, stdout, stderr),
-            // A bash node has no timeout of its own: the only way it
-            // stops early is the run's cancellation.
-            Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => {
-                return cancelled_end(ctx, node).await;
-            }
-        };
+    let outcome = spawn_governed(command, ctx.supervision(cancel)).await?;
+    let Outcome::Exited {
+        status,
+        stdout,
+        stderr,
+    } = &outcome
+    else {
+        // A bash node has no timeout of its own: the only way it stops
+        // early is the run's cancellation.
+        return cancelled_end(ctx, node).await;
+    };
     // Captured regardless of exit status — a
     // failing `lint` is exactly the case a corrective node's own
     // `node-output` context wants to read.
-    crate::run::context_resolve::write_node_output(
-        ctx.run_dir,
-        &node.id,
-        &stdout_bytes,
-        &stderr_bytes,
-    )?;
+    crate::run::context_resolve::write_node_output(ctx.run_dir, &node.id, stdout, stderr).await?;
 
     if status.success() {
         close_node(ctx, node, Close::new("exit 0", TokenUsage::default())).await
     } else {
-        let stderr_tail: String = String::from_utf8_lossy(&stderr_bytes)
-            .lines()
-            .rev()
-            .take(20)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("\n");
-        fail(
-            ctx,
-            node,
-            format!("exit {}: {stderr_tail}", status.code().unwrap_or(-1)),
-            false,
-        )
-        .await
+        let code = status.code().unwrap_or(-1);
+        let failure = super::command_exited(ctx, &outcome, code, None, "bash node").await?;
+        fail_with(ctx, node, failure, false, TokenUsage::default()).await
     }
 }

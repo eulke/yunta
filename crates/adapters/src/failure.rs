@@ -1,8 +1,11 @@
 //! What a CLI's failure message says about retrying. The message is
 //! the only signal the CLIs give, so the reading is by marker: the
 //! phrases the CLIs and the APIs behind them print for a refused
-//! credential or an unknown model. Anything else is a failure of the
-//! attempt, and a fresh session may do better.
+//! credential, an unknown model, or a service the machine cannot reach.
+//! Anything else is a failure of the attempt, and a fresh session may do
+//! better.
+
+use yunta_core::port::FailureCause;
 
 /// Why a session failed, as far as its message tells.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,6 +16,10 @@ pub enum FailureKind {
     /// The model named is not one this account can use; another
     /// attempt asks for the same model.
     InvalidModel,
+    /// The machine could not reach the service: its name did not
+    /// resolve, or nothing answered. The same session can go on once it
+    /// does.
+    Unreachable,
     /// Anything else: a transport error, a rate limit, a turn that
     /// ended badly.
     Other,
@@ -21,9 +28,31 @@ pub enum FailureKind {
 impl FailureKind {
     /// Whether a fresh session with the same request can do better.
     pub fn retryable(self) -> bool {
-        matches!(self, FailureKind::Other)
+        self.cause().retryable()
+    }
+
+    /// What the failure says about what comes after it, as the port
+    /// carries it.
+    pub fn cause(self) -> FailureCause {
+        match self {
+            FailureKind::Authentication | FailureKind::InvalidModel => FailureCause::Final,
+            FailureKind::Unreachable => FailureCause::Unreachable,
+            FailureKind::Other => FailureCause::Retryable,
+        }
     }
 }
+
+/// What the CLIs, and the network libraries under them, print when the
+/// machine cannot reach the service at all — never for a stream that
+/// broke after it answered, which is the attempt's.
+const UNREACHABLE_MARKERS: &[&str] = &[
+    "enotfound",
+    "eai_again",
+    "econnrefused",
+    "enetunreach",
+    "etimedout",
+    "can't reach the api server",
+];
 
 const AUTHENTICATION_MARKERS: &[&str] = &[
     "invalid api key",
@@ -45,7 +74,14 @@ const MODEL_MARKERS: &[&str] = &[
 ];
 
 pub fn classify(message: &str) -> FailureKind {
-    let text = message.to_lowercase().replace('_', " ");
+    let lower = message.to_lowercase();
+    if UNREACHABLE_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
+    {
+        return FailureKind::Unreachable;
+    }
+    let text = lower.replace('_', " ");
     if AUTHENTICATION_MARKERS
         .iter()
         .any(|marker| text.contains(marker))
@@ -84,6 +120,24 @@ mod tests {
         ] {
             assert_eq!(classify(message), FailureKind::InvalidModel, "{message}");
         }
+    }
+
+    #[test]
+    fn connectivity_messages_classify_unreachable() {
+        for message in [
+            "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)",
+            "getaddrinfo EAI_AGAIN api.anthropic.com",
+            "connect ECONNREFUSED 127.0.0.1:8080",
+            "connect ENETUNREACH 2606:4700::6810:1",
+            "request to https://api.openai.com/v1/responses failed: ETIMEDOUT",
+        ] {
+            assert_eq!(classify(message), FailureKind::Unreachable, "{message}");
+            assert_eq!(classify(message).cause(), FailureCause::Unreachable);
+        }
+        assert_eq!(
+            classify("stream disconnected before completion"),
+            FailureKind::Other
+        );
     }
 
     #[test]

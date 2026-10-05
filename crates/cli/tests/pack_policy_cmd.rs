@@ -99,7 +99,7 @@ fn executors_deny_refuses_even_with_yes() {
     assert!(!out.status.success());
     assert_eq!(
         stderr(&out).trim_end(),
-        "error: this pack declares 1 executor(s) and `permissions.packs.executors` is `deny` \
+        "error: this pack declares 1 executor and `permissions.packs.executors` is `deny` \
          (declared by the repo config layer) — `--yes` cannot override a permissions ceiling. \
          Change the policy there, or install a pack without executors.",
         "the refusal names the deny policy, the declaring layer and that --yes cannot override it"
@@ -171,7 +171,7 @@ fn update_to_a_ref_that_adds_executors_is_gated_like_add() {
     );
     assert!(!refused.status.success());
     assert!(stderr(&refused).contains("--yes"), "{}", stderr(&refused));
-    let vendored: serde_norway::Value = serde_norway::from_str(
+    let vendored: yunta_core::yaml::Value = yunta_core::yaml::parse(
         &std::fs::read_to_string(repo.join(".yunta/packs/acme/tools-pack/pack.yaml")).unwrap(),
     )
     .unwrap();
@@ -186,7 +186,7 @@ fn update_to_a_ref_that_adds_executors_is_gated_like_add() {
         &["pack", "update", "acme/tools-pack", INITIAL_BRANCH, "--yes"]
     );
     assert!(ok.status.success(), "{}", stderr(&ok));
-    let vendored: serde_norway::Value = serde_norway::from_str(
+    let vendored: yunta_core::yaml::Value = yunta_core::yaml::parse(
         &std::fs::read_to_string(repo.join(".yunta/packs/acme/tools-pack/pack.yaml")).unwrap(),
     )
     .unwrap();
@@ -231,7 +231,7 @@ fn update_refuses_a_publisher_no_longer_allowed() {
         "{}",
         stderr(&out)
     );
-    let vendored: serde_norway::Value = serde_norway::from_str(
+    let vendored: yunta_core::yaml::Value = yunta_core::yaml::parse(
         &std::fs::read_to_string(repo.join(".yunta/packs/globex/tools-pack/pack.yaml")).unwrap(),
     )
     .unwrap();

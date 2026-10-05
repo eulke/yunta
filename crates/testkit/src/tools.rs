@@ -1,0 +1,278 @@
+//! `ToolsHost` — the world the per-run MCP listener serves.
+//!
+//! A run's tools answer about a run that exists on the log and whose
+//! nodes never execute: what a test of them needs is a born run, the
+//! directories `create_run` gives every run, and a listener opened for
+//! one node. That is a layer of its own, below [`Bench`], which drives
+//! whole runs and opens no listener.
+//!
+//! [`Bench`]: crate::Bench
+
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
+
+use tempfile::TempDir;
+use tokio_util::sync::CancellationToken;
+use yunta_core::events::{EventDraft, EventPayload, StoredEvent};
+use yunta_core::{
+    sha256_hex, Clock, CommitSha, NodeId, RunId, Seq, SystemClock, Task, TaskId, TreeId, Workflow,
+};
+use yunta_engine::{
+    open_session_listener, Memo, NodeScopeAccess, RunToolsHost, RunToolsSession, TaskAccess, Unit,
+    UnitId,
+};
+use yunta_storage::Storage;
+
+/// A born run, the directories it owns, and the host its tools answer
+/// through.
+pub struct ToolsHost {
+    _root: TempDir,
+    /// The run directory the host serves.
+    pub run_dir: PathBuf,
+    /// The event store every tool call appends to.
+    pub storage: Storage,
+    /// The run the host answers for.
+    pub run_id: RunId,
+    host: Arc<RunToolsHost>,
+    clock: Arc<dyn Clock>,
+}
+
+impl ToolsHost {
+    /// A host over `workflow_yaml`, stamping what it writes with the
+    /// wall clock — for a test about what a tool call lands on the log
+    /// rather than about when.
+    pub fn over(workflow_yaml: &str) -> Self {
+        Self::stamped_by(workflow_yaml, Arc::new(SystemClock))
+    }
+
+    /// The same host, stamping what it writes with `clock` — which is
+    /// what proves an event carries the run's own reading of time.
+    pub fn stamped_by(workflow_yaml: &str, clock: Arc<dyn Clock>) -> Self {
+        let root = tempfile::tempdir().expect("tempdir");
+        let storage = Storage::open(&root.path().join("yunta.db")).expect("open storage");
+        let run_id = RunId::from("run-tools-1");
+        let workflow: Workflow = yunta_core::yaml::parse(workflow_yaml).expect("parse workflow");
+        let run_dir = born_run_dir(root.path());
+        let worktree = born_tree(root.path());
+        let host = Arc::new(RunToolsHost::new(
+            &workflow,
+            yunta_engine::HostOf {
+                storage: storage.async_handle(),
+                run_id: run_id.clone(),
+                clock: clock.clone(),
+                // A test here reads the log a tool call lands on; its mirror has its own test.
+                observer: None,
+                run_dir: run_dir.clone(),
+                max_artifact_bytes: None,
+                redactor: yunta_core::Redactor::default(),
+                memo: Arc::new(Memo::new(sha256_hex(b"test-config"))),
+                pool: yunta_engine::CheckoutPool::new(
+                    &root.path().join("worktrees"),
+                    &worktree,
+                    &run_dir,
+                ),
+                process_registry: None,
+                subprocess_vars: Vec::new(),
+                environment: Some(tools_environment()),
+                worktree,
+            },
+        ));
+        let hosted = ToolsHost {
+            _root: root,
+            run_dir,
+            storage,
+            run_id,
+            host,
+            clock,
+        };
+        // Every log opens with `run_created` — the listener's own
+        // appends land on an already-born run in production too.
+        hosted.record(None, crate::events::born(b"test-manifest", "deadbeef"));
+        hosted
+    }
+
+    /// Appends one event to the run's log, answering with the position
+    /// storage gave it — what a run that reached this point would
+    /// already have said.
+    pub fn record(&self, node: Option<&str>, payload: EventPayload) -> Seq {
+        self.storage
+            .append(
+                &EventDraft {
+                    run_id: self.run_id.clone(),
+                    node_id: node.map(NodeId::from),
+                    payload,
+                },
+                self.clock.as_ref(),
+            )
+            .expect("append to the run's log")
+    }
+
+    /// Every event this run's log holds.
+    pub fn events(&self) -> Vec<StoredEvent> {
+        self.storage
+            .events_for_run(&self.run_id)
+            .expect("read events")
+    }
+
+    /// Where `node` writes what it declares, created as an attempt of
+    /// that node would create it.
+    pub fn staging(&self, node: &str) -> PathBuf {
+        let dir = yunta_engine::run_dir::staging(&self.run_dir, &node.into());
+        std::fs::create_dir_all(&dir).expect("create the node's staging directory");
+        dir
+    }
+
+    /// The directory a session works in — where a request a tool writes
+    /// for its caller lands.
+    pub fn attempt_dir(&self) -> PathBuf {
+        self._root.path().to_path_buf()
+    }
+
+    /// Opens the listener one node's session reaches its tools through —
+    /// a task session's, when `task` names one: a task with nothing
+    /// declared, worked in [`attempt_dir`](Self::attempt_dir).
+    pub async fn session(&self, node: &str, task: Option<&str>) -> RunToolsSession {
+        self.session_declaring(node, task, Vec::new()).await
+    }
+
+    /// The same listener, for a session that declares `declared` — what
+    /// decides which artifacts its tools will take.
+    pub async fn session_declaring(
+        &self,
+        node: &str,
+        task: Option<&str>,
+        declared: Vec<yunta_core::ArtifactSpec>,
+    ) -> RunToolsSession {
+        let task = task.map(|id| {
+            self.task_access(
+                Task {
+                    id: TaskId::from(id),
+                    title: String::new(),
+                    scope: Vec::new(),
+                    criteria: Vec::new(),
+                    depends_on: Vec::new(),
+                    notes: None,
+                    description: None,
+                    changes: Vec::new(),
+                    outcome: None,
+                    uses: Vec::new(),
+                    invariants: Vec::new(),
+                },
+                Unit {
+                    who: UnitId::Task(TaskId::from(id)),
+                    worktree: self.attempt_dir(),
+                    base: CommitSha::from_static("deadbeef"),
+                    from: TreeId::from_static("deadbeef"),
+                },
+            )
+        });
+        let cwd = task
+            .as_ref()
+            .map_or_else(|| self.attempt_dir(), |task| task.unit.worktree.clone());
+        self.open(node, (task, None), cwd, declared).await
+    }
+
+    /// The listener a loop's session on `task` reaches its tools through.
+    pub async fn task_session(&self, node: &str, task: TaskAccess) -> RunToolsSession {
+        let cwd = task.unit.worktree.clone();
+        self.open(node, (Some(task), None), cwd, Vec::new()).await
+    }
+
+    /// The listener a node's own session reaches its tools through, when
+    /// the node works to `scope` in `cwd`: nothing staged, and `may_ask`
+    /// saying whether a person may widen it on this run.
+    pub async fn scoped_session(
+        &self,
+        node: &str,
+        scope: Vec<yunta_core::ScopeGlob>,
+        may_ask: bool,
+        cwd: PathBuf,
+    ) -> RunToolsSession {
+        let access = NodeScopeAccess {
+            scope,
+            index: self.run_dir.join("node-check-index"),
+            may_ask,
+            staged: Arc::new(OnceLock::from(Vec::new())),
+            denied: Vec::new(),
+        };
+        self.open(node, (None, Some(access)), cwd, Vec::new()).await
+    }
+
+    /// What a task session's tools reach for `task` worked in `unit`: the
+    /// scope the task declared, nothing granted, and nothing staged.
+    pub fn task_access(&self, task: Task, unit: Unit) -> TaskAccess {
+        TaskAccess {
+            scope: task.scope.clone(),
+            task,
+            unit,
+            index: self.run_dir.join("check-index"),
+            cancel: CancellationToken::new(),
+            staged: Arc::new(OnceLock::from(Vec::new())),
+            denied: Vec::new(),
+            checks: Default::default(),
+            plan: None,
+            suite: None,
+        }
+    }
+
+    async fn open(
+        &self,
+        node: &str,
+        (task, node_scope): (Option<TaskAccess>, Option<NodeScopeAccess>),
+        cwd: PathBuf,
+        declared: Vec<yunta_core::ArtifactSpec>,
+    ) -> RunToolsSession {
+        open_session_listener(
+            yunta_engine::RunToolsAccess {
+                host: self.host.clone(),
+                node: NodeId::from(node),
+                // Run tools belong to a session, and a `prompt` node is
+                // the one that opens one of its own.
+                node_kind: yunta_core::NodeKind::Prompt {
+                    prompt: yunta_core::PromptSource::Inline(String::new()),
+                },
+                declared,
+                // The tools as a client calls them directly, by their
+                // own names.
+                naming: yunta_core::ToolNaming::Bare,
+            },
+            (task.map(Arc::new), node_scope.map(Arc::new)),
+            cwd,
+        )
+        .await
+        .expect("open the session's listener")
+    }
+}
+
+/// A run directory under `root` holding what `create_run` gives every run:
+/// the view the engine writes, and the working space every node stages in.
+fn born_run_dir(root: &std::path::Path) -> PathBuf {
+    let run_dir = root.join("run");
+    for dir in [
+        yunta_core::ARTIFACTS_DIR,
+        yunta_engine::run_dir::SCRATCH_DIR,
+    ] {
+        std::fs::create_dir_all(run_dir.join(dir)).expect("create the run's own directories");
+    }
+    run_dir
+}
+
+/// The environment a [`ToolsHost`] reports its commands running with —
+/// what a test compares an answer's `runs_under` against. It is a label
+/// the host carries, not the environment its checks actually run in,
+/// which stays the test process's own.
+pub fn tools_environment() -> yunta_core::events::ExecutionEnvironment {
+    yunta_core::events::ExecutionEnvironment {
+        shell: "sh".to_string(),
+        path: vec!["/usr/bin".to_string(), "/bin".to_string()],
+    }
+}
+
+/// The run's own tree under `root`, a repository like any a run works
+/// in: a handed-over document's commands are proven in a checkout of it.
+fn born_tree(root: &std::path::Path) -> PathBuf {
+    let tree = root.join("tree");
+    std::fs::create_dir_all(&tree).expect("create the run's tree");
+    crate::init_repo(&tree);
+    tree
+}

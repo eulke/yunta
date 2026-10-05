@@ -7,11 +7,32 @@ license.workspace = true
 repository.workspace = true
 description = "Shared domain types for Yunta, the deterministic workflow engine for code agents."
 
+# What a doc example shows, the crate's own tests assert: a doctest would
+# build a binary of its own to say it again.
+[lib]
+doctest = false
+
 [lints]
 workspace = true
 
 [dependencies]
 thiserror.workspace = true
+# The port is an async trait whose sessions hand back a stream of
+# events: `async-trait` is how a trait declares an async method on
+# stable Rust, and `futures` is the `BoxStream` that stream is.
+async-trait.workspace = true
+futures.workspace = true
+# `process::subprocess` spawns a CLI, reads its stdout line by line and
+# reaps it: the same "process"/"io-util" halves the adapters used before
+# the module moved here, plus the task and channel the reader runs on.
+tokio = { workspace = true, features = ["rt", "sync", "time", "process", "io-util", "net"] }
+# Signals to processes and process groups (`process::signal`): the
+# kernel's own `errno` instead of a `kill` binary's exit status, with no
+# unsafe code of ours (D118).
+nix = { workspace = true, features = ["event"] }
+rustix.workspace = true
+# A subprocess's stderr is drained to the trace log rather than dropped.
+tracing.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 chrono = { workspace = true, features = ["serde"] }
@@ -25,13 +46,14 @@ indexmap = { workspace = true, features = ["serde"] }
 # YAML is the authoring format of every type in this crate; the parser
 # lives next to them so the whole workspace reads and writes YAML through
 # one module, and a document's parse error carries the failing key's path.
-serde_norway.workspace = true
 # Every scope glob in the workspace compiles through one rule that lives
 # next to the schema declaring it; the engine and the mock consume it.
 globset.workspace = true
 # Names the path of a value that failed inside an already-buffered
 # `Value` — the one place the parser's own path tracking cannot reach.
 serde_path_to_error.workspace = true
+serde-saphyr.workspace = true
+strsim.workspace = true
 # Run ids are ULIDs (time-ordered, one path segment, collision-free across
 # processes). The crate is the encoding and the 48-bit millisecond
 # arithmetic and nothing else; its randomness comes from `rand`, already
@@ -42,11 +64,22 @@ ulid.workspace = true
 # `chrono` support. `indexmap2` describes `modes:`, an ordered map.
 schemars = { workspace = true, features = ["chrono04", "indexmap2"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+errno.workspace = true
+libproc.workspace = true
+
 [features]
 # Unchecked `From<&str>`/`From<String>` for identifiers, so a test can
 # write a literal; production code parses.
 testkit = []
 
 [dev-dependencies]
+yunta-testkit-core.workspace = true
 yunta-core = { path = ".", features = ["testkit"] }
+tokio = { workspace = true, features = ["macros"] }
 proptest.workspace = true
+tempfile.workspace = true

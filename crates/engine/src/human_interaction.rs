@@ -17,6 +17,17 @@ use async_trait::async_trait;
 use yunta_core::events::{Channel, GateWaitingPayload, HumanChoice};
 use yunta_core::{Answer, QuestionsFile, Responder};
 
+/// What a decision is asked with, beside the escalation the log records:
+/// the documents the escalation shows, read from the run for the person
+/// to see. The escalation names them by hash; this is their content.
+pub struct Asking<'a> {
+    pub shown: &'a [ShownDocument],
+    /// The run the decision is in, which a surface names a document by.
+    pub run: &'a yunta_core::RunId,
+}
+
+pub use yunta_core::shown::{ShownContent, ShownDocument};
+
 /// One surface's reply to a `kind: questions` artifact:
 /// the answers plus which channel produced them and who answered — the
 /// implementation knows its own channel (console = `Tty`, the MCP tool
@@ -45,21 +56,47 @@ pub trait HumanInteraction: Send + Sync {
     /// that answers off the menu is a bug, not a decision.
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice>;
 
+    /// Whether a person is at this surface to be asked: what makes the
+    /// run say on its log when an asking began. A surface with nobody
+    /// there — none, an automatic answerer — is not one, and the default
+    /// says so.
+    fn present(&self) -> bool {
+        false
+    }
+
+    /// [`resolve`](Self::resolve), with what the asking knows: the
+    /// documents the escalation shows. They are the asking's context, not
+    /// the escalation's — the escalation is what the log records and a
+    /// parked run rebuilds. A surface with nowhere to show them answers
+    /// as `resolve` does.
+    async fn resolve_in(
+        &self,
+        escalation: &GateWaitingPayload,
+        _asking: &Asking<'_>,
+    ) -> Option<HumanChoice> {
+        self.resolve(escalation).await
+    }
+
     /// Puts a `kind: questions` artifact to the human,
     /// question by question. `None` = this surface can't ask (same
-    /// convention as `resolve`), and the run degrades to waiting exactly
-    /// as it did before any surface existed. Deliberately a separate
-    /// method from `resolve`: questions and gate escalations
-    /// are two distinct shapes, and flattening them
-    /// into one payload would breed the ambiguous-object vice. A default
-    /// implementation returns `None` so surfaces that only handle gates
-    /// (and every existing implementor) stay valid unchanged.
-    /// `interactive` is the node's own `interactive:` flag — a
-    /// presentation datum: a surface that can hold a live
-    /// conversation should when it's `true`; one that can't ignores it,
-    /// and nothing else changes.
-    async fn ask(&self, questions: &QuestionsFile, interactive: bool) -> Option<QuestionsReply> {
-        let _ = (questions, interactive);
+    /// convention as `resolve`), and the run parks with its questions
+    /// registered, to be answered on a later invocation or through
+    /// another surface. Deliberately a separate method from `resolve`:
+    /// questions and gate escalations are two distinct shapes, and
+    /// flattening them into one payload would breed the
+    /// ambiguous-object vice. A default implementation returns `None`
+    /// so surfaces that only handle gates stay valid unchanged.
+    ///
+    /// How the questions are presented is the surface's own call: a
+    /// node that declares them has said everything it has to say. `node`
+    /// is the one asking, which a surface names so a person knows whose
+    /// questions these are.
+    async fn ask(
+        &self,
+        node: &yunta_core::NodeId,
+        questions: &QuestionsFile,
+    ) -> Option<QuestionsReply> {
+        let _ = (node, questions);
         None
     }
 }

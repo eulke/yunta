@@ -25,7 +25,8 @@
 
 use std::collections::HashMap;
 
-use yunta_core::events::{EventPayload, GateResolvedPayload, Phase, StoredEvent};
+use yunta_core::events::{CriterionType, EventPayload, GateResolvedPayload, Phase, StoredEvent};
+use yunta_core::events::{GateEvent, NodeEvent, RunEvent};
 use yunta_core::{ModeName, NodeId, Workflow};
 
 /// Below this many independent samples, a signal says nothing — a
@@ -111,7 +112,7 @@ fn unused_modes(workflow: &Workflow, history: &[Vec<StoredEvent>]) -> Vec<Unused
         .iter()
         .filter_map(|events| {
             events.iter().find_map(|e| match e.payload() {
-                Some(EventPayload::RunCreated(p)) => Some(&p.mode),
+                Some(EventPayload::Run(RunEvent::Created(p))) => Some(&p.mode),
                 _ => None,
             })
         })
@@ -138,13 +139,20 @@ fn never_red_criteria(history: &[Vec<StoredEvent>]) -> Vec<NeverRedCriterion> {
     let mut samples: HashMap<String, (usize, usize)> = HashMap::new(); // cmd -> (total, red)
     for events in history {
         for event in events {
-            let Some(EventPayload::CriteriaChecked(p)) = event.payload() else {
+            let Some(EventPayload::Node(NodeEvent::CriteriaChecked(p))) = event.payload() else {
                 continue;
             };
             if p.phase != Phase::Pre {
                 continue;
             }
-            for result in &p.results {
+            // A guard is green before the work by definition — it is
+            // there to stay green — so never being red is what it is
+            // for, not a sign it checks nothing.
+            for result in p
+                .results
+                .iter()
+                .filter(|result| result.r#type != Some(CriterionType::Guard))
+            {
                 let entry = samples.entry(result.cmd.clone()).or_default();
                 entry.0 += 1;
                 if result.exit_code != 0 {
@@ -194,7 +202,10 @@ fn never_triggered_reroutes(
             let ran = events.iter().any(|e| {
                 matches!(
                     e.payload(),
-                    Some(EventPayload::NodeFinished(_) | EventPayload::NodeFailed(_))
+                    Some(
+                        EventPayload::Node(NodeEvent::Finished(_))
+                            | EventPayload::Node(NodeEvent::Failed(_))
+                    )
                 ) && e.node_id.as_ref() == Some(&node.id)
             });
             if !ran {
@@ -204,7 +215,7 @@ fn never_triggered_reroutes(
             let rerouted = events.iter().any(|e| {
                 matches!(
                     e.payload(),
-                    Some(EventPayload::NodeRerouted(p)) if p.to_node == on_failure.goto
+                    Some(EventPayload::Node(NodeEvent::Rerouted(p))) if p.to_node == on_failure.goto
                 ) && e.node_id.as_ref() == Some(&node.id)
             });
             if rerouted {
@@ -250,7 +261,7 @@ fn always_approved_gates(
         let mut needed_adjustment = 0usize;
         for events in history {
             for event in events {
-                let Some(EventPayload::GateResolved(p)) = event.payload() else {
+                let Some(EventPayload::Gates(GateEvent::Resolved(p))) = event.payload() else {
                     continue;
                 };
                 if event.node_id.as_ref() != Some(&node_id) {
@@ -286,7 +297,7 @@ fn always_first_try_tasks(history: &[Vec<StoredEvent>]) -> Option<AlwaysFirstTry
     for events in history {
         let mut post_checks: HashMap<yunta_core::TaskId, usize> = HashMap::new();
         for event in events {
-            let Some(EventPayload::CriteriaChecked(p)) = event.payload() else {
+            let Some(EventPayload::Node(NodeEvent::CriteriaChecked(p))) = event.payload() else {
                 continue;
             };
             if p.phase == Phase::Post {

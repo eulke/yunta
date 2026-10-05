@@ -1,7 +1,8 @@
 //! One way to run a subprocess. Every command the engine spawns is born
 //! in its own process group, registered for the run so `yunta cancel`
 //! can find it, bounded by a timeout and by the run's cancellation, and
-//! killed with its whole tree on either. Its pipes are read to the end
+//! killed with its whole tree on either — or when its caller stops
+//! waiting and drops it mid-flight. Its pipes are read to the end
 //! on every path, so the outcome always carries what the child wrote —
 //! whether it exited, timed out or was cancelled.
 
@@ -10,35 +11,71 @@ use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
 
-use thiserror::Error;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::task::JoinHandle;
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
-use yunta_adapters::signal::{signal_group, Signal, SignalError};
-use yunta_core::Pid;
+use yunta_core::process::exit::ExitWatch;
+use yunta_core::process::group::force_kill_group;
+use yunta_core::process::signal::{signal_group, Signal};
+use yunta_core::{Clock, Pid};
 
 use crate::process_registry::{self, ProcessRegistry};
+mod environment;
+mod error;
+mod leader;
+mod output;
+mod pipes;
+mod state;
+
+pub use environment::execution_environment;
+use environment::SHELL;
+use error::captured_output;
+pub use error::{CapturedOutput, PipeKind, SpawnError};
+use leader::Leader;
+pub use output::{CommandOutput, Printed};
+use pipes::{read_to_capture, stdio, write_then_close, Captured, PipeFailure};
+use state::{wait_for_deadline, Waited};
 
 /// The run context a governed subprocess runs under: who watches it — the
 /// run's registry, so `yunta cancel` finds it, and the token whose firing
 /// kills it — and the variables layered onto its environment (a run's
 /// injected `PATH` and the like, empty by default).
-#[derive(Clone, Copy, Default)]
+///
+/// There is no supervision without an owner: a token and a clock are
+/// what every caller has, so they are fields and not options, and the
+/// registry is optional because only a run has one.
+#[derive(Clone, Copy)]
 pub struct Supervision<'a> {
     pub registry: Option<&'a ProcessRegistry>,
-    pub cancel: Option<&'a CancellationToken>,
+    /// Whose firing kills the child and its whole tree.
+    pub cancel: &'a CancellationToken,
     /// Variables set on the child on top of the inherited environment —
     /// the run's `subprocess_vars`, so a node's `PATH` is injected rather
     /// than read from a mutated process. Empty leaves the child's
     /// environment inherited unchanged.
     pub env: &'a [(String, String)],
+    /// What tells the time, for the one thing supervision does with it:
+    /// judging whether a lock's holder is still the process that took
+    /// it.
+    pub clock: &'a dyn Clock,
 }
 
-impl Supervision<'_> {
-    /// No registry, no cancellation and no env overrides: the child is
-    /// bounded only by its own timeout.
-    pub fn none() -> Self {
-        Supervision::default()
+impl<'a> Supervision<'a> {
+    /// A supervision outside any run: the caller's token and clock, no
+    /// registry and no env overrides — what a CLI command and a test
+    /// spawn under.
+    pub fn outside_any_run(cancel: &'a CancellationToken, clock: &'a dyn Clock) -> Self {
+        Supervision {
+            registry: None,
+            cancel,
+            env: &[],
+            clock,
+        }
+    }
+
+    /// The same supervision, with variables layered onto the child's
+    /// environment.
+    pub fn with_env(self, env: &'a [(String, String)]) -> Self {
+        Supervision { env, ..self }
     }
 }
 
@@ -46,21 +83,21 @@ impl fmt::Debug for Supervision<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Supervision")
             .field("registered", &self.registry.is_some())
-            .field("cancellable", &self.cancel.is_some())
+            .field("cancelled", &self.cancel.is_cancelled())
             .field("env_vars", &self.env.len())
             .finish()
     }
 }
 
-/// What to do with one of the child's output streams.
+/// What to do with one of the child's output streams. Never the
+/// engine's own: the terminal belongs to the run's display, so what a
+/// child prints is kept or dropped, never interleaved with it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Capture {
-    /// The child writes to the engine's own stream.
-    #[default]
-    Inherit,
     /// The stream is discarded.
     Discard,
     /// The stream is read to the end and returned in the outcome.
+    #[default]
     Collect,
 }
 
@@ -79,27 +116,23 @@ pub struct GovernedCommand {
 }
 
 impl GovernedCommand {
-    /// `program`, run in `cwd`: no arguments, no stdin, streams
-    /// inherited, no timeout.
+    /// `program`, run in `cwd`: no arguments, no stdin, both streams
+    /// collected, no timeout.
     pub fn new(program: impl Into<PathBuf>, cwd: &Path) -> Self {
         GovernedCommand {
             program: program.into(),
             args: Vec::new(),
             cwd: cwd.to_path_buf(),
             stdin: None,
-            stdout: Capture::Inherit,
-            stderr: Capture::Inherit,
+            stdout: Capture::Collect,
+            stderr: Capture::Collect,
             timeout: None,
         }
     }
 
     /// `sh -c <script>` in `cwd`, both streams collected.
     pub fn shell(cwd: &Path, script: &str) -> Self {
-        Self::new("sh", cwd)
-            .arg("-c")
-            .arg(script)
-            .stdout(Capture::Collect)
-            .stderr(Capture::Collect)
+        Self::new(SHELL, cwd).arg("-c").arg(script)
     }
 
     pub fn arg(mut self, arg: impl Into<String>) -> Self {
@@ -161,40 +194,13 @@ pub enum Outcome {
     },
 }
 
-#[derive(Debug, Error)]
-pub enum SpawnError {
-    #[error("failed to spawn `{command}`")]
-    Spawn {
-        command: String,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("`{command}` spawned without a pid")]
-    NoPid { command: String },
-    #[error("failed to wait for `{command}`")]
-    Wait {
-        command: String,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("failed to kill the process group of `{command}`")]
-    Kill {
-        command: String,
-        #[source]
-        source: SignalError,
-    },
-}
-
-enum Waited {
-    Exited(ExitStatus),
-    TimedOut,
-    Cancelled,
-}
-
 /// Runs `command` to its end under the engine's governance: in its own
 /// process group, registered while it lives, killed with its whole
-/// tree when its timeout elapses or the supervision's token fires.
-/// Returns once the child is reaped and every collected stream is read.
+/// tree when its timeout elapses, the supervision's token fires or its
+/// caller drops it before it ends. The leader stays waitable until the
+/// process group has been closed and its pipes have drained. This keeps
+/// its PID from being reused while any signal can still target the
+/// group.
 pub async fn spawn_governed(
     command: GovernedCommand,
     supervision: Supervision<'_>,
@@ -220,6 +226,7 @@ pub async fn spawn_governed(
         std_cmd.process_group(0);
     }
     let mut child = tokio::process::Command::from(std_cmd)
+        .kill_on_drop(true)
         .spawn()
         .map_err(|source| SpawnError::Spawn {
             command: described.clone(),
@@ -230,87 +237,194 @@ pub async fn spawn_governed(
     })?;
     let _registration = process_registry::register(supervision.registry, Some(pgid));
 
-    let stdin_task = command
-        .stdin
-        .zip(child.stdin.take())
-        .map(|(bytes, mut pipe)| {
-            tokio::spawn(async move {
-                let _ = pipe.write_all(&bytes).await;
-            })
-        });
-    let stdout_task = child.stdout.take().map(read_to_end);
-    let stderr_task = child.stderr.take().map(read_to_end);
+    let timeout_at = command
+        .timeout
+        .map(|timeout| tokio::time::Instant::now() + timeout);
+    let stdout = Captured::default();
+    let stderr = Captured::default();
+    let mut pipes = JoinSet::new();
 
-    let cancelled = async {
-        match supervision.cancel {
-            Some(token) => token.cancelled().await,
-            None => std::future::pending().await,
-        }
-    };
-    let deadline = async {
-        match command.timeout {
-            Some(timeout) => tokio::time::sleep(timeout).await,
-            None => std::future::pending().await,
-        }
-    };
-    let waited = tokio::select! {
-        _ = cancelled => Waited::Cancelled,
-        _ = deadline => Waited::TimedOut,
-        status = child.wait() => Waited::Exited(status.map_err(|source| SpawnError::Wait {
-            command: described.clone(),
-            source,
-        })?),
-    };
-    if !matches!(waited, Waited::Exited(_)) {
-        signal_group(pgid, Signal::SIGKILL).map_err(|source| SpawnError::Kill {
-            command: described.clone(),
-            source,
-        })?;
-        let _ = child.wait().await;
+    if let Some((bytes, pipe)) = command.stdin.zip(child.stdin.take()) {
+        pipes.spawn(async move { (PipeKind::Stdin, write_then_close(pipe, &bytes).await) });
     }
-    if let Some(task) = stdin_task {
-        let _ = task.await;
+    if let Some(pipe) = child.stdout.take() {
+        let capture = stdout.clone();
+        pipes.spawn(async move { (PipeKind::Stdout, read_to_capture(pipe, capture).await) });
     }
-    let stdout = drain(stdout_task).await;
-    let stderr = drain(stderr_task).await;
-    Ok(match waited {
-        Waited::Exited(status) => Outcome::Exited {
-            status,
-            stdout,
-            stderr,
+    if let Some(pipe) = child.stderr.take() {
+        let capture = stderr.clone();
+        pipes.spawn(async move { (PipeKind::Stderr, read_to_capture(pipe, capture).await) });
+    }
+    let mut child = Leader::new(child, pgid);
+
+    let mut observe_error = None;
+    let mut exit = ExitWatch::new(pgid);
+    let mut waited = tokio::select! {
+        biased;
+        _ = supervision.cancel.cancelled() => Waited::Cancelled,
+        _ = wait_for_deadline(timeout_at) => Waited::TimedOut,
+        exited = exit.exited() => match exited {
+            Ok(()) => Waited::Exited,
+            Err(error) => {
+                observe_error = Some(error);
+                Waited::Failed
+            }
         },
-        Waited::TimedOut => Outcome::TimedOut {
+    };
+
+    // Keep this close operation pinned while watching the token and deadline. If
+    // either fires after the shell exits but while descendants still own
+    // a pipe, the operation is still cancelled/timed out and the same
+    // shutdown continues to completion.
+    let cleanup = force_kill_group(pgid);
+    tokio::pin!(cleanup);
+    let cleanup_result = loop {
+        tokio::select! {
+            biased;
+            result = &mut cleanup => break result,
+            _ = supervision.cancel.cancelled(), if waited == Waited::Exited => {
+                waited = Waited::Cancelled;
+            }
+            _ = wait_for_deadline(timeout_at), if waited == Waited::Exited => {
+                waited = Waited::TimedOut;
+            }
+        }
+    };
+    if cleanup_result.is_err() {
+        // The shared helper reports the inspection/signal error and makes
+        // its own emergency SIGKILL attempt. Keep one final direct attempt
+        // here before waiting on our owned leader.
+        if let Err(error) = signal_group(pgid, Signal::SIGKILL) {
+            tracing::warn!(pgid = %pgid, error = %error, "final process-group kill attempt failed");
+        }
+        if let Err(error) = child.start_kill() {
+            tracing::warn!(pgid = %pgid, error = %error, "final process-leader kill attempt failed");
+        }
+    }
+
+    // Nothing in the group can write any more: what is still buffered
+    // reads at once, and a pipe still open after a moment is held by a
+    // process that left the group — a detached daemon — which this
+    // command does not wait for. The moment is long enough for a process
+    // starved of CPU to read what is buffered: it is paid only when a
+    // pipe is held, since without a holder the end of the pipe comes first.
+    let drained_by = tokio::time::Instant::now() + Duration::from_secs(2);
+    let mut pipe_failure = None;
+    let mut abort_pipes = cleanup_result.is_err();
+    while !pipes.is_empty() && !abort_pipes {
+        tokio::select! {
+            biased;
+            joined = pipes.join_next() => match joined {
+                Some(Ok((stream, Err(error)))) => {
+                    pipe_failure.get_or_insert(PipeFailure::Io(stream, error));
+                    abort_pipes = true;
+                }
+                Some(Err(error)) => {
+                    pipe_failure.get_or_insert(PipeFailure::Join(PipeKind::Stdout, error));
+                    abort_pipes = true;
+                }
+                _ => {}
+            },
+            _ = supervision.cancel.cancelled(), if waited == Waited::Exited => {
+                waited = Waited::Cancelled;
+                abort_pipes = true;
+            }
+            _ = wait_for_deadline(timeout_at), if waited == Waited::Exited => {
+                waited = Waited::TimedOut;
+                abort_pipes = true;
+            }
+            _ = wait_for_deadline(Some(drained_by)) => {
+                tracing::debug!(command = %described, "a process outside the command's group still holds its output; reading stops here");
+                abort_pipes = true;
+            }
+        }
+    }
+    if abort_pipes {
+        // The leader is intentionally still unreaped, so the process group
+        // id is still its identity while cleanup is repeated here.
+        let second_cleanup = force_kill_group(pgid).await;
+        if cleanup_result.is_ok() {
+            if let Err(error) = second_cleanup {
+                pipe_failure.get_or_insert(PipeFailure::Group(error));
+            }
+        }
+        pipes.abort_all();
+        while pipes.join_next().await.is_some() {}
+    }
+
+    // The group has been signalled and its members killed. The
+    // leader is now collected, which is the first point at which its pid
+    // may safely be reused.
+    let status = loop {
+        tokio::select! {
+            biased;
+            status = child.wait() => break status,
+            _ = supervision.cancel.cancelled(), if waited == Waited::Exited => {
+                waited = Waited::Cancelled;
+            }
+            _ = wait_for_deadline(timeout_at), if waited == Waited::Exited => {
+                waited = Waited::TimedOut;
+            }
+        }
+    };
+    let captured_stdout = stdout.snapshot();
+    let captured_stderr = stderr.snapshot();
+
+    if let Some(error) = observe_error {
+        return Err(SpawnError::Observe {
+            command: described,
+            source: error,
+            output: captured_output(captured_stdout, captured_stderr),
+        });
+    }
+    if let Err(source) = cleanup_result {
+        return Err(SpawnError::Kill {
+            command: described,
+            source: Box::new(source),
+            output: captured_output(captured_stdout, captured_stderr),
+        });
+    }
+    if let Some(failure) = pipe_failure {
+        return Err(match failure {
+            PipeFailure::Io(stream, source) => SpawnError::Read {
+                command: described,
+                stream,
+                source,
+                output: captured_output(captured_stdout, captured_stderr),
+            },
+            PipeFailure::Join(stream, source) => SpawnError::ReadTask {
+                command: described,
+                stream,
+                source,
+                output: captured_output(captured_stdout, captured_stderr),
+            },
+            PipeFailure::Group(source) => SpawnError::Kill {
+                command: described,
+                source: Box::new(source),
+                output: captured_output(captured_stdout, captured_stderr),
+            },
+        });
+    }
+    let status = status.map_err(|source| SpawnError::Wait {
+        command: described,
+        source,
+        output: captured_output(captured_stdout.clone(), captured_stderr.clone()),
+    })?;
+    Ok(match waited {
+        Waited::Exited => Outcome::Exited {
+            status,
+            stdout: captured_stdout,
+            stderr: captured_stderr,
+        },
+        Waited::TimedOut | Waited::Failed => Outcome::TimedOut {
             pgid,
-            stdout,
-            stderr,
+            stdout: captured_stdout,
+            stderr: captured_stderr,
         },
         Waited::Cancelled => Outcome::Cancelled {
             pgid,
-            stdout,
-            stderr,
+            stdout: captured_stdout,
+            stderr: captured_stderr,
         },
     })
-}
-
-fn stdio(capture: Capture) -> Stdio {
-    match capture {
-        Capture::Inherit => Stdio::inherit(),
-        Capture::Discard => Stdio::null(),
-        Capture::Collect => Stdio::piped(),
-    }
-}
-
-fn read_to_end<R: AsyncRead + Unpin + Send + 'static>(mut pipe: R) -> JoinHandle<Vec<u8>> {
-    tokio::spawn(async move {
-        let mut buf = Vec::new();
-        let _ = pipe.read_to_end(&mut buf).await;
-        buf
-    })
-}
-
-async fn drain(task: Option<JoinHandle<Vec<u8>>>) -> Vec<u8> {
-    match task {
-        Some(task) => task.await.unwrap_or_default(),
-        None => Vec::new(),
-    }
 }

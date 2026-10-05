@@ -34,27 +34,17 @@ pub(crate) fn check_runner_fanout(workflow: &Workflow, errors: &mut Vec<CheckErr
                 }
             }
         }
-        for spec in &node.context {
-            if let yunta_core::ContextSpec::Artifact { artifact } = spec {
-                if let Some(referenced) = &artifact.node {
-                    if fanout_ids.contains(referenced) {
-                        errors.push(CheckError::FanOutTarget {
-                            node: node.id.clone(),
-                            target: referenced.clone(),
-                        });
-                    }
+        for read in yunta_core::workflow::reads::artifact_reads(node) {
+            let Some(referenced) = read.node.filter(|named| fanout_ids.contains(*named)) else {
+                continue;
+            };
+            let (node, target) = (node.id.clone(), referenced.clone());
+            errors.push(match read.site {
+                yunta_core::workflow::reads::ReadSite::Mount => {
+                    CheckError::MountOnFanOut { node, target }
                 }
-            }
-        }
-        if let NodeKind::Workflow { mounts, .. } = &node.kind {
-            for mount in mounts {
-                if fanout_ids.contains(&mount.artifact.node) {
-                    errors.push(CheckError::MountOnFanOut {
-                        node: node.id.clone(),
-                        target: mount.artifact.node.clone(),
-                    });
-                }
-            }
+                _ => CheckError::FanOutTarget { node, target },
+            });
         }
     }
     // An explicit `runners: []` parses identically to an absent field

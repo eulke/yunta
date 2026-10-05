@@ -1,0 +1,29 @@
+run 7E5PH4: ◆ needs you
+  node `lint` failed and its 0 re-routes to `fix-lint` are
+  exhausted — exit 101
+
+  lint: exit 101
+    │ error[E0425]: cannot find value `x` in this scope
+    │  --> src/lib.rs:3:5
+    whole output: ~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/342da2eb16499698087adc25ad9595254cd6664564344b7db803bc9bd029d8da
+
+  decision on node `lint`
+    retry — Re-route to `fix-lint` once more
+      Uses one extra correction attempt beyond the declared
+      max_reroutes (0)
+      yunta resolve-gate 7E5PH4 retry
+    abort — Abort the run
+      Pauses here; nothing further executes
+      yunta resolve-gate 7E5PH4 abort
+  the run holds its own state on disk — close this terminal
+  whenever you like and answer from anywhere.
+
+  progress     nodes 0/1 · 1 failed
+  tokens       20.2k spent
+  slowest      lint 12s
+  branch       yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off
+               main, in
+               ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
+
+  yunta close 7E5PH4    closes it for good
+  yunta status 7E5PH4   shows the whole run

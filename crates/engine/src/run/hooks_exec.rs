@@ -1,23 +1,49 @@
 //! `hooks:` around a node — the `before`/`after` commands, the node's
 //! own list merged over `node_defaults`, and how a hook failure lands.
 
-use yunta_core::events::{EventPayload, HookExecutedPayload, HookPhase};
-use yunta_core::{HookStep, Hooks, Node};
+use yunta_core::events::{
+    CommandExit, CommandOrigin, EventPayload, HookExecutedPayload, HookPhase,
+};
+use yunta_core::{ConfigKey, HookStep, Hooks, Node, Resolved};
 
-use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
-use crate::template::render_template;
+use crate::process::{spawn_governed, CommandOutput, GovernedCommand, Outcome};
+use yunta_core::template::render_template;
 
 use super::node_exec::template_vars;
 use super::{RunCtx, RunError};
+use yunta_core::events::NodeEvent;
 
-/// How one hook step went: it ran (with its own success bool, before the
-/// caller applies `on_failure`), or the permissions model refused it
-/// outright. The distinction matters because `on_failure: warn` downgrades
-/// a hook's own failure, never a governance violation — otherwise
-/// any hook could opt out of the model by declaring itself warn-only.
+/// How one hook step went: it passed, it failed (with what it left
+/// behind, before the caller applies `on_failure`), or the permissions
+/// model refused it outright. The distinction matters because
+/// `on_failure: warn` downgrades a hook's own failure, never a
+/// governance violation — otherwise any hook could opt out of the model
+/// by declaring itself warn-only.
 pub(super) enum HookRun {
-    Ran(bool),
+    Passed,
+    Failed(CommandExit),
     Violation(String),
+    /// It names a command the run's frozen config does not declare.
+    Unset(ConfigKey),
+}
+
+/// What a hook that failed left behind, named as the workflow wrote it.
+fn hook_exit(
+    phase: HookPhase,
+    step: &HookStep,
+    code: i32,
+    tail: Vec<String>,
+    output: Option<yunta_core::ContentHash>,
+) -> CommandExit {
+    CommandExit {
+        origin: Some(CommandOrigin::Hook {
+            phase,
+            command: step.run.to_string(),
+        }),
+        code,
+        tail,
+        output,
+    }
 }
 
 /// A hook only ever fails or warns — unless the permissions model
@@ -28,7 +54,22 @@ pub(super) async fn run_hook(
     phase: HookPhase,
     step: &HookStep,
 ) -> Result<HookRun, RunError> {
-    let rendered = match render_template(&step.run, &template_vars(ctx, node)) {
+    let script = match step.run.resolve(&ctx.manifest.config) {
+        Ok(Resolved::Script(script)) => script,
+        Ok(Resolved::Project { text, .. }) => text,
+        Err(command) => {
+            return Ok(HookRun::Unset(ConfigKey::Command {
+                command: command.clone(),
+            }))
+        }
+    };
+    // A project's command runs as the project wrote it; only a script is
+    // the workflow's to template.
+    let rendered = match step.run.project() {
+        Some(_) => Ok(script.to_string()),
+        None => render_template(script, &template_vars(ctx, node)),
+    };
+    let rendered = match rendered {
         Ok(rendered) => rendered,
         Err(_) => {
             // An unrenderable hook is a failed hook — the
@@ -36,14 +77,22 @@ pub(super) async fn run_hook(
             // account of it; no warning duplicates that event.
             ctx.emit(
                 Some(&node.id),
-                EventPayload::HookExecuted(HookExecutedPayload {
+                EventPayload::Node(NodeEvent::HookExecuted(HookExecutedPayload {
                     phase,
-                    command: step.run.clone(),
+                    command: script.to_string(),
                     exit_code: -1,
-                }),
+                    output: None,
+                    tail: Vec::new(),
+                })),
             )
             .await?;
-            return Ok(HookRun::Ran(false));
+            return Ok(HookRun::Failed(hook_exit(
+                phase,
+                step,
+                -1,
+                Vec::new(),
+                None,
+            )));
         }
     };
 
@@ -55,33 +104,51 @@ pub(super) async fn run_hook(
         return Ok(HookRun::Violation(rule));
     }
 
-    // A hook shares the engine's streams and is bounded by its own
-    // timeout and by the run's cancellation; either kills its whole
-    // process tree.
-    let mut command = GovernedCommand::shell(ctx.worktree, &rendered)
-        .stdout(Capture::Inherit)
-        .stderr(Capture::Inherit);
+    // What a hook prints is the run's, never the terminal's: it lands in
+    // the run's objects, and the tail of a failing hook on its event. A
+    // hook is bounded by its own timeout and by the run's cancellation;
+    // either kills its whole process tree.
+    let mut command = GovernedCommand::shell(ctx.worktree, &rendered);
     if let Some(seconds) = step.timeout_seconds {
         command = command.timeout(std::time::Duration::from_secs(seconds));
     }
-    let exit_code = match spawn_governed(command, ctx.supervision(&ctx.root_cancel)).await? {
+    let outcome = spawn_governed(command, ctx.supervision(&ctx.root_cancel)).await?;
+    let exit_code = match &outcome {
         Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
         // Never a real process exit code (those are 0..=255) — distinct
         // from -1's "couldn't even render/run", so a hook the engine
         // stopped is diagnosable from the event alone.
         Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
     };
+    let printed = CommandOutput::of(&outcome);
+    let output = crate::artifacts::store::ObjectStore::at(ctx.run_dir)
+        .put_redacted(printed.bytes(), &ctx.redactor)
+        .await
+        .map_err(|source| RunError::Io {
+            context: format!("keep what hook `{rendered}` printed"),
+            source,
+        })?;
+    let (tail, run) = match exit_code {
+        0 => (Vec::new(), HookRun::Passed),
+        _ => {
+            let tail = printed.tail();
+            let exit = hook_exit(phase, step, exit_code, tail.clone(), Some(output.clone()));
+            (tail, HookRun::Failed(exit))
+        }
+    };
 
     ctx.emit(
         Some(&node.id),
-        EventPayload::HookExecuted(HookExecutedPayload {
+        EventPayload::Node(NodeEvent::HookExecuted(HookExecutedPayload {
             phase,
             command: rendered,
             exit_code,
-        }),
+            output: Some(output),
+            tail,
+        })),
     )
     .await?;
-    Ok(HookRun::Ran(exit_code == 0))
+    Ok(run)
 }
 
 /// A node's hooks with `node_defaults.hooks` filled in per phase:

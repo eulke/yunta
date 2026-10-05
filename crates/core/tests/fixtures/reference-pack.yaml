@@ -12,7 +12,7 @@ requires:
     - { name: reviewer, permissions: read-only }
     - { name: mechanical }
   mcp_servers: [internal-docs]
-  commands: ["gh", "cargo"]
+  programs: ["gh", "cargo"]
 
 declares:
   permissions: read-only

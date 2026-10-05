@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 use yunta_core::events::TokenUsage;
 use yunta_core::{ExecutorKind, ExecutorName, ExecutorRegistration, Node};
 
-use super::node_close::{close_node, fail, Close};
+use super::node_close::{close_node, fail, fail_with, Close};
 use super::node_exec::NodeEnd;
 use super::{RunCtx, RunError};
 use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome};
@@ -74,11 +74,12 @@ pub(super) async fn execute_executor(
         .as_ref()
         .and_then(|skills| skills.executors.iter().find(|e| e.name == *executor))
     else {
-        return fail(
+        return super::check_exec::unset(
             ctx,
             node,
-            format!("executor `{executor}` needs a matching entry under `skills.executors`"),
-            false,
+            yunta_core::ConfigKey::Executor {
+                executor: executor.clone(),
+            },
         )
         .await;
     };
@@ -118,51 +119,45 @@ pub(super) async fn execute_executor(
     if let Some(seconds) = timeout_seconds {
         command = command.timeout(Duration::from_secs(seconds));
     }
-    let (status, stdout_bytes, stderr_bytes) =
-        match spawn_governed(command, ctx.supervision(cancel)).await? {
-            Outcome::Exited {
-                status,
-                stdout,
-                stderr,
-            } => (status, stdout, stderr),
-            Outcome::Cancelled { .. } => return super::node_exec::cancelled_end(ctx, node).await,
-            Outcome::TimedOut { .. } => {
-                return fail(
-                    ctx,
-                    node,
-                    format!(
-                        "executor `{executor}` exceeded its {}s timeout",
-                        timeout_seconds.unwrap_or_default()
-                    ),
-                    false,
-                )
-                .await;
-            }
-        };
+    let outcome = spawn_governed(command, ctx.supervision(cancel)).await?;
+    let (status, stdout_bytes) = match &outcome {
+        Outcome::Exited { status, stdout, .. } => (status, stdout),
+        Outcome::Cancelled { .. } => return super::node_exec::cancelled_end(ctx, node).await,
+        Outcome::TimedOut { .. } => {
+            return fail(
+                ctx,
+                node,
+                format!(
+                    "executor `{executor}` exceeded its {}s timeout",
+                    timeout_seconds.unwrap_or_default()
+                ),
+                false,
+            )
+            .await;
+        }
+    };
 
     let exit_code = status.code().unwrap_or(-1);
     if exit_code == 0 {
-        let summary = serde_json::from_slice::<ExecutorOutput>(&stdout_bytes)
+        let summary = serde_json::from_slice::<ExecutorOutput>(stdout_bytes)
             .ok()
             .and_then(|output| output.summary)
             .unwrap_or_else(|| format!("executor `{executor}` exited 0"));
         close_node(ctx, node, Close::new(summary, TokenUsage::default())).await
     } else {
-        let stderr_tail: String = String::from_utf8_lossy(&stderr_bytes)
-            .lines()
-            .rev()
-            .take(20)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("\n");
-        fail(
+        // An executor that signals only through its exit code — a probe
+        // that writes nothing — is reported as that code alone.
+        let origin = yunta_core::events::CommandOrigin::Executor {
+            executor: executor.to_string(),
+        };
+        let failure = super::command_exited(
             ctx,
-            node,
-            format!("executor `{executor}` exited {exit_code}: {stderr_tail}"),
-            false,
+            &outcome,
+            exit_code,
+            Some(origin),
+            &format!("executor `{executor}`"),
         )
-        .await
+        .await?;
+        fail_with(ctx, node, failure, false, TokenUsage::default()).await
     }
 }

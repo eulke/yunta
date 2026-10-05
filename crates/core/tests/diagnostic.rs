@@ -1,11 +1,11 @@
 //! A diagnostic names what is wrong in the vocabulary of the document,
-//! and a report renders every one of them the way `spec-ledger.md` §4
+//! and a report renders every one of them the way `spec-tasks.md` §4
 //! fixes it. Nothing a deserializer says about its own internals
 //! reaches either rendering.
 
 use yunta_core::diagnostic::{
-    ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, RuleCode,
-    Subject,
+    ArtifactFailure, Diagnostic, DiagnosticCode, DocumentRef, FileProblem, Named, Problem, Report,
+    RuleCode, Subject,
 };
 use yunta_core::events::{ArtifactId, Failure};
 use yunta_core::{ArtifactKind, NodeId, RunId, TaskId};
@@ -109,7 +109,7 @@ fn a_diagnostic_survives_the_event_log_as_data() {
     let json = serde_json::to_string(&diagnostic).expect("a diagnostic serializes");
     let back: Diagnostic = serde_json::from_str(&json).expect("and reads back identical");
     assert_eq!(back, diagnostic);
-    assert_eq!(back.code(), "empty-scope");
+    assert_eq!(back.code().as_str(), "empty-scope");
 }
 
 #[test]
@@ -122,7 +122,10 @@ fn every_diagnostic_has_a_stable_code_for_counting() {
         ),
     ];
     for (problem, expected) in cases {
-        assert_eq!(Diagnostic::new(Subject::Document, problem).code(), expected);
+        assert_eq!(
+            Diagnostic::new(Subject::Document, problem).code().as_str(),
+            expected
+        );
     }
 }
 
@@ -176,7 +179,11 @@ fn a_failure_keeps_the_document_every_problem_came_from() {
         .map(|report| {
             (
                 report.document.path.as_str(),
-                report.diagnostics.iter().map(Diagnostic::code).collect(),
+                report
+                    .diagnostics
+                    .iter()
+                    .map(|d| d.code().as_str())
+                    .collect(),
             )
         })
         .collect();
@@ -237,7 +244,7 @@ fn a_document_nobody_handed_over_is_a_failure_of_the_artifact_itself() {
     };
 
     assert_eq!(
-        undelivered.code(),
+        undelivered.code().map(DiagnosticCode::as_str),
         Some("artifact-undelivered"),
         "a receipt counts it under its own stable name"
     );
@@ -300,7 +307,7 @@ fn an_artifact_no_run_holds_is_a_failure_of_the_artifact_itself() {
     };
 
     assert_eq!(
-        unheld.code(),
+        unheld.code().map(DiagnosticCode::as_str),
         Some("artifact-unheld"),
         "a receipt counts it under its own stable name"
     );
@@ -350,4 +357,56 @@ fn an_artifact_another_run_owes_renders_as_the_run_that_does_not_hold_it() {
         "it is one declared artifact that did not close"
     );
     assert_eq!(failure.reports().count(), 0, "no document was read");
+}
+
+/// Where `report`'s diagnostics are placed, in order.
+fn placed(report: &Report) -> Vec<Option<(usize, usize)>> {
+    report
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.at.map(|at| (at.line, at.col)))
+        .collect()
+}
+
+#[test]
+fn a_diagnostic_read_from_text_carries_its_location() {
+    // Parsed, then broken: a dependency on a node nobody declares is
+    // placed on the name in the list that names it.
+    let workflow = "name: w\nnodes:\n  - id: lint\n    kind: bash\n    run: \"true\"\n  - id: fix\n    kind: bash\n    run: \"true\"\n    depends_on: [lnt]\n";
+    let report = yunta_core::workflow::read::read(workflow, std::path::Path::new("w.yaml"))
+        .expect_err("`lnt` is declared nowhere");
+    assert_eq!(placed(&report), [Some((9, 18))], "{report}");
+
+    // Not parsed at all: placed where the parser stopped.
+    let unread = "name: w\nnodes:\n  - id: lint\n    kind: bash\n    rn: x\n";
+    let report = yunta_core::workflow::read::read(unread, std::path::Path::new("w.yaml"))
+        .expect_err("`rn` is no key of a bash node");
+    assert!(
+        placed(&report)[0].is_some_and(|(line, _)| line == 3 || line == 5),
+        "{report}"
+    );
+}
+
+#[test]
+fn a_tasks_document_places_a_broken_rule_at_the_task_it_names() {
+    let tasks = "tasks:\n  - id: t1\n    title: one\n    scope: [src/]\n    criteria:\n      - { cmd: \"true\" }\n  - id: t1\n    title: two\n    scope: [src/]\n    criteria:\n      - { cmd: \"true\" }\n";
+    let report = yunta_core::shape::read::<yunta_core::TasksFile>(tasks.as_bytes(), "plan.yaml")
+        .expect_err("two tasks carry one id");
+    assert!(
+        report.diagnostics.iter().any(|diagnostic| diagnostic.code()
+            == DiagnosticCode::Rule(RuleCode::DuplicateId)
+            && diagnostic.at.is_some_and(|at| at.line == 7)),
+        "the second `t1` is the one at fault: {report:?}"
+    );
+}
+
+#[test]
+fn a_document_handed_over_as_a_value_has_no_place_to_point_to() {
+    let submitted = serde_json::json!({ "tasks": [{ "id": "t1" }] });
+    let report = yunta_core::shape::accept::<yunta_core::TasksFile>(submitted, "plan.yaml")
+        .expect_err("a task needs its fields");
+    assert!(report
+        .diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.at.is_none()));
 }

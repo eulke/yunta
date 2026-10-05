@@ -1,56 +1,95 @@
 //! Dispatching one task of a batch in its own worktree, with the
 //! attempt number and the expansions already granted to it.
 
-use std::path::PathBuf;
+use yunta_core::ScopeGlob;
 
 use yunta_core::events::{EventPayload, StoredEvent, TaskStatus, TaskStatusChangedPayload};
-use yunta_core::{CommitSha, Isolation, Node, Task};
+use yunta_core::{CommitSha, Node, Task};
 
-use crate::task_cycle::{run_task, AttemptEnv, ScopeGovernance, TaskCycleReport};
-use crate::worktree::prepare_worktree;
+use crate::task_cycle::{run_task, AttemptEnv, Continuing, ScopeGovernance, TaskCycleReport};
+use crate::worktree::{reopen_unit, Lease, Unit, UnitHome, UnitId};
 
+use crate::replay::RunState;
 use crate::run::{RunCtx, RunError};
+use yunta_core::events::TaskEvent;
 
 /// How many times this task has already been dispatched `Running` in the
 /// log — 1-indexed, so the first dispatch is attempt 1. Used only to keep
 /// worktree/branch names unique across a resumed orphan's fresh attempt;
-/// never fed into retry-limit logic (that's `run_task`'s own
-/// `max_retries`, scoped to one dispatch).
-pub(super) fn attempt_number(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> u32 {
-    events
-        .iter()
-        .filter(|event| {
-            matches!(
-                event.payload(),
-                Some(EventPayload::TaskStatusChanged(p))
-                    if p.task_id == *task_id && p.new_status == TaskStatus::Running
-            )
-        })
-        .count() as u32
-        + 1
+/// never fed into the cycle's own decision whether to dispatch again.
+pub(super) fn attempt_number(state: &RunState, task_id: &yunta_core::TaskId) -> u32 {
+    state.tasks.get(task_id).map_or(0, |record| record.attempts) + 1
 }
 
-/// Every path a prior `scope_expansion_granted` on the log authorized
-/// for `task_id` — the retry after a human grant derives its
-/// widened scope from here, never from in-memory state.
-fn granted_paths_for(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> Vec<String> {
-    events
-        .iter()
-        .filter_map(|event| match event.payload() {
-            Some(EventPayload::ScopeExpansionGranted(p)) if &p.task_id == task_id => {
-                Some(p.paths.iter().cloned())
-            }
-            _ => None,
-        })
-        .flatten()
-        .collect()
+/// The checkout and the session a task reopened to resume picks back
+/// up: the unit holding the work its session left, and that session with
+/// the answer it waited for. `None` for a task reopened any other way —
+/// and for one whose checkout is gone, which then continues from the work
+/// in a fresh unit, with the log saying the session was not resumed.
+async fn continuation(
+    ctx: &RunCtx<'_>,
+    node: &Node,
+    task: &Task,
+    state: &RunState,
+    adapter: &dyn yunta_core::port::Adapter,
+) -> Result<Option<(Unit, Continuing)>, RunError> {
+    let Some(record) = state.tasks.get(&task.id) else {
+        return Ok(None);
+    };
+    // What the session is picked back up on: the answer to the departure
+    // it declared when the task's reopening followed one, and otherwise
+    // the answer to the scope it asked for.
+    let answer = match &record.deviation_answer {
+        Some(departure) => Some(crate::task_cycle::Answer::Deviation(departure.clone())),
+        None => state
+            .grants
+            .answer_for(&task.id)
+            .cloned()
+            .map(crate::task_cycle::Answer::Scope),
+    };
+    let (Some(session), Some((_, work)), Some(answer)) =
+        (record.resumes.clone(), record.left_work.as_ref(), answer)
+    else {
+        return Ok(None);
+    };
+    let reopened = reopen_unit(
+        ctx.worktree,
+        ctx.run_id,
+        UnitId::Task(task.id.clone()),
+        Some(work),
+        ctx.root_supervision(),
+    )
+    .await?;
+    let Some(unit) = reopened else {
+        ctx.emit(
+            Some(&node.id),
+            EventPayload::Session(yunta_core::events::SessionEvent::CapabilityDegraded(
+                yunta_core::events::CapabilityDegradedPayload::new(
+                    yunta_core::Capability::ResumeSession,
+                    adapter.id().clone(),
+                    yunta_core::events::Policy::FreshSession,
+                ),
+            )),
+        )
+        .await?;
+        return Ok(None);
+    };
+    Ok(Some((unit, Continuing { session, answer })))
+}
+
+/// Everything the log lets `task_id` reach beyond its declared scope:
+/// the files that name a shape it owns, and every path a prior
+/// `scope_expansion_granted` authorized — the retry after a human grant
+/// derives its widened scope from here, never from in-memory state.
+fn granted_paths_for(state: &RunState, task_id: &yunta_core::TaskId) -> Vec<ScopeGlob> {
+    state.grants.reach_for(task_id)
 }
 
 /// Isolates one batch member in its own worktree — each task in the
 /// batch gets its own worktree derived from the current base commit —
 /// and runs it through the ordinary task cycle there — pre-check,
-/// dispatch, post-check, scope-check, retried up to `max_task_retries`
-/// exactly as the sequential path always has. Never commits or marks
+/// dispatch, post-check, scope-check, exactly as the sequential path
+/// always has. Never commits or marks
 /// the task `done`/`blocked` in the log itself; that's the caller's job
 /// once every batch member's dispatch has settled, so integration can
 /// stay strictly serial and in declaration order.
@@ -61,12 +100,25 @@ fn granted_paths_for(events: &[StoredEvent], task_id: &yunta_core::TaskId) -> Ve
 #[derive(Clone, Copy)]
 pub(super) struct BatchDispatchEnv<'a> {
     pub(super) events: &'a [StoredEvent],
+    /// Every task of the batch: what each member's others may write is
+    /// what evidence alone never grants it.
+    pub(super) batch: &'a [&'a Task],
     pub(super) base_commit: &'a CommitSha,
-    pub(super) adapter: &'a dyn yunta_adapters::Adapter,
+    pub(super) adapter: &'a dyn yunta_core::port::Adapter,
     pub(super) scope_expansion: Option<&'a yunta_core::ScopeExpansion>,
     pub(super) grants: &'a crate::scope_expansion::GrantLedger,
     pub(super) cancel: &'a tokio_util::sync::CancellationToken,
     pub(super) setup: &'a crate::task_cycle::SessionSetup,
+}
+
+/// One batch member's dispatch: its task, the unit it worked in and the
+/// hold on that unit's checkout — kept until the task is integrated or
+/// set aside — and what its cycle reported.
+pub(super) struct Dispatched<'a> {
+    pub(super) task: &'a Task,
+    pub(super) unit: Unit,
+    pub(super) lease: Lease,
+    pub(super) report: TaskCycleReport,
 }
 
 pub(super) async fn dispatch_task_in_isolation<'a>(
@@ -75,9 +127,10 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     env: &BatchDispatchEnv<'_>,
     task: &'a Task,
     instruction: &str,
-) -> Result<(&'a Task, PathBuf, TaskCycleReport), RunError> {
+) -> Result<Dispatched<'a>, RunError> {
     let BatchDispatchEnv {
         events,
+        batch,
         base_commit,
         adapter,
         scope_expansion,
@@ -85,27 +138,47 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         cancel,
         setup,
     } = *env;
-    let attempt = attempt_number(events, &task.id);
-    let task_worktree = ctx
-        .run_dir
-        .join("task-worktrees")
-        .join(format!("{}-{attempt}", task.id));
-    let branch = crate::worktree::task_branch(ctx.run_id, &task.id, attempt);
-    prepare_worktree(
-        ctx.worktree,
-        &task_worktree,
-        base_commit,
-        &branch,
-        Isolation::Worktree,
-    )
-    .await?;
+    let state = crate::replay::derive(events);
+    let beside: Vec<ScopeGlob> = batch
+        .iter()
+        .filter(|other| other.id != task.id)
+        .flat_map(|other| super::batch::reach(other, &state))
+        .collect();
+    let attempt = attempt_number(&state, &task.id);
+    let continuation = continuation(ctx, node, task, &state, adapter).await?;
+    let (unit, lease, resume) = match continuation {
+        Some((unit, continuing)) => {
+            let lease = ctx
+                .pool
+                .hold(unit.worktree.clone(), ctx.root_supervision())
+                .await?;
+            (unit, lease, Some(continuing))
+        }
+        None => {
+            let (unit, lease) = ctx
+                .pool
+                .open(
+                    UnitHome {
+                        repo: ctx.worktree,
+                        run_dir: ctx.run_dir,
+                        run_id: ctx.run_id,
+                        base: base_commit,
+                    },
+                    UnitId::Task(task.id.clone()),
+                    attempt,
+                    ctx.root_supervision(),
+                )
+                .await?;
+            (unit, lease, None)
+        }
+    };
 
     let registered_seq = events
         .iter()
         .find(|event| {
             matches!(
                 event.payload(),
-                Some(EventPayload::TaskRegistered(p)) if p.task_id == task.id
+                Some(EventPayload::Tasks(TaskEvent::Registered(p))) if p.task_id == task.id
             )
         })
         .map(|event| event.seq)
@@ -117,12 +190,11 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         })?;
     ctx.emit(
         Some(&node.id),
-        EventPayload::TaskStatusChanged(TaskStatusChangedPayload {
-            task_id: task.id.clone(),
-            new_status: TaskStatus::Running,
-            caused_by: registered_seq,
-            commit: None,
-        }),
+        EventPayload::Tasks(TaskEvent::StatusChanged(TaskStatusChangedPayload::to(
+            task.id.clone(),
+            TaskStatus::Running,
+            registered_seq,
+        ))),
     )
     .await?;
 
@@ -131,11 +203,22 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
         instruction,
         AttemptEnv {
             adapter,
-            cwd: &task_worktree,
-            max_retries: ctx.max_task_retries,
+            node,
+            unit: &unit,
             budget: ctx.session_budget().await?,
             memo: &ctx.memo,
-            registry: ctx.process_registry.as_ref(),
+            history: &state.tasks,
+            supervision: ctx.supervision(cancel),
+            // A task a person reopened to continue carries the work it
+            // continues from on the reopening itself — unless the session
+            // that left it picks it back up in the unit that holds it.
+            carry: state
+                .tasks
+                .get(&task.id)
+                .and_then(|record| record.left_work.as_ref())
+                .map(|(_, work)| work)
+                .filter(|_| resume.is_none()),
+            resume,
         },
         ScopeGovernance {
             permissions: ctx.manifest.config.permissions.as_ref(),
@@ -143,7 +226,8 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
             scope_expansion,
             max_expansion_files: ctx.manifest.config.resolved_max_expansion_files(),
             grants,
-            already_granted_paths: &granted_paths_for(events, &task.id),
+            already_granted_paths: &granted_paths_for(&state, &task.id),
+            beside: &beside,
         },
         Some((ctx as &dyn crate::task_cycle::SessionObserver, &node.id)),
         cancel,
@@ -151,5 +235,10 @@ pub(super) async fn dispatch_task_in_isolation<'a>(
     )
     .await?;
 
-    Ok((task, task_worktree, report))
+    Ok(Dispatched {
+        task,
+        unit,
+        lease,
+        report,
+    })
 }

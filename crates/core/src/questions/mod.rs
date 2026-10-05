@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::QuestionId;
 
-/// `text | choice | boolean`, verbatim.
+/// How a person answers: `text` in their own words, `choice` with one of
+/// the question's `values`, `boolean` with yes or no.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AnswerType {
@@ -23,34 +24,42 @@ impl AnswerType {
     pub const NAMES: [&'static str; 3] = ["text", "choice", "boolean"];
 }
 
-/// One question: `id`, `text`, `answer_type`, `values` only when
-/// `answer_type` is `choice`, and `required`.
+/// One question a person answers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Question {
     pub id: QuestionId,
+    /// The question, standing on its own for someone who has not read the
+    /// code.
     pub text: String,
     pub answer_type: AnswerType,
+    /// The options of a `choice` question, and of no other.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
+    /// Whether the run waits for the answer: a round with a required
+    /// question pauses it, and a round of optional ones does not.
     pub required: bool,
+    /// What the work takes as the answer when nobody gives one — what an
+    /// optional question has to say, so the run can go on without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assumes: Option<String>,
 }
 
-/// A `kind: questions` artifact's document — sole top-level key
-/// `questions:`, mirroring `TasksFile`'s `tasks:`-only shape and
-/// `FindingsFile`'s `findings:`-only shape.
+/// What a node needs a person to decide. An empty list asks nothing.
+// Sole top-level key `questions:`, as a tasks document has only `tasks:`
+// and a findings document only `findings:`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QuestionsFile {
     pub questions: Vec<Question>,
 }
 
-/// One answer: the question's `id` and the human's value, as
-/// text — a `boolean` answer is the string `true`/`false`, a `choice`
-/// one of the declared `values`. Strings deliberately, not a typed enum
-/// per answer kind: the artifact is what a *following node's session*
-/// reads — meant to be consumed by whatever node comes next — and text
-/// is the only shape every consumer shares.
+/// One answer: the question's `id` and the person's value, as text — a
+/// `boolean` answer is the string `true`/`false`, a `choice` one of the
+/// declared `values`.
+// Strings deliberately, not a typed enum per answer kind: the artifact is
+// what a following node's session reads, and text is the only shape every
+// consumer shares.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Answer {
     pub id: QuestionId,
@@ -64,48 +73,7 @@ pub struct AnswersFile {
     pub answers: Vec<Answer>,
 }
 
-/// Validates a reply against its questions: every `required`
-/// question answered, every answer names a declared question, `choice`
-/// values within the declared list, `boolean` values parseable. All
-/// violations reported together, never just the first (same principle
-/// as the tasks document's own registration).
-pub fn validate_answers(file: &QuestionsFile, answers: &[Answer]) -> Vec<String> {
-    let mut violations = Vec::new();
-    for answer in answers {
-        let Some(question) = file.questions.iter().find(|q| q.id == answer.id) else {
-            violations.push(format!("answer `{}` names no declared question", answer.id));
-            continue;
-        };
-        match question.answer_type {
-            AnswerType::Choice => {
-                if !question.values.contains(&answer.value) {
-                    violations.push(format!(
-                        "answer `{}`: `{}` is not one of [{}]",
-                        answer.id,
-                        answer.value,
-                        question.values.join(", ")
-                    ));
-                }
-            }
-            AnswerType::Boolean => {
-                if answer.value != "true" && answer.value != "false" {
-                    violations.push(format!(
-                        "answer `{}`: `{}` is not `true`/`false`",
-                        answer.id, answer.value
-                    ));
-                }
-            }
-            AnswerType::Text => {}
-        }
-    }
-    for question in &file.questions {
-        if question.required && !answers.iter().any(|a| a.id == question.id) {
-            violations.push(format!("required question `{}` has no answer", question.id));
-        }
-    }
-    violations
-}
-
+mod answers;
 mod rules;
 
 /// The shape this document publishes, as the YAML it is.

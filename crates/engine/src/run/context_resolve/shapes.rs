@@ -27,22 +27,24 @@ pub(super) const SHAPE_KIND: &str = "artifact-shape";
 /// identical in every session of this node and sits inside the
 /// byte-stable prefix a provider's cache reuses rather than disturbing
 /// it.
-pub(super) fn mount_artifact_shapes(
+pub(super) async fn mount_artifact_shapes(
     ctx: &RunCtx<'_>,
     node: &Node,
-    blocks: &mut Vec<String>,
-    sources: &mut Vec<ContextSourceRef>,
+    naming: yunta_core::ToolNaming,
+    (blocks, sources): (&mut Vec<String>, &mut Vec<ContextSourceRef>),
 ) -> Result<(), ContextResolveError> {
     let inline_threshold = ctx.manifest.config.resolved_inline_context_bytes() as usize;
-    for (source_id, content) in artifact_shapes(node) {
+    for (source_id, content) in artifact_shapes(node, naming) {
         let bytes = content.into_bytes();
         let (path, content_hash) =
-            materialize(ctx.run_dir, &bytes).map_err(|source| ContextResolveError::Io {
-                node: node.id.clone(),
-                source_id: source_id.clone(),
-                action: "materialize an artifact shape".to_string(),
-                source,
-            })?;
+            materialize(ctx.run_dir, &bytes)
+                .await
+                .map_err(|source| ContextResolveError::Io {
+                    node: node.id.clone(),
+                    source_id: source_id.clone(),
+                    action: "materialize an artifact shape".to_string(),
+                    source,
+                })?;
         blocks.push(render_block(
             &source_id,
             SHAPE_KIND,
@@ -54,6 +56,7 @@ pub(super) fn mount_artifact_shapes(
             source_id,
             kind: SHAPE_KIND.to_string(),
             content_hash,
+            absent: Vec::new(),
         });
     }
     Ok(())
@@ -65,8 +68,12 @@ pub(super) fn mount_artifact_shapes(
 ///
 /// The block names the kind and what carries it, never a path: an
 /// interpreted artifact is a document the session hands over, identified
-/// by its kind, and the file is the engine's to write.
-pub(super) fn artifact_shapes(node: &Node) -> Vec<(String, String)> {
+/// by its kind, and the file is the engine's to write. The tool that
+/// carries it is named the way the session's CLI names it (`naming`).
+pub(super) fn artifact_shapes(
+    node: &Node,
+    naming: yunta_core::ToolNaming,
+) -> Vec<(String, String)> {
     let Some(artifacts) = &node.artifacts else {
         return Vec::new();
     };
@@ -77,10 +84,11 @@ pub(super) fn artifact_shapes(node: &Node) -> Vec<(String, String)> {
             yunta_core::ArtifactSpec::Interpreted(kind) => {
                 let shape = yunta_core::shape::contract(*kind);
                 let opening = match kind.submit_tool() {
-                    Some(tool) => format!(
+                    Some(_) => format!(
                         "This node produces the `{kind}` document. It is not a file this \
                          session writes: hand it over with `{tool}`, and the engine \
-                         validates it and writes the file itself."
+                         validates it and writes the file itself.",
+                        tool = yunta_core::RunTool::Submit(*kind).called(naming),
                     ),
                     None => format!(
                         "This node produces the `{kind}` artifact. It is not a file this \

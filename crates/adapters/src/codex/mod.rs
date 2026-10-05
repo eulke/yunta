@@ -1,22 +1,8 @@
 //! The real `codex` adapter: spawns `codex exec --json` headless,
 //! streams its JSONL into `AgentEvent`s (`parse.rs`), and maps yunta's
 //! portable request fields onto the CLI's own flags (`permissions.rs`).
-//! Never exercised by the automated suite — no real LLM in CI — covered
-//! instead by `crates/adapters/tests/codex.rs` against a scripted fake
-//! binary, matching `claude_code`'s own testing shape exactly.
-//!
-//! **No live smoke test against the real binary — a documented gap, not
-//! a silent skip.** The `claude_code` adapter's own manual smoke test
-//! ran against `claude`, which is installed and authenticated in that
-//! sandbox. No `codex` binary exists here (`which codex` finds nothing)
-//! and no OpenAI credentials are configured — there is no way to run one
-//! from this environment. What the wire protocol looks like isn't a
-//! guess, though: `parse.rs`'s own doc comment cites the CLI's own
-//! source (`codex-rs/exec/src/exec_events.rs`, openai/codex) for every
-//! event and field shape this adapter reads, the same rigor applied to
-//! `claude_code`'s own CLI-specific mapping — the piece that's missing
-//! is only live confirmation that the installed binary actually behaves
-//! the way its own source says it should.
+//! Automated tests use a scripted CLI. A live Codex probe is run
+//! separately when the binary and credentials are available.
 //!
 //! **`resume_session` is a fixed `true`, not literally "calculated in
 //! the constructor from `probe()`"** the way the adapter spec's own
@@ -32,19 +18,23 @@
 //! justifies on its own.
 
 mod config;
+mod fence;
 mod parse;
-mod permissions;
 mod settings;
 
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use yunta_core::{AdapterError, AdapterId, AdapterSettings, Capabilities, Result, SessionId};
+use yunta_core::{
+    AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, SessionId,
+    ToolNaming, Unbuildable,
+};
 
-use crate::session::{
+use yunta_core::fence::Coverage;
+use yunta_core::port::{
     Adapter, AgentEvent, AgentSession, ProbeReport, RunToolsEndpoint, SessionRequest,
 };
-use crate::subprocess::{self, Launch, LineParser};
+use yunta_core::process::subprocess::{self, Launch, LineParser};
 
 use config::ConfigOverride;
 
@@ -76,20 +66,30 @@ impl CodexAdapter {
         }
     }
 
-    fn build_args(&self, req: &SessionRequest, resume: Option<&SessionId>) -> Vec<String> {
+    fn build_args(
+        &self,
+        req: &SessionRequest,
+        resume: Option<&SessionId>,
+    ) -> std::result::Result<Vec<String>, Unbuildable> {
         let mut args = vec!["exec".to_string(), "--json".to_string()];
         if let Some(model) = &req.model {
             args.push("--model".to_string());
             args.push(model.to_string());
         }
-        let edit_sandbox = self
-            .settings
-            .as_ref()
-            .ok()
-            .and_then(|settings| settings.sandbox)
-            .unwrap_or_default();
-        args.extend(permissions::sandbox_args(req.permissions, edit_sandbox));
-        args.extend(config_overrides(req));
+        // `launch` refused already for settings that do not read, so
+        // the fallback here is a node whose settings named nothing.
+        let settings = self.settings.as_ref().cloned().unwrap_or_default();
+        let edit_sandbox = settings.sandbox.unwrap_or_default();
+        args.extend(fence::sandbox_args(
+            &req.fence,
+            req.permissions,
+            edit_sandbox,
+        )?);
+        // Only `workspace-write` reads the switch: `read-only` has no
+        // network to open and `danger-full-access` never closed it.
+        let opens_network = settings.network_access
+            && fence::mode(req.permissions, edit_sandbox) == settings::Sandbox::WorkspaceWrite;
+        args.extend(config_overrides(req, opens_network));
         // `exec`'s own options are declared on the parent command and
         // are not `global`, so clap reads one that follows `resume` as
         // an unexpected argument and the invocation dies before a
@@ -104,7 +104,7 @@ impl CodexAdapter {
         // `-` makes the CLI read the prompt from stdin, so nothing of
         // it shows in the process list.
         args.push("-".to_string());
-        args
+        Ok(args)
     }
 
     async fn launch(
@@ -112,7 +112,21 @@ impl CodexAdapter {
         req: SessionRequest,
         resume: Option<&SessionId>,
     ) -> Result<Box<dyn AgentSession>> {
-        let args = self.build_args(&req, resume);
+        // Settings that do not read fail the session rather than fall
+        // back: a `sandbox:` nobody could parse would run the agent
+        // under a confinement the team never asked for, and silently.
+        if let Err(unreadable) = &self.settings {
+            return Err(AdapterError::UnreadableSettings {
+                adapter: ID.clone(),
+                detail: unreadable.to_string(),
+            });
+        }
+        let args =
+            self.build_args(&req, resume)
+                .map_err(|source| AdapterError::FenceUnbuildable {
+                    adapter: ID.clone(),
+                    source,
+                })?;
         // The credential the config names, placed where a secret is
         // allowed to travel: the child's own environment.
         let mut env = req.env.clone();
@@ -128,6 +142,7 @@ impl CodexAdapter {
             prompt: &req.prompt,
             parser: Box::new(CodexParser {
                 last_message: String::new(),
+                fence: fence::coverage(&req.fence, &req.cwd),
             }),
         })
         .await
@@ -140,19 +155,23 @@ impl CodexAdapter {
 /// reaches the run's own tools: both are settings of the CLI's config
 /// file, which `-c` overrides for this invocation alone rather than
 /// writing to the user's own `~/.codex/config.toml`.
-fn config_overrides(req: &SessionRequest) -> Vec<String> {
+fn config_overrides(req: &SessionRequest, opens_network: bool) -> Vec<String> {
     let mut args = Vec::new();
     // `workspace-write` confines writes to the workspace, and the
-    // directory a declared file belongs in sits in the run directory,
-    // which is never inside it. Without this the session is told to
-    // write a file the sandbox then refuses it.
-    if let Some(dir) = &req.artifact_dir {
+    // fence's roots are what sits outside it and stays writable — the
+    // directory a declared file belongs in, first of all. Without this
+    // the session is told to write a file the sandbox then refuses it.
+    let roots = fence::writable_roots(&req.fence);
+    if !roots.is_empty() {
         args.extend(
-            ConfigOverride::list(
-                "sandbox_workspace_write.writable_roots",
-                [dir.display().to_string()],
-            )
-            .into_args(),
+            ConfigOverride::list("sandbox_workspace_write.writable_roots", roots).into_args(),
+        );
+    }
+    // The same sandbox keeps every socket off, loopback included, so a
+    // command the session runs cannot even listen on 127.0.0.1.
+    if opens_network {
+        args.extend(
+            ConfigOverride::bool("sandbox_workspace_write.network_access", true).into_args(),
         );
     }
     if let Some(endpoint) = &req.run_tools_endpoint {
@@ -167,6 +186,16 @@ fn config_overrides(req: &SessionRequest) -> Vec<String> {
                 format!("mcp_servers.{server}.bearer_token_env_var"),
                 TOKEN_VAR,
             ),
+            ConfigOverride::string(
+                format!("mcp_servers.{server}.default_tools_approval_mode"),
+                "approve",
+            ),
+            // A call can run a task's criteria; the CLI waits for it as
+            // long as the session may run.
+            ConfigOverride::float(
+                format!("mcp_servers.{server}.tool_timeout_sec"),
+                RunToolsEndpoint::call_timeout(&req.budget).as_secs_f64(),
+            ),
         ] {
             args.extend(setting.into_args());
         }
@@ -179,11 +208,14 @@ fn config_overrides(req: &SessionRequest) -> Vec<String> {
 /// line to line.
 struct CodexParser {
     last_message: String,
+    /// What the sandbox this session runs under actually fenced —
+    /// computed once, when the session was built.
+    fence: Coverage,
 }
 
 impl LineParser for CodexParser {
     fn parse(&mut self, line: &str) -> Vec<AgentEvent> {
-        let events = parse::parse_line(line, &self.last_message);
+        let events = parse::parse_line(line, &self.last_message, &self.fence);
         if let Some(text) = events.iter().rev().find_map(|event| match event {
             AgentEvent::Note { text } => Some(text.clone()),
             _ => None,
@@ -208,10 +240,10 @@ impl Adapter for CodexAdapter {
             // so the engine degrades with `capability_degraded` when a
             // node declares skills here.
             skills: false,
-            // No live edit-hook blocking wired — same honest gap as
-            // claude_code, same reason: the engine's own post-hoc scope
-            // check is the real boundary today.
-            edit_hooks: false,
+            // The sandbox the process itself runs under keeps writes
+            // inside a set of directories — by directory, never by glob,
+            // which is what the coverage a session reports says.
+            fence: FenceLevel::Filesystem,
             permission_profiles: true,
             // `codex exec` has no documented `--agent <name>` selector —
             // nothing here to map `agent:` onto, so declaring the
@@ -224,10 +256,17 @@ impl Adapter for CodexAdapter {
             // off the CLI's own source rather than confirmed live —
             // see this module's doc comment.
             run_tools: true,
-            // `codex exec` isolates no network — declaring the capability
-            // would claim a sandbox that isn't built, so `network: false`
-            // degrades to declarative-only here.
+            // The `read-only` and `workspace-write` sandboxes keep a
+            // session off the network unless `network_access` opens it,
+            // but `danger-full-access` — every `full` session — leaves it
+            // open. The capability is one answer for all of them, so it
+            // is never claimed, and `network: false` degrades to
+            // declarative-only here even where the sandbox closes it.
             network_isolation: false,
+            // The CLI names an MCP server's tools `mcp__<server>__<tool>`
+            // with the server's `-` written `_`: a session finds
+            // `mcp__yunta_run__yunta_task`, never `yunta_task`.
+            tool_naming: ToolNaming::McpPrefixedUnderscored,
         }
     }
 
@@ -239,6 +278,11 @@ impl Adapter for CodexAdapter {
             });
         }
         Ok(subprocess::probe_version(&self.binary).await)
+    }
+
+    /// The OpenAI API, or the endpoint or proxy the session is pointed at.
+    async fn reachable(&self, req: &SessionRequest) -> Option<bool> {
+        crate::reach::answers(req, "OPENAI_BASE_URL", "api.openai.com").await
     }
 
     async fn spawn(&self, req: SessionRequest) -> Result<Box<dyn AgentSession>> {

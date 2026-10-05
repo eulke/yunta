@@ -8,7 +8,7 @@
 //! digest: the audit stream carries evidence that a call happened and
 //! what it answered, never the content itself.
 
-use crate::RunToolsEndpoint;
+use yunta_core::port::RunToolsEndpoint;
 
 /// Why the mock's own MCP call failed — the session fails with it.
 #[derive(Debug, thiserror::Error)]
@@ -35,10 +35,17 @@ pub(super) enum RunToolCallError {
     Refused { tool: String, text: String },
 }
 
+impl RunToolCallError {
+    /// A `tools/call` request was sent to the per-run server.
+    pub(super) fn reached_call(&self) -> bool {
+        matches!(self, Self::Call { .. } | Self::Refused { .. })
+    }
+}
+
 /// The mock's own MCP client leg: one `tools/call` against the
 /// session's per-run endpoint, exactly as a real CLI would place it.
 /// Returns a short digest of the response for the audit stream
-/// (`ToolUse.target_digest` — never full content), or the error that
+/// (`ToolUse.target` — never full content), or the error that
 /// fails the session.
 pub(super) async fn call_run_tool(
     endpoint: Option<&RunToolsEndpoint>,

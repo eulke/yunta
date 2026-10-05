@@ -4,7 +4,7 @@
 //! `run.dir`, the `--json` flag, refusing a non-terminal run) on top of
 //! `yunta_engine::receipt`'s own unit-tested derivation.
 
-use yunta_testkit::{init_repo, run_id_from, stderr, stdout, write, yunta_in};
+use yunta_testkit::{handle, init_repo, run_id_from, stderr, stdout, write, yunta_in};
 
 fn bash_only_workflow() -> &'static str {
     r#"
@@ -43,31 +43,45 @@ fn receipt_writes_both_formats_to_run_dir_and_prints_markdown_by_default() {
 
     let receipt_out = yunta_in!(&repo, &home, &["receipt", &run_id]);
     assert!(receipt_out.status.success(), "{}", stderr(&receipt_out));
-    let markdown = stdout(&receipt_out);
-    assert!(markdown.starts_with(&format!("# Verified Work Receipt — run {run_id}")));
+    let drawn = stdout(&receipt_out);
+    let handle = yunta_testkit::handle(&run_id);
     assert!(
-        markdown
-            .lines()
-            .any(|l| l == "- baseline: not used by this workflow"),
-        "{markdown}"
+        drawn.starts_with(&format!("receipt for run {handle}: ✓ finished")),
+        "{drawn}"
+    );
+    // A bash-only workflow has no tasks at all, and nothing to prove is
+    // never crossed out: it is said, with the neutral mark.
+    assert!(
+        yunta_testkit::checked(&drawn, "criteria")
+            .unwrap_or_default()
+            .contains("none declared, nothing to prove"),
+        "{drawn}"
     );
     assert!(
-        markdown.lines().any(|l| l.starts_with("- ✓ event chain: ")),
-        "{markdown}"
+        yunta_testkit::checked(&drawn, "baseline")
+            .unwrap_or_default()
+            .contains("not used by this workflow"),
+        "{drawn}"
     );
+    assert!(!drawn.contains('✗'), "{drawn}");
 
-    // A bash-only workflow has no tasks at all — 0/0 criteria, the
-    // honest reading (marked ✗, not a green ✓), never a manufactured pass.
-    assert!(
-        markdown
-            .lines()
-            .any(|l| l == "- ✗ 0/0 criteria green (commands + exit codes below)"),
-        "{markdown}"
-    );
-
+    // The file holds the same document, written as Markdown.
     let run_dir = home.join("runs").join(&run_id);
     let written_md = std::fs::read_to_string(run_dir.join("receipt.md")).unwrap();
-    assert_eq!(written_md, markdown);
+    assert!(
+        written_md.starts_with(&format!("# receipt for run {handle}: ✓ finished")),
+        "{written_md}"
+    );
+    assert!(
+        written_md
+            .lines()
+            .any(|l| l == "- · **criteria** none declared, nothing to prove"),
+        "{written_md}"
+    );
+    assert!(
+        written_md.lines().any(|l| l == format!("- run: {run_id}")),
+        "{written_md}"
+    );
     let written_json = std::fs::read_to_string(run_dir.join("receipt.json")).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&written_json).unwrap();
     assert_eq!(parsed["run_id"], run_id);
@@ -133,13 +147,48 @@ fn receipt_refuses_a_run_that_has_not_finished() {
         stderr(&receipt_out).trim_end(),
         format!(
             "error: run `{run_id}` hasn't reached a terminal state yet — \
-             `yunta status {run_id}` shows where it is; a receipt is only generated \
-             once a run finishes"
+             a receipt is only generated once a run finishes; \
+             `yunta status {}` shows where it is",
+            handle(&run_id)
         ),
-        "the refusal explains the run is not terminal and points at `yunta status`"
+        "the refusal explains why a receipt cannot be built yet and says what shows the run's state"
     );
 
     let run_dir = home.join("runs").join(&run_id);
     assert!(!run_dir.join("receipt.md").exists());
     assert!(!run_dir.join("receipt.json").exists());
+}
+
+#[test]
+fn the_receipt_carries_the_document_version() {
+    // Every machine-readable document this CLI writes says which schema
+    // it was written against — the receipt included, so a reader can
+    // refuse one from a schema it predates instead of guessing at a
+    // field it does not recognise.
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+
+    write(
+        &repo.join(".yunta/workflows/bash-only-receipt.yaml"),
+        bash_only_workflow(),
+    );
+
+    let run_out = yunta_in!(
+        &repo,
+        &home,
+        &["run", ".yunta/workflows/bash-only-receipt.yaml"]
+    );
+    assert!(run_out.status.success(), "{}", stderr(&run_out));
+    let run_id = run_id_from(&run_out);
+
+    let receipt_out = yunta_in!(&repo, &home, &["receipt", &run_id, "--json"]);
+    assert!(receipt_out.status.success(), "{}", stderr(&receipt_out));
+    let receipt: serde_json::Value = serde_json::from_str(&stdout(&receipt_out)).unwrap();
+    assert!(
+        receipt["schema_version"].as_u64().is_some(),
+        "the receipt names its schema: {receipt:#}"
+    );
 }

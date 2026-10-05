@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Report Rust functions whose bodies exceed a line budget.
 
-A function that no longer fits on a screen is a signal the repo attends to
-in the PR that crosses it (CLAUDE.md). This ratchet makes that signal
-mechanical: it walks the given files, measures every `fn` body by brace
-depth, and exits non-zero naming each function over `--max` lines so CI and
-a contributor see the same list.
+A function that no longer fits on a screen is a signal to examine its
+cohesion. This ratchet makes a chosen line budget mechanical: it walks the
+given files, measures every `fn` body by brace depth, and exits non-zero
+naming each function over `--max` lines so CI and a contributor see the
+same list.
 
 Body length is counted from the line after the opening `{` of the function
 body to its matching `}`, inclusive of blank and comment lines — the whole

@@ -4,16 +4,17 @@
 //! paper to edit, not a working pipeline. Never references a pack and
 //! never touches `yunta.lock` — `new` creates the team's own content,
 //! `pack add` is the only verb that brings in someone else's, and the
-//! two stay disjoint on purpose. Runs `check` on what it wrote and
-//! reports the result, same as `yunta check` would.
+//! two stay disjoint on purpose. Reaches the verdict `yunta check` would
+//! on what it wrote and reports it the same way, exit code included: a
+//! skeleton the project's config cannot run is written, and said not to
+//! run.
 
-use std::io::IsTerminal;
-
-use yunta_core::text::problems;
 use yunta_core::{ConfigLayer, Workflow};
 
-use crate::error::{note, warn, CliError, Outcome};
+use crate::ask::{choose, Choice, Console, Escape};
+use crate::error::{warn, CliError, Outcome};
 use crate::project;
+use crate::surface::Diagnostics;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shape {
@@ -56,13 +57,31 @@ impl Shape {
         }
     }
 
-    fn skeleton(&self, name: &str) -> String {
+    /// What a workflow of this shape does, beside its name on the menu.
+    fn does(&self) -> &'static str {
+        match self {
+            Self::OneNode => "one command whose exit code is the check",
+            Self::LintFix => "a check, and an agent that fixes what it finds",
+            Self::Tasks => "a plan of tasks, and an agent that works through them",
+        }
+    }
+
+    /// The skeleton named `name`. `lint_declared` says whether the
+    /// project's config declares a `lint` command, which a lint-fix
+    /// skeleton then runs by name instead of leaving a placeholder.
+    fn skeleton(&self, name: &str, lint_declared: bool) -> String {
         let template = match self {
             Self::OneNode => ONE_NODE_TEMPLATE,
             Self::LintFix => LINT_FIX_TEMPLATE,
             Self::Tasks => TASKS_TEMPLATE,
         };
-        template.replace("{{workflow-name}}", name)
+        let lint = match lint_declared {
+            true => LINT_DECLARED,
+            false => LINT_PLACEHOLDER,
+        };
+        template
+            .replace("{{workflow-name}}", name)
+            .replace("{{lint}}", lint)
     }
 }
 
@@ -90,17 +109,26 @@ name: {{workflow-name}}
 # `on_failure.goto` re-routes to `fix`, which gets an
 # agent session to address what's wrong, then control returns to
 # `lint` to re-verify. `max_reroutes` caps how many correction
-# attempts run before escalating to a person.
+# rounds run before escalating to a person: one, since a round that
+# did not fix it has told you what a person needs to look at.
 nodes:
   - id: lint
     kind: bash
-    run: \"true\"  # replace with your real lint/test command
-    on_failure: { goto: fix, max_reroutes: 2 }
+    {{lint}}
+    on_failure: { goto: fix, max_reroutes: 1 }
   - id: fix
     kind: prompt
     # runner: implementer  # uncomment once runners: defines this role
     prompt: \"Fix what `lint` reported.\"
 ";
+
+/// The lint step when the project declares its `lint` command: run by
+/// the name `.yunta/config.yaml` gives it.
+const LINT_DECLARED: &str =
+    "run: { command: lint }  # the project's own lint command, as its config declares it";
+
+/// The lint step when the project declares none.
+const LINT_PLACEHOLDER: &str = "run: \"true\"  # replace with your real lint/test command";
 
 const TASKS_TEMPLATE: &str = "\
 name: {{workflow-name}}
@@ -124,22 +152,19 @@ nodes:
     prompt: \"Read your next task from the tasks document and implement it.\"
 ";
 
-fn prompt_shape() -> Shape {
-    println!("choose a shape:");
-    for (i, shape) in Shape::all().iter().enumerate() {
-        println!("  {}) {}", i + 1, shape.label());
-    }
-    print!("shape [1]: ");
-    let _ = std::io::Write::flush(&mut std::io::stdout());
-    let mut line = String::new();
-    if std::io::stdin().read_line(&mut line).unwrap_or(0) == 0 {
-        return Shape::OneNode;
-    }
-    match line.trim() {
-        "2" => Shape::LintFix,
-        "3" => Shape::Tasks,
-        _ => Shape::OneNode,
-    }
+/// The shape picked off the one list this binary puts choices on —
+/// same arrows, same filter, same numbering, same Escape — or the
+/// first shape when nobody picks: a skeleton is a starting point, and
+/// "not me, not now" about which one is the plainest one.
+fn picked(console: &Console) -> Shape {
+    let choices = Shape::all()
+        .into_iter()
+        .map(|shape| Choice {
+            label: Some(shape.does().to_string()),
+            ..Choice::named(shape.label(), shape)
+        })
+        .collect();
+    choose(console, "choose a shape", choices).unwrap_or(Shape::OneNode)
 }
 
 /// A safe file stem: letters, digits, `-` and `_` only, non-empty — the
@@ -160,7 +185,7 @@ fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn new_workflow(
+pub async fn new_workflow(
     name: &str,
     shape: Option<&str>,
     interactive: bool,
@@ -170,19 +195,41 @@ pub fn new_workflow(
 
     let shape = match shape {
         Some(raw) => Shape::parse(raw).map_err(CliError::msg)?,
-        None if interactive && std::io::stdin().is_terminal() => prompt_shape(),
-        None => {
-            if interactive {
-                warn("--interactive given but stdin isn't a TTY — defaulting to `one-node`");
-            }
-            Shape::OneNode
-        }
+        // There is no run drawing here, so what opening the console has
+        // to say goes out through a door onto nothing, which is stderr.
+        None => match interactive {
+            false => Shape::OneNode,
+            true => match Console::open(&Diagnostics::none(), Escape::TakesTheFirst).await {
+                Some(console) => picked(&console),
+                None => {
+                    warn(
+                        "--interactive given but there is no terminal to ask on — \
+                         defaulting to `one-node`",
+                    );
+                    Shape::OneNode
+                }
+            },
+        },
     };
+
+    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
+    // Same layered config `yunta check` resolves without an explicit
+    // `--config` — an empty/default layer set (no `.yunta/config.yaml`
+    // yet, e.g. `new` run before `init`) is a legal, empty `ConfigLayer`,
+    // not an error.
+    let config = ConfigLayer::merge_layers(
+        project::load_named_layers(&cwd)?
+            .into_iter()
+            .map(|(_, l)| l),
+    );
+    let lint_declared = config
+        .command(&yunta_core::CommandName::from_static("lint"))
+        .is_some();
 
     // Build the real type before writing: a skeleton that doesn't parse as
     // a `Workflow` never reaches disk, so `--force` can't leave an invalid
     // file behind.
-    let yaml = shape.skeleton(name);
+    let yaml = shape.skeleton(name, lint_declared);
     let workflow: Workflow = yunta_core::yaml::parse(&yaml).map_err(|e| {
         CliError::msg(format!(
             "the {} skeleton does not parse as a workflow: {e}",
@@ -190,7 +237,6 @@ pub fn new_workflow(
         ))
     })?;
 
-    let cwd = std::env::current_dir().map_err(|source| CliError::Cwd { source })?;
     let path = cwd.join(".yunta/workflows").join(format!("{name}.yaml"));
     if path.exists() && !force {
         return Err(CliError::msg(format!(
@@ -205,23 +251,18 @@ pub fn new_workflow(
     std::fs::write(&path, &yaml).map_err(|source| CliError::io("write", path.display(), source))?;
     println!("wrote {} ({})", path.display(), shape.label());
 
-    // Same layered config `yunta check` resolves without an explicit
-    // `--config` — an empty/default layer set (no `.yunta/config.yaml`
-    // yet, e.g. `new` run before `init`) is a legal, empty `ConfigLayer`,
-    // not an error: these skeletons never reference a `runner:`
-    // precisely so `check` never depends on that config existing.
-    let config = ConfigLayer::merge_layers(
-        project::load_named_layers(&cwd)?
-            .into_iter()
-            .map(|(_, l)| l),
-    );
-
-    let errors = yunta_engine::check(&workflow, &config);
-    if errors.is_empty() {
-        println!("{}: OK", path.display());
-        Ok(Outcome::Success)
-    } else {
-        note(problems(path.display(), &errors));
-        Ok(Outcome::Reported)
-    }
+    // The verdict `yunta check` reaches on the file, said under it: a
+    // workflow the config cannot run is reported as one, whatever it is
+    // the config has to declare first.
+    let ctx = crate::context::Context::load()?;
+    let verdict = super::verdict::verdict(
+        &ctx,
+        &workflow,
+        &path,
+        &config,
+        super::verdict::layer_conflicts(&cwd)?,
+        super::verdict::Reach::Workflow,
+    )
+    .await;
+    Ok(verdict.report(&ctx, path.display()).await)
 }

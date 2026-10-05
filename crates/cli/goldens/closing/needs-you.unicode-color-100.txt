@@ -1,0 +1,26 @@
+␛[1mrun 7E5PH4␛[0m: ␛[1;35m◆␛[0m ␛[1;35mneeds you␛[0m
+  ␛[1;35mnode `lint` failed and its 0 re-routes to `fix-lint` are exhausted — exit 101␛[0m
+
+  ␛[1mlint␛[0m: ␛[31mexit 101␛[0m
+  ␛[2m  │ ␛[0merror[E0425]: cannot find value `x` in this scope
+  ␛[2m  │ ␛[0m --> src/lib.rs:3:5
+    ␛[2mwhole output: ␛[0m~/.yunta/runs/01K3W48MFW7H0ZZA5PZ07E5PH4/objects/342da2eb16499698087adc25ad9595254cd6664564344b7db803bc9bd029d8da
+
+  ␛[1mdecision on node `lint`␛[0m
+    ␛[1mretry␛[0m — Re-route to `fix-lint` once more
+      ␛[2mUses one extra correction attempt beyond the declared max_reroutes (0)␛[0m
+      ␛[1myunta resolve-gate 7E5PH4 retry␛[0m
+    ␛[1mabort␛[0m — Abort the run
+      ␛[2mPauses here; nothing further executes␛[0m
+      ␛[1myunta resolve-gate 7E5PH4 abort␛[0m
+  ␛[2mthe run holds its own state on disk — close this terminal whenever you like and answer from␛[0m
+  ␛[2manywhere.␛[0m
+
+  ␛[2mprogress    ␛[0m nodes 0/1 · 1 failed
+  ␛[2mtokens      ␛[0m 20.2k spent
+  ␛[2mslowest     ␛[0m lint 12s
+  ␛[2mbranch      ␛[0m yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off main, in
+               ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
+
+  ␛[1myunta close 7E5PH4 ␛[0m   ␛[2mcloses it for good␛[0m
+  ␛[1myunta status 7E5PH4␛[0m   ␛[2mshows the whole run␛[0m

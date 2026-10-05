@@ -1,0 +1,581 @@
+<title>La crónica del run</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  --ground:#F4F6F5; --paper:#FBFCFB; --ink:#1C2226; --ink-2:#4A545C; --muted:#6B767F;
+  --rule:#D5DBD9; --code-bg:#E9EDEB; --code-ink:#20282D;
+  --accent:#2A6C7C; --accent-soft:#D9E9ED; --accent-ink:#1E5563;
+  --done:#3C7C51; --fail:#B3483B; --wait:#A97A19; --run:#2A6C7C;
+  --done-soft:#DDEEE3; --fail-soft:#F3DEDA; --wait-soft:#F4E9CF;
+  --term-bg:#1B2124; --term-ink:#DCE3E0; --term-dim:#8A959C; --term-done:#8FD3A4; --term-fail:#EE9B90; --term-wait:#E9C070; --term-run:#8CCBDB;
+  --del:#B3483B; --new:#3C7C51;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#131719; --paper:#181D20; --ink:#E4E8E6; --ink-2:#B6BEC3; --muted:#8E989F;
+    --rule:#2B3236; --code-bg:#1E2427; --code-ink:#DCE3E0;
+    --accent:#7CC0D0; --accent-soft:#1F3238; --accent-ink:#A8DAE6;
+    --done:#7FC494; --fail:#E08A7F; --wait:#E0B15C; --run:#7CC0D0;
+    --done-soft:#1D2E24; --fail-soft:#35211E; --wait-soft:#33291A;
+    --del:#E08A7F; --new:#7FC494;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#131719; --paper:#181D20; --ink:#E4E8E6; --ink-2:#B6BEC3; --muted:#8E989F;
+  --rule:#2B3236; --code-bg:#1E2427; --code-ink:#DCE3E0;
+  --accent:#7CC0D0; --accent-soft:#1F3238; --accent-ink:#A8DAE6;
+  --done:#7FC494; --fail:#E08A7F; --wait:#E0B15C; --run:#7CC0D0;
+  --done-soft:#1D2E24; --fail-soft:#35211E; --wait-soft:#33291A;
+  --del:#E08A7F; --new:#7FC494;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:"Source Serif 4",Georgia,"Times New Roman",serif;font-size:17px;line-height:1.55;padding-block:0 96px;padding-inline:clamp(16px,4vw,48px)}
+.wrap{max-width:1040px;margin:0 auto}
+.prose{max-width:68ch}
+h1,h2,h3{font-family:"Instrument Sans","Helvetica Neue",Arial,sans-serif;text-wrap:balance;line-height:1.15;margin:0}
+h1{font-size:clamp(34px,5vw,52px);font-weight:700;letter-spacing:-.015em}
+h2{font-size:26px;font-weight:600;margin-top:72px;padding-top:20px;border-top:1px solid var(--rule)}
+h3{font-size:19px;font-weight:600;margin-top:36px}
+p{margin:14px 0}
+.eyebrow{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+header{padding-block:56px 8px}
+header .lede{font-size:21px;color:var(--ink-2);max-width:60ch;margin-top:18px}
+.meta{display:flex;flex-wrap:wrap;gap:8px 20px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12.5px;color:var(--muted);margin-top:22px}
+.meta b{color:var(--ink-2);font-weight:600}
+nav.toc{margin-top:40px;padding:18px 22px;background:var(--paper);border:1px solid var(--rule);border-radius:6px;max-width:68ch}
+nav.toc ol{margin:0;padding-left:22px;columns:2;column-gap:32px;font-family:"Instrument Sans",sans-serif;font-size:15px}
+nav.toc li{margin:4px 0;break-inside:avoid}
+nav.toc a{color:var(--ink);text-decoration:none}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent);text-decoration:underline}
+a{color:var(--accent-ink)}
+code,pre,kbd{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+code{font-size:.88em;background:var(--code-bg);color:var(--code-ink);padding:1px 5px;border-radius:3px}
+pre{background:var(--code-bg);color:var(--code-ink);padding:16px 18px;border-radius:6px;overflow-x:auto;font-size:13.5px;line-height:1.5;margin:18px 0}
+pre code{background:none;padding:0;font-size:inherit}
+pre .c{color:var(--muted);font-style:italic}
+pre .k{color:var(--accent-ink);font-weight:600}
+pre .t{color:var(--ink)}
+.principle{margin:28px 0;padding:22px 26px;border-left:4px solid var(--accent);background:var(--paper);font-family:"Instrument Sans",sans-serif;font-size:20px;line-height:1.35;max-width:68ch}
+.principle small{display:block;font-family:"Source Serif 4",serif;font-size:15.5px;color:var(--ink-2);margin-top:10px;line-height:1.5}
+/* terminals */
+.terms{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:22px 0}
+@media (max-width:760px){.terms{grid-template-columns:1fr}}
+.term{background:var(--term-bg);color:var(--term-ink);border-radius:8px;padding:14px 16px 16px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12.5px;line-height:1.55;overflow-x:auto}
+.term .bar{display:flex;justify-content:space-between;color:var(--term-dim);font-size:11px;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid #2E373B;padding-bottom:8px;margin-bottom:10px}
+.term pre{background:none;color:inherit;padding:0;margin:0;font-size:inherit;white-space:pre}
+.term .done{color:var(--term-done)}.term .fail{color:var(--term-fail)}.term .wait{color:var(--term-wait)}.term .run{color:var(--term-run)}.term .dim{color:var(--term-dim)}
+.term .region{border-top:1px dashed #3A454A;margin-top:8px;padding-top:8px}
+.term .region::before{content:"región anclada";display:block;color:var(--term-dim);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.term mark{background:transparent;color:inherit;outline:1px solid var(--term-run);outline-offset:1px;border-radius:2px}
+/* flow diagram */
+.flow{display:grid;grid-template-columns:1fr auto 1fr auto 1fr auto 1.4fr;align-items:stretch;gap:0 10px;margin:26px 0;font-family:"Instrument Sans",sans-serif}
+@media (max-width:880px){.flow{grid-template-columns:1fr;gap:10px}.flow .arrow{transform:rotate(90deg);justify-self:center}}
+.flow .col{display:flex;flex-direction:column;gap:10px}
+.flow .box{border:1px solid var(--rule);background:var(--paper);border-radius:6px;padding:12px 14px;font-size:14px}
+.flow .box b{display:block;font-size:15px;font-weight:600}
+.flow .box code{font-size:12px}
+.flow .box.new{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.flow .box .tag{display:inline-block;font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-ink);background:var(--accent-soft);padding:1px 6px;border-radius:3px;margin-top:6px}
+.flow .arrow{align-self:center;color:var(--muted);font-size:22px}
+.flow .head{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
+/* tables */
+.tablewrap{overflow-x:auto;margin:18px 0;border:1px solid var(--rule);border-radius:6px;background:var(--paper)}
+table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--rule)}
+th{font-family:"Instrument Sans",sans-serif;font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--ground);position:sticky;top:0}
+tr:last-child td{border-bottom:none}
+td code{white-space:nowrap}
+td.wrap-ok code{white-space:normal}
+.pill{display:inline-block;font-family:"Instrument Sans",sans-serif;font-size:11.5px;font-weight:600;letter-spacing:.03em;padding:1px 8px;border-radius:999px;white-space:nowrap}
+.pill.keep{background:var(--done-soft);color:var(--done)}
+.pill.pass{background:var(--code-bg);color:var(--muted)}
+.pill.new{background:var(--accent-soft);color:var(--accent-ink)}
+.pill.del{background:var(--fail-soft);color:var(--fail)}
+.pill.mod{background:var(--wait-soft);color:var(--wait)}
+.group td{background:var(--ground);font-family:"Instrument Sans",sans-serif;font-weight:600;font-size:13px;color:var(--ink-2);padding-block:6px}
+/* misc */
+.two{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media (max-width:760px){.two{grid-template-columns:1fr}}
+.note{background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:14px 18px;font-size:15.5px;margin:18px 0}
+.note.decide{border-color:var(--wait);background:var(--wait-soft)}
+.note.decide .eyebrow{color:var(--wait)}
+ul,ol{padding-left:22px}
+li{margin:6px 0}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;font-size:15px;margin:14px 0}
+.kv dt{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--muted)}
+.kv dd{margin:0}
+.steps{counter-reset:s;list-style:none;padding:0;margin:18px 0}
+.steps li{counter-increment:s;position:relative;padding-left:44px;margin:12px 0}
+.steps li::before{content:counter(s);position:absolute;left:0;top:1px;width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent-ink);font-family:"Instrument Sans",sans-serif;font-weight:700;font-size:13px;display:grid;place-items:center}
+.test{margin:16px 0;padding:14px 18px;border:1px solid var(--rule);border-radius:6px;background:var(--paper)}
+.test .name{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--accent-ink);word-break:break-all}
+.test .where{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--muted);margin-top:2px}
+.test p{margin:8px 0 0;font-size:15px}
+blockquote.adr{margin:18px 0;padding:18px 22px;background:var(--paper);border:1px solid var(--rule);border-radius:6px;font-size:15.5px}
+blockquote.adr p{margin:10px 0}
+@media (prefers-reduced-motion: no-preference){a{transition:color .15s}}
+</style>
+
+<div class="wrap">
+<header>
+  <p class="eyebrow">yunta · propuesta de diseño · crates/engine + crates/cli</p>
+  <h1>La crónica del run</h1>
+  <p class="lede">Una sola derivación de "qué pasó", en el vocabulario en que el frame ya dice "dónde está". Las superficies dejan de elegir palabras: la región, el scrollback y las líneas append-only disponen las mismas.</p>
+  <div class="meta">
+    <span><b>rama</b> feature/improve-ux</span>
+    <span><b>revisa</b> D162 · D45 · Contrato §8.5</span>
+    <span><b>registra</b> D164</span>
+    <span><b>alcance</b> un PR propio, después de este</span>
+  </div>
+  <nav class="toc" aria-label="Contenido">
+    <ol>
+      <li><a href="#hoy">Lo que hay hoy</a></li>
+      <li><a href="#principio">El principio</a></li>
+      <li><a href="#derivacion">La derivación</a></li>
+      <li><a href="#mapa">Cada evento, un momento</a></li>
+      <li><a href="#palabras">Las palabras</a></li>
+      <li><a href="#disposiciones">Las disposiciones</a></li>
+      <li><a href="#pintor">El pase del pintor</a></li>
+      <li><a href="#tests">Los tests que la sostienen</a></li>
+      <li><a href="#decisiones">Decisiones a registrar</a></li>
+      <li><a href="#inventario">Inventario sin huecos</a></li>
+      <li><a href="#nombres">Nombres</a></li>
+      <li><a href="#fuera">Lo que no cambia y lo que queda afuera</a></li>
+    </ol>
+  </nav>
+</header>
+
+<section id="hoy" class="prose">
+  <h2>Lo que hay hoy</h2>
+  <p>El CLI presenta un run desde dos derivaciones distintas que no se conocen entre sí.</p>
+  <div class="tablewrap" style="max-width:none">
+  <table>
+    <thead><tr><th></th><th>región + scrollback</th><th>append-only (pipe, CI, TERM=dumb)</th></tr></thead>
+    <tbody>
+      <tr><td>deriva de</td><td><code>RunFrame</code> — estado en un instante</td><td><code>EventPayload</code> crudo, evento por evento</td></tr>
+      <tr><td>elige palabras en</td><td><code>surface/view.rs</code></td><td><code>surface/lines.rs</code> (match de 36 brazos)</td></tr>
+      <tr><td>vocabulario de estados</td><td><code>render::state::NodeDisplay</code></td><td>ninguno — el <code>kind_name</code> del evento</td></tr>
+      <tr><td>dice</td><td><code>+ implement — finished — noted · 3s</code></td><td><code>[3s] node_finished on `implement` — noted</code></td></tr>
+      <tr><td>comparten</td><td colspan="2">una función: <code>view::closed_as</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p>Tres textos afirman una unidad que ningún mecanismo sostiene: el rustdoc de <code>lines.rs</code> ("<em>it is the same content the pinned region carries</em>"), el de <code>render::state</code> ("<em>the vocabulary every surface says it in</em>" — y <code>lines.rs</code> no lo importa), y D162 ("<em>el mismo contenido sale como líneas append-only, una por evento</em>"). Según CLAUDE.md la documentación gana: hay una divergencia declarada.</p>
+  <p>Y se paga. En el merge de main, <code>lines.rs</code> tuvo que crecer cinco brazos —<code>FindingUpdated</code>, <code>FindingWithdrawn</code>, <code>FindingRefused</code>, <code>ArtifactSubmitted</code>, <code>ArtifactAccepted</code>— mientras el frame los absorbía por otro camino. Y el defecto que corregí en esta rama (un nodo que vuelve a correr y cuyo éxito nunca reaparecía arriba) vive en <code>Scrollback::gone</code>: memoria que existe solo porque el scrollback deduce "qué cerró" comparando dos frames en vez de leerlo del log.</p>
+</section>
+
+<section id="principio">
+  <div class="prose">
+  <h2>El principio</h2>
+  <div class="principle">
+    El log es una secuencia de eventos; una persona lo lee como una secuencia de <em>hechos</em>. El engine deriva el frame (dónde está cada cosa) y la crónica (qué pasó, en orden) del mismo log y con los mismos tipos. El CLI elige las palabras una vez por hecho; cada superficie solo las dispone.
+    <small>Lo que un frame dice que un nodo <em>es</em>, la crónica dice que <em>se volvió</em>. Es el mismo <code>NodeState</code>, y <code>NodeDisplay</code> lo nombra una sola vez.</small>
+  </div>
+  </div>
+  <div class="flow" role="img" aria-label="Del log salen dos derivaciones puras en el engine; el CLI pone palabras una vez y cuatro disposiciones las consumen.">
+    <div class="col">
+      <div class="head">yunta-storage</div>
+      <div class="box"><b>Event log</b><code>Vec&lt;StoredEvent&gt;</code><span class="tag">verdad</span></div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <div class="head">yunta-engine · view (puro)</div>
+      <div class="box"><b>run_frame</b><code>RunFrame</code> · dónde está</div>
+      <div class="box new"><b>chronicle</b><code>Vec&lt;Moment&gt;</code> · qué pasó<span class="tag">nuevo</span></div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <div class="head">yunta · palabras, una vez</div>
+      <div class="box"><b>surface/view.rs</b>frame → filas</div>
+      <div class="box new"><b>surface/chronicle.rs</b>momento → oración<span class="tag">nuevo</span></div>
+      <div class="box"><b>render::state</b><code>NodeDisplay</code> · las dos lo usan</div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col">
+      <div class="head">yunta · disposiciones</div>
+      <div class="box"><b>Region</b>filas del frame, lo abierto</div>
+      <div class="box"><b>Scrollback</b>momentos que cierran algo</div>
+      <div class="box"><b>Lines</b>todos los momentos, con elapsed</div>
+      <div class="box"><b>Closing · status · --json</b>frame (sin cambios)</div>
+    </div>
+  </div>
+</section>
+
+<section id="derivacion" class="prose">
+  <h2>La derivación</h2>
+  <p>Un módulo hermano de <code>view/node.rs</code> y <code>view/phase.rs</code>: <code>crates/engine/src/view/chronicle.rs</code>. Misma familia que <code>derive</code> y <code>run_frame</code> — función pura del log, sin reloj, sin storage, sin saber con qué se dibuja.</p>
+
+<pre><code><span class="c">// crates/engine/src/view/chronicle.rs</span>
+
+<span class="c">/// One thing that happened to a run, placed: when, to which node, and
+/// what. The chronicle's unit, derived from the log the way a frame is
+/// and in the same types — what a frame says a node *is*, a moment says
+/// it *became*.</span>
+<span class="k">pub struct</span> <span class="t">Moment</span> {
+    <span class="k">pub</span> seq: Seq,
+    <span class="k">pub</span> at: DateTime&lt;Utc&gt;,
+    <span class="c">/// The run's own clock at this point: from its first event to this
+    /// one. What a reader after the fact places the moment by.</span>
+    <span class="k">pub</span> elapsed: Duration,
+    <span class="c">/// The node it concerns, `None` for a run-level moment.</span>
+    <span class="k">pub</span> node: Option&lt;NodeId&gt;,
+    <span class="k">pub</span> happening: Happening,
+}
+
+<span class="c">/// What happened, read as a person reads it. Every arm carries the type
+/// the frame already holds for the same fact, so no surface can say one
+/// thing about a state and another about the moment it was reached.</span>
+<span class="k">pub enum</span> <span class="t">Happening</span> {
+    <span class="c">// — the run</span>
+    RunCreated { mode: ModeName, base_branch: String },
+    RunPaused { reason: String },
+    RunResumed,
+    RunClosed { terminal: TerminalState, tokens: TokenUsage },
+    PromotionSignaled { to: ModeName, reason: String, evidence: Evidence },
+
+    <span class="c">// — a node</span>
+    RunnerResolved(ResolvedRunner),
+    <span class="c">/// The node reached `state` — started, finished or failed. A node
+    /// that settles carries how long it worked and the children it bore,
+    /// because they leave the region with it.</span>
+    Node { state: NodeState, elapsed: Option&lt;Duration&gt;, children: Vec&lt;ChildLink&gt; },
+    Rerouted(Reroute),
+    <span class="c">/// A question put to a person: the escalation as `gate_waiting`
+    /// recorded it, which is what the demand line and the closing block
+    /// already read.</span>
+    Escalated(GateWaitingPayload),
+    GateResolved(GateResolvedPayload),
+    QuestionsAnswered { channel: Channel, responder: Option&lt;Responder&gt; },
+    LoopIteration { iteration: u32 },
+    HookRan { phase: HookPhase, exit_code: i32 },
+    ContextAssembled,
+    BaselineCaptured,
+
+    <span class="c">// — a session</span>
+    SessionOpened(OpenSession),
+    <span class="c">/// A tool the session reached for — the same reading `NodeFrame::activity` shows live.</span>
+    Called(ToolCall),
+    Message(AgentMessageType),
+
+    <span class="c">// — the tasks document</span>
+    TaskRegistered { task: TaskId },
+    TaskMoved { task: TaskId, to: TaskStatus },
+    CriteriaChecked { task: TaskId, phase: Phase, checked: usize },
+
+    <span class="c">// — scope</span>
+    ScopeChecked { violations: usize },
+    ScopeExpansion { task: TaskId, step: ScopeExpansionStep },
+
+    <span class="c">// — findings and artifacts</span>
+    Finding { id: FindingId, severity: FindingSeverity, title: String, change: FindingChange },
+    ArtifactSubmitted { kind: ArtifactKind, name: String, taken: bool },
+    ArtifactAccepted(ArtifactId),
+    ArtifactWritten { path: PathBuf },
+
+    <span class="c">// — composition and capability</span>
+    ChildBorn(RunId),
+    ChildClosed { run_id: RunId, terminal: TerminalState },
+    Degraded(Degradation),
+
+    <span class="c">/// A kind this binary does not know. It is still a moment: a reader
+    /// who is not told the log carries more than the binary reads is a
+    /// reader misled.</span>
+    Unknown { kind: String },
+}
+
+<span class="k">pub enum</span> <span class="t">ScopeExpansionStep</span> { Requested { paths: Vec&lt;String&gt; }, Granted { by: Decider }, Denied { by: Decider, reason: Option&lt;String&gt; } }
+<span class="k">pub enum</span> <span class="t">FindingChange</span> { Posted, Updated, Withdrawn { reason: String }, Refused { operation: FindingOperation, problems: usize } }
+
+<span class="c">/// Reads the log as the sequence of moments a person met it as: one per
+/// event, in the log's order, each placed by the run's own elapsed.
+///
+/// Pure, and monotone in the log: the chronicle of a prefix is a prefix
+/// of the chronicle. That is what lets a surface remember how many it
+/// has written and write the rest, and never reprint one.</span>
+<span class="k">pub fn</span> <span class="t">chronicle</span>(events: &amp;[StoredEvent]) -&gt; Vec&lt;Moment&gt;</code></pre>
+
+  <h3>Tres invariantes, todos testeables</h3>
+  <ul>
+    <li><strong>Uno por evento.</strong> <code>chronicle(events).len() == events.len()</code>, con <code>Unknown</code> incluido. Es D162 tal como está escrito: "una por evento".</li>
+    <li><strong>Monótona en el log.</strong> Para todo <code>n</code>, <code>chronicle(&amp;events[..n])</code> es prefijo de <code>chronicle(events)</code>. Es lo que hace correcto el contador <code>written</code> que el pintor ya tiene, y lo que hace que un momento nunca se reimprima.</li>
+    <li><strong>El frame concuerda con la crónica.</strong> Para cada nodo, <code>frame.nodes[n].state</code> es lo que dice el último momento sobre <code>n</code>: <code>Node{state}</code> → <code>Reached(state)</code>; <code>Escalated</code> → <code>Reached(Waiting{..})</code>; ninguno → <code>ToGo</code> o <code>Skipped</code>. Y <code>frame.reroutes</code> es la cuenta de <code>Rerouted</code>, <code>frame.degraded</code> son los <code>Degraded</code>, <code>frame.children</code> los <code>ChildBorn</code>/<code>ChildClosed</code>.</li>
+  </ul>
+  <p>El tercero es el que ata las dos derivaciones. No se implementa el frame como fold de la crónica —<code>run_frame</code> ya tiene su camino por <code>derive</code> y <code>stats</code>— pero el test dice que no pueden discrepar, y los tipos compartidos hacen que discrepar sea difícil de escribir.</p>
+
+  <h3>Qué necesita la derivación, y por qué no es "un match sobre el payload"</h3>
+  <p>Casi todo momento es una lectura del evento solo. Tres cosas necesitan el prefijo: el <code>elapsed</code> del run (primer evento), el <code>elapsed</code> del nodo que cierra (su <code>node_started</code>), y los <code>children</code> de un nodo que cierra (sus <code>child_run_created</code>/<code>_finished</code> anteriores). Por eso <code>chronicle</code> toma el log y no un evento: un pase O(e) con un estado mínimo, del mismo orden que <code>derive</code>. El pintor la rederiva en cada pase sobre <code>folded.settled()</code>, igual que hoy rederiva <code>run_frame</code> — la pureza vale más que el ahorro, y el costo es una fracción del que ya se paga.</p>
+</section>
+
+<section id="mapa">
+  <div class="prose">
+  <h2>Cada evento, un momento</h2>
+  <p>Los 36 kinds de <code>EventPayload</code> más el desconocido, con el brazo que los lee, el tipo que reutilizan y el valor por defecto de <code>kept</code> — lo que una terminal observada conserva encima de su región. Esta tabla es la evidencia de que no hay huecos: cada fila del log tiene una fila acá.</p>
+  </div>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>kind (log)</th><th>Happening</th><th>tipo que reutiliza</th><th>kept</th><th>lo que dice (Glyphs::Ascii)</th></tr></thead>
+    <tbody>
+      <tr class="group"><td colspan="5">el run</td></tr>
+      <tr><td><code>run_created</code></td><td><code>RunCreated</code></td><td>—</td><td><span class="pill pass">semilla</span></td><td class="wrap-ok"><code>run — created — mode `standard` off main</code> (se pliega con la semilla, no se escribe)</td></tr>
+      <tr><td><code>run_paused</code></td><td><code>RunPaused</code></td><td>—</td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>? run — paused — node `lint` failed: exit 1</code></td></tr>
+      <tr><td><code>run_resumed</code></td><td><code>RunResumed</code></td><td>—</td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>&gt; run — resumed</code></td></tr>
+      <tr><td><code>run_finished</code></td><td><code>RunClosed</code></td><td><code>TerminalState</code>, <code>TokenUsage</code></td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>+ run — finished</code> · el bloque de cierre es su registro en una terminal</td></tr>
+      <tr><td><code>promotion_signaled</code></td><td><code>PromotionSignaled</code></td><td><code>Evidence</code></td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>? run — promotion to `ship` — cap: 400; spent: 500</code></td></tr>
+      <tr class="group"><td colspan="5">un nodo</td></tr>
+      <tr><td><code>runner_resolved</code></td><td><code>RunnerResolved</code></td><td><code>ResolvedRunner</code> (= <code>NodeFrame::runner</code>)</td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>implement — executor on claude-code/opus</code></td></tr>
+      <tr><td><code>node_started</code></td><td><code>Node{Running}</code></td><td><code>NodeState</code> (= <code>NodeStanding::Reached</code>)</td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>&gt; implement — running — attempt 1</code></td></tr>
+      <tr><td><code>node_finished</code></td><td><code>Node{Finished}</code></td><td><code>NodeState</code>, <code>ChildLink</code></td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>+ implement — finished — noted · 3s</code></td></tr>
+      <tr><td><code>node_failed</code></td><td><code>Node{Failed}</code></td><td><code>NodeState</code>, <code>Failure</code></td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>x lint — failed — exit 1 · 2s</code></td></tr>
+      <tr><td><code>node_rerouted</code></td><td><code>Rerouted</code></td><td><code>Reroute</code> (= <code>NodeFrame::reroute</code>)</td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>lint — rerouted to `fix`: criteria still red (1/2)</code></td></tr>
+      <tr><td><code>gate_waiting</code></td><td><code>Escalated</code></td><td><code>GateWaitingPayload</code> (lo que lee <code>render::escalation</code>)</td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>? ship — waiting — Ship what is on the branch? — assignee: the release lead</code></td></tr>
+      <tr><td><code>gate_resolved</code></td><td><code>GateResolved</code></td><td><code>GateResolvedPayload</code></td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>ship — `approve` chosen by console</code></td></tr>
+      <tr><td><code>questions_answered</code></td><td><code>QuestionsAnswered</code></td><td><code>Channel</code>, <code>Responder</code></td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>ask — answered from console</code></td></tr>
+      <tr><td><code>loop_iteration</code></td><td><code>LoopIteration</code></td><td>—</td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>work — iteration 3</code></td></tr>
+      <tr><td><code>hook_executed</code></td><td><code>HookRan</code></td><td><code>HookPhase</code></td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>build — hook Before exit 0</code></td></tr>
+      <tr><td><code>context_assembled</code></td><td><code>ContextAssembled</code></td><td>—</td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>implement — context assembled</code></td></tr>
+      <tr><td><code>baseline_captured</code></td><td><code>BaselineCaptured</code></td><td>—</td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>run — baseline captured</code></td></tr>
+      <tr class="group"><td colspan="5">una sesión</td></tr>
+      <tr><td><code>agent_session_opened</code></td><td><code>SessionOpened</code></td><td><code>OpenSession</code> (= <code>NodeFrame::sessions</code>)</td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>implement — session opened as builder on opus</code></td></tr>
+      <tr><td><code>agent_message</code> (tool_use)</td><td><code>Called</code></td><td><code>ToolCall</code> (= <code>NodeFrame::activity</code>)</td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>implement — called Edit</code></td></tr>
+      <tr><td><code>agent_message</code> (usage, note)</td><td><code>Message</code></td><td><code>AgentMessageType</code></td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>implement — usage</code></td></tr>
+      <tr class="group"><td colspan="5">el documento de tareas</td></tr>
+      <tr><td><code>task_registered</code></td><td><code>TaskRegistered</code></td><td><code>TaskId</code></td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>plan — task T001 registered</code></td></tr>
+      <tr><td><code>task_status_changed</code></td><td><code>TaskMoved</code></td><td><code>TaskStatus</code> (= <code>Counter</code> de tasks)</td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>work — T001 is done</code></td></tr>
+      <tr><td><code>criteria_checked</code></td><td><code>CriteriaChecked</code></td><td><code>Phase</code></td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>work — T001 Integration: 3 criteria</code></td></tr>
+      <tr class="group"><td colspan="5">scope</td></tr>
+      <tr><td><code>scope_checked</code></td><td><code>ScopeChecked</code></td><td>—</td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>work — 2 paths out of scope</code></td></tr>
+      <tr><td><code>scope_expansion_requested</code></td><td><code>ScopeExpansion{Requested}</code></td><td><code>ScopeExpansionStep</code></td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>work — T001 asks for src/db/</code></td></tr>
+      <tr><td><code>scope_expansion_granted</code></td><td><code>ScopeExpansion{Granted}</code></td><td><code>Decider</code></td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>work — T001 scope granted by policy</code></td></tr>
+      <tr><td><code>scope_expansion_denied</code></td><td><code>ScopeExpansion{Denied}</code></td><td><code>Decider</code></td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>work — T001 scope denied by policy: outside the pack</code></td></tr>
+      <tr class="group"><td colspan="5">findings y artifacts</td></tr>
+      <tr><td><code>finding_posted</code></td><td><code>Finding{Posted}</code></td><td><code>FindingSeverity</code> (= <code>RunFrame::blocking_findings</code>)</td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>review — finding F1 Blocking: SQL built by hand</code></td></tr>
+      <tr><td><code>finding_updated</code></td><td><code>Finding{Updated}</code></td><td>ídem</td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>review — finding F1 updated Minor: …</code></td></tr>
+      <tr><td><code>finding_withdrawn</code></td><td><code>Finding{Withdrawn}</code></td><td>ídem</td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>review — finding F1 withdrawn: fixed upstream</code></td></tr>
+      <tr><td><code>finding_refused</code></td><td><code>Finding{Refused}</code></td><td><code>FindingOperation</code></td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>review — finding F1 Post refused: 2 problems</code></td></tr>
+      <tr><td><code>artifact_submitted</code></td><td><code>ArtifactSubmitted</code></td><td><code>ArtifactKind</code></td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>plan — Tasks tasks.yaml submitted: accepted</code></td></tr>
+      <tr><td><code>artifact_accepted</code></td><td><code>ArtifactAccepted</code></td><td><code>ArtifactId</code> (= <code>NodeFrame::artifacts</code>)</td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>plan — accepted tasks.yaml</code></td></tr>
+      <tr><td><code>artifact_written</code></td><td><code>ArtifactWritten</code></td><td>—</td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>plan — wrote scratch/staging/plan/note.md</code></td></tr>
+      <tr class="group"><td colspan="5">composición y capacidad</td></tr>
+      <tr><td><code>child_run_created</code></td><td><code>ChildBorn</code></td><td><code>RunId</code> (= <code>ChildLink</code>)</td><td><span class="pill pass">no</span></td><td class="wrap-ok"><code>&gt; compose — child run 01J… opened</code></td></tr>
+      <tr><td><code>child_run_finished</code></td><td><code>ChildClosed</code></td><td><code>TerminalState</code> (= <code>ChildLink::terminal</code>)</td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>+ compose — child run 01J… finished</code></td></tr>
+      <tr><td><code>capability_degraded</code></td><td><code>Degraded</code></td><td><code>Degradation</code> (= <code>RunFrame::degraded</code>)</td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>! implement — RunTools on codex: session runs without run tools</code></td></tr>
+      <tr class="group"><td colspan="5">lo que este binario no lee</td></tr>
+      <tr><td><code>EventBody::Unknown</code></td><td><code>Unknown</code></td><td><code>UnknownKindCount</code> (= <code>RunFrame::unknown_kinds</code>)</td><td><span class="pill keep">sí</span></td><td class="wrap-ok"><code>run — `criteria_checked_v2`, a kind this binary does not read</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="prose">
+  <p>Dos filas merecen una palabra. <code>run_created</code> nunca se escribe hoy tampoco: el pintor pliega la semilla sin escribir una línea por ella (<code>Painter::attach_to</code>), porque es lo que el run ya era y no lo que esta invocación hizo; la crónica conserva eso tal cual. <code>run_finished</code> no se conserva arriba de la región porque el bloque de cierre <em>es</em> su registro en una terminal — una línea <code>+ run — finished</code> justo encima de <code>run 01J…: + finished</code> diría lo mismo dos veces; en el modo append-only sí sale, porque ahí el bloque de cierre llega por stdout y la crónica por stderr.</p>
+  </div>
+</section>
+
+<section id="palabras">
+  <div class="prose">
+  <h2>Las palabras</h2>
+  <p>Un módulo hermano de <code>surface/view.rs</code>: <code>surface/chronicle.rs</code>. Donde <code>view.rs</code> elige una vez las palabras de un frame, este elige una vez las de un momento — y las dos pasan por <code>render::state::NodeDisplay</code> para todo lo que es un estado.</p>
+
+<pre><code><span class="c">// crates/cli/src/surface/chronicle.rs</span>
+
+<span class="c">/// One moment as a surface says it, before any layout decides where
+/// it goes: the mark for the eye, and the sentence for everybody.</span>
+<span class="k">pub(super) struct</span> <span class="t">Said</span> {
+    <span class="c">/// The state the moment reaches, when it reaches one — what the
+    /// glyph beside the line stands for. `None` for a moment that is
+    /// not a state: a call, a task moving, a hook.</span>
+    <span class="k">pub(super)</span> word: Option&lt;StateWord&gt;,
+    <span class="c">/// `subject — what happened`, one line, already collapsed.</span>
+    <span class="k">pub(super)</span> text: String,
+}
+
+<span class="c">/// The words for `moment`. One match, and the only one: a kind that
+/// earns new words earns them here for every surface at once.</span>
+<span class="k">pub(super) fn</span> <span class="t">say</span>(moment: &amp;Moment) -&gt; Said
+
+<span class="c">/// Whether a terminal a person is watching keeps `happening` above its
+/// region once it has scrolled past. What closes something, or asks
+/// something of a person, is kept; what is in flight is shown live in
+/// the region and not kept. The append-only surface keeps everything:
+/// a reader who arrives after the fact has no region to have watched.</span>
+<span class="k">pub(super) fn</span> <span class="t">kept</span>(happening: &amp;Happening) -&gt; bool
+
+<span class="c">/// The rows a settled node leaves behind: its own line, and the
+/// children it bore indented under it — a tree, as the region drew it.</span>
+<span class="k">pub(super) fn</span> <span class="t">graduation</span>(moment: &amp;Moment, glyphs: Glyphs) -&gt; Vec&lt;String&gt;</code></pre>
+
+  <p>La forma de toda oración es la que <code>yunta_core::text::aside</code> ya fija: <code>sujeto — lo que carga</code>. Para un nodo que alcanza un estado, "lo que carga" es exactamente <code>NodeDisplay::of(state).label()</code> — la misma cadena que hoy imprime la graduación del scrollback y <code>yunta status</code>. Eso es lo que hace que las tres superficies digan lo mismo por construcción y no por disciplina.</p>
+  </div>
+
+  <div class="terms">
+    <div class="term">
+      <div class="bar"><span>terminal · región + scrollback</span><span>stderr</span></div>
+<pre><span class="dim">run 01J…: created at ~/.yunta/runs/01J…</span>
+<span class="done">+</span> <mark>plan — finished — 3 tasks · 4s</mark>
+<span class="fail">x</span> <mark>lint — failed — exit 1 · 2s</mark>
+  lint — rerouted to `fix`: criteria still red (1/2)
+<span class="done">+</span> fix — finished — clippy clean · 9s
+<span class="done">+</span> <mark>lint — finished — exit 0 · 2s</mark>
+<div class="region"><span class="run">&gt;</span> run implement · executor claude-code/opus · 31s · last event 2s ago
+  this node's recent calls: Edit, Read, Bash
+nothing needs you
+nodes 3/5 · 1 run · 1 reroute</div></pre>
+    </div>
+    <div class="term">
+      <div class="bar"><span>pipe / CI · append-only</span><span>stderr</span></div>
+<pre><span class="dim">live view off (stderr is not a terminal): one line per event</span>
+[0s]  &gt; plan — running — attempt 1
+[0s]    plan — executor on claude-code/opus
+[4s]    plan — accepted tasks.yaml
+[4s]  <span class="done">+</span> <mark>plan — finished — 3 tasks · 4s</mark>
+[4s]  &gt; lint — running — attempt 1
+[6s]  <span class="fail">x</span> <mark>lint — failed — exit 1 · 2s</mark>
+[6s]    lint — rerouted to `fix`: criteria still red (1/2)
+[6s]  &gt; fix — running — attempt 1
+[15s] <span class="done">+</span> fix — finished — clippy clean · 9s
+[15s] &gt; lint — running — attempt 2
+[17s] <span class="done">+</span> <mark>lint — finished — exit 0 · 2s</mark>
+[17s] &gt; implement — running — attempt 1
+[17s]   implement — executor on claude-code/opus
+[18s]   implement — called Edit
+[19s]   implement — called Read</pre>
+    </div>
+  </div>
+  <div class="prose">
+  <p>Lo marcado es la misma cadena, byte a byte, en las dos superficies. La izquierda conserva lo que cerró y muestra lo abierto en la región; la derecha conserva todo porque no tiene región. Lo que difiere es disposición: el prefijo <code>[elapsed]</code> de la derecha, y el árbol de hijos bajo un nodo que cierra a la izquierda. Nótese que el nodo <code>lint</code> corre dos veces y aparece dos veces arriba, con dos resultados distintos: no hay <code>gone</code> que olvidar, porque un nodo que cierra dos veces son dos momentos.</p>
+  </div>
+</section>
+
+<section id="disposiciones" class="prose">
+  <h2>Las disposiciones</h2>
+  <p>Cada superficie queda reducida a lo que le es propio: dónde va la oración y qué se le pone adelante.</p>
+  <dl class="kv">
+    <dt>Lines</dt><dd><code>moment(&amp;Moment)</code> escribe <code>[elapsed] {glyph} {text}</code>, para todo momento. <code>open(out, reason)</code> y <code>note(line)</code> siguen iguales. Desaparecen <code>detail</code>, <code>resolution</code> y <code>counted_problems</code> — sus 36 brazos son ahora <code>chronicle::say</code>. Queda en ~50 líneas.</dd>
+    <dt>Scrollback</dt><dd>Se queda con <code>over(region, out)</code> y <code>write(lines)</code>: la única puerta hacia arriba, con la región fuera de pantalla mientras escribe. Desaparecen <code>gone</code>, <code>leaving</code> y <code>restart</code>: el scrollback ya no deduce qué cerró comparando frames, lo lee de la crónica. Queda en ~40 líneas.</dd>
+    <dt>Region</dt><dd><code>show(frame, run_id, answerable)</code> dibuja lo abierto, como hoy. <code>graduate(frame)</code> pasa a ser <code>record(lines)</code> — recibe filas ya dichas y las manda arriba. <code>restart()</code> desaparece: la región no tiene memoria por run; <code>demand</code>, <code>body</code> y <code>counters</code> se reconstruyen en cada <code>show</code>.</dd>
+    <dt>view.rs</dt><dd>Pierde <code>graduation</code>, <code>settled_nodes</code> y <code>working_nodes</code>. Conserva <code>demand_line</code>, <code>node_rows</code>, <code>child_row</code>, <code>children_by_node</code>, <code>counter_line</code>, <code>working</code> y <code>closed_as</code> — que <code>chronicle.rs</code> consume para <code>RunClosed</code> y <code>ChildClosed</code>, como <code>lines.rs</code> ya lo consumía.</dd>
+    <dt>Closing · status · --json · MCP</dt><dd>Sin cambios: leen el frame. El bloque de cierre sigue siendo el registro del run en una terminal.</dd>
+    <dt>Turns · Feed · Fold</dt><dd>Sin cambios. La cortina sigue gobernando cuándo se escribe; el feed sigue siendo el observer; <code>Folded</code> sigue siendo el prefijo contiguo del que ambas derivaciones parten.</dd>
+  </dl>
+</section>
+
+<section id="pintor" class="prose">
+  <h2>El pase del pintor</h2>
+  <p>La única secuencia con orden que importa. Un pase de <code>Painter::take</code>, tal como queda:</p>
+  <ol class="steps">
+    <li><code>absorb(events)</code> pliega los eventos del run en <code>Folded</code> y sigue a un sucesor de promoción si aparece — sin cambios.</li>
+    <li><code>write_settled()</code>: <code>let moments = chronicle(folded.settled())</code>; para cada <code>m</code> en <code>moments[written..]</code>, <code>draw.record(&amp;m)</code>. <code>Draw::Lines</code> escribe cada uno; <code>Draw::Live</code> escribe los que <code>kept</code> admite, como <code>graduation(m, glyphs)</code>, vía <code>Region::record</code>. Luego <code>written = moments.len()</code>. Bajo la cortina no escribe nada, igual que hoy: lo que se debe se cuenta, no se encola.</li>
+    <li><code>redraw()</code>: <code>run_frame(folded.settled())</code> → <code>region.show</code>. Sin cambios.</li>
+  </ol>
+  <p>Tres detalles que quedan resueltos por el mismo mecanismo:</p>
+  <ul>
+    <li><code>attach_to(seed)</code> sigue haciendo <code>written = folded.settled().len()</code>: por el invariante uno-por-evento es exactamente <code>chronicle(seed).len()</code>, así que un <code>resume</code> no reimprime el log — la garantía que esta rama ya tiene, ahora sostenida por un invariante y no por una coincidencia de conteo.</li>
+    <li><code>follow(successor)</code> resetea <code>written = 0</code> y <code>Folded</code>, como hoy; la llamada a <code>region.restart()</code> se va con el método.</li>
+    <li>El pintor recibe <code>glyphs</code> de <code>SurfaceEnv</code> — hoy los tiene solo la región. Es el mismo valor, leído una vez por la invocación.</li>
+  </ul>
+</section>
+
+<section id="tests" class="prose">
+  <h2>Los tests que la sostienen</h2>
+  <p>La promesa de D162 hoy no la sostiene nada. Estos son los que la sostendrían; los nombres nombran el comportamiento, la sincronización es explícita, y la infraestructura ya existe (<code>Drawing::open</code> en los tests de <code>turns.rs</code>, <code>Watched</code>, <code>Captured</code>, los generadores de <code>properties.rs</code>, <code>Checkout</code> y <code>yunta_on_terminal!</code> en el testkit).</p>
+
+  <div class="test"><div class="name">every_event_is_one_moment</div><div class="where">crates/engine/tests/chronicle.rs</div><p>Un log con un evento de cada kind, más uno <code>Unknown</code>: <code>chronicle(log).len() == log.len()</code>, y el desconocido es <code>Happening::Unknown{kind}</code> con el nombre que el escritor usó.</p></div>
+  <div class="test"><div class="name">the_chronicle_of_a_prefix_is_a_prefix_of_the_chronicle</div><div class="where">crates/engine/tests/properties.rs (proptest sobre <code>log()</code>)</div><p>Para todo <code>n</code>, <code>chronicle(&amp;log[..n]) == chronicle(&amp;log)[..n]</code>. Es el invariante que hace correcto <code>written</code>.</p></div>
+  <div class="test"><div class="name">the_frame_agrees_with_the_chronicle</div><div class="where">crates/engine/tests/properties.rs (proptest sobre <code>log()</code>)</div><p>Para cada nodo del workflow, <code>run_frame(log).nodes[n].state</code> es lo que dice el último momento sobre <code>n</code>; <code>frame.reroutes</code>, <code>frame.degraded</code> y <code>frame.children</code> coinciden con los momentos que los producen. Es el que ata las dos derivaciones.</p></div>
+  <div class="test"><div class="name">a_settled_node_carries_how_long_it_worked_and_the_children_it_bore</div><div class="where">crates/engine/tests/chronicle.rs</div><p>Con timestamps fijos: <code>Node{Finished}.elapsed</code> es <code>finished.at − started.at</code>, y <code>children</code> son los links bajo ese nodo hasta ese momento — lo que la graduación necesita y hoy toma del frame.</p></div>
+  <div class="test"><div class="name">a_node_that_settles_twice_is_two_moments</div><div class="where">crates/engine/tests/chronicle.rs</div><p>failed → rerouted → started → finished sobre el mismo nodo produce dos <code>Node</code> cerrados con dos estados. Es el defecto de <code>Scrollback::gone</code> vuelto estructuralmente imposible.</p></div>
+  <div class="test"><div class="name">what_a_watched_terminal_keeps_above_its_region_is_what_the_append_only_surface_writes</div><div class="where">crates/cli/src/surface/painter.rs (tests)</div><p>Los mismos beats a un <code>Draw::Live</code> y a un <code>Draw::Lines</code>; se drena cada pintor. Cada línea del scrollback (sin su glifo) aparece en la salida de Lines (sin su <code>[elapsed] </code>), en el mismo orden. Es el test que hace verdadero el rustdoc de <code>lines.rs</code>.</p></div>
+  <div class="test"><div class="name">every_kind_earns_its_words_once</div><div class="where">crates/cli/src/surface/chronicle.rs (tests)</div><p>Los ocho tests de <code>lines.rs</code> migran acá (texto vacío no deja un guion colgando; una re-ruta sin causa es solo el destino; etc.), más uno por brazo con el ejemplo de la tabla de arriba.</p></div>
+  <div class="test"><div class="name">a_run_read_back_from_a_pipe_says_what_a_watched_terminal_kept</div><div class="where">crates/cli/tests/run_surface.rs</div><p>El mismo workflow con <code>Checkout</code>, corrido con pty (<code>yunta_on_terminal!</code>) y por pipe (<code>yunta_in!</code>). Lo que la pty dejó arriba de la región es subconjunto, palabra por palabra, de lo que el pipe escribió. El único test existente acoplado al vocabulario viejo —<code>without_a_terminal_line_one_names_the_downgrade_and_nothing_redraws</code>, que busca <code>node_started</code>— pasa a buscar <code>touch — running</code>.</p></div>
+</section>
+
+<section id="decisiones" class="prose">
+  <h2>Decisiones a registrar</h2>
+  <p>Una ADR nueva y dos revisiones. El texto va acá completo para que la decisión se tome sobre lo que quedaría escrito.</p>
+
+  <blockquote class="adr">
+    <p><strong>D164 — El run se lee como una crónica derivada, y cada superficie la dispone.</strong> El engine deriva del log, junto al frame, una <em>crónica</em>: un momento por evento, en el orden del log, en los mismos tipos que el frame usa para decir dónde está cada cosa (<code>NodeState</code>, <code>Reroute</code>, <code>ChildLink</code>, <code>Degradation</code>, <code>ToolCall</code>, <code>OpenSession</code>, <code>ResolvedRunner</code>). Es pura y monótona en el log: la crónica de un prefijo es prefijo de la crónica. El CLI elige las palabras de un momento una sola vez, con el mismo vocabulario de estados que el frame, y cada superficie solo las dispone: la región dibuja del frame lo que está abierto; el scrollback conserva de la crónica lo que cerró algo o pidió algo a una persona; la superficie append-only escribe todos los momentos, cada uno con el tiempo del run adelante. Un test de propiedad sostiene que el frame concuerda con la crónica, y otro que lo que una terminal observada conserva es lo que la superficie append-only escribe. Racional: dos derivaciones con dos vocabularios se pagan dos veces por cada kind nuevo y divergen sin que ningún test lo diga; y un scrollback que deduce "qué cerró" comparando frames necesita memoria por nodo, que es donde vivió un defecto real. Descartados: hacer que el modo append-only dibuje frames (un frame no es una línea, y un lector después del hecho quiere el orden); declarar las dos superficies deliberadamente distintas y corregir D162 (barato, pero deja dos vocabularios sin nada que los ate); un <code>--format json</code> como salida de máquina (queda habilitado por el tipo, no lo reemplaza).</p>
+  </blockquote>
+
+  <dl class="kv">
+    <dt>D162</dt><dd>Nota de revisión: "<em>Revisada por D164: el contenido común es la crónica derivada; una terminal conserva lo que cerró y muestra lo abierto en la región, y sin terminal salen todos los momentos.</em>"</dd>
+    <dt>D45</dt><dd>Nota de revisión: la superficie viva presenta dos derivaciones puras, frame y crónica, ambas del log.</dd>
+    <dt>Contrato §8.5</dt><dd>La oración "sin terminal … el mismo contenido sale como líneas append-only, una por evento" pasa a: "sin terminal … la crónica sale entera como líneas append-only, una por evento; sobre una terminal, lo que cerró sube al scrollback con las mismas palabras y lo abierto vive en la región".</dd>
+    <dt>README</dt><dd>Las dos filas de la tabla de comandos (<code>run</code>, <code>resume</code>) dicen "the same content arrives as one line per event"; pasan a "every moment of the run arrives as one line, in the words the live view uses".</dd>
+    <dt>glosario</dt><dd>Entradas <em>frame</em> y <em>crónica / momento</em>, con la relación entre ambos en una oración.</dd>
+  </dl>
+
+  <div class="note decide">
+    <p class="eyebrow">paso 2 · lo que decide el humano</p>
+    <p><strong>Qué conserva una terminal observada.</strong> La columna <code>kept</code> de la tabla es una propuesta: <em>lo que cierra algo o pide algo a una persona</em>. La arquitectura hace que la decisión viva en un solo match (<code>chronicle::kept</code>) y que cambiarla sea un brazo; no la toma. Tres lecturas posibles: (a) la propuesta; (b) además las tareas que se mueven (<code>TaskMoved</code>) y los artifacts aceptados, para un run largo de <code>loop</code> donde el nodo no cierra en minutos; (c) solo nodos que cierran, como hoy. Recomiendo (a): un nodo <code>loop</code> largo ya muestra sus tareas corriendo en la región, y lo que un lector quiere reencontrar arriba es lo que cambió el rumbo del run.</p>
+  </div>
+</section>
+
+<section id="inventario">
+  <div class="prose">
+  <h2>Inventario sin huecos</h2>
+  <p>Todo archivo que la propuesta toca, con lo que le pasa. Nada queda "para después".</p>
+  </div>
+  <div class="tablewrap">
+  <table>
+    <thead><tr><th>archivo</th><th>acción</th><th>qué</th></tr></thead>
+    <tbody>
+      <tr class="group"><td colspan="3">crates/engine</td></tr>
+      <tr><td><code>src/view/chronicle.rs</code></td><td><span class="pill new">nuevo</span></td><td><code>Moment</code>, <code>Happening</code>, <code>ScopeExpansionStep</code>, <code>FindingChange</code>, <code>chronicle()</code>. Un pase con estado mínimo: primer timestamp, <code>node_started</code> abierto por nodo, links de hijos por nodo.</td></tr>
+      <tr><td><code>src/view/mod.rs</code></td><td><span class="pill mod">modifica</span></td><td><code>mod chronicle; pub use chronicle::{chronicle, FindingChange, Happening, Moment, ScopeExpansionStep};</code> y el rustdoc del módulo nombra las dos derivaciones.</td></tr>
+      <tr><td><code>src/lib.rs</code></td><td><span class="pill mod">modifica</span></td><td>Reexporta lo anterior junto a <code>run_frame</code>.</td></tr>
+      <tr><td><code>tests/chronicle.rs</code></td><td><span class="pill new">nuevo</span></td><td>Los cuatro tests de arriba con timestamps fijos (<code>at(offset)</code> como en <code>tests/view.rs</code>).</td></tr>
+      <tr><td><code>tests/properties.rs</code></td><td><span class="pill mod">modifica</span></td><td>Dos propiedades nuevas sobre el generador <code>log()</code>; el generador <code>payload()</code> gana los kinds que hoy no produce (hoy cubre 8 de 36), para que la propiedad del frame se pruebe sobre todo el vocabulario.</td></tr>
+      <tr class="group"><td colspan="3">crates/testkit</td></tr>
+      <tr><td><code>src/frames.rs</code></td><td><span class="pill mod">modifica</span></td><td><code>pub fn moment(seq, node, happening) -&gt; Moment</code> con <code>at</code> y <code>elapsed</code> fijos, al lado de <code>run_frame</code> y <code>node_frame</code>; exportado en <code>lib.rs</code>.</td></tr>
+      <tr class="group"><td colspan="3">crates/cli</td></tr>
+      <tr><td><code>src/surface/chronicle.rs</code></td><td><span class="pill new">nuevo</span></td><td><code>Said</code>, <code>say</code>, <code>kept</code>, <code>graduation</code>. El match único. Sus tests: los ocho de <code>lines.rs</code> migrados más uno por brazo.</td></tr>
+      <tr><td><code>src/surface/lines.rs</code></td><td><span class="pill mod">modifica</span></td><td><code>event(&amp;StoredEvent)</code> → <code>moment(&amp;Moment)</code>; borra <code>detail</code>, <code>resolution</code>, <code>counted_problems</code> y sus tests (migran). El rustdoc dice lo que ahora es verdad.</td></tr>
+      <tr><td><code>src/surface/scrollback.rs</code></td><td><span class="pill mod">modifica</span></td><td>Borra <code>gone</code>, <code>leaving</code>, <code>restart</code> y sus cuatro tests (dos migran como tests de <code>chronicle</code> en el engine: "un nodo que cierra dos veces", "un sucesor de promoción"; dos quedan sin objeto).</td></tr>
+      <tr><td><code>src/surface/region.rs</code></td><td><span class="pill mod">modifica</span></td><td><code>graduate(frame)</code> → <code>record(&amp;[String])</code>; borra <code>restart</code>. <code>show</code> deja de llamar a <code>graduate</code>.</td></tr>
+      <tr><td><code>src/surface/view.rs</code></td><td><span class="pill mod">modifica</span></td><td>Borra <code>graduation</code>, <code>settled_nodes</code>, <code>working_nodes</code>. <code>closed_as</code> queda, consumido por <code>chronicle.rs</code>.</td></tr>
+      <tr><td><code>src/surface/painter.rs</code></td><td><span class="pill mod">modifica</span></td><td>Campo <code>glyphs: Glyphs</code>; <code>Draw::record(&amp;Moment, Glyphs)</code>; <code>write_settled</code> itera la crónica; <code>follow</code> sin <code>region.restart()</code>. Test nuevo de los dos draws.</td></tr>
+      <tr><td><code>src/surface/mod.rs</code></td><td><span class="pill mod">modifica</span></td><td><code>mod chronicle;</code> y el rustdoc: "tres superficies sobre dos derivaciones y un vocabulario".</td></tr>
+      <tr><td><code>src/commands/status/decision.rs</code></td><td><span class="pill mod">modifica</span></td><td><code>Layout::aside</code> → <code>Layout::advice</code> (ver Nombres).</td></tr>
+      <tr><td><code>tests/run_surface.rs</code></td><td><span class="pill mod">modifica</span></td><td>Test pty-vs-pipe nuevo; el test del downgrade busca <code>touch — running</code> en vez de <code>node_started</code>.</td></tr>
+      <tr class="group"><td colspan="3">docs</td></tr>
+      <tr><td><code>docs/design/adrs.md</code></td><td><span class="pill mod">modifica</span></td><td>D164; notas de revisión en D162 y D45.</td></tr>
+      <tr><td><code>docs/design/contrato-del-run.md</code></td><td><span class="pill mod">modifica</span></td><td>§8.5, la oración de las superficies.</td></tr>
+      <tr><td><code>docs/design/glosario.md</code></td><td><span class="pill mod">modifica</span></td><td>Entradas <em>frame</em> y <em>crónica</em>.</td></tr>
+      <tr><td><code>README.md</code></td><td><span class="pill mod">modifica</span></td><td>Las filas de <code>run</code> y <code>resume</code> en la tabla de comandos.</td></tr>
+      <tr><td><code>xtask/smells.baseline</code></td><td><span class="pill mod">modifica</span></td><td>Se regenera por medición; <code>lines.rs</code> y <code>scrollback.rs</code> pierden líneas, <code>chronicle.rs</code> nace bajo 500. La cuenta no sube.</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="prose">
+  <p>Lo que <strong>no</strong> se toca, y por qué está bien que no: <code>feed.rs</code>, <code>turns.rs</code>, <code>fold.rs</code> (el transporte y la cortina no saben qué se dibuja); <code>closing.rs</code>, <code>status/</code>, <code>--json</code>, <code>mcp.rs</code> (leen el frame); <code>render/state.rs</code> (ya es el lugar único; gana un consumidor); <code>observer.rs</code> y <code>run_log.rs</code> (la frontera de observación entrega eventos, no momentos — derivar es del lado de quien dibuja, como hoy).</p>
+  </div>
+</section>
+
+<section id="nombres" class="prose">
+  <h2>Nombres</h2>
+  <p><strong><code>Layout::aside</code> → <code>Layout::advice</code>.</strong> <code>yunta_core::text::aside</code> nombra una forma tipográfica (<code>sujeto — lo que carga</code>) y la crónica la usa en cada línea; el método del trailer nombra <em>qué puede hacer el lector</em>, y ese concepto ya tiene nombre en el CLI: el módulo <code>commands::advice</code> (<code>advice::resume</code>, <code>advice::parked_on</code>). La palabra que se mueve es la que estaba usando el nombre ajeno.</p>
+  <p><strong><code>Moment</code> y <code>Happening</code>.</strong> El envoltorio y el hecho, como <code>NodeFrame</code> y <code>NodeStanding</code>: el frame es "el run en un instante"; un momento es "un instante en que algo pasó". <code>Fact</code> queda para la evidencia, que ya lo usa.</p>
+  <p><strong>Retiro una objeción.</strong> Dije que <code>Evidence::lines()</code> en <code>core::events</code> era presentación fuera de lugar. No lo es: <code>Failure</code> es <code>Display</code> en el mismo módulo ("<em>the prose a reader sees is produced from this, so no surface can disagree with the facts behind it</em>"), y D133 pone en <code>core::text</code> cómo se ve un problema. <code>Evidence::lines()</code> sigue esa regla; se queda.</p>
+</section>
+
+<section id="fuera" class="prose">
+  <h2>Lo que no cambia y lo que queda afuera</h2>
+  <div class="two">
+    <div class="note">
+      <p class="eyebrow">queda habilitado, no hecho</p>
+      <ul>
+        <li><code>yunta log &lt;run&gt;</code>: la crónica de un run terminado, con las mismas palabras. Es <code>chronicle(events)</code> más la disposición de <code>Lines</code>; no entra en este PR.</li>
+        <li><code>--json</code> con la crónica como array de momentos versionado, para tooling. El tipo ya está; el schema publicado es una decisión aparte.</li>
+        <li>MCP <code>workflow_status</code> con "los últimos N momentos" para un agente que sondea. Misma derivación, otra disposición.</li>
+      </ul>
+    </div>
+    <div class="note">
+      <p class="eyebrow">fuera de alcance, y a propósito</p>
+      <ul>
+        <li><code>Checkout</code> lo usan 3 de 19 archivos de test del CLI; los otros 16 arman el repo con <code>init_repo</code> + <code>write</code>. Es una migración mecánica y propia; el test pty-vs-pipe nuevo usa <code>Checkout</code> y no espera a esa migración.</li>
+        <li>Un pase incremental de la crónica (un <code>Chronicler</code> que pliega de a un evento). La rederivación por pase es O(e) y ya se paga O(n·e) por el frame; se mide antes de optimizar, y el invariante de prefijo garantiza que un incremental daría lo mismo.</li>
+      </ul>
+    </div>
+  </div>
+  <p style="margin-top:28px">Costo, sin adornos: dos módulos nuevos (~250 líneas de engine con sus tests, ~200 de CLI), cuatro archivos que se achican, seis tests nuevos de los cuales dos son de propiedad, una ADR y cuatro textos. Es un PR propio que arranca cuando <code>feature/improve-ux</code> esté mergeado, y el primer commit es la decisión de <code>kept</code> registrada en D164 — el paso 2 antes del paso 3.</p>
+</section>
+</div>

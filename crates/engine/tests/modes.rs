@@ -6,22 +6,9 @@
 //! `plan`); and the run finishes once every *included* node is done,
 //! never waiting on one that was never going to run.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
-use yunta_adapters::{Adapter, MockAdapter};
-use yunta_core::SeqIdSource;
-use yunta_core::{AdapterId, ConfigLayer, ModeName, RunId, Workflow};
-use yunta_engine::{
-    build_manifest, create_run, execute_run, CreateRunParams, NoInteraction, NodeState, RunEnv,
-    RunError, RunTerminal, DEFAULT_MAX_RETRIES,
-};
-use yunta_storage::Storage;
-use yunta_testkit::{init_repo, FixedClock};
-
-/// Run ids for everything a test run gives birth to — unique across
-/// the binary, so parallel tests never share a run directory.
-static IDS: SeqIdSource = SeqIdSource::new("minted");
+use yunta_core::events::NodeEvent;
+use yunta_engine::{NodeState, RunError, RunReport, RunTerminal};
+use yunta_testkit::Bench;
 
 const WORKFLOW: &str = r#"
 name: mode-scenario
@@ -44,140 +31,35 @@ nodes:
 
 const FIXTURE: &str = "sessions: []\n";
 
-struct Bench {
-    _root: tempfile::TempDir,
-    worktree: std::path::PathBuf,
-    runs_root: std::path::PathBuf,
-    storage: Storage,
-}
-
-impl Bench {
-    fn new() -> Self {
-        let root = tempfile::tempdir().unwrap();
-        let worktree = root.path().join("worktree");
-        std::fs::create_dir_all(&worktree).unwrap();
-        init_repo(&worktree);
-        let runs_root = root.path().join("runs");
-        let storage = Storage::open(&root.path().join("yunta.db")).unwrap();
-        Bench {
-            _root: root,
-            worktree,
-            runs_root,
-            storage,
-        }
-    }
-
-    /// Creates and drives a run in `mode` to completion (or pause) in
-    /// one call — every test here needs exactly one wake.
-    async fn run(
-        &self,
-        run_id: &str,
-        mode: &str,
-    ) -> Result<(RunTerminal, yunta_engine::RunState), RunError> {
-        self.run_workflow(WORKFLOW, run_id, mode).await
-    }
-
-    async fn run_workflow(
-        &self,
-        workflow_yaml: &str,
-        run_id: &str,
-        mode: &str,
-    ) -> Result<(RunTerminal, yunta_engine::RunState), RunError> {
-        self.run_with_config(workflow_yaml, run_id, mode, ConfigLayer::default())
-            .await
-    }
-
-    /// The one run driver — `run_workflow` is this with the default config
-    /// layer; the `on_failure` tests pass a layer that sets
-    /// `defaults.on_failure`.
-    async fn run_with_config(
-        &self,
-        workflow_yaml: &str,
-        run_id: &str,
-        mode: &str,
-        config: ConfigLayer,
-    ) -> Result<(RunTerminal, yunta_engine::RunState), RunError> {
-        let workflow: Workflow = serde_norway::from_str(workflow_yaml).unwrap();
-        let manifest = build_manifest(
-            &workflow,
-            &config,
-            &self.worktree,
-            &self.worktree,
-            &HashMap::new(),
-        )
-        .unwrap()
-        .manifest;
-        let run_id = RunId::from(run_id);
-        let run_dir = create_run(
-            CreateRunParams {
-                run_id: &run_id,
-                manifest: &manifest,
-                runs_root: &self.runs_root,
-                mode: &ModeName::from(mode),
-                worktree: &self.worktree,
-                promoted_from: None,
-                artifacts: &[],
-            },
-            &self.storage.async_handle(),
-            &FixedClock,
-        )
-        .await?;
-
-        let adapter = MockAdapter::from_yaml(FIXTURE).unwrap();
-        let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
-        adapters.insert("mock".into(), Arc::new(adapter));
-
-        let report = execute_run(RunEnv {
-            run_id: &run_id,
-            manifest: &manifest,
-            run_dir: &run_dir,
-            worktree: &self.worktree,
-            adapters: &adapters,
-            storage: &self.storage.async_handle(),
-            clock: std::sync::Arc::new(FixedClock),
-            ids: &IDS,
-            max_task_retries: DEFAULT_MAX_RETRIES,
-            human_interaction: &NoInteraction,
-            forge: None,
-            cancel: None,
-            adapter_override: None,
-            ambient: None,
-        })
-        .await
-        .unwrap();
-        Ok((report.terminal, report.state))
-    }
-}
-
 #[tokio::test]
 async fn quick_mode_skips_the_excluded_node_and_still_finishes() {
-    let bench = Bench::new();
-    let (terminal, state) = bench.run("run-quick", "quick").await.unwrap();
+    let bench = Bench::with_run_id("run-quick").in_mode("quick");
+    let RunReport { terminal, state } = bench.run(WORKFLOW, FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished);
     assert!(matches!(
-        state.nodes.get("start"),
+        state.nodes.state("start"),
         Some(NodeState::Finished { .. })
     ));
     assert!(matches!(
-        state.nodes.get("ship"),
+        state.nodes.state("ship"),
         Some(NodeState::Finished { .. })
     ));
     assert!(
-        !state.nodes.contains_key("extra"),
+        !state.nodes.has_state("extra"),
         "a node excluded from the run's mode must never be scheduled at all"
     );
 }
 
 #[tokio::test]
 async fn full_mode_runs_every_node() {
-    let bench = Bench::new();
-    let (terminal, state) = bench.run("run-full", "full").await.unwrap();
+    let bench = Bench::with_run_id("run-full").in_mode("full");
+    let RunReport { terminal, state } = bench.run(WORKFLOW, FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished);
     for id in ["start", "extra", "ship"] {
         assert!(
-            matches!(state.nodes.get(id), Some(NodeState::Finished { .. })),
+            matches!(state.nodes.state(id), Some(NodeState::Finished { .. })),
             "node `{id}` should have finished under `full`, got {:?}",
-            state.nodes.get(id)
+            state.nodes.state(id)
         );
     }
 }
@@ -187,12 +69,12 @@ async fn the_default_sentinel_ignores_modes_and_runs_everything() {
     // `"default"` never validates against `modes:` and never filters —
     // `yunta test` relies on exactly this to exercise a moded
     // workflow's full graph without picking one mode out from under it.
-    let bench = Bench::new();
-    let (terminal, state) = bench.run("run-default", "default").await.unwrap();
+    let bench = Bench::with_run_id("run-default");
+    let RunReport { terminal, state } = bench.run(WORKFLOW, FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished);
     for id in ["start", "extra", "ship"] {
         assert!(matches!(
-            state.nodes.get(id),
+            state.nodes.state(id),
             Some(NodeState::Finished { .. })
         ));
     }
@@ -200,8 +82,8 @@ async fn the_default_sentinel_ignores_modes_and_runs_everything() {
 
 #[tokio::test]
 async fn an_unknown_mode_name_is_refused_before_the_run_is_created() {
-    let bench = Bench::new();
-    let err = bench.run("run-bogus", "nonexistent").await.unwrap_err();
+    let bench = Bench::with_run_id("run-bogus").in_mode("nonexistent");
+    let err = bench.try_run(WORKFLOW, FIXTURE).await.unwrap_err();
     assert!(matches!(err, RunError::UnknownMode { .. }), "got: {err:?}");
     // Refused before anything was written — no run directory, no event.
     assert!(bench.storage.list_runs().unwrap().is_empty());
@@ -267,23 +149,17 @@ fn seq_of(
 
 #[tokio::test]
 async fn a_dependent_of_an_excluded_node_waits_for_that_nodes_own_dependencies() {
-    let bench = Bench::new();
-    let (terminal, _) = bench
-        .run_workflow(ORDER_WORKFLOW, "run-order", "quick")
-        .await
-        .unwrap();
+    let bench = Bench::with_run_id("run-order").in_mode("quick");
+    let RunReport { terminal, .. } = bench.run(ORDER_WORKFLOW, FIXTURE).await;
     assert_eq!(terminal, RunTerminal::Finished);
 
-    let events = bench
-        .storage
-        .events_for_run(&RunId::from("run-order"))
-        .unwrap();
+    let events = bench.events();
     use yunta_core::events::EventPayload;
     let start_finished = seq_of(&events, "start", |p| {
-        matches!(p, EventPayload::NodeFinished(_))
+        matches!(p, EventPayload::Node(NodeEvent::Finished(_)))
     });
     let ship_started = seq_of(&events, "ship", |p| {
-        matches!(p, EventPayload::NodeStarted(_))
+        matches!(p, EventPayload::Node(NodeEvent::Started(_)))
     });
     assert!(
         start_finished < ship_started,
@@ -296,19 +172,16 @@ async fn a_dependent_of_an_excluded_node_waits_for_that_nodes_own_dependencies()
 async fn a_gate_behind_an_excluded_node_waits_for_that_nodes_own_dependencies() {
     // With nobody to answer it, the internal gate pauses the run — but
     // only once everything it effectively depends on has run.
-    let bench = Bench::new();
-    let (terminal, state) = bench
-        .run_workflow(GATE_WORKFLOW, "run-gate", "quick")
-        .await
-        .unwrap();
+    let bench = Bench::with_run_id("run-gate").in_mode("quick");
+    let RunReport { terminal, state } = bench.run(GATE_WORKFLOW, FIXTURE).await;
     assert!(
         matches!(terminal, RunTerminal::Paused { .. }),
         "expected the unanswered gate to pause the run, got {terminal:?}"
     );
     assert!(
-        matches!(state.nodes.get("start"), Some(NodeState::Finished { .. })),
+        matches!(state.nodes.state("start"), Some(NodeState::Finished { .. })),
         "`start` must finish before the gate that transitively depends on it is asked; got {:?}",
-        state.nodes.get("start")
+        state.nodes.state("start")
     );
 }
 
@@ -339,32 +212,30 @@ async fn on_failure_abort_ends_the_run() {
     // `abort`: the first failed node with no re-route of its own closes
     // the run as failed at once — nothing new starts after it, not even a
     // node whose own dependencies are already satisfied (`tail`).
-    let bench = Bench::new();
-    let (terminal, state) = bench
+    let bench = Bench::with_run_id("run-abort");
+    let RunReport { terminal, state } = bench
         .run_with_config(
             ON_FAILURE_WORKFLOW,
-            "run-abort",
-            "default",
-            serde_norway::from_str("defaults:\n  on_failure: abort\n").unwrap(),
+            FIXTURE,
+            "defaults:\n  on_failure: abort\n",
         )
-        .await
-        .unwrap();
+        .await;
 
     assert!(
         matches!(terminal, RunTerminal::Failed { .. }),
         "abort closes the run as failed, got {terminal:?}"
     );
     assert!(
-        matches!(state.nodes.get("boom"), Some(NodeState::Failed { .. })),
+        matches!(state.nodes.state("boom"), Some(NodeState::Failed { .. })),
         "the causing node is failed: {:?}",
-        state.nodes.get("boom")
+        state.nodes.state("boom")
     );
     assert_eq!(
-        state.nodes.get("tail"),
+        state.nodes.state("tail"),
         None,
         "abort starts nothing after the failure, even a ready node"
     );
-    assert_eq!(state.nodes.get("after"), None, "the dependent never ran");
+    assert_eq!(state.nodes.state("after"), None, "the dependent never ran");
 }
 
 #[tokio::test]
@@ -372,39 +243,37 @@ async fn on_failure_continue_skips_dependents() {
     // `continue`: the failed node's dependents are skipped (`after`), the
     // rest of the graph runs to completion (`side` -> `tail`), and the run
     // still closes as failed at the end.
-    let bench = Bench::new();
-    let (terminal, state) = bench
+    let bench = Bench::with_run_id("run-continue");
+    let RunReport { terminal, state } = bench
         .run_with_config(
             ON_FAILURE_WORKFLOW,
-            "run-continue",
-            "default",
-            serde_norway::from_str("defaults:\n  on_failure: continue\n").unwrap(),
+            FIXTURE,
+            "defaults:\n  on_failure: continue\n",
         )
-        .await
-        .unwrap();
+        .await;
 
     assert!(
         matches!(terminal, RunTerminal::Failed { .. }),
         "continue still closes the run as failed, got {terminal:?}"
     );
     assert!(
-        matches!(state.nodes.get("boom"), Some(NodeState::Failed { .. })),
+        matches!(state.nodes.state("boom"), Some(NodeState::Failed { .. })),
         "the causing node is failed: {:?}",
-        state.nodes.get("boom")
+        state.nodes.state("boom")
     );
     assert_eq!(
-        state.nodes.get("after"),
+        state.nodes.state("after"),
         None,
         "a dependent of the failed node is skipped, never run"
     );
     assert!(
-        matches!(state.nodes.get("side"), Some(NodeState::Finished { .. })),
+        matches!(state.nodes.state("side"), Some(NodeState::Finished { .. })),
         "an independent node runs: {:?}",
-        state.nodes.get("side")
+        state.nodes.state("side")
     );
     assert!(
-        matches!(state.nodes.get("tail"), Some(NodeState::Finished { .. })),
+        matches!(state.nodes.state("tail"), Some(NodeState::Finished { .. })),
         "a dependent of an independent node runs: {:?}",
-        state.nodes.get("tail")
+        state.nodes.state("tail")
     );
 }

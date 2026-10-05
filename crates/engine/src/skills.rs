@@ -8,13 +8,13 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::{ConfigLayer, Node, Publisher, Workflow};
+use yunta_core::{ConfigLayer, Node, Publisher, SkillName, Workflow};
 
 /// The names one node mounts: `skills.always` first, then the node's
 /// own list (or `node_defaults.skills` when the node declares none —
 /// the same replace-wholesale inheritance as hooks), deduplicated.
-fn skill_names(config: &ConfigLayer, workflow: &Workflow, node: &Node) -> Vec<String> {
-    let own: &[String] = if node.skills.is_empty() {
+fn skill_names(config: &ConfigLayer, workflow: &Workflow, node: &Node) -> Vec<SkillName> {
+    let own: &[SkillName] = if node.skills.is_empty() {
         workflow
             .node_defaults
             .as_ref()
@@ -23,7 +23,7 @@ fn skill_names(config: &ConfigLayer, workflow: &Workflow, node: &Node) -> Vec<St
     } else {
         &node.skills
     };
-    let always: &[String] = config
+    let always: &[SkillName] = config
         .skills
         .as_ref()
         .map(|skills| skills.always.as_slice())
@@ -46,7 +46,7 @@ pub enum SkillsError {
         searched.iter().map(|root| format!("`{}`", root.display())).collect::<Vec<_>>().join(", ")
     )]
     NotFound {
-        name: String,
+        name: SkillName,
         searched: Vec<PathBuf>,
     },
 }
@@ -80,7 +80,7 @@ pub fn resolve_skills(
     for name in &names {
         let found = search_roots
             .iter()
-            .map(|root| root.join(name))
+            .map(|root| root.join(name.as_str()))
             .find(|candidate| candidate.is_dir())
             // Repo/configured paths never find a
             // namespaced name as a literal subdirectory in practice, so
@@ -88,7 +88,7 @@ pub fn resolve_skills(
             // vendored packs are the fallback layer, never the first one
             // (a repo directory that happens to occupy that path still
             // wins, same shadowing rule `use:` follows).
-            .or_else(|| resolve_pack_skill(worktree, name));
+            .or_else(|| resolve_pack_skill(worktree, name.as_str()));
         match found {
             Some(dir) => resolved.push(dir),
             None => {

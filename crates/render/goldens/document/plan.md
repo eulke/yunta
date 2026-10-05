@@ -1,0 +1,116 @@
+# plan of `plan`: 2 tasks in 2 steps, held to 1 test from its spec
+
+Greet a person by name, and say goodbye too.
+
+### tasks
+
+| step | task | proven by | code | |
+|---|---|---|---|---|
+| ▲ 1 | `greet` | 1 spec test | code 1/2 | Greet by name |
+| ▲ 2 | `farewell` | `greet`'s test | code 0/1 | Say goodbye |
+
+### what keeps this plan from being proven as it is written
+
+- ▲ `greet` plans to change `tests/greet.rs`, a test the spec wrote for `greet`
+  - so: no session may write it, so the task cannot be done as planned
+  - fix: leave the test as the spec wrote it, and change the code it tests
+
+- ▲ `farewell` is judged by `cargo test --test greet`, the spec's test of `greet`
+  - so: it passes once `greet` is done, whatever this task does
+  - fix: judge the task by a test of its own
+
+The program says nothing today. It will greet whoever runs it by name, and say goodbye.
+
+```mermaid
+graph LR
+  Name --> Greeting
+```
+
+### you answered
+
+#### 1  Which word should the greeting use?
+
+- you said: hello
+- the plan: It says `hello`.
+
+### decided for you
+
+#### 1  What does it say when no name is given?
+
+- chose: It greets `world`.
+- because: A program run with no arguments should still say something.
+- not: Refuse to run  
+  Ask for a name
+
+### design
+
+`Greeter` owns the words; `main` reads the name and prints.
+
+**Greeter** in src/greet.rs — its code is in step 1, `greet`
+
+### risks
+
+- ▲ A name with a newline in it breaks the line it is printed on.
+
+### out of scope
+
+- · Greeting in other languages.
+
+### every task keeps passing
+
+- the suite: green before this run changed anything  
+  `$ cargo test`
+
+### step 1 of 2
+
+#### greet — Greet by name
+
+- you will see: `hello ana` prints `hello, ana`.
+- touches: src/{greet.rs, main.rs}, tests/greet.rs
+- keeps: With no name it still greets `world`.
+- checked by: nothing but the suite
+
+`src/greet.rs › Greeter` — the type that holds the name and words the greeting
+
+```rust
+pub struct Greeter {
+    pub name: String,
+}
+
+impl Greeter {
+    pub fn hello(&self) -> String;
+}
+```
+
+- ▲ tests/greet.rs — a test the spec wrote for `greet`; no session may write it
+
+- done when: the greeting names the person  
+  `$ cargo test --test greet`
+
+`tests/greet.rs` — the spec wrote it, and this command runs it
+
+```rust
+#[test]
+fn the_greeting_names_the_person() {
+    let said = run(&["ana"]);
+    assert_eq!(said, "hello, ana\n");
+}
+```
+
+### step 2 of 2
+
+#### farewell — Say goodbye
+
+- you will see: `hello ana` prints a goodbye after the greeting.
+- touches: src/greet.rs, tests/greet.rs
+- uses: Greeter (from greet)
+- keeps: The greeting reads as it did.
+- checked by: the greeting still reads as it did  
+  `$ cargo test --test greet_alone`
+- after: greet
+
+`src/greet.rs › Greeter › bye` — the goodbye, beside the greeting
+
+- done when: the program also says goodbye  
+  `$ cargo test --test greet`  
+  the same command as the spec test of `greet`

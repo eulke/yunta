@@ -1,0 +1,15 @@
+run 01ARZ3NDEKTSV4RRFFQ69G5FAV — mode default
+  ␛[2mCPTV        ␛[0m 500 tokens per verified task · 1 task done
+  ␛[2mrework      ␛[0m 12% of tokens went to retries and re-routes
+  ␛[2mcache       ␛[0m 1.4× cached tokens per input token
+  ␛[2mtokens      ␛[0m 18k in / 2.2k out (25.2k cached)
+  ␛[2mdocuments   ␛[0m 3 accepted, 1 refused
+  ␛[2mfindings    ␛[0m 5 posted, 1 updated, 1 withdrawn, 0 refused — 4 standing
+  ␛[2manswers     ␛[0m 2 given, 1 proved — 1 settled
+
+nodes:
+  ␛[32m✓␛[0m finished  plan                        ██████··············   4.4k tokens     50s   20% blocked
+  ␛[32m✓␛[0m finished  implement-the-whole-feature ████████████████████  15.4k tokens   6m15s   20% blocked
+
+runners:
+  implementer ████████████████████  19.8k tokens

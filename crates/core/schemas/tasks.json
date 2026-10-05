@@ -1,10 +1,60 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "yunta tasks",
-  "description": "A tasks document — the sole top-level key is `tasks:`, with no\nheader metadata alongside it.",
+  "description": "A tasks document: the tasks the engine runs, and what a person who\nreviews the plan reads about it — what changes and why, the shapes it\ncreates or changes, and what it leaves out. What a person approves is\nwhat the engine executes.",
   "type": "object",
   "properties": {
+    "decisions": {
+      "description": "The choices a person could make differently: every point the\nbrief left open, closed here rather than by whoever implements it.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Decision"
+      }
+    },
+    "description": {
+      "description": "What changes, why, and how the work is approached, in Markdown:\ncode blocks for an example or how the parts interact, `mermaid`\nblocks for diagrams.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "design": {
+      "description": "How the parts the plan touches fit together, in Markdown — the\nprose around its `shapes`, which declare the shapes themselves.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "out_of_scope": {
+      "description": "What the plan deliberately leaves out.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "risks": {
+      "description": "What could go wrong that a person approving the plan should weigh.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "shapes": {
+      "description": "The shapes the plan creates or changes — types, interfaces,\nschemas, signatures, file formats — each declared once, in the\nfile it lives in, by the one task that builds it.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Shape"
+      }
+    },
+    "summary": {
+      "description": "What the plan changes, in one line.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "tasks": {
+      "description": "The work, one task per independently verifiable unit.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/Task"
@@ -16,14 +66,49 @@
     "tasks"
   ],
   "$defs": {
+    "Change": {
+      "description": "One place a task changes, and what changes there.",
+      "type": "object",
+      "properties": {
+        "at": {
+          "description": "A file, or a file and what in it: `src/theme.rs::Theme`.",
+          "type": "string"
+        },
+        "code": {
+          "description": "The change as it will read once made: the signature it changes or\nthe lines it adds — so a person reviewing the plan sees how the\nwork will look, not only what it is about.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "what": {
+          "description": "What changes there, in words.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "at",
+        "what"
+      ]
+    },
     "Criterion": {
-      "description": "One criterion as the tasks document declares it: a command, and whether it\nis a `guard` (passes before and after the work) or an ordinary\ncriterion (red before, green after). The event log freezes it as\n[`events::Criterion`], which reads what a later writer adds; this\ntype refuses it, because an agent wrote it.",
+      "description": "One criterion: a command, and whether it is a `guard` (passes before\nand after the work) or an ordinary criterion (fails before the work,\npasses after).",
       "type": "object",
       "properties": {
         "cmd": {
+          "description": "The command, run under `sh` in the task's checkout; it passes when\nit exits 0.",
           "type": "string"
         },
+        "proves": {
+          "description": "What passing shows, in words a person reviewing the plan reads.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "type": {
+          "description": "`guard` for a command that passes before the work and must keep\npassing; left out for one that fails before the work and passes\nonce it is done.",
           "anyOf": [
             {
               "$ref": "#/$defs/CriterionType"
@@ -45,48 +130,168 @@
         "guard"
       ]
     },
-    "Task": {
-      "description": "One task. `id`'s pattern isn't enforced by this type — the\nspec treats that as a registration-time rule, not a parse-time\none, so an ill-formed id still parses and gets a proper diagnostic\nnaming the task, field and expectation instead of a raw serde error.",
+    "Decision": {
+      "description": "A choice the plan makes that a person could make differently.",
       "type": "object",
       "properties": {
+        "alternatives": {
+          "description": "What it did not choose, one to a line.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "answers": {
+          "description": "The question of the run this decision restates, when a person\nalready answered it: the plan carries their answer and does not\ndecide it again.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuestionId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "choice": {
+          "description": "What the plan chose.",
+          "type": "string"
+        },
+        "id": {
+          "description": "How a person, and the plan's tasks, refer to it.",
+          "type": "string"
+        },
+        "question": {
+          "description": "What was open.",
+          "type": "string"
+        },
+        "why": {
+          "description": "Why this, and not those.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "question",
+        "choice"
+      ]
+    },
+    "QuestionId": {
+      "description": "A question id: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
+    },
+    "ScopeGlob": {
+      "description": "a scope glob: a path pattern where `*` stays within one directory and `**` recurses",
+      "type": "string",
+      "minLength": 1
+    },
+    "Shape": {
+      "description": "A shape the plan creates or changes, declared once where it lives and\nowned by the task that builds it: every other task that builds on it\nwaits for that one, and none but it may change the file.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "The shape itself, as the code it is.",
+          "type": "string"
+        },
+        "file": {
+          "description": "The file it lives in, which its owner's scope covers.",
+          "type": "string"
+        },
+        "name": {
+          "description": "What the plan's tasks call it.",
+          "type": "string"
+        },
+        "owner": {
+          "description": "The task that builds it.",
+          "$ref": "#/$defs/TaskId"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "owner",
+        "file",
+        "code"
+      ]
+    },
+    "Task": {
+      "description": "One task: a unit of work its criteria verify on their own, the paths\nit may change, and what a person reviewing the plan reads about it.",
+      "type": "object",
+      "properties": {
+        "changes": {
+          "description": "What the task changes, place by place — each inside its scope.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Change"
+          }
+        },
         "criteria": {
+          "description": "The commands that must all pass for the task to be done.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/Criterion"
           }
         },
         "depends_on": {
+          "description": "The tasks whose work this one starts from. Tasks with no\ndependency between them run at the same time and may not share a\npath.",
           "type": "array",
           "items": {
             "$ref": "#/$defs/TaskId"
           }
         },
-        "id": {
-          "$ref": "#/$defs/TaskId"
-        },
-        "justification": {
+        "description": {
+          "description": "What the task does and why, in Markdown, for a person reviewing\nthe plan. It names the plan's shapes it touches rather than\nrepeating them.",
           "type": [
             "string",
             "null"
           ]
         },
-        "manual_review": {
-          "type": "boolean"
+        "id": {
+          "description": "How the plan's shapes and other tasks refer to it.",
+          "$ref": "#/$defs/TaskId"
+        },
+        "invariants": {
+          "description": "What the code the task touches already promises, which the task\nkeeps.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
         "notes": {
+          "description": "What the session building the task should know that nothing else\nhere says.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "description": "What a person will observe once the task is done.",
           "type": [
             "string",
             "null"
           ]
         },
         "scope": {
+          "description": "The only paths the task may change.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeGlob"
+          }
+        },
+        "title": {
+          "description": "What the task does, in one line.",
+          "type": "string"
+        },
+        "uses": {
+          "description": "The plan's shapes, by name, that the task builds on without\nowning them.",
           "type": "array",
           "items": {
             "type": "string"
           }
-        },
-        "title": {
-          "type": "string"
         }
       },
       "additionalProperties": false,

@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 
 use yunta_core::NodeId;
 
+use crate::worktree::UnitId;
+
 /// The run directory's working space: everything the engine and its
 /// sessions need on disk while a run is alive, and nothing a reader of
 /// the run resolves anything through.
@@ -20,6 +22,77 @@ pub const SCRATCH_DIR: &str = "scratch";
 
 /// Where nodes' staging directories live under [`SCRATCH_DIR`].
 const STAGING_DIR: &str = "staging";
+
+/// The manifest a run froze when it was created: what it runs, which
+/// runners it resolves against, which limits it is held to.
+pub fn manifest_path(run_dir: &Path) -> PathBuf {
+    run_dir.join("manifest.yaml")
+}
+
+/// Where a session's own transcript directory goes, under the scratch.
+pub fn sessions_root(run_dir: &Path) -> PathBuf {
+    run_dir.join(SCRATCH_DIR).join("sessions")
+}
+
+/// Where a run made before its project kept checkouts kept its units'
+/// checkouts, which it takes away when it ends.
+pub fn unit_worktrees(run_dir: &Path) -> PathBuf {
+    run_dir.join("unit-worktrees")
+}
+
+/// Where a run's checkouts live: the root its manifest froze, or else the
+/// `worktrees` directory beside the runs root its directory sits in — so
+/// a library caller without frozen paths gets a place next to its runs.
+pub fn worktrees_root(manifest: &yunta_core::Manifest, run_dir: &Path) -> PathBuf {
+    if let Some(paths) = &manifest.paths {
+        return paths.worktrees_root().to_path_buf();
+    }
+    let runs = run_dir.parent().unwrap_or(run_dir);
+    runs.parent()
+        .map(|parent| parent.join("worktrees"))
+        .unwrap_or_else(|| runs.join("worktrees"))
+}
+
+/// The run's baseline: what its suite wrote on the tree the run woke
+/// on. Only a run that measured has one — a run born holding its
+/// lineage's measurement reads the bytes under the run its origin
+/// names, and a lineage whose root declared no suite has none at all.
+pub(crate) fn baseline_dir(run_dir: &Path) -> PathBuf {
+    run_dir.join("baseline")
+}
+
+/// The private git index one unit of work captures its tree through.
+///
+/// Under the run's scratch and never in the checkout, and named by the
+/// unit rather than by the directory: two units working in one tree at
+/// the same moment share the `cwd` and must not share the index, so what
+/// makes the path unique is whose capture it is. A [`UnitId`] renders
+/// its kind as well as its id, because a node and a task of one run may
+/// be called the same thing and still run side by side.
+pub fn index_for(run_dir: &Path, who: &UnitId) -> PathBuf {
+    run_dir
+        .join(SCRATCH_DIR)
+        .join("index")
+        .join(yunta_core::sha256_hex(who.to_string().as_bytes()).as_str())
+}
+
+/// Everything the baseline suite wrote on the run's first wake.
+///
+/// The log states what the suite did — its command, its exit code, a
+/// summary and the hash of all of it — and the bytes that hash names sit
+/// here, so a reader of a comparison against the baseline can read the
+/// output it is against and not only its summary. Every comparison in
+/// the lineage names this one file: a descendant's log carries the fact
+/// and the run that holds the bytes.
+pub fn baseline_capture(run_dir: &Path) -> PathBuf {
+    baseline_dir(run_dir).join("suite.out")
+}
+
+/// The run's view of what it holds: one file per artifact, written from
+/// the acceptance that named it.
+pub fn artifacts_view(run_dir: &Path) -> PathBuf {
+    run_dir.join(yunta_core::ARTIFACTS_DIR)
+}
 
 /// Where every node's staging sits, one directory per node id.
 pub fn staging_root(run_dir: &Path) -> PathBuf {

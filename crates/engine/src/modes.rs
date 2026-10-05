@@ -6,7 +6,27 @@
 
 use std::collections::{HashMap, HashSet};
 
-use yunta_core::{ModeInclude, ModeName, Node, NodeId, Workflow};
+use yunta_core::{LeftOut, ModeInclude, ModeName, Node, NodeId, Workflow};
+
+/// The top-level node ids a run schedules: what its mode includes, less
+/// what it left out because its config lacks what they need. `None` when
+/// nothing narrows the graph at all.
+pub fn included_nodes(
+    workflow: &Workflow,
+    mode_name: &ModeName,
+    left_out: &[LeftOut],
+) -> Option<HashSet<NodeId>> {
+    let by_mode = mode_included_nodes(workflow, mode_name);
+    if left_out.is_empty() {
+        return by_mode;
+    }
+    let every = || workflow.nodes.iter().map(|node| node.id.clone()).collect();
+    let mut included: HashSet<NodeId> = by_mode.unwrap_or_else(every);
+    for gone in left_out {
+        included.remove(&gone.node);
+    }
+    Some(included)
+}
 
 /// The top-level node ids `mode_name` makes schedulable, or `None` when
 /// nothing narrows the graph — no `modes:` declared at all, or the

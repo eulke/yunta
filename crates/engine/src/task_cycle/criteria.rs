@@ -1,39 +1,60 @@
 //! Running a task's criteria: each command once per tree it ran
-//! against, memoized, before an attempt and after it.
+//! against, memoized, before an attempt and after it — the pre-check in
+//! the order the log priced those commands, cheapest first.
 
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
-use yunta_core::events::CriterionType;
+use yunta_core::events::{CriterionType, TaskLedger};
 use yunta_core::Criterion;
 use yunta_core::{ContentHash, Task, TaskId};
 
-use super::{CriterionRun, PreCheckOutcome, TaskCycleError};
-use crate::process::{spawn_governed, Capture, GovernedCommand, Outcome, Supervision};
+use super::tree::{asks_git, Tree};
+use super::{CriterionRun, TaskCycleError};
+use crate::process::{
+    spawn_governed, CommandOutput, GovernedCommand, Outcome, Printed, Supervision,
+};
 
-/// Per-run memoization cache: a criterion's result is reused when
-/// its command, the working tree's content, and the resolved config are
-/// all unchanged since the last time it ran *in this run*. Never
-/// cross-run — a fresh `Memo` per `execute_run` call is correct, not a
-/// gap: a resumed run simply starts with a cold cache and re-verifies
-/// once more than strictly necessary, which is safe (over-verifying),
-/// unlike a stale cross-run cache (which would risk under-verifying).
+/// The run's memoization cache: a criterion's result is reused when its
+/// command, the working tree's content and the resolved config are all
+/// unchanged since it last answered. One `Memo` per `execute_run` call
+/// holds what this invocation answered, seeded at a wake with what the
+/// log says earlier invocations answered — only for the trees each
+/// answer names, and only from an invocation whose commands ran with the
+/// environment this one's do.
 ///
-/// The full key is `cmd + tree_hash + declared env +
-/// resolved config` — `declared env` drops out here because criteria
-/// have no `env:` field in the schema yet (nothing to declare yet).
+/// The key is `sha256(cmd \0 content \0 head \0 config_hash)`: the
+/// command as written, the git tree of what the checkout holds, and the
+/// hash of the resolved config it runs under — the things its exit code
+/// can turn on, since a criterion declares no `env:` of its own. `head`
+/// is the commit the checkout stands on, and counts only for a command
+/// that runs `git`: that one can read history, where any other reads
+/// files, so the same content committed, or replayed onto a base that
+/// did not move, keeps its answer.
 pub struct Memo {
     config_hash: ContentHash,
-    cache: Mutex<HashMap<ContentHash, i32>>,
-    /// Observed wall-clock durations per criterion command, this
-    /// invocation only — the same lifetime discipline as the result
-    /// cache above (a resume starts cold and re-learns, which only
-    /// costs one declared-order pass). Keyed by the bare command, not
-    /// the memo key: a criterion's cost profile survives tree changes,
-    /// which is exactly when the ordering matters (a memo hit never
-    /// re-runs anything, so there is nothing to reorder).
-    durations: Mutex<HashMap<String, Vec<u64>>>,
+    cache: Mutex<HashMap<ContentHash, Answer>>,
+    /// One slot per key a check is asking about: two checks of one
+    /// command on one tree at the same moment — the tasks of a batch,
+    /// each pre-checking the suite on the commit they all start from —
+    /// take turns, and the second reuses what the first answered instead
+    /// of running the command alongside it.
+    asking: Mutex<HashMap<ContentHash, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    /// What the lineage's measurement says about the suite every task is
+    /// held to, as this invocation learns it.
+    suite: super::SuiteGate,
+}
+
+/// What a command answered on one tree. A red answer keeps what the
+/// command printed, so a check that reuses it still says why it fails —
+/// the common case is a session's `yunta_check_task` running the
+/// criteria and the close reusing them on the same tree. A green one
+/// keeps nothing to explain.
+#[derive(Clone)]
+struct Answer {
+    exit_code: i32,
+    output: Option<Printed>,
 }
 
 impl Memo {
@@ -41,119 +62,232 @@ impl Memo {
         Self {
             config_hash,
             cache: Mutex::new(HashMap::new()),
-            durations: Mutex::new(HashMap::new()),
+            asking: Mutex::new(HashMap::new()),
+            suite: super::SuiteGate::default(),
         }
     }
 
-    fn record_duration(&self, cmd: &str, duration_ms: u64) {
-        let mut durations = self.durations.lock().unwrap_or_else(|e| e.into_inner());
-        durations
-            .entry(cmd.to_string())
-            .or_default()
-            .push(duration_ms);
+    /// The suite every task is held to, as the measurement settles it.
+    pub fn suite(&self) -> &super::SuiteGate {
+        &self.suite
     }
 
-    /// The median of this command's observed durations as a cheapest-first
-    /// sort key, `None` with no history yet — the workspace's one
-    /// [`crate::stats::median`], truncated back to whole milliseconds.
-    fn median_duration(&self, cmd: &str) -> Option<u64> {
-        let durations = self.durations.lock().unwrap_or_else(|e| e.into_inner());
-        let samples = durations.get(cmd)?;
-        let mut sorted: Vec<f64> = samples.iter().map(|&ms| ms as f64).collect();
-        sorted.sort_by(|a, b| a.total_cmp(b));
-        crate::stats::median(&sorted).map(|ms| ms as u64)
+    fn key(&self, cmd: &str, tree: &Tree) -> ContentHash {
+        let head = if asks_git(cmd) {
+            tree.head.as_deref().unwrap_or_default()
+        } else {
+            ""
+        };
+        yunta_core::sha256_hex(
+            format!(
+                "{cmd}\x00{}\x00{head}\x00{}",
+                tree.content, self.config_hash
+            )
+            .as_bytes(),
+        )
     }
 
-    fn key(&self, cmd: &str, tree_hash: &ContentHash) -> ContentHash {
-        yunta_core::sha256_hex(format!("{cmd}\x00{tree_hash}\x00{}", self.config_hash).as_bytes())
+    /// Takes the turn to ask about `key`: held while the caller reads
+    /// the cache and, on a miss, runs the command and records what it
+    /// answered.
+    async fn turn(&self, key: &ContentHash) -> tokio::sync::OwnedMutexGuard<()> {
+        let slot = {
+            let mut asking = self.asking.lock().unwrap_or_else(|e| e.into_inner());
+            asking.entry(key.clone()).or_default().clone()
+        };
+        slot.lock_owned().await
     }
 
-    fn get(&self, cmd: &str, tree_hash: &ContentHash) -> Option<i32> {
+    fn get(&self, key: &ContentHash) -> Option<Answer> {
         let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        cache.get(&self.key(cmd, tree_hash)).copied()
+        cache.get(key).cloned()
     }
 
-    fn put(&self, cmd: &str, tree_hash: &ContentHash, exit_code: i32) {
-        let key = self.key(cmd, tree_hash);
+    /// Remembers what a command answered under `key` — unless it could
+    /// not run at all. A command that was not found says nothing about
+    /// the tree, and the next check on the same tree must run it again:
+    /// the program may be on the `PATH` by then.
+    fn put(&self, key: ContentHash, exit_code: i32, output: &CommandOutput) {
+        if could_not_run(exit_code).is_some() {
+            return;
+        }
+        let answer = Answer {
+            exit_code,
+            output: (exit_code != 0).then(|| Printed::Ran(output.clone())),
+        };
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        cache.insert(key, exit_code);
+        cache.insert(key, answer);
+    }
+
+    /// What `cmd`'s answer on `cwd` is kept under, read as `cwd` stands
+    /// now.
+    async fn key_on(
+        &self,
+        cmd: &str,
+        cwd: &Path,
+        supervision: Supervision<'_>,
+    ) -> Result<ContentHash, TaskCycleError> {
+        let tree = self.tree_for(cmd, cwd, supervision).await?;
+        Ok(self.key(cmd, &tree))
+    }
+
+    /// Takes in what earlier invocations of the run answered — every
+    /// answer the log holds that still speaks for this one.
+    pub(crate) fn seed(
+        &self,
+        events: &[yunta_core::events::StoredEvent],
+        run: &yunta_core::events::RunLedger,
+    ) {
+        let answers = super::recorded::answers(events, run);
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        for answer in answers {
+            cache.insert(
+                self.key(&answer.cmd, &answer.tree),
+                Answer {
+                    exit_code: answer.exit_code,
+                    output: answer.printed,
+                },
+            );
+        }
+    }
+
+    /// `cwd` as an answer of `cmd` is kept for it, read as it stands now
+    /// — for a caller that runs the command some other way and hands the
+    /// answer to [`Memo::passed_on`].
+    pub(crate) async fn tree_for(
+        &self,
+        cmd: &str,
+        cwd: &Path,
+        supervision: Supervision<'_>,
+    ) -> Result<Tree, TaskCycleError> {
+        Tree::of(cwd, asks_git(cmd), supervision).await
+    }
+
+    /// Remembers that `cmd` passed on `tree`, measured by a caller rather
+    /// than a check: the suite a run measures, which every task is then
+    /// held to.
+    pub(crate) fn passed_on(&self, cmd: &str, tree: &Tree) {
+        let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache.insert(
+            self.key(cmd, tree),
+            Answer {
+                exit_code: 0,
+                output: None,
+            },
+        );
+    }
+
+    /// The exit code of `cmd` on `cwd` as this invocation already knows
+    /// it, or by running it now: what a criterion and a
+    /// `baseline_compare` share, so a suite two comparisons ask about
+    /// runs once while the tree stands still.
+    pub(crate) async fn exit_code(
+        &self,
+        cmd: &str,
+        cwd: &Path,
+        supervision: Supervision<'_>,
+    ) -> Result<Memoized, TaskCycleError> {
+        let key = self.key_on(cmd, cwd, supervision).await?;
+        let _turn = self.turn(&key).await;
+        if let Some(answer) = self.get(&key) {
+            return Ok(Memoized {
+                exit_code: answer.exit_code,
+                reused: true,
+                output: answer.output,
+            });
+        }
+        // What the command prints is the run's to keep, never the
+        // terminal's: the person watching reads the run's own view.
+        let outcome = spawn_governed(GovernedCommand::shell(cwd, cmd), supervision)
+            .await
+            .map_err(|source| TaskCycleError::MemoizedCommand {
+                cmd: cmd.to_string(),
+                source,
+            })?;
+        let output = CommandOutput::of(&outcome);
+        let exit_code = exit_code_of(outcome);
+        self.put(key, exit_code, &output);
+        Ok(Memoized {
+            exit_code,
+            reused: false,
+            output: Some(Printed::Ran(output)),
+        })
     }
 }
 
-/// A fingerprint of `cwd`'s current content: the commit it's on,
-/// its full diff against that commit (tracked changes), and every
-/// untracked file's own content hash — conservative on purpose. Missing
-/// an untracked file's content from the fingerprint would let two
-/// genuinely different trees hash the same and wrongly reuse a stale
-/// result; a bare filename list (from `git status`) isn't enough since a
-/// file can change content without its name changing.
-async fn tree_hash(cwd: &Path) -> Result<ContentHash, TaskCycleError> {
-    let run_git = |args: &'static [&'static str]| async move {
-        crate::git::output(cwd, args).await.map_err(|e| {
-            let detail = e.detail();
-            TaskCycleError::TreeHash {
-                args: e.args,
-                cwd: e.cwd,
-                detail,
-            }
-        })
-    };
-
-    let head = run_git(&["rev-parse", "HEAD"]).await?;
-    let diff = run_git(&["diff", "HEAD"]).await?;
-    let untracked = run_git(&["ls-files", "--others", "--exclude-standard"]).await?;
-
-    let mut untracked_fingerprint = String::new();
-    for path in untracked.lines() {
-        let bytes = std::fs::read(cwd.join(path)).unwrap_or_default();
-        untracked_fingerprint.push_str(path);
-        untracked_fingerprint.push(':');
-        untracked_fingerprint.push_str(yunta_core::sha256_hex(&bytes).as_str());
-        untracked_fingerprint.push('\n');
+/// The exit code the log records for how a criterion's command ended.
+/// A command the engine stopped before it answered — a timeout, or a
+/// cancellation — has no exit code of its own, so it is recorded as
+/// `-2`, which no process exits with; one killed by a signal as `-1`.
+fn exit_code_of(outcome: Outcome) -> i32 {
+    match outcome {
+        Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
+        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
     }
+}
 
-    Ok(yunta_core::sha256_hex(
-        format!("{head}\n{diff}\n{untracked_fingerprint}").as_bytes(),
-    ))
+/// Why a criterion never answered, when its exit code says it did not:
+/// the shell could not find its command (127), found it but could not
+/// execute it (126), or the engine stopped it first (`-2`, see
+/// [`exit_code_of`]). `None` for every other exit code, which is the
+/// command's own answer.
+///
+/// A criterion that could not run is neither red nor green: no work on
+/// the tree changes it, so it is never taken for a verdict about one.
+pub fn could_not_run(exit_code: i32) -> Option<&'static str> {
+    match exit_code {
+        127 => Some("command not found"),
+        126 => Some("command not executable"),
+        -2 => Some("stopped before it answered"),
+        _ => None,
+    }
+}
+
+/// What a memoized command answered, and whether this invocation had to
+/// run it to find out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Memoized {
+    pub exit_code: i32,
+    pub reused: bool,
+    /// What the command printed, as [`CriterionRun::output`] keeps it.
+    pub output: Option<Printed>,
 }
 
 /// Runs one criterion command, measuring its wall-clock cost —
 /// an observed fact about an external process, same standing as its
-/// exit code; the injected `Clock` governs event timestamps and derived
-/// state, neither of which this feeds.
+/// exit code, and recorded like one: the order a later check runs its
+/// commands in is derived from the value the log carries, never
+/// measured again. The injected `Clock` governs when an event happened,
+/// which is not what this measures.
 async fn run_criterion(
     task_id: &TaskId,
     cwd: &Path,
     cmd: &str,
     supervision: Supervision<'_>,
-) -> Result<(i32, u64), TaskCycleError> {
+) -> Result<(i32, u64, CommandOutput), TaskCycleError> {
     let started = std::time::Instant::now();
-    // A criterion shares the engine's streams: its output is the
-    // person's to read, its exit code the engine's to record.
-    let command = GovernedCommand::shell(cwd, cmd)
-        .stdout(Capture::Inherit)
-        .stderr(Capture::Inherit);
-    let exit_code = match spawn_governed(command, supervision)
+    // What a criterion prints is the run's, never the terminal's: kept
+    // with its check, so the person watching, the one deciding and the
+    // session after this one read why it did not pass — and the view
+    // the run draws is the only thing on the screen.
+    let outcome = spawn_governed(GovernedCommand::shell(cwd, cmd), supervision)
         .await
         .map_err(|source| TaskCycleError::Criterion {
             task: task_id.clone(),
             cmd: cmd.to_string(),
             source,
-        })? {
-        Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
-        // Stopped by the engine before it could answer — never a real
-        // exit code, so the record says so.
-        Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,
-    };
+        })?;
+    let output = CommandOutput::of(&outcome);
+    let exit_code = exit_code_of(outcome);
     let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
-    Ok((exit_code, duration_ms))
+    Ok((exit_code, duration_ms, output))
 }
 
-/// Tree hash computed once per call and shared across every criterion in
-/// it — criteria are read-only, so the tree can't change between
-/// them, and one `git` round-trip beats N. `criteria` arrives already in
-/// the order the caller wants executed (declared, or the learned
-/// order) — this function only runs and records.
+/// The tree read once per call and shared across every criterion in it
+/// — criteria are read-only, so the tree can't change between them, and
+/// one capture beats N. `criteria` arrives already in the order the
+/// caller wants executed (declared, or the learned order) — this
+/// function only runs and records.
 async fn run_all_criteria(
     task_id: &TaskId,
     criteria: &[Criterion],
@@ -161,17 +295,36 @@ async fn run_all_criteria(
     memo: &Memo,
     supervision: Supervision<'_>,
 ) -> Result<Vec<CriterionRun>, TaskCycleError> {
-    let tree_hash = tree_hash(cwd).await?;
+    let tree = Tree::for_criteria(criteria, cwd, supervision).await?;
+    run_on(task_id, criteria, &tree, cwd, memo, supervision).await
+}
+
+/// Runs `criteria` in order on `tree`, which `cwd` holds, each through
+/// the memo.
+async fn run_on(
+    task_id: &TaskId,
+    criteria: &[Criterion],
+    tree: &Tree,
+    cwd: &Path,
+    memo: &Memo,
+    supervision: Supervision<'_>,
+) -> Result<Vec<CriterionRun>, TaskCycleError> {
     let mut runs = Vec::with_capacity(criteria.len());
     for criterion in criteria {
-        let (exit_code, reused, duration_ms) = match memo.get(&criterion.cmd, &tree_hash) {
-            Some(exit_code) => (exit_code, true, None),
+        let key = memo.key(&criterion.cmd, tree);
+        let _turn = memo.turn(&key).await;
+        let (exit_code, reused, duration_ms, output) = match memo.get(&key) {
+            Some(answer) => (answer.exit_code, true, None, answer.output),
             None => {
-                let (exit_code, duration_ms) =
+                let (exit_code, duration_ms, output) =
                     run_criterion(task_id, cwd, &criterion.cmd, supervision).await?;
-                memo.put(&criterion.cmd, &tree_hash, exit_code);
-                memo.record_duration(&criterion.cmd, duration_ms);
-                (exit_code, false, Some(duration_ms))
+                memo.put(key, exit_code, &output);
+                (
+                    exit_code,
+                    false,
+                    Some(duration_ms),
+                    Some(Printed::Ran(output)),
+                )
             }
         };
         runs.push(CriterionRun {
@@ -180,57 +333,165 @@ async fn run_all_criteria(
             is_guard: criterion.r#type == Some(CriterionType::Guard),
             reused,
             duration_ms,
+            output,
+            tree: Some(tree.content.clone()),
+            head: tree.head.clone().filter(|_| asks_git(&criterion.cmd)),
         });
     }
     Ok(runs)
 }
 
-/// Pre-check in rojo: every non-`guard` criterion must
-/// fail, every `guard` must pass. Runs every criterion regardless — the
-/// report should show all of them, not stop at the first surprise.
-/// Execution order is the learned one: ascending historical
-/// median duration, criteria without history last in declared order —
-/// the fast, likely-to-fail evidence lands first while the verdict
-/// (computed over the complete set) stays order-independent by
-/// construction.
-pub async fn pre_check(
-    task: &Task,
+/// The median of what the log says `cmd` cost, as a cheapest-first sort
+/// key; `None` for a command the log never priced. The workspace's one
+/// [`crate::stats::median`], over samples the log holds in the order
+/// they were measured, truncated back to whole milliseconds.
+fn median_duration(history: &TaskLedger, cmd: &str) -> Option<u64> {
+    let mut sorted: Vec<f64> = history
+        .criterion_durations(cmd)
+        .iter()
+        .map(|&ms| ms as f64)
+        .collect();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    crate::stats::median(&sorted).map(|ms| ms as u64)
+}
+
+/// Runs every criterion of `task` on `cwd` as its pre-check would —
+/// through the same cache, which keeps what they answered for that
+/// tree — so what a command that could not run said can be handed back
+/// to whoever wrote it.
+/// What one command answers in `cwd`, through the memo: a criterion no
+/// task declares, such as the one a finding proposes to prove its fix.
+pub(crate) async fn probe_command(
+    cmd: &str,
     cwd: &Path,
     memo: &Memo,
     supervision: Supervision<'_>,
-) -> Result<(Vec<CriterionRun>, PreCheckOutcome), TaskCycleError> {
-    let mut ordered: Vec<&Criterion> = task.criteria.iter().collect();
-    // Stable sort: no-history criteria (u64::MAX key) keep declared
-    // order among themselves.
-    ordered.sort_by_key(|criterion| memo.median_duration(&criterion.cmd).unwrap_or(u64::MAX));
-    let ordered: Vec<Criterion> = ordered.into_iter().cloned().collect();
-    let runs = run_all_criteria(&task.id, &ordered, cwd, memo, supervision).await?;
-
-    let mut outcome = PreCheckOutcome::Red;
-    for run in &runs {
-        if matches!(outcome, PreCheckOutcome::Red) {
-            if run.is_guard && run.exit_code != 0 {
-                outcome = PreCheckOutcome::BrokenGuard {
-                    cmd: run.cmd.clone(),
-                };
-            } else if !run.is_guard && run.exit_code == 0 {
-                outcome = PreCheckOutcome::TrivialCriterion {
-                    cmd: run.cmd.clone(),
-                };
-            }
-        }
-    }
-
-    Ok((runs, outcome))
+) -> Result<CriterionRun, TaskCycleError> {
+    let criterion = Criterion {
+        cmd: cmd.to_string(),
+        r#type: None,
+        proves: None,
+    };
+    let task = TaskId::from_static("proposed-criterion");
+    let runs = run_all_criteria(
+        &task,
+        std::slice::from_ref(&criterion),
+        cwd,
+        memo,
+        supervision,
+    );
+    Ok(runs.await?.remove(0))
 }
 
-/// Post-check: every criterion, guard or not, must now
-/// pass.
-pub async fn post_check(
+pub(crate) async fn probe(
     task: &Task,
     cwd: &Path,
     memo: &Memo,
     supervision: Supervision<'_>,
 ) -> Result<Vec<CriterionRun>, TaskCycleError> {
     run_all_criteria(&task.id, &task.criteria, cwd, memo, supervision).await
+}
+
+/// Pre-check in rojo: every non-`guard` criterion must
+/// fail, every `guard` must pass. Runs every criterion regardless — the
+/// report should show all of them, not stop at the first surprise.
+/// Execution order is the learned one, and `history` is where it is
+/// learned from: ascending median of what the log records each command
+/// costing, criteria the log never priced last in declared order — the
+/// fast, likely-to-fail evidence lands first while the verdict
+/// (computed over the complete set) stays order-independent by
+/// construction.
+pub async fn pre_check(
+    task: &Task,
+    cwd: &Path,
+    memo: &Memo,
+    history: &TaskLedger,
+    supervision: Supervision<'_>,
+) -> Result<Vec<CriterionRun>, TaskCycleError> {
+    // The suite still being measured is left out: the measurement is the
+    // answer on the tree the task starts from.
+    let mut ordered: Vec<&Criterion> = task
+        .criteria
+        .iter()
+        .filter(|criterion| !memo.suite().pending(criterion))
+        .collect();
+    // Stable sort: criteria the log never priced (u64::MAX key) keep
+    // declared order among themselves.
+    ordered.sort_by_key(|criterion| median_duration(history, &criterion.cmd).unwrap_or(u64::MAX));
+    let ordered: Vec<Criterion> = ordered.into_iter().cloned().collect();
+    run_all_criteria(&task.id, &ordered, cwd, memo, supervision).await
+}
+
+/// [`pre_check`], unless a cancellation cut it while it still read the
+/// tree: then `None`. The token that fired stopped git itself, so its
+/// failure says nothing about the task, which was cut before any
+/// criterion ran.
+pub(crate) async fn pre_check_unless_cut(
+    task: &Task,
+    cwd: &Path,
+    memo: &Memo,
+    history: &TaskLedger,
+    supervision: Supervision<'_>,
+) -> Result<Option<Vec<CriterionRun>>, TaskCycleError> {
+    match pre_check(task, cwd, memo, history, supervision).await {
+        Err(_) if supervision.cancel.is_cancelled() => Ok(None),
+        ran => ran.map(Some),
+    }
+}
+
+/// What a post-check answered: every criterion it ran, and the guards
+/// it left waiting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostCheck {
+    pub runs: Vec<CriterionRun>,
+    /// The guards that did not run, by command, because one of the
+    /// task's own criteria is red.
+    pub waiting: Vec<String>,
+    /// The tree the checkout held, which every answer is for.
+    pub tree: yunta_core::TreeId,
+}
+
+impl PostCheck {
+    /// Whether the check passes: every criterion ran, and each exits 0.
+    pub fn passes(&self) -> bool {
+        self.waiting.is_empty() && self.runs.iter().all(|run| run.exit_code == 0)
+    }
+}
+
+/// Post-check: every criterion, guard or not, must now pass. The task's
+/// own criteria run first, in declared order, and its guards only once
+/// every one of those passes.
+///
+/// While one of its own is red the check cannot close the task whatever
+/// a guard answers, and a guard that is the project's whole suite holds
+/// that same red test: run then, it costs the suite and says nothing the
+/// red criterion did not. A guard left waiting is in no run, so nothing
+/// reads it as passed.
+pub async fn post_check(
+    task: &Task,
+    cwd: &Path,
+    memo: &Memo,
+    supervision: Supervision<'_>,
+) -> Result<PostCheck, TaskCycleError> {
+    let (guards, own): (Vec<Criterion>, Vec<Criterion>) =
+        task.criteria.iter().cloned().partition(Criterion::is_guard);
+    let tree = Tree::for_criteria(&task.criteria, cwd, supervision).await?;
+    let mut runs = run_on(&task.id, &own, &tree, cwd, memo, supervision).await?;
+    if !runs.iter().all(|run| run.exit_code == 0) {
+        let waiting = guards.into_iter().map(|guard| guard.cmd).collect();
+        return Ok(PostCheck {
+            runs,
+            waiting,
+            tree: tree.content,
+        });
+    }
+    // The suite still being measured is waited for here, where its answer
+    // is what decides whether it holds the task at all.
+    let guards = memo.suite().judging(guards, supervision.cancel).await;
+    runs.extend(run_on(&task.id, &guards, &tree, cwd, memo, supervision).await?);
+    Ok(PostCheck {
+        runs,
+        waiting: Vec::new(),
+        tree: tree.content,
+    })
 }

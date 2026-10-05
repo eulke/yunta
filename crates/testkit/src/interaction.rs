@@ -44,11 +44,17 @@ impl ScriptedInteraction {
 
 #[async_trait]
 impl HumanInteraction for ScriptedInteraction {
+    /// Stands in for a person at the terminal, so a run says when it
+    /// began asking as it does for one.
+    fn present(&self) -> bool {
+        true
+    }
+
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
         self.seen_options
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(escalation.options.iter().map(|o| o.id.clone()).collect());
+            .push(escalation.options().iter().map(|o| o.id.clone()).collect());
         Some(self.choice.clone())
     }
 }
@@ -69,7 +75,7 @@ impl ApproveEverything {
 #[async_trait]
 impl HumanInteraction for ApproveEverything {
     async fn resolve(&self, escalation: &GateWaitingPayload) -> Option<HumanChoice> {
-        escalation.options.first().map(|first| HumanChoice {
+        escalation.options().first().map(|first| HumanChoice {
             option: first.id.clone(),
             by: self.by.clone(),
             free_text: None,

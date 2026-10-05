@@ -1,0 +1,904 @@
+<title>Yunta de raíz</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root{
+  --ground:#F4F6F5; --paper:#FBFCFB; --ink:#1C2226; --ink-2:#4A545C; --muted:#6B767F;
+  --rule:#D5DBD9; --code-bg:#E9EDEB; --code-ink:#20282D;
+  --accent:#2A6C7C; --accent-soft:#D9E9ED; --accent-ink:#1E5563;
+  --done:#3C7C51; --fail:#B3483B; --wait:#A97A19;
+  --done-soft:#DDEEE3; --fail-soft:#F3DEDA; --wait-soft:#F4E9CF;
+  --keep:#3C7C51; --keep-soft:#DDEEE3;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#131719; --paper:#181D20; --ink:#E4E8E6; --ink-2:#B6BEC3; --muted:#8E989F;
+    --rule:#2B3236; --code-bg:#1E2427; --code-ink:#DCE3E0;
+    --accent:#7CC0D0; --accent-soft:#1F3238; --accent-ink:#A8DAE6;
+    --done:#7FC494; --fail:#E08A7F; --wait:#E0B15C;
+    --done-soft:#1D2E24; --fail-soft:#35211E; --wait-soft:#33291A;
+    --keep:#7FC494; --keep-soft:#1D2E24;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#131719; --paper:#181D20; --ink:#E4E8E6; --ink-2:#B6BEC3; --muted:#8E989F;
+  --rule:#2B3236; --code-bg:#1E2427; --code-ink:#DCE3E0;
+  --accent:#7CC0D0; --accent-soft:#1F3238; --accent-ink:#A8DAE6;
+  --done:#7FC494; --fail:#E08A7F; --wait:#E0B15C;
+  --done-soft:#1D2E24; --fail-soft:#35211E; --wait-soft:#33291A;
+  --keep:#7FC494; --keep-soft:#1D2E24;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:"Source Serif 4",Georgia,serif;font-size:17px;line-height:1.55;padding-block:0 96px;padding-inline:clamp(16px,4vw,48px)}
+.wrap{max-width:1080px;margin:0 auto}
+.prose{max-width:70ch}
+h1,h2,h3,h4{font-family:"Instrument Sans","Helvetica Neue",Arial,sans-serif;text-wrap:balance;line-height:1.15;margin:0}
+h1{font-size:clamp(34px,5vw,54px);font-weight:700;letter-spacing:-.015em}
+h2{font-size:27px;font-weight:600;margin-top:80px;padding-top:22px;border-top:1px solid var(--rule)}
+h3{font-size:20px;font-weight:600;margin-top:40px}
+h4{font-size:16.5px;font-weight:600;margin-top:24px}
+p{margin:14px 0}
+.eyebrow{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+header{padding-block:56px 8px}
+header .lede{font-size:21px;color:var(--ink-2);max-width:62ch;margin-top:18px}
+.meta{display:flex;flex-wrap:wrap;gap:8px 20px;font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--muted);margin-top:22px}
+.meta b{color:var(--ink-2);font-weight:600}
+nav.toc{margin-top:40px;padding:18px 22px;background:var(--paper);border:1px solid var(--rule);border-radius:6px;max-width:70ch}
+nav.toc ol{margin:0;padding-left:22px;columns:2;column-gap:32px;font-family:"Instrument Sans",sans-serif;font-size:15px}
+nav.toc li{margin:4px 0;break-inside:avoid}
+nav.toc a{color:var(--ink);text-decoration:none}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--accent);text-decoration:underline}
+a{color:var(--accent-ink)}
+code,pre{font-family:"JetBrains Mono",ui-monospace,monospace}
+code{font-size:.88em;background:var(--code-bg);color:var(--code-ink);padding:1px 5px;border-radius:3px}
+pre{background:var(--code-bg);color:var(--code-ink);padding:16px 18px;border-radius:6px;overflow-x:auto;font-size:13.5px;line-height:1.5;margin:18px 0}
+pre code{background:none;padding:0;font-size:inherit}
+pre .c{color:var(--muted);font-style:italic}
+pre .k{color:var(--accent-ink);font-weight:600}
+.principle{margin:28px 0;padding:22px 26px;border-left:4px solid var(--accent);background:var(--paper);font-family:"Instrument Sans",sans-serif;font-size:20px;line-height:1.35;max-width:70ch}
+.principle small{display:block;font-family:"Source Serif 4",serif;font-size:15.5px;color:var(--ink-2);margin-top:10px;line-height:1.5}
+/* stats row */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:26px 0}
+.stat{background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:14px 16px}
+.stat b{display:block;font-family:"Instrument Sans",sans-serif;font-size:30px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
+.stat span{display:block;font-size:13px;color:var(--muted);margin-top:6px}
+/* vice cards */
+.vice{margin:26px 0;padding:20px 24px;background:var(--paper);border:1px solid var(--rule);border-radius:6px}
+.vice .id{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--accent-ink);letter-spacing:.06em}
+.vice h3{margin-top:4px}
+.vice .sym{margin:12px 0;font-size:15.5px}
+.vice .sym b{font-family:"Instrument Sans",sans-serif;font-weight:600}
+.vice .mech{margin-top:14px;padding:12px 16px;background:var(--accent-soft);border-radius:4px;font-size:15.5px}
+.vice .mech b{font-family:"Instrument Sans",sans-serif;color:var(--accent-ink)}
+.vice .keep{margin-top:10px;font-size:14.5px;color:var(--ink-2)}
+.vice .keep b{color:var(--keep);font-family:"Instrument Sans",sans-serif}
+/* flow diagram */
+.flow{display:grid;align-items:stretch;gap:0 10px;margin:26px 0;font-family:"Instrument Sans",sans-serif}
+.flow.c4{grid-template-columns:1fr auto 1fr auto 1fr auto 1fr}
+.flow.c5{grid-template-columns:1fr auto 1fr auto 1fr auto 1fr auto 1fr}
+.flow.c3{grid-template-columns:1fr auto 1fr auto 1fr}
+@media (max-width:900px){.flow{grid-template-columns:1fr !important;gap:10px}.flow .arrow{transform:rotate(90deg);justify-self:center}}
+.flow .col{display:flex;flex-direction:column;gap:10px}
+.flow .box{border:1px solid var(--rule);background:var(--paper);border-radius:6px;padding:12px 14px;font-size:13.5px}
+.flow .box b{display:block;font-size:14.5px;font-weight:600}
+.flow .box code{font-size:12px}
+.flow .box.new{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.flow .box.keep{border-color:var(--keep);box-shadow:inset 3px 0 0 var(--keep)}
+.flow .box.bad{border-color:var(--fail);box-shadow:inset 3px 0 0 var(--fail)}
+.flow .box .tag{display:inline-block;font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:1px 6px;border-radius:3px;margin-top:6px}
+.tag.new{color:var(--accent-ink);background:var(--accent-soft)}
+.tag.keep{color:var(--keep);background:var(--keep-soft)}
+.tag.bad{color:var(--fail);background:var(--fail-soft)}
+.flow .arrow{align-self:center;color:var(--muted);font-size:22px}
+.flow .head{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
+/* crate diagram */
+.crates{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin:24px 0}
+@media (max-width:760px){.crates{grid-template-columns:1fr}}
+.stack{background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:14px 16px}
+.stack .head{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.stack .layer{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 12px;border:1px solid var(--rule);border-radius:4px;margin:6px 0;font-family:"Instrument Sans",sans-serif;font-size:14px;background:var(--ground)}
+.stack .layer code{font-size:12px}
+.stack .layer small{color:var(--muted);font-size:12px;text-align:right}
+.stack .layer.bad{border-color:var(--fail)}
+.stack .layer.new{border-color:var(--accent)}
+.stack .dep{text-align:center;color:var(--muted);font-size:14px;line-height:1}
+/* tables */
+.tablewrap{overflow-x:auto;margin:18px 0;border:1px solid var(--rule);border-radius:6px;background:var(--paper)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;vertical-align:top;padding:8px 11px;border-bottom:1px solid var(--rule)}
+th{font-family:"Instrument Sans",sans-serif;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:600;background:var(--ground);position:sticky;top:0}
+tr:last-child td{border-bottom:none}
+td code{white-space:nowrap}
+td.w code{white-space:normal}
+.group td{background:var(--ground);font-family:"Instrument Sans",sans-serif;font-weight:600;font-size:13px;color:var(--ink-2);padding-block:6px}
+.pill{display:inline-block;font-family:"Instrument Sans",sans-serif;font-size:11.5px;font-weight:600;letter-spacing:.03em;padding:1px 8px;border-radius:999px;white-space:nowrap}
+.pill.new{background:var(--accent-soft);color:var(--accent-ink)}
+.pill.keep{background:var(--keep-soft);color:var(--keep)}
+.pill.del{background:var(--fail-soft);color:var(--fail)}
+.pill.mod{background:var(--wait-soft);color:var(--wait)}
+.pill.m{background:var(--code-bg);color:var(--ink-2);font-family:"JetBrains Mono",monospace;font-weight:400}
+.note{background:var(--paper);border:1px solid var(--rule);border-radius:6px;padding:14px 18px;font-size:15.5px;margin:18px 0}
+.note.decide{border-color:var(--wait);background:var(--wait-soft)}
+.note.decide .eyebrow{color:var(--wait)}
+ul,ol{padding-left:22px}
+li{margin:6px 0}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;font-size:15px;margin:14px 0}
+.kv dt{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--muted)}
+.kv dd{margin:0}
+.steps{counter-reset:s;list-style:none;padding:0;margin:18px 0}
+.steps li{counter-increment:s;position:relative;padding-left:44px;margin:12px 0}
+.steps li::before{content:counter(s);position:absolute;left:0;top:1px;width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent-ink);font-family:"Instrument Sans",sans-serif;font-weight:700;font-size:13px;display:grid;place-items:center}
+.phase{margin:18px 0;padding:16px 20px;border:1px solid var(--rule);border-radius:6px;background:var(--paper)}
+.phase .ph{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--accent-ink);letter-spacing:.06em}
+.phase h4{margin-top:4px}
+.phase p{font-size:15px;margin:8px 0 0}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media (max-width:760px){.two{grid-template-columns:1fr}}
+.term{background:#1B2124;color:#DCE3E0;border-radius:8px;padding:14px 16px;font-family:"JetBrains Mono",monospace;font-size:12.5px;line-height:1.55;overflow-x:auto;margin:18px 0}
+.term pre{background:none;color:inherit;padding:0;margin:0;font-size:inherit}
+.term .dim{color:#8A959C}.term .g{color:#8FD3A4}.term .r{color:#EE9B90}.term .y{color:#E9C070}
+</style>
+
+<div class="wrap">
+<header>
+  <p class="eyebrow">yunta · corrección de raíz · ocho frentes auditados sobre 80abe93</p>
+  <h1>Yunta de raíz</h1>
+  <p class="lede">Doscientos defectos con evidencia se reducen a doce vicios que se repiten en cada crate. Cada vicio tiene un mecanismo que lo vuelve irrepresentable, y la mitad de esos mecanismos ya viven en el repo como patrón aislado. Esta es la arquitectura que los generaliza, el plan que la construye y el índice que prueba que ningún defecto quedó sin casa.</p>
+  <div class="meta">
+    <span><b>fuentes</b> 8 auditorías independientes, ~690 lecturas de archivo</span>
+    <span><b>defectos</b> 198 con archivo:línea</span>
+    <span><b>vicios</b> 12 · <b>mecanismos</b> 24 · <b>fases</b> 8</span>
+    <span><b>decisiones previas</b> 7 (paso 2)</span>
+  </div>
+  <nav class="toc" aria-label="Contenido">
+    <ol>
+      <li><a href="#diagnostico">El diagnóstico en números</a></li>
+      <li><a href="#vicios">Los doce vicios y sus mecanismos</a></li>
+      <li><a href="#arquitectura">La arquitectura objetivo</a></li>
+      <li><a href="#crates">Crates y el puerto</a></li>
+      <li><a href="#eventos">El modelo de eventos por dominio</a></li>
+      <li><a href="#engine">El núcleo: derivar, decidir, ejecutar</a></li>
+      <li><a href="#sesion">Sesiones y capacidades</a></li>
+      <li><a href="#tipos">Tipos: lo inválido, irrepresentable</a></li>
+      <li><a href="#cli">El CLI: puertas, vocabulario, borde</a></li>
+      <li><a href="#observacion">Observación: frame y crónica</a></li>
+      <li><a href="#tests">Tests: un arnés por capa</a></li>
+      <li><a href="#docs">Documentación atada al código</a></li>
+      <li><a href="#flujos">Siete flujos punta a punta</a></li>
+      <li><a href="#decisiones">Decisiones que van antes</a></li>
+      <li><a href="#fases">El plan por fases</a></li>
+      <li><a href="#bugs">Los bugs de comportamiento</a></li>
+      <li><a href="#indice">Índice: cada defecto, su mecanismo</a></li>
+    </ol>
+  </nav>
+</header>
+
+<section id="diagnostico">
+  <div class="prose">
+  <h2>El diagnóstico en números</h2>
+  <p>Tu sensación de "parche sobre parche" es correcta, y es medible. Ocho auditorías independientes —eventos, engine, artifacts, CLI, adapters, core, tests, docs— leyeron el repo completo con CLAUDE.md como vara. Esto es lo que midieron, no lo que recordaron.</p>
+  </div>
+  <div class="stats">
+    <div class="stat"><b>9+2</b><span>lugares donde se declara un kind de evento; el compilador defiende 3</span></div>
+    <div class="stat"><b>7</b><span>literales de <code>GateWaitingPayload</code> en 4 módulos, sin constructor</span></div>
+    <div class="stat"><b>19</b><span>módulos que pliegan el ciclo de vida de un nodo a mano</span></div>
+    <div class="stat"><b>≥3</b><span>replays completos del log por iteración del scheduler</span></div>
+    <div class="stat"><b>0</b><span>subprocesos git con process group, registro o cancelación</span></div>
+    <div class="stat"><b>3</b><span>capacidades declaradas que el engine nunca consulta</span></div>
+    <div class="stat"><b>6</b><span>copias de "buscar el run dir" en el CLI; 10 redacciones de "no run"</span></div>
+    <div class="stat"><b>46</b><span><code>execute_run(RunEnv{…})</code> a mano en tests, contra 1 en el testkit</span></div>
+    <div class="stat"><b>44</b><span>divergencias doc↔código; <code>docs/design/</code> no está atado por ningún test</span></div>
+    <div class="stat"><b>0</b><span>tags publicados: reestructurar los payloads hoy no cuesta ningún <code>_v2</code> (D141)</span></div>
+  </div>
+  <div class="prose">
+  <p>Y lo que está bien, que es mucho y hay que nombrarlo para que nadie lo reconstruya: el engine tiene <strong>cero</strong> conocimiento de CLIs concretos; <code>RunLog</code> es una costura única con el observer colgado de ella; <code>Failure</code> y <code>reserved::offer</code> son hechos tipados con constructor único; <code>FindingLedger</code> y <code>ArtifactLedger</code> son pliegues únicos por dominio; <code>GateResolvedPayload</code> separa forma Rust de forma wire; <code>string_id!</code> hace que ningún id se construya sin validar; <code>shape::read</code> fusiona parsear y chequear; <code>spawn_governed</code> es el modelo de propiedad de procesos; <code>Delivery::choose</code>, <code>Curtain</code>, <code>Folded</code>, <code>render::state</code>, <code>advice</code> y <code>Layout</code> en el CLI; el pty harness y <code>wait.rs</code> en el testkit; la calidad de los 163 ADRs. <strong>Cada mecanismo de esta propuesta es uno de esos patrones, generalizado.</strong></p>
+  </div>
+</section>
+
+<section id="vicios">
+  <div class="prose">
+  <h2>Los doce vicios y sus mecanismos</h2>
+  <p>Un vicio es una forma de escribir código que produce el mismo defecto en cualquier módulo donde se aplique. Un mecanismo es la forma que hace que ese defecto no se pueda escribir. Cada tarjeta nombra el vicio, la evidencia más fuerte, el mecanismo, y el patrón del repo que ya lo encarna.</p>
+  </div>
+
+  <div class="vice"><div class="id">V1 · M03 M08</div><h3>Un hecho se construye en muchos lugares</h3>
+    <p class="sym"><b>Síntoma.</b> <code>gate_waiting</code> se arma en 7 literales de 4 módulos; <code>capability_degraded</code> en 8 sitios con prosa libre en <code>policy_applied</code>; <code>node_finished</code> en 4, <code>node_started</code> en 3 con dos reglas de attempt; <code>finding_posted</code> a mano en 4 sitios que saltean <code>engine_finding</code>; <code>run_paused.reason</code> con 10 strings distintos. <code>SessionRequest</code> se construye campo a campo en <code>prompt_exec.rs:205</code> y <code>attempt.rs:263</code> — y ya divergieron: <strong>un nodo <code>loop</code> corre sus sesiones en el modelo default del CLI</strong> mientras <code>runner_resolved</code> registra otro, y sin <code>artifact_dir</code>.</p>
+    <div class="mech"><b>Mecanismo.</b> Un constructor por hecho, en el módulo del dominio, que fija los invariantes por tipo: <code>Escalation::new(summary, evidence, NonEmpty&lt;GateOption&gt;)</code>, <code>Degradation::new(capability, adapter, Policy)</code>, <code>PauseReason</code> enum, <code>TaskStatusChanged::done(task, caused_by, commit)</code>, <code>ChildClosed::new(...)</code>, <code>SessionPlan → open_session(plan) -&gt; (SessionRequest, Vec&lt;Degradation&gt;)</code>. Un payload sin constructor público no se puede escribir a mano.</div>
+    <p class="keep"><b>Ya existe.</b> <code>NodeFailedPayload::new</code> + <code>Failure</code> (un solo escritor: <code>node_close::fail_with</code>); <code>ReservedOption::offer</code> (una opción sin tradeoff es inexpresable); <code>exec::run_paused()</code> (un constructor, faltan las razones tipadas).</p>
+  </div>
+
+  <div class="vice"><div class="id">V2 · M04 M15 M16</div><h3>Una pregunta se responde en muchos lugares</h3>
+    <p class="sym"><b>Síntoma.</b> <code>last_external_ref</code> duplicada byte a byte (<code>schedule.rs:187</code>, <code>gate_exec.rs:365</code>); "el attempt de este nodo" derivado de 6 formas; dos reglas de dedup de findings que discrepan en whitespace (<code>replay.rs:384</code> vs <code>findings.rs:38</code>); el blackboard repliega <code>finding_posted</code> ignorando updates y retiros; tasks plegadas en 5 lugares; <code>RunArtifacts::of</code> repliega el ledger en 4 sitios aunque <code>RunState.artifacts</code> ya lo tiene; <code>next_step</code> re-camina el log que <code>derive()</code> acaba de caminar. En el CLI: 6 copias de la búsqueda del run dir, 9 lecturas del manifest, <code>RunPhase</code>→palabras en 5 mapeos, y un run parado se llama <code>waiting</code>, <code>paused</code>, <code>needs you</code> o <code>"paused"</code> según la superficie.</p>
+    <div class="mech"><b>Mecanismo.</b> Un pliegue por dominio en <code>core/events/&lt;dominio&gt;/ledger.rs</code> —<code>TaskLedger</code>, <code>GateLedger</code>, <code>NodeLedger</code>, <code>SessionLedger</code>, <code>ChildLedger</code>, <code>DegradationLedger</code>— y <code>RunState</code> los sostiene a todos; <code>next_step</code>, <code>live</code>, <code>stats</code>, <code>view</code> y <code>receipt</code> leen <code>RunState</code>, nunca el log. En el CLI: <code>Context::open_run</code> como única puerta al run, y <code>RunWord</code> como única palabra del estado de un run.</div>
+    <p class="keep"><b>Ya existe.</b> <code>FindingLedger</code> y <code>ArtifactLedger</code> con su oración de cabecera: "*a second fold is a second answer*". <code>render::state::NodeDisplay</code> para los nodos. <code>commands::advice</code> para los comandos.</p>
+  </div>
+
+  <div class="vice"><div class="id">V3 · M05</div><h3>El catch-all silencioso</h3>
+    <p class="sym"><b>Síntoma.</b> <code>replay::apply</code> termina en <code>_ =&gt; Ok(())</code> (<code>replay.rs:370</code>) custodiado por un comentario de 19 líneas que nada verifica: un kind nuevo que debería mover estado no deriva nada, y <strong>no cuenta como desconocido</strong> porque el binario sí lo conoce. <code>phase.rs:116</code> responde <code>RunPhase::Created</code> para un run cuyo último evento no reconoce — una respuesta confiada y falsa. Más de 30 brazos comodín en 13 módulos. Solo dos matches en todo el workspace son exhaustivos.</p>
+    <div class="mech"><b>Mecanismo.</b> El comodín queda prohibido en derivación de estado. <code>replay::apply</code> despacha por dominio y cada <code>&lt;dominio&gt;::apply</code> es exhaustivo sobre su propia enum chica; lo que es puramente auditoría se declara <code>Domain::Audit(_)</code> <strong>por nombre</strong>, opt-in. Los lectores de presentación pueden seguir con comodín, pero declaran en su firma qué dominios leen.</div>
+    <p class="keep"><b>Ya existe.</b> <code>EventBody::Unknown</code> + <code>unknown_kinds</code> para lo que el binario no sabe; el guard de compilación <code>every_variant_is_built_by_all_kinds</code>.</p>
+  </div>
+
+  <div class="vice"><div class="id">V4 · M02</div><h3>La declaración dispersa</h3>
+    <p class="sym"><b>Síntoma.</b> Un kind son: variante en <code>mod.rs</code>, struct en <code>payloads.rs</code> (989 líneas), literal en <code>KINDS</code>, brazo de <code>kind_name</code>, <code>all_kinds()</code> del test, literal en <code>kind_names_match_the_spec_exactly</code>, brazo en <code>lines::detail</code>, <code>events.json</code> generado, sección del spec, fila del Contrato, y tres "36" contados a mano. <code>artifact_submitted</code> tocó 19 archivos. <code>KINDS</code> —el único árbitro de conocido/desconocido— no tiene vínculo de compilación con la enum.</p>
+    <div class="mech"><b>Mecanismo.</b> Un kind se declara una vez donde vive su dominio: <code>core/events/{run,node,session,tasks,scope,findings,artifacts,gates,children}/</code>, cada módulo dueño de sus payloads, constructores, nombres, pliegue y lectura como <code>Happening</code>. <code>EventPayload</code> pasa a dos niveles en Rust; el wire queda idéntico (<code>kind</code> plano) por una <code>EventPayloadWire</code> con <code>from</code>/<code>into</code> y un <code>JsonSchema</code> a mano que emite el mismo <code>oneOf</code> de 36 ramas en el mismo orden. <code>KINDS</code>, <code>kind_name</code> y el schema derivan de una sola declaración.</div>
+    <p class="keep"><b>Ya existe.</b> <code>GateResolvedPayload</code> con <code>#[serde(from/into = GateResolvedWire)]</code> y <code>StoredEvent</code> con <code>Serialize</code>/<code>Deserialize</code>/<code>JsonSchema</code> a mano — las dos plantillas exactas. Y D141: sin tag publicado, esto no cuesta ningún <code>_v2</code>.</p>
+  </div>
+
+  <div class="vice"><div class="id">V5 · M06 M17</div><h3>La prosa congelada en el log y el texto en la capa equivocada</h3>
+    <p class="sym"><b>Síntoma.</b> <code>run_paused.reason</code>, <code>gate_waiting.summary</code> y <code>node_rerouted.cause = failure.to_string()</code> son prosa del engine persistida en el log: ninguna superficie puede re-renderizarla. 275 <code>format!</code> en el engine. En el CLI, identificadores Rust llegan al usuario por <code>{:?}</code> en 9 lugares (<code>Done</code> en la línea, <code>done</code> en <code>status</code>); <code>mcp.rs</code> re-bordea 17 errores a <code>String</code>; <code>promote.rs</code> y <code>test.rs</code> aplanan errores tipados; <code>questions::validate_answers</code> y <code>permission_layer_conflicts</code> arman prosa dentro de core.</p>
+    <div class="mech"><b>Mecanismo.</b> Los hechos son datos; la prosa se produce una vez, en el borde. <code>PauseReason</code>, <code>Policy</code>, <code>RerouteCause(Failure)</code> como enums; <code>Capability::as_str</code> en vez de <code>{:?}</code>; <code>CliError</code> con brazos tipados y <code>Message(String)</code> reducido a lo genuinamente único; MCP devuelve <code>Result&lt;T, CliError&gt;</code> y un solo adaptador lo vuelve tool result; <code>Diagnostic</code> en vez de <code>Vec&lt;String&gt;</code>.</div>
+    <p class="keep"><b>Ya existe.</b> <code>Failure: Display</code> ("*the prose a reader sees is produced from this*"), <code>Evidence</code>/<code>Fact</code>, <code>Report</code>/<code>Diagnostic</code>, <code>error.rs</code> como borde con brazos tipados.</p>
+  </div>
+
+  <div class="vice"><div class="id">V6 · M12 M13 M14</div><h3>La disciplina que el tipo no impone</h3>
+    <p class="sym"><b>Síntoma.</b> <code>scope:</code> son <code>Vec&lt;String&gt;</code>: un glob inválido pasa parse y <code>check</code>, y falla a mitad del run con tokens gastados. <code>yunta_schema</code> es <code>String</code> y el del pack ni se parsea. Commits como <code>String</code> donde <code>CommitSha</code> existe. <code>started_at: String</code> junto a un <code>DateTime</code> en el archivo hermano. <code>ArtifactOrigin::Legacy</code> representable en una aceptación fresca. Un nombre de artifact <code>{{inputs.x}}</code> con <code>x=../..</code> escapa del run dir después de renderizar. <code>ctx.adapters[&amp;id]</code> indexa un <code>HashMap</code> (pánico invisible al lint). <code>manifest.schema_version</code> se escribe y nadie lo lee; cuatro archivos persistidos no tienen versión. Un <code>Workflow</code> se obtiene sin sus reglas en 11 sitios.</p>
+    <div class="mech"><b>Mecanismo.</b> "Parsear es validar" extendido a cada campo que representa un conjunto cerrado o una gramática: <code>ScopeGlob</code>, <code>SchemaRange</code>, <code>ArtifactName</code> + <code>ReservedIdentity</code>, <code>WorkflowName</code>, <code>SkillName</code>, <code>InputName</code>, <code>McpServerName</code>, <code>RecordedOrigin</code>, <code>Location</code>, <code>TemplateVar</code>, <code>DiagnosticCode</code>. Una puerta única <code>workflow::read</code> que corre las reglas de <code>check</code> en el mismo <code>Report</code>. <code>PersistedDoc&lt;T&gt;</code>: todo lo persistido lleva versión, la lee, y marca lo que no entendió.</div>
+    <p class="keep"><b>Ya existe.</b> <code>string_id!</code> (constructor validado, <code>From&lt;&amp;str&gt;</code> solo bajo <code>testkit</code>), <code>shape::read</code> + <code>RULES</code>, <code>FrozenPaths::new</code>, <code>Secret&lt;T&gt;</code>, <code>InputSpec</code> por variante.</p>
+  </div>
+
+  <div class="vice"><div class="id">V7 · M09 M24</div><h3>La capacidad declarada y no consultada</h3>
+    <p class="sym"><b>Síntoma.</b> <code>edit_hooks</code>, <code>permission_profiles</code> y <code>usage_reporting</code> se declaran y ningún sitio las consulta: todo run real degrada en silencio en scope (ambos adapters declaran <code>edit_hooks: false</code>) y un adapter sin reporte de uso no tiene presupuesto de tokens efectivo. <code>run_tools</code> se gatea en 4 sitios con 4 redacciones; el gate <code>TypedArtifactNeedsRunTools</code> existe en el camino prompt y no en el loop. <code>codex</code> traga un error de settings y cae al sandbox default. El registro de procesos falla a <code>tracing</code>. Cinco comportamientos que la documentación promete no están construidos (baseline al crear el run, hooks de edición, preguntas por PR, orden de criterios aprendido del log, fuentes de contexto por executor) y viven como comentarios que explican el atajo.</p>
+    <div class="mech"><b>Mecanismo.</b> Capacidad→política como tabla de datos en core (<code>FailNode | DegradeWith(Policy) | Resting</code>) y un único <code>require(adapter, capability, ctx) -&gt; Decision</code>: una capacidad sin fila no compila. <code>check</code> recibe el registro de adapters. Toda degradación es un evento vía <code>engine_finding</code>, nunca un warning. Y para lo prometido-no-construido: <strong>build-or-register</strong> — se construye, o se levanta y queda en la deuda con nota de revisión en el ADR que retira. Nunca un comentario.</div>
+    <p class="keep"><b>Ya existe.</b> <code>Capabilities::declares</code> como único predicado; nadie infiere capacidad de un id; <code>RunCtx::engine_finding</code> y su rustdoc ("*never a tracing warning that leaves the log silent*").</p>
+  </div>
+
+  <div class="vice"><div class="id">V8 · M10 M11</div><h3>La cáscara que no gobierna</h3>
+    <p class="sym"><b>Síntoma.</b> Todo subproceso git (<code>git.rs:116-167</code>) nace sin process group, sin registro en <code>engine.json</code>, sin timeout y sin cancelación: un <code>git push</code> colgado sobrevive a Ctrl-C y <code>yunta cancel</code> no lo ve. 15 <code>std::fs</code> síncronos dentro de <code>async fn</code> en el engine, más en adapters. 3 <code>SystemClock</code> construidos dentro del engine; <code>std::env</code> leído en 2 sitios con <code>RunEnv.ambient</code> existiendo para inyectarlo. El mock pierde el handle de su player. Gate y questions no tienen span de nodo. <code>target_digest</code> persiste el comando crudo; el pase de redacción del spec no existe.</p>
+    <div class="mech"><b>Mecanismo.</b> Una cáscara: <code>spawn_governed</code> para todo subproceso, git incluido; <code>tokio::fs</code>/<code>spawn_blocking</code> para todo disco; <code>Clock</code>, <code>Env</code>, <code>IdSource</code> y un <code>SecretSource</code> inyectados y nada más lee el proceso; cada <code>tokio::spawn</code> conserva su handle; <code>#[instrument]</code> en gate/questions y span propagado a tareas hijas. <code>ToolTarget { display: Option, digest: ContentHash }</code> con <code>display</code> solo para formas que no pueden cargar una credencial.</div>
+    <p class="keep"><b>Ya existe.</b> <code>spawn_governed</code> (grupo, registro RAII, select cancel/timeout/exit, SIGKILL al grupo, pipes drenados); <code>RunToolsSession::Drop</code>; el protocolo de lock; <code>note_summary</code>.</p>
+  </div>
+
+  <div class="vice"><div class="id">V9 · M01</div><h3>El puerto del lado equivocado</h3>
+    <p class="sym"><b>Síntoma.</b> <code>Adapter</code>, <code>AgentSession</code>, <code>SessionRequest</code>, <code>Budget</code>, <code>PermissionProfile</code>, <code>process_start</code> y <code>signal::Liveness</code> viven en <code>yunta-adapters</code>, y el engine depende del crate de adapters concretos para importar su propia interfaz. El renderer del fixture del mock vive en el CLI (<code>commands/test.rs</code>) y falta en el <code>Bench</code> del testkit. <code>core</code> y <code>adapters</code> no pueden enlazar el testkit porque el testkit depende de ellos.</p>
+    <div class="mech"><b>Mecanismo.</b> El puerto lo define quien lo consume: <code>yunta-core::port</code> (traits + <code>SessionRequest</code> + <code>Capabilities</code> + <code>Budget</code> + <code>PermissionProfile</code>), <code>yunta-adapters</code> lo implementa y no lo exporta, el engine depende de core y storage únicamente, el CLI es la raíz de composición. <code>MockFixture::parse(yaml, &amp;RunPaths)</code> en <code>adapters/mock</code>. <code>yunta-testkit</code> se parte en <code>testkit-core</code> (sin dependencias hacia arriba) y <code>testkit</code> (engine/cli).</div>
+    <p class="keep"><b>Ya existe.</b> La dirección core → storage → adapters → engine → cli sin ciclos; <code>no_sql_dependency.rs</code> como test de frontera.</p>
+  </div>
+
+  <div class="vice"><div class="id">V10 · M18 M19 M20</div><h3>Los caminos duplicados</h3>
+    <p class="sym"><b>Síntoma.</b> <code>yunta test</code> es un cuarto camino de ejecución: resuelve el workflow a mano, <strong>saltea <code>check</code></strong>, y usa <code>SystemClock</code> directo con un <code>Context</code> en la mano. <code>promote</code> usa <code>&amp;SystemClock</code>. <code>mcp::tool_resolve_gate</code> reimplementa <code>resolve_gate.rs</code> línea por línea menos el consejo de <code>NotPaused</code>. <code>init</code> y <code>new</code> preguntan por <code>stdin().read_line</code> fuera de <code>ask/</code>. Dos mapeos de exit code. La superficie append-only deriva sus palabras del evento crudo y la región del frame. En tests: 8 <code>Bench</code> sombra, 10 <code>fn event()</code>, 17 grupos de helpers idénticos, <code>common/mod.rs</code> de 982 líneas con <code>allow(dead_code)</code>.</p>
+    <div class="mech"><b>Mecanismo.</b> Una puerta por operación: <code>runnable</code> + <code>drive</code> para run/resume/test/promote; <code>resolve_gate</code> único con MCP como medio; <code>ask::Console</code> para toda pregunta; <code>Outcome</code> de un <code>RunWord</code>. Una crónica derivada para las superficies. Un arnés por capa: <code>Log</code> builder, un <code>Bench</code> con las cinco capacidades que los sombra necesitaban, <code>hermetic()</code> para el binario.</div>
+    <p class="keep"><b>Ya existe.</b> <code>run::runnable</code> + <code>drive::Driving</code>/<code>settle</code>; <code>Bench</code>/<code>Checkout</code> como par; <code>Terminal</code>; <code>frames.rs</code>.</p>
+  </div>
+
+  <div class="vice"><div class="id">V11 · M23</div><h3>La documentación sin atar</h3>
+    <p class="sym"><b>Síntoma.</b> <code>docs_sync.rs</code> no recorre <code>docs/design/</code>: la config de referencia publicada <strong>no parsea</strong> (<code>2_000_000</code>). <code>spec-events</code> tiene 8 campos desfasados; <code>spec-adapter</code> lista 6 capacidades de 8 y dice que claude-code "declara todas"; el Contrato lista 5 tools MCP de 6 y se contradice a sí mismo en §4.1/§6.4; D18, D62, D19 describen mecanismos que el código no tiene; los ADRs son un archivo de 184 KB con un ADR por línea (D157: 14.188 caracteres en una línea), sin anclas, con <code># Seguridad y operación</code> conteniendo 77 de 163; <code>ledger</code> para el documento de tareas en 12 lugares incluido un string de menú de gate; 21 marcadores de tiempo/plan en rustdoc y corpus; el Contrato y los RFCs con markdown corrupto de exportación.</p>
+    <div class="mech"><b>Mecanismo.</b> El tipo es la fuente y los docs citan la emisión; una prueba recursiva ata cada conjunto cerrado (kinds, campos de payload, capacidades por adapter, tools MCP, <code>RULES</code>, builtins, fuentes, tipos de input) y parsea cada bloque YAML de <code>docs/design/</code>. Un ADR por archivo con front-matter (<code>revises</code>/<code>revised_by</code> recíprocos verificados) e índice generado. Dos ratchets nuevos: vocabulario prohibido y marcadores de tiempo. Un pase mecánico que deshace la corrupción del corpus.</div>
+    <p class="keep"><b>Ya existe.</b> <code>docs_sync.rs</code> (igualdad de conjuntos README↔<code>--help</code>, cada YAML documentado se acepta); <code>xtask schema --check</code>; el orden de autoridad de <code>docs/design/README.md</code>; el <code>_Evitar_</code> del glosario; la deuda con ids estables.</p>
+  </div>
+
+  <div class="vice"><div class="id">V12 · M21 M22</div><h3>El ratchet que mide el síntoma</h3>
+    <p class="sym"><b>Síntoma.</b> <code>copied_test_helpers 0</code> cuenta cuatro literales mientras las copias reales son decenas. <code>utc_now_outside_clock 0</code> no ve <code>&amp;SystemClock</code> ni mira <code>tests/</code>. La propiedad de resume computa el prefijo y lo descarta: <strong><code>derive(&amp;log) == derive(&amp;log)</code></strong>. No hay propiedad de idempotencia ni de cadena de hashes; el generador emite 8 de 36 kinds. Todo test que corre el binario hereda <code>/etc/yunta/config.yaml</code> del host. El gate de release es más débil que el de CI. Nada corre en macOS ni en perfil release.</p>
+    <div class="mech"><b>Mecanismo.</b> El ratchet mide la regla, no el síntoma: <code>execute_run</code> fuera del testkit, <code>Command::new("git")</code> fuera de <code>git.rs</code>/<code>repo.rs</code>, <code>SystemClock</code>/<code>Utc::now</code> en tests, <code>sleep</code>, <code>env::set_var</code>, <code>fn event(</code> fuera del testkit, vocabulario prohibido, marcadores de tiempo — sobre <code>src</code> <strong>y</strong> <code>tests</code>. Cuatro propiedades reales sobre el generador completo. <code>release.yml</code> reusa <code>ci</code> por <code>workflow_call</code>; job macOS; <code>timeout-minutes</code>.</div>
+    <p class="keep"><b>Ya existe.</b> La forma del ratchet ("*a number can only ever go down*"); las 7 propiedades de core y <code>finding_ledger</code> contra un oráculo; la ceiling del binario con su racional.</p>
+  </div>
+</section>
+
+<section id="arquitectura">
+  <div class="prose">
+  <h2>La arquitectura objetivo</h2>
+  <div class="principle">
+    El log es la única verdad. De él se deriva un estado, una vez, por dominio. Sobre ese estado decide una función pura. Una cáscara ejecuta la decisión y produce hechos, cada uno por su constructor, a través de una sola costura. Lo que un lector ve es una disposición de lo derivado, nunca una segunda derivación.
+    <small>Es lo que CLAUDE.md ya dice —Replay, Núcleo puro, Un lugar, Frontera, Dueño— llevado a que el compilador lo imponga en vez de la disciplina.</small>
+  </div>
+  </div>
+  <div class="flow c5" role="img" aria-label="Del log al lector: storage, estado derivado por dominio, decisión pura, cáscara que ejecuta, hechos por constructor que vuelven al log; y del log, frame y crónica hacia las superficies.">
+    <div class="col"><div class="head">storage</div><div class="box keep"><b>Event log</b><code>Vec&lt;StoredEvent&gt;</code> · wire plano, hash chain<span class="tag keep">se conserva</span></div></div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">core/events · por dominio</div><div class="box new"><b>Ledgers</b>Task · Gate · Node · Session · Child · Degradation<span class="tag new">nuevo</span></div><div class="box keep"><b>Ledgers</b>Finding · Artifact<span class="tag keep">se conserva</span></div><div class="box new"><b>RunState</b>= todos los ledgers, un pase O(e)<span class="tag new">absorbe</span></div></div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">engine · puro</div><div class="box new"><b>decide()</b>gate · waiting · orphan · failure · ready_batch<span class="tag new">next_step partido</span></div><div class="box keep"><b>run_frame()</b>estado en un instante<span class="tag keep">se conserva</span></div><div class="box new"><b>chronicle()</b>qué pasó, en orden<span class="tag new">nuevo</span></div></div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">engine · cáscara</div><div class="box new"><b>execute()</b>Shell: spawn_governed, tokio::fs, Clock/Env inyectados<span class="tag new">git gobernado</span></div><div class="box new"><b>SessionPlan</b>→ open_session → dispatch<span class="tag new">un camino</span></div><div class="box new"><b>require(cap)</b>tabla capacidad→política<span class="tag new">nuevo</span></div></div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">de vuelta al log</div><div class="box new"><b>Constructores</b>Escalation::new · Degradation::new · PauseReason · …<span class="tag new">un hecho, un constructor</span></div><div class="box keep"><b>RunLog::record</b>una costura, observer colgado<span class="tag keep">se conserva</span></div><div class="box keep"><b>Observer</b>→ superficies como disposición<span class="tag keep">se conserva</span></div></div>
+  </div>
+</section>
+
+<section id="crates">
+  <div class="prose">
+  <h2>Crates y el puerto</h2>
+  <p>La dirección de dependencias es correcta y no tiene ciclos. Lo que está mal es <strong>qué crate define la interfaz</strong>. Un engine que "conoce a un adapter solo por lo que declara" no puede depender del crate de adapters concretos para saber qué es un adapter.</p>
+  </div>
+  <div class="crates">
+    <div class="stack"><div class="head">hoy</div>
+      <div class="layer"><span><code>yunta</code> (cli)</span><small>composición, comandos, superficies</small></div><div class="dep">↓</div>
+      <div class="layer bad"><span><code>yunta-engine</code></span><small>importa <code>yunta_adapters::{Adapter, SessionRequest, Budget, signal, process_start}</code></small></div><div class="dep">↓</div>
+      <div class="layer bad"><span><code>yunta-adapters</code></span><small>define el trait <b>y</b> lo implementa; subprocess, signal, process_start</small></div><div class="dep">↓</div>
+      <div class="layer"><span><code>yunta-storage</code></span><small>SQLite, hash chain</small></div><div class="dep">↓</div>
+      <div class="layer"><span><code>yunta-core</code></span><small>tipos, eventos, config, workflow</small></div>
+      <div class="layer bad" style="margin-top:14px"><span><code>yunta-testkit</code></span><small>depende de engine+adapters → core y adapters no pueden usarlo</small></div>
+    </div>
+    <div class="stack"><div class="head">objetivo</div>
+      <div class="layer"><span><code>yunta</code> (cli)</span><small>raíz de composición: instancia adapters, los entrega al engine</small></div><div class="dep">↓ ↓</div>
+      <div class="layer new"><span><code>yunta-engine</code></span><small>depende de core + storage; conoce el puerto, no el crate</small></div>
+      <div class="layer new"><span><code>yunta-adapters</code></span><small>implementa <code>core::port</code>; claude-code, codex, mock, forge; <code>MockFixture::parse(yaml, &amp;RunPaths)</code></small></div><div class="dep">↓</div>
+      <div class="layer"><span><code>yunta-storage</code></span><small>sin cambios</small></div><div class="dep">↓</div>
+      <div class="layer new"><span><code>yunta-core</code></span><small>+ <code>port</code>: Adapter, AgentSession, SessionRequest, Budget, PermissionProfile, Capabilities, policy table</small></div>
+      <div class="layer new" style="margin-top:14px"><span><code>yunta-testkit-core</code></span><small>FixedClock, Log builder, ids, Captured — solo depende de core</small></div>
+      <div class="layer"><span><code>yunta-testkit</code></span><small>Bench, Checkout, Terminal — depende de engine/adapters/cli</small></div>
+    </div>
+  </div>
+  <div class="prose">
+  <p>Lo que se mueve y a dónde: <code>Adapter</code>, <code>AgentSession</code>, <code>SessionRequest</code>, <code>RunToolsEndpoint</code>, <code>Budget</code>, <code>PermissionProfile</code>, <code>ProbeReport</code>, <code>AgentEvent</code>, <code>AdapterError</code> → <code>core::port</code>; <code>subprocess.rs</code>, <code>signal.rs</code>, <code>process_start.rs</code> → <code>core::process</code> (el engine ya tiene <code>process.rs</code>; una sola implementación de "proceso gobernado" en un solo lugar, consumida por engine y adapters). <code>commands/test.rs::load_mock_fixture</code> → <code>adapters::mock::MockFixture::parse</code>. La composición de adapters concretos (<code>real_adapters</code>) queda en el CLI, derivada de un registro, no de un <code>if</code>-chain: <code>refuse_unrunnable</code> y <code>doctor</code> listan <code>adapters.keys()</code>, no prosa.</p>
+  <p>Test de frontera, junto a <code>no_sql_dependency.rs</code>: <code>no_adapter_crate_in_engine.rs</code> — el <code>Cargo.toml</code> del engine no nombra <code>yunta-adapters</code>, y el compilador lo impone.</p>
+  </div>
+</section>
+
+<section id="eventos">
+  <div class="prose">
+  <h2>El modelo de eventos por dominio</h2>
+  <p>D143 dice "una regla se enuncia donde se aplica". Esto es la misma decisión para los eventos: <strong>un kind se declara donde vive su dominio</strong>, y desde ahí se publica todo lo que hoy está disperso.</p>
+  </div>
+  <div class="flow c3" role="img" aria-label="Lo que un módulo de dominio es dueño de, y lo que se deriva de él.">
+    <div class="col"><div class="head">core/events/findings/ · dueño de</div>
+      <div class="box new"><b>kinds.rs</b><code>enum FindingEvent { Posted, Updated, Withdrawn, Refused }</code> · nombres snake_case · versión</div>
+      <div class="box new"><b>payloads.rs</b>structs + <b>constructores</b> que fijan invariantes</div>
+      <div class="box keep"><b>ledger.rs</b><code>FindingLedger::apply</code> exhaustivo<span class="tag keep">ya existe</span></div>
+      <div class="box new"><b>happening.rs</b><code>impl From&lt;&amp;FindingEvent&gt; for Happening</code></div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">core/events/ · derivado, una vez</div>
+      <div class="box new"><b>EventPayload</b>9 brazos: <code>Run · Node · Session · Tasks · Scope · Findings · Artifacts · Gates · Children</code></div>
+      <div class="box new"><b>wire.rs</b><code>EventPayloadWire</code> plano por <code>from/into</code>; <code>KINDS</code> concatenado de los dominios; <code>JsonSchema</code> a mano = 36 ramas, mismo orden</div>
+      <div class="box keep"><b>mod.rs</b>StoredEvent, EventBody::Unknown, envelope<span class="tag keep">sin cambios</span></div>
+    </div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">lo que ya no se escribe a mano</div>
+      <div class="box"><b>kind_name()</b>derivado</div>
+      <div class="box"><b>all_kinds()</b>derivado de <code>KINDS</code></div>
+      <div class="box"><b>"36"</b><code>KINDS.len()</code> en doc, test y spec</div>
+      <div class="box"><b>events.json</b>generado; <code>schema --check</code> guarda que no cambie un byte</div>
+      <div class="box"><b>lines::detail</b>desaparece: <code>chronicle::say</code> por dominio</div>
+    </div>
+  </div>
+  <div class="prose">
+  <h3>Los nueve dominios y sus constructores</h3>
+  </div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>dominio</th><th>kinds</th><th>constructores que fijan el invariante</th><th>ledger</th></tr></thead>
+    <tbody>
+      <tr><td><code>run</code></td><td class="w"><code>run_created run_paused run_resumed run_finished promotion_signaled</code></td><td class="w"><code>RunPaused::new(PauseReason)</code> — <code>PauseReason::{Escalation(Escalation), Cancelled, BudgetExhausted{spent,cap}, ExternalGate(Url), UncertainOrphans(Vec&lt;NodeId&gt;), NodeFailed{node,failure}}</code>; <code>RunResumed::new(OnInterrupt)</code>; <code>RunFinished::closed(terminal, &amp;RunState)</code> (métricas derivadas, no pasadas)</td><td><code>RunLedger</code>: fase, modo, cierre</td></tr>
+      <tr><td><code>node</code></td><td class="w"><code>node_started node_finished node_failed node_rerouted hook_executed context_assembled criteria_checked scope_checked baseline_captured</code></td><td class="w"><code>NodeStarted::attempt(n)</code> (n viene del <code>NodeLedger</code>, no se recuenta); <code>NodeFinished::new(outcome, tokens)</code>; <code>NodeFailed::new(Failure, retryable, tokens)</code> <span class="pill keep">existe</span>; <code>NodeRerouted::new(to, RerouteCause(Failure), origin)</code> — la causa es el <code>Failure</code>, no su <code>to_string()</code></td><td><code>NodeLedger</code>: attempts, terminales, ventana abierta, sesiones abiertas, tokens en vuelo — reemplaza 19 pliegues</td></tr>
+      <tr><td><code>session</code></td><td class="w"><code>agent_session_opened agent_message capability_degraded</code></td><td class="w"><code>Degradation::new(Capability, AdapterId, Policy)</code> — <code>Policy</code> enum cerrado, <code>Display</code> en el borde; <code>AgentMessage::tool_use(ToolTarget)</code> con <code>ToolTarget{display: Option, digest}</code></td><td><code>SessionLedger</code>: sesiones por attempt, degradaciones</td></tr>
+      <tr><td><code>tasks</code></td><td class="w"><code>task_registered task_status_changed</code></td><td class="w"><code>TaskStatusChanged::to(task, status, caused_by)</code> y <code>::done(task, caused_by, commit)</code> — "solo un done lleva commit" por tipo; <code>caused_by</code> lo resuelve el ledger, no un scan inline</td><td><code>TaskLedger</code>: estado, dueño, commit, identidad de registro, attempt — reemplaza 5 pliegues</td></tr>
+      <tr><td><code>scope</code></td><td class="w"><code>scope_expansion_requested scope_expansion_granted scope_expansion_denied</code></td><td class="w"><code>ScopeExpansion::{requested, granted, denied}</code> con <code>Decider</code></td><td><code>GrantLedger</code> <span class="pill keep">existe</span>, absorbe <code>granted_paths_for</code> y el scan de <code>loop_exec:413</code></td></tr>
+      <tr><td><code>findings</code></td><td class="w"><code>finding_posted finding_updated finding_withdrawn finding_refused</code></td><td class="w"><code>Finding::posted(...)</code>; <code>RunCtx::engine_finding</code> como único autor engine (los 4 bypass se cierran)</td><td><code>FindingLedger</code> <span class="pill keep">existe</span>; <b>una</b> regla de dedup (<code>inherited_findings</code> la consume)</td></tr>
+      <tr><td><code>artifacts</code></td><td class="w"><code>artifact_accepted artifact_submitted artifact_written</code></td><td class="w"><code>ArtifactAccepted::new(id, hash, RecordedOrigin)</code> — <code>Legacy</code> irrepresentable al escribir; <code>artifact_written</code> es <code>#[doc(hidden)]</code> sin constructor: solo lectura, por tipo</td><td><code>ArtifactLedger</code> <span class="pill keep">existe</span></td></tr>
+      <tr><td><code>gates</code></td><td class="w"><code>gate_waiting gate_resolved questions_answered</code></td><td class="w"><code>Escalation::new(summary, Evidence, NonEmpty&lt;GateOption&gt;)</code> — menú vacío y summary que repite la evidencia son inexpresables; <code>GateResolved</code> <span class="pill keep">existe</span>; <code>QuestionsAnswered::via(Channel, Responder)</code></td><td><code>GateLedger</code>: pares waiting/resolved, <code>external_ref</code>, <code>approved_sha</code>, decisión pre-sembrada — reemplaza <code>last_external_ref</code> ×2 y 4 scans</td></tr>
+      <tr><td><code>children</code></td><td class="w"><code>child_run_created child_run_finished loop_iteration</code></td><td class="w"><code>ChildClosed::new(run, terminal, tokens)</code> — una construcción en vez de 3 en <code>drive_child</code></td><td><code>ChildLedger</code>: links abiertos/cerrados — reemplaza 5 scans</td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+  <h3>Replay sin comodín</h3>
+<pre><code><span class="c">// crates/engine/src/replay.rs — la forma entera</span>
+<span class="k">pub fn</span> derive(events: &amp;[StoredEvent]) -&gt; RunState {
+    <span class="k">let mut</span> state = RunState::default();
+    <span class="k">for</span> event <span class="k">in</span> events {
+        <span class="k">match</span> event.body() {
+            EventBody::Unknown(u) =&gt; state.unknown.count(u),
+            EventBody::Known(payload) =&gt; <span class="k">match</span> payload {
+                EventPayload::Run(e)       =&gt; state.run.apply(e, event),
+                EventPayload::Node(e)      =&gt; state.nodes.apply(e, event),
+                EventPayload::Session(e)   =&gt; state.sessions.apply(e, event),
+                EventPayload::Tasks(e)     =&gt; state.tasks.apply(e, event),
+                EventPayload::Scope(e)     =&gt; state.grants.apply(e, event),
+                EventPayload::Findings(e)  =&gt; state.findings.apply(e, event),
+                EventPayload::Artifacts(e) =&gt; state.artifacts.apply(e, event),
+                EventPayload::Gates(e)     =&gt; state.gates.apply(e, event),
+                EventPayload::Children(e)  =&gt; state.children.apply(e, event),
+            },
+        }
+    }
+    state
+}
+<span class="c">// Cada `apply` es exhaustivo sobre su enum de 2–9 variantes. Un kind nuevo
+// que no mueve estado se declara en su dominio como `Audit` — por nombre.</span></code></pre>
+  <p>Costo: un pase O(e). Hoy <code>derive</code> es O(e + F²) porque rematerializa los findings efectivos en cada evento; <code>FindingLedger::effective</code> se llama una vez al final. <code>run_frame</code> pasa de O(n·e) a O(e + n) porque la liveness por nodo la tiene <code>NodeLedger</code>. El scheduler pasa de ≥2 lecturas y ≥3 replays por iteración a una lectura y un replay: <code>next_step</code> recibe <code>&amp;RunState</code>, no <code>&amp;[StoredEvent]</code>.</p>
+  </div>
+</section>
+
+<section id="engine" class="prose">
+  <h2>El núcleo: derivar, decidir, ejecutar</h2>
+<pre><code>RunState  ← derive(events)                        <span class="c">// un pase, un dueño por lectura</span>
+Decision  ← decide(&amp;Workflow, &amp;RunState, &amp;Policy)  <span class="c">// pura, total, no toca el log</span>
+Effects   ← execute(Decision, &amp;mut Shell)          <span class="c">// solo I/O; produce hechos</span>
+Fact      ← &lt;dominio&gt;::Constructor(...)           <span class="c">// uno por kind</span>
+seq       ← RunLog::record(fact)                  <span class="c">// una costura, observer colgado</span></code></pre>
+  <h3>decide(): <code>next_step</code> en cinco funciones</h3>
+  <p><code>schedule::next_step</code> (370 líneas) ya es pura; solo su tamaño está mal. Se parte en las cinco secciones que ya contiene, cada una total sobre <code>RunState</code>: <code>gate_step</code>, <code>waiting_step</code>, <code>orphan_step</code>, <code>failure_step</code>, <code>ready_batch</code>, compuestas por <code>decide</code>. <code>NodeHistory</code> desaparece (es <code>NodeLedger</code>). <code>parallel_exec</code> deja de re-decidir la política de huérfanos: llama <code>schedule::resume_policies</code> y con eso respeta <code>on_interrupt</code>. <code>current_escalation</code> deja de correr <code>next_step</code> dos veces y <code>current_mode_name</code> es <code>run_mode()</code>.</p>
+  <h3>execute(): la cáscara y sus hechos</h3>
+  <ul>
+    <li><strong><code>GateStep::Waiting(PauseReason)</code></strong>: el gate devuelve la razón, <code>steps</code> registra <code>run_paused</code>. Hoy <code>gate_exec</code> a veces lo escribe y a veces no, y <code>steps.rs:432-463</code> compensa — estado inválido representable.</li>
+    <li><strong><code>run_finished</code> una vez</strong>: <code>RunFinished::closed(terminal, &amp;state)</code> reemplaza las 3 copias de <code>steps.rs:43/116/276</code> (métricas + export + cleanup en un solo <code>finish(terminal)</code>).</li>
+    <li><strong><code>Shell</code></strong>: <code>git.rs</code> pasa por <code>spawn_governed</code> (grupo, registro, timeout, cancel). <code>progress.md</code>, <code>distill</code>, <code>lock.rs</code>, <code>worktree</code>, <code>criteria.rs</code>, <code>process_registry::persist</code> pasan a <code>tokio::fs</code>. Los 3 <code>SystemClock</code> de <code>worktree/mod.rs</code> toman el <code>Clock</code> inyectado. <code>secrets_env</code> y <code>context_resolve/mcp.rs</code> leen de un <code>SecretSource</code> inyectado por <code>RunEnv</code>, no de <code>std::env</code>.</li>
+    <li><strong>Sin pánicos escondidos</strong>: <code>ctx.adapters.get(&amp;id).ok_or(RunError::AdapterMissing)</code> en <code>prompt_exec:137</code> y <code>loop_exec:244</code>; <code>&amp;hash[..12]</code> pasa por <code>ContentHash::short()</code>.</li>
+    <li><strong>Errores con causa</strong>: <code>RunError::Git(#[source] GitError)</code> en vez de <code>Git{detail: String}</code>; <code>Broken{diagnostic}</code> y <code>ManifestWrite{detail}</code> igual.</li>
+    <li><strong>Degradación explícita, siempre un evento</strong>: fallas de <code>process_registry</code> add/remove/clear, <code>read_registry</code> corrupto (distinto de ausente), <code>interrupt</code>/<code>kill</code> fallido, <code>encode_ref</code> fallido, <code>git::success</code> que no pudo spawnear — cada uno un <code>engine_finding</code>.</li>
+    <li><strong>Spans</strong>: <code>#[instrument(fields(run_id, node_id))]</code> en <code>publish_gate</code>, <code>poll_gate</code>, <code>resolve_internal_gate</code>, <code>execute_ask</code>; <code>tokio::spawn(fut.instrument(Span::current()))</code> en readers y players.</li>
+  </ul>
+  <h3>Lo que se conserva sin tocar</h3>
+  <p><code>RunLog</code> y su seam; <code>observer.rs</code>; el protocolo de <code>lock</code> + <code>hand_over</code> (solo su <code>std::fs</code>); <code>worktree</code> (integridad por identidad+ancestría, <code>branch -d</code>, guard en <code>Drop</code>); <code>reserved::offers</code>; <code>escalation</code>'s two builders; <code>pre_seeded_resolution</code>; <code>process.rs::spawn_governed</code>; <code>node_close::fail_with</code>; <code>create_run</code>'s <code>tokio::fs</code>.</p>
+</section>
+
+<section id="sesion">
+  <div class="prose">
+  <h2>Sesiones y capacidades</h2>
+  <p>Hoy un nodo <code>prompt</code> y una tarea de <code>loop</code> construyen el mismo <code>SessionRequest</code> de 14 campos en dos lugares, con las capacidades gateadas dos veces en dos órdenes, y ya divergieron en tres campos. La corrección no es sincronizar las copias: es que haya una.</p>
+  </div>
+  <div class="flow c4" role="img" aria-label="Un SessionPlan pasa por require() por cada capacidad y produce un SessionRequest más las degradaciones; dispatch_session no cambia.">
+    <div class="col"><div class="head">quien pide</div><div class="box new"><b>SessionPlan</b><code>{ node, task: Option&lt;TaskId&gt;, prompt, chosen: RunnerCandidate, profile, artifact_dir, resume: Option&lt;SessionId&gt; }</code></div></div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">core/port · datos</div><div class="box new"><b>POLICY: [(Capability, Absence)]</b><code>ResumeSession → Resting</code><br><code>EditHooks → DegradeWith(PostCheckOnly)</code><br><code>PermissionProfiles → FailAtCheck</code><br><code>CustomAgents → FailAtCheck</code><br><code>UsageReporting → DegradeWith(NoTokenBudget)</code><br><code>Skills → DegradeWith(NoSkills)</code><br><code>RunTools → FailNode | DegradeWith(NoRunTools)</code><br><code>NetworkIsolation → DegradeWith(NetworkOpen)</code><span class="tag new">una fila por variante o no compila</span></div></div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">engine · una función</div><div class="box new"><b>open_session(plan, adapter)</b>→ <code>(SessionRequest, Vec&lt;Degradation&gt;)</code><br>llama <code>require(cap)</code> por cada campo que una capacidad gobierna: <code>edit_constraints</code>, <code>skills</code>, <code>agent</code>, <code>run_tools_endpoint</code>, <code>budget.max_turns</code>, <code>network</code>. Modelo y agente vienen de <code>chosen</code> — no se pueden perder.</div></div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">sin cambios</div><div class="box keep"><b>dispatch_session</b>resume/spawn, pgid registrado, interrupt→grace→kill<span class="tag keep">se conserva</span></div><div class="box keep"><b>SessionObserver</b>audit events → log, <code>Result</code><span class="tag keep">se conserva</span></div></div>
+  </div>
+  <div class="prose">
+  <p>Consecuencias directas: <code>TypedArtifactNeedsRunTools</code> rige en <code>loop</code> porque el gate tiene un solo sitio; <code>edit_hooks</code> ausente emite <code>capability_degraded(PostCheckOnly)</code> una vez por run, como el Contrato §6.1 dice; <code>usage_reporting</code> ausente emite <code>NoTokenBudget</code> y el run lo sabe en vez de nunca frenar; <code>check(workflow, config, &amp;Adapters)</code> refuta <code>read_only</code> y <code>agent:</code> sobre un adapter sin la capacidad <strong>antes</strong> de que exista un worktree. Un test recorre <code>Capability::ALL</code> por <code>FixtureCapabilities</code> para que una novena capacidad rompa el build en vez de volverse inexpresable en fixtures.</p>
+  <h3>Adapters: lo que cambia del lado de la implementación</h3>
+  <ul>
+    <li><strong>Parsing tipado en el borde</strong>: <code>#[serde(tag = "type")] enum ClaudeLine { … , #[serde(other)] Unknown }</code> y lo mismo para codex (cuyo doc comment ya transcribe el schema); <code>Option&lt;u64&gt;</code> para conteos ausentes en vez de <code>0</code> facturado contra <code>max_tokens</code>. <code>AgentError</code> con causa tipada.</li>
+    <li><strong>Secreto</strong>: <code>ToolTarget</code> — <code>command</code>/<code>url</code> nunca en <code>display</code>; pase de redacción en <code>RunLog::record</code> contra el <code>SecretSource</code> conocido (defensa en profundidad que el spec promete); <code>scratch/mcp.json</code> se borra con el registro; comparación de bearer en tiempo constante sobre <code>Secret</code>.</li>
+    <li><strong>Mock a paridad de dueño</strong>: <code>MockSession</code> conserva el <code>JoinHandle</code> del player y lo aborta en <code>Drop</code>; <code>apply_effects</code> por <code>tokio::fs</code>.</li>
+    <li><strong>Codex</strong>: un error de settings falla el spawn, no cae al sandbox default; <code>ReadOnly</code> + <code>artifact_dir</code> es una degradación explícita, no un cierre fallido sin evento.</li>
+    <li><strong>Claude-code</strong>: <code>ReadOnly</code> no incluye <code>Write</code> mientras <code>permission_profiles: true</code> esté declarado — o se confina a <code>artifact_dir</code> o la capacidad se declara <code>false</code>.</li>
+  </ul>
+  </div>
+</section>
+
+<section id="tipos">
+  <div class="prose">
+  <h2>Tipos: lo inválido, irrepresentable</h2>
+  <p><code>string_id!</code> ya hace el trabajo para 22 identificadores. La lista de abajo es lo que sigue siendo <code>String</code> y representa una gramática o un conjunto cerrado.</p>
+  </div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>tipo nuevo</th><th>reemplaza</th><th>qué vuelve irrepresentable</th></tr></thead>
+    <tbody>
+      <tr><td><code>ScopeGlob</code></td><td class="w"><code>Node.scope</code>, <code>Task.scope</code>, <code>ScopeExpansion.within</code> (<code>Vec&lt;String&gt;</code>)</td><td class="w">un glob inválido que pasa <code>check</code> y falla a mitad del run — compila en <code>Deserialize</code> por <code>glob::scope_glob</code></td></tr>
+      <tr><td><code>SchemaRange</code></td><td class="w"><code>Workflow.yunta_schema</code>, <code>PackManifest.yunta_schema</code> (<code>String</code>)</td><td class="w">un rango que se parsea en el engine y no en el pack; <code>check/declarations.rs:73</code> es su <code>FromStr</code></td></tr>
+      <tr><td><code>ArtifactName</code> + <code>ReservedIdentity</code></td><td class="w"><code>ArtifactSpec::Opaque(String)</code>, <code>ArtifactRefId::Name</code>, <code>MountArtifact.rename</code></td><td class="w">un nombre con <code>..</code>, absoluto, o que colisiona con <code>questions.answers.yaml</code>; se re-valida <b>después</b> de renderizar templates</td></tr>
+      <tr><td><code>TemplateVar</code> (enum)</td><td class="w"><code>BTreeMap&lt;String,String&gt;</code> de <code>template_vars</code></td><td class="w">un input del usuario que se expande donde un path no lo admite; <code>{{runner.role}}</code> pasa a <code>{{runner.name}}</code> (vocabulario)</td></tr>
+      <tr><td><code>CommitSha</code> <span class="pill keep">existe</span></td><td class="w"><code>PackProvenance.commit</code>, <code>PackLockEntry.commit</code></td><td class="w">un commit que no es hex</td></tr>
+      <tr><td><code>DateTime&lt;Utc&gt;</code></td><td class="w"><code>EngineProcessFile.started_at: String</code></td><td class="w">dos representaciones del instante en archivos hermanos</td></tr>
+      <tr><td><code>WorkflowName</code> <code>SkillName</code> <code>InputName</code> <code>McpServerName</code></td><td class="w"><code>NodeKind::Workflow.use</code>, <code>Node.skills</code>, claves de <code>inputs</code>, <code>McpQueryParams.server</code></td><td class="w">una referencia que no puede resolver; una línea de <code>string_id!</code> cada uno</td></tr>
+      <tr><td><code>RecordedOrigin</code> → <code>ArtifactOrigin</code></td><td class="w"><code>ArtifactAcceptedPayload.origin</code></td><td class="w"><code>Legacy</code> en una aceptación fresca; el fold lo ensancha, <code>accept</code> no lo escribe</td></tr>
+      <tr><td><code>ArtifactKind::Answers</code></td><td class="w"><code>ANSWERS_SUFFIX</code> + <code>Opaque</code></td><td class="w">el engine escribe un documento que se niega a leer; con kind tiene <code>shape::read</code>, contrato publicado y sin colisión por sufijo</td></tr>
+      <tr><td><code>Location { path, range }</code></td><td class="w"><code>FindingEntry.location: String</code></td><td class="w">"path y rango opcional" del Contrato §4.1 como tipo</td></tr>
+      <tr><td><code>Vec&lt;QuestionId&gt;</code></td><td class="w"><code>pending_questions: Vec&lt;String&gt;</code>, <code>unanswered</code> mezclando ids y violaciones</td><td class="w">un id y una violación en la misma lista</td></tr>
+      <tr><td><code>DiagnosticCode</code> (una enum)</td><td class="w"><code>RuleCode</code> + literales <code>&amp;'static str</code> de parse/file/artifact + <code>DiagnosticCount.code: String</code></td><td class="w">un código que se escribe a mano; un test lo ata a <code>compatibility.md</code></td></tr>
+      <tr><td><code>Answerer { Log, Staging }</code></td><td class="w"><code>answered_by_the_log</code> + su re-derivación en <code>submission.rs:67</code></td><td class="w">una tercera lectura de "quién responde por este artifact"</td></tr>
+      <tr><td><code>RunTool</code> (enum)</td><td class="w">literales en <code>catalog.rs</code> y <code>session.rs</code> (inconsistentes entre sí)</td><td class="w">catálogo y dispatch como dos folds sobre la misma enum: no se puede olvidar uno</td></tr>
+      <tr><td><code>StagedHash</code> / hash único de <code>accept</code></td><td class="w"><code>VerifiedArtifact.content_hash</code> con dos significados</td><td class="w">un campo que es el hash del staging en un camino y del canónico en otro</td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+  <h3>Puertas únicas en core</h3>
+  <ul>
+    <li><strong><code>workflow::read(bytes, path) -&gt; Result&lt;Workflow, Report&gt;</code></strong>: las reglas de grafo de <code>engine/src/check/</code> (ids duplicados, refs rotas, scopes solapados) corren en el mismo <code>Report</code> que <code>shape::read</code>. Los 11 <code>yaml::parse::&lt;Workflow&gt;</code> desaparecen; ningún caller puede tener un workflow sin chequear — incluido <code>yunta test</code>.</li>
+    <li><strong><code>Document</code> para <code>FindingEntry</code> y <code>Withdrawal</code></strong>: <code>run_tools/findings.rs:214</code> (<code>parse_problem</code>, copia del mapeo de <code>accept</code>) se borra.</li>
+    <li><strong><code>text::counted(n, noun)</code></strong> en core; <code>commands::counted</code>, <code>lines::counted_problems</code> y el <code>error/errors</code> de <code>problems</code> lo consumen. Los 25 <code>(s)</code> se van.</li>
+    <li><strong><code>run_dir::</code></strong> nombra todo path bajo el run: <code>manifest_path()</code> (15 literales), <code>progress_path()</code>, <code>sessions_root()</code>, <code>task_worktrees()</code>, y el CLI usa <code>ARTIFACTS_DIR</code>.</li>
+  </ul>
+  <h3><code>PersistedDoc&lt;T&gt;</code>: versionado que se lee</h3>
+  <p>Todo archivo que Yunta escribe y vuelve a leer —<code>manifest.yaml</code>, <code>yunta.lock</code>, <code>scratch/engine.json</code>, el lock de aislamiento, <code>receipt.json</code>— lleva <code>schema_version</code>, un lector que la compara, y un balde <code>unknown</code> que aflora como <code>EventBody::Unknown</code> ya lo hace. <code>Manifest</code> deja de embeber <code>Workflow</code> y <code>ConfigLayer</code> estrictos: embebe su forma persistida, tolerante, y el lector viejo marca lo que no entendió. <code>manifest.rs:151</code> deja de tragar un <code>pack.yaml</code> ilegible con <code>.ok()?</code>.</p>
+  </div>
+</section>
+
+<section id="cli">
+  <div class="prose">
+  <h2>El CLI: puertas, vocabulario, borde</h2>
+  </div>
+  <div class="flow c4" role="img" aria-label="Todo comando entra por Context::open_run, deriva por el engine, habla con RunWord y sale por CliError.">
+    <div class="col"><div class="head">una puerta al run</div><div class="box new"><b>Context::open_run(&amp;RunId)</b>→ <code>Opened { run_id, run_dir, manifest: PersistedDoc, events, project }</code><br>búsqueda (<code>Project::run_dir</code>), una oración de rechazo que nombra ambas raíces, manifest, log. La toman <code>status stats receipt verify cancel gc graph resume resolve-gate list --runs drive::settle</code> y los 4 tools MCP. <code>collect_history</code> también.<span class="tag new">6+5+9+10 copias → 1</span></div></div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">una derivación</div><div class="box keep"><b>run_frame / derive</b>engine<span class="tag keep">se conserva</span></div><div class="box new"><b>RunWord</b>en <code>render::state</code>: la palabra de un run parado es una, y <code>--json</code> emite el mismo token que el texto imprime<span class="tag new">waiting/paused/needs you → una</span></div></div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">un borde</div><div class="box new"><b>CliError</b>brazos tipados por módulo; <code>Message(String)</code> solo para lo único; MCP devuelve <code>Result&lt;T, CliError&gt;</code> y un adaptador lo vuelve tool result; <code>promote</code>/<code>test</code> tipados<span class="tag new">17+9+2 sitios</span></div><div class="box new"><b>ask::Console</b>única superficie de pregunta: <code>init</code> y <code>new</code> también</div></div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">una salida</div><div class="box new"><b>Outcome ← RunWord</b>un solo mapeo; un run con findings bloqueantes es <code>Reported</code> — o se decide que no, en un ADR</div><div class="box new"><b>RunDocument</b>un DTO versionado para run/resume/status; <code>receipt.json</code> lleva <code>schema_version</code></div></div>
+  </div>
+  <div class="prose">
+  <p>Un camino de ejecución: <code>test.rs::run_case</code> y <code>promote.rs</code> entran por <code>runnable</code> + <code>drive</code> con el <code>Clock</code> e <code>IdSource</code> del <code>Context</code> — <code>yunta test</code> deja de saltear <code>check</code> y pasa a ser determinista de verdad. <code>mcp::tool_resolve_gate</code> <strong>es</strong> <code>resolve_gate</code> con otro medio. <code>Env</code> se lee una vez en <code>main</code> y <code>TerminalEnv</code>, <code>GlyphEnv</code>, <code>identity</code>, <code>doctor</code> y <code>process_env</code> lo reciben; <code>check_or_refuse</code> toma <code>&amp;Path</code>. <code>graph</code> abre storage por <code>ctx.storage()</code>. <code>stats.rs</code> renderiza a <code>String</code>.</p>
+  <p>Se conserva: <code>Delivery::choose</code>, <code>Curtain</code>/<code>Standing</code>, la política de drop del <code>Feed</code>, <code>Folded</code>, <code>Region</code> sin raw mode ni spinner, <code>render::state</code>, <code>commands::advice</code>, <code>decision::Layout</code>, <code>render::escalation</code> + <code>reserved::offers</code>, <code>json::SCHEMA_VERSION</code> como regla, <code>error::{warn, note}</code> + <code>Diagnostics</code>.</p>
+  </div>
+</section>
+
+<section id="observacion" class="prose">
+  <h2>Observación: frame y crónica</h2>
+  <p>La propuesta anterior —una crónica derivada, dos disposiciones— sigue en pie y ahora está donde tenía que estar: <strong>aguas abajo del modelo de eventos por dominio</strong>. <code>Happening</code> no es una enum plana de 36 brazos que espeja la enum plana vieja; es <code>enum Happening { Run(run::Happening), Node(node::Happening), … }</code> y cada dominio es dueño de su lectura (<code>impl From&lt;&amp;FindingEvent&gt; for findings::Happening</code>). <code>chronicle(events) -&gt; Vec&lt;Moment&gt;</code> es pura, uno por evento, monótona. <code>surface/chronicle.rs::say</code> delega por dominio y usa <code>NodeDisplay</code> para todo estado. <code>Scrollback::gone</code>, <code>leaving</code>, <code>restart</code>, <code>view::graduation</code>, <code>lines::detail</code> desaparecen. <code>kept(&amp;Happening)</code> es un match en un solo lugar (decisión del humano, abajo).</p>
+  <p>Los tres tests que la sostienen —uno por evento, prefijo de prefijo, el frame concuerda con la crónica— más el de los dos draws con los mismos beats, quedan como estaban propuestos. Y la propuesta anterior se retira como documento aparte: este la contiene.</p>
+</section>
+
+<section id="tests">
+  <div class="prose">
+  <h2>Tests: un arnés por capa</h2>
+  </div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>capa</th><th>sujeto</th><th>arnés</th><th>regla que el ratchet mide</th></tr></thead>
+    <tbody>
+      <tr><td>pura</td><td>ledgers, <code>derive</code>, <code>decide</code>, <code>check</code>, renders</td><td class="w"><code>testkit_core::Log::for_run("r").at(FIXED_NOW).node("build", payload).after(3).event(payload).build()</code> — reemplaza 10 <code>fn event()</code>, 3 <code>base_time()</code>, 3 <code>tokens()</code>, 4 <code>workflow()</code></td><td class="w"><code>fn event(</code> fuera del testkit = 0</td></tr>
+      <tr><td>engine</td><td><code>execute_run</code> punta a punta</td><td class="w"><b>un</b> <code>Bench</code> con <code>run_sabotaged(|run_dir| …)</code>, <code>wake()</code>/<code>wake_with(forge)</code>, <code>with_clock</code>/<code>with_ids</code>, <code>findings_by</code>/<code>group_output</code>/<code>commit_subjects</code> — las cinco capacidades por las que existen los 8 sombra; <code>common/mod.rs</code> queda en literales de workflow y fixture</td><td class="w"><code>execute_run(RunEnv</code> fuera del testkit = 0; <code>struct .*Bench</code> fuera del testkit = 0</td></tr>
+      <tr><td>binario</td><td><code>yunta</code> compilado</td><td class="w"><code>Checkout</code> + <code>hermetic(cmd, dir, home)</code>: fija <code>YUNTA_HOME</code>, <code>YUNTA_ORG_CONFIG</code> (archivo vacío, no unset), <code>HOME</code>, <code>USER</code>, <code>TERM</code>, quita <code>NO_COLOR</code>; <code>Checkout::without_yunta_home()</code> para el caso legítimo de <code>run_flow:2872</code></td><td class="w"><code>Command::new(CARGO_BIN_EXE_yunta)</code> fuera del testkit = 0; <code>Command::new("git")</code> fuera de <code>git.rs</code>/<code>repo.rs</code> = 0</td></tr>
+      <tr><td>terminal</td><td>lo que una persona ve y tipea</td><td class="w"><code>Terminal</code> + <code>yunta_on_terminal!</code> <span class="pill keep">ya es así</span></td><td>—</td></tr>
+      <tr><td>producto</td><td>workflows y packs</td><td class="w"><code>.yunta/tests/*.yaml</code> por <code>yunta test</code>, ahora con <code>check</code> y clock inyectado; <code>cargo test</code> los corre vía <code>factory_packs_cmd</code> — y también los del repo</td><td>—</td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+  <h3>Cuatro propiedades, generador completo</h3>
+  <p>El generador emite los 36 kinds (comparte la lista con <code>all_kinds()</code>) más <code>Unknown</code>. Sobre él: <strong>replay</strong> (determinista, prefijo-monótono, <code>Unknown</code> conservado — se queda); <strong>resume</strong> (log + corte <code>k</code>, se entra por el camino real de resume desde el prefijo, estado final igual al ininterrumpido — reemplaza la tautología); <strong>idempotencia</strong> (re-entregar una subsecuencia no cambia <code>derive</code>; re-correr un nodo tras un crash produce un <code>node_finished</code> por attempt); <strong>cadena</strong> (toda secuencia de appends verifica; toda mutación de un byte la detecta <code>verify_chain</code>). Más las de la crónica.</p>
+  <p><code>core</code> y <code>adapters</code> enlazan <code>testkit-core</code>; <code>request()</code>, <code>drain()</code>, <code>write_lines()</code>, <code>child_pid_fifo()</code>, <code>grandchild_pid()</code> y el test duplicado byte a byte de secretos pasan a <code>testkit::adapter</code> parametrizado por adapter. <code>SourceLog::record</code> toma un clock inyectado. <code>static IDS</code> compartido por 12 binarios pasa a <code>SeqIdSource</code> por bench. El <code>sleep(100ms)</code> de <code>run_tools.rs:547</code> es <code>wait_until_async</code>. <code>wait.rs</code> cede con <code>sleep(1ms)</code> en vez de spin caliente.</p>
+  <h3>CI</h3>
+  <p><code>release.yml</code> reusa <code>ci</code> por <code>workflow_call</code> (hoy saltea schema, smells, rustdoc y aislamiento por crate). Job macOS <code>cargo test --workspace</code> (pty, señales, process groups son POSIX-específicos). <code>for p in packs/*/</code> en vez de la lista literal. <code>concurrency</code> + <code>timeout-minutes</code>. <code>cargo test --release</code> una vez (el perfil <code>panic = "abort"</code> + LTO nunca se ejercita). CONTRIBUTING lista <code>smells --check</code>.</p>
+  </div>
+</section>
+
+<section id="docs">
+  <div class="prose">
+  <h2>Documentación atada al código</h2>
+  <p>La regla es "la documentación gana". Para que gane tiene que poder perder: un test que la contradiga.</p>
+  </div>
+  <div class="flow c3" role="img" aria-label="El tipo es la fuente; el schema y los docs son emisiones; un test recursivo ata cada conjunto cerrado.">
+    <div class="col"><div class="head">fuente</div><div class="box keep"><b>Los tipos</b><code>EventPayload::KINDS · Capability::ALL · TasksFile::RULES · CheckBuiltin · ContextSpec · InputSpec · tool_definitions()</code><span class="tag keep">ya existen</span></div></div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">emisiones</div><div class="box keep"><b>schemas/*.json</b><code>xtask schema --check</code><span class="tag keep">ya atado</span></div><div class="box new"><b>docs/design/*.md</b>citan; no restatean. Donde restatean, un test compara.</div><div class="box new"><b>adrs.md</b>índice generado de <code>adr/DNNN-slug.md</code></div></div>
+    <div class="arrow">→</div>
+    <div class="col"><div class="head">lo que ata · docs_sync recursivo</div><div class="box new">Contrato §3 tabla ≡ <code>KINDS</code> (set y cuenta)<br>spec-events §5.x campos ≡ structs<br>spec-adapter caps ≡ <code>Capability::ALL</code>; tabla de degradación completa; §6 por adapter ≡ <code>capabilities()</code><br>spec-ledger §3 ≡ <code>RULES</code><br>Contrato §6.4 ≡ <code>tool_definitions()</code> + catálogo<br>§7.1/§9/§2.3 ≡ variantes<br>todo YAML de <code>docs/design/</code> parsea y chequea<br>ADRs: sin huecos, citas resuelven, <code>revises</code>/<code>revised_by</code> recíprocos<span class="tag new">~200 líneas de test</span></div></div>
+  </div>
+  <div class="prose">
+  <ul>
+    <li><strong>Un ADR por archivo</strong> en <code>docs/design/adr/DNNN-slug.md</code> con front-matter <code>number, title, status, revises, revised_by</code>; <code>adrs.md</code> se genera por <code>cargo xtask adr --check</code>. Anclas, diffs de una línea, agrupación por tags en vez de 7 <code>#</code> que no predicen su contenido. El directorio ya existe con esa intención.</li>
+    <li><strong>Dos ratchets</strong> en <code>xtask smells</code>: vocabulario prohibido (<code>ledger</code> para tareas, <code>plugin</code>, <code>role:</code>, <code>driver</code>, <code>backend</code> no-storage, <code>subagente</code>) sobre <code>crates/**</code>, <code>docs/</code>, <code>*.yaml</code>, <code>*.json</code>; y marcadores de tiempo/plan (<code>for now</code>, <code>yet</code>, <code>today</code>, <code>now built</code>, <code>the old</code>, <code>will</code>, <code>not yet</code>, <code>future</code>) en <code>//!</code>/<code>///</code> y docs. Sembrados con el conteo de hoy; solo bajan.</li>
+    <li><strong>Corpus</strong>: un pase que deshace la exportación (<code>\{\{</code>, <code>\[</code>, <code>\|</code>, fences <code>javascript</code>, autolinks <code>http://progress.md</code>, fence sin cerrar en <code>contrato:19</code>). Hasta entonces ningún YAML normativo del Contrato es parseable ni atable.</li>
+    <li><strong>Correcciones puntuales</strong> que los tests nuevos van a exigir: 6 tools MCP en Contrato/<code>cli.rs</code>/<code>mcp.rs</code>; <code>{document}</code> en §6.4; <code>finished</code> en §3.2; §5.3 sin <code>free_text</code>/<code>default_on_timeout</code> como campos y con <code>external_ref</code>; <code>2000000</code> en referencia-schema; 8 schemas en D139/compatibility; <code>"tasks document"</code> en D132; <code>commit</code>/<code>paths</code>/<code>external_ref</code>/<code>sha</code> en spec-events; 8 capacidades y <code>SessionRequest</code> real en spec-adapter; O1–O6 sin duplicar; <code>deuda ⑪</code>→A-05, <code>M14</code>→A-06; nota <code>Revisada por D157</code> en D152; reviser en D03; <code>spec-ledger.md</code>→<code>spec-tasks.md</code>.</li>
+    <li><strong>Glosario</strong>: entran <code>frame</code>, <code>standing</code>, <code>escalation</code>, <code>tradeoff</code>, <code>demand line</code>, <code>crónica</code>/<code>momento</code>, <code>ledger</code> (pliegue del log, licenciado), <code>puerto</code>.</li>
+    <li><strong>Deuda</strong>: entran lo prometido-no-construido que se decida registrar (abajo), más <code>yunta replay/diff</code> (RFC-0003) y la verificación en vivo de adapters (status.md).</li>
+  </ul>
+  </div>
+</section>
+
+<section id="flujos">
+  <div class="prose">
+  <h2>Siete flujos punta a punta</h2>
+  <p>Cómo funciona cada cosa en la arquitectura objetivo, paso a paso, con la función que da cada paso.</p>
+
+  <h3>F1 · Agregar un kind de evento</h3>
+  <ol class="steps">
+    <li>En <code>core/events/&lt;dominio&gt;/kinds.rs</code> se agrega la variante con su nombre y versión. Es el único lugar.</li>
+    <li><code>payloads.rs</code> del dominio gana el struct y su constructor. Sin constructor público, nadie lo puede construir.</li>
+    <li><code>ledger.rs::apply</code> no compila hasta que el kind tenga brazo — o se declare <code>Audit</code> por nombre.</li>
+    <li><code>happening.rs</code> no compila hasta que el kind tenga lectura.</li>
+    <li><code>KINDS</code>, <code>kind_name</code>, <code>all_kinds()</code>, <code>events.json</code> y los "36" se derivan; <code>xtask schema</code> regenera; el test de docs exige la fila del Contrato y la sección del spec.</li>
+  </ol>
+  <p>Antes: 9 sitios + 2 docs, 3 defendidos. Después: 3 sitios en un módulo, todos defendidos, el resto derivado.</p>
+
+  <h3>F2 · Un nodo corre</h3>
+  <ol class="steps">
+    <li><code>exec</code> lee el log una vez y <code>derive</code> produce <code>RunState</code> (todos los ledgers, un pase).</li>
+    <li><code>decide(&amp;workflow, &amp;state, &amp;policy)</code> devuelve <code>Decision::Execute(node, attempt)</code> — el attempt lo dice <code>NodeLedger</code>.</li>
+    <li><code>execute</code> construye <code>NodeStarted::attempt(n)</code> y lo registra por <code>RunLog::record</code>; el observer lo espeja al pintor.</li>
+    <li>Según el kind, la cáscara corre <code>bash</code> por <code>spawn_governed</code>, o arma un <code>SessionPlan</code> (F3), o publica un gate (<code>Escalation::new</code>) y devuelve <code>GateStep::Waiting(PauseReason)</code>.</li>
+    <li><code>close_node</code> verifica artifacts (<code>Answerer::{Log,Staging}</code>), y registra <code>NodeFinished::new(outcome, tokens)</code> o <code>NodeFailed::new(Failure, …)</code> — un constructor cada uno, un escritor cada uno.</li>
+    <li><code>progress.md</code> se escribe por <code>tokio::fs</code> desde <code>RunState</code>, no por otro replay.</li>
+    <li>Cada evento llega al pintor: <code>Folded</code> → <code>run_frame</code> (región) y <code>chronicle</code> (scrollback y líneas), mismas palabras.</li>
+  </ol>
+
+  <h3>F3 · Una sesión se abre</h3>
+  <ol class="steps">
+    <li><code>resolve_node_runner</code> elige <code>chosen: RunnerCandidate</code> y registra <code>runner_resolved</code>.</li>
+    <li><code>SessionPlan { node, task, prompt, chosen, profile, artifact_dir, resume }</code>.</li>
+    <li><code>open_session(plan, adapter)</code> llama <code>require(cap)</code> por cada campo gobernado; cada ausencia produce una <code>Degradation::new(cap, adapter, Policy)</code> desde la tabla — o falla el nodo, según la fila.</li>
+    <li><code>SessionRequest</code> sale con modelo y agente de <code>chosen</code>, <code>edit_constraints</code> solo si <code>EditHooks</code>, skills solo si <code>Skills</code>, endpoint solo si <code>RunTools</code>.</li>
+    <li><code>dispatch_session</code> (sin cambios): resume o spawn, pgid registrado, stream plegado a eventos de auditoría con <code>Result</code>, <code>ToolTarget</code> digest.</li>
+    <li>Cancel/budget: interrupt → gracia → kill al grupo; un kill fallido es un <code>engine_finding</code>.</li>
+  </ol>
+
+  <h3>F4 · Un artifact vive</h3>
+  <ol class="steps">
+    <li><code>produces: [tasks, "report-{{inputs.name}}.md"]</code> parsea a <code>ArtifactSpec::{Interpreted(Tasks), Opaque(ArtifactName)}</code>; el nombre se valida como escrito y otra vez después de renderizar.</li>
+    <li>Interpretado: la sesión entrega por <code>yunta_submit_tasks {document}</code> (<code>RunTool</code> enum), <code>shape::accept</code> valida, <code>canonical</code> renderiza, <code>accept(…, RecordedOrigin::Submitted)</code> guarda por hash y proyecta la vista. Opaco: la sesión escribe en su staging.</li>
+    <li>Al cierre, <code>Answerer</code> dice quién responde por cada declaración; <code>held_document</code> o <code>verify_one</code>; el veredicto en sesión (<code>yunta_check_artifact</code>) llama a la misma función.</li>
+    <li><code>ArtifactLedger</code> (sin cambios) es la única respuesta a "qué tiene el run"; nadie lee <code>artifacts/</code>.</li>
+    <li>Answers es <code>ArtifactKind::Answers</code>: el engine lo escribe y lo lee por la misma puerta que los demás.</li>
+  </ol>
+
+  <h3>F5 · Cualquier comando abre un run</h3>
+  <ol class="steps">
+    <li><code>Context::load()</code> lee <code>Env</code> una vez y resuelve el proyecto.</li>
+    <li><code>ctx.open_run(&amp;run_id)?</code> → <code>Opened</code> o <code>CliError::RunNotFound { id, roots }</code> — una oración, un lugar.</li>
+    <li><code>opened.manifest</code> es <code>PersistedDoc&lt;Manifest&gt;</code>: versión leída, desconocidos marcados.</li>
+    <li>El comando deriva (<code>run_frame</code>/<code>derive</code>/<code>chronicle</code>) y renderiza con <code>RunWord</code>/<code>NodeDisplay</code>/<code>advice</code>.</li>
+    <li>Sale por <code>Outcome ← RunWord</code> y <code>main</code> mapea una vez a exit code.</li>
+  </ol>
+
+  <h3>F6 · Una capacidad degrada</h3>
+  <ol class="steps">
+    <li><code>POLICY</code> en core dice qué pasa cuando falta cada capacidad; <code>require()</code> la consulta.</li>
+    <li>La ausencia es un <code>capability_degraded</code> con <code>Policy</code> tipada, registrado por <code>RunLog</code>.</li>
+    <li><code>DegradationLedger</code> la sostiene; <code>RunFrame.degraded</code>, el receipt, <code>stats</code> y <code>verify</code> la muestran (hoy solo el frame).</li>
+    <li>La crónica la dice: <code>! implement — edit hooks not declared by codex: scope checked after the session</code>.</li>
+    <li><code>check(workflow, config, &amp;adapters)</code> refuta antes lo que <code>FailAtCheck</code> marca.</li>
+  </ol>
+
+  <h3>F7 · Una afirmación de la documentación queda atada</h3>
+  <ol class="steps">
+    <li>El tipo declara el conjunto (<code>Capability::ALL</code>).</li>
+    <li><code>spec-adapter.md</code> lo lista en una tabla con formato fijo.</li>
+    <li><code>docs_sync.rs</code> (recursivo) parsea la tabla y la compara con el tipo: igualdad de conjuntos.</li>
+    <li>El ratchet de vocabulario y de tiempo corre sobre el mismo archivo.</li>
+    <li>Un ADR que la revisa lleva <code>revises: [DNN]</code>; <code>xtask adr --check</code> exige el recíproco.</li>
+  </ol>
+  </div>
+</section>
+
+<section id="decisiones" class="prose">
+  <h2>Decisiones que van antes</h2>
+  <p>CLAUDE.md, paso 2: lo que ninguna decisión registrada fija se levanta con alternativas y recomendación. Estas siete no las tomo yo, y varias condicionan el orden de las fases.</p>
+  <div class="note decide"><p class="eyebrow">P1 · el puerto</p><p><strong>¿El puerto de adapters vive en <code>yunta-core::port</code> o en un crate propio <code>yunta-port</code>?</strong> Recomiendo <code>core::port</code>: ya es el crate de tipos compartidos, <code>Capabilities</code> ya vive ahí, y un crate más es superficie sin consumidor propio. Alternativa: <code>yunta-port</code> si se prevé publicar el puerto para adapters de terceros con un semver independiente del core.</p></div>
+  <div class="note decide"><p class="eyebrow">P2 · antes del primer tag</p><p><strong>¿La reestructura de eventos por dominio se hace antes del primer <code>v0.x</code> tag?</strong> Recomiendo sí, y que sea lo primero después de P1: D141 la hace gratis hoy y cara para siempre después. Alternativa: publicar el tag primero y pagar <code>_v2</code> por kind — no veo qué compra.</p></div>
+  <div class="note decide"><p class="eyebrow">P3 · build-or-register, cinco veces</p><p>Cinco comportamientos que la documentación promete y el código no tiene: <strong>baseline al crear el run</strong> (D18, §7.2 — hoy lazy y el primer <code>baseline_compare</code> siempre pasa); <strong>hooks de edición</strong> (spec-adapter §6 — ningún adapter los tiene); <strong>preguntas por pull request</strong> (§3, §4.1 — <code>Channel</code> no tiene <code>Pr</code>); <strong>orden de criterios aprendido del log</strong> (D62 — hoy por invocación); <strong>fuentes de contexto por executor</strong> (D19 — <code>ContextSpec</code> es cerrada). Para cada uno: se construye en este plan, o se retira con una entrada <code>A-NN</code> en la deuda y una nota <code>Revisada</code> en el ADR. Recomiendo: construir baseline eager (es <code>create_run</code> async, que ya es async en su camino principal) y orden desde el log (es leer <code>criteria_checked.duration_ms</code>, que ya se persiste); registrar como deuda los otros tres.</p></div>
+  <div class="note decide"><p class="eyebrow">P4 · <code>task-ledger</code> en YAML de autor</p><p>El alias <code>#[serde(alias = "task-ledger")]</code> hace válido para siempre, en workflows y en el CLI, un nombre retirado y prohibido — contra D110 y sin ADR. Recomiendo: alias solo en la lectura de lo persistido (manifest, log) y rechazo con diagnóstico que nombra <code>tasks</code> en YAML de autor; registrado en un ADR.</p></div>
+  <div class="note decide"><p class="eyebrow">P5 · exit code con findings bloqueantes</p><p>Un run que cierra "finished, holding N blocking findings" sale con 0. Recomiendo <code>Reported</code> (1): el propio bloque de cierre dice que nadie aceptó el trabajo. Alternativa: 0 con el conteo en el documento JSON — es lo de hoy, y hay que decidirlo, no heredarlo.</p></div>
+  <div class="note decide"><p class="eyebrow">P6 · qué conserva una terminal observada</p><p>La columna <code>kept</code> de la crónica: lo que cierra algo o pide algo a una persona (recomendado); o además tareas y artifacts aceptados; o solo nodos que cierran. Un match, un lugar.</p></div>
+  <div class="note decide"><p class="eyebrow">P7 · umbrales sin decisión</p><p><code>WAIT_DEADLINE = 10s</code>, el stagger de <code>60ms</code> en <code>blackboard.rs:148</code>, <code>QUEUE_DEPTH = 1024</code>, <code>REDRAW_CEILING_HZ = 20</code>, <code>MIN_SAMPLES_FOR_ESTIMATION = 3</code>. Cada uno con rustdoc que explica por qué, ninguno con ADR. Recomiendo un ADR único "umbrales de la superficie y del arnés" que los fije con su racional, y que el ratchet rechace un literal numérico nuevo en <code>const</code> sin referencia a un ADR.</p></div>
+  <div class="note decide"><p class="eyebrow">P8 · los bugs de comportamiento, ahora o por fase</p><p>Trece de los defectos no son de forma: cambian lo que un run hace hoy. Cada uno lo cierra un mecanismo de las fases 2–6. La pregunta es si cinco de ellos —los que exponen un secreto, escapan del run dir, corren en el modelo equivocado, muestran findings retirados o dejan un git colgado— se corrigen antes, como PRs propios. Recomiendo sí, con una regla: cada corrección es <b>el mecanismo aplicado a ese único sitio</b>, no una tercera copia. La sección siguiente los lista con su fix y si cumple esa regla.</p></div>
+</section>
+
+<section id="bugs">
+  <div class="prose">
+  <h2>Los bugs de comportamiento</h2>
+  <p>Trece defectos que cambian lo que un run hace hoy, con la fila del índice que los absorbe, el mecanismo, y —para los que no pueden esperar— el fix propio y si es un subconjunto estricto del mecanismo. "Subconjunto estricto" quiere decir: el código que se escribe para el fix es código que la fase igual escribiría, en el mismo lugar; nada se tira después.</p>
+  </div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>bug</th><th>hoy</th><th>índice</th><th>mecanismo · fase</th><th>fix propio antes de la fase</th><th>¿subconjunto?</th></tr></thead>
+    <tbody>
+      <tr class="group"><td colspan="6">recomendados ahora</td></tr>
+      <tr><td class="w"><b>Sesiones de <code>loop</code> en el modelo default</b></td><td class="w"><code>attempt.rs:266-267</code> pasa <code>model: None, agent: None</code>; los adapters solo agregan <code>--model</code> si hay uno; <code>runner_resolved</code> registra otro modelo</td><td>AR-D2</td><td><span class="pill m">M08</span> · 3</td><td class="w"><code>SessionSetup</code> gana <code>chosen: RunnerCandidate</code> y <code>artifact_dir</code>; <code>attempt.rs</code> los copia de ahí. Test: <code>a_task_session_runs_on_the_model_the_runner_resolved</code></td><td><span class="pill keep">sí</span> — es el campo que <code>SessionPlan</code> lleva</td></tr>
+      <tr><td class="w"><b>Nombre de artifact que escapa del run dir</b></td><td class="w"><code>produces: ["{{inputs.x}}"]</code> con <code>x=../../…</code> pasa <code>check</code> (chequea el template sin renderizar) y <code>store.rs:147</code> lo une a un <code>PathBuf</code></td><td>AR-D8</td><td><span class="pill m">M12</span> · 4</td><td class="w"><code>ArtifactName::parse</code> (segmentos relativos, sin <code>..</code>, no reservado) aplicado en <code>render_artifact_names</code> <b>después</b> de renderizar; fallo del nodo con diagnóstico. Test: <code>a_rendered_artifact_name_that_leaves_the_run_dir_fails_the_node</code></td><td><span class="pill keep">sí</span> — es el newtype, con un solo consumidor por ahora</td></tr>
+      <tr><td class="w"><b><code>target_digest</code> persiste comandos crudos</b></td><td class="w"><code>claude_code/parse.rs:131</code>, <code>codex/parse.rs:109</code> guardan <code>command</code>/<code>url</code> literal en el log; un token en una línea de comando queda en claro</td><td>AD-D5</td><td><span class="pill m">M11</span> · 3</td><td class="w">Los parsers hashean siempre (<code>sha256[..12]</code>) hasta que <code>ToolTarget</code> distinga formas que no pueden cargar credencial. Test: <code>a_tool_use_never_persists_the_command_it_ran</code></td><td><span class="pill keep">sí</span> — <code>ToolTarget{display: None, digest}</code> es exactamente esto</td></tr>
+      <tr><td class="w"><b>Blackboard muestra findings retirados</b></td><td class="w"><code>blackboard.rs:35,76</code> pliegan <code>finding_posted</code> a mano; un finding actualizado sale viejo, uno retirado sigue</td><td>EV-D11 AR-D1</td><td><span class="pill m">M04</span> · 2</td><td class="w"><code>consolidate_blackboard</code> y <code>get_blackboard</code> leen <code>FindingLedger::of(events).effective_of(group)</code>. Test: <code>a_withdrawn_finding_leaves_the_blackboard</code></td><td><span class="pill keep">sí</span> — es M04 para ese dominio, ya construido</td></tr>
+      <tr><td class="w"><b>Git sin process group ni cancelación</b></td><td class="w"><code>git.rs:116-167</code> usa <code>Command::new("git")</code> directo: un <code>push</code> colgado sobrevive a Ctrl-C y <code>yunta cancel</code> no lo ve</td><td>EN-D1</td><td><span class="pill m">M10</span> · 3</td><td class="w"><code>git.rs</code> pasa por <code>spawn_governed</code> con el registro y el token de cancelación del run. Test: <code>a_cancelled_run_kills_the_git_it_spawned</code> (git envuelto en un stub que espera)</td><td><span class="pill keep">sí</span> — M10 es "todo por <code>spawn_governed</code>"; git es el único que falta</td></tr>
+      <tr class="group"><td colspan="6">por fase — el fix propio sería una copia más o depende de una decisión</td></tr>
+      <tr><td class="w"><b>Tres capacidades nunca consultadas</b></td><td class="w"><code>edit_hooks</code>, <code>usage_reporting</code>, <code>permission_profiles</code>: sin <code>capability_degraded</code>, sin presupuesto efectivo sin reporte de uso</td><td>AD-D2 D3 D4</td><td><span class="pill m">M09</span> · 3</td><td class="w">Un quinto sitio de gate inline sería V7 otra vez. Depende de P3 (build-or-register para hooks).</td><td><span class="pill del">no</span></td></tr>
+      <tr><td class="w"><b><code>loop</code> sin el gate de artifact tipado</b></td><td class="w"><code>loop_exec:288-315</code> omite <code>TypedArtifactNeedsRunTools</code>: quema todas las sesiones y falla al cierre</td><td>EN-D3 AR-D4</td><td><span class="pill m">M08</span> · 3</td><td class="w">Cae con el fix de <code>SessionSetup</code> de arriba si <code>open_run_tools</code> se llama desde ahí; si no, es la tercera copia del gate.</td><td><span class="pill mod">con el primero</span></td></tr>
+      <tr><td class="w"><b><code>parallel_exec</code> ignora <code>on_interrupt</code></b></td><td class="w"><code>parallel_exec.rs:39-47</code> reinicia siempre; <code>fail_if_uncertain</code>/<code>resume_session</code> no rigen en grupos</td><td>EN-D2</td><td><span class="pill m">M07</span> · 3</td><td class="w">Llamar <code>schedule::resume_policies</code> es exactamente M07 para ese sitio. Chico; puede ir con los cinco.</td><td><span class="pill keep">sí</span></td></tr>
+      <tr><td class="w"><b>Dos dedup de findings divergentes</b></td><td class="w"><code>blocking_findings</code> y los findings heredados pueden discrepar por whitespace interno</td><td>EN-D4</td><td><span class="pill m">M04</span> · 2</td><td class="w"><code>inherited_findings</code> llama <code>dedup_findings</code>. Una línea. Va con el blackboard.</td><td><span class="pill keep">sí</span></td></tr>
+      <tr><td class="w"><b>Mock pierde el handle del player</b></td><td class="w">Una sesión abandonada sin <code>kill()</code> deja una task parada para siempre</td><td>AD-D1</td><td><span class="pill m">M10</span> · 3</td><td class="w"><code>MockSession { player: JoinHandle }</code> + <code>Drop</code> que aborta. Va con git.</td><td><span class="pill keep">sí</span></td></tr>
+      <tr><td class="w"><b>Findings bloqueantes salen con 0</b></td><td class="w"><code>closing.rs:94</code> mapea <code>Finished</code> → <code>Success</code> aunque la línea diga "holding N blocking findings"</td><td>CLI-D16</td><td><span class="pill m">M16</span> · 5</td><td class="w">Depende de P5. No se toca hasta decidirlo.</td><td><span class="pill del">decisión</span></td></tr>
+      <tr><td class="w"><b>Propiedad de resume tautológica</b></td><td class="w"><code>properties.rs:246</code> asserta <code>derive(&amp;log) == derive(&amp;log)</code></td><td>TE-D12</td><td><span class="pill m">M21</span> · 6</td><td class="w">La propiedad real necesita entrar por el camino de resume desde un prefijo — es M21 entero, no un sitio. Hasta entonces, el test se renombra a lo que prueba (determinismo) para no mentir.</td><td><span class="pill mod">renombrar ahora</span></td></tr>
+      <tr><td class="w"><b>Tests heredan <code>/etc/yunta/config.yaml</code></b></td><td class="w"><code>run_yunta</code> no fija <code>YUNTA_ORG_CONFIG</code>; 22 archivos leen la capa org del host</td><td>TE-D7</td><td><span class="pill m">M20</span> · 6</td><td class="w"><code>run_yunta</code> y <code>Terminal::open</code> apuntan <code>YUNTA_ORG_CONFIG</code> a un archivo vacío del temp. Cuatro líneas; es el núcleo de <code>hermetic()</code>.</td><td><span class="pill keep">sí</span></td></tr>
+      <tr><td class="w"><b>Config de referencia no parsea</b></td><td class="w"><code>2_000_000</code> en <code>referencia-schema.md</code>; <code>docs_sync</code> no mira <code>docs/design</code></td><td>CO-14 DO-D9</td><td><span class="pill m">M23</span> · 0</td><td class="w">Fase 0, ya.</td><td><span class="pill keep">sí</span></td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+  <p>Ocho fixes propios, cada uno un mecanismo aplicado a un sitio, cada uno con su test en rojo primero. Van en la rama <code>feature/improve-ux</code> después del merge actual o en una rama hermana, antes de la fase 0 — porque un usuario que corre Yunta hoy los sufre, y ninguno de los ocho se tira cuando llegue su fase.</p>
+  </div>
+</section>
+
+<section id="fases" class="prose">
+  <h2>El plan por fases</h2>
+  <p>Ocho fases, cada una un PR o una serie corta, ordenadas por lo que desbloquean. Ninguna fase deja una pieza "para después": cada una termina con su gate completo en verde, sus textos en presente y su ADR registrado.</p>
+
+  <div class="phase"><div class="ph">fase 0 · decisiones y corpus</div><h4>P1–P7 registradas; corpus des-corrompido; docs_sync recursivo</h4><p>Un ADR por decisión (por archivo, estrenando el formato). El pase mecánico sobre Contrato y RFCs. <code>docs_sync.rs</code> recorre <code>docs/design/</code> y parsea todo YAML — la config de referencia se corrige en el mismo PR. Los ratchets nuevos sembrados con el conteo de hoy. <b>Desbloquea:</b> que la documentación pueda perder, y por lo tanto ganar.</p></div>
+  <div class="phase"><div class="ph">fase 1 · el puerto</div><h4>M01: <code>core::port</code>, <code>core::process</code>, testkit partido, mock renderer en su crate</h4><p>Movimiento de tipos sin cambio de comportamiento; test de frontera <code>no_adapter_crate_in_engine</code>. <code>core</code> y <code>adapters</code> enlazan <code>testkit-core</code>; los helpers duplicados de adapters se unifican. <b>Desbloquea:</b> la tabla capacidad→política en core (fase 3) y el arnés único (fase 6).</p></div>
+  <div class="phase"><div class="ph">fase 2 · eventos por dominio</div><h4>M02 M03 M04 M05: dominios, constructores, ledgers, replay exhaustivo</h4><p>Antes del primer tag. Wire idéntico byte a byte (<code>schema --check</code> lo guarda; <code>events.json</code> no cambia). Los 7 literales de <code>GateWaiting</code>, los 8 de <code>capability_degraded</code>, los 4 bypass de <code>engine_finding</code>, las 10 razones de pausa: cada uno pasa por su constructor. <code>blackboard</code> consume <code>FindingLedger</code>. <code>RunState</code> absorbe <code>NodeHistory</code>, <code>last_external_ref</code>, los 6 attempts, las 5 lecturas de tasks. <b>Desbloquea:</b> todo lo que deriva.</p></div>
+  <div class="phase"><div class="ph">fase 3 · el núcleo</div><h4>M06 M07 M08 M09 M10 M11: decide/execute, SessionPlan, require(), Shell, secreto</h4><p><code>next_step</code> en cinco; <code>GateStep::Waiting(PauseReason)</code>; <code>RunFinished::closed</code> único; git gobernado; <code>tokio::fs</code> en los 15 sitios; clock/env/secretos inyectados; spans; <code>ToolTarget</code>; pase de redacción; mock con handle. Las tres capacidades no consultadas empiezan a consultarse por la tabla; <code>check</code> recibe adapters. Aquí caen los bugs de comportamiento: loop en modelo default, loop sin gate de artifact tipado, <code>parallel_exec</code> ignorando <code>on_interrupt</code>, dedup divergente. <b>Desbloquea:</b> un engine que el compilador defiende.</p></div>
+  <div class="phase"><div class="ph">fase 4 · tipos y puertas de core</div><h4>M12 M13 M14: newtypes, <code>workflow::read</code>, <code>PersistedDoc</code></h4><p><code>ScopeGlob</code> primero (es el que gasta tokens); <code>ArtifactName</code> + <code>ReservedIdentity</code> + <code>TemplateVar</code> (es el escape del run dir); <code>SchemaRange</code>; <code>Answers</code> como kind; <code>Answerer</code>; <code>RunTool</code>; <code>run_dir::</code> completo; <code>PersistedDoc</code> en los cinco archivos. <code>yunta test</code> pasa a chequear porque no puede no hacerlo. <b>Desbloquea:</b> que <code>check</code> atrape antes del primer token lo que hoy atrapa a mitad del run.</p></div>
+  <div class="phase"><div class="ph">fase 5 · el CLI</div><h4>M15 M16 M17 M18 M19: <code>open_run</code>, <code>RunWord</code>, borde, un camino, crónica</h4><p>Puerta única; vocabulario único con <code>--json</code> emitiendo el mismo token; MCP y promote y test por <code>CliError</code>; <code>init</code>/<code>new</code> por <code>ask</code>; <code>test</code>/<code>promote</code> por <code>runnable</code> + <code>drive</code> con clock inyectado; la crónica con <code>Happening</code> por dominio; <code>stats</code> renderiza a <code>String</code>; <code>Env</code> una vez. <b>Desbloquea:</b> que un lector encuentre la misma palabra en cada superficie.</p></div>
+  <div class="phase"><div class="ph">fase 6 · tests</div><h4>M20 M21 M22: <code>Log</code>, un <code>Bench</code>, <code>hermetic()</code>, cuatro propiedades, ratchet que mide la regla</h4><p>Migración mecánica de los 46 <code>execute_run</code>, 8 sombra, 10 builders; <code>common/mod.rs</code> a literales; propiedades reales sobre el generador completo; CI con <code>workflow_call</code>, macOS, timeouts. <b>Desbloquea:</b> que el número del ratchet signifique lo que dice.</p></div>
+  <div class="phase"><div class="ph">fase 7 · documentación</div><h4>M23 M24: pinning completo, ADR por archivo, glosario, deuda</h4><p>Los ~9 tests de conjuntos cerrados; <code>adrs.md</code> generado; las correcciones que esos tests exigen; el glosario con sus términos faltantes; la deuda con lo decidido en P3. Corre en paralelo con 2–6 porque cada fase cierra su parte del corpus; esta fase es la que verifica que no quedó nada suelto. <b>Desbloquea:</b> el primer tag.</p></div>
+  <p style="margin-top:28px">Orden estricto solo entre 0 → 1 → 2 → 3; 4, 5 y 6 dependen de 2 y pueden ir en paralelo entre sí; 7 acompaña. El primer tag <code>v0.1.0</code> se publica después de la 7, no antes de la 2.</p>
+</section>
+
+<section id="indice">
+  <div class="prose">
+  <h2>Índice: cada defecto, su mecanismo</h2>
+  <p>Los 198 defectos de las ocho auditorías, con el id de origen, el mecanismo que lo absorbe y la fase que lo cierra. Esto es lo que respalda "sin huecos": ninguno queda sin fila. Los ids son los de cada informe: EV eventos, EN engine, AR artifacts, CLI, AD adapters, CO core, TE tests, DO docs.</p>
+  </div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>id</th><th>defecto</th><th>mecanismo</th><th>fase</th></tr></thead>
+    <tbody>
+      <tr class="group"><td colspan="4">Eventos (19)</td></tr>
+      <tr><td>EV-D1</td><td>kind declarado en 9 sitios, 3 defendidos</td><td><span class="pill m">M02</span></td><td>2</td></tr>
+      <tr><td>EV-D2</td><td><code>KINDS</code> sin vínculo de compilación con la enum</td><td><span class="pill m">M02</span></td><td>2</td></tr>
+      <tr><td>EV-D3</td><td><code>replay::apply</code> <code>_ =&gt; Ok(())</code> silencioso</td><td><span class="pill m">M05</span></td><td>2</td></tr>
+      <tr><td>EV-D4</td><td>30+ brazos comodín en 13 módulos</td><td><span class="pill m">M04 M05</span></td><td>2</td></tr>
+      <tr><td>EV-D5</td><td><code>phase.rs</code> responde <code>Created</code> a lo desconocido</td><td><span class="pill m">M04</span> RunLedger</td><td>2</td></tr>
+      <tr><td>EV-D6</td><td><code>GateWaitingPayload</code> sin constructor, 7 literales</td><td><span class="pill m">M03</span> Escalation::new</td><td>2</td></tr>
+      <tr><td>EV-D7</td><td>escalación con menú vacío representable</td><td><span class="pill m">M03</span> NonEmpty</td><td>2</td></tr>
+      <tr><td>EV-D8</td><td><code>run_paused.reason</code> con 10 strings</td><td><span class="pill m">M03 M06</span> PauseReason</td><td>2</td></tr>
+      <tr><td>EV-D9</td><td>4 bypass de <code>engine_finding</code></td><td><span class="pill m">M03</span></td><td>2</td></tr>
+      <tr><td>EV-D10</td><td><code>capability_degraded</code> sin constructor, prosa en 8 sitios</td><td><span class="pill m">M03 M09</span></td><td>2–3</td></tr>
+      <tr><td>EV-D11</td><td>blackboard repliega findings</td><td><span class="pill m">M04</span></td><td>2</td></tr>
+      <tr><td>EV-D12</td><td><code>last_external_ref</code> ×2 idéntica</td><td><span class="pill m">M04</span> GateLedger</td><td>2</td></tr>
+      <tr><td>EV-D13</td><td>tasks plegadas en 5 lugares</td><td><span class="pill m">M04</span> TaskLedger</td><td>2</td></tr>
+      <tr><td>EV-D14</td><td>ciclo de nodo en 19 módulos; dos "sesión"</td><td><span class="pill m">M04</span> NodeLedger/SessionLedger</td><td>2</td></tr>
+      <tr><td>EV-D15</td><td><code>artifact_written</code> escribible sin emisor</td><td><span class="pill m">M03</span> sin constructor</td><td>2</td></tr>
+      <tr><td>EV-D16</td><td>spec-events numera artifacts bajo findings</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>EV-D17</td><td><code>schema_version</code> constante 1, envelope sin versión conocida</td><td><span class="pill m">M02</span> versión por dominio</td><td>2</td></tr>
+      <tr><td>EV-D18</td><td>tres "36" a mano</td><td><span class="pill m">M02 M23</span> derivado</td><td>2</td></tr>
+      <tr><td>EV-D19</td><td><code>payloads.rs</code> 989 líneas</td><td><span class="pill m">M02</span></td><td>2</td></tr>
+      <tr class="group"><td colspan="4">Engine (26)</td></tr>
+      <tr><td>EN-D1</td><td>git sin process group/registro/cancel</td><td><span class="pill m">M10</span></td><td>3</td></tr>
+      <tr><td>EN-D2</td><td><code>parallel_exec</code> ignora <code>on_interrupt</code></td><td><span class="pill m">M07</span></td><td>3</td></tr>
+      <tr><td>EN-D3</td><td>loop sin gate <code>TypedArtifactNeedsRunTools</code></td><td><span class="pill m">M08</span></td><td>3</td></tr>
+      <tr><td>EN-D4</td><td>dos dedup de findings divergentes</td><td><span class="pill m">M04</span></td><td>2</td></tr>
+      <tr><td>EN-D5</td><td><code>derive</code> O(e+F²)</td><td><span class="pill m">M04</span></td><td>2</td></tr>
+      <tr><td>EN-D6</td><td>≥2 lecturas, ≥3 replays por iteración</td><td><span class="pill m">M04 M07</span></td><td>2–3</td></tr>
+      <tr><td>EN-D7</td><td><code>progress.md</code> con replay + fs síncrono por nodo</td><td><span class="pill m">M04 M10</span></td><td>3</td></tr>
+      <tr><td>EN-D8</td><td>índice de HashMap (pánico invisible) ×2</td><td><span class="pill m">M10</span> get()</td><td>3</td></tr>
+      <tr><td>EN-D9</td><td><code>encode_ref</code> traga error</td><td><span class="pill m">M10</span> engine_finding</td><td>3</td></tr>
+      <tr><td>EN-D10</td><td>registro de procesos falla a tracing</td><td><span class="pill m">M10</span></td><td>3</td></tr>
+      <tr><td>EN-D11</td><td>registro corrupto = ausente</td><td><span class="pill m">M14</span> PersistedDoc</td><td>4</td></tr>
+      <tr><td>EN-D12</td><td>kill fallido descartado</td><td><span class="pill m">M10</span></td><td>3</td></tr>
+      <tr><td>EN-D13</td><td><code>git::success.unwrap_or(false)</code></td><td><span class="pill m">M10</span></td><td>3</td></tr>
+      <tr><td>EN-D14</td><td><code>StillWaiting</code> no dice si escribió <code>run_paused</code></td><td><span class="pill m">M07</span> GateStep::Waiting</td><td>3</td></tr>
+      <tr><td>EN-D15</td><td><code>node_finished</code> ×4, <code>node_started</code> ×3</td><td><span class="pill m">M03</span></td><td>2</td></tr>
+      <tr><td>EN-D16</td><td>gate/questions sin span</td><td><span class="pill m">M10</span></td><td>3</td></tr>
+      <tr><td>EN-D17</td><td>15 <code>std::fs</code> en async</td><td><span class="pill m">M10</span></td><td>3</td></tr>
+      <tr><td>EN-D18</td><td>3 <code>SystemClock</code> en el engine</td><td><span class="pill m">M10</span></td><td>3</td></tr>
+      <tr><td>EN-D19</td><td><code>std::env</code> en el engine ×2</td><td><span class="pill m">M10</span> SecretSource</td><td>3</td></tr>
+      <tr><td>EN-D20</td><td>5 archivos &gt;500, 56 fns &gt;50</td><td><span class="pill m">M07 M02</span></td><td>2–3</td></tr>
+      <tr><td>EN-D21</td><td><code>verification_effectiveness</code> 5 pases</td><td><span class="pill m">M04</span> un RunState por log histórico</td><td>3</td></tr>
+      <tr><td>EN-D22</td><td><code>current_escalation</code> deriva ×2</td><td><span class="pill m">M07</span></td><td>3</td></tr>
+      <tr><td>EN-D23</td><td><code>RunArtifacts::of</code> ×4 con el ledger en RunState</td><td><span class="pill m">M04</span></td><td>2</td></tr>
+      <tr><td>EN-D24</td><td><code>clippy.toml</code> apunta a lints inexistentes; deny ×5</td><td><span class="pill m">M22</span> workspace.lints</td><td>6</td></tr>
+      <tr><td>EN-D25</td><td>literales <code>distilled</code>/<code>manifest.yaml</code></td><td><span class="pill m">M13</span> run_dir::</td><td>4</td></tr>
+      <tr><td>EN-D26</td><td><code>GitError</code> stringificado</td><td><span class="pill m">M06</span> #[source]</td><td>3</td></tr>
+      <tr class="group"><td colspan="4">Artifacts y run tools (18)</td></tr>
+      <tr><td>AR-D1</td><td>blackboard repliega (confirmación)</td><td><span class="pill m">M04</span></td><td>2</td></tr>
+      <tr><td>AR-D2</td><td>loop en modelo default, sin agente</td><td><span class="pill m">M08</span></td><td>3</td></tr>
+      <tr><td>AR-D3</td><td><code>SessionRequest</code> ×2 campo a campo</td><td><span class="pill m">M08</span></td><td>3</td></tr>
+      <tr><td>AR-D4</td><td>gate de artifact tipado solo en prompt</td><td><span class="pill m">M08</span></td><td>3</td></tr>
+      <tr><td>AR-D5</td><td><code>answered_by_the_log</code> re-derivado</td><td><span class="pill m">M13</span> Answerer</td><td>4</td></tr>
+      <tr><td>AR-D6</td><td>nombres de tools como literales inconsistentes</td><td><span class="pill m">M13</span> RunTool</td><td>4</td></tr>
+      <tr><td>AR-D7</td><td><code>manifest.yaml</code> ×15, paths fuera de <code>run_dir</code></td><td><span class="pill m">M13</span></td><td>4</td></tr>
+      <tr><td>AR-D8</td><td>nombre de artifact escapa el run dir por template</td><td><span class="pill m">M12</span> ArtifactName + TemplateVar</td><td>4</td></tr>
+      <tr><td>AR-D9</td><td><code>ANSWERS_SUFFIX</code> no reservado</td><td><span class="pill m">M12</span> Answers kind</td><td>4</td></tr>
+      <tr><td>AR-D10</td><td>findings heredados fuera de <code>canonical</code>, sin ceiling</td><td><span class="pill m">M13</span></td><td>4</td></tr>
+      <tr><td>AR-D11</td><td><code>Legacy</code> representable en fresco</td><td><span class="pill m">M12</span> RecordedOrigin</td><td>4</td></tr>
+      <tr><td>AR-D12</td><td>Contrato §6.4 <code>{name, document}</code></td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>AR-D13</td><td>Contrato §5.2 brief con ruta</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>AR-D14</td><td>spec-ledger regla 1 en dos capas</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>AR-D15</td><td><code>Vec&lt;String&gt;</code> por <code>QuestionId</code></td><td><span class="pill m">M12</span></td><td>4</td></tr>
+      <tr><td>AR-D16</td><td><code>location: String</code></td><td><span class="pill m">M12</span> Location</td><td>4</td></tr>
+      <tr><td>AR-D17</td><td><code>content_hash</code> con dos significados</td><td><span class="pill m">M12</span></td><td>4</td></tr>
+      <tr><td>AR-D18</td><td><code>{{runner.role}}</code></td><td><span class="pill m">M12</span> TemplateVar</td><td>4</td></tr>
+      <tr class="group"><td colspan="4">CLI (26)</td></tr>
+      <tr><td>CLI-D1</td><td>sin puerta <code>open_run</code></td><td><span class="pill m">M15</span></td><td>5</td></tr>
+      <tr><td>CLI-D2</td><td><code>collect_history</code> saltea <code>Project::run_dir</code></td><td><span class="pill m">M15</span></td><td>5</td></tr>
+      <tr><td>CLI-D3</td><td><code>collect_history</code> ×2</td><td><span class="pill m">M15</span></td><td>5</td></tr>
+      <tr><td>CLI-D4</td><td>run parado con 4 palabras</td><td><span class="pill m">M16</span> RunWord</td><td>5</td></tr>
+      <tr><td>CLI-D5</td><td><code>RunPhase</code>→palabras ×5</td><td><span class="pill m">M16</span></td><td>5</td></tr>
+      <tr><td>CLI-D6</td><td><code>{:?}</code> al usuario ×9</td><td><span class="pill m">M06</span> as_str / Display</td><td>5</td></tr>
+      <tr><td>CLI-D7</td><td>25 <code>(s)</code>, 3 pluralizadores</td><td><span class="pill m">M13</span> text::counted</td><td>4</td></tr>
+      <tr><td>CLI-D8</td><td>dos derivaciones para las superficies</td><td><span class="pill m">M19</span></td><td>5</td></tr>
+      <tr><td>CLI-D9</td><td><code>Scrollback::gone</code></td><td><span class="pill m">M19</span></td><td>5</td></tr>
+      <tr><td>CLI-D10</td><td><code>mcp::tool_resolve_gate</code> duplicado</td><td><span class="pill m">M18</span></td><td>5</td></tr>
+      <tr><td>CLI-D11</td><td>MCP re-bordea 17 errores</td><td><span class="pill m">M17</span></td><td>5</td></tr>
+      <tr><td>CLI-D12</td><td><code>promote</code> aplana errores, <code>SystemClock</code></td><td><span class="pill m">M17 M18</span></td><td>5</td></tr>
+      <tr><td>CLI-D13</td><td><code>test</code> cuarto camino, sin <code>check</code></td><td><span class="pill m">M18 M13</span></td><td>4–5</td></tr>
+      <tr><td>CLI-D14</td><td><code>init</code>/<code>new</code> fuera de <code>ask</code></td><td><span class="pill m">M17</span></td><td>5</td></tr>
+      <tr><td>CLI-D15</td><td>cwd/HOME leídos ×2</td><td><span class="pill m">M10</span> Env una vez</td><td>5</td></tr>
+      <tr><td>CLI-D16</td><td>dos mapeos de exit code; findings bloqueantes = 0</td><td><span class="pill m">M16 M24</span> P5</td><td>0–5</td></tr>
+      <tr><td>CLI-D17</td><td>receipt JSON sin versión</td><td><span class="pill m">M14 M16</span></td><td>4–5</td></tr>
+      <tr><td>CLI-D18</td><td><code>--quiet</code> imprime más que el id</td><td><span class="pill m">M23</span> doc o código, atado</td><td>5</td></tr>
+      <tr><td>CLI-D19</td><td>README: <code>list</code> modes, <code>graph</code> firma</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>CLI-D20</td><td>scans de terminal a mano ×3</td><td><span class="pill m">M04 M15</span></td><td>5</td></tr>
+      <tr><td>CLI-D21</td><td>"only claude-code and codex" ×2</td><td><span class="pill m">M01</span> registro</td><td>1</td></tr>
+      <tr><td>CLI-D22</td><td><code>stats.rs</code> 25 <code>println!</code></td><td><span class="pill m">M16</span> render a String</td><td>5</td></tr>
+      <tr><td>CLI-D23</td><td>tamaños</td><td><span class="pill m">M15 M17 M18</span></td><td>5</td></tr>
+      <tr><td>CLI-D24</td><td><code>graph</code> abre storage solo</td><td><span class="pill m">M15</span></td><td>5</td></tr>
+      <tr><td>CLI-D25</td><td><code>MARKER</code>/<code>GAP</code>, <code>{:&lt;12}</code></td><td><span class="pill m">M16</span> width::</td><td>5</td></tr>
+      <tr><td>CLI-D26</td><td>warnings de <code>Console::open</code> sin <code>Diagnostics</code></td><td><span class="pill m">M17</span></td><td>5</td></tr>
+      <tr class="group"><td colspan="4">Adapters (24)</td></tr>
+      <tr><td>AD-D1</td><td>mock pierde handle del player</td><td><span class="pill m">M10</span></td><td>3</td></tr>
+      <tr><td>AD-D2</td><td><code>edit_hooks</code> nunca consultada</td><td><span class="pill m">M09</span></td><td>3</td></tr>
+      <tr><td>AD-D3</td><td><code>usage_reporting</code> nunca consultada</td><td><span class="pill m">M09</span></td><td>3</td></tr>
+      <tr><td>AD-D4</td><td><code>permission_profiles</code> nunca; <code>check</code> ciego</td><td><span class="pill m">M09</span></td><td>3</td></tr>
+      <tr><td>AD-D5</td><td><code>target_digest</code> crudo</td><td><span class="pill m">M11</span> ToolTarget</td><td>3</td></tr>
+      <tr><td>AD-D6</td><td>sin pase de redacción</td><td><span class="pill m">M11</span></td><td>3</td></tr>
+      <tr><td>AD-D7</td><td>claude <code>ReadOnly</code> con <code>Write</code></td><td><span class="pill m">M09</span></td><td>3</td></tr>
+      <tr><td>AD-D8</td><td>fixture renderer en el CLI</td><td><span class="pill m">M01</span></td><td>1</td></tr>
+      <tr><td>AD-D9</td><td>gates de skills/run_tools duplicados</td><td><span class="pill m">M08 M09</span></td><td>3</td></tr>
+      <tr><td>AD-D10</td><td><code>policy_applied</code> prosa ×7</td><td><span class="pill m">M03 M09</span></td><td>2–3</td></tr>
+      <tr><td>AD-D11</td><td>codex traga error de settings</td><td><span class="pill m">M10</span></td><td>3</td></tr>
+      <tr><td>AD-D12</td><td><code>std::fs</code> en spawn async</td><td><span class="pill m">M10</span></td><td>3</td></tr>
+      <tr><td>AD-D13</td><td>parsers stringly; conteos ausentes = 0</td><td><span class="pill m">M06</span> enums tagged</td><td>3</td></tr>
+      <tr><td>AD-D14</td><td><code>AgentError</code> sin causa</td><td><span class="pill m">M06</span></td><td>3</td></tr>
+      <tr><td>AD-D15</td><td><code>FixtureCapabilities</code> sin guard</td><td><span class="pill m">M09</span> test ALL</td><td>3</td></tr>
+      <tr><td>AD-D16</td><td><code>init.rs</code> re-deletrea ids</td><td><span class="pill m">M01</span></td><td>1</td></tr>
+      <tr><td>AD-D17</td><td><code>refuse_unrunnable</code> prosa</td><td><span class="pill m">M01</span></td><td>1</td></tr>
+      <tr><td>AD-D18</td><td><code>RunTools</code> vs <code>run_tools</code></td><td><span class="pill m">M06</span></td><td>5</td></tr>
+      <tr><td>AD-D19</td><td>codex sin <code>RunToolsMounted</code></td><td><span class="pill m">M09</span> Policy Resting explícita</td><td>3</td></tr>
+      <tr><td>AD-D20</td><td>codex <code>ReadOnly</code>+<code>artifact_dir</code> sin evento</td><td><span class="pill m">M09</span></td><td>3</td></tr>
+      <tr><td>AD-D21</td><td>readers sin span</td><td><span class="pill m">M10</span></td><td>3</td></tr>
+      <tr><td>AD-D22</td><td>spec-events 6 caps, <code>model</code> obligatorio</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>AD-D23</td><td>adapters.md "primer sano"</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>AD-D24</td><td>spec-adapter §6 falso</td><td><span class="pill m">M23 M24</span> P3</td><td>0–7</td></tr>
+      <tr class="group"><td colspan="4">Core (20)</td></tr>
+      <tr><td>CO-1</td><td>globs sin compilar</td><td><span class="pill m">M12</span> ScopeGlob</td><td>4</td></tr>
+      <tr><td>CO-2</td><td><code>yunta_schema</code> String</td><td><span class="pill m">M12</span> SchemaRange</td><td>4</td></tr>
+      <tr><td>CO-3</td><td>commits String</td><td><span class="pill m">M12</span></td><td>4</td></tr>
+      <tr><td>CO-4</td><td><code>started_at</code> String</td><td><span class="pill m">M12</span></td><td>4</td></tr>
+      <tr><td>CO-5</td><td><code>manifest.schema_version</code> no leído</td><td><span class="pill m">M14</span></td><td>4</td></tr>
+      <tr><td>CO-6</td><td>4 persistidos sin versión</td><td><span class="pill m">M14</span></td><td>4</td></tr>
+      <tr><td>CO-7</td><td><code>Manifest</code> embebe tipos estrictos</td><td><span class="pill m">M14</span></td><td>4</td></tr>
+      <tr><td>CO-8</td><td><code>FindingEntry</code> parseada a mano</td><td><span class="pill m">M13</span> Document</td><td>4</td></tr>
+      <tr><td>CO-9</td><td><code>Workflow</code> sin reglas ×11</td><td><span class="pill m">M13</span> workflow::read</td><td>4</td></tr>
+      <tr><td>CO-10</td><td>prosa en core (<code>Vec&lt;String&gt;</code>)</td><td><span class="pill m">M06</span> Diagnostic</td><td>4</td></tr>
+      <tr><td>CO-11</td><td>pluralización ×3</td><td><span class="pill m">M13</span></td><td>4</td></tr>
+      <tr><td>CO-12</td><td>códigos half-typed</td><td><span class="pill m">M12</span> DiagnosticCode</td><td>4</td></tr>
+      <tr><td>CO-13</td><td>rustdoc de <code>Task.id</code> contradice el tipo</td><td><span class="pill m">M23</span></td><td>4</td></tr>
+      <tr><td>CO-14</td><td>referencia-schema no parsea</td><td><span class="pill m">M23</span></td><td>0</td></tr>
+      <tr><td>CO-15</td><td>7 schemas documentados, 8 reales</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>CO-16</td><td>D140/D144 sin nota de D156</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>CO-17</td><td><code>pack.yaml</code> ilegible tragado</td><td><span class="pill m">M14</span></td><td>4</td></tr>
+      <tr><td>CO-18</td><td><code>ArtifactRefId</code> untagged</td><td><span class="pill m">M12</span></td><td>4</td></tr>
+      <tr><td>CO-19</td><td><code>ScopeExpansionPermissions</code> sin export; <code>Answer</code> sin deny</td><td><span class="pill m">M12</span></td><td>4</td></tr>
+      <tr><td>CO-20</td><td>HOME/TERM ×2</td><td><span class="pill m">M10</span> Env</td><td>5</td></tr>
+      <tr class="group"><td colspan="4">Tests (25)</td></tr>
+      <tr><td>TE-D1</td><td><code>copied_test_helpers 0</code> falso</td><td><span class="pill m">M22</span></td><td>6</td></tr>
+      <tr><td>TE-D2</td><td>46 <code>execute_run</code> a mano</td><td><span class="pill m">M20</span></td><td>6</td></tr>
+      <tr><td>TE-D3</td><td><code>stored</code> sin usuarios; 10 builders</td><td><span class="pill m">M20</span> Log</td><td>6</td></tr>
+      <tr><td>TE-D4</td><td>core/adapters sin testkit</td><td><span class="pill m">M01 M20</span></td><td>1</td></tr>
+      <tr><td>TE-D5</td><td><code>common/mod.rs</code> segundo testkit</td><td><span class="pill m">M20</span></td><td>6</td></tr>
+      <tr><td>TE-D6</td><td><code>sleep(100ms)</code></td><td><span class="pill m">M22</span></td><td>6</td></tr>
+      <tr><td>TE-D7</td><td><code>run_yunta</code> hereda org config, TERM, USER</td><td><span class="pill m">M20</span> hermetic</td><td>6</td></tr>
+      <tr><td>TE-D8</td><td><code>check_keys_cmd</code> lee config real</td><td><span class="pill m">M20</span></td><td>6</td></tr>
+      <tr><td>TE-D9</td><td><code>docs_sync</code> sin HOME/git pin</td><td><span class="pill m">M20</span></td><td>6</td></tr>
+      <tr><td>TE-D10</td><td><code>remove_var</code> global</td><td><span class="pill m">M22</span></td><td>6</td></tr>
+      <tr><td>TE-D11</td><td><code>static IDS</code> ×12</td><td><span class="pill m">M20</span></td><td>6</td></tr>
+      <tr><td>TE-D12</td><td>propiedad de resume tautológica</td><td><span class="pill m">M21</span></td><td>6</td></tr>
+      <tr><td>TE-D13</td><td>sin idempotencia</td><td><span class="pill m">M21</span></td><td>6</td></tr>
+      <tr><td>TE-D14</td><td>sin propiedad de cadena</td><td><span class="pill m">M21</span></td><td>6</td></tr>
+      <tr><td>TE-D15</td><td>generador 8/36</td><td><span class="pill m">M21</span></td><td>6</td></tr>
+      <tr><td>TE-D16</td><td>release nunca testeado</td><td><span class="pill m">M22</span></td><td>6</td></tr>
+      <tr><td>TE-D17</td><td>sin macOS</td><td><span class="pill m">M22</span></td><td>6</td></tr>
+      <tr><td>TE-D18</td><td>release gate débil</td><td><span class="pill m">M22</span></td><td>6</td></tr>
+      <tr><td>TE-D19</td><td>nombres — sin defecto</td><td><span class="pill keep">se conserva</span></td><td>—</td></tr>
+      <tr><td>TE-D20</td><td>19 tests sin <code>//!</code></td><td><span class="pill m">M23</span></td><td>6</td></tr>
+      <tr><td>TE-D21</td><td>comentario de dev-dep falso</td><td><span class="pill m">M23</span></td><td>6</td></tr>
+      <tr><td>TE-D22</td><td><code>nix</code> dev-dep obsoleto</td><td><span class="pill m">M23</span></td><td>6</td></tr>
+      <tr><td>TE-D23</td><td><code>yunta test</code> "determinista" con SystemClock</td><td><span class="pill m">M18</span></td><td>5</td></tr>
+      <tr><td>TE-D24</td><td>34 tests &gt;500, 145 fns &gt;50</td><td><span class="pill m">M22</span> ratchet sobre tests</td><td>6</td></tr>
+      <tr><td>TE-D25</td><td>60ms sin decisión</td><td><span class="pill m">M24</span> P7</td><td>0</td></tr>
+      <tr class="group"><td colspan="4">Documentación (44)</td></tr>
+      <tr><td>DO-D1</td><td>baseline lazy vs D18/§7.2</td><td><span class="pill m">M24</span> P3</td><td>0–3</td></tr>
+      <tr><td>DO-D2</td><td>claude-code <code>edit_hooks</code> vs spec</td><td><span class="pill m">M09 M24</span> P3</td><td>0–3</td></tr>
+      <tr><td>DO-D3</td><td>codex <code>resume_session: true</code> vs spec</td><td><span class="pill m">M23</span> pinned por adapter</td><td>7</td></tr>
+      <tr><td>DO-D4</td><td>preguntas por PR</td><td><span class="pill m">M24</span> P3</td><td>0</td></tr>
+      <tr><td>DO-D5</td><td>orden de criterios por invocación vs D62</td><td><span class="pill m">M24</span> P3</td><td>0–3</td></tr>
+      <tr><td>DO-D6</td><td>memo key con <code>env</code> inexistente</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>DO-D7</td><td>fuentes por executor vs D19</td><td><span class="pill m">M24</span> P3</td><td>0</td></tr>
+      <tr><td>DO-D8</td><td><code>task-ledger</code> en YAML de autor</td><td><span class="pill m">M24</span> P4</td><td>0–4</td></tr>
+      <tr><td>DO-D9</td><td>referencia-schema no parsea</td><td><span class="pill m">M23</span></td><td>0</td></tr>
+      <tr><td>DO-D10–11</td><td>5 tools MCP en Contrato, <code>--help</code>, rustdoc</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>DO-D12</td><td>§6.4 <code>{name, document}</code></td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>DO-D13</td><td><code>session.rs:3-10</code> rustdoc falso ×3</td><td><span class="pill m">M23</span> ratchet de tiempo</td><td>1</td></tr>
+      <tr><td>DO-D14</td><td>"Only pause is built"</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>DO-D15</td><td>"future --detach"</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>DO-D16</td><td>README <code>graph</code></td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>DO-D17</td><td><code>waiting</code> incompleto en concepts</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>DO-D18</td><td>marcadores <code>[inferido]</code> obsoletos</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>DO-D19–21</td><td>spec-adapter/spec-events campos desfasados</td><td><span class="pill m">M23</span> pinned</td><td>7</td></tr>
+      <tr><td>DO-D22</td><td>7 reglas documentadas, 9 publicadas</td><td><span class="pill m">M23</span> pinned a RULES</td><td>7</td></tr>
+      <tr><td>DO-D23</td><td><code>done</code> vs <code>finished</code></td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>DO-D24</td><td>§5.3 campos inexistentes</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>DO-D25</td><td>markdown corrupto</td><td><span class="pill m">M23</span></td><td>0</td></tr>
+      <tr><td>DO-D26–27</td><td>D132 "task ledger", D139 "siete"</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>DO-D28–30</td><td>O5 duplicado, M14, deuda ⑪</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>DO-D31–32</td><td>D152 sin nota; D03 sin reviser</td><td><span class="pill m">M23</span> recíprocos verificados</td><td>7</td></tr>
+      <tr><td>DO-D33–34</td><td>agrupación degenerada; <code>adr/</code> vacío</td><td><span class="pill m">M23</span> ADR por archivo</td><td>0</td></tr>
+      <tr><td>DO-D35–41</td><td>vocabulario prohibido (12 + 6)</td><td><span class="pill m">M23</span> ratchet</td><td>0–7</td></tr>
+      <tr><td>DO-D42</td><td>21 marcadores de tiempo/plan</td><td><span class="pill m">M23</span> ratchet</td><td>0–7</td></tr>
+      <tr><td>DO-D43</td><td>términos sin glosario</td><td><span class="pill m">M23</span></td><td>7</td></tr>
+      <tr><td>DO-D44</td><td><code>docs/design</code> invisible a <code>docs_sync</code></td><td><span class="pill m">M23</span></td><td>0</td></tr>
+    </tbody>
+  </table></div>
+  <div class="prose">
+  <p>Un solo defecto sin mecanismo: TE-D19, porque no es un defecto — la nomenclatura de tests es lo mejor del repo y se conserva. Todo lo demás tiene fila, mecanismo y fase.</p>
+  <p style="margin-top:28px">Este documento reemplaza a "La crónica del run": la crónica sigue, como M19, aguas abajo del modelo de eventos. La ejecución empieza por la fase 0 —las siete decisiones— porque cada una cambia lo que se construye en las fases siguientes, y CLAUDE.md no admite construir sobre una decisión que alguien tomó solo.</p>
+  </div>
+</section>
+</div>

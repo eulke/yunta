@@ -11,8 +11,8 @@ inputs:
     description: "Qué construir — se convierte en el brief"
 
 modes:
-  quick:    { include: [grill, plan, implement, lint, fix-lint, tests, ship, pr] }
-  standard: { include: [grill, plan, approve-plan, implement, lint, fix-lint, tests, review, fix-findings, ship, pr] }
+  quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, ship, pr] }
+  standard: { include: [grill, brief, plan, approve-plan, implement, lint, fix-lint, tests, review, fix-findings, ship, pr] }
   full:     { include: all }
 
 node_defaults:
@@ -25,20 +25,32 @@ nodes:
     kind: prompt
     runner: planner
     skills: [grill]
-    interactive: true
     prompt: |
       Identificá las ambigüedades de "{{inputs.idea}}" y escribí las preguntas
-      necesarias como artifact; no converses. Con las respuestas, escribí el brief.
+      necesarias como artifact; no converses.
     artifacts:
-      produces: [questions, brief.md]
+      produces: [questions]
+
+  - id: brief
+    kind: prompt
+    runner: planner
+    depends_on: [grill]
+    context:
+      - artifact: { node: grill, kind: questions }
+      - artifact: { node: grill, kind: answers }
+    prompt: |
+      Escribí el brief de "{{inputs.idea}}" a partir de las preguntas y sus
+      respuestas.
+    artifacts:
+      produces: [brief.md]
 
   - id: plan
     kind: prompt
     runner: planner
     permissions: read-only
-    depends_on: [grill]
+    depends_on: [brief]
     context:
-      - artifact: { node: grill, name: brief.md }
+      - artifact: { node: brief, name: brief.md }
       - knowledge: {}
       - files: ["docs/architecture.md"]
       - command: "git log --oneline -20"
@@ -54,6 +66,7 @@ nodes:
     message: "Plan registrado. ¿Aprobás?"
     options: [aprobar, ajustar, abortar]
     on: { ajustar: plan }
+    shows: [{ node: plan, kind: tasks }]
 
   - id: implement
     kind: loop
@@ -64,7 +77,6 @@ nodes:
     concurrency: 2
     scope_expansion:
       mode: ask
-      within: ["src/**"]
       max_per_run: 3
     prompt: |
       Leé tu tarea del documento de tareas. Implementala dentro de su scope.
@@ -72,16 +84,17 @@ nodes:
   - id: lint
     kind: bash
     invariant: true
+    optional: true
     depends_on: [implement]
-    run: "cargo clippy -- -D warnings"
-    on_failure: { goto: fix-lint, max_reroutes: 2 }
+    run: { command: lint }
+    on_failure: { goto: fix-lint, max_reroutes: 1 }
 
   - id: fix-lint
     kind: prompt
     runner: mechanical
     context: [{ node-output: { node: lint } }]
     prompt: "Corregí exclusivamente los errores del reporte."
-    scope: ["src/**"]
+    scope: run
 
   - id: tests
     kind: check
@@ -113,11 +126,9 @@ nodes:
     message: "¿Creo el PR?"
 
   - id: pr
-    kind: bash
+    kind: pull_request
     depends_on: [ship]
-    run: |
-      git push -u origin {{run.branch}}
-      gh pr create --fill --base {{project.base_branch}}
+    title: "{{inputs.idea}}"
 
 on_finish:
   - cleanup: worktree

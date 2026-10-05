@@ -6,12 +6,14 @@
 //! so it stays testable without going through a CLI process.
 
 use std::path::{Path, PathBuf};
+use yunta_core::CommitSha;
+use yunta_engine::process::Supervision;
 
 use yunta_core::{sha256_hex, ContentHash, PackLock, PackManifest, PackRef};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PackError {
-    #[error("git {args}: {detail}")]
+    #[error("{}", yunta_core::text::detailed(format!("git {args}"), .detail))]
     Git { args: String, detail: String },
     #[error("failed to read `{path}`: {source}")]
     Read {
@@ -31,6 +33,12 @@ pub enum PackError {
     InvalidManifest { path: PathBuf, detail: String },
     #[error("`{path}` isn't valid UTF-8, can't be hashed as pack content")]
     NonUtf8Path { path: PathBuf },
+    #[error("`git rev-parse HEAD` answered `{line}`, which is not a commit")]
+    NotACommit {
+        line: String,
+        #[source]
+        source: yunta_core::InvalidId,
+    },
     #[error(
         "`{path}` is a symlink — a pack ships regular files only, so vendoring never follows a \
          link out of the pack or copies what one points at"
@@ -71,8 +79,12 @@ pub fn clone_url(source: &str) -> String {
     }
 }
 
-async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, PackError> {
-    yunta_engine::git::output(cwd, args)
+async fn run_git(
+    cwd: &Path,
+    args: &[&str],
+    supervision: Supervision<'_>,
+) -> Result<String, PackError> {
+    yunta_engine::git::output(cwd, args, supervision)
         .await
         .map(|stdout| stdout.trim().to_string())
         .map_err(|e| {
@@ -88,14 +100,20 @@ async fn run_git(cwd: &Path, args: &[&str]) -> Result<String, PackError> {
 /// `ref_` when given — a full clone, not shallow: `--depth 1` would
 /// only work for a ref that's a branch tip, and a ref here can just as
 /// well be a tag or a commit-ish.
-pub async fn clone_pack(url: &str, ref_: Option<&str>, dest: &Path) -> Result<(), PackError> {
+pub async fn clone_pack(
+    url: &str,
+    ref_: Option<&str>,
+    dest: &Path,
+    supervision: Supervision<'_>,
+) -> Result<(), PackError> {
     run_git(
         Path::new("."),
         &["clone", "--quiet", url, &dest.display().to_string()],
+        supervision,
     )
     .await?;
     if let Some(ref_) = ref_ {
-        run_git(dest, &["checkout", "--quiet", ref_]).await?;
+        run_git(dest, &["checkout", "--quiet", ref_], supervision).await?;
     }
     Ok(())
 }
@@ -103,15 +121,23 @@ pub async fn clone_pack(url: &str, ref_: Option<&str>, dest: &Path) -> Result<()
 /// The commit `dest` (an already-cloned working tree) currently has
 /// checked out — what `add`/`update` records as the lock entry's
 /// `commit`, independent of whether `ref` itself later moves.
-pub async fn head_commit(dest: &Path) -> Result<String, PackError> {
-    run_git(dest, &["rev-parse", "HEAD"]).await
+pub async fn head_commit(
+    dest: &Path,
+    supervision: Supervision<'_>,
+) -> Result<CommitSha, PackError> {
+    let line = run_git(dest, &["rev-parse", "HEAD"], supervision).await?;
+    line.parse()
+        .map_err(|source| PackError::NotACommit { line, source })
 }
 
 /// The branch `dest` landed on when no explicit ref was requested — the
 /// descriptive `ref` a lock entry records for a plain `pack add <url>`
 /// with no `@ref` suffix, so `yunta.lock` never has to say "unknown".
-pub async fn current_branch(dest: &Path) -> Result<String, PackError> {
-    run_git(dest, &["rev-parse", "--abbrev-ref", "HEAD"]).await
+pub async fn current_branch(
+    dest: &Path,
+    supervision: Supervision<'_>,
+) -> Result<String, PackError> {
+    run_git(dest, &["rev-parse", "--abbrev-ref", "HEAD"], supervision).await
 }
 
 /// Reads, parses and validates `<dir>/pack.yaml`: a manifest whose
@@ -324,13 +350,13 @@ pub fn lock_path(cwd: &Path) -> PathBuf {
 
 pub fn load_lock(cwd: &Path) -> Result<PackLock, PackError> {
     let path = lock_path(cwd);
-    match std::fs::read_to_string(&path) {
-        Ok(contents) => {
-            yunta_core::yaml::parse(&contents).map_err(|e| PackError::InvalidManifest {
+    match std::fs::read(&path) {
+        Ok(bytes) => yunta_core::persisted::PersistedDoc::<PackLock>::read(&bytes)
+            .map(|lock| lock.doc)
+            .map_err(|e| PackError::InvalidManifest {
                 path,
-                detail: e.to_string(),
-            })
-        }
+                detail: yunta_core::describe(&e),
+            }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(PackLock::default()),
         Err(source) => Err(PackError::Read { path, source }),
     }
@@ -344,9 +370,11 @@ pub fn save_lock(cwd: &Path, lock: &PackLock) -> Result<(), PackError> {
             source,
         })?;
     }
-    let yaml = yunta_core::yaml::to_string(lock).map_err(|e| PackError::Manifest {
-        detail: format!("cannot serialize yunta.lock: {e}"),
-    })?;
+    let yaml = yunta_core::persisted::PersistedDoc::of(lock.clone())
+        .write()
+        .map_err(|e| PackError::Manifest {
+            detail: format!("cannot serialize yunta.lock: {}", yunta_core::describe(&e)),
+        })?;
     // Written beside the lock and renamed over it: a reader never sees
     // a half-written file, and a failed write leaves the old lock intact.
     let staging = path.with_extension("lock.tmp");

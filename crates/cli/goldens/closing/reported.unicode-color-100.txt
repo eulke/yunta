@@ -1,0 +1,11 @@
+␛[1mrun 7E5PH4␛[0m: ␛[33m▲␛[0m ␛[33mreported␛[0m
+  ␛[33mfinished holding 1 blocking finding␛[0m
+
+  ␛[2mprogress    ␛[0m nodes 2/2
+  ␛[2mtokens      ␛[0m 20.2k spent
+  ␛[2mslowest     ␛[0m lint 12s · review 12s
+  ␛[2mbranch      ␛[0m yunta/run/01K3W48MFW7H0ZZA5PZ07E5PH4 off main, in
+               ~/.yunta/worktrees/01K3W48MFW7H0ZZA5PZ07E5PH4
+
+  ␛[1myunta receipt 7E5PH4␛[0m   ␛[2mcertifies what it did␛[0m
+  ␛[1myunta status 7E5PH4 ␛[0m   ␛[2mshows the whole run␛[0m

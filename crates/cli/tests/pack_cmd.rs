@@ -89,8 +89,8 @@ fn add_vendors_the_pack_and_writes_a_lock_entry() {
         "vendored tree must not carry .git"
     );
 
-    let lock: serde_norway::Value =
-        serde_norway::from_str(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
+    let lock: yunta_core::yaml::Value =
+        yunta_core::yaml::parse(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
             .unwrap();
     let entry = &lock["packs"]["acme/review-pack"];
     assert_eq!(entry["publisher"], "acme");
@@ -108,8 +108,8 @@ fn add_with_an_explicit_ref_pins_and_records_it() {
     let out = yunta_in!(&repo, &home, &["pack", "add", &source]);
     assert!(out.status.success(), "{}", stderr(&out));
 
-    let lock: serde_norway::Value =
-        serde_norway::from_str(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
+    let lock: yunta_core::yaml::Value =
+        yunta_core::yaml::parse(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
             .unwrap();
     assert_eq!(lock["packs"]["acme/review-pack"]["ref"], "v1.0.0");
 }
@@ -138,14 +138,9 @@ fn list_reports_every_locked_pack_and_verifies_it_against_the_lock() {
     let list_out = yunta_in!(&repo, &home, &["pack", "list"]);
     assert!(list_out.status.success(), "{}", stderr(&list_out));
     let listed = stdout(&list_out);
+    let row = yunta_testkit::checked(&listed, "acme/review-pack").unwrap_or_default();
     assert!(
-        listed.contains(&format!("acme/review-pack @ {INITIAL_BRANCH}")),
-        "{listed}"
-    );
-    assert!(
-        listed
-            .lines()
-            .any(|l| l.starts_with("acme/review-pack @ ") && l.ends_with(") — ok")),
+        row.starts_with(&format!("{INITIAL_BRANCH} (")) && row.ends_with("as its lock records it"),
         "the vendored pack verifies clean against the lock: {listed}"
     );
 
@@ -159,7 +154,9 @@ fn list_reports_every_locked_pack_and_verifies_it_against_the_lock() {
     .unwrap();
     let list_after_tamper = yunta_in!(&repo, &home, &["pack", "list"]);
     assert!(
-        stdout(&list_after_tamper).contains("MODIFIED"),
+        yunta_testkit::checked(&stdout(&list_after_tamper), "acme/review-pack")
+            .unwrap_or_default()
+            .contains("modified: its files no longer match its lock"),
         "{}",
         stdout(&list_after_tamper)
     );
@@ -194,12 +191,13 @@ fn update_revendors_at_the_new_ref_and_keeps_the_remembered_source() {
     );
     assert!(update_out.status.success(), "{}", stderr(&update_out));
     assert!(
-        stdout(&update_out).contains("updated acme/review-pack -> v2.0.0"),
+        ["->", "→"].iter().any(|arrow| stdout(&update_out)
+            .contains(&format!("updated acme/review-pack {arrow} v2.0.0"))),
         "{}",
         stdout(&update_out)
     );
 
-    let vendored_manifest: serde_norway::Value = serde_norway::from_str(
+    let vendored_manifest: yunta_core::yaml::Value = yunta_core::yaml::parse(
         &std::fs::read_to_string(repo.join(".yunta/packs/acme/review-pack/pack.yaml")).unwrap(),
     )
     .unwrap();
@@ -208,8 +206,8 @@ fn update_revendors_at_the_new_ref_and_keeps_the_remembered_source() {
         "update re-vendors the manifest at the new version"
     );
 
-    let lock: serde_norway::Value =
-        serde_norway::from_str(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
+    let lock: yunta_core::yaml::Value =
+        yunta_core::yaml::parse(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
             .unwrap();
     assert_eq!(lock["packs"]["acme/review-pack"]["ref"], "v2.0.0");
 }
@@ -236,8 +234,8 @@ fn remove_deletes_the_vendored_tree_and_the_lock_entry() {
     assert!(remove_out.status.success(), "{}", stderr(&remove_out));
 
     assert!(!repo.join(".yunta/packs/acme/review-pack").exists());
-    let lock: serde_norway::Value =
-        serde_norway::from_str(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
+    let lock: yunta_core::yaml::Value =
+        yunta_core::yaml::parse(&std::fs::read_to_string(repo.join(".yunta/yunta.lock")).unwrap())
             .unwrap();
     assert!(lock["packs"].as_mapping().unwrap().is_empty());
 }
@@ -300,10 +298,10 @@ fn write_pack_with_executor_and_tests(dir: &Path) {
 }
 
 fn yunta_with_marker(dir: &Path, home: &Path, marker_dir: &Path, args: &[&str]) -> Output {
-    std::process::Command::new(env!("CARGO_BIN_EXE_yunta"))
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_yunta"));
+    yunta_testkit::hermetic(&mut command, dir, home);
+    command
         .args(args)
-        .current_dir(dir)
-        .env("YUNTA_HOME", home)
         .env("YUNTA_TEST_MARKER_DIR", marker_dir)
         .output()
         .expect("failed to run the yunta binary")
@@ -531,5 +529,37 @@ fn pack_new_produces_a_pack_that_passes_check_and_test() {
         stdout(&tested).contains("0 failed"),
         "test output: {}",
         stdout(&tested)
+    );
+}
+
+/// A pack states the schema major it needs. `add` checks it against the
+/// binary's own before vendoring anything: a pack installed under a
+/// binary that cannot run it is a failure the first run discovers, after
+/// the tree is already on disk.
+#[test]
+fn add_refuses_a_pack_whose_schema_range_this_binary_is_outside_of() {
+    let (_root, upstream, repo, home) = setup();
+    std::fs::write(
+        upstream.join("pack.yaml"),
+        "name: review-pack\n\
+         publisher: acme\n\
+         version: 1.0.0\n\
+         yunta_schema: \">=99\"\n\
+         declares:\n  permissions: read-only\n  network: false\n  executors: []\n\
+         contents:\n  workflows: [workflows/review.yaml]\n",
+    )
+    .unwrap();
+    commit_all(&upstream, "needs a newer schema");
+
+    let out = yunta_in!(&repo, &home, &["pack", "add", upstream.to_str().unwrap()]);
+    assert!(!out.status.success(), "{}", stdout(&out));
+    let said = stderr(&out);
+    assert!(
+        said.contains(">=99") && said.contains("yunta_schema"),
+        "the refusal names the range it could not satisfy: {said}"
+    );
+    assert!(
+        !repo.join(".yunta/packs/acme/review-pack").exists(),
+        "nothing is vendored under a range this binary is outside of"
     );
 }

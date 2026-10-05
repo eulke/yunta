@@ -1,0 +1,494 @@
+//! The words for one moment, chosen once.
+//!
+//! Every surface that says what happened says it from here: the
+//! append-only lines a pipe gets, and the history a watched terminal
+//! keeps above its region. They differ in what they *keep* and in how
+//! they lay it out, never in what a thing is called — so a reader who
+//! followed a run on a terminal and a reader who read the same run out
+//! of a CI log met the same sentences.
+//!
+//! Every state word comes from `render::state::NodeDisplay`, every
+//! run or child close from `view::closed_as`, every capability from
+//! `Capability::as_str`. Nothing here formats a domain type with
+//! `Debug`: a reader is owed a word, not a Rust identifier.
+
+mod scope_words;
+mod words;
+
+use yunta_core::events::{children, findings, gates, node, run, session};
+use yunta_core::text::{aside, one_line};
+use yunta_engine::{Happening, Moment};
+
+use super::view;
+use crate::commands::advice;
+use crate::render::blocks::{Drawn, FailureDetail, Whole};
+use crate::render::ink::{Line, Tone};
+use crate::render::{indent, Glyphs, Look, Mark, CHILD_DEPTH};
+use words::carried;
+
+/// One moment as a surface says it, before any layout decides where it
+/// goes.
+pub(super) struct Said {
+    /// What this moment is marked with, when it is about something
+    /// reaching a state, asking a person or changing course; `None` for a
+    /// moment that only reports.
+    pub(super) mark: Option<Mark>,
+    pub(super) text: String,
+}
+
+/// The words for `moment`. One match per domain, and the only ones.
+pub(super) fn say(moment: &Moment, glyphs: Glyphs) -> Said {
+    let subject = match &moment.node {
+        Some(node) => node.to_string(),
+        None => "run".to_string(),
+    };
+    let (mark, carried) = carried(&moment.happening, glyphs.sep());
+    Said {
+        mark,
+        text: aside(subject, &one_line(&carried)),
+    }
+}
+
+/// Whether a terminal a person is watching keeps this above its region.
+///
+/// What it keeps is what closed something or asked something of a
+/// person: the rest is the run working, and the region already
+/// shows that while it is true. A run's own close is the one thing that
+/// closes and is not kept — the block that reports it is its record,
+/// and a line above the region would say it twice.
+pub(super) fn kept(happening: &Happening) -> bool {
+    match happening {
+        Happening::Run(run::happening::Happening::Paused { .. })
+        | Happening::Run(run::happening::Happening::Resumed { .. })
+        | Happening::Run(run::happening::Happening::PromotionSignaled { .. })
+        | Happening::Run(run::happening::Happening::HostSuspended { .. }) => true,
+        Happening::Run(_) => false,
+        Happening::Node(node::happening::Happening::Reached { state, .. }) => {
+            !matches!(state, yunta_core::events::NodeState::Running { .. })
+        }
+        Happening::Node(node::happening::Happening::Rerouted(_)) => true,
+        Happening::Node(_) => false,
+        Happening::Session(session::happening::Happening::Degraded { .. })
+        | Happening::Session(session::happening::Happening::RunToolFailed { .. })
+        | Happening::Session(session::happening::Happening::RunToolRefused { .. })
+        | Happening::Session(session::happening::Happening::CutOff { .. })
+        | Happening::Session(session::happening::Happening::Reconnected { .. }) => true,
+        Happening::Session(_) => false,
+        Happening::Gates(gates::happening::Happening::Escalated(_))
+        | Happening::Gates(gates::happening::Happening::Resolved(_))
+        | Happening::Gates(gates::happening::Happening::Asked { .. })
+        | Happening::Gates(gates::happening::Happening::Answered { .. }) => true,
+        // What asks the person is on their screen already; the line is
+        // the answer's.
+        Happening::Gates(gates::happening::Happening::AskingOpened) => false,
+        Happening::Findings(findings::happening::Happening::Finding { change, .. }) => matches!(
+            change,
+            findings::happening::Change::Posted
+                | findings::happening::Change::Withdrawn { .. }
+                | findings::happening::Change::Answered { .. }
+                | findings::happening::Change::Proved { .. }
+                | findings::happening::Change::Settled { .. }
+        ),
+        Happening::Children(children::happening::Happening::Closed { .. }) => true,
+        Happening::Children(_) => false,
+        Happening::Unknown { .. } => true,
+        Happening::Tasks(_) | Happening::Scope(_) | Happening::Artifacts(_) => false,
+    }
+}
+
+/// The line one moment is said on, marked when it carries a mark.
+pub(super) fn line(moment: &Moment, look: &Look) -> Line {
+    let said = say(moment, look.glyphs);
+    let line = match said.mark {
+        Some(mark) => Line::new()
+            .push(Tone::of(mark), look.glyphs.mark(mark).to_string())
+            .plain(" "),
+        None => Line::new(),
+    };
+    line.plain(said.text)
+}
+
+/// The rows a settled node leaves behind: its own line, what it printed
+/// when it failed, and the children it bore indented under it.
+///
+/// The children come with it because they leave the region with it. A
+/// node in the region carries its own tree; a node that graduated
+/// carries it into the history, where the run's composition stays
+/// readable after the node that composed it is gone.
+pub(super) fn graduation(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
+    let mut rows = vec![line(moment, look)];
+    rows.extend(evidence(moment, run, look));
+    let Happening::Node(node::happening::Happening::Reached { children, .. }) = &moment.happening
+    else {
+        return rows;
+    };
+    let under = indent(CHILD_DEPTH);
+    rows.extend(children.iter().map(|child| {
+        Line::new()
+            .plain(under.as_str())
+            .plain(view::child_row(child, look.glyphs))
+    }));
+    rows
+}
+
+/// What a node that failed printed, quoted under the line that says it
+/// failed, and the command that shows all of it — the reason is read
+/// where the failure is, not one command away. `run` is what the run is
+/// called by. Nothing for any other moment.
+pub(super) fn evidence(moment: &Moment, run: &str, look: &Look) -> Vec<Line> {
+    let Happening::Node(node::happening::Happening::Reached {
+        state: yunta_core::events::NodeState::Failed { failure, .. },
+        ..
+    }) = &moment.happening
+    else {
+        return Vec::new();
+    };
+    let whole = failure.output().map(|_| {
+        Whole::Command(match &moment.node {
+            Some(node) => advice::status_node(run, node.as_str()),
+            None => advice::status(run),
+        })
+    });
+    FailureDetail { failure, whole }.lines(look)
+}
+
+#[cfg(test)]
+mod tests {
+    use yunta_core::events::{
+        BaselineCapturedPayload, BaselineOrigin, BaselineResults, CriteriaCheckedPayload,
+        CriterionResult, EventBody, EventPayload, Evidence, Failure, Finding, FindingPostedPayload,
+        FindingSeverity, NodeEvent, NodeFinishedPayload, NodeReroutedPayload, Phase,
+        PromotionSignaledPayload, RerouteCause, RerouteOrigin, RunEvent, StoredEvent,
+    };
+    use yunta_core::events::{FindingEvent, TokenUsage};
+    use yunta_engine::chronicle as derive_chronicle;
+
+    use super::*;
+
+    /// What a surface says for one event, through the one derivation
+    /// every surface reads: the log, folded, then the words.
+    fn said_for(payload: EventPayload) -> String {
+        let events = vec![StoredEvent {
+            seq: 1.into(),
+            run_id: "01JQ0000000000000000000000".into(),
+            node_id: None,
+            timestamp: chrono::DateTime::UNIX_EPOCH,
+            body: EventBody::Known(payload),
+        }];
+        let moments = derive_chronicle(&events);
+        say(
+            moments.first().expect("one moment per event"),
+            Glyphs::Unicode,
+        )
+        .text
+    }
+
+    /// A log this binary reads back was written by some other
+    /// invocation: nothing guarantees the free text on a payload says
+    /// anything, and words built for it must not promise that it does.
+    fn rerouted(cause: &str) -> EventPayload {
+        EventPayload::Node(NodeEvent::Rerouted(NodeReroutedPayload::new(
+            "fix-lint".into(),
+            RerouteCause(Failure::message(cause)),
+            RerouteOrigin::GateChoice,
+            None,
+            None,
+        )))
+    }
+
+    /// A child that failed or was cancelled is not marked as one that
+    /// finished: the mark repeats how it closed.
+    #[test]
+    fn a_closed_child_is_marked_by_how_it_closed() {
+        use yunta_core::events::{ChildEvent, ChildRunFinishedPayload, TerminalState};
+        for (terminal, mark) in [
+            (TerminalState::Done, Mark::Done),
+            (TerminalState::Failed, Mark::Failed),
+            (TerminalState::Cancelled, Mark::Failed),
+            (TerminalState::Promoted, Mark::Reroute),
+        ] {
+            let events = vec![StoredEvent {
+                seq: 1.into(),
+                run_id: "01JQ0000000000000000000000".into(),
+                node_id: Some("compose".into()),
+                timestamp: chrono::DateTime::UNIX_EPOCH,
+                body: EventBody::Known(EventPayload::Children(ChildEvent::Finished(
+                    ChildRunFinishedPayload {
+                        child_run_id: "01JQ0000000000000000000001".into(),
+                        child_workflow_hash: yunta_core::sha256_hex(b"child"),
+                        terminal_state: terminal,
+                        tokens: TokenUsage::default(),
+                    },
+                ))),
+            }];
+            let moments = derive_chronicle(&events);
+            let said = say(moments.first().expect("one moment"), Glyphs::Unicode);
+            assert_eq!(said.mark, Some(mark), "{terminal:?}: {}", said.text);
+        }
+    }
+
+    #[test]
+    fn a_reroute_with_a_cause_reads_as_the_target_and_the_cause() {
+        assert_eq!(
+            said_for(rerouted("exit 1")),
+            "run — rerouted to `fix-lint`: exit 1"
+        );
+    }
+
+    #[test]
+    fn a_red_post_check_names_each_red_criterion_with_the_last_line_it_printed() {
+        let result = |cmd: &str, exit_code: i32, tail: &[&str]| CriterionResult {
+            cmd: cmd.to_string(),
+            exit_code,
+            r#type: None,
+            reused: false,
+            duration_ms: None,
+            output: None,
+            tail: tail.iter().map(|line| line.to_string()).collect(),
+            tree: None,
+            head: None,
+        };
+        let payload = EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
+            task_id: "T001".into(),
+            phase: Phase::Post,
+            results: vec![
+                result("cargo test", 101, &["failures:", "test result: FAILED", ""]),
+                result("cargo fmt --check", 0, &[]),
+                result("test -f made.txt", 1, &[]),
+            ],
+            waiting: Vec::new(),
+        }));
+        assert_eq!(
+            said_for(payload),
+            "run — T001 post: 3 criteria · red: `cargo test` exit 101 — test result: FAILED; \
+             `test -f made.txt` exit 1"
+        );
+    }
+
+    #[test]
+    fn a_check_answer_says_how_long_it_took_and_what_stands_between_the_task_and_done() {
+        let answered = |closes: bool, exit_code: i32, outside: &[&str]| {
+            EventPayload::Tasks(yunta_core::events::TaskEvent::CheckAnswered(
+                yunta_core::events::TaskCheckAnsweredPayload {
+                    task_id: "T001".into(),
+                    closes,
+                    results: vec![CriterionResult {
+                        cmd: "cargo test".to_string(),
+                        exit_code,
+                        r#type: None,
+                        reused: false,
+                        duration_ms: Some(221_000),
+                        output: None,
+                        tail: Vec::new(),
+                        tree: None,
+                        head: None,
+                    }],
+                    outside_scope: outside.iter().map(|path| path.into()).collect(),
+                    denied: Vec::new(),
+                    duration_ms: 222_400,
+                    waiting: Vec::new(),
+                },
+            ))
+        };
+        assert_eq!(
+            said_for(answered(true, 0, &[])),
+            "run — T001 checked in 3m42s: it would close"
+        );
+        assert_eq!(
+            said_for(answered(false, 101, &[])),
+            "run — T001 checked in 3m42s: 1 of its criteria red"
+        );
+        assert_eq!(
+            said_for(answered(false, 0, &["notes.md"])),
+            "run — T001 checked in 3m42s: its work reaches paths it may not change"
+        );
+    }
+
+    #[test]
+    fn a_reroute_with_no_cause_recorded_reads_as_the_target_alone() {
+        assert_eq!(said_for(rerouted("")), "run — rerouted to `fix-lint`");
+    }
+
+    #[test]
+    fn a_promotion_with_no_reason_recorded_reads_as_the_mode_alone() {
+        let payload = EventPayload::Run(RunEvent::PromotionSignaled(PromotionSignaledPayload {
+            reason: String::new(),
+            evidence: Evidence::none(),
+            suggested_mode: "ship".into(),
+        }));
+        assert_eq!(said_for(payload), "run — promotion to `ship`");
+    }
+
+    fn baseline(exit_code: i32) -> EventPayload {
+        EventPayload::Run(RunEvent::BaselineCaptured(BaselineCapturedPayload {
+            command: "make test".to_string(),
+            results: BaselineResults {
+                exit_code,
+                summary: String::new(),
+            },
+            hash: yunta_core::sha256_hex(b""),
+            origin: BaselineOrigin::Measured,
+            tree: None,
+            duration_ms: None,
+        }))
+    }
+
+    /// A person watching a run learns the machine slept, that the time is
+    /// not counted as work, and why no session opens for a while, above
+    /// the region that keeps moving.
+    #[test]
+    fn a_host_suspension_stays_above_the_live_region_and_says_how_long() {
+        let payload = EventPayload::Run(RunEvent::HostSuspended(
+            yunta_core::events::HostSuspendedPayload::slept(std::time::Duration::from_secs(
+                38 * 60,
+            )),
+        ));
+        assert_eq!(
+            said_for(payload.clone()),
+            "run — host suspended for 38m00s — durations leave it out; new sessions wait \
+             until it has been awake 2m00s"
+        );
+        let events = vec![StoredEvent {
+            seq: 1.into(),
+            run_id: "01JQ0000000000000000000000".into(),
+            node_id: None,
+            timestamp: chrono::DateTime::UNIX_EPOCH,
+            body: EventBody::Known(payload),
+        }];
+        assert!(kept(&derive_chronicle(&events)[0].happening));
+    }
+
+    #[test]
+    fn a_baseline_measured_green_reads_as_measured() {
+        assert_eq!(said_for(baseline(0)), "run — baseline measured");
+    }
+
+    /// A person watching learns, before any comparison passes, that none
+    /// could have failed.
+    #[test]
+    fn a_baseline_measured_red_says_no_comparison_can_find_a_regression() {
+        assert_eq!(
+            said_for(baseline(101)),
+            "run — baseline measured, already red (exit 101): no comparison can find a \
+             regression, and no task is held to it"
+        );
+    }
+
+    #[test]
+    fn a_finding_with_no_title_reads_as_its_severity_alone() {
+        let payload = EventPayload::Findings(FindingEvent::Posted(FindingPostedPayload {
+            finding: Finding {
+                id: "f1".into(),
+                severity: FindingSeverity::Minor,
+                title: String::new(),
+                location: "src/lib.rs".into(),
+                detail: String::new(),
+                proposed_criterion: None,
+            },
+        }));
+        assert_eq!(said_for(payload), "run — finding f1 minor");
+    }
+
+    #[test]
+    fn a_node_that_finished_saying_nothing_is_still_said_to_have_finished() {
+        let payload = EventPayload::Node(NodeEvent::Finished(NodeFinishedPayload::new(
+            String::new(),
+            TokenUsage::default(),
+        )));
+        assert_eq!(said_for(payload), "run — finished");
+    }
+
+    /// A log written before the engine named its fallbacks carries an
+    /// empty `policy_applied`. The words state what was missing and
+    /// claim nothing about what was done instead.
+    #[test]
+    fn a_degraded_capability_with_no_policy_recorded_reads_as_what_was_missing() {
+        let payload: EventPayload = serde_json::from_value(serde_json::json!({
+            "kind": "capability_degraded",
+            "capability": "run_tools",
+            "adapter": "codex",
+            "policy_applied": "",
+        }))
+        .expect("the wire form of a degradation with no policy");
+        assert_eq!(said_for(payload), "run — run_tools not declared by codex");
+    }
+
+    #[test]
+    fn every_kind_earns_its_words_once() {
+        // One sentence per kind, and every one of them a sentence: a
+        // kind nothing says words for would reach a reader as a bare
+        // subject, and a `Debug` spelling would reach them as a Rust
+        // identifier.
+        for payload in yunta_testkit_core::all_kinds() {
+            let kind = payload.kind_name();
+            let said = said_for(payload);
+            assert!(
+                said.contains('—') || said != "run",
+                "`{kind}` says nothing beyond its subject: {said:?}"
+            );
+            assert!(
+                !said.contains('{') && !said.contains("::"),
+                "`{kind}` reached a reader as a Rust value: {said:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn what_a_watched_terminal_keeps_is_what_closed_or_asked() {
+        // P6, stated once: a terminal keeps above its region what
+        // closed something or asked something of a person. Everything
+        // else is the run working, and the region shows that while it
+        // is true.
+        let opened = EventPayload::Session(yunta_core::events::SessionEvent::Opened(
+            serde_json::from_value(serde_json::json!({
+                "kind": "agent_session_opened",
+                "session_id": "s1",
+                "capabilities": {},
+            }))
+            .expect("a session that opened"),
+        ));
+        let events = vec![StoredEvent {
+            seq: 1.into(),
+            run_id: "01JQ0000000000000000000000".into(),
+            node_id: Some("work".into()),
+            timestamp: chrono::DateTime::UNIX_EPOCH,
+            body: EventBody::Known(opened),
+        }];
+        assert!(
+            !kept(&derive_chronicle(&events)[0].happening),
+            "a session opening is the run working"
+        );
+
+        let failed = EventPayload::Node(NodeEvent::Failed(
+            yunta_core::events::NodeFailedPayload::new(
+                Failure::message("exit 1"),
+                false,
+                TokenUsage::default(),
+            ),
+        ));
+        let events = vec![StoredEvent {
+            body: EventBody::Known(failed),
+            ..events[0].clone()
+        }];
+        assert!(
+            kept(&derive_chronicle(&events)[0].happening),
+            "a node that failed closed something"
+        );
+
+        let failed_call = EventPayload::Session(yunta_core::events::SessionEvent::RunToolFailed(
+            yunta_core::events::RunToolFailedPayload {
+                session_id: "s1".into(),
+                tool: yunta_core::RunTool::Submit(yunta_core::ArtifactKind::Questions),
+                cause: yunta_core::events::RunToolFailureCause::CallFailed,
+            },
+        ));
+        let events = vec![StoredEvent {
+            body: EventBody::Known(failed_call),
+            ..events[0].clone()
+        }];
+        assert!(
+            kept(&derive_chronicle(&events)[0].happening),
+            "a watched terminal keeps a failed call visible"
+        );
+    }
+}

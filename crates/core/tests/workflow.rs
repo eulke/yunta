@@ -1,3 +1,10 @@
+//! The workflow schema, node kind by node kind.
+//!
+//! Every field a workflow may declare parses into its type with the
+//! default the schema states when it is absent, survives a serialization
+//! round trip, and is refused by name when its value is outside the
+//! closed set it belongs to.
+
 use yunta_core::{
     ArtifactKind, ArtifactSpec, CheckBuiltin, HookFailurePolicy, JoinPolicy, LoopUntil, NodeKind,
     NodePermissions, OnInterrupt, PromptSource, Workflow,
@@ -7,7 +14,7 @@ const FIXTURE: &str = include_str!("fixtures/m0-workflow.yaml");
 
 #[test]
 fn parses_the_reference_schema_excerpt_without_loss() {
-    let workflow: Workflow = serde_norway::from_str(FIXTURE).expect("fixture should parse");
+    let workflow: Workflow = yunta_core::yaml::parse(FIXTURE).expect("fixture should parse");
 
     assert_eq!(workflow.name, "fix-lint-loop");
     assert_eq!(workflow.nodes.len(), 3);
@@ -31,7 +38,10 @@ fn parses_the_reference_schema_excerpt_without_loss() {
     let lint = &workflow.nodes[1];
     assert_eq!(lint.depends_on[0].as_str(), "implement");
     match &lint.kind {
-        NodeKind::Bash { run } => assert_eq!(run, "cargo clippy --workspace -- -D warnings"),
+        NodeKind::Bash { run } => assert_eq!(
+            run.script(),
+            Some("cargo clippy --workspace -- -D warnings")
+        ),
         other => panic!("expected Bash, got {other:?}"),
     }
     let on_failure = lint.on_failure.as_ref().unwrap();
@@ -39,17 +49,20 @@ fn parses_the_reference_schema_excerpt_without_loss() {
     assert_eq!(on_failure.max_reroutes, 2);
 
     let fix_lint = &workflow.nodes[2];
-    assert_eq!(fix_lint.scope, vec!["src/**".to_string()]);
+    assert_eq!(
+        fix_lint.scope.globs(),
+        [yunta_core::ScopeGlob::from("src/**")]
+    );
     let hooks = fix_lint.hooks.as_ref().unwrap();
-    assert_eq!(hooks.after[0].run, "cargo fmt");
+    assert_eq!(hooks.after[0].run.script(), Some("cargo fmt"));
     assert!(hooks.before.is_empty());
 }
 
 #[test]
 fn round_trips_through_serialization() {
-    let first: Workflow = serde_norway::from_str(FIXTURE).unwrap();
-    let re_serialized = serde_norway::to_string(&first).unwrap();
-    let second: Workflow = serde_norway::from_str(&re_serialized).unwrap();
+    let first: Workflow = yunta_core::yaml::parse(FIXTURE).unwrap();
+    let re_serialized = yunta_core::yaml::to_string(&first).unwrap();
+    let second: Workflow = yunta_core::yaml::parse(&re_serialized).unwrap();
 
     assert_eq!(first, second);
 }
@@ -72,10 +85,10 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let first: Workflow = serde_norway::from_str(yaml).unwrap();
-    let re_serialized = serde_norway::to_string(&first).unwrap();
+    let first: Workflow = yunta_core::yaml::parse(yaml).unwrap();
+    let re_serialized = yunta_core::yaml::to_string(&first).unwrap();
     let second: Workflow =
-        serde_norway::from_str(&re_serialized).expect("include: all must round-trip");
+        yunta_core::yaml::parse(&re_serialized).expect("include: all must round-trip");
     assert_eq!(first, second);
     assert_eq!(
         first.modes.as_ref().unwrap()["full"].include,
@@ -102,9 +115,9 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let first: Workflow = serde_norway::from_str(yaml).unwrap();
-    let re_serialized = serde_norway::to_string(&first).unwrap();
-    let second: Workflow = serde_norway::from_str(&re_serialized).unwrap();
+    let first: Workflow = yunta_core::yaml::parse(yaml).unwrap();
+    let re_serialized = yunta_core::yaml::to_string(&first).unwrap();
+    let second: Workflow = yunta_core::yaml::parse(&re_serialized).unwrap();
     assert_eq!(first, second);
 
     // The promotion-ladder guarantee: declaration order, not
@@ -139,13 +152,15 @@ nodes:
     message: "Plan registrado. Do you approve?"
     options: [aprobar, ajustar, abortar]
     on: { ajustar: plan }
+    shows: [{ node: plan, kind: tasks }]
 "#;
-    let first: Workflow = serde_norway::from_str(yaml).unwrap();
+    let first: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let NodeKind::Gate {
         assignee,
         message,
         options,
         on,
+        shows,
         external,
     } = &first.nodes[1].kind
     else {
@@ -155,10 +170,19 @@ nodes:
     assert_eq!(message.as_deref(), Some("Plan registrado. Do you approve?"));
     assert_eq!(options, &["aprobar", "ajustar", "abortar"]);
     assert_eq!(on.get("ajustar").map(|t| t.as_str()), Some("plan"));
+    assert_eq!(
+        shows,
+        &[yunta_core::ArtifactContextRef {
+            node: Some("plan".into()),
+            id: yunta_core::ArtifactRefId::Kind {
+                kind: yunta_core::ArtifactKind::Tasks
+            },
+        }]
+    );
     assert!(external.is_none(), "an internal gate has no external block");
 
-    let re_serialized = serde_norway::to_string(&first).unwrap();
-    let second: Workflow = serde_norway::from_str(&re_serialized).unwrap();
+    let re_serialized = yunta_core::yaml::to_string(&first).unwrap();
+    let second: Workflow = yunta_core::yaml::parse(&re_serialized).unwrap();
     assert_eq!(first, second);
 }
 
@@ -171,7 +195,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     assert!(!workflow.nodes[0].invariant);
 }
 
@@ -184,7 +208,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     assert!(workflow.modes.is_none());
 }
 
@@ -195,7 +219,7 @@ id: plan
 kind: prompt
 prompt: "prompts/plan.md"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Prompt { prompt } => {
             assert_eq!(prompt, PromptSource::Inline("prompts/plan.md".to_string()));
@@ -214,7 +238,7 @@ hooks:
   after:
     - run: "cargo fmt"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     let step = &node.hooks.unwrap().after[0];
     assert_eq!(step.on_failure, HookFailurePolicy::Fail);
     assert_eq!(step.timeout_seconds, None);
@@ -232,7 +256,7 @@ hooks:
       on_failure: warn
       timeout_seconds: 5
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     let step = &node.hooks.unwrap().after[0];
     assert_eq!(step.on_failure, HookFailurePolicy::Warn);
     assert_eq!(step.timeout_seconds, Some(5));
@@ -251,9 +275,12 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let defaults = workflow.node_defaults.unwrap();
-    assert_eq!(defaults.hooks.unwrap().after[0].run, "cargo fmt");
+    assert_eq!(
+        defaults.hooks.unwrap().after[0].run.script(),
+        Some("cargo fmt")
+    );
 }
 
 #[test]
@@ -269,7 +296,7 @@ nodes:
     kind: bash
     run: "echo load"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Parallel { join, nodes, .. } => {
             assert_eq!(join, JoinPolicy::All);
@@ -292,7 +319,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Parallel { join, .. } => assert_eq!(join, JoinPolicy::Any),
         other => panic!("expected Parallel, got {other:?}"),
@@ -306,7 +333,7 @@ id: implement
 kind: bash
 run: "true"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.on_interrupt, None);
 }
 
@@ -318,7 +345,7 @@ kind: prompt
 prompt: "do it"
 on_interrupt: fail_if_uncertain
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.on_interrupt, Some(OnInterrupt::FailIfUncertain));
 }
 
@@ -329,7 +356,7 @@ id: no-regressions
 kind: check
 builtin: baseline_compare
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Check(builtin) => assert_eq!(builtin, CheckBuiltin::BaselineCompare),
         other => panic!("expected Check, got {other:?}"),
@@ -343,7 +370,7 @@ id: coverage
 kind: check
 builtin: coverage_gate
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Check(builtin) => assert_eq!(builtin, CheckBuiltin::CoverageGate),
         other => panic!("expected Check, got {other:?}"),
@@ -358,7 +385,7 @@ kind: check
 builtin: findings_gate
 max_severity: major
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Check(builtin) => assert_eq!(
             builtin,
@@ -377,7 +404,7 @@ id: mystery
 kind: check
 builtin: something_undefined
 "#;
-    let result: Result<yunta_core::Node, _> = serde_norway::from_str(yaml);
+    let result: Result<yunta_core::Node, _> = yunta_core::yaml::parse(yaml);
     assert!(result.is_err(), "unknown builtin must not parse");
 }
 
@@ -388,7 +415,7 @@ id: coverage-gate
 kind: executor
 executor: coverage-gate
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Executor {
             executor,
@@ -414,7 +441,7 @@ with:
   suite: unit
 timeout_seconds: 30
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Executor {
             executor,
@@ -438,7 +465,7 @@ kind: loop
 until: all_tasks_complete
 prompt: "do it"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Loop {
             scope_expansion, ..
@@ -459,14 +486,14 @@ scope_expansion:
   within: ["src/**"]
   max_per_run: 3
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Loop {
             scope_expansion, ..
         } => {
             let se = scope_expansion.unwrap();
             assert_eq!(se.mode, yunta_core::ScopeExpansionMode::Ask);
-            assert_eq!(se.within, vec!["src/**".to_string()]);
+            assert_eq!(se.within, vec![yunta_core::ScopeGlob::from("src/**")]);
             assert_eq!(se.max_per_run, Some(3));
         }
         other => panic!("expected Loop, got {other:?}"),
@@ -483,7 +510,7 @@ prompt: "do it"
 scope_expansion:
   within: ["src/**"]
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Loop {
             scope_expansion, ..
@@ -505,7 +532,7 @@ kind: loop
 until: all_tasks_complete
 prompt: "do it"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Loop { concurrency, .. } => assert_eq!(concurrency, None),
         other => panic!("expected Loop, got {other:?}"),
@@ -521,7 +548,7 @@ until: all_tasks_complete
 prompt: "do it"
 concurrency: 4
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Loop { concurrency, .. } => assert_eq!(concurrency, Some(4)),
         other => panic!("expected Loop, got {other:?}"),
@@ -536,7 +563,7 @@ kind: prompt
 prompt: "plan it"
 permissions: read-only
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.permissions, Some(NodePermissions::ReadOnly));
 }
 
@@ -547,7 +574,7 @@ id: implement
 kind: bash
 run: "true"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.permissions, None);
     assert_eq!(node.network, None);
 }
@@ -560,7 +587,7 @@ kind: bash
 run: "cargo clippy"
 network: false
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.network, Some(false));
 }
 
@@ -572,7 +599,7 @@ kind: prompt
 prompt: "plan it"
 permissions: unrestricted
 "#;
-    let result: Result<yunta_core::Node, _> = serde_norway::from_str(yaml);
+    let result: Result<yunta_core::Node, _> = yunta_core::yaml::parse(yaml);
     assert!(result.is_err(), "unknown profile must not parse");
 }
 
@@ -583,19 +610,19 @@ id: implement
 kind: bash
 run: "true"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.description, None);
 }
 
 #[test]
-fn a_node_can_declare_a_one_line_description_for_progress_md() {
+fn a_node_can_declare_a_one_line_description_of_what_it_does() {
     let yaml = r#"
 id: implement
 kind: bash
 run: "true"
 description: "Wires up the CLI's graph command"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(
         node.description.as_deref(),
         Some("Wires up the CLI's graph command")
@@ -609,7 +636,7 @@ id: plan
 kind: prompt
 prompt: { file: prompts/plan.md }
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match node.kind {
         NodeKind::Prompt { prompt } => {
             assert_eq!(
@@ -630,8 +657,62 @@ id: plan
 kind: prompt
 prompt: "plan it"
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert!(node.context.is_empty());
+}
+
+/// A required entry is written back as the bare path it always was, so
+/// the JSON a manifest's hash is taken over is the one a `Vec<String>`
+/// produced before optional entries existed: no frozen run's hash moves.
+#[test]
+fn a_required_files_entry_serializes_as_the_bare_path_it_always_was() {
+    use yunta_core::{ContextFile, ContextSpec};
+
+    let required = ContextSpec::Files {
+        files: vec![ContextFile::required("docs/architecture.md")],
+    };
+    assert_eq!(
+        serde_json::to_string(&required).unwrap(),
+        r#"{"files":["docs/architecture.md"]}"#
+    );
+
+    let optional = ContextSpec::Files {
+        files: vec![ContextFile {
+            path: "docs/architecture.md".to_string(),
+            optional: true,
+        }],
+    };
+    let written = serde_json::to_string(&optional).unwrap();
+    assert_eq!(
+        written,
+        r#"{"files":[{"path":"docs/architecture.md","optional":true}]}"#
+    );
+    let read: ContextSpec = yunta_core::yaml::parse(&written).unwrap();
+    assert_eq!(read, optional, "what is written reads back as itself");
+}
+
+#[test]
+fn a_files_entry_that_is_neither_shape_is_refused_by_name() {
+    let refused = |entry: &str| {
+        yunta_core::yaml::parse::<yunta_core::ContextSpec>(&format!("files: [{entry}]"))
+            .unwrap_err()
+            .to_string()
+    };
+    assert!(
+        refused("{ path: a.md, required: true }").contains("unknown key `required`"),
+        "{}",
+        refused("{ path: a.md, required: true }")
+    );
+    assert!(
+        refused("{ optional: true }").contains("names its `path`"),
+        "{}",
+        refused("{ optional: true }")
+    );
+    assert!(
+        refused("[a.md]").contains("a path or `{ path, optional }`, not a list"),
+        "{}",
+        refused("[a.md]")
+    );
 }
 
 #[test]
@@ -641,7 +722,7 @@ id: plan
 kind: prompt
 prompt: "plan it"
 context:
-  - files: ["docs/architecture.md"]
+  - files: ["docs/architecture.md", { path: docs/overview.md, optional: true }]
   - command: "git log --oneline -20"
   - artifact: { node: grill, name: brief.md }
   - tasks: {}
@@ -650,14 +731,21 @@ context:
   - run-events: { filter: failed }
   - mcp: { server: internal-docs, query: "{{inputs.idea}}" }
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(node.context.len(), 8);
 
-    use yunta_core::ContextSpec;
+    use yunta_core::{ContextFile, ContextSpec};
     match &node.context[0] {
-        ContextSpec::Files { files } => {
-            assert_eq!(files, &vec!["docs/architecture.md".to_string()])
-        }
+        ContextSpec::Files { files } => assert_eq!(
+            files,
+            &vec![
+                ContextFile::required("docs/architecture.md"),
+                ContextFile {
+                    path: "docs/overview.md".to_string(),
+                    optional: true,
+                },
+            ]
+        ),
         other => panic!("expected Files, got {other:?}"),
     }
     match &node.context[1] {
@@ -711,7 +799,7 @@ prompt: "plan it"
 context:
   - knowledge: { layers: [repo] }
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match &node.context[0] {
         yunta_core::ContextSpec::Knowledge { knowledge } => {
             assert_eq!(knowledge.layers, vec![yunta_core::KnowledgeLayer::Repo])
@@ -729,7 +817,7 @@ prompt: "plan it"
 context:
   - knowledge: { layers: [repo, user, org] }
 "#;
-    let node: yunta_core::Node = serde_norway::from_str(yaml).unwrap();
+    let node: yunta_core::Node = yunta_core::yaml::parse(yaml).unwrap();
     match &node.context[0] {
         yunta_core::ContextSpec::Knowledge { knowledge } => assert_eq!(
             knowledge.layers,
@@ -797,7 +885,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).expect("should parse");
+    let workflow: yunta_core::Workflow = yunta_core::yaml::parse(yaml).expect("should parse");
     assert_eq!(workflow.inputs.len(), 6);
 
     assert!(workflow.inputs["idea"].is_required());
@@ -863,9 +951,9 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let first: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
-    let re_serialized = serde_norway::to_string(&first).unwrap();
-    let second: yunta_core::Workflow = serde_norway::from_str(&re_serialized).unwrap();
+    let first: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
+    let re_serialized = yunta_core::yaml::to_string(&first).unwrap();
+    let second: yunta_core::Workflow = yunta_core::yaml::parse(&re_serialized).unwrap();
     assert_eq!(first, second);
 }
 
@@ -878,7 +966,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
     assert!(workflow.inputs.is_empty());
 }
 
@@ -896,7 +984,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let workflow: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
+    let workflow: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
     match &workflow.inputs["plan"] {
         yunta_core::InputSpec::Document {
             kind,
@@ -927,7 +1015,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let error = serde_norway::from_str::<yunta_core::Workflow>(yaml)
+    let error = yunta_core::yaml::parse::<yunta_core::Workflow>(yaml)
         .expect_err("a document input names the kind it is read as");
     let text = error.to_string();
     assert!(text.contains("kind"), "the refusal names the key: {text}");
@@ -948,7 +1036,7 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let error = serde_norway::from_str::<yunta_core::Workflow>(yaml)
+    let error = yunta_core::yaml::parse::<yunta_core::Workflow>(yaml)
         .expect_err("`required: true` and a `default` contradict each other");
     assert!(
         error.to_string().contains("contradict each other"),
@@ -956,7 +1044,7 @@ nodes:
     );
 }
 
-// --- Reference-schema fields (interactive, yunta_schema, skills,
+// --- Reference-schema fields (yunta_schema, skills,
 // on_finish) ------------------------------------------------------------------
 
 #[test]
@@ -969,7 +1057,6 @@ nodes:
     kind: prompt
     runner: planner
     skills: [grill]
-    interactive: true
     prompt: "Ask the questions."
   - id: implement
     kind: loop
@@ -981,10 +1068,14 @@ on_finish:
   - cleanup: worktree
   - distill: [{ node: plan, kind: tasks }]
 "#;
-    let wf: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
-    assert_eq!(wf.yunta_schema.as_deref(), Some(">=1 <2"));
+    let wf: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
+    assert_eq!(
+        wf.yunta_schema
+            .as_ref()
+            .map(yunta_core::SchemaRange::as_str),
+        Some(">=1 <2")
+    );
     assert_eq!(wf.nodes[0].skills, vec!["grill"]);
-    assert!(wf.nodes[0].interactive);
     assert_eq!(
         wf.on_finish,
         vec![
@@ -1003,8 +1094,8 @@ on_finish:
     );
 
     // Round-trip: serialize and re-parse to the same tree.
-    let reserialized = serde_norway::to_string(&wf).unwrap();
-    let reparsed: yunta_core::Workflow = serde_norway::from_str(&reserialized).unwrap();
+    let reserialized = yunta_core::yaml::to_string(&wf).unwrap();
+    let reparsed: yunta_core::Workflow = yunta_core::yaml::parse(&reserialized).unwrap();
     assert_eq!(wf, reparsed);
 }
 
@@ -1019,10 +1110,10 @@ nodes:
     kind: bash
     run: "true"
 "#;
-    let wf: yunta_core::Workflow = serde_norway::from_str(yaml).unwrap();
+    let wf: yunta_core::Workflow = yunta_core::yaml::parse(yaml).unwrap();
     assert_eq!(
         wf.node_defaults.unwrap().skills,
-        vec!["conventions".to_string()]
+        vec![yunta_core::SkillName::from("conventions")]
     );
 }
 
@@ -1038,11 +1129,327 @@ nodes:
     assignee: lead
     options: ["go ahead", abort]
 "#;
-    let error = serde_norway::from_str::<Workflow>(yaml)
+    let error = yunta_core::yaml::parse::<Workflow>(yaml)
         .expect_err("an option that is not an identifier is refused");
     let text = error.to_string();
     assert!(
         text.contains("go ahead") && text.contains("option id"),
         "the refusal names the value and what it had to be: {text}"
     );
+}
+
+/// A `scope:` pattern globset cannot compile is refused where it is
+/// read, not carried as a string until something tries to match with
+/// it: a ceiling nobody can evaluate is not a ceiling.
+#[test]
+fn an_invalid_glob_is_refused_at_parse() {
+    let yaml = r#"
+name: broken-scope
+nodes:
+  - id: edit
+    kind: prompt
+    prompt: do the thing
+    scope: ["src/[unclosed"]
+"#;
+    let error = yunta_core::yaml::parse::<Workflow>(yaml)
+        .expect_err("a scope that does not compile should not parse");
+
+    let text = error.to_string();
+    assert!(
+        text.contains("src/[unclosed"),
+        "the refusal names the pattern: {text}"
+    );
+    assert!(
+        text.contains("scope glob"),
+        "the refusal names what it was reading: {text}"
+    );
+}
+
+// --- the reading door: a workflow comes with its rules ---------------
+
+mod reading {
+    use std::path::Path;
+
+    use yunta_core::workflow::read::read;
+
+    const PATH: &str = ".yunta/workflows/ship.yaml";
+
+    fn refuse(yaml: &str) -> String {
+        read(yaml, Path::new(PATH))
+            .expect_err("this workflow breaks a rule")
+            .to_string()
+    }
+
+    fn reads(yaml: &str) {
+        read(yaml, Path::new(PATH)).expect("this workflow is well formed");
+    }
+
+    #[test]
+    fn a_workflow_cannot_be_obtained_without_its_rules() {
+        // The defect this door closes: a workflow used to parse without
+        // anyone asking the graph anything, so a file with two nodes of
+        // one id reached a run and was found out at replay.
+        let two_of_one = "\
+name: ship
+nodes:
+  - { id: a, kind: bash, run: \"true\" }
+  - { id: a, kind: bash, run: \"false\" }
+";
+        assert!(yunta_core::yaml::parse::<yunta_core::Workflow>(two_of_one).is_ok());
+        let text = refuse(two_of_one);
+        assert!(
+            text.contains("duplicate-id") || text.contains("already carries this id"),
+            "{text}"
+        );
+        assert!(
+            text.contains(PATH),
+            "a report names the file to fix: {text}"
+        );
+        assert!(text.contains("node `a`"), "and the node: {text}");
+    }
+
+    #[test]
+    fn a_reference_that_reaches_nothing_is_refused_wherever_it_is_written() {
+        for (yaml, field) in [
+            (
+                "name: ship\nnodes:\n  - { id: a, kind: bash, run: \"true\", depends_on: [ghost] }\n",
+                "depends_on",
+            ),
+            (
+                "name: ship\nnodes:\n  - id: a\n    kind: bash\n    run: \"true\"\n    \
+                 on_failure: { goto: ghost, max_reroutes: 1 }\n",
+                "on_failure.goto",
+            ),
+            (
+                "name: ship\nnodes:\n  - id: a\n    kind: gate\n    assignee: me\n    \
+                 options: [retry]\n    on: { retry: ghost }\n",
+                "on",
+            ),
+        ] {
+            let text = refuse(yaml);
+            assert!(text.contains("`ghost`"), "names what is missing: {text}");
+            assert!(text.contains(field), "and where it was written: {text}");
+        }
+    }
+
+    #[test]
+    fn two_parallel_children_never_reach_for_the_same_files() {
+        let text = refuse(
+            "\
+name: ship
+nodes:
+  - id: group
+    kind: parallel
+    nodes:
+      - { id: a, kind: bash, run: \"true\", scope: [\"src/**\"] }
+      - { id: b, kind: bash, run: \"true\", scope: [\"src/lib.rs\"] }
+",
+        );
+        assert!(text.contains("`a`") && text.contains("`b`"), "{text}");
+        assert!(text.contains("same files"), "{text}");
+
+        reads(
+            "\
+name: ship
+nodes:
+  - id: group
+    kind: parallel
+    nodes:
+      - { id: a, kind: bash, run: \"true\", scope: [\"src/**\"] }
+      - { id: b, kind: bash, run: \"true\", scope: [\"docs/**\"] }
+",
+        );
+    }
+
+    /// Modes name a group, not its children, and a child only ever runs
+    /// with its group: an `invariant` there would be a promise nothing
+    /// keeps, so the file is refused and told where the node belongs.
+    #[test]
+    fn an_invariant_inside_a_parallel_group_is_refused_naming_its_group() {
+        let grouped = "\
+name: ship
+nodes:
+  - id: checks
+    kind: parallel
+    nodes:
+      - { id: lint, kind: bash, run: \"true\", invariant: true }
+      - { id: docs, kind: bash, run: \"true\" }
+";
+        let report = read(grouped, Path::new(PATH)).expect_err("an invariant child is refused");
+        let codes: Vec<String> = report
+            .diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code().to_string())
+            .collect();
+        assert_eq!(codes, ["invariant-in-parallel"]);
+        let text = report.to_string();
+        assert!(
+            text.contains("`lint`") && text.contains("`checks`"),
+            "names the child and its group: {text}"
+        );
+        assert!(text.contains("move it out of the group"), "{text}");
+
+        reads("name: ship\nnodes:\n  - { id: lint, kind: bash, run: \"true\", invariant: true }\n");
+    }
+
+    #[test]
+    fn a_mode_leaves_a_graph_that_still_runs() {
+        let nodes = "\
+nodes:
+  - { id: lint, kind: bash, run: \"true\", invariant: true }
+  - { id: ship, kind: bash, run: \"true\" }
+";
+        // A mode naming a node nobody declared.
+        let text = refuse(&format!(
+            "name: ship\n{nodes}modes:\n  quick:\n    include: [lint, ghost]\n"
+        ));
+        assert!(text.contains("`ghost`"), "{text}");
+
+        // A mode leaving out what the workflow cannot run without.
+        let text = refuse(&format!(
+            "name: ship\n{nodes}modes:\n  quick:\n    include: [ship]\n"
+        ));
+        assert!(
+            text.contains("invariant") && text.contains("quick"),
+            "{text}"
+        );
+
+        // A mode that keeps a node keeps what it reroutes to.
+        let text = refuse(
+            "\
+name: ship
+nodes:
+  - id: lint
+    kind: bash
+    run: \"true\"
+    on_failure: { goto: fix, max_reroutes: 2 }
+  - { id: fix, kind: bash, run: \"true\" }
+modes:
+  quick:
+    include: [lint]
+",
+        );
+        assert!(text.contains("`fix`") && text.contains("quick"), "{text}");
+
+        // `include: all` holds every one of those vacuously, and a mode
+        // that keeps both ends is fine.
+        reads(&format!(
+            "name: ship\n{nodes}modes:\n  full:\n    include: all\n  quick:\n    \
+             include: [lint, ship]\n"
+        ));
+    }
+
+    /// A node a mode keeps reads its context, output and mounts from
+    /// nodes by name; a mode that leaves the source out leaves the reader
+    /// a read that can never be answered.
+    #[test]
+    fn a_mode_that_keeps_a_node_keeps_what_it_reads_from() {
+        for (reader, field) in [
+            (
+                "  - id: fix\n    kind: prompt\n    prompt: p\n    \
+                 context: [{ artifact: { node: lint, name: report.md } }]\n",
+                "context: artifact",
+            ),
+            (
+                "  - id: fix\n    kind: prompt\n    prompt: p\n    \
+                 context: [{ node-output: { node: lint } }]\n",
+                "context: node-output",
+            ),
+            (
+                "  - id: fix\n    kind: workflow\n    use: child\n    \
+                 mounts: [{ artifact: { node: lint, name: report.md } }]\n",
+                "mounts",
+            ),
+            (
+                "  - id: fix\n    kind: parallel\n    nodes:\n      - id: inner\n        \
+                 kind: prompt\n        prompt: p\n        \
+                 context: [{ node-output: { node: lint } }]\n",
+                "context: node-output",
+            ),
+        ] {
+            let nodes = format!(
+                "nodes:\n  - {{ id: lint, kind: bash, run: \"true\", \
+                 artifacts: {{ produces: [report.md] }} }}\n{reader}"
+            );
+            let text = refuse(&format!(
+                "name: ship\n{nodes}modes:\n  quick:\n    include: [fix]\n"
+            ));
+            assert!(
+                text.contains("`lint`") && text.contains("quick") && text.contains(field),
+                "{text}"
+            );
+            reads(&format!(
+                "name: ship\n{nodes}modes:\n  quick:\n    include: [lint, fix]\n"
+            ));
+            // A run promoted into `followup` is born holding what `first`
+            // produced, so the source an earlier mode keeps is not missing.
+            reads(&format!(
+                "name: ship\n{nodes}modes:\n  first:\n    include: [lint]\n  \
+                 followup:\n    include: [fix]\n"
+            ));
+        }
+    }
+
+    #[test]
+    fn a_reroute_from_a_node_the_mode_leaves_out_is_not_that_modes_problem() {
+        reads(
+            "\
+name: ship
+nodes:
+  - id: lint
+    kind: bash
+    run: \"true\"
+    on_failure: { goto: fix, max_reroutes: 2 }
+  - { id: fix, kind: bash, run: \"true\" }
+  - { id: ship, kind: bash, run: \"true\" }
+modes:
+  quick:
+    include: [ship]
+",
+        );
+    }
+
+    #[test]
+    fn a_fan_out_is_expanded_before_the_rules_read_the_graph() {
+        // `review` becomes one node per runner, and what depended on
+        // `review` depends on all of them — so the rules see the graph a
+        // run would build rather than the one the author typed.
+        let workflow = read(
+            "\
+name: ship
+nodes:
+  - { id: review, kind: prompt, runners: [a, b], prompt: \"look\" }
+  - { id: ship, kind: bash, run: \"true\", depends_on: [review] }
+",
+            Path::new(PATH),
+        )
+        .expect("a fan-out reads");
+        let ids: Vec<String> = workflow
+            .iter_nodes()
+            .map(|node| node.id.to_string())
+            .collect();
+        assert_eq!(ids, ["review@a", "review@b", "ship"]);
+        let ship = workflow
+            .nodes
+            .iter()
+            .find(|node| node.id.as_str() == "ship")
+            .expect("ship stands");
+        assert_eq!(
+            ship.depends_on
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>(),
+            ["review@a", "review@b"]
+        );
+    }
+
+    #[test]
+    fn bytes_that_are_not_a_workflow_fail_as_the_document_they_are_not() {
+        let text = refuse("name: ship\nnodes: \"not a list\"\n");
+        assert!(text.contains(PATH), "{text}");
+        assert!(
+            text.contains("nodes"),
+            "at the value that stopped it: {text}"
+        );
+    }
 }

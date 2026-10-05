@@ -23,32 +23,45 @@
 //! non-mutating tools, so "accept edits" has nothing mutating to
 //! accept; `Edit` gets the file-editing tools and nothing that reaches a
 //! shell or the network; `Full` gets the CLI's whole tool set. Where a
-//! file lands is still the engine's own post-hoc scope check, not a
-//! live CLI restriction — `capabilities().edit_hooks` says so (`false`,
-//! see mod.rs).
+//! file lands is the fence: every writing tool goes through the hook
+//! that runs the judge before the write happens.
 
-use crate::session::PermissionProfile;
+use yunta_core::fence::Fenced;
+use yunta_core::port::PermissionProfile;
 
 /// The tools a profile allows, as the CLI names them; `None` leaves the
 /// CLI's whole tool set available.
-/// `Write` is in every profile, `ReadOnly` included, because a profile
-/// says what the session may do to *the project*, and a node's declared
-/// artifact is not the project: it is the node's own output, written to
-/// the run directory, which `--add-dir` is what actually opens. Leaving
-/// `Write` out of `ReadOnly` made a read-only node that declares an
-/// artifact unable to produce one — the node then failed at close for a
-/// file its session was never permitted to create.
-pub(super) fn tools(profile: PermissionProfile) -> Option<&'static str> {
+///
+/// `ReadOnly` keeps `Write` and `Edit` only when the session has
+/// somewhere declared to write: a profile says what the session may do
+/// to *the project*, and a node's declared file is not the project —
+/// it is the node's own output, written to a root the fence keeps
+/// writable. With no such root, a read-only session has nothing at all
+/// to write and the tools go with it.
+pub(super) fn tools(profile: PermissionProfile, has_declared_files: bool) -> Option<&'static str> {
     match profile {
-        PermissionProfile::ReadOnly => Some("Read,Grep,Glob,WebFetch,WebSearch,Write"),
+        PermissionProfile::ReadOnly if has_declared_files => {
+            Some("Read,Grep,Glob,WebFetch,WebSearch,Write,Edit")
+        }
+        PermissionProfile::ReadOnly => Some("Read,Grep,Glob,WebFetch,WebSearch"),
         PermissionProfile::Edit => Some("Read,Grep,Glob,Edit,Write,MultiEdit,NotebookEdit"),
         PermissionProfile::Full => None,
     }
 }
 
-pub(super) fn permission_args(profile: PermissionProfile) -> Vec<String> {
+/// What each profile leaves fenced outside the file tools. `edit` and
+/// `read_only` expose no shell at all, so there is no second channel to
+/// widen the coverage; `full` does, and nothing fences a shell by path.
+pub(super) fn other_channels(profile: PermissionProfile) -> Option<Fenced> {
+    match profile {
+        PermissionProfile::ReadOnly | PermissionProfile::Edit => Some(Fenced::Exact),
+        PermissionProfile::Full => None,
+    }
+}
+
+pub(super) fn permission_args(profile: PermissionProfile, has_declared_files: bool) -> Vec<String> {
     let mut args = Vec::new();
-    if let Some(tools) = tools(profile) {
+    if let Some(tools) = tools(profile, has_declared_files) {
         args.push("--tools".to_string());
         args.push(tools.to_string());
     }
