@@ -338,6 +338,25 @@ impl SessionTools {
             .map(|_| ())
             .map_err(|source| RunToolError::Storage { source })
     }
+
+    /// Records `runs` as the log keeps them, what each printed kept with
+    /// the run's objects; `task` names whose check could not keep it.
+    pub(super) async fn recorded(
+        &self,
+        task: &yunta_core::TaskId,
+        runs: &[crate::task_cycle::CriterionRun],
+    ) -> Result<Vec<yunta_core::events::CriterionResult>, RunToolError> {
+        let objects = crate::artifacts::store::ObjectStore::at(&self.host.run_dir)
+            .redacting(&self.host.redactor);
+        crate::task_cycle::recorded(runs, &objects)
+            .await
+            .map_err(|source| RunToolError::Check {
+                source: crate::task_cycle::TaskCycleError::KeepOutput {
+                    task: task.clone(),
+                    source,
+                },
+            })
+    }
 }
 
 impl ServerHandler for SessionTools {

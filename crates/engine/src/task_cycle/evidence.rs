@@ -34,18 +34,24 @@ pub(super) async fn of_refusals(
         .iter()
         .filter_map(|target| relative(worktree, target.display.as_deref()?))
         .collect();
-    let (cmd, paths) = post
-        .iter()
-        .filter(|run| run.exit_code != 0 && run.could_not_run().is_none())
-        .find_map(|run| {
-            let text = text_of(run.output.as_ref()?, worktree);
-            let located: Vec<String> = refused
-                .iter()
-                .filter(|path| locates(&text, path))
-                .cloned()
-                .collect();
-            (!located.is_empty()).then(|| (run.cmd.clone(), located))
-        })?;
+    let mut evidence = None;
+    for run in post {
+        let red = run.exit_code != 0 && run.could_not_run().is_none();
+        let Some(printed) = run.output.as_ref().filter(|_| red) else {
+            continue;
+        };
+        let text = text_of(printed, worktree, params).await;
+        let located: Vec<String> = refused
+            .iter()
+            .filter(|path| locates(&text, path))
+            .cloned()
+            .collect();
+        if !located.is_empty() {
+            evidence = Some((run.cmd.clone(), located));
+            break;
+        }
+    }
+    let (cmd, paths) = evidence?;
     let reason = format!(
         "the fence refused writing {} and `{cmd}` points there",
         paths.join(", ")
@@ -73,13 +79,10 @@ pub(super) async fn of_request(
         .exit_code(cmd, worktree, params.supervision)
         .await?;
     let red = answer.exit_code != 0 && super::criteria::could_not_run(answer.exit_code).is_none();
-    let Some(text) = answer
-        .output
-        .as_ref()
-        .map(|printed| text_of(printed, worktree))
-    else {
+    let Some(printed) = answer.output.as_ref() else {
         return Ok(None);
     };
+    let text = text_of(printed, worktree, params).await;
     let asked: Vec<String> = request
         .paths
         .iter()
@@ -165,12 +168,25 @@ fn roots(worktree: &Path) -> Vec<std::path::PathBuf> {
     roots
 }
 
-/// What `printed` says, with the checkout's own path taken out, so a
-/// location reads relative to it whichever way the command printed it.
-fn text_of(printed: &Printed, worktree: &Path) -> String {
+/// Everything `printed` says, with the checkout's own path taken out, so
+/// a location reads relative to it whichever way the command printed it.
+/// An answer an earlier invocation gave is read from the object the run
+/// kept of it; only one whose object cannot be read — or that a log
+/// written before a run kept its objects names none for — is read from
+/// the last lines the log quotes.
+async fn text_of(printed: &Printed, worktree: &Path, params: &AttemptParams<'_>) -> String {
     let text = match printed {
         Printed::Ran(output) => String::from_utf8_lossy(output.bytes()).into_owned(),
-        Printed::Recorded { tail, .. } => tail.join("\n"),
+        Printed::Recorded { object, tail } => {
+            let kept = match (object, params.audit) {
+                (Some(hash), Some((observer, _))) => observer.kept_output(hash).await,
+                _ => None,
+            };
+            match kept {
+                Some(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+                None => tail.join("\n"),
+            }
+        }
     };
     roots(worktree).iter().fold(text, |text, root| {
         text.replace(&format!("{}/", root.display()), "")

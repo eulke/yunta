@@ -13,7 +13,7 @@ use yunta_core::events::{
 };
 use yunta_core::{NodeId, Seq, TaskId};
 
-use super::{CriterionRun, SessionObserver, TaskCycleError};
+use super::{CriterionRun, KeepsOutput, SessionObserver, TaskCycleError};
 use crate::process::Printed;
 use crate::scope::ScopeCheckResult;
 
@@ -52,26 +52,16 @@ impl Recorder<'_> {
         runs: &[CriterionRun],
         waiting: Vec<String>,
     ) -> Result<Option<Seq>, TaskCycleError> {
-        let mut results = to_results(runs);
-        // What each command printed goes where the run keeps its objects;
-        // the check names it, and quotes the end of what did not pass.
-        if let Some((observer, _)) = self.audit {
-            for (result, run) in results.iter_mut().zip(runs) {
-                result.output = match &run.output {
-                    Some(Printed::Ran(output)) => {
-                        Some(observer.keep_output(output).await.map_err(|source| {
-                            TaskCycleError::KeepOutput {
-                                task: self.task.clone(),
-                                source,
-                            }
-                        })?)
-                    }
-                    // Kept already, by the invocation that ran it.
-                    Some(Printed::Recorded { object, .. }) => object.clone(),
-                    None => None,
-                };
-            }
-        }
+        let Some((observer, _)) = self.audit else {
+            return Ok(None);
+        };
+        let results =
+            recorded(runs, observer)
+                .await
+                .map_err(|source| TaskCycleError::KeepOutput {
+                    task: self.task.clone(),
+                    source,
+                })?;
         self.record(EventPayload::Node(NodeEvent::CriteriaChecked(
             CriteriaCheckedPayload {
                 task_id: self.task.clone(),
@@ -112,22 +102,39 @@ impl Recorder<'_> {
     }
 }
 
-/// Criterion runs as the log records them.
-pub(crate) fn to_results(runs: &[CriterionRun]) -> Vec<CriterionResult> {
-    runs.iter()
-        .map(|run| CriterionResult {
+/// Criterion runs as the log records them. What a command printed in
+/// this invocation goes where `objects` keeps it, and an answer taken
+/// from an earlier
+/// invocation names the object that one kept; a red one also quotes the
+/// end of it, for a reader who does not open the object. A command that
+/// printed nothing leaves nothing to keep.
+pub(crate) async fn recorded(
+    runs: &[CriterionRun],
+    objects: &dyn KeepsOutput,
+) -> std::io::Result<Vec<CriterionResult>> {
+    let mut results = Vec::with_capacity(runs.len());
+    for run in runs {
+        let output = match &run.output {
+            Some(Printed::Ran(output)) if !output.bytes().is_empty() => {
+                Some(objects.keep_output(output).await?)
+            }
+            Some(Printed::Recorded { object, .. }) => object.clone(),
+            Some(Printed::Ran(_)) | None => None,
+        };
+        results.push(CriterionResult {
             cmd: run.cmd.clone(),
             exit_code: run.exit_code,
             r#type: run.is_guard.then_some(CriterionType::Guard),
             reused: run.reused,
             duration_ms: run.duration_ms,
-            output: None,
+            output,
             tail: match (&run.output, run.exit_code) {
                 (Some(output), exit_code) if exit_code != 0 => output.tail(),
                 _ => Vec::new(),
             },
             tree: run.tree.clone(),
             head: run.head.clone(),
-        })
-        .collect()
+        });
+    }
+    Ok(results)
 }

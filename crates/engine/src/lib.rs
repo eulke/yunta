@@ -154,8 +154,8 @@ pub use stats::{
 };
 pub use task_cycle::{
     post_check, pre_check, run_task, surprises, AttemptEnv, AttemptRecord, BlockedCause,
-    CriterionRun, DispatchOutcome, Memo, PostCheck, ScopeGovernance, SessionObserver, SessionSetup,
-    Surprise, TaskCycleError, TaskCycleReport, TaskOutcome,
+    CriterionRun, DispatchOutcome, KeepsOutput, Memo, PostCheck, ScopeGovernance, SessionObserver,
+    SessionSetup, Surprise, TaskCycleError, TaskCycleReport, TaskOutcome,
 };
 pub use tasks::{judged_task, suite_of};
 pub use time_spent::TimeSpent;

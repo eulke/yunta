@@ -86,7 +86,7 @@ impl SessionTools {
             found.extend(judged(index, task, &probes, self.host.environment.as_ref()));
             ran.push(TaskProbe {
                 task_id: task.id.clone(),
-                results: crate::task_cycle::to_results(&probes),
+                results: self.recorded(&task.id, &probes).await?,
             });
         }
         probing.done(supervision).await;

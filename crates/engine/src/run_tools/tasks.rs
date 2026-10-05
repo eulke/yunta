@@ -98,8 +98,14 @@ impl SessionTools {
             return Err(RunToolError::Superseded);
         }
         let judgement = judgement.map_err(|source| RunToolError::Check { source })?;
-        self.append(answered(&access.task.id, &judgement, started.elapsed()))
-            .await?;
+        let results = self.recorded(&access.task.id, &judgement.criteria).await?;
+        self.append(answered(
+            &access.task.id,
+            &judgement,
+            results,
+            started.elapsed(),
+        ))
+        .await?;
         self.check_verdict(judgement)
     }
 
@@ -133,11 +139,16 @@ impl SessionTools {
 }
 
 /// The answer a check of `task` gave, as the log keeps it.
-fn answered(task: &TaskId, judgement: &Judgement, took: std::time::Duration) -> EventPayload {
+fn answered(
+    task: &TaskId,
+    judgement: &Judgement,
+    results: Vec<yunta_core::events::CriterionResult>,
+    took: std::time::Duration,
+) -> EventPayload {
     EventPayload::Tasks(TaskEvent::CheckAnswered(TaskCheckAnsweredPayload {
         task_id: task.clone(),
         closes: judgement.closes(),
-        results: crate::task_cycle::to_results(&judgement.criteria),
+        results,
         waiting: judgement.waiting.clone(),
         outside_scope: judgement.scope.violations.clone(),
         denied: judgement.scope.denied.clone(),

@@ -100,6 +100,15 @@ impl<'a> ObjectStore<'a> {
             .await
     }
 
+    /// This store as what a command printed is kept in it: with every
+    /// secret `redactor` knows taken out.
+    pub fn redacting(self, redactor: &'a yunta_core::Redactor) -> Redacting<'a> {
+        Redacting {
+            store: self,
+            redactor,
+        }
+    }
+
     /// The bytes `hash` names, verified against it.
     pub async fn get(&self, hash: &ContentHash) -> Result<Vec<u8>, ObjectError> {
         let path = self.path_of(hash);
@@ -180,4 +189,24 @@ pub fn view_path(node: Option<&NodeId>, name: &str) -> PathBuf {
     }
     path.push(name);
     path
+}
+
+/// A run's object store as what its commands printed is kept in it.
+pub struct Redacting<'a> {
+    store: ObjectStore<'a>,
+    redactor: &'a yunta_core::Redactor,
+}
+
+#[async_trait::async_trait]
+impl crate::task_cycle::KeepsOutput for Redacting<'_> {
+    async fn keep_output(
+        &self,
+        output: &crate::process::CommandOutput,
+    ) -> std::io::Result<ContentHash> {
+        self.store.put_redacted(output.bytes(), self.redactor).await
+    }
+
+    async fn kept_output(&self, hash: &ContentHash) -> Option<Vec<u8>> {
+        self.store.get(hash).await.ok()
+    }
 }

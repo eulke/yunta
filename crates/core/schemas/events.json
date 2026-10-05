@@ -1130,7 +1130,7 @@
           ]
         },
         "output": {
-          "description": "The run object holding everything the command printed — stdout,\nthen stderr — with the run's secrets taken out. Absent when\nnothing ran (`reused`), and on a log written before a run kept\nwhat its commands printed.",
+          "description": "The run object holding everything the command printed — stdout,\nthen stderr — with the run's secrets taken out: for a red answer\n`reused`, what the run that gave it printed. Absent when the\ncommand printed nothing, for a green answer `reused`, and on a log\nwritten before a run kept what its commands printed.",
           "anyOf": [
             {
               "$ref": "#/$defs/ContentHash"

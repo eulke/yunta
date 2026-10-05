@@ -43,9 +43,10 @@ pub struct CriterionResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     /// The run object holding everything the command printed — stdout,
-    /// then stderr — with the run's secrets taken out. Absent when
-    /// nothing ran (`reused`), and on a log written before a run kept
-    /// what its commands printed.
+    /// then stderr — with the run's secrets taken out: for a red answer
+    /// `reused`, what the run that gave it printed. Absent when the
+    /// command printed nothing, for a green answer `reused`, and on a log
+    /// written before a run kept what its commands printed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<ContentHash>,
     /// The last lines a criterion that did not pass printed: what a

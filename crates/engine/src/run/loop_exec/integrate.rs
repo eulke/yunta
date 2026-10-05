@@ -11,7 +11,7 @@ use yunta_core::events::{
 };
 use yunta_core::{CommitSha, Node, ScopeGlob, Seq, Task};
 
-use crate::task_cycle::{post_check, to_results, BlockedCause, Memo, TaskOutcome};
+use crate::task_cycle::{post_check, BlockedCause, Memo, TaskOutcome};
 use crate::worktree::{commit_work, land, rebase_onto, Rebase, Unit};
 
 use super::depart::PendingDeparture;
@@ -324,13 +324,19 @@ async fn integrate_task(
     let task_worktree = unit.worktree.as_path();
 
     let checked = post_check(task, task_worktree, memo, ctx.supervision(cancel)).await?;
+    let results = ctx.recorded(&checked.runs).await.map_err(|source| {
+        crate::task_cycle::TaskCycleError::KeepOutput {
+            task: task.id.clone(),
+            source,
+        }
+    })?;
     *last_check_seq = ctx
         .emit(
             Some(&node.id),
             EventPayload::Node(NodeEvent::CriteriaChecked(CriteriaCheckedPayload {
                 task_id: task.id.clone(),
                 phase: Phase::Post,
-                results: to_results(&checked.runs),
+                results,
                 waiting: checked.waiting.clone(),
             })),
         )

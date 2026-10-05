@@ -198,7 +198,7 @@ impl SessionSetup {
 /// expose the process registry for pgid bookkeeping. `RunCtx` is the one
 /// real implementor.
 #[async_trait::async_trait]
-pub trait SessionObserver: Sync {
+pub trait SessionObserver: KeepsOutput {
     /// Appends one event to the run's log and returns the sequence
     /// number the log gave it. The storage cause travels back on failure
     /// so the cycle fails the node rather than dropping the event — a
@@ -209,14 +209,6 @@ pub trait SessionObserver: Sync {
         node_id: &yunta_core::NodeId,
         payload: EventPayload,
     ) -> Result<yunta_core::Seq, StorageError>;
-    /// Keeps what a command printed where the run keeps every object it
-    /// holds, with the run's secrets taken out, and answers the hash it
-    /// is named by. What a cycle's commands print is the run's, never
-    /// the terminal's.
-    async fn keep_output(
-        &self,
-        output: &crate::process::CommandOutput,
-    ) -> std::io::Result<yunta_core::ContentHash>;
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry>;
     /// Waits until the host the run works on has stayed awake a while
     /// since it last slept — `false` when `cancel` fired first. An
@@ -234,6 +226,21 @@ pub trait SessionObserver: Sync {
     fn shell_service(&self) -> Option<&std::collections::BTreeMap<String, String>> {
         None
     }
+}
+
+/// Where a run keeps what its commands printed: every object it holds,
+/// with the run's secrets taken out. What a check's commands print is the
+/// run's, never the terminal's.
+#[async_trait::async_trait]
+pub trait KeepsOutput: Sync {
+    /// Keeps `output` and answers the hash it is named by.
+    async fn keep_output(
+        &self,
+        output: &crate::process::CommandOutput,
+    ) -> std::io::Result<yunta_core::ContentHash>;
+
+    /// What was kept under `hash` — `None` when it cannot be read.
+    async fn kept_output(&self, hash: &yunta_core::ContentHash) -> Option<Vec<u8>>;
 }
 
 /// The only shape of a note the log ever carries: its size and

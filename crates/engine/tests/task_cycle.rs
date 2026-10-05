@@ -1259,6 +1259,23 @@ enum Down {
 struct FailingObserver(Down);
 
 #[async_trait::async_trait]
+impl yunta_engine::KeepsOutput for FailingObserver {
+    async fn keep_output(
+        &self,
+        output: &yunta_engine::process::CommandOutput,
+    ) -> std::io::Result<yunta_core::ContentHash> {
+        match self.0 {
+            Down::Objects => Err(std::io::Error::other("object storage is down")),
+            Down::Log => Ok(yunta_core::sha256_hex(output.bytes())),
+        }
+    }
+
+    async fn kept_output(&self, _hash: &yunta_core::ContentHash) -> Option<Vec<u8>> {
+        None
+    }
+}
+
+#[async_trait::async_trait]
 impl yunta_engine::SessionObserver for FailingObserver {
     async fn record(
         &self,
@@ -1271,16 +1288,6 @@ impl yunta_engine::SessionObserver for FailingObserver {
                 source: "audit storage is down".into(),
             }),
             Down::Objects => Ok(yunta_core::Seq::from(1)),
-        }
-    }
-
-    async fn keep_output(
-        &self,
-        output: &yunta_engine::process::CommandOutput,
-    ) -> std::io::Result<yunta_core::ContentHash> {
-        match self.0 {
-            Down::Objects => Err(std::io::Error::other("object storage is down")),
-            Down::Log => Ok(yunta_core::sha256_hex(output.bytes())),
         }
     }
 
@@ -1319,11 +1326,8 @@ async fn a_cycle_with_its_store_down(down: Down) -> yunta_engine::TaskCycleError
     let (_dir, run, unit) = a_unit(&owner).await;
     let memo = Memo::new(yunta_core::sha256_hex(b"config-hash"));
 
-    let t = task(
-        "write-output",
-        &["output.txt"],
-        vec![cmd("test -f output.txt")],
-    );
+    // A check that prints, which leaves something to keep.
+    let t = task("write-output", &["output.txt"], vec![cmd("cat output.txt")]);
     let adapter = MockAdapter::from_yaml(
         r#"
 effects:

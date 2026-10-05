@@ -24,7 +24,14 @@ pub(super) async fn prove(ctx: &RunCtx<'_>, node: &Node) -> Result<(), RunError>
         let run =
             crate::task_cycle::probe_command(&cmd, ctx.worktree, &ctx.memo, ctx.root_supervision())
                 .await?;
-        let result = crate::task_cycle::to_results(std::slice::from_ref(&run)).remove(0);
+        let result = ctx
+            .recorded(std::slice::from_ref(&run))
+            .await
+            .map_err(|source| RunError::Io {
+                context: format!("keep what `{}` printed", run.cmd),
+                source,
+            })?
+            .remove(0);
         ctx.emit(
             Some(&node.id),
             EventPayload::Findings(FindingEvent::Proved(FindingProvedPayload {

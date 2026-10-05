@@ -371,6 +371,35 @@ impl<'a> RunCtx<'a> {
             .and_then(|settings| settings.adapter_settings.clone())
             .unwrap_or_default()
     }
+
+    /// Records `runs` as the log keeps them, what each printed kept with
+    /// the run's objects.
+    pub(crate) async fn recorded(
+        &self,
+        runs: &[crate::task_cycle::CriterionRun],
+    ) -> std::io::Result<Vec<yunta_core::events::CriterionResult>> {
+        crate::task_cycle::recorded(runs, self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::task_cycle::KeepsOutput for RunCtx<'_> {
+    async fn keep_output(
+        &self,
+        output: &crate::process::CommandOutput,
+    ) -> std::io::Result<yunta_core::ContentHash> {
+        crate::artifacts::store::ObjectStore::at(self.run_dir)
+            .redacting(&self.redactor)
+            .keep_output(output)
+            .await
+    }
+
+    async fn kept_output(&self, hash: &yunta_core::ContentHash) -> Option<Vec<u8>> {
+        crate::artifacts::store::ObjectStore::at(self.run_dir)
+            .redacting(&self.redactor)
+            .kept_output(hash)
+            .await
+    }
 }
 
 /// `RunCtx` is the one real [`SessionObserver`] — audit events
@@ -393,15 +422,6 @@ impl crate::task_cycle::SessionObserver for RunCtx<'_> {
         // fails the node — the same storage the run's next mandatory
         // event would hit anyway, surfaced now instead of masked.
         self.log().record(Some(node_id), payload).await
-    }
-
-    async fn keep_output(
-        &self,
-        output: &crate::process::CommandOutput,
-    ) -> std::io::Result<yunta_core::ContentHash> {
-        crate::artifacts::store::ObjectStore::at(self.run_dir)
-            .put_redacted(output.bytes(), &self.redactor)
-            .await
     }
 
     fn process_registry(&self) -> Option<&crate::process_registry::ProcessRegistry> {

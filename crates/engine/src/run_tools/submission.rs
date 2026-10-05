@@ -157,7 +157,7 @@ impl SessionTools {
             crate::artifacts::ArtifactContent::Spec(spec) => {
                 let proven = self.spec_handover(spec).await?;
                 let told = failing_now(&proven.failing, &self.host.redactor);
-                (proven.broken, told, by_task(&proven.failing))
+                (proven.broken, told, self.by_task(&proven.failing).await?)
             }
             _ => return Ok(Offered::told_nothing(Ok(verified))),
         };
@@ -314,21 +314,26 @@ impl Offered {
     }
 }
 
-/// `runs`, gathered under the task each answered for, in the order the
-/// tasks first appear.
-fn by_task(runs: &[(yunta_core::TaskId, crate::task_cycle::CriterionRun)]) -> Vec<TaskProbe> {
-    let mut probes: Vec<TaskProbe> = Vec::new();
-    for (task, run) in runs {
-        let result = crate::task_cycle::to_results(std::slice::from_ref(run));
-        match probes.iter_mut().find(|probe| &probe.task_id == task) {
-            Some(probe) => probe.results.extend(result),
-            None => probes.push(TaskProbe {
-                task_id: task.clone(),
-                results: result,
-            }),
+impl SessionTools {
+    /// `runs`, gathered under the task each answered for, in the order
+    /// the tasks first appear, as the log records them.
+    async fn by_task(
+        &self,
+        runs: &[(yunta_core::TaskId, crate::task_cycle::CriterionRun)],
+    ) -> Result<Vec<TaskProbe>, RunToolError> {
+        let mut probes: Vec<TaskProbe> = Vec::new();
+        for (task, run) in runs {
+            let result = self.recorded(task, std::slice::from_ref(run)).await?;
+            match probes.iter_mut().find(|probe| &probe.task_id == task) {
+                Some(probe) => probe.results.extend(result),
+                None => probes.push(TaskProbe {
+                    task_id: task.clone(),
+                    results: result,
+                }),
+            }
         }
+        Ok(probes)
     }
-    probes
 }
 
 /// How each test of an accepted spec fails before the work: its exit and

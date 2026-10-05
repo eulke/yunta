@@ -41,7 +41,7 @@ pub use outcome::{
 
 use crate::process::Supervision;
 use attempt::{run_one_attempt, AttemptParams, AttemptStep};
-pub(crate) use record::to_results;
+pub(crate) use record::recorded;
 use record::Recorder;
 
 pub(crate) use criteria::{could_not_run, pre_check_unless_cut, probe, probe_command};
@@ -50,7 +50,7 @@ pub use dispatch::DispatchError;
 pub(crate) use dispatch::{dispatch_session, Dispatched, Opening, Resume};
 pub(crate) use judge::{judge, Judgement, Work};
 pub use memo::{Memo, Memoized};
-pub use session::{RunToolsNeed, SessionObserver, SessionSetup};
+pub use session::{KeepsOutput, RunToolsNeed, SessionObserver, SessionSetup};
 pub use suite::SuiteGate;
 pub(crate) use tree::content_of;
 
