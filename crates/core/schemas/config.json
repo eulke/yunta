@@ -340,6 +340,10 @@
       },
       "additionalProperties": false
     },
+    "DiskShare": {
+      "description": "An amount of a disk: bytes — `80G`, `500M`, `1.5T`, in decimal units —\nor a share of the whole file system, `20%`.",
+      "type": "string"
+    },
     "ExecutorKind": {
       "description": "Closed at `binary` today — `wasm` is reserved as a future\nadditive variant once demand for it shows up, so this is an enum even\nwith a single variant, not a bare string that would silently accept\nanything.",
       "type": "string",
@@ -676,6 +680,35 @@
       },
       "additionalProperties": false
     },
+    "PoolConfig": {
+      "description": "`storage.pool` — both optional: what is not said falls back to what\nthe disk and the builds the pool measured say.",
+      "type": "object",
+      "properties": {
+        "budget": {
+          "description": "What the builds of the project's checkouts may take together.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskShare"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "keep_free": {
+          "description": "What of the disk the pool always leaves free.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskShare"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "PricingEntry": {
       "description": "One `pricing:` entry (reference shape): a struct rather than a\nbare number so a later per-direction price is a field addition, not\na schema break.",
       "type": "object",
@@ -835,6 +868,17 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "pool": {
+          "description": "What the project's checkouts may keep of the disk.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PoolConfig"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "retention_days": {

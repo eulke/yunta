@@ -121,11 +121,32 @@ impl World {
     /// recorded the build it leaves.
     pub async fn give_back(&self, unit: &Unit, lease: yunta_engine::Lease) {
         self.pool.give_back(lease, self.owner.supervision()).await;
+        self.wait_for_build(unit).await;
+    }
+
+    /// Gives back `unit`'s checkout as of `at`, and waits until the pool
+    /// recorded the build it leaves.
+    pub async fn give_back_at(&self, unit: &Unit, lease: yunta_engine::Lease, at: &str) {
+        let clock = yunta_testkit_core::AtClock(at.parse().unwrap());
+        let supervision = yunta_engine::process::Supervision {
+            clock: &clock,
+            ..self.owner.supervision()
+        };
+        self.pool.give_back(lease, supervision).await;
+        self.wait_for_build(unit).await;
+    }
+
+    async fn wait_for_build(&self, unit: &Unit) {
         let name = unit.worktree.file_name().unwrap().to_string_lossy();
         let built = unit.worktree.with_file_name(format!("{name}.built"));
+        // Counted once the record says how many bytes the build takes.
         yunta_testkit::wait_until_async(
-            || async { tokio::fs::try_exists(&built).await.unwrap_or(false) },
-            || format!("the pool records the build of {}", unit.worktree.display()),
+            || async {
+                tokio::fs::read_to_string(&built)
+                    .await
+                    .is_ok_and(|record| record.contains("\"bytes\""))
+            },
+            || format!("the pool counts the build of {}", unit.worktree.display()),
         )
         .await;
     }

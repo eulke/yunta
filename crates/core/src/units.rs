@@ -63,6 +63,30 @@ impl fmt::Display for Tokens {
     }
 }
 
+/// A size on disk, in decimal units and three significant digits:
+/// `512 B`, `9.4 MB`, `15.4 GB`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Bytes(pub u64);
+
+impl fmt::Display for Bytes {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let figure = significant(self.0);
+        let (number, unit) = match figure.strip_suffix(['k', 'M', 'B', 'T']) {
+            Some(number) => {
+                let unit = match figure.chars().last() {
+                    Some('k') => "kB",
+                    Some('M') => "MB",
+                    Some('B') => "GB",
+                    _ => "TB",
+                };
+                (number, unit)
+            }
+            None => (figure.as_str(), "B"),
+        };
+        f.pad(&format!("{number} {unit}"))
+    }
+}
+
 /// Each scale a count is read in, smallest first.
 const SCALES: [(u64, &str); 4] = [
     (1_000, "k"),
@@ -159,6 +183,15 @@ pub fn duration(duration: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_size_reads_in_decimal_units_and_three_digits() {
+        let read = |n| Bytes(n).to_string();
+        assert_eq!(read(512), "512 B");
+        assert_eq!(read(9_400_000), "9.4 MB");
+        assert_eq!(read(15_412_000_000), "15.4 GB");
+        assert_eq!(read(1_000_000_000_000), "1 TB");
+    }
 
     fn figure(n: u64) -> String {
         Tokens(n).figure()

@@ -20,7 +20,7 @@ impl CheckoutPool {
         super::slot::used(&home, number, self.holder.as_deref(), now).await;
         drop(lease);
         if let Some(roots) = roots {
-            space::measure(&home, number, roots, now).await;
+            space::given_back(&home, number, roots, now, &self.walking).await;
         }
     }
 

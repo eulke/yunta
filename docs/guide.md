@@ -769,8 +769,26 @@ are checkouts of the project's pool, under the worktrees root: a run or a task t
 free one, put back to the commit it starts from, and what git ignores — a build's
 output, `target/`, `node_modules/` — stays where the last run left it. The first build
 in a checkout is cold; every later one rebuilds only what changed, the same as in your
-own checkout after a pull. `yunta gc` keeps as many free checkouts as your runs had
-busy at once in the last 30 days.
+own checkout after a pull.
+
+A build is the weight of a checkout — gigabytes, where its source is megabytes — so
+the pool keeps its builds within a budget and always leaves part of the disk free:
+
+```yaml
+storage:
+  pool:
+    budget: 60G        # what the checkouts' builds may take together
+    keep_free: 10%     # what of the disk always stays free
+```
+
+Unset, the budget is the smaller of a fifth of the disk and three times the largest
+build the pool measured, and the floor the larger of 5% of the disk and 10 GB. Before
+a checkout is taken, the builds of free checkouts past the budget are emptied — what
+git ignores goes, the source stays — the least recently used first. A run that would
+still leave the disk under its floor stops and says how to make room; `yunta run`
+refuses to start one. `yunta gc` empties the builds nobody used within
+`storage.retention_days`, removes free checkouts that hold no build, and says what the
+pool keeps; `yunta doctor` says it too.
 
 Do not point several checkouts at one build directory. A build is right only at the
 path that made it: build tools name a project's own output the same way in any

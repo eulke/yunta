@@ -112,55 +112,8 @@ pub(super) async fn hold(
             unit,
         };
         record(&held_path(home, number), &held).await;
-        record_busy(home, now).await;
     }
     Ok(Some(lease))
-}
-
-/// How long the pool remembers how many checkouts were busy at once.
-pub(super) fn remembered() -> chrono::Duration {
-    chrono::Duration::days(30)
-}
-
-/// The most checkouts the pool saw busy at once, and when it last saw that
-/// many — or more, after what it remembers ran out.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-struct Busiest {
-    count: usize,
-    at: DateTime<Utc>,
-}
-
-/// The most checkouts busy at once, and when, as the pool last recorded it.
-pub(super) async fn busiest(home: &Path) -> Option<(usize, DateTime<Utc>)> {
-    let bytes = tokio::fs::read(home.join("busiest")).await.ok()?;
-    let busiest: Busiest = serde_json::from_slice(&bytes).ok()?;
-    Some((busiest.count, busiest.at))
-}
-
-/// Records how many checkouts are busy now, when that is the most the
-/// pool remembers.
-async fn record_busy(home: &Path, now: DateTime<Utc>) {
-    let mut busy = 0;
-    if let Ok(mut entries) = tokio::fs::read_dir(home).await {
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            busy += usize::from(name.starts_with(SLOT) && name.ends_with(".lock"));
-        }
-    }
-    let higher = match busiest(home).await {
-        Some((count, at)) => busy > count || now - at > remembered(),
-        None => true,
-    };
-    if higher {
-        record(
-            &home.join("busiest"),
-            &Busiest {
-                count: busy,
-                at: now,
-            },
-        )
-        .await;
-    }
 }
 
 /// Writes `value` at `path` whole — through a file beside it, renamed

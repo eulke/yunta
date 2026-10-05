@@ -36,8 +36,15 @@ pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
     let Reclaimed {
         removed,
         given_back,
+        idle,
     } = reclaim(&ctx, dry_run)?;
-    let pool = yunta_engine::CheckoutPool::upkeep(&ctx.project.worktrees_root, &ctx.cwd);
+    let limits = ctx
+        .project
+        .config
+        .storage
+        .as_ref()
+        .and_then(|storage| storage.pool.as_ref());
+    let pool = yunta_engine::CheckoutPool::upkeep(&ctx.project.worktrees_root, &ctx.cwd, limits);
     for run_id in &removed {
         forget_units(&ctx, &pool, run_id).await;
     }
@@ -46,7 +53,12 @@ pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
             give_back(&ctx, &pool, run_id, tree).await;
         }
         adopt(&ctx, &pool).await;
-        trim(&ctx, &pool).await;
+        for (run_id, places) in &idle {
+            take_old_layouts(&ctx, run_id, places).await;
+        }
+        tidy(&ctx, &pool).await;
+    } else if let Ok(kept) = pool.report(ctx.supervision()).await {
+        println!("the project's checkouts: {kept}");
     }
     Ok(Outcome::Success)
 }
@@ -58,6 +70,9 @@ pub async fn gc(dry_run: bool) -> Result<Outcome, CliError> {
 struct Reclaimed {
     removed: Vec<RunId>,
     given_back: Vec<(RunId, PathBuf)>,
+    /// Where each run nothing drives kept checkouts before the project's
+    /// pool: its units' directory, and its own tree when outside the pool.
+    idle: Vec<(RunId, Vec<PathBuf>)>,
 }
 
 /// Gives a run's checkout back to the project's pool, with no branch.
@@ -96,16 +111,57 @@ async fn adopt(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
     }
 }
 
-/// Takes away the project's free checkouts beyond as many as its runs had
-/// busy at once lately.
-async fn trim(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
-    match yunta_engine::trim_pool(pool, ctx.supervision()).await {
-        Ok(removed) => {
-            for checkout in removed {
+/// Tidies the project's pool — what its checkouts' builds take is
+/// measured where nobody did, a build unused within retention is emptied,
+/// the builds stay within the budget, and a free checkout holding no
+/// build goes — and says what the pool keeps.
+async fn tidy(ctx: &Context, pool: &yunta_engine::CheckoutPool) {
+    let unused = ctx
+        .project
+        .config
+        .storage
+        .as_ref()
+        .and_then(|storage| storage.retention_days)
+        .map(|days| chrono::Duration::days(i64::from(days)));
+    match pool.tidy(unused, ctx.supervision()).await {
+        Ok(tidied) => {
+            for (checkout, bytes) in &tidied.emptied {
+                println!(
+                    "emptied the build of {} ({})",
+                    checkout.display(),
+                    yunta_core::units::Bytes(*bytes)
+                );
+            }
+            for checkout in &tidied.removed {
                 println!("removed the unused checkout {}", checkout.display());
             }
+            println!("the project's checkouts: {}", tidied.kept);
         }
         Err(e) => warn(format!("the project's checkouts: {e}")),
+    }
+}
+
+/// Takes away the clean checkouts run `run_id`, which nothing drives,
+/// kept at `places` before the project's pool, and names the ones kept.
+async fn take_old_layouts(ctx: &Context, run_id: &RunId, places: &[PathBuf]) {
+    for place in places {
+        match yunta_engine::remove_old_checkouts(&ctx.cwd, place, ctx.supervision()).await {
+            Ok(done) => {
+                for checkout in done {
+                    match checkout {
+                        yunta_engine::OldCheckout::Removed(path) => {
+                            println!("removed {} of run {}", path.display(), run_id.handle());
+                        }
+                        yunta_engine::OldCheckout::Kept(path) => println!(
+                            "kept {} of run {}: something in it is uncommitted",
+                            path.display(),
+                            run_id.handle()
+                        ),
+                    }
+                }
+            }
+            Err(e) => warn(format!("run {}: {e}", run_id.handle())),
+        }
     }
 }
 
@@ -154,6 +210,11 @@ fn reclaim(ctx: &Context, dry_run: bool) -> Result<Reclaimed, CliError> {
                     Some(yunta_core::events::EventPayload::Run(RunEvent::Finished(_)))
                 )
             });
+        if !is_terminal {
+            if let Some(places) = old_layouts(&ctx.project, &run_id, &state) {
+                collected.idle.push((run_id.clone(), places));
+            }
+        }
         let age_days = (now - last.timestamp).num_days();
         if age_days < retention_days as i64 {
             continue;
@@ -216,6 +277,28 @@ fn reclaim(ctx: &Context, dry_run: bool) -> Result<Reclaimed, CliError> {
         println!("{} reclaimed", yunta_core::text::counted(reclaimed, "run"));
     }
     Ok(collected)
+}
+
+/// Where a run nothing drives kept checkouts before the project's pool:
+/// its units' directory under its own, and its own tree when the pool
+/// does not keep it. `None` for a run an engine drives now, or may.
+fn old_layouts(
+    project: &Project,
+    run_id: &RunId,
+    state: &yunta_engine::RunState,
+) -> Option<Vec<PathBuf>> {
+    let run_dir = project.run_dir(run_id.as_str())?;
+    let liveness = yunta_engine::engine_liveness(&run_dir, &yunta_engine::lock::SystemProbe);
+    if !matches!(
+        liveness,
+        yunta_engine::EngineLiveness::Dead | yunta_engine::EngineLiveness::Unrecorded
+    ) {
+        return None;
+    }
+    let mut places = vec![yunta_engine::run_dir::unit_worktrees(&run_dir)];
+    let bound = state.run.checkout();
+    places.extend(worktree_of(project, &run_dir, run_id, bound).filter(|tree| !in_the_pool(tree)));
+    Some(places)
 }
 
 /// Whether `tree` is a checkout of a project's pool — `pool/<project>/slot-N`

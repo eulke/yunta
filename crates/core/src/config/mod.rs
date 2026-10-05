@@ -16,6 +16,7 @@ mod env;
 mod keys;
 mod merge;
 mod permissions;
+mod pool;
 mod sections;
 
 use std::collections::BTreeMap;
@@ -36,6 +37,7 @@ pub use permissions::{
     permission_layer_conflicts, CommandPermissions, NetworkPermissions, PackExecutorPolicy,
     PackPermissions, PermissionsConfig, PublisherPermissions,
 };
+pub use pool::{DiskShare, PoolConfig};
 pub use sections::{
     is_default_isolation, AdapterSettings, BaselineConfig, CoverageConfig, DefaultOnFailure,
     DefaultsConfig, ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, Isolation,

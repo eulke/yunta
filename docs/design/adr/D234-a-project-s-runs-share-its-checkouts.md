@@ -3,7 +3,7 @@ number: D234
 title: "A project's runs share its checkouts, and a build stays at the path that made it"
 status: revised
 revises: [D231, D160]
-revised_by: [D246]
+revised_by: [D246, D247]
 ---
 
 # D234 — A project's runs share its checkouts, and a build stays at the path that made it

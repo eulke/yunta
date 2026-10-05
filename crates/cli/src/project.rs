@@ -65,7 +65,7 @@ impl Project {
             &self.worktrees_root_for(manifest),
             repo,
             run_dir,
-            manifest.project.as_ref(),
+            manifest,
         )
     }
 

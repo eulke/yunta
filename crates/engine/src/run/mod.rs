@@ -43,6 +43,7 @@ mod gate_exec;
 pub(crate) mod gate_findings;
 mod hooks_exec;
 mod internal_gate;
+mod invocation;
 mod loop_exec;
 mod node_artifacts;
 mod node_close;
@@ -152,6 +153,11 @@ pub enum RunError {
     /// `run_paused { cancelled by user }`, and a CLI into its own exit.
     #[error("cancelled by user")]
     Cancelled,
+
+    /// The disk has no room for what the run is about to build: the run
+    /// stops and says how to make some, rather than filling the disk.
+    #[error(transparent)]
+    NoRoom(crate::worktree::WorktreeError),
 
     /// A `HumanInteraction` surface returned an answer the escalation it
     /// was shown does not accept — an option it never offered, or one
@@ -266,9 +272,10 @@ impl From<crate::git::GitError> for RunError {
 
 impl From<crate::worktree::WorktreeError> for RunError {
     fn from(worktree: crate::worktree::WorktreeError) -> Self {
-        match worktree.cancelled() {
-            true => RunError::Cancelled,
-            false => RunError::Worktree(worktree),
+        match (worktree.cancelled(), &worktree) {
+            (true, _) => RunError::Cancelled,
+            (false, crate::worktree::WorktreeError::NoRoom { .. }) => RunError::NoRoom(worktree),
+            (false, _) => RunError::Worktree(worktree),
         }
     }
 }

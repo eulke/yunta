@@ -112,6 +112,11 @@ mod pause_reason_tests {
                 spent: 120_000,
                 cap: 100_000,
             },
+            PauseReason::NoRoom {
+                available: 8_200_000_000,
+                need: 15_400_000_000,
+                keep_free: 10_000_000_000,
+            },
             PauseReason::LoopOverrun {
                 node: NodeId::from("build"),
                 cap: 8,
@@ -168,6 +173,7 @@ mod pause_reason_tests {
                 | PauseReason::Cancelled
                 | PauseReason::CancelledAfterCrash
                 | PauseReason::BudgetExhausted { .. }
+                | PauseReason::NoRoom { .. }
                 | PauseReason::LoopOverrun { .. }
                 | PauseReason::ExternalGate { .. }
                 | PauseReason::UncertainOrphans(_)

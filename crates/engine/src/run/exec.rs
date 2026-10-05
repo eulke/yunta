@@ -181,8 +181,25 @@ async fn drive(ready: &Ready<'_>) -> Result<RunReport, RunError> {
 }
 
 /// Takes one step the scheduler decided, answering with the report of a
-/// step that ended the invocation.
+/// step that ended the invocation. A step the disk has no room for stops
+/// the run, saying how to make some.
 async fn take_step(
+    ctx: &RunCtx<'_>,
+    state: &crate::replay::RunState,
+    mode_name: &ModeName,
+    decision: Decision,
+) -> Result<Option<RunReport>, RunError> {
+    // Boxed: a step runs at the bottom of every composed run's stack.
+    match Box::pin(step(ctx, state, mode_name, decision)).await {
+        Err(RunError::NoRoom(crate::worktree::WorktreeError::NoRoom { room })) => {
+            pause(ctx, room.pause()).await.map(Some)
+        }
+        taken => taken,
+    }
+}
+
+/// One step the scheduler decided, taken.
+async fn step(
     ctx: &RunCtx<'_>,
     state: &crate::replay::RunState,
     mode_name: &ModeName,
@@ -267,7 +284,7 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
             state: view.state,
         })));
     }
-    share_dirs(&ctx.manifest.config).await?;
+    super::invocation::share_dirs(&ctx.manifest.config).await?;
     if view.state.woken() {
         // An invocation already worked on this run — this one is a
         // resume. A birth writes as many events as the run was born
@@ -374,10 +391,10 @@ fn build_ctx(
         &crate::run_dir::worktrees_root(manifest, run_dir),
         worktree,
         run_dir,
-        manifest.project.as_ref(),
+        manifest,
     );
     let registry_for_host = registry.clone();
-    let subprocess_vars = subprocess_vars(ambient, &manifest.config);
+    let subprocess_vars = super::invocation::subprocess_vars(ambient, &manifest.config);
     let ctx = RunCtx {
         fence_hook,
         run_id,
@@ -433,38 +450,6 @@ fn build_ctx(
         )),
     };
     (ctx, root_cancel, registry_error)
-}
-
-/// Every variable layered onto a subprocess of the run: the ambient
-/// ones a caller injects, then each shared directory under its variable.
-fn subprocess_vars(
-    ambient: Option<&yunta_core::Env>,
-    config: &yunta_core::ConfigLayer,
-) -> Vec<(String, String)> {
-    let mut vars = ambient
-        .map(|ambient| ambient.subprocess_vars.clone())
-        .unwrap_or_default();
-    vars.extend(
-        config
-            .shared_dirs()
-            .map(|(var, dir)| (var.to_string(), dir.display().to_string())),
-    );
-    vars
-}
-
-/// Makes every shared directory exist before anything is asked to write
-/// in it: a session's sandbox keeps a directory writable, it does not
-/// create one.
-async fn share_dirs(config: &yunta_core::ConfigLayer) -> Result<(), RunError> {
-    for (_, dir) in config.shared_dirs() {
-        tokio::fs::create_dir_all(dir)
-            .await
-            .map_err(|source| RunError::Io {
-                context: format!("create the shared directory `{}`", dir.display()),
-                source,
-            })?;
-    }
-    Ok(())
 }
 
 pub(super) fn find_node<'a>(

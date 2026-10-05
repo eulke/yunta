@@ -133,44 +133,74 @@ async fn a_checkout_whose_work_landed_is_free_with_its_branch() {
     assert_eq!(world.slots().await, vec!["slot-1"]);
 }
 
-/// The pool keeps as many free checkouts as were busy at once, the most
-/// recently used, and takes the rest away.
+/// Past its budget, the pool empties the build of the free checkout used
+/// least recently — never the one about to be taken — and keeps its
+/// source.
 #[tokio::test]
-async fn gc_keeps_as_many_free_slots_as_were_busy() {
+async fn past_its_budget_the_pool_empties_the_least_recently_used_free_build() {
     let world = World::new();
-    let mut units = Vec::new();
-    for task in ["T001", "T002", "T003"] {
-        let (unit, held) = world.open(task).await;
-        yunta_testkit::git(
-            &unit.worktree,
-            &["commit", "-q", "--allow-empty", "-m", task],
-        );
-        drop(held);
-        units.push(unit);
+    let (older, older_held) = world.open("T001").await;
+    let (newer, newer_held) = world.open("T002").await;
+    for unit in [&older, &newer] {
+        write(&unit.worktree.join("target/build"), &"b".repeat(64 * 1024));
     }
-    for unit in &units {
-        let (unit, held) = world
-            .pool
-            .reopen_unit(
-                &world.run,
-                unit.who.clone(),
-                None,
-                world.owner.supervision(),
-            )
-            .await
-            .unwrap()
-            .expect("each unit's checkout is still its own");
-        world.land(&unit, &held).await;
-    }
-    let upkeep =
-        yunta_engine::CheckoutPool::upkeep(&world.root.path().join("worktrees"), &world.repo);
+    world.land(&older, &older_held).await;
+    world.land(&newer, &newer_held).await;
+    world
+        .give_back_at(&older, older_held, "2026-01-01T00:00:00Z")
+        .await;
+    world
+        .give_back_at(&newer, newer_held, "2026-01-02T00:00:00Z")
+        .await;
+    let budget = yunta_core::PoolConfig {
+        budget: Some(yunta_core::DiskShare::Bytes(100_000)),
+        keep_free: Some(yunta_core::DiskShare::Bytes(0)),
+    };
+    let pool = yunta_engine::CheckoutPool::within(
+        &world.root.path().join("worktrees"),
+        &world.repo,
+        &world.root.path().join("run"),
+        &budget,
+    );
 
-    let removed = yunta_engine::trim_pool(&upkeep, world.owner.supervision())
-        .await
-        .unwrap();
+    let (taken, _held) = world.open_through(&pool, &world.run, "T003", 1).await;
 
-    assert_eq!(removed.len(), 2, "{removed:?}");
-    assert_eq!(world.slots().await, vec!["slot-1"]);
+    assert_eq!(taken.worktree, newer.worktree);
+    assert!(
+        !older.worktree.join("target/build").exists(),
+        "the older build went"
+    );
+    assert!(
+        older.worktree.join(".gitignore").exists(),
+        "its source stayed"
+    );
+}
+
+/// A checkout that would leave less of the disk free than the pool keeps
+/// free is refused, saying so.
+#[tokio::test]
+async fn a_checkout_is_refused_when_it_would_leave_less_than_kept_free() {
+    let world = World::new();
+    let everything = yunta_core::PoolConfig {
+        budget: None,
+        keep_free: Some(yunta_core::DiskShare::Percent(100)),
+    };
+    let pool = yunta_engine::CheckoutPool::within(
+        &world.root.path().join("worktrees"),
+        &world.repo,
+        &world.root.path().join("run"),
+        &everything,
+    );
+
+    let refused = pool
+        .open_detached(&world.head(), world.owner.supervision())
+        .await;
+
+    assert!(
+        matches!(refused, Err(yunta_engine::WorktreeError::NoRoom { .. })),
+        "{:?}",
+        refused.map(|(path, _)| path)
+    );
 }
 
 /// A run's own checkout is the run's while it lives, parked or not: no

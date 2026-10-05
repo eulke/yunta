@@ -94,6 +94,9 @@ pub struct StorageConfig {
     pub path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention_days: Option<u32>,
+    /// What the project's checkouts may keep of the disk.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<super::PoolConfig>,
 }
 
 /// `project:` — backs the `{{project.*}}` template namespace, the

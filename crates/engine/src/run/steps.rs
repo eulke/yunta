@@ -289,6 +289,9 @@ pub(super) async fn execute_batch(
     state: &RunState,
     batch: Vec<(NodeId, u32)>,
 ) -> Result<Option<RunReport>, RunError> {
+    // Work needs the disk's floor free: a batch that would start below it
+    // stops the run instead, saying how to make room.
+    Box::pin(ctx.pool.keeps_its_floor(ctx.root_supervision())).await?;
     // The budget check guards exactly the steps that spend tokens — a run
     // whose remaining work is gates and questions finishes without ever
     // tripping it.

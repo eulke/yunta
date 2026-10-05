@@ -37,7 +37,7 @@ pub use findings::{payloads::*, FindingEvent};
 pub use gates::{ledger::*, payloads::*, GateEvent, Withheld};
 pub use meta::EventMeta;
 pub use node::{ledger::*, payloads::*, NodeEvent};
-pub use run::{ledger::*, payloads::*, RunEvent, Suspension, Suspensions};
+pub use run::{ledger::*, payloads::*, PauseReason, RunEvent, Suspension, Suspensions};
 pub use scope::{ledger::*, payloads::*, ScopeEvent};
 pub use session::{ledger::*, payloads::*, SessionEvent};
 pub use tasks::{ledger::*, payloads::*, TaskEvent};

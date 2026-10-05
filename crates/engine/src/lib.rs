@@ -173,7 +173,7 @@ pub use worktree::{
     adopt_unit_branches, capture_tree, cleanup_worktree, commit_tree, commit_work,
     forget_run_units, hand_over_run_checkout, hand_over_worktree, head_commit, head_tree, land,
     pool_home, prepare_worktree, rebase_onto, release_run_checkout, release_unit_checkouts,
-    release_worktree, run_branch, snapshot_commit, still_the_runs, trim_pool, CheckoutPool, Lease,
-    Rebase, RunWorktree, Unit, UnitHome, UnitId, UnitRef, WorktreeCleanup, WorktreeError,
-    WorktreeIntegrity, WorktreePrepared,
+    release_worktree, remove_old_checkouts, run_branch, snapshot_commit, still_the_runs,
+    CheckoutPool, Lease, OldCheckout, PoolReport, Rebase, RunWorktree, Tidied, Unit, UnitHome,
+    UnitId, UnitRef, WorktreeCleanup, WorktreeError, WorktreeIntegrity, WorktreePrepared,
 };

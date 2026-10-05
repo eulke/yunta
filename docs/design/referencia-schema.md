@@ -73,6 +73,9 @@ coverage:
 storage:
   path: ~/.yunta/yunta.db           # SQLite en modo WAL — único backend (D53)
   retention_days: 90
+  pool:                             # lo que los checkouts del proyecto guardan del disco (D247)
+    budget: 60G                     # bytes (80G, 500M, 1.5T) o parte del disco (20%)
+    keep_free: 10%                  # lo que del disco siempre queda libre
 
 paths:                              # dónde vive el estado (§2.2); `YUNTA_HOME` los sobreescribe
   runs: ~/.yunta/runs

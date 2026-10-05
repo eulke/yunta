@@ -6,7 +6,7 @@ use std::path::Path;
 
 use yunta_core::CommitSha;
 
-use super::{fit, slot, survey, CheckoutPool, Taken};
+use super::{fit, room, slot, space, survey, CheckoutPool, Taken};
 use crate::lock::Contention;
 use crate::process::Supervision;
 use crate::worktree::WorktreeError;
@@ -30,26 +30,11 @@ impl CheckoutPool {
             .filter(|slot| slot.standing.is_some())
             .map(|slot| slot.number)
             .collect();
-        let mut ranked = fit::ranked(slots, user, target);
-        // How far each stands from `target` tells apart only candidates
-        // the survey could not: with one, there is nothing to tell apart.
-        let best = match ranked.len() {
-            0 | 1 => 0,
-            many => many.min(3),
-        };
-        let mut nearest = Vec::with_capacity(best);
-        for candidate in ranked.drain(..best) {
-            let away = match candidate.at_target() {
-                true => 0,
-                false => distance(&candidate.slot.path, target, supervision).await,
-            };
-            nearest.push((candidate, away));
-        }
-        nearest.sort_by_key(|(candidate, away)| candidate.rank(*away));
-        let ordered = nearest
-            .into_iter()
-            .map(|(candidate, _)| candidate)
-            .chain(ranked);
+        space::count_pending(&home, &slots, &self.walking);
+        let builds = room::Builds::of(&slots);
+        let ranked = fit::ranked(slots, user, target);
+        self.room_for(ranked.first(), builds, supervision).await?;
+        let ordered = nearest_first(ranked, target, supervision).await;
         for candidate in ordered {
             let held = slot::hold(
                 &home,
@@ -69,6 +54,33 @@ impl CheckoutPool {
         }
         Ok(Taken::Nothing { listed })
     }
+}
+
+/// `ranked` with its best few told apart by how many paths separate each
+/// from `target` — what the survey could not tell; with one, there is
+/// nothing to tell apart.
+async fn nearest_first(
+    mut ranked: Vec<fit::Candidate>,
+    target: &CommitSha,
+    supervision: Supervision<'_>,
+) -> impl Iterator<Item = fit::Candidate> {
+    let best = match ranked.len() {
+        0 | 1 => 0,
+        many => many.min(3),
+    };
+    let mut nearest = Vec::with_capacity(best);
+    for candidate in ranked.drain(..best) {
+        let away = match candidate.at_target() {
+            true => 0,
+            false => distance(&candidate.slot.path, target, supervision).await,
+        };
+        nearest.push((candidate, away));
+    }
+    nearest.sort_by_key(|(candidate, away)| candidate.rank(*away));
+    nearest
+        .into_iter()
+        .map(|(candidate, _)| candidate)
+        .chain(ranked)
 }
 
 /// Whether `checkout` — checkout `number` of the pool at `home`, held —

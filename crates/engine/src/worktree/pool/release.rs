@@ -2,7 +2,7 @@
 //! own when it ends, and the ones a project no longer uses when it
 //! collects what is old — and how legacy unit branches are taken in.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::super::WorktreeError;
 use super::{slot, survey, CheckoutPool};
@@ -114,64 +114,6 @@ pub async fn forget_run_units(
 ) -> Result<(), WorktreeError> {
     adopt_unit_branches(pool, repo, Some(run_id), supervision).await?;
     pool.forget_units_of(repo, run_id, supervision).await
-}
-
-/// Takes away the free checkouts of the pool beyond as many as were busy
-/// at once lately, the least recently used first: a project keeps the
-/// warm checkouts it uses, and no more.
-pub async fn trim_pool(
-    pool: &CheckoutPool,
-    supervision: Supervision<'_>,
-) -> Result<Vec<PathBuf>, WorktreeError> {
-    let home = pool.home(supervision).await?;
-    let keep = busiest(&home, supervision.clock.now()).await;
-    let mut free = Vec::new();
-    for slot in survey::survey(&home, &pool.repo, supervision).await? {
-        if slot
-            .standing
-            .is_none_or(|standing| standing.branch.is_some())
-        {
-            continue;
-        }
-        if survey::look(&slot.path, supervision)
-            .await
-            .is_some_and(|look| look.clean)
-        {
-            let used = slot.held.map(|held| held.at);
-            free.push((std::cmp::Reverse(used), slot.number, slot.path));
-        }
-    }
-    free.sort();
-    let mut removed = Vec::new();
-    for (_, number, path) in free.into_iter().skip(keep) {
-        let held = slot::hold(&home, number, Contention::Refuse, None, supervision);
-        let Some(_lease) = held.await? else {
-            continue;
-        };
-        let common_dir = super::super::common_git_dir(&pool.repo, supervision).await?;
-        let _mutation_lock =
-            super::super::lock_worktree_mutations(&common_dir, supervision.clock).await?;
-        let shown = path.display().to_string();
-        super::super::run_git(
-            &pool.repo,
-            &["worktree", "remove", "--force", &shown],
-            supervision,
-        )
-        .await?;
-        removed.push(path);
-    }
-    Ok(removed)
-}
-
-/// How many checkouts were busy at once within the time the pool
-/// remembers, as the pool last recorded it — every checkout it has, when
-/// it recorded nothing.
-async fn busiest(home: &Path, now: chrono::DateTime<chrono::Utc>) -> usize {
-    match slot::busiest(home).await {
-        Some((count, at)) if now - at <= slot::remembered() => count.max(1),
-        Some(_) => 1,
-        None => usize::MAX,
-    }
 }
 
 /// Takes in the legacy unit branches — `run`'s, or every run's — as the refs units keep their work by: each branch's commit is kept by

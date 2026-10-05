@@ -8,6 +8,10 @@
 //!
 //! Says who git commits a run's work as, or that it cannot name anyone.
 //!
+//! Says what the project's checkouts keep of the disk: within their
+//! budget, and over the part of it always kept free — under which a run
+//! stops.
+//!
 //! Also validates every installed pack's own `requires:` against this
 //! project's merged config: roles resolvable, `mcp_servers:` defined,
 //! and — the one part `yunta_engine::check_pack_requires` deliberately
@@ -37,6 +41,7 @@ pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
         Err(why) => checks.push(Found::Problem, "git", why.to_string()),
     }
     checks.extend(super::forge::forge_checks(&ctx).await);
+    checkouts(&ctx, &mut checks).await;
     check_installed_pack_requires(&ctx.cwd, &ctx.project.config, &mut checks, &mut steps);
     check_installed_pack_workflows(&ctx, &mut checks, &mut steps).await;
     if session {
@@ -68,6 +73,30 @@ pub async fn doctor(session: bool) -> Result<Outcome, CliError> {
         true => Ok(Outcome::Success),
         false => Ok(Outcome::Reported),
     }
+}
+
+/// What the project's checkouts keep of the disk: a problem when the disk
+/// is already under the part of it kept free — a run stops there — and a
+/// caution when their builds are over budget, which the next checkout
+/// taken or `yunta gc` empties.
+async fn checkouts(ctx: &Context, checks: &mut Checklist) {
+    let limits = ctx
+        .project
+        .config
+        .storage
+        .as_ref()
+        .and_then(|storage| storage.pool.as_ref());
+    let pool = yunta_engine::CheckoutPool::upkeep(&ctx.project.worktrees_root, &ctx.cwd, limits);
+    let kept = match pool.report(ctx.supervision()).await {
+        Ok(kept) => kept,
+        Err(e) => return checks.push(Found::Caution, "checkouts", e.to_string()),
+    };
+    let found = match (kept.available < kept.keep_free, kept.builds > kept.budget) {
+        (true, _) => Found::Problem,
+        (false, true) => Found::Caution,
+        (false, false) => Found::Holds,
+    };
+    checks.push(found, "checkouts", kept.to_string());
 }
 
 /// Probes every adapter this project's `runners:` names, a check each.

@@ -77,6 +77,12 @@ impl Candidate {
         self.at_target
     }
 
+    /// Whether what it holds is known to be no build: taking it builds
+    /// everything there.
+    pub(super) fn is_empty(&self) -> bool {
+        self.build == Build::Empty
+    }
+
     /// How it ranks when `away` paths separate it from where its user
     /// starts: lower is better.
     pub(super) fn rank(
@@ -113,8 +119,8 @@ pub(super) fn ranked(slots: Vec<Slot>, user: User<'_>, target: &CommitSha) -> Ve
             let unit = slot.held.as_ref().and_then(|held| held.unit.as_deref());
             let claim = claim(standing, unit, user)?;
             let at_target = standing.head.as_ref() == Some(target);
-            let build = match slot.built {
-                Some(built) if built.bytes > 0 => Build::Held,
+            let build = match &slot.built {
+                Some(built) if built.holds() => Build::Held,
                 Some(_) => Build::Empty,
                 None => Build::Unknown,
             };

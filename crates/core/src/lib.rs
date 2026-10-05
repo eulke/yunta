@@ -25,6 +25,7 @@ mod clock;
 pub mod commit_message;
 mod config;
 pub mod diagnostic;
+pub mod disk;
 mod error;
 pub mod events;
 pub mod fence;
@@ -63,11 +64,11 @@ pub use clock::{Clock, SystemClock};
 pub use config::{
     permission_layer_conflicts, user_state_root, AdapterSettings, BaselineConfig,
     CommandPermissions, ConfigKey, ConfigLayer, CoverageConfig, DefaultOnFailure, DefaultsConfig,
-    Env, ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, HomeExpansionError,
-    Isolation, LimitsConfig, McpServerConfig, NetworkPermissions, PackExecutorPolicy,
-    PackPermissions, PathsConfig, PermissionsConfig, PricingEntry, ProcessSecrets, ProjectConfig,
-    PublisherPermissions, Redactor, RunnerCandidate, SecretSource, SkillsConfig, StorageConfig,
-    REDACTED,
+    DiskShare, Env, ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig,
+    HomeExpansionError, Isolation, LimitsConfig, McpServerConfig, NetworkPermissions,
+    PackExecutorPolicy, PackPermissions, PathsConfig, PermissionsConfig, PoolConfig, PricingEntry,
+    ProcessSecrets, ProjectConfig, PublisherPermissions, Redactor, RunnerCandidate, SecretSource,
+    SkillsConfig, StorageConfig, REDACTED,
 };
 pub use diagnostic::{
     ArtifactFailure, Diagnostic, DocumentRef, FileProblem, Named, Problem, Report, Rule, RuleCode,

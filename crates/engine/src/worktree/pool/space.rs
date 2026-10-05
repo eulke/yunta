@@ -1,8 +1,10 @@
 //! What a checkout's build takes on disk: everything git ignores in it,
-//! measured when the checkout is given back and kept beside it as
-//! `slot-N.built`. The measurement walks files, which takes seconds on a
-//! large build, so it runs out of the way of the run that gave the
-//! checkout back; the pool reads what it last found.
+//! kept beside the checkout as `slot-N.built`. A give-back records where
+//! the build is — what git ignores, listed while the checkout is still
+//! held — and the walk that counts its bytes runs off the way of whoever
+//! gave it back: it takes seconds on a large build. A walk a process did
+//! not live to finish is finished by the next one that surveys the pool,
+//! or by `gc`; the pool reads what was last counted.
 
 use std::path::{Path, PathBuf};
 
@@ -12,41 +14,133 @@ use serde::{Deserialize, Serialize};
 use super::slot::SLOT;
 use crate::process::Supervision;
 
-/// What a checkout's build took when it was last given back.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// The build a checkout was last given back with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct Built {
-    /// Bytes on disk of everything git ignores in it; `0` for none.
-    pub(super) bytes: u64,
-    /// When the checkout was given back with that build.
+    /// What git ignores in the checkout — where its build is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(super) roots: Vec<PathBuf>,
+    /// What those take on disk — `None` while nobody finished counting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) bytes: Option<u64>,
+    /// When the checkout was given back with it.
     pub(super) at: DateTime<Utc>,
 }
 
-/// What the pool at `home` last measured of checkout `number`'s build.
+impl Built {
+    /// Whether the checkout holds a build at all.
+    pub(super) fn holds(&self) -> bool {
+        !self.roots.is_empty() || self.bytes.is_some_and(|bytes| bytes > 0)
+    }
+
+    /// What its build takes, as far as anybody counted.
+    pub(super) fn counted(&self) -> u64 {
+        self.bytes.unwrap_or(0)
+    }
+}
+
+/// The build checkout `number` of the pool at `home` was last given back
+/// with.
 pub(super) async fn built(home: &Path, number: u32) -> Option<Built> {
     let bytes = tokio::fs::read(built_path(home, number)).await.ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
-/// Records what `roots` — what git ignores in checkout `number` of the
-/// pool at `home`, given back at `at` — take on disk: at once when there
-/// are none, and otherwise walked off the caller's way and recorded
-/// unless a later give-back already was.
-pub(super) async fn measure(home: &Path, number: u32, roots: Vec<PathBuf>, at: DateTime<Utc>) {
-    let path = built_path(home, number);
-    if roots.is_empty() {
-        record(&path, Built { bytes: 0, at }).await;
-        return;
+/// Records that checkout `number` of the pool at `home` was given back at
+/// `at` holding what git ignores at `roots`, and counts what that takes
+/// off the caller's way — unless `walking`, the walks this process has
+/// under way, already counts it.
+pub(super) async fn given_back(
+    home: &Path,
+    number: u32,
+    roots: Vec<PathBuf>,
+    at: DateTime<Utc>,
+    walking: &Walking,
+) {
+    let bytes = roots.is_empty().then_some(0);
+    let built = Built { roots, bytes, at };
+    record(&built_path(home, number), &built).await;
+    if built.bytes.is_none() {
+        walking.count(built_path(home, number), built);
     }
-    tokio::spawn(async move {
-        let Ok(bytes) = tokio::task::spawn_blocking(move || super::walk::on_disk(&roots)).await
-        else {
-            return;
-        };
-        let newer = built_at(&path).await.is_some_and(|recorded| recorded > at);
-        if !newer {
-            record(&path, Built { bytes, at }).await;
+}
+
+/// Counts every build the survey `slots` found recorded and not counted,
+/// off the caller's way.
+pub(super) fn count_pending(home: &Path, slots: &[super::survey::Slot], walking: &Walking) {
+    for slot in slots {
+        if let Some(built) = slot.built.as_ref().filter(|built| built.bytes.is_none()) {
+            walking.count(built_path(home, slot.number), built.clone());
         }
-    });
+    }
+}
+
+/// The walks a process has under way, by the record each one finishes.
+#[derive(Default)]
+pub(super) struct Walking(std::sync::Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>);
+
+impl Walking {
+    /// Counts `built`'s bytes off the caller's way and records them at
+    /// `path`, unless a walk of it is under way or a later give-back was
+    /// recorded first.
+    fn count(&self, path: PathBuf, built: Built) {
+        let under_way = self.0.clone();
+        let started = under_way
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(path.clone());
+        if !started {
+            return;
+        }
+        tokio::spawn(async move {
+            let roots = built.roots.clone();
+            let counted = tokio::task::spawn_blocking(move || super::walk::on_disk(&roots)).await;
+            if let Ok(bytes) = counted {
+                let newer = recorded_at(&path).await.is_some_and(|at| at > built.at);
+                if !newer {
+                    let bytes = Some(bytes);
+                    record(&path, &Built { bytes, ..built }).await;
+                }
+            }
+            under_way
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove(&path);
+        });
+    }
+}
+
+/// Counts `roots` — what git ignores in checkout `number` of the pool at
+/// `home` — and records it as of `at`, waiting for the walk: what `gc`
+/// does where nobody counted. Answers the bytes.
+pub(super) async fn measure_now(
+    home: &Path,
+    number: u32,
+    roots: Vec<PathBuf>,
+    at: DateTime<Utc>,
+) -> u64 {
+    let walked = roots.clone();
+    let bytes = tokio::task::spawn_blocking(move || super::walk::on_disk(&walked))
+        .await
+        .unwrap_or(0);
+    let built = Built {
+        roots,
+        bytes: Some(bytes),
+        at,
+    };
+    record(&built_path(home, number), &built).await;
+    bytes
+}
+
+/// Records that checkout `number` of the pool at `home` holds no build
+/// since `at`.
+pub(super) async fn emptied(home: &Path, number: u32, at: DateTime<Utc>) {
+    let built = Built {
+        roots: Vec::new(),
+        bytes: Some(0),
+        at,
+    };
+    record(&built_path(home, number), &built).await;
 }
 
 /// The paths git ignores in `checkout`, whole directories named once —
@@ -72,7 +166,7 @@ pub(super) async fn ignored(checkout: &Path, supervision: Supervision<'_>) -> Op
     )
 }
 
-async fn built_at(path: &Path) -> Option<DateTime<Utc>> {
+async fn recorded_at(path: &Path) -> Option<DateTime<Utc>> {
     let bytes = tokio::fs::read(path).await.ok()?;
     serde_json::from_slice::<Built>(&bytes)
         .ok()
@@ -81,8 +175,8 @@ async fn built_at(path: &Path) -> Option<DateTime<Utc>> {
 
 /// Writes `built` at `path` whole: through a file beside it, renamed into
 /// place, so a reader never meets half of it.
-async fn record(path: &Path, built: Built) {
-    let Ok(json) = serde_json::to_vec(&built) else {
+async fn record(path: &Path, built: &Built) {
+    let Ok(json) = serde_json::to_vec(built) else {
         return;
     };
     let mut partial = path.as_os_str().to_owned();

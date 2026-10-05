@@ -4,10 +4,12 @@
 pub mod happening;
 pub mod kinds;
 pub mod ledger;
+pub mod pause;
 pub mod payloads;
 pub mod suspensions;
 
 pub use kinds::RunEvent;
 pub use ledger::*;
+pub use pause::PauseReason;
 pub use payloads::*;
 pub use suspensions::{Suspension, Suspensions};

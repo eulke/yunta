@@ -5,8 +5,8 @@ use std::collections::BTreeMap;
 
 use super::permissions::merge_permissions;
 use super::{
-    AdapterSettings, ConfigLayer, DefaultsConfig, LimitsConfig, PathsConfig, ProjectConfig,
-    StorageConfig,
+    AdapterSettings, ConfigLayer, DefaultsConfig, LimitsConfig, PathsConfig, PoolConfig,
+    ProjectConfig, StorageConfig,
 };
 
 pub(super) fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLayer {
@@ -182,6 +182,13 @@ fn merge_storage_config(base: StorageConfig, more_specific: StorageConfig) -> St
     StorageConfig {
         path: more_specific.path.or(base.path),
         retention_days: more_specific.retention_days.or(base.retention_days),
+        pool: match (base.pool, more_specific.pool) {
+            (Some(base), Some(more_specific)) => Some(PoolConfig {
+                budget: more_specific.budget.or(base.budget),
+                keep_free: more_specific.keep_free.or(base.keep_free),
+            }),
+            (base, more_specific) => more_specific.or(base),
+        },
     }
 }
 

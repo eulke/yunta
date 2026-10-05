@@ -123,6 +123,70 @@ fn gc_keeps_a_live_runs_unit_branch_work_by_a_ref() {
     );
 }
 
+/// `gc` says what the project's checkouts keep, and empties a build
+/// nobody used within retention: its source stays, a `git clean` away
+/// from where it was.
+#[test]
+fn gc_says_what_the_checkouts_hold_and_what_it_emptied() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    write(&repo.join(".gitignore"), "target/\n");
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-q", "-m", "ignore builds"]);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "storage:\n  retention_days: 0\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: builds\nnodes:\n  - id: only\n    kind: bash\n    run: \"mkdir -p target && echo built > target/x && echo a > a.txt\"\n    scope: [\"a.txt\"]\n",
+    );
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    assert!(run.status.success(), "stderr: {}", stderr(&run));
+
+    let gc = yunta_in!(&repo, &home, &["gc"]);
+
+    let said = stdout(&gc);
+    assert!(gc.status.success(), "stderr: {}", stderr(&gc));
+    assert!(said.contains("emptied the build of"), "{said}");
+    assert!(said.contains("the project's checkouts:"), "{said}");
+}
+
+/// A checkout a parked run kept under its own directory, before the
+/// project's pool, goes when nothing in it is uncommitted: a wake takes
+/// its checkouts from the pool.
+#[test]
+fn gc_reclaims_an_old_layouts_clean_unit_worktrees() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    let home = root.path().join("state");
+    write(
+        &repo.join(".yunta/config.yaml"),
+        "storage:\n  retention_days: 30\n",
+    );
+    write(
+        &repo.join("wf.yaml"),
+        "name: gated\nnodes:\n  - id: wait\n    kind: gate\n    assignee: lead\n",
+    );
+    let run = yunta_in!(&repo, &home, &["run", "wf.yaml"]);
+    let run_dir = home.join("runs").join(run_id_from(&run));
+    let old = run_dir.join("unit-worktrees/task/T1-1");
+    git(
+        &repo,
+        &["worktree", "add", "-q", "--detach", old.to_str().unwrap()],
+    );
+
+    let gc = yunta_in!(&repo, &home, &["gc"]);
+
+    assert!(gc.status.success(), "stderr: {}", stderr(&gc));
+    assert!(!old.exists(), "stdout: {}", stdout(&gc));
+}
+
 #[test]
 fn gc_dry_run_reports_without_removing_anything() {
     let root = tempfile::tempdir().unwrap();

@@ -30,11 +30,13 @@ mod add;
 mod fit;
 mod give;
 mod release;
+mod room;
 mod runs;
 mod slot;
 mod space;
 mod survey;
 mod take;
+mod tidy;
 mod units;
 mod walk;
 
@@ -49,9 +51,10 @@ use crate::process::Supervision;
 pub use give::clear_work;
 pub use release::{
     adopt_unit_branches, forget_run_units, hand_over_run_checkout, release_run_checkout,
-    release_unit_checkouts, still_the_runs, trim_pool,
+    release_unit_checkouts, still_the_runs,
 };
 use slot::SLOT;
+pub use tidy::{PoolReport, Tidied};
 
 /// A project's checkouts, as one run's invocation reaches them.
 pub struct CheckoutPool {
@@ -66,6 +69,10 @@ pub struct CheckoutPool {
     /// The project's common git directory as its run recorded it, which
     /// spares asking git while it is still there.
     known: Option<PathBuf>,
+    /// What the pool may keep of the disk.
+    limits: yunta_core::PoolConfig,
+    /// The walks counting builds this handle started, under way.
+    walking: space::Walking,
     /// Where the pool is, read once.
     located: tokio::sync::OnceCell<Located>,
 }
@@ -162,26 +169,45 @@ impl CheckoutPool {
     /// The pool of the project `repo` is a checkout of, kept under `root`,
     /// for the run whose directory is `holder`.
     pub fn new(root: &Path, repo: &Path, holder: &Path) -> Arc<Self> {
-        Self::reached(root, repo, Some(holder.to_path_buf()), None)
+        Self::reached(root, repo, Some(holder.to_path_buf()), None, None)
     }
 
     /// The pool of the project a run's manifest names, for that run: what
     /// the manifest recorded of the project is taken rather than asked
-    /// for again.
+    /// for again, and what it may keep of the disk is the run's config's.
     pub fn of_run(
         root: &Path,
         repo: &Path,
         holder: &Path,
-        project: Option<&yunta_core::ProjectIdentity>,
+        manifest: &yunta_core::Manifest,
     ) -> Arc<Self> {
-        let known = project.map(|project| project.git_common_dir.clone());
-        Self::reached(root, repo, Some(holder.to_path_buf()), known)
+        let known = manifest
+            .project
+            .as_ref()
+            .map(|project| project.git_common_dir.clone());
+        let limits = manifest
+            .config
+            .storage
+            .as_ref()
+            .and_then(|storage| storage.pool.as_ref());
+        Self::reached(root, repo, Some(holder.to_path_buf()), known, limits)
     }
 
-    /// The same pool, for its own upkeep: what it holds to tidy is never
-    /// recorded as used.
-    pub fn upkeep(root: &Path, repo: &Path) -> Arc<Self> {
-        Self::reached(root, repo, None, None)
+    /// The pool of the project `repo` is a checkout of, for the run whose
+    /// directory is `holder`, kept within `limits`.
+    pub fn within(
+        root: &Path,
+        repo: &Path,
+        holder: &Path,
+        limits: &yunta_core::PoolConfig,
+    ) -> Arc<Self> {
+        Self::reached(root, repo, Some(holder.to_path_buf()), None, Some(limits))
+    }
+
+    /// The same pool, for its own upkeep, kept within `limits`: what it
+    /// holds to tidy is never recorded as used.
+    pub fn upkeep(root: &Path, repo: &Path, limits: Option<&yunta_core::PoolConfig>) -> Arc<Self> {
+        Self::reached(root, repo, None, None, limits)
     }
 
     fn reached(
@@ -189,12 +215,15 @@ impl CheckoutPool {
         repo: &Path,
         holder: Option<PathBuf>,
         known: Option<PathBuf>,
+        limits: Option<&yunta_core::PoolConfig>,
     ) -> Arc<Self> {
         Arc::new(Self {
             root: root.to_path_buf(),
             repo: repo.to_path_buf(),
             holder,
             known,
+            limits: limits.cloned().unwrap_or_default(),
+            walking: space::Walking::default(),
             located: tokio::sync::OnceCell::new(),
         })
     }

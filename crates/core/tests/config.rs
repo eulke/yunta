@@ -93,6 +93,7 @@ fn storage_fields_deep_merge_across_layers() {
         storage: Some(StorageConfig {
             path: None,
             retention_days: Some(90),
+            pool: None,
         }),
         ..Default::default()
     };
@@ -100,6 +101,7 @@ fn storage_fields_deep_merge_across_layers() {
         storage: Some(StorageConfig {
             path: Some(PathBuf::from("~/.yunta/yunta.db")),
             retention_days: None,
+            pool: None,
         }),
         ..Default::default()
     };

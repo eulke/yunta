@@ -29,6 +29,7 @@ mod branches;
 mod commit;
 mod integrity;
 mod listing;
+mod old_layouts;
 mod overlay;
 mod pool;
 mod unit;
@@ -49,10 +50,12 @@ pub use branches::{run_branch, UnitRef};
 pub use commit::{commit_tree, restore, Captured};
 pub use integrity::{RunWorktree, WorktreeIntegrity};
 pub(crate) use listing::checkouts;
+pub use old_layouts::{remove_old_checkouts, OldCheckout};
 pub use overlay::{remove_files, tree_with, write_files};
 pub use pool::{
     adopt_unit_branches, clear_work, forget_run_units, hand_over_run_checkout, pool_home,
-    release_run_checkout, release_unit_checkouts, still_the_runs, trim_pool, CheckoutPool, Lease,
+    release_run_checkout, release_unit_checkouts, still_the_runs, CheckoutPool, Lease, PoolReport,
+    Tidied,
 };
 pub use unit::{
     carry_work, commit_work, land, rebase_onto, snapshot_commit, Carried, Rebase, Unit, UnitHome,
@@ -125,6 +128,16 @@ pub enum WorktreeError {
         lock_path: PathBuf,
         owner_pid: Option<Pid>,
     },
+    /// The disk has no room for another build without going under the
+    /// part of it the pool always leaves free, even with every build the
+    /// pool may empty emptied.
+    #[error(
+        "the disk has {} free and the checkout needs about {} more, where {} stays free",
+        yunta_core::units::Bytes(.room.available),
+        yunta_core::units::Bytes(.room.need),
+        yunta_core::units::Bytes(.room.keep_free)
+    )]
+    NoRoom { room: Room },
     /// A checkout of the project's pool a unit went back to is held by
     /// another process, which did not let go of it in the moment given.
     #[error("the checkout `{}` is held by another process", .path.display())]
@@ -174,6 +187,25 @@ pub enum WorktreeError {
     /// checkout to run `git worktree` from.
     #[error("the git common dir `{common_dir}` has no parent directory to run `git worktree` in")]
     NoMainRepo { common_dir: PathBuf },
+}
+
+/// What a checkout needed of the disk and did not find.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Room {
+    pub available: u64,
+    pub need: u64,
+    pub keep_free: u64,
+}
+
+impl Room {
+    /// Why a run stops for it.
+    pub fn pause(self) -> yunta_core::events::PauseReason {
+        yunta_core::events::PauseReason::NoRoom {
+            available: self.available,
+            need: self.need,
+            keep_free: self.keep_free,
+        }
+    }
 }
 
 impl WorktreeError {
