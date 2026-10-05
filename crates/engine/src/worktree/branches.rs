@@ -65,6 +65,12 @@ impl UnitRef {
         &self.0
     }
 
+    /// What the refs of every attempt of this ref's unit start with.
+    pub fn every_attempt(&self) -> &str {
+        let unit = self.0.rfind('/').and_then(|slash| self.0.get(..=slash));
+        unit.unwrap_or(&self.0)
+    }
+
     /// The attempt this ref keeps the work of.
     pub fn attempt(&self) -> Option<u32> {
         self.0.rsplit('/').next()?.parse().ok()

@@ -95,17 +95,16 @@ impl CheckoutPool {
             })
     }
 
-    /// Lets go of `unit`'s checkout, still held by `lease`, once its work
-    /// landed: the ref that kept the work goes — the run's tree holds it —
-    /// and the checkout is kept for nobody.
+    /// Lets go of a task's `unit`, its checkout still held by `lease`, once
+    /// its work landed: its attempts' refs go ([`forget_attempts`]) and the
+    /// checkout is kept for nobody.
     pub async fn retire(
         &self,
         unit: &Unit,
         lease: &Lease,
         supervision: Supervision<'_>,
     ) -> Result<(), WorktreeError> {
-        let forget = ["update-ref", "-d", unit.keeps.name()];
-        crate::git::output(&unit.worktree, &forget, supervision).await?;
+        forget_attempts(unit, supervision).await?;
         lease.keep_for(None).await;
         Ok(())
     }
@@ -180,6 +179,22 @@ impl CheckoutPool {
         }
         Ok(())
     }
+}
+
+/// Lets go of every ref the attempts of `unit` kept, its work landed: the
+/// run's tree holds what the landing attempt did, replayed onto it — a
+/// commit of its own, which no ref of the unit names — and what the other
+/// attempts left is superseded by it.
+pub async fn forget_attempts(
+    unit: &Unit,
+    supervision: Supervision<'_>,
+) -> Result<(), WorktreeError> {
+    let prefix = unit.keeps.every_attempt();
+    for kept in refs(&unit.worktree, prefix, None, supervision).await? {
+        let forget = ["update-ref", "-d", kept.name()];
+        crate::git::output(&unit.worktree, &forget, supervision).await?;
+    }
+    Ok(())
 }
 
 /// The units' refs of `repo` under `prefix` — only those `merged` names

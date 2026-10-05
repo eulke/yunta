@@ -57,6 +57,7 @@ pub use release::{
 pub use runs::Birth;
 use slot::SLOT;
 pub use tidy::{PoolReport, Tidied};
+pub use units::forget_attempts;
 
 /// A project's checkouts, as one run's invocation reaches them.
 pub struct CheckoutPool {

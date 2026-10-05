@@ -108,8 +108,8 @@ impl World {
         .expect("a unit opens in the pool")
     }
 
-    /// What landing does to a unit's checkout, held by `lease`: the ref
-    /// that kept its work goes, and the checkout is kept for nobody.
+    /// What landing does to a task's checkout, held by `lease`: the refs
+    /// its attempts kept go, and the checkout is kept for nobody.
     pub async fn land(&self, unit: &Unit, lease: &yunta_engine::Lease) {
         self.pool
             .retire(unit, lease, self.owner.supervision())

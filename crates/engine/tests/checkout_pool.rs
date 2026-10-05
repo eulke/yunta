@@ -319,3 +319,50 @@ async fn run_end_frees_a_blocked_units_clean_checkout_and_keeps_its_ref() {
     );
     assert_eq!(kept.trim(), blocked.keeps.name());
 }
+
+/// A task that lands leaves no ref of any of its attempts: the run's tree
+/// holds what the landing one did, and what a blocked one left before it
+/// is superseded.
+#[tokio::test]
+async fn a_task_that_lands_leaves_none_of_its_attempts_refs() {
+    let world = World::new();
+    let supervision = world.owner.supervision();
+    let (blocked, held) = world.open_through(&world.pool, &world.run, "T001", 1).await;
+    write(&blocked.worktree.join("a.txt"), "a");
+    yunta_engine::commit_work(&blocked, "left", supervision)
+        .await
+        .unwrap();
+    drop(held);
+    let (landing, held) = world.open_through(&world.pool, &world.run, "T001", 2).await;
+    write(&landing.worktree.join("b.txt"), "b");
+    yunta_engine::commit_work(&landing, "landed", supervision)
+        .await
+        .unwrap();
+
+    world.land(&landing, &held).await;
+
+    let prefix = format!("refs/yunta/unit/{}/", world.run);
+    let kept = git_output(
+        &world.repo,
+        &["for-each-ref", "--format=%(refname)", &prefix],
+    );
+    assert_eq!(kept.trim(), "");
+}
+
+/// A node that works in a unit of its own leaves no ref of it once its
+/// work lands, though what landed is a replay of what it committed.
+#[tokio::test]
+async fn a_landed_nodes_unit_leaves_no_ref() {
+    let bench = yunta_testkit::Bench::new();
+    let workflow = "name: writes\nnodes:\n  - { id: write, kind: bash, scope: [x.txt], run: \"echo x > x.txt\" }\n";
+    write(&bench.worktree.join("leftover.txt"), "found in the tree");
+
+    let report = bench.run(workflow, "sessions: []\n").await;
+
+    assert_eq!(report.terminal, yunta_engine::RunTerminal::Finished);
+    let kept = git_output(
+        &bench.worktree,
+        &["for-each-ref", "--format=%(refname)", "refs/yunta/unit/"],
+    );
+    assert_eq!(kept.trim(), "", "the node's work landed");
+}

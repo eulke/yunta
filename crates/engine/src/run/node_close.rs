@@ -378,6 +378,9 @@ async fn land_unit(
         }
     }
     crate::worktree::land(mine.unit, mine.into, supervision).await?;
+    // Landed, its refs go; the checkout stays the node's, so a person who
+    // sends the run back to it finds its session where it saw it.
+    crate::worktree::forget_attempts(mine.unit, supervision).await?;
     Ok(None)
 }
 

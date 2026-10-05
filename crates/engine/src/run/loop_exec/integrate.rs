@@ -397,8 +397,8 @@ async fn integrate_task(
     // with anything to reconcile is that invariant breaking, which
     // `land` reports as the engine error it is.
     let commit = land(unit, ctx.worktree, supervision).await?;
-    // Landed, its checkout is kept for nobody, and the ref that kept its
-    // work goes: the run's tree holds it.
+    // Landed, its checkout is kept for nobody, and the refs its attempts
+    // kept go: the run's tree holds what this one did.
     ctx.pool.retire(unit, lease, supervision).await?;
     Ok(IntegrationOutcome::Integrated { commit })
 }
