@@ -36,7 +36,7 @@ inputs:
     description: "What to build — becomes the brief"
 
 modes:
-  quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, conform, ship, pr] }
+  quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, conform, ship, pr], ask: required }
   standard: { include: [grill, brief, plan, spec, approve-plan, implement, lint, fix-lint, tests, review, conform, fix-findings, ship, pr] }
   full:     { include: all }
 
@@ -57,9 +57,7 @@ nodes:
       you see; use `text` only when the answer cannot be listed. A question
       is `required` only when the brief cannot be written without it; any
       other says in `assumes` what the work takes as its answer when nobody
-      gives one. Only a required question stops the run: a round of optional
-      ones goes on with what each assumes. When nothing needs deciding, hand
-      over an empty list.
+      gives one. When nothing needs deciding, hand over an empty list.
     artifacts:
       produces: [questions]
 

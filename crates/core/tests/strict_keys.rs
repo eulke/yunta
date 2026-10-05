@@ -29,7 +29,7 @@ fn a_node_refuses_an_unknown_key_and_names_every_one_at_once() {
     );
     assert_eq!(
         text,
-        "`nodes[0]`: node `plan`: unknown keys `depend_on`, `scpe` for a `prompt` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `invariant`, `optional`, `kind`, `prompt`; `depend_on`: did you mean `depends_on`?; `scpe`: did you mean `scope`? at line 3 column 5"
+        "`nodes[0]`: node `plan`: unknown keys `depend_on`, `scpe` for a `prompt` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `invariant`, `optional`, `ask`, `kind`, `prompt`; `depend_on`: did you mean `depends_on`?; `scpe`: did you mean `scope`? at line 3 column 5"
     );
 }
 
@@ -39,7 +39,7 @@ fn a_node_key_that_belongs_to_another_kind_is_refused() {
         err::<Workflow>("name: w\nnodes:\n  - id: a\n    kind: bash\n    run: x\n    prompt: p\n");
     assert_eq!(
         text,
-        "`nodes[0]`: node `a`: unknown key `prompt` for a `bash` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `invariant`, `optional`, `kind`, `run` at line 3 column 5"
+        "`nodes[0]`: node `a`: unknown key `prompt` for a `bash` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `invariant`, `optional`, `ask`, `kind`, `run` at line 3 column 5"
     );
 }
 
@@ -50,7 +50,7 @@ fn role_and_fresh_context_are_refused_with_the_key_that_replaces_them() {
     );
     assert_eq!(
         text,
-        "`nodes[0]`: node `a`: unknown keys `role`, `fresh_context` for a `prompt` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `invariant`, `optional`, `kind`, `prompt`; `role`: a node names its runner with `runner:`; `fresh_context`: every session starts fresh; `on_interrupt: resume_session` reuses one only when a run resumes at line 3 column 5"
+        "`nodes[0]`: node `a`: unknown keys `role`, `fresh_context` for a `prompt` node; valid keys: `id`, `depends_on`, `scope`, `runner`, `runners`, `agent`, `artifacts`, `hooks`, `on_failure`, `on_interrupt`, `description`, `permissions`, `network`, `context`, `skills`, `invariant`, `optional`, `ask`, `kind`, `prompt`; `role`: a node names its runner with `runner:`; `fresh_context`: every session starts fresh; `on_interrupt: resume_session` reuses one only when a run resumes at line 3 column 5"
     );
 }
 
@@ -120,7 +120,7 @@ fn a_mode_and_an_input_refuse_unknown_keys() {
     ));
     assert_eq!(
         text,
-        "`modes.quick.includes`: unknown field `includes`, expected `include` at line 7 column 26"
+        "`modes.quick.includes`: unknown field `includes`, expected `include` or `ask` — did you mean `include`? at line 7 column 26"
     );
     let text = err::<Workflow>(&format!(
         "{NODE}inputs:\n  idea: {{ type: string, descripton: x }}\n"

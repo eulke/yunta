@@ -358,10 +358,20 @@ async fn record_content(
 /// Every question this node's artifacts ask, by id.
 ///
 /// What a node asked: the ids of the questions it handed over, and
-/// whether any of them is one the run waits for.
+/// whether any of them is required.
 pub(super) struct Asked {
     pub(super) ids: Vec<QuestionId>,
-    pub(super) waits: bool,
+    required: bool,
+}
+
+impl Asked {
+    /// Whether this round stops the run for a person, under `ask`.
+    pub(super) fn waits(&self, ask: yunta_core::Ask) -> bool {
+        match ask {
+            yunta_core::Ask::Always => true,
+            yunta_core::Ask::Required => self.required,
+        }
+    }
 }
 
 /// The questions a node handed over — `None` when the node declared none
@@ -381,7 +391,7 @@ pub(super) fn asked(verified: &[VerifiedArtifact]) -> Option<Asked> {
         .find_map(|artifact| match &artifact.content {
             ArtifactContent::Questions(questions) => Some(Asked {
                 ids: questions.iter().map(|q| q.id.clone()).collect(),
-                waits: questions.iter().any(|q| q.required),
+                required: questions.iter().any(|q| q.required),
             }),
             _ => None,
         })

@@ -31,6 +31,7 @@ fn node(id: &str, on_failure: Option<OnFailure>) -> Node {
         runners: Vec::new(),
         agent: None,
         optional: false,
+        ask: None,
     }
 }
 
@@ -65,6 +66,7 @@ fn gate_node(id: &str) -> Node {
         runners: Vec::new(),
         agent: None,
         optional: false,
+        ask: None,
     }
 }
 
@@ -408,6 +410,7 @@ fn moded_workflow(nodes: Vec<Node>, mode_names: &[&str]) -> Workflow {
                     yunta_core::ModeName::from(*name),
                     yunta_core::ModeSpec {
                         include: yunta_core::ModeInclude::All,
+                        ask: None,
                     },
                 )
             })

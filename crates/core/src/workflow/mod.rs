@@ -49,7 +49,7 @@ pub use node_kind::{
     CheckBuiltin, Coordination, ExternalGate, ForgeKind, JoinPolicy, MountArtifact, MountSpec,
     NodeKind, PromptSource,
 };
-pub use node_policy::{LoopUntil, NodePermissions, OnInterrupt};
+pub use node_policy::{Ask, LoopUntil, NodePermissions, OnInterrupt};
 pub use optional::{followers, left_out, reroute_sources, Because, LeftOut};
 pub use scope::NodeScope;
 
@@ -121,6 +121,14 @@ impl Workflow {
         NodeGroupIter {
             stack: self.nodes.iter().rev().map(|node| (node, None)).collect(),
         }
+    }
+
+    /// Which rounds of `node`'s questions stop a run in `mode`: what the
+    /// node says, else what its mode says, else every round.
+    pub fn ask(&self, node: &Node, mode: &ModeName) -> Ask {
+        node.ask
+            .or_else(|| self.modes.as_ref()?.get(mode)?.ask)
+            .unwrap_or_default()
     }
 }
 
@@ -237,6 +245,10 @@ pub enum CleanupTarget {
 #[serde(deny_unknown_fields)]
 pub struct ModeSpec {
     pub include: ModeInclude,
+    /// `ask:` — which rounds of questions stop a run in this mode, for a
+    /// node that does not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<Ask>,
 }
 
 /// `include: all` or `include: [id, id, ...]` — the bare string literal

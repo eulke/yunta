@@ -44,6 +44,18 @@ pub(crate) fn check_resume_session(workflow: &Workflow, errors: &mut Vec<CheckEr
     }
 }
 
+/// `ask` declared on a node that hands over no questions is refused: a
+/// mode's `ask` stays legal, since it speaks for every node that asks.
+pub(crate) fn check_ask(workflow: &Workflow, errors: &mut Vec<CheckError>) {
+    for node in workflow.iter_nodes() {
+        if node.ask.is_some() && !node.asks() {
+            errors.push(CheckError::AskOnANodeThatAsksNothing {
+                node: node.id.clone(),
+            });
+        }
+    }
+}
+
 /// The range held for this binary's own schema major, or the workflow
 /// declares a requirement this binary does not meet.
 pub(crate) fn check_yunta_schema(workflow: &Workflow, errors: &mut Vec<CheckError>) {

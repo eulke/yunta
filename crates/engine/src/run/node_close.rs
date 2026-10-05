@@ -185,7 +185,12 @@ pub(super) async fn close_node(
             // the bytes the close happened to hold: the round that
             // follows resolves the same acceptance, and one number that
             // came from two places is one that can disagree with itself.
-            let questions_hash = held_questions(ctx, &node.id).await?;
+            let events = ctx.load_events().await?;
+            let questions_hash = held_questions(ctx, &events, &node.id)?;
+            // Whether the round waits is the workflow's to say, under the
+            // mode the run was created in.
+            let mode = yunta_core::events::run_mode(&events);
+            let waits = asked.waits(ctx.manifest.workflow.ask(node, &mode));
             match QuestionsAskedPayload::new(questions_hash, asked.ids, tokens) {
                 Some(payload) => {
                     ctx.emit(
@@ -193,12 +198,13 @@ pub(super) async fn close_node(
                         EventPayload::Gates(GateEvent::QuestionsAsked(payload)),
                     )
                     .await?;
-                    if asked.waits {
+                    if waits {
                         return Ok(NodeEnd::Asked);
                     }
-                    // Nothing it asked is required: each question says what
-                    // the work assumes without an answer, and the run goes
-                    // on with that rather than waiting for a person.
+                    // The workflow lets a round with nothing required go:
+                    // each question says what the work assumes without an
+                    // answer, and the run goes on with that rather than
+                    // waiting for a person.
                     crate::answers::record_assumed(&ctx.log(), ctx.run_dir, &node.id)
                         .await
                         .map_err(|source| RunError::Broken {
@@ -228,9 +234,12 @@ pub(super) async fn close_node(
 /// Read from the log, which is the run's only answer to what it holds:
 /// the round that answers these questions resolves the same acceptance
 /// and compares the two, so both have to come from there.
-async fn held_questions(ctx: &RunCtx<'_>, node: &NodeId) -> Result<ContentHash, RunError> {
-    let events = ctx.load_events().await?;
-    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, &events);
+fn held_questions(
+    ctx: &RunCtx<'_>,
+    events: &[yunta_core::events::StoredEvent],
+    node: &NodeId,
+) -> Result<ContentHash, RunError> {
+    let held = crate::artifacts::RunArtifacts::of(ctx.run_dir, events);
     held.held(
         &ArtifactId::Interpreted {
             kind: ArtifactKind::Questions,

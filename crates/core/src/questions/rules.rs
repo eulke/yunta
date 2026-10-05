@@ -80,7 +80,7 @@ pub(super) fn check(file: &QuestionsFile) -> Vec<Diagnostic> {
                 &question.id,
                 RuleCode::UnstatedAssumption,
                 "the question is optional but says nothing in `assumes`; say what the work \
-                 takes as the answer when nobody gives one — the run goes on with it",
+                 takes as the answer when nobody gives one",
             ));
         }
     }

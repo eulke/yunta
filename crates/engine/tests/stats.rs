@@ -37,6 +37,7 @@ fn node(id: &str, depends_on: &[&str]) -> Node {
         runners: Vec::new(),
         agent: None,
         optional: false,
+        ask: None,
     }
 }
 

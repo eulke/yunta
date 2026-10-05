@@ -1,9 +1,9 @@
 ---
 number: D241
 title: "Only a required question stops a run, and an optional one says what it assumes"
-status: accepted
+status: revised
 revises: [D173]
-revised_by: []
+revised_by: [D244]
 ---
 
 # D241 — Only a required question stops a run, and an optional one says what it assumes

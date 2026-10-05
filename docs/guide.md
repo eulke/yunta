@@ -483,6 +483,16 @@ mode's point of view — it's included or excluded whole, never by naming one of
 children; naming a child directly is a `check` error, not a way to reach inside the
 group.
 
+### Which questions stop a run
+
+A node that produces `questions` stops the run until a person answers them. `ask:`
+says which rounds do: with `always`, the default, every round that asks something
+waits; with `required`, only a round holding a `required` question waits, and a
+round of optional ones goes on with what each question `assumes`. A mode can say
+it for every node that asks — `quick: { include: [...], ask: required }` — and a
+node's own `ask:` beats its mode's. `yunta check` refuses `ask:` on a node that
+asks nothing.
+
 ### Optional nodes
 
 `optional: true` on a top-level node says the run can do without it when the project

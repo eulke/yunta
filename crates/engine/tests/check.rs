@@ -45,6 +45,7 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         skills: Vec::new(),
         runners: Vec::new(),
         agent: None,
+        ask: None,
     }
 }
 
@@ -70,6 +71,7 @@ fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
         skills: Vec::new(),
         runners: Vec::new(),
         agent: None,
+        ask: None,
     }
 }
 
@@ -103,6 +105,7 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
         skills: Vec::new(),
         runners: Vec::new(),
         agent: None,
+        ask: None,
     }
 }
 
@@ -137,6 +140,7 @@ fn gate(id: &str, depends_on: &[&str]) -> Node {
         skills: Vec::new(),
         runners: Vec::new(),
         agent: None,
+        ask: None,
     }
 }
 
@@ -1561,6 +1565,38 @@ nodes:
     assert!(!check(&wf, &ConfigLayer::default())
         .iter()
         .any(|e| matches!(e, CheckError::ScopeExpansionModeOverCeiling { .. })));
+}
+
+// --- ask only where a node asks --------------------------------------------------
+
+#[test]
+fn check_refuses_ask_on_a_node_that_asks_nothing() {
+    let yaml = r#"
+name: x
+modes:
+  quick: { include: all, ask: required }
+nodes:
+  - id: grill
+    kind: prompt
+    prompt: "ask"
+    ask: required
+    artifacts:
+      produces: [questions]
+  - id: build
+    kind: prompt
+    prompt: "go"
+    depends_on: [grill]
+    ask: always
+"#;
+    let wf: Workflow = yunta_core::yaml::parse(yaml).unwrap();
+    let refused: Vec<String> = check(&wf, &ConfigLayer::default())
+        .iter()
+        .filter_map(|e| match e {
+            CheckError::AskOnANodeThatAsksNothing { node } => Some(node.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(refused, ["build"]);
 }
 
 // --- resume_session only where a session exists ----------------------------------

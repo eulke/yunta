@@ -119,7 +119,9 @@ inputs:
 
 modes:                              # nombres y cantidad libres del autor (§10.1);
                                     # el orden declara la escalera de promoción
-  quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, ship, pr] }
+  quick:    { include: [grill, brief, plan, implement, lint, fix-lint, tests, ship, pr], ask: required }
+                                    # ask: qué rondas de preguntas detienen el run —`always`
+                                    # (default) o `required`—; el `ask` de un nodo gana (D244)
   standard: { include: [grill, brief, plan, approve-plan, implement, lint, fix-lint, tests, review, fix-findings, ship, pr] }
   full:     { include: all }
 
@@ -138,6 +140,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
       necesarias como artifact; no converses.
     artifacts:
       produces: [questions]         # §4.1 — un nodo que pregunta no declara nada más
+                                    # ask: always | required — solo en un nodo que pregunta
 
   - id: brief
     kind: prompt

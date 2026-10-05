@@ -6,7 +6,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::parse::{describe, list};
 use super::{
-    Artifacts, ContextSpec, Hooks, NodeKind, NodePermissions, NodeScope, OnFailure, OnInterrupt,
+    Artifacts, Ask, ContextSpec, Hooks, NodeKind, NodePermissions, NodeScope, OnFailure,
+    OnInterrupt,
 };
 use crate::ids::{AgentName, NodeId, RunnerName, SkillName};
 use crate::yaml::{self, Mapping, Value};
@@ -117,6 +118,11 @@ pub struct Node {
     /// leaves the node out as a mode would, instead of being refused.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub optional: bool,
+    /// `ask:` — which rounds of this node's questions stop the run for a
+    /// person, over what its mode says. Only a node that
+    /// [`asks`](Node::asks) declares it; `check` refuses it elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<Ask>,
 }
 
 impl Node {
@@ -173,6 +179,7 @@ pub(super) const NODE_KEYS: &[&str] = &[
     "skills",
     "invariant",
     "optional",
+    "ask",
 ];
 
 /// Keys an author reaches for that no node accepts, each with the key
@@ -229,6 +236,8 @@ struct NodeFields {
     invariant: bool,
     #[serde(default)]
     optional: bool,
+    #[serde(default)]
+    ask: Option<Ask>,
 }
 
 impl<'de> Deserialize<'de> for Node {
@@ -330,6 +339,7 @@ impl<'de> Deserialize<'de> for Node {
             skills: fields.skills,
             invariant: fields.invariant,
             optional: fields.optional,
+            ask: fields.ask,
         })
     }
 }
@@ -430,6 +440,7 @@ context: [{ command: x }]
 skills: [s]
 invariant: true
 optional: true
+ask: required
 "#,
         )
         .unwrap();

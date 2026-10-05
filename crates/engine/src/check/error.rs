@@ -388,6 +388,14 @@ pub enum CheckError {
     )]
     ResumeSessionOnSessionlessNode { node: NodeId },
 
+    /// `ask` says which rounds of a node's questions stop the run; on a
+    /// node that hands over no `questions` it says nothing.
+    #[error(
+        "node `{node}`: `ask` says which rounds of a node's questions stop the run, and this \
+         node produces no `questions` — remove `ask`, or set it on the node that asks"
+    )]
+    AskOnANodeThatAsksNothing { node: NodeId },
+
     /// The node asks for a scope-expansion mode more
     /// permissive than the merged `permissions.scope_expansion.max_mode`
     /// ceiling allows — same only-narrowing model as every other

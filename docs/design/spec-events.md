@@ -489,10 +489,12 @@ Un nodo que declara `questions` cierra entero —hooks, scope, artifacts— y re
 `questions_asked` en vez de un terminal; entre ese hecho y `questions_answered` el
 nodo espera, y el `node_finished` que el cierre difirió llega después de la
 respuesta. Un `questions_asked` sin preguntas es irrepresentable: un nodo que no
-preguntó nada termina en el mismo cierre. Una ronda sin preguntas `required` no
-espera: al `questions_asked` le siguen las respuestas vacías del engine y un
-`questions_answered` con canal `assumed` —cada pregunta dice en `assumes` qué toma
-el trabajo por respuesta— y el nodo termina en el mismo cierre (D241).
+preguntó nada termina en el mismo cierre. Bajo `ask: required` —del nodo o de su
+modo; el default es `always`, que espera siempre— una ronda sin preguntas
+`required` no espera: al `questions_asked` le siguen las respuestas vacías del
+engine y un `questions_answered` con canal `assumed` —cada pregunta dice en
+`assumes` qué toma el trabajo por respuesta— y el nodo termina en el mismo cierre
+(D241, D244).
 
 `questions_asked`:
 

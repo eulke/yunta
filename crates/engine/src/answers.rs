@@ -105,9 +105,10 @@ pub(crate) async fn record_nothing_asked(
     write(log, run_dir, node, &file, RecordedOrigin::Derived).await
 }
 
-/// The answers of a round that asked nothing required: empty, and the
-/// engine's own, with the `questions_answered` that closes the round on
-/// what each question assumes — so the run goes on without anyone asked.
+/// The answers of a round that asked nothing required, under a workflow
+/// that lets such a round go: empty, and the engine's own, with the
+/// `questions_answered` that closes the round on what each question
+/// assumes — so the run goes on without anyone asked.
 pub(crate) async fn record_assumed(
     log: &RunLog<'_>,
     run_dir: &Path,

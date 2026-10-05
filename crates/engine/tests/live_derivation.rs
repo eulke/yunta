@@ -49,6 +49,7 @@ fn node(id: &str) -> Node {
         runners: Vec::new(),
         agent: None,
         optional: false,
+        ask: None,
     }
 }
 

@@ -56,6 +56,20 @@ impl OnInterrupt {
     }
 }
 
+/// Which rounds of a node's questions stop the run for a person.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Ask {
+    /// Every round that asks something waits for its answers.
+    #[default]
+    Always,
+    /// Only a round with a required question waits; a round of optional
+    /// ones goes on with what each assumes.
+    Required,
+}
+
 /// What a `kind: loop` runs until. One condition exists: the tasks document
 /// has no task left to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -157,6 +157,21 @@
         "produces"
       ]
     },
+    "Ask": {
+      "description": "Which rounds of a node's questions stop the run for a person.",
+      "oneOf": [
+        {
+          "description": "Every round that asks something waits for its answers.",
+          "type": "string",
+          "const": "always"
+        },
+        {
+          "description": "Only a round with a required question waits; a round of optional\nones goes on with what each assumes.",
+          "type": "string",
+          "const": "required"
+        }
+      ]
+    },
     "CleanupTarget": {
       "type": "string",
       "enum": [
@@ -741,6 +756,17 @@
       "description": "One `modes:` entry's own scope.",
       "type": "object",
       "properties": {
+        "ask": {
+          "description": "`ask:` — which rounds of questions stop a run in this mode, for a\nnode that does not say.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ask"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "include": {
           "$ref": "#/$defs/ModeInclude"
         }
@@ -824,6 +850,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/Artifacts"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ask": {
+          "description": "`ask:` — which rounds of this node's questions stop the run for a\nperson, over what its mode says. Only a node that\n[`asks`](Node::asks) declares it; `check` refuses it elsewhere.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Ask"
             },
             {
               "type": "null"
