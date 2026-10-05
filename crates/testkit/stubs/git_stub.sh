@@ -12,8 +12,14 @@
 # rename is atomic, so the moment the file exists it holds the whole
 # pid and a watcher needs no interval to be sure of that.
 #
+# `YUNTA_STUB_GIT_LOG` names a file each invocation is appended to, for
+# a test that counts how often the engine asks git.
+#
 # The subcommand is read as git reads it: after the `-c name=value`
 # pairs a caller sets ahead of it.
+if [ -n "$YUNTA_STUB_GIT_LOG" ]; then
+    echo "$*" >> "$YUNTA_STUB_GIT_LOG"
+fi
 first=""
 second=""
 setting=""

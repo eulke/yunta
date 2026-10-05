@@ -89,7 +89,7 @@ impl SessionTools {
                 results: self.recorded(&task.id, &probes).await?,
             });
         }
-        probing.done(supervision).await;
+        probing.done(&self.host.pool, supervision).await;
         Ok((found, ran))
     }
 
@@ -130,7 +130,7 @@ impl SessionTools {
         // the tree the loop's first check of the task reads, which then
         // takes these answers instead of running them again.
         for (index, one) in spec.specs.iter().enumerate().filter(|(_, one)| asked(one)) {
-            crate::worktree::put_back(&checkout, supervision)
+            crate::worktree::clear_work(&checkout, supervision)
                 .await
                 .map_err(|source| RunToolError::Handover {
                     detail: source.to_string(),
@@ -142,7 +142,7 @@ impl SessionTools {
                 .failing
                 .extend(runs.into_iter().map(|run| (one.task.clone(), run)));
         }
-        probing.done(supervision).await;
+        probing.done(&self.host.pool, supervision).await;
         Ok(proven)
     }
 
@@ -193,7 +193,7 @@ impl SessionTools {
             crate::task_cycle::probe_command(cmd, &probing.checkout, &self.host.memo, supervision)
                 .await
                 .map_err(|source| RunToolError::Check { source })?;
-        probing.done(supervision).await;
+        probing.done(&self.host.pool, supervision).await;
         let problem = if run.could_not_run().is_some() {
             Problem::rule(
                 RuleCode::CriterionCannotRun,
@@ -276,7 +276,7 @@ impl SessionTools {
         Ok(Probing {
             checkout,
             base,
-            _held: held,
+            held,
         })
     }
 }
@@ -285,17 +285,18 @@ impl SessionTools {
 struct Probing {
     checkout: PathBuf,
     base: CommitSha,
-    _held: crate::worktree::Lease,
+    held: crate::worktree::Lease,
 }
 
 impl Probing {
-    /// Gives the checkout back with nothing the probes wrote in it, so
-    /// the pool can hand it to the next unit. One that could not be put
-    /// back stays out of the pool.
-    async fn done(self, supervision: crate::process::Supervision<'_>) {
-        if let Err(error) = crate::worktree::put_back(&self.checkout, supervision).await {
-            tracing::debug!(%error, "a probe's checkout stays out of the pool");
-        }
+    /// Gives the checkout back to `pool` with nothing the probes wrote in
+    /// it, so the pool can hand it to the next unit.
+    async fn done(
+        self,
+        pool: &crate::worktree::CheckoutPool,
+        supervision: crate::process::Supervision<'_>,
+    ) {
+        pool.put_back(self.held, supervision).await;
     }
 }
 

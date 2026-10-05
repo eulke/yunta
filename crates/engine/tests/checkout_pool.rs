@@ -204,18 +204,20 @@ async fn a_seeded_private_index_captures_what_a_fresh_one_does() {
     assert_eq!(captured.as_str(), expected.trim());
 }
 
-/// A checkout that holds a build goes before an empty one nearer the
-/// unit's start: only what changed is built again in it, where the empty
-/// one builds everything, its dependencies first.
+/// A checkout given back holding a build goes before an empty one nearer
+/// the unit's start: the pool knows the build by the record the checkout
+/// was given back with, and only what changed is built again in it, where
+/// the empty one builds everything, its dependencies first.
 #[tokio::test]
-async fn a_checkout_holding_a_build_goes_before_a_nearer_empty_one() {
+async fn a_build_is_known_by_the_record_its_checkout_was_given_back_with() {
     let world = World::new();
     let (warm, warm_held) = world.open("T001").await;
     let (cold, cold_held) = world.open("T002").await;
     write(&warm.worktree.join("target/debug/built"), "built");
     world.land(&warm).await;
     world.land(&cold).await;
-    drop((warm_held, cold_held));
+    world.give_back(&warm, warm_held).await;
+    world.give_back(&cold, cold_held).await;
     write(&world.repo.join("moved.txt"), "moved");
     yunta_testkit::git(&world.repo, &["add", "-A"]);
     yunta_testkit::git(&world.repo, &["commit", "-q", "-m", "moved"]);
@@ -228,4 +230,41 @@ async fn a_checkout_holding_a_build_goes_before_a_nearer_empty_one() {
     let (next, _held) = world.open("T003").await;
 
     assert_eq!(next.worktree, warm.worktree);
+}
+
+/// Opening a unit asks git as often whether the pool holds two free
+/// checkouts or eight: one listing answers for all of them, and only the
+/// checkout taken is looked at on its own.
+#[tokio::test]
+async fn opening_a_unit_asks_git_as_often_whatever_the_pool_holds() {
+    let few = asked_to_open_beside(2).await;
+    let many = asked_to_open_beside(8).await;
+
+    assert_eq!(few, many);
+    assert!(many <= 6, "opening a unit ran git {many} times");
+}
+
+/// How many times opening one unit runs git, in a pool holding `free`
+/// checkouts given back after their units landed.
+async fn asked_to_open_beside(free: usize) -> usize {
+    let world = World::new();
+    let mut opened = Vec::new();
+    for n in 0..free {
+        opened.push(world.open(&format!("T{n:03}")).await);
+    }
+    for (unit, lease) in opened {
+        world.land(&unit).await;
+        world.give_back(&unit, lease).await;
+    }
+    let log = world.root.path().join("git.log");
+    let stub = yunta_testkit::stubs::git_counting(world.root.path(), &log);
+    let supervision = yunta_engine::process::Supervision {
+        env: &stub,
+        ..world.owner.supervision()
+    };
+
+    world.open_supervised("T999", supervision).await;
+
+    let asked = tokio::fs::read_to_string(&log).await.unwrap_or_default();
+    asked.lines().count()
 }

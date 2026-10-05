@@ -96,7 +96,7 @@ async fn measure_aside(
 ) -> Result<(), RunError> {
     let supervision = ctx.supervision(&stop);
     let base = &ctx.manifest.base_commit;
-    let (checkout, _held) = match ctx.pool.open_detached(base, supervision).await {
+    let (checkout, held) = match ctx.pool.open_detached(base, supervision).await {
         // Stopped while its checkout was being made, it measured nothing,
         // like a suite stopped while it ran.
         Err(stopped) if stopped.cancelled() => {
@@ -106,9 +106,7 @@ async fn measure_aside(
         opened => opened.inspect_err(|_| ctx.memo.suite().give_up())?,
     };
     let measured = super::baseline::measure_in(ctx, suite, &checkout, supervision).await;
-    if let Err(error) = crate::worktree::put_back(&checkout, supervision).await {
-        tracing::debug!(%error, "the checkout the suite was measured in stays out of the pool");
-    }
+    ctx.pool.put_back(held, supervision).await;
     // A measurement that ended without an answer leaves nobody waiting for
     // one: a guard runs the suite itself, as with no measurement at all.
     ctx.memo.suite().give_up();

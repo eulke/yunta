@@ -173,9 +173,9 @@ async fn units_of(
     let ours = format!("refs/heads/{}", super::unit_branches(run_id, who));
     let mut opened: Vec<(u32, PathBuf)> = super::checkouts(&listing)
         .into_iter()
-        .filter_map(|(path, branch)| {
-            let attempt = branch?.strip_prefix(&ours)?.parse().ok()?;
-            Some((attempt, path))
+        .filter_map(|listed| {
+            let attempt = listed.branch?.strip_prefix(&ours)?.parse().ok()?;
+            Some((attempt, listed.path))
         })
         .collect();
     opened.sort_by_key(|(attempt, _)| std::cmp::Reverse(*attempt));

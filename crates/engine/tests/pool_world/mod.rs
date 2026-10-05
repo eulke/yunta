@@ -59,6 +59,25 @@ impl World {
         self.open_through(&self.pool, &self.run, task, 1).await
     }
 
+    /// Opens `task`'s first attempt under `supervision`.
+    pub async fn open_supervised(
+        &self,
+        task: &str,
+        supervision: yunta_engine::process::Supervision<'_>,
+    ) -> (Unit, yunta_engine::Lease) {
+        let (run_dir, base) = (self.root.path().join("run"), self.head());
+        let home = UnitHome {
+            repo: &self.repo,
+            run_dir: &run_dir,
+            run_id: &self.run,
+            base: &base,
+        };
+        self.pool
+            .open(home, UnitId::Task(task.into()), 1, supervision)
+            .await
+            .expect("a unit opens in the pool")
+    }
+
     pub async fn open_through(
         &self,
         pool: &Arc<CheckoutPool>,
@@ -86,6 +105,19 @@ impl World {
         yunta_engine::retire_unit_branch(unit, &self.repo, self.owner.supervision())
             .await
             .unwrap();
+    }
+
+    /// Gives back `unit`'s checkout, done with it, and waits until the pool
+    /// recorded the build it leaves.
+    pub async fn give_back(&self, unit: &Unit, lease: yunta_engine::Lease) {
+        self.pool.give_back(lease, self.owner.supervision()).await;
+        let name = unit.worktree.file_name().unwrap().to_string_lossy();
+        let built = unit.worktree.with_file_name(format!("{name}.built"));
+        yunta_testkit::wait_until_async(
+            || async { tokio::fs::try_exists(&built).await.unwrap_or(false) },
+            || format!("the pool records the build of {}", unit.worktree.display()),
+        )
+        .await;
     }
 
     /// The checkouts the pool holds on disk, by name.

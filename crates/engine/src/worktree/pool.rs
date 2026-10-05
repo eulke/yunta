@@ -19,10 +19,21 @@
 //! unit's. Holding a checkout lasts as long as
 //! the process ([`slot`]); owning one is the branch it is on, which
 //! outlives every process.
+//!
+//! A checkout is taken from one survey of the pool ([`survey`], [`take`]):
+//! one listing of the repository's checkouts, whatever their number, and
+//! a look at the one taken. A checkout given back records its use and the
+//! build it leaves ([`give`], [`space`]), which is what ranks it next.
 
+mod fit;
+mod give;
 mod release;
 mod runs;
 mod slot;
+mod space;
+mod survey;
+mod take;
+mod walk;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -33,6 +44,7 @@ use super::{head_tree, prepare_worktree, Unit, UnitHome, UnitId, WorktreeError};
 use crate::lock::Contention;
 use crate::process::Supervision;
 
+pub use give::clear_work;
 pub use release::{
     forget_run_units, hand_over_run_checkout, release_run_checkout, release_unit_checkouts,
     retire_unit_branch, still_the_runs, trim_pool,
@@ -53,20 +65,31 @@ pub struct CheckoutPool {
     home: tokio::sync::OnceCell<PathBuf>,
 }
 
-/// A hold on one checkout of the pool, given back when dropped.
+/// A hold on one checkout of the pool, let go when dropped. A user done
+/// with the checkout gives it back instead
+/// ([`CheckoutPool::give_back`]), which records the use and the build it
+/// leaves.
 pub struct Lease {
     lock: Option<PathBuf>,
+    /// The checkout held: its number in the pool at `home`.
+    slot: Option<(PathBuf, u32)>,
 }
 
 impl Lease {
-    fn of(lock: PathBuf) -> Self {
-        Lease { lock: Some(lock) }
+    fn of(home: &Path, number: u32) -> Self {
+        Lease {
+            lock: Some(home.join(format!("{SLOT}{number}.lock"))),
+            slot: Some((home.to_path_buf(), number)),
+        }
     }
 
     /// The hold on a checkout the pool does not keep — one a run made
     /// before its project kept checkouts — which nothing else takes.
     fn outside() -> Self {
-        Lease { lock: None }
+        Lease {
+            lock: None,
+            slot: None,
+        }
     }
 }
 
@@ -243,45 +266,6 @@ impl CheckoutPool {
             .ok_or(WorktreeError::CheckoutHeld { path: checkout })
     }
 
-    /// The most fitting checkout for a user owning the branches starting
-    /// with `owner` and starting from `target`, held for it.
-    async fn take(
-        &self,
-        owner: Option<&str>,
-        target: &CommitSha,
-        supervision: Supervision<'_>,
-    ) -> Result<Option<(PathBuf, Lease)>, WorktreeError> {
-        let home = self.home(supervision).await?;
-        let mut ranked = Vec::new();
-        for (number, path) in slot::listed(&home).await {
-            if let Some(rank) = slot::rank(&path, owner, target, supervision).await {
-                ranked.push((rank, number, path));
-            }
-        }
-        ranked.sort();
-        for (_, number, path) in ranked {
-            let held = slot::hold(
-                &home,
-                number,
-                Contention::Refuse,
-                self.holder.as_deref(),
-                supervision,
-            );
-            let Some(lease) = held.await? else {
-                continue;
-            };
-            // Held, then looked at again: another process may have taken
-            // and changed it between the look that ranked it and the hold.
-            if slot::rank(&path, owner, target, supervision)
-                .await
-                .is_some()
-            {
-                return Ok(Some((path, lease)));
-            }
-        }
-        Ok(None)
-    }
-
     /// Adds a checkout to the pool under the lowest number nobody uses,
     /// held for its caller.
     async fn add(
@@ -298,13 +282,19 @@ impl CheckoutPool {
                 path: home.clone(),
                 source,
             })?;
+        let listed: std::collections::HashSet<u32> = survey::survey(&home, &self.repo, supervision)
+            .await?
+            .into_iter()
+            .filter(|slot| slot.standing.is_some())
+            .map(|slot| slot.number)
+            .collect();
         let mut number = 0;
         loop {
             number += 1;
-            let path = home.join(format!("{SLOT}{number}"));
-            if slot::is_checkout(&path, supervision).await {
+            if listed.contains(&number) {
                 continue;
             }
+            let path = home.join(format!("{SLOT}{number}"));
             let held = slot::hold(
                 &home,
                 number,
@@ -316,9 +306,9 @@ impl CheckoutPool {
                 continue;
             };
             if tokio::fs::try_exists(&path).await.unwrap_or(false) {
-                // Added by another process since the look above, or left
-                // half added by one that crashed.
-                if slot::is_checkout(&path, supervision).await {
+                // Added by another process since the survey, or left half
+                // added by one that crashed.
+                if survey::look(&path, supervision).await.is_some() {
                     continue;
                 }
                 slot::clear(repo, &path, supervision).await?;
@@ -352,14 +342,6 @@ async fn settled(path: &Path) -> PathBuf {
             _ => return path.to_path_buf(),
         }
     }
-}
-
-/// Puts `checkout` back to the commit it is on, with nothing a probe
-/// wrote left in it but what git ignores — so it is free again.
-pub async fn put_back(checkout: &Path, supervision: Supervision<'_>) -> Result<(), WorktreeError> {
-    crate::git::output(checkout, &["reset", "-q", "--hard"], supervision).await?;
-    crate::git::output(checkout, &["clean", "-q", "-ffd"], supervision).await?;
-    Ok(())
 }
 
 /// Makes the checkout of `repo` at `path` that `fresh` says.

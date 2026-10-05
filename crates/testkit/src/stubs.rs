@@ -16,6 +16,8 @@ pub const GIT_PID: &str = "YUNTA_STUB_GIT_PID";
 /// second time a run asks git the same question and not the first.
 pub const GIT_BLOCK_WHEN: &str = "YUNTA_STUB_GIT_BLOCK_WHEN";
 const GIT_REAL: &str = "YUNTA_STUB_GIT_REAL";
+/// A file every invocation of the stub is appended to, one line each.
+pub const GIT_LOG: &str = "YUNTA_STUB_GIT_LOG";
 
 /// Writes the `git` stub into `dir/bin` and answers with the variables
 /// a run must carry for it to be the `git` its subprocesses find:
@@ -74,6 +76,14 @@ pub fn git_holding(
     if let Some(armed_by) = armed_by {
         vars.push((GIT_BLOCK_WHEN.to_string(), armed_by.display().to_string()));
     }
+    vars
+}
+
+/// A `git` that runs for real and appends every invocation to `log`, one
+/// line each: what a test counts the engine's questions to git by.
+pub fn git_counting(dir: &Path, log: &Path) -> Vec<(String, String)> {
+    let mut vars = git(dir);
+    vars.push((GIT_LOG.to_string(), log.display().to_string()));
     vars
 }
 

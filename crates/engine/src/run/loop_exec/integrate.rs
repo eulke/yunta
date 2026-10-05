@@ -44,11 +44,11 @@ pub(super) async fn integrate_batch(
     let owed = ctx.run_view().await?.state.tasks;
     for dispatch in dispatches {
         // The checkout stays held until this task is integrated or set
-        // aside below.
+        // aside below, and is given back then.
         let super::dispatch::Dispatched {
             task,
             unit,
-            lease: _held,
+            lease,
             mut report,
         } = dispatch?;
         if let Some(cause) = super::depart::owed_first(&owed, &report) {
@@ -167,6 +167,7 @@ pub(super) async fn integrate_batch(
             // Handled by the early return above.
             TaskOutcome::Interrupted => None,
         };
+        ctx.pool.give_back(lease, ctx.supervision(cancel)).await;
         // A task a departure blocks is reopened by its answer, never by
         // the answer to a scope request its done work also made.
         let was_blocked = blocked_cause

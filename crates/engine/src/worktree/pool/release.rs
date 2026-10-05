@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use super::super::{head_commit, run_units, Unit, WorktreeError};
-use super::{slot, CheckoutPool};
+use super::{slot, survey, CheckoutPool};
 use crate::lock::Contention;
 use crate::process::Supervision;
 
@@ -49,7 +49,7 @@ pub async fn release_unit_checkouts(
     remove_own_checkouts(into, run_dir, supervision).await?;
     let ours = format!("{}/", run_units(run_id));
     let home = pool.home(supervision).await?;
-    let kept = let_go(&home, &ours, pool.holder.as_deref(), supervision).await?;
+    let kept = let_go(pool, &home, &ours, supervision).await?;
     for branch in branches(into, &ours, supervision).await? {
         let landed_there = crate::git::success(
             into,
@@ -93,13 +93,17 @@ pub async fn release_run_checkout(
         return Ok(());
     };
     let held = slot::hold(&home, number, Contention::Refuse, None, supervision).await?;
-    let Some(_lease) = held else {
+    let Some(lease) = held else {
         return Ok(());
     };
-    let on = crate::git::output(&tree, &["branch", "--show-current"], supervision).await?;
-    if on.trim() == super::super::run_branch(run_id) && slot::is_clean(&tree, supervision).await {
+    let branch = super::super::run_branch(run_id);
+    let lets_go = survey::look(&tree, supervision)
+        .await
+        .is_some_and(|look| look.clean && look.standing.branch.as_deref() == Some(branch.as_str()));
+    if lets_go {
         super::mutating(&tree, &["switch", "--detach", "-q"], supervision).await?;
     }
+    pool.give_back(lease, supervision).await;
     Ok(())
 }
 
@@ -111,13 +115,10 @@ pub async fn still_the_runs(
     run_id: &yunta_core::RunId,
     supervision: Supervision<'_>,
 ) -> bool {
-    if !slot::is_checkout(tree, supervision).await {
-        return false;
-    }
-    let Ok(on) = crate::git::output(tree, &["branch", "--show-current"], supervision).await else {
+    let Some(look) = survey::look(tree, supervision).await else {
         return false;
     };
-    let on = on.trim();
+    let on = look.standing.branch.as_deref().unwrap_or_default();
     on == super::super::run_branch(run_id)
         || !(on.is_empty() || on.starts_with(&format!("{}/", super::super::RUN_BRANCHES)))
             && !super::super::is_unit_branch(on)
@@ -147,7 +148,7 @@ pub async fn forget_run_units(
 ) -> Result<(), WorktreeError> {
     let ours = format!("{}/", run_units(run_id));
     let home = pool.home(supervision).await?;
-    let kept = let_go(&home, &ours, pool.holder.as_deref(), supervision).await?;
+    let kept = let_go(pool, &home, &ours, supervision).await?;
     for branch in branches(repo, &ours, supervision).await? {
         if kept.iter().all(|still| still != &branch) {
             super::mutating(repo, &["branch", "-D", &branch], supervision).await?;
@@ -166,14 +167,19 @@ pub async fn trim_pool(
     let home = pool.home(supervision).await?;
     let keep = busiest(&home, supervision.clock.now()).await;
     let mut free = Vec::new();
-    for (number, path) in slot::listed(&home).await {
-        if !slot::is_checkout(&path, supervision).await {
+    for slot in survey::survey(&home, &pool.repo, supervision).await? {
+        if slot
+            .standing
+            .is_none_or(|standing| standing.branch.is_some())
+        {
             continue;
         }
-        let on = crate::git::output(&path, &["branch", "--show-current"], supervision).await;
-        if on.is_ok_and(|on| on.trim().is_empty()) && slot::is_clean(&path, supervision).await {
-            let used = slot::last_held(&home, number).await.map(|held| held.at);
-            free.push((std::cmp::Reverse(used), number, path));
+        if survey::look(&slot.path, supervision)
+            .await
+            .is_some_and(|look| look.clean)
+        {
+            let used = slot.held.map(|held| held.at);
+            free.push((std::cmp::Reverse(used), slot.number, slot.path));
         }
     }
     free.sort();
@@ -213,27 +219,32 @@ async fn busiest(home: &Path, now: chrono::DateTime<chrono::Utc>) -> usize {
 /// `ours` go of it. Answers the branches still held: by a checkout with
 /// something uncommitted, or held by a live process.
 async fn let_go(
+    pool: &CheckoutPool,
     home: &Path,
     ours: &str,
-    holder: Option<&Path>,
     supervision: Supervision<'_>,
 ) -> Result<Vec<String>, WorktreeError> {
     let mut kept = Vec::new();
-    for (number, path) in slot::listed(home).await {
-        let Ok(on) = crate::git::output(&path, &["branch", "--show-current"], supervision).await
-        else {
+    for slot in survey::survey(home, &pool.repo, supervision).await? {
+        let Some(branch) = slot.standing.and_then(|standing| standing.branch) else {
             continue;
         };
-        let branch = on.trim().to_string();
         if !branch.starts_with(ours) {
             continue;
         }
-        let held = slot::hold(home, number, Contention::Refuse, holder, supervision).await?;
-        match held {
-            Some(_lease) if slot::is_clean(&path, supervision).await => {
-                super::mutating(&path, &["switch", "--detach", "-q"], supervision).await?;
+        let holder = pool.holder.as_deref();
+        let held = slot::hold(home, slot.number, Contention::Refuse, holder, supervision).await?;
+        let clean = match &held {
+            Some(_) => survey::look(&slot.path, supervision)
+                .await
+                .is_some_and(|look| look.clean),
+            None => false,
+        };
+        match clean {
+            true => {
+                super::mutating(&slot.path, &["switch", "--detach", "-q"], supervision).await?;
             }
-            _ => kept.push(branch),
+            false => kept.push(branch),
         }
     }
     Ok(kept)
@@ -277,9 +288,9 @@ async fn remove_own_checkouts(
     let common_dir = super::super::common_git_dir(repo, supervision).await?;
     let _mutation_lock =
         super::super::lock_worktree_mutations(&common_dir, supervision.clock).await?;
-    for (checkout, _) in super::super::checkouts(&listing) {
-        if checkout.starts_with(&own) {
-            let path = checkout.display().to_string();
+    for listed in super::super::checkouts(&listing) {
+        if listed.path.starts_with(&own) {
+            let path = listed.path.display().to_string();
             super::super::run_git(repo, &["worktree", "remove", "--force", &path], supervision)
                 .await?;
         }

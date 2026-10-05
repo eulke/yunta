@@ -101,15 +101,13 @@ pub(super) async fn execute_node(
         return Box::pin(execute_in_its_tree(ctx, node, attempt, cancel)).await;
     }
     // The checkout stays held until the node's attempt has ended — its
-    // work landed, or left for a session to continue.
-    let (unit, _held, continuing) = node_unit(ctx, node, attempt).await?;
-    Box::pin(execute_in_its_tree(
-        &ctx.in_unit(&unit, continuing.as_ref()),
-        node,
-        attempt,
-        cancel,
-    ))
-    .await
+    // work landed, or left for a session to continue — and is given back
+    // then.
+    let (unit, lease, continuing) = node_unit(ctx, node, attempt).await?;
+    let in_unit = ctx.in_unit(&unit, continuing.as_ref());
+    let ended = Box::pin(execute_in_its_tree(&in_unit, node, attempt, cancel)).await;
+    ctx.pool.give_back(lease, ctx.supervision(cancel)).await;
+    ended
 }
 
 /// The checkout this attempt works in, held for it, and the session it

@@ -51,7 +51,7 @@ pub use integrity::{RunWorktree, WorktreeIntegrity};
 pub(crate) use listing::checkouts;
 pub use overlay::{remove_files, tree_with, write_files};
 pub use pool::{
-    forget_run_units, hand_over_run_checkout, pool_home, put_back, release_run_checkout,
+    clear_work, forget_run_units, hand_over_run_checkout, pool_home, release_run_checkout,
     release_unit_checkouts, retire_unit_branch, still_the_runs, trim_pool, CheckoutPool, Lease,
 };
 pub use unit::{
