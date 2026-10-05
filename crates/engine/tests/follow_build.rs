@@ -124,6 +124,22 @@ async fn a_run_follows_its_tasks_build_past_a_gate() {
     assert_eq!(moves(&bench.events()), vec![bench.tree()]);
 }
 
+/// A tree warm from before its task's work landed holds a build of an
+/// older commit, however large: the run follows its task's build of the
+/// commit it stands at.
+#[tokio::test]
+async fn a_run_leaves_a_larger_build_of_an_older_commit_for_its_tasks_build() {
+    let bench = Bench::new().pooled();
+    ignore(&bench, "target/\n");
+    let older = "mkdir -p target && head -c 262144 /dev/zero > target/older && printf 'tasks:";
+    let workflow = builds_then(TESTS_THE_BUILD).replace("printf 'tasks:", older);
+
+    let RunReport { terminal, .. } = bench.run(&workflow, BUILDS).await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(moves(&bench.events()), vec![bench.tree()]);
+}
+
 /// A build the run's tree holds that the task's checkout does not — what
 /// a node before the loop left — keeps the run where it is, however much
 /// more the task built.

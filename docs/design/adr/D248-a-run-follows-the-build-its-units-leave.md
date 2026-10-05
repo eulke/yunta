@@ -24,11 +24,13 @@ its units and its measurement built in colder ones.
 1. **The run moves into the build.** Between two steps, when units' work has
    landed since the run took its checkout and since a node last started
    building in it, the next node that builds in the run's tree runs in the
-   free checkout of the pool that stands exactly at the run's commit and holds
-   the most build. The run moves only while nothing of it runs or measures,
-   when its tree is clean on its branch, when the other checkout holds every
-   kind of build the tree holds (what git ignores, by top-level name), and
-   when that checkout holds more of it.
+   free checkout of the pool that stands exactly at the run's commit and was
+   given back last with a build — the one its last unit built in. Its build
+   is of that commit; the tree's is of whatever the tree last built, before
+   the units' work landed. The run moves only while nothing of it runs or
+   measures, when its tree is clean on its branch, and when the other
+   checkout holds every kind of build the tree holds (what git ignores, by
+   top-level name).
 2. **By its branch.** The tree lets go of the run's branch and the other
    checkout takes it. If git refuses the second step, the first one is undone
    and the run stays. The old tree goes back to the pool with its build
@@ -69,6 +71,12 @@ is rebuilt, or worse, trusted at the wrong path.
 **Running every node of the run in a unit.** It would give each node a warm
 checkout, but the run's tree is where units land and where what git ignores
 passes from one node to the next. Moving the run keeps both.
+
+**Moving only into a larger build.** Size is not freshness. On a real pool a
+run's tree held 38 GB built at an older commit, and the checkout its unit
+built in held the suite's 18 GB build of the run's own commit; comparing sizes
+kept the run in the tree, where its tests would build again everything the
+units' work changed.
 
 **Moving only when the last node to finish landed units.** A gate between a
 loop and the lint would keep a light-born run in a checkout holding nothing,
