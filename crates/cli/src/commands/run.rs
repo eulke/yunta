@@ -433,12 +433,14 @@ pub(super) async fn create_run_from(
     let run_id = ctx.ids.mint_run_id(ctx.clock.now());
     let worktree = match manifest.isolation {
         // A run of its own works in a checkout of the project's pool, on a
-        // branch of its own: warm with whatever the last run there built.
+        // branch of its own: warm with whatever the last run there built,
+        // or — for a run whose units build — the one holding the least.
         yunta_core::Isolation::Worktree => {
             let run_dir = ctx.project.runs_root.join(run_id.as_str());
             let pool = ctx.project.pool_of(manifest, &ctx.cwd, &run_dir);
+            let birth = yunta_engine::Birth::of(&manifest.workflow);
             let (checkout, _held) = pool
-                .open_run(&run_id, &manifest.base_commit, ctx.supervision())
+                .open_run(&run_id, &manifest.base_commit, birth, ctx.supervision())
                 .await?;
             checkout
         }

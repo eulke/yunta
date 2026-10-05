@@ -33,7 +33,8 @@ impl CheckoutPool {
         space::count_pending(&home, &slots, &self.walking);
         let builds = room::Builds::of(&slots);
         let ranked = fit::ranked(slots, user, target);
-        self.room_for(ranked.first(), builds, supervision).await?;
+        self.room_for(user, ranked.first(), builds, supervision)
+            .await?;
         let ordered = nearest_first(ranked, target, supervision).await;
         for candidate in ordered {
             let held = slot::hold(

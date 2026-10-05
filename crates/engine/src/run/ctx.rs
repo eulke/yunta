@@ -191,6 +191,47 @@ impl<'a> RunCtx<'a> {
         }
     }
 
+    /// This same run once it moved into `checkout`: what the invocation
+    /// holds — its log, its budget, its process tree, what it answered —
+    /// carries over, and the run works there, reaching its pool from
+    /// there.
+    pub(crate) fn moved_to<'b>(&'b self, checkout: &'b Path) -> RunCtx<'b>
+    where
+        'a: 'b,
+    {
+        let pool = self.pool.reached_from(checkout);
+        let host = self.run_tools_host.moved_to(checkout, pool.clone());
+        RunCtx {
+            run_id: self.run_id,
+            manifest: self.manifest,
+            run_dir: self.run_dir,
+            worktree: checkout,
+            adapters: self.adapters,
+            storage: self.storage,
+            clock: self.clock.clone(),
+            ids: self.ids,
+            memo: self.memo.clone(),
+            pool,
+            human_interaction: self.human_interaction,
+            budget_lifted: self.budget_lifted.clone(),
+            process_registry: self.process_registry.clone(),
+            root_cancel: self.root_cancel.clone(),
+            fence_hook: self.fence_hook.clone(),
+            adapter_override: self.adapter_override,
+            forge: self.forge,
+            depth: self.depth,
+            run_tools_host: Arc::new(host),
+            ambient: self.ambient,
+            subprocess_vars: self.subprocess_vars.clone(),
+            secrets: self.secrets.clone(),
+            redactor: self.redactor.clone(),
+            observer: self.observer.clone(),
+            landing: self.landing.clone(),
+            awake: self.awake.clone(),
+            unit: None,
+        }
+    }
+
     /// The supervision every subprocess of this run gets: its registry,
     /// and `cancel` — a node's own token, or the run's root token.
     pub(crate) fn supervision<'s>(

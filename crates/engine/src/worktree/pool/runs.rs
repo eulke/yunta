@@ -11,19 +11,48 @@ use super::{fit, reset, CheckoutPool, Fresh, Lease, Taken};
 use crate::process::Supervision;
 use crate::worktree::WorktreeError;
 
+/// Which free checkout of the pool a run is born in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Birth {
+    /// The run builds in its own tree: it is born in the free checkout
+    /// holding the most of a build.
+    Builds,
+    /// Units do the run's work, each in a checkout of its own, and the run
+    /// moves into the build the last one leaves: it is born in the free
+    /// checkout holding the least, which leaves the warm ones to its units
+    /// and to its measurement.
+    FollowsUnits,
+}
+
+impl Birth {
+    /// How a run of `workflow` is born: following its units when a node of
+    /// it lands units' work.
+    pub fn of(workflow: &yunta_core::Workflow) -> Birth {
+        match workflow.iter_nodes().any(crate::worktree::lands_units) {
+            true => Birth::FollowsUnits,
+            false => Birth::Builds,
+        }
+    }
+}
+
 impl CheckoutPool {
     /// A checkout of the pool for run `run_id` to work in, on the run's own
-    /// branch cut from `base`: a free one put back to that commit, or a new
-    /// one when none is free. The run's branch keeps it the run's for as
-    /// long as the run lives; the hold handed back only covers its taking.
+    /// branch cut from `base`: a free one put back to that commit, chosen as
+    /// `birth` says, or a new one when none is free. The run's branch keeps
+    /// it the run's for as long as the run lives; the hold handed back only
+    /// covers its taking.
     pub async fn open_run(
         self: &Arc<Self>,
         run_id: &yunta_core::RunId,
         base: &CommitSha,
+        birth: Birth,
         supervision: Supervision<'_>,
     ) -> Result<(PathBuf, Lease), WorktreeError> {
         let branch = crate::worktree::run_branch(run_id);
-        let user = fit::User::Run { branch: &branch };
+        let user = fit::User::Run {
+            branch: &branch,
+            birth,
+        };
         match Box::pin(self.take(user, base, supervision)).await? {
             Taken::Held(checkout, lease) => {
                 reset(&checkout, Some(&branch), base, supervision).await?;
@@ -58,7 +87,13 @@ impl CheckoutPool {
                 cwd: self.repo.clone(),
                 source,
             })?;
-        let user = fit::User::Run { branch: &branch };
+        // The checkout still on the run's branch goes first; past it, the
+        // warmest at the run's commit — the one the run gave back while
+        // parked, holding its build, when nobody took it since.
+        let user = fit::User::Run {
+            branch: &branch,
+            birth: Birth::Builds,
+        };
         match Box::pin(self.take(user, &head, supervision)).await? {
             Taken::Held(checkout, lease) => {
                 let on = crate::git::output(&checkout, &["branch", "--show-current"], supervision)

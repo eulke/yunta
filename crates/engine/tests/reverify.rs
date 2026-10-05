@@ -42,6 +42,7 @@ fn policy() -> SchedulingPolicy {
         may_promote: false,
         grants_scope: true,
         denied: Vec::new(),
+        follows_builds: false,
     }
 }
 

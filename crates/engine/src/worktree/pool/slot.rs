@@ -61,6 +61,25 @@ pub(super) async fn listed(home: &Path) -> Vec<(u32, PathBuf)> {
     slots
 }
 
+/// Which checkout of the pool at `home` `checkout` is: its number, and its
+/// path as the file system names it — `None` for a checkout outside the
+/// pool.
+pub(super) async fn number_of(home: &Path, checkout: &Path) -> Option<(u32, PathBuf)> {
+    let path = tokio::fs::canonicalize(checkout)
+        .await
+        .unwrap_or_else(|_| checkout.to_path_buf());
+    if path.parent() != Some(home) {
+        return None;
+    }
+    let number = path
+        .file_name()?
+        .to_str()?
+        .strip_prefix(SLOT)?
+        .parse()
+        .ok()?;
+    Some((number, path))
+}
+
 /// Holds checkout `number` of the pool at `home` — for the run at `holder`,
 /// or for the pool's own upkeep when there is none — or answers `None` when
 /// somebody else holds it: a live process, or a gone one whose run's

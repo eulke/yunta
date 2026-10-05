@@ -2298,6 +2298,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "run_moved"
+            }
+          },
+          "$ref": "#/$defs/RunMovedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "run_finished"
             }
           },
@@ -4124,6 +4137,18 @@
       },
       "required": [
         "tokens"
+      ]
+    },
+    "RunMovedPayload": {
+      "description": "The run moved, between two of its steps, into another checkout of its\nproject's pool that already built the commit the run stands at — as a\nrule, the one its last unit worked in — and works there from here on.",
+      "type": "object",
+      "properties": {
+        "checkout": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "checkout"
       ]
     },
     "RunPausedPayload": {

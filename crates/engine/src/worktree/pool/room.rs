@@ -101,17 +101,20 @@ fn emptiable(slot: &Slot) -> Option<Emptiable> {
 }
 
 impl CheckoutPool {
-    /// Makes room for what `best` — the checkout about to be taken, or a
-    /// new one when there is none — builds: nothing much in one that holds
-    /// a build, a whole build otherwise.
+    /// Makes room for what `user` builds in `best` — the checkout about to
+    /// be taken, or a new one when there is none: nothing much in one that
+    /// holds a build, or for a user that leaves the building to others, a
+    /// whole build otherwise.
     pub(super) async fn room_for(
         &self,
+        user: super::fit::User<'_>,
         best: Option<&super::fit::Candidate>,
         builds: Builds,
         supervision: Supervision<'_>,
     ) -> Result<(), WorktreeError> {
         let need = match best {
             Some(best) if !best.is_empty() => 0,
+            _ if !user.builds() => 0,
             _ => builds.largest,
         };
         let spare = best.map(|best| best.slot.number);

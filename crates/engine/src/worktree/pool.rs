@@ -28,6 +28,7 @@
 
 mod add;
 mod fit;
+mod follow;
 mod give;
 mod release;
 mod room;
@@ -53,6 +54,7 @@ pub use release::{
     adopt_unit_branches, forget_run_units, hand_over_run_checkout, release_run_checkout,
     release_unit_checkouts, still_the_runs,
 };
+pub use runs::Birth;
 use slot::SLOT;
 pub use tidy::{PoolReport, Tidied};
 
@@ -80,6 +82,7 @@ pub struct CheckoutPool {
 /// Where a pool is: its own directory, and the common git directory of
 /// the project it keeps checkouts of — what every checkout's change is
 /// held off by.
+#[derive(Clone)]
 struct Located {
     home: PathBuf,
     common_dir: PathBuf,
@@ -225,6 +228,21 @@ impl CheckoutPool {
             limits: limits.cloned().unwrap_or_default(),
             walking: space::Walking::default(),
             located: tokio::sync::OnceCell::new(),
+        })
+    }
+
+    /// The same pool, reached from `repo` — another checkout of the
+    /// project, for a run that moved there — knowing what this handle
+    /// knows, and sharing the walks it has under way.
+    pub fn reached_from(&self, repo: &Path) -> Arc<Self> {
+        Arc::new(Self {
+            root: self.root.clone(),
+            repo: repo.to_path_buf(),
+            holder: self.holder.clone(),
+            known: self.known.clone(),
+            limits: self.limits.clone(),
+            walking: self.walking.clone(),
+            located: tokio::sync::OnceCell::new_with(self.located.get().cloned()),
         })
     }
 

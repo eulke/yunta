@@ -8,16 +8,16 @@
 //! [`execute_run_at_depth`] and reads what remains off the log, never from
 //! in-process state.
 
-use std::sync::Arc;
+use std::future::Future;
+use std::path::PathBuf;
+use std::pin::Pin;
 
 use tokio_util::sync::CancellationToken;
 use yunta_core::events::{
-    EventDraft, EventPayload, FindingSeverity, PauseReason, RunPausedPayload,
+    EventDraft, EventPayload, FindingSeverity, PauseReason, RunMovedPayload, RunPausedPayload,
 };
-use yunta_core::{Clock, ModeName, NodeId, Pid, RunId};
+use yunta_core::{Clock, ModeName, NodeId, RunId};
 use yunta_storage::AsyncStorage;
-
-use crate::task_cycle::Memo;
 
 use super::schedule::{self, Decision};
 use super::{baseline, gate_exec, steps, RunCtx, RunEnv, RunError, RunReport, RunTerminal};
@@ -117,7 +117,7 @@ pub(crate) async fn execute_run_at_depth(
     let log = ready.ctx.log();
     tokio::select! {
         biased;
-        report = Box::pin(drive(&ready)) => report,
+        report = Box::pin(drive_where_it_works(&ready)) => report,
         stopped = ready.ctx.awake.watch(&log) => match stopped {
             Ok(never) => match never {},
             Err(error) => Err(error.into()),
@@ -125,20 +125,55 @@ pub(crate) async fn execute_run_at_depth(
     }
 }
 
+/// Where one drive of the scheduler loop left the run. The report is
+/// boxed, as a run's startup is: a move carries a path.
+enum Driven {
+    /// At a stop, which the invocation reports.
+    Stopped(Box<RunReport>),
+    /// In another checkout, where the loop drives it on.
+    Moved(PathBuf),
+}
+
+impl Driven {
+    fn stopped(report: RunReport) -> Self {
+        Driven::Stopped(Box::new(report))
+    }
+}
+
+/// Drives the run in the checkout it works in, and on in each one it
+/// moves into: what the invocation holds carries over every move.
+async fn drive_where_it_works(ready: &Ready<'_>) -> Result<RunReport, RunError> {
+    let mut moved: Option<PathBuf> = None;
+    loop {
+        let driven = {
+            let there = moved
+                .as_deref()
+                .map(|checkout| ready.ctx.moved_to(checkout));
+            Box::pin(drive(there.as_ref().unwrap_or(&ready.ctx), ready)).await?
+        };
+        match driven {
+            Driven::Stopped(report) => return Ok(*report),
+            Driven::Moved(checkout) => moved = Some(checkout),
+        }
+    }
+}
+
 /// The scheduler loop: replays the log, asks what is next, and runs it
-/// until the answer is terminal.
+/// until the answer is terminal — or until the run moves into the
+/// checkout its last unit built in, where it goes on.
 ///
 /// A run that measures its suite aside starts measuring as soon as it
 /// owes the measurement, and every step runs beside it until a step that
 /// reads it waits for it. The measurement never outlives the loop: when a
 /// step ends the invocation, a measurement still under way stops,
-/// records nothing, and the next wake takes it again.
-async fn drive(ready: &Ready<'_>) -> Result<RunReport, RunError> {
+/// records nothing, and the next wake takes it again. A run moves only
+/// while nothing measures, so no move stops one.
+async fn drive(ctx: &RunCtx<'_>, ready: &Ready<'_>) -> Result<Driven, RunError> {
     let Ready {
-        ctx,
         root_cancel,
         mode_name,
         policy,
+        ..
     } = ready;
     let mut aside = super::aside::Aside::new(root_cancel);
     let ended = loop {
@@ -148,7 +183,9 @@ async fn drive(ready: &Ready<'_>) -> Result<RunReport, RunError> {
         // log first and then reach this same check.
         if root_cancel.is_cancelled() {
             aside.stop().await;
-            break pause(ctx, PauseReason::Cancelled).await;
+            break pause(ctx, PauseReason::Cancelled)
+                .await
+                .map(Driven::stopped);
         }
         // One read and one replay per iteration: the decision and every
         // handler that needs the run's state read the same derivation.
@@ -163,11 +200,14 @@ async fn drive(ready: &Ready<'_>) -> Result<RunReport, RunError> {
         if matches!(decision, Decision::MeasureBaseline { .. }) && aside.finish().await? {
             continue;
         }
+        if let Some(checkout) = moves_before(ctx, &state, policy, &aside, &decision).await? {
+            break Ok(Driven::Moved(checkout));
+        }
         match aside
             .beside(take_step(ctx, &state, mode_name, decision))
             .await
         {
-            Ok(Some(report)) => break Ok(report),
+            Ok(Some(report)) => break Ok(Driven::stopped(report)),
             Ok(None) => {}
             // A cancellation that reached the step's own git said so on
             // the way out; it is the same Ctrl-C the loop's next turn
@@ -180,6 +220,37 @@ async fn drive(ready: &Ready<'_>) -> Result<RunReport, RunError> {
     ended
 }
 
+/// Moves the run, before it executes `decision`, into a checkout of its
+/// pool that already built the commit it stands at — the one its last
+/// unit worked in — when it is the moment to look for one, and says so on
+/// the log. Answers where the run works now; `None` when it stays.
+async fn moves_before(
+    ctx: &RunCtx<'_>,
+    state: &crate::replay::RunState,
+    policy: &schedule::Policy,
+    aside: &super::aside::Aside<'_>,
+    decision: &Decision,
+) -> Result<Option<PathBuf>, RunError> {
+    let Decision::Execute(batch) = decision else {
+        return Ok(None);
+    };
+    if !aside.idle() || !schedule::follows_build(&ctx.manifest.workflow, state, policy, batch) {
+        return Ok(None);
+    }
+    let supervision = ctx.root_supervision();
+    // Boxed: the move runs at the bottom of every composed run's stack.
+    let moved = Box::pin(ctx.pool.follow_build(ctx.run_id, ctx.worktree, supervision)).await?;
+    let Some(checkout) = moved else {
+        return Ok(None);
+    };
+    let payload = RunMovedPayload {
+        checkout: checkout.clone(),
+    };
+    ctx.emit(None, EventPayload::Run(RunEvent::Moved(payload)))
+        .await?;
+    Ok(Some(checkout))
+}
+
 /// Takes one step the scheduler decided, answering with the report of a
 /// step that ended the invocation. A step the disk has no room for stops
 /// the run, saying how to make some.
@@ -189,8 +260,7 @@ async fn take_step(
     mode_name: &ModeName,
     decision: Decision,
 ) -> Result<Option<RunReport>, RunError> {
-    // Boxed: a step runs at the bottom of every composed run's stack.
-    match Box::pin(step(ctx, state, mode_name, decision)).await {
+    match step(ctx, state, mode_name, decision).await {
         Err(RunError::NoRoom(crate::worktree::WorktreeError::NoRoom { room })) => {
             pause(ctx, room.pause()).await.map(Some)
         }
@@ -198,22 +268,25 @@ async fn take_step(
     }
 }
 
-/// One step the scheduler decided, taken.
-async fn step(
-    ctx: &RunCtx<'_>,
-    state: &crate::replay::RunState,
-    mode_name: &ModeName,
+/// What a step answers: the report of a step that ended the invocation.
+type Stepped<'s> = Pin<Box<dyn Future<Output = Result<Option<RunReport>, RunError>> + 's>>;
+
+/// The step the scheduler decided, boxed apart by its kind: a run nested
+/// inside another run's step carries the frame of the one step it takes,
+/// not one sized for every kind of step, at every level of the
+/// composition.
+fn step<'s>(
+    ctx: &'s RunCtx<'_>,
+    state: &'s crate::replay::RunState,
+    mode: &'s ModeName,
     decision: Decision,
-) -> Result<Option<RunReport>, RunError> {
+) -> Stepped<'s> {
     match decision {
-        Decision::Broken { diagnostic } => Err(steps::broken(ctx, diagnostic).await),
-        Decision::MeasureBaseline { suite } => {
-            baseline::measure(ctx, suite).await?;
-            Ok(None)
-        }
-        Decision::Finish => steps::run_finished(ctx, mode_name).await.map(Some),
-        Decision::Pause { reason } => pause(ctx, reason).await.map(Some),
-        Decision::Fail { reason } => steps::run_failed(ctx, reason).await.map(Some),
+        Decision::Broken { diagnostic } => Box::pin(fails(steps::broken(ctx, diagnostic))),
+        Decision::MeasureBaseline { suite } => Box::pin(goes_on(baseline::measure(ctx, suite))),
+        Decision::Finish => Box::pin(ends(steps::run_finished(ctx, mode))),
+        Decision::Pause { reason } => Box::pin(ends(pause(ctx, reason))),
+        Decision::Fail { reason } => Box::pin(ends(steps::run_failed(ctx, reason))),
         Decision::Reroute {
             from,
             to,
@@ -221,15 +294,19 @@ async fn step(
             max_reroutes,
             cause,
         } => {
-            steps::reroute(ctx, from, to, attempt, max_reroutes, cause).await?;
-            Ok(None)
+            let rerouted = steps::reroute(ctx, from, to, attempt, max_reroutes, cause);
+            Box::pin(goes_on(rerouted))
         }
         Decision::GateExhaustedReroutes {
             node,
             goto,
             max_reroutes,
             cause,
-        } => steps::gate_exhausted(ctx, state, mode_name, node, goto, max_reroutes, cause).await,
+        } => {
+            let exhausted =
+                steps::gate_exhausted(ctx, state, mode, node, goto, max_reroutes, cause);
+            Box::pin(exhausted)
+        }
         Decision::EscalateFailure {
             node,
             failure,
@@ -237,24 +314,37 @@ async fn step(
             continuable,
             grantable,
         } => {
-            steps::failure_escalation(
-                ctx,
-                state,
-                node,
-                failure,
-                (next_attempt, (continuable, grantable)),
-            )
-            .await
+            let next = (next_attempt, (continuable, grantable));
+            Box::pin(steps::failure_escalation(ctx, state, node, failure, next))
         }
-        Decision::Execute(batch) => steps::execute_batch(ctx, state, batch).await,
-        Decision::PublishGate { node } => steps::publish_gate(ctx, node).await,
+        Decision::Execute(batch) => Box::pin(steps::execute_batch(ctx, state, batch)),
+        Decision::PublishGate { node } => Box::pin(steps::publish_gate(ctx, node)),
         Decision::PollGate { node, external_ref } => {
-            steps::poll_gate(ctx, node, external_ref).await
+            Box::pin(steps::poll_gate(ctx, node, external_ref))
         }
-        Decision::ResolveInternalGate { node } => steps::resolve_internal_gate(ctx, node).await,
-        Decision::AskQuestions { node } => steps::ask_questions(ctx, node).await,
-        Decision::FinishAnswered { node } => steps::finish_answered(ctx, node).await,
+        Decision::ResolveInternalGate { node } => Box::pin(steps::resolve_internal_gate(ctx, node)),
+        Decision::AskQuestions { node } => Box::pin(steps::ask_questions(ctx, node)),
+        Decision::FinishAnswered { node } => Box::pin(steps::finish_answered(ctx, node)),
     }
+}
+
+/// A step that finds the run broken, saying how.
+async fn fails(broken: impl Future<Output = RunError>) -> Result<Option<RunReport>, RunError> {
+    Err(broken.await)
+}
+
+/// A step that ends the invocation, reporting what `ended` reports.
+async fn ends(
+    ended: impl Future<Output = Result<RunReport, RunError>>,
+) -> Result<Option<RunReport>, RunError> {
+    ended.await.map(Some)
+}
+
+/// A step after which the run goes on.
+async fn goes_on(
+    step: impl Future<Output = Result<(), RunError>>,
+) -> Result<Option<RunReport>, RunError> {
+    step.await.map(|()| None)
 }
 
 /// Wakes the run: builds its context, refuses a run with no log, returns
@@ -264,7 +354,7 @@ async fn step(
 /// finding, rechecks approved gates, and freezes the mode — everything
 /// that happens once per invocation, before the scheduler loop.
 async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
-    let (ctx, root_cancel, registry_error) = build_ctx(env, depth);
+    let (ctx, root_cancel, registry_error) = super::invocation::build_ctx(env, depth);
 
     let view = ctx.run_view().await?;
     if view.events.is_empty() {
@@ -332,124 +422,6 @@ async fn start(env: RunEnv<'_>, depth: u32) -> Result<Startup<'_>, RunError> {
         mode_name,
         policy,
     })))
-}
-
-/// Builds the run's context and the two invocation-scoped values the
-/// scheduler loop needs beside it: the loop's own handle on the root
-/// cancellation, which the caller always brings, and the
-/// process-registry write error,
-/// carried past construction because a failed write has no log to record
-/// itself on until the context exists.
-fn build_ctx(
-    env: RunEnv<'_>,
-    depth: u32,
-) -> (RunCtx<'_>, CancellationToken, Option<std::io::Error>) {
-    let RunEnv {
-        run_id,
-        manifest,
-        run_dir,
-        worktree,
-        adapters,
-        storage,
-        clock,
-        ids,
-        human_interaction,
-        forge,
-        cancel,
-        adapter_override,
-        ambient,
-        secrets,
-        observer,
-        fence_hook,
-    } = env;
-    // Resolved once, when the run wakes: every append this invocation
-    // makes takes the same values back out, and a run that declares no
-    // secret builds an empty one and pays nothing.
-    let redactor =
-        yunta_core::Redactor::of(&manifest.config.secrets, secrets.as_deref().map(|s| s as _));
-    let root_cancel = cancel.clone();
-    let root_cancel_for_ctx = root_cancel.clone();
-    let (registry, registry_error) = match crate::process_registry::ProcessRegistry::create(
-        run_dir,
-        Pid::current(),
-        clock.now(),
-    ) {
-        Ok(registry) => (Some(std::sync::Arc::new(registry)), None),
-        Err(e) => (None, Some(e)),
-    };
-    // The per-run MCP host outlives every borrow of this invocation, so
-    // it owns a clone of the run's clock and of its observer rather than
-    // borrowing them — the one injected clock and the one display
-    // surface reach the listener's own event appends.
-    let clock_for_host = clock.clone();
-    let awake = Arc::new(crate::wakefulness::Wakefulness::new(clock.clone()));
-    let observer_for_host = observer.clone();
-    // One cache of criterion results per invocation, read by every task
-    // cycle and by every check a task session asks for through the host.
-    let memo = std::sync::Arc::new(Memo::new(manifest.config_hash.clone()));
-    let pool = crate::worktree::CheckoutPool::of_run(
-        &crate::run_dir::worktrees_root(manifest, run_dir),
-        worktree,
-        run_dir,
-        manifest,
-    );
-    let registry_for_host = registry.clone();
-    let subprocess_vars = super::invocation::subprocess_vars(ambient, &manifest.config);
-    let ctx = RunCtx {
-        fence_hook,
-        run_id,
-        manifest,
-        run_dir,
-        worktree,
-        adapters,
-        storage,
-        clock,
-        ids,
-        memo: memo.clone(),
-        pool: pool.clone(),
-        human_interaction,
-        adapter_override,
-        budget_lifted: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        process_registry: registry,
-        root_cancel: root_cancel_for_ctx,
-        forge,
-        depth,
-        ambient,
-        subprocess_vars: subprocess_vars.clone().into(),
-        secrets,
-        redactor: redactor.clone(),
-        observer,
-        unit: None,
-        landing: std::sync::Arc::new(tokio::sync::Mutex::new(())),
-        awake,
-        // One host per execute_run invocation, shared by every session
-        // listener; each of them reads and writes through the host's own
-        // clone of the log handle.
-        run_tools_host: Arc::new(crate::run_tools::RunToolsHost::new(
-            &manifest.workflow,
-            crate::run_tools::HostOf {
-                storage: storage.clone(),
-                run_id: run_id.clone(),
-                clock: clock_for_host,
-                observer: observer_for_host,
-                run_dir: run_dir.to_path_buf(),
-                max_artifact_bytes: manifest
-                    .config
-                    .limits
-                    .as_ref()
-                    .and_then(|limits| limits.max_artifact_bytes),
-                redactor,
-                memo,
-                pool,
-                process_registry: registry_for_host,
-                subprocess_vars,
-                environment: crate::process::execution_environment(ambient),
-                worktree: worktree.to_path_buf(),
-                suite: crate::run::baseline::suite(manifest).and_then(yunta_core::Suite::of),
-            },
-        )),
-    };
-    (ctx, root_cancel, registry_error)
 }
 
 pub(super) fn find_node<'a>(

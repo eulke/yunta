@@ -1,9 +1,9 @@
 ---
 number: D235
 title: "A run's log names the checkout it works in"
-status: accepted
+status: revised
 revises: [D158]
-revised_by: []
+revised_by: [D248]
 ---
 
 # D235 — A run's log names the checkout it works in

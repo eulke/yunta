@@ -318,7 +318,12 @@ impl Bench {
         }
         let (checkout, _held) = self
             .pool_handle(manifest)
-            .open_run(&self.run_id, &manifest.base_commit, self.supervision())
+            .open_run(
+                &self.run_id,
+                &manifest.base_commit,
+                yunta_engine::Birth::of(&manifest.workflow),
+                self.supervision(),
+            )
             .await?;
         Ok(checkout)
     }
@@ -379,7 +384,7 @@ impl Bench {
         if let Some(driven) = self.driven.lock().expect("the bench's own lock").as_mut() {
             driven.tree = tree.clone();
         }
-        execute_run(RunEnv {
+        let report = execute_run(RunEnv {
             run_id: &self.run_id,
             manifest: &manifest,
             run_dir: &run_dir,
@@ -400,7 +405,13 @@ impl Bench {
             fence_hook: None,
             observer: self.observer.clone(),
         })
-        .await
+        .await?;
+        // A run may move into a checkout that already built where it
+        // stands: the next wake takes it there.
+        if let Some(driven) = self.driven.lock().expect("the bench's own lock").as_mut() {
+            driven.tree = report.tree(&tree);
+        }
+        Ok(report)
     }
 
     /// The same wake, panicking on a refusal no test is about.

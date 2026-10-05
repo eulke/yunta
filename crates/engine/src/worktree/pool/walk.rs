@@ -1,6 +1,6 @@
 //! The walk that tells what a build takes on disk. It reads the disk as
 //! it goes, file by file, so it only ever runs on a blocking thread —
-//! [`super::space::measure`] hands it there.
+//! [`super::space::on_disk`] hands it there.
 
 // blocking: every read below happens on the thread `spawn_blocking` gives
 // the walk, never on the executor.

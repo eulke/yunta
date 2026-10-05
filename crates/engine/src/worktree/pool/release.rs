@@ -42,20 +42,7 @@ pub async fn release_run_checkout(
     supervision: Supervision<'_>,
 ) -> Result<(), WorktreeError> {
     let home = pool.home(supervision).await?;
-    let tree = tokio::fs::canonicalize(tree)
-        .await
-        .unwrap_or_else(|_| tree.to_path_buf());
-    let number = tree
-        .parent()
-        .filter(|parent| *parent == home)
-        .and_then(|_| {
-            tree.file_name()?
-                .to_str()?
-                .strip_prefix(slot::SLOT)?
-                .parse()
-                .ok()
-        });
-    let Some(number) = number else {
+    let Some((number, tree)) = slot::number_of(&home, tree).await else {
         return Ok(());
     };
     let held = slot::hold(&home, number, Contention::Refuse, None, supervision).await?;
@@ -183,20 +170,7 @@ async fn let_go(
     unit: &super::super::UnitRef,
     supervision: Supervision<'_>,
 ) -> Result<bool, WorktreeError> {
-    let path = tokio::fs::canonicalize(path)
-        .await
-        .unwrap_or_else(|_| path.to_path_buf());
-    let number = path
-        .parent()
-        .filter(|parent| *parent == home)
-        .and_then(|_| {
-            path.file_name()?
-                .to_str()?
-                .strip_prefix(slot::SLOT)?
-                .parse()
-                .ok()
-        });
-    let Some(number) = number else {
+    let Some((number, path)) = slot::number_of(home, path).await else {
         return Ok(false);
     };
     let held = slot::hold(

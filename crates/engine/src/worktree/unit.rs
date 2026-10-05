@@ -20,6 +20,12 @@ use yunta_core::{CommitSha, NodeId, RunId, TaskId, TreeId};
 use super::{head_commit, WorktreeError};
 use crate::process::Supervision;
 
+/// Whether `node`'s work is done by units of its own — a loop's tasks,
+/// or an audited node — and lands on the run's tree once it passes.
+pub fn lands_units(node: &yunta_core::Node) -> bool {
+    matches!(node.kind, yunta_core::NodeKind::Loop { .. }) || crate::scope::audits(node)
+}
+
 /// Which unit of work owns a tree, a branch and a private index.
 ///
 /// The kind is part of the name, not decoration: a node and a task of

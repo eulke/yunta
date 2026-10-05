@@ -30,6 +30,10 @@ pub enum Happening {
         origin: BaselineOrigin,
         red: Option<i32>,
     },
+    /// The run moved into a checkout that already built where it stands.
+    Moved {
+        checkout: std::path::PathBuf,
+    },
     /// The host slept for `slept` while the run was open.
     HostSuspended {
         slept: std::time::Duration,
@@ -57,6 +61,9 @@ impl From<&RunEvent> for Happening {
             },
             RunEvent::Resumed(p) => Happening::Resumed {
                 policies: p.policies.clone(),
+            },
+            RunEvent::Moved(p) => Happening::Moved {
+                checkout: p.checkout.clone(),
             },
             RunEvent::Finished(p) => Happening::Closed {
                 terminal: p.terminal_state,

@@ -319,6 +319,7 @@ pub(super) async fn execute_workflow(
             let opened = Box::pin(ctx.pool.open_run(
                 &child_id,
                 &child_manifest.base_commit,
+                crate::worktree::Birth::of(&child_manifest.workflow),
                 ctx.root_supervision(),
             ))
             .await;
@@ -558,6 +559,9 @@ async fn drive_child(
             ));
             future.await?
         };
+        // Where the member works as it stopped, which a move may have
+        // taken away from where it began: a successor carries on there.
+        let worked_in = report.tree(&current_tree);
 
         match report.terminal {
             RunTerminal::Finished => {
@@ -610,7 +614,7 @@ async fn drive_child(
                     super::Predecessor {
                         id: &current_id,
                         manifest: &current_manifest,
-                        worktree: &current_tree,
+                        worktree: &worked_in,
                         run_dir: &current_run_dir,
                     },
                     &suggested_mode,

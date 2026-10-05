@@ -433,6 +433,7 @@ wire_kinds! {
     HostSuspended => "host_suspended",
     RunPaused => "run_paused",
     RunResumed => "run_resumed",
+    RunMoved => "run_moved",
     RunFinished => "run_finished",
 }
 

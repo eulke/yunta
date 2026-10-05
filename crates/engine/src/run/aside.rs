@@ -43,6 +43,11 @@ impl<'a> Aside<'a> {
         }
     }
 
+    /// Whether no measurement is under way.
+    pub(super) fn idle(&self) -> bool {
+        self.under_way.is_none()
+    }
+
     /// Waits for the measurement under way: `false` when none is.
     pub(super) async fn finish(&mut self) -> Result<bool, RunError> {
         match self.under_way.take() {

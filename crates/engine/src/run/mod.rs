@@ -315,6 +315,15 @@ pub struct RunReport {
     pub state: RunState,
 }
 
+impl RunReport {
+    /// Where the run works as it stopped: the checkout its log names last
+    /// — where it was born, woke or moved — or `given`, the tree it was
+    /// handed, for a run whose log names none.
+    pub fn tree(&self, given: &Path) -> std::path::PathBuf {
+        self.state.run.checkout().unwrap_or(given).to_path_buf()
+    }
+}
+
 /// Everything [`execute_run`] needs from its caller, grouped: the run's
 /// own identity/manifest/paths, the environment it executes against
 /// (adapters, storage, clock, ids), and the cross-cutting surfaces

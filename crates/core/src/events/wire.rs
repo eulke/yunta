@@ -91,6 +91,7 @@ pub(crate) enum EventPayloadWire {
     HostSuspended(HostSuspendedPayload),
     RunPaused(RunPausedPayload),
     RunResumed(RunResumedPayload),
+    RunMoved(RunMovedPayload),
     RunFinished(RunFinishedPayload),
 }
 
@@ -170,6 +171,7 @@ wire_table! {
     HostSuspended => Run(RunEvent::HostSuspended),
     RunPaused => Run(RunEvent::Paused),
     RunResumed => Run(RunEvent::Resumed),
+    RunMoved => Run(RunEvent::Moved),
     RunFinished => Run(RunEvent::Finished),
 }
 

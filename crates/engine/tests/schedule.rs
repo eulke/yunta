@@ -48,6 +48,7 @@ fn policy() -> SchedulingPolicy {
         may_promote: false,
         grants_scope: true,
         denied: Vec::new(),
+        follows_builds: false,
     }
 }
 
@@ -371,6 +372,7 @@ fn grant_is_not_offered_for_a_denied_path() {
     };
     let denying_ci = SchedulingPolicy {
         denied: vec![".github/**".into()],
+        follows_builds: false,
         ..policy()
     };
     let into_ci = Failure::scope_violated(vec![".github/ci.yml".into()]);

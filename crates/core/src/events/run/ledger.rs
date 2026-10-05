@@ -76,6 +76,9 @@ pub struct RunLedger {
     checkout: Option<std::path::PathBuf>,
     /// The wake that last moved the run to another checkout.
     moved_at: Option<Seq>,
+    /// Where the run last took the checkout it works in: its birth, a
+    /// wake that moved it, or a move between two of its steps.
+    bound_at: Option<Seq>,
 }
 
 impl RunLedger {
@@ -84,6 +87,12 @@ impl RunLedger {
     /// working in a person's checkout, or one whose log never named it.
     pub fn checkout(&self) -> Option<&std::path::Path> {
         self.checkout.as_deref()
+    }
+
+    /// Where the run last took the checkout it works in — `None` for a
+    /// run working in a person's checkout.
+    pub fn bound_at(&self) -> Option<Seq> {
+        self.bound_at
     }
 
     /// Whether the latest wake moved the run to another checkout than the
@@ -218,6 +227,7 @@ impl RunLedger {
                 self.left_out = p.left_out.clone();
                 self.opens_on_base = p.opens_on_base;
                 self.checkout = p.checkout.clone();
+                self.bound_at = p.checkout.as_ref().map(|_| meta.seq);
                 self.invocations
                     .push((meta.seq, p.environment.as_deref().cloned()));
             }
@@ -234,7 +244,12 @@ impl RunLedger {
                 if let Some(checkout) = &p.checkout {
                     self.checkout = Some(checkout.clone());
                     self.moved_at = Some(meta.seq);
+                    self.bound_at = Some(meta.seq);
                 }
+            }
+            RunEvent::Moved(p) => {
+                self.checkout = Some(p.checkout.clone());
+                self.bound_at = Some(meta.seq);
             }
             RunEvent::Finished(p) => {
                 self.phase = RunPhaseRaw::Closed;

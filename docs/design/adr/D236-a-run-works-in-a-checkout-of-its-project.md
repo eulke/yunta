@@ -1,9 +1,9 @@
 ---
 number: D236
 title: "A run works in a checkout of its project's pool, reserved by its branch for as long as it lives"
-status: accepted
+status: revised
 revises: [D158]
-revised_by: []
+revised_by: [D248]
 ---
 
 # D236 — A run works in a checkout of its project's pool, reserved by its branch for as long as it lives

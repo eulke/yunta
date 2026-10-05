@@ -111,9 +111,11 @@ pub(crate) async fn drive_promotions(
         })
         .await?;
 
+        // Where the successor works as it stopped: a move may have taken
+        // it out of the checkout it was handed.
+        worktree = successor_report.tree(&successor.worktree);
         run_id = successor.run_id;
         manifest = successor.manifest;
-        worktree = successor.worktree;
         report = successor_report;
     }
     Ok((run_id, manifest, worktree, report))

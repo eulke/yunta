@@ -1,0 +1,167 @@
+//! A run following a build into another checkout of its pool. What a
+//! unit builds is right only at the path that built it, so once the run's
+//! tree stands where a free checkout already built, the run takes that
+//! checkout on its branch instead of building the same commit again: its
+//! tree goes back to the pool, its own build with it.
+
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+use yunta_core::CommitSha;
+
+use super::survey::{self, Standing};
+use super::{slot, space, CheckoutPool, Lease};
+use crate::lock::Contention;
+use crate::process::Supervision;
+use crate::worktree::WorktreeError;
+
+/// A free checkout standing where the run's tree does, held.
+struct Warm {
+    number: u32,
+    path: PathBuf,
+    _lease: Lease,
+}
+
+impl CheckoutPool {
+    /// Moves run `run_id` out of `tree`, the checkout it works in, into the
+    /// free checkout of the pool standing exactly where `tree` stands that
+    /// holds the most build — the one its last unit built in, given back as
+    /// that unit's work landed — when that build holds every kind of build
+    /// `tree` holds, and more of it. `tree` lets go of the run's branch for
+    /// that checkout to take it, and goes back to the pool with its build.
+    ///
+    /// Answers where the run works now; `None` when it stays: `tree` is
+    /// not clean on the run's branch, or no checkout builds more. A move
+    /// git refused half way is undone, and the run stays.
+    pub async fn follow_build(
+        &self,
+        run_id: &yunta_core::RunId,
+        tree: &Path,
+        supervision: Supervision<'_>,
+    ) -> Result<Option<PathBuf>, WorktreeError> {
+        let home = self.home(supervision).await?;
+        let Some((own, tree)) = slot::number_of(&home, tree).await else {
+            return Ok(None);
+        };
+        let held = slot::hold(&home, own, Contention::Refuse, None, supervision).await?;
+        let Some(tree_lease) = held else {
+            return Ok(None);
+        };
+        let branch = crate::worktree::run_branch(run_id);
+        let Some(at) = on_branch(&tree, &branch, supervision).await else {
+            return Ok(None);
+        };
+        let Some(warm) = self.warmest_at(&home, own, &at, supervision).await? else {
+            return Ok(None);
+        };
+        let Some((roots, bytes)) = self.outbuilt(&tree, &home, &warm, supervision).await else {
+            return Ok(None);
+        };
+        super::mutating(&tree, &["switch", "--detach", "-q"], supervision).await?;
+        let take = ["switch", "-q", branch.as_str()];
+        if let Err(error) = super::mutating(&warm.path, &take, supervision).await {
+            super::mutating(&tree, &take, supervision).await?;
+            tracing::warn!(%error, checkout = %warm.path.display(), "the run stays in its tree");
+            return Ok(None);
+        }
+        let now = supervision.clock.now();
+        slot::used(&home, warm.number, self.holder.as_deref(), now).await;
+        slot::used(&home, own, self.holder.as_deref(), now).await;
+        space::measured(&home, own, roots, bytes, now).await;
+        drop(tree_lease);
+        Ok(Some(warm.path))
+    }
+
+    /// The free checkout of the pool at `home` standing at `at` that holds
+    /// the most build, held — any but `own`, the run's tree.
+    async fn warmest_at(
+        &self,
+        home: &Path,
+        own: u32,
+        at: &CommitSha,
+        supervision: Supervision<'_>,
+    ) -> Result<Option<Warm>, WorktreeError> {
+        let mut warm: Vec<survey::Slot> = survey::survey(home, &self.repo, supervision)
+            .await?
+            .into_iter()
+            .filter(|slot| {
+                let detached_at = Standing {
+                    head: Some(at.clone()),
+                    branch: None,
+                };
+                let kept = slot.held.as_ref().is_some_and(|held| held.unit.is_some());
+                slot.number != own
+                    && slot.standing.as_ref() == Some(&detached_at)
+                    && !kept
+                    && slot.built.as_ref().is_some_and(space::Built::holds)
+            })
+            .collect();
+        warm.sort_by_key(|slot| {
+            let built = slot.built.as_ref();
+            let bytes = built.map_or(0, space::Built::counted);
+            std::cmp::Reverse((bytes, built.map(|built| built.at)))
+        });
+        for slot in warm {
+            let held = slot::hold(home, slot.number, Contention::Refuse, None, supervision);
+            let Some(lease) = held.await? else {
+                continue;
+            };
+            let free = slot::last_held(home, slot.number)
+                .await
+                .is_none_or(|held| held.unit.is_none());
+            let detached_at = survey::look(&slot.path, supervision)
+                .await
+                .is_some_and(|look| {
+                    look.clean
+                        && look.standing.branch.is_none()
+                        && look.standing.head.as_ref() == Some(at)
+                });
+            if free && detached_at {
+                return Ok(Some(Warm {
+                    number: slot.number,
+                    path: slot.path,
+                    _lease: lease,
+                }));
+            }
+        }
+        Ok(None)
+    }
+
+    /// What `tree` holds of a build — where, and how much — when `warm`
+    /// holds every kind of build it does, and more of it. `None` when it
+    /// does not, or when git cannot say what either ignores.
+    async fn outbuilt(
+        &self,
+        tree: &Path,
+        home: &Path,
+        warm: &Warm,
+        supervision: Supervision<'_>,
+    ) -> Option<(Vec<PathBuf>, u64)> {
+        let roots = space::ignored(tree, supervision).await?;
+        let theirs = space::ignored(&warm.path, supervision).await?;
+        let theirs: HashSet<&Path> = names(&theirs, &warm.path).collect();
+        if !names(&roots, tree).all(|name| theirs.contains(name)) {
+            return None;
+        }
+        let bytes = match roots.is_empty() {
+            true => 0,
+            false => space::on_disk(roots.clone()).await,
+        };
+        let warmer = space::counted(home, warm.number, &self.walking).await?;
+        (bytes < warmer).then_some((roots, bytes))
+    }
+}
+
+/// Where `tree` stands when it is clean on `branch`.
+async fn on_branch(tree: &Path, branch: &str, supervision: Supervision<'_>) -> Option<CommitSha> {
+    let look = survey::look(tree, supervision).await?;
+    let on = look.standing.branch.as_deref() == Some(branch);
+    (look.clean && on).then_some(look.standing.head?)
+}
+
+/// `roots` as named inside `checkout`.
+fn names<'a>(roots: &'a [PathBuf], checkout: &'a Path) -> impl Iterator<Item = &'a Path> {
+    roots
+        .iter()
+        .filter_map(move |root| root.strip_prefix(checkout).ok())
+}

@@ -52,6 +52,10 @@ fn run_words(happening: &run::happening::Happening) -> (Option<Mark>, String) {
             ),
         },
         H::BaselineCaptured { origin, red } => return baseline_words(origin, *red),
+        H::Moved { checkout } => format!(
+            "moved into {}, which already built this commit",
+            checkout.display()
+        ),
         H::HostSuspended { slept } => format!(
             "host suspended for {} — durations leave it out; new sessions wait until it has \
              been awake {}",

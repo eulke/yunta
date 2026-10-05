@@ -213,7 +213,12 @@ async fn a_paused_runs_checkout_is_never_leased_to_another_run() {
     let supervision = world.owner.supervision();
     let (theirs, held) = world
         .pool
-        .open_run(&parked, &world.head(), supervision)
+        .open_run(
+            &parked,
+            &world.head(),
+            yunta_engine::Birth::Builds,
+            supervision,
+        )
         .await
         .unwrap();
     drop(held);
@@ -222,7 +227,12 @@ async fn a_paused_runs_checkout_is_never_leased_to_another_run() {
     let other = RunId::from("01JPOOLANOTHERRUNCHECKOUTA");
     let (others, _held) = world
         .pool
-        .open_run(&other, &world.head(), supervision)
+        .open_run(
+            &other,
+            &world.head(),
+            yunta_engine::Birth::Builds,
+            supervision,
+        )
         .await
         .unwrap();
 
@@ -239,7 +249,12 @@ async fn resume_continues_on_a_persons_branch_in_the_bound_checkout() {
     let supervision = world.owner.supervision();
     let (tree, _held) = world
         .pool
-        .open_run(&run, &world.head(), supervision)
+        .open_run(
+            &run,
+            &world.head(),
+            yunta_engine::Birth::Builds,
+            supervision,
+        )
         .await
         .unwrap();
 

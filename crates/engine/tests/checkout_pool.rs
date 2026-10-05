@@ -319,3 +319,38 @@ async fn run_end_frees_a_blocked_units_clean_checkout_and_keeps_its_ref() {
     );
     assert_eq!(kept.trim(), blocked.keeps.name());
 }
+
+/// A run whose units build its work is born in the free checkout holding
+/// the least, and leaves the warm one to its units; a run that builds in
+/// its own tree is born in the warm one.
+#[tokio::test]
+async fn a_run_whose_units_build_is_born_in_the_emptiest_free_checkout() {
+    let world = World::new();
+    let (warm, warm_held) = world.open("T001").await;
+    let (empty, empty_held) = world.open("T002").await;
+    write(&warm.worktree.join("target/build"), &"b".repeat(64 * 1024));
+    for (unit, held) in [(&warm, warm_held), (&empty, empty_held)] {
+        world.land(unit, &held).await;
+        world.give_back(unit, held).await;
+    }
+
+    let (following, _held) = born(&world, yunta_engine::Birth::FollowsUnits).await;
+    let (building, _also) = born(&world, yunta_engine::Birth::Builds).await;
+
+    assert_eq!(canonical(&following), canonical(&empty.worktree));
+    assert_eq!(canonical(&building), canonical(&warm.worktree));
+}
+
+/// A run of its own opened in the pool, born as `birth` says.
+async fn born(
+    world: &World,
+    birth: yunta_engine::Birth,
+) -> (std::path::PathBuf, yunta_engine::Lease) {
+    let run = yunta_core::RunId::from(format!("01JBORN{birth:?}").as_str());
+    let supervision = world.owner.supervision();
+    world
+        .pool
+        .open_run(&run, &world.head(), birth, supervision)
+        .await
+        .unwrap()
+}

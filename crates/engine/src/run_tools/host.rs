@@ -63,6 +63,7 @@ pub struct HostOf {
     pub suite: Option<yunta_core::Suite>,
 }
 
+#[derive(Clone)]
 pub struct RunToolsHost {
     pub(super) storage: AsyncStorage,
     pub(super) run_id: RunId,
@@ -179,6 +180,20 @@ impl RunToolsHost {
             worktree,
             suite,
             workflow: workflow.clone(),
+        }
+    }
+
+    /// This host for the run once it moved into `worktree`, reaching its
+    /// pool from there.
+    pub(crate) fn moved_to(
+        &self,
+        worktree: &std::path::Path,
+        pool: Arc<crate::worktree::CheckoutPool>,
+    ) -> Self {
+        Self {
+            worktree: worktree.to_path_buf(),
+            pool,
+            ..self.clone()
         }
     }
 

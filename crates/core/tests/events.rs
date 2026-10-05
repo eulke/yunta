@@ -41,6 +41,7 @@ fn run_kinds(event: &RunEvent) {
         | RunEvent::HostSuspended(_)
         | RunEvent::Paused(_)
         | RunEvent::Resumed(_)
+        | RunEvent::Moved(_)
         | RunEvent::Finished(_) => {}
     }
 }
@@ -265,12 +266,12 @@ fn every_domain_declares_the_kinds_the_wire_carries() {
 }
 
 #[test]
-fn there_are_exactly_53_kinds_with_distinct_names() {
+fn there_are_exactly_54_kinds_with_distinct_names() {
     let kinds = all_kinds();
-    assert_eq!(kinds.len(), 53);
+    assert_eq!(kinds.len(), 54);
 
     let names: std::collections::HashSet<&str> = kinds.iter().map(|k| k.kind_name()).collect();
-    assert_eq!(names.len(), 53, "expected 53 distinct kind names");
+    assert_eq!(names.len(), 54, "expected 54 distinct kind names");
 }
 
 /// A node that asked nothing did not ask: the fact refuses to exist, so
@@ -355,6 +356,7 @@ const KIND_NAMES: &[&str] = &[
     "host_suspended",
     "run_paused",
     "run_resumed",
+    "run_moved",
     "run_finished",
 ];
 

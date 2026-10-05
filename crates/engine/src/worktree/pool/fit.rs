@@ -12,13 +12,30 @@ use super::survey::{Slot, Standing};
 /// Who takes a checkout of the pool.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum User<'a> {
-    /// A run, which works on its own branch.
-    Run { branch: &'a str },
+    /// A run, which works on its own branch, born as `birth` says.
+    Run {
+        branch: &'a str,
+        birth: super::Birth,
+    },
     /// A unit, whose attempts' refs all start with `refs`: it works on no
     /// branch, and the checkout's record says it is the unit's.
     Unit { refs: &'a str },
     /// A probe or a measurement, which owns nothing.
     Passing,
+}
+
+impl User<'_> {
+    /// Whether it builds where it works: everybody but a run whose units
+    /// build its work, each in a checkout of its own.
+    pub(super) fn builds(&self) -> bool {
+        !matches!(
+            self,
+            User::Run {
+                birth: super::Birth::FollowsUnits,
+                ..
+            }
+        )
+    }
 }
 
 /// Whose a checkout is, for its next user. Only a clean checkout is ever
@@ -44,7 +61,7 @@ pub(super) enum Claim {
 /// other branch, a person's.
 pub(super) fn claim(standing: &Standing, unit: Option<&str>, user: User<'_>) -> Option<Claim> {
     match (standing.branch.as_deref(), unit, user) {
-        (Some(on), _, User::Run { branch }) if on == branch => Some(Claim::Own),
+        (Some(on), _, User::Run { branch, .. }) if on == branch => Some(Claim::Own),
         (Some(on), _, _) if crate::worktree::is_legacy_unit_branch(on) => Some(Claim::Landed),
         (Some(_), _, _) => None,
         (None, Some(kept), User::Unit { refs }) if kept.starts_with(refs) => Some(Claim::Own),
@@ -53,9 +70,9 @@ pub(super) fn claim(standing: &Standing, unit: Option<&str>, user: User<'_>) -> 
     }
 }
 
-/// What is known of a checkout's build, best first: one that holds a
-/// build builds again only what changed, where an empty one builds
-/// everything, its dependencies first.
+/// What is known of a checkout's build, best first for a user that
+/// builds: one that holds a build builds again only what changed, where
+/// an empty one builds everything, its dependencies first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Build {
     Held,
@@ -64,12 +81,26 @@ pub(super) enum Build {
     Empty,
 }
 
+impl Build {
+    /// Its place for a user that builds nothing: the emptiest first, so
+    /// the warm ones stay for whoever builds.
+    fn lightest_first(self) -> Build {
+        match self {
+            Build::Held => Build::Empty,
+            Build::Unknown => Build::Unknown,
+            Build::Empty => Build::Held,
+        }
+    }
+}
+
 /// One checkout a user may take, and what ranks it.
 pub(super) struct Candidate {
     pub(super) slot: Slot,
     pub(super) claim: Claim,
     build: Build,
     at_target: bool,
+    /// Whether its user builds where it works, and wants the most build.
+    builds: bool,
 }
 
 impl Candidate {
@@ -84,26 +115,39 @@ impl Candidate {
     }
 
     /// How it ranks when `away` paths separate it from where its user
-    /// starts: lower is better.
-    pub(super) fn rank(
-        &self,
-        away: usize,
-    ) -> (
-        Claim,
-        Build,
-        usize,
-        Reverse<Option<chrono::DateTime<chrono::Utc>>>,
-        u32,
-    ) {
-        let used = self.slot.held.as_ref().map(|held| held.at);
-        (
-            self.claim,
-            self.build,
+    /// starts.
+    pub(super) fn rank(&self, away: usize) -> Rank {
+        let warmth = match self.builds {
+            true => (self.build, 0),
+            false => {
+                let bytes = self
+                    .slot
+                    .built
+                    .as_ref()
+                    .map_or(0, super::space::Built::counted);
+                (self.build.lightest_first(), bytes)
+            }
+        };
+        Rank {
+            claim: self.claim,
+            warmth,
             away,
-            Reverse(used),
-            self.slot.number,
-        )
+            used: Reverse(self.slot.held.as_ref().map(|held| held.at)),
+            number: self.slot.number,
+        }
     }
+}
+
+/// How a checkout ranks for its user, lower first: whose it is, how its
+/// build suits the user, how far it stands from where the user starts,
+/// how recently it was used, and its number.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct Rank {
+    claim: Claim,
+    warmth: (Build, u64),
+    away: usize,
+    used: Reverse<Option<chrono::DateTime<chrono::Utc>>>,
+    number: u32,
 }
 
 /// The checkouts of a survey `user` may take to start from `target`,
@@ -129,6 +173,7 @@ pub(super) fn ranked(slots: Vec<Slot>, user: User<'_>, target: &CommitSha) -> Ve
                 claim,
                 build,
                 at_target,
+                builds: user.builds(),
             })
         })
         .collect();

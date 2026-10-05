@@ -6,9 +6,11 @@
 //! not live to finish is finished by the next one that surveys the pool,
 //! or by `gc`; the pool reads what was last counted.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
+use futures::future::{BoxFuture, FutureExt, Shared};
 use serde::{Deserialize, Serialize};
 
 use super::slot::SLOT;
@@ -75,39 +77,97 @@ pub(super) fn count_pending(home: &Path, slots: &[super::survey::Slot], walking:
     }
 }
 
-/// The walks a process has under way, by the record each one finishes.
-#[derive(Default)]
-pub(super) struct Walking(std::sync::Arc<std::sync::Mutex<std::collections::HashSet<PathBuf>>>);
+/// The walks a process has under way, by the record each one finishes:
+/// shared by every handle on the pool the process reaches it through, so
+/// none starts a walk another one has under way, and each can wait for
+/// one to end.
+#[derive(Default, Clone)]
+pub(super) struct Walking(std::sync::Arc<std::sync::Mutex<HashMap<PathBuf, Walk>>>);
+
+/// A walk under way, which every caller waiting for it awaits.
+type Walk = Shared<BoxFuture<'static, ()>>;
 
 impl Walking {
     /// Counts `built`'s bytes off the caller's way and records them at
     /// `path`, unless a walk of it is under way or a later give-back was
     /// recorded first.
     fn count(&self, path: PathBuf, built: Built) {
-        let under_way = self.0.clone();
-        let started = under_way
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(path.clone());
-        if !started {
-            return;
+        let (walked, ended) = tokio::sync::oneshot::channel::<()>();
+        {
+            let mut under_way = self.under_way();
+            if under_way
+                .get(&path)
+                .is_some_and(|walk| walk.peek().is_none())
+            {
+                return;
+            }
+            under_way.insert(path.clone(), ended.map(|_| ()).boxed().shared());
         }
+        let walking = self.clone();
         tokio::spawn(async move {
             let roots = built.roots.clone();
-            let counted = tokio::task::spawn_blocking(move || super::walk::on_disk(&roots)).await;
-            if let Ok(bytes) = counted {
-                let newer = recorded_at(&path).await.is_some_and(|at| at > built.at);
-                if !newer {
-                    let bytes = Some(bytes);
-                    record(&path, &Built { bytes, ..built }).await;
-                }
+            let bytes = on_disk(roots).await;
+            let newer = recorded_at(&path).await.is_some_and(|at| at > built.at);
+            if !newer {
+                let bytes = Some(bytes);
+                record(&path, &Built { bytes, ..built }).await;
             }
-            under_way
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .remove(&path);
+            walking.under_way().remove(&path);
+            // Whoever waits for the walk is woken by its end.
+            drop(walked);
         });
     }
+
+    /// Waits for the walk recording at `path` to end, when one is under
+    /// way.
+    async fn finished(&self, path: &Path) {
+        let walk = self.under_way().get(path).cloned();
+        if let Some(walk) = walk {
+            walk.await;
+        }
+    }
+
+    fn under_way(&self) -> std::sync::MutexGuard<'_, HashMap<PathBuf, Walk>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+}
+
+/// What checkout `number` of the pool at `home` holds of a build, counted:
+/// once a walk of it `walking` has under way ends, or now when nobody
+/// counted it. `None` when nothing recorded its build.
+pub(super) async fn counted(home: &Path, number: u32, walking: &Walking) -> Option<u64> {
+    walking.finished(&built_path(home, number)).await;
+    let built = built(home, number).await?;
+    Some(match built.bytes {
+        Some(bytes) => bytes,
+        None => measure_now(home, number, built.roots, built.at).await,
+    })
+}
+
+/// What `roots` take on disk, counted on a thread that may block.
+pub(super) async fn on_disk(roots: Vec<PathBuf>) -> u64 {
+    tokio::task::spawn_blocking(move || super::walk::on_disk(&roots))
+        .await
+        .unwrap_or(0)
+}
+
+/// Records that checkout `number` of the pool at `home` was given back at
+/// `at` holding `bytes` of build at `roots`, counted.
+pub(super) async fn measured(
+    home: &Path,
+    number: u32,
+    roots: Vec<PathBuf>,
+    bytes: u64,
+    at: DateTime<Utc>,
+) {
+    let built = Built {
+        roots,
+        bytes: Some(bytes),
+        at,
+    };
+    record(&built_path(home, number), &built).await;
 }
 
 /// Counts `roots` — what git ignores in checkout `number` of the pool at
@@ -119,16 +179,8 @@ pub(super) async fn measure_now(
     roots: Vec<PathBuf>,
     at: DateTime<Utc>,
 ) -> u64 {
-    let walked = roots.clone();
-    let bytes = tokio::task::spawn_blocking(move || super::walk::on_disk(&walked))
-        .await
-        .unwrap_or(0);
-    let built = Built {
-        roots,
-        bytes: Some(bytes),
-        at,
-    };
-    record(&built_path(home, number), &built).await;
+    let bytes = on_disk(roots.clone()).await;
+    measured(home, number, roots, bytes, at).await;
     bytes
 }
 

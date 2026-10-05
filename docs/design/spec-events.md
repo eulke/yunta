@@ -12,9 +12,8 @@ su parser.
 
 ## 0. Event count
 
-The current Run Contract event table has 43 rows and **53 `kind` names**.
-It had 42 rows and 51 kinds before `service_unreachable` and
-`service_reachable` were added. The table
+The current Run Contract event table has 44 rows and **54 `kind` names**.
+It had 43 rows and 53 kinds before `run_moved` was added. The table
 defines the normative set; this document specifies each payload.
 
 ## 1. Envelope común
@@ -115,7 +114,7 @@ atribuidos al adapter: `agent_session_opened` y
 Si esta lectura no es la intención original, es exactamente el tipo de cosa a
 corregir con una nota tuya antes de que se convierta en tipos de Rust.
 
-## 5. Los 48 tipos de evento, campo por campo
+## 5. Los 54 tipos de evento, campo por campo
 
 Convención de esta sección: **Fuente** cita la columna "Payload relevante"
 tal cual está documentada; **Campos** expande eso a nombre/tipo/obligatoriedad/nota,
@@ -809,6 +808,13 @@ the run reports leaves the span out (D199).
 | `terminal_state` | estado | solo en `run_finished` | — |
 | `metrics` | `{cptv?, tokens, ...}` | solo en `run_finished` | derivadas del log, nunca estimadas |
 | `closed_by` | responder | no, solo en `run_finished` | quién cerró un run detenido que nadie iba a continuar (`yunta close`), con `terminal_state: cancelled`; ausente cuando el engine cerró el run llevándolo a su fin |
+
+### 5.26a `run_moved` — engine
+**Fuente:** el checkout al que el run se mudó entre dos de sus pasos
+
+| Campo | Tipo | Oblig. | Notas |
+|---|---|---|---|
+| `checkout` | ruta | sí | el checkout del pool, ya compilado en el commit donde está el run, en que trabaja desde ahora (D248); el ledger lo lee como el checkout del run, igual que el de `run_created` y el de un `run_resumed` que lo mudó |
 
 ## 6. Regla transversal
 

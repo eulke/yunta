@@ -272,6 +272,14 @@ impl RunPausedPayload {
     }
 }
 
+/// The run moved, between two of its steps, into another checkout of its
+/// project's pool that already built the commit the run stands at — as a
+/// rule, the one its last unit worked in — and works there from here on.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RunMovedPayload {
+    pub checkout: std::path::PathBuf,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunResumedPayload {
     /// The one `on_interrupt` every orphan of this resume resolved to;

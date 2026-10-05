@@ -9,6 +9,8 @@ pub enum RunEvent {
     PromotionSignaled(PromotionSignaledPayload),
     Paused(RunPausedPayload),
     Resumed(RunResumedPayload),
+    /// The run moved into a checkout that already built where it stands.
+    Moved(RunMovedPayload),
     Finished(RunFinishedPayload),
     /// What the suite the run's lineage declared did on the tree the
     /// run opens on — measured by this run on its first wake, or held
@@ -28,6 +30,7 @@ impl RunEvent {
         "host_suspended",
         "run_paused",
         "run_resumed",
+        "run_moved",
         "run_finished",
     ];
 
@@ -38,6 +41,7 @@ impl RunEvent {
             Self::PromotionSignaled(_) => "promotion_signaled",
             Self::Paused(_) => "run_paused",
             Self::Resumed(_) => "run_resumed",
+            Self::Moved(_) => "run_moved",
             Self::Finished(_) => "run_finished",
             Self::BaselineCaptured(_) => "baseline_captured",
             Self::HostSuspended(_) => "host_suspended",
@@ -57,6 +61,7 @@ impl RunEvent {
             Self::PromotionSignaled(_) => false,
             Self::Paused(_) => false,
             Self::Resumed(_) => false,
+            Self::Moved(_) => false,
             Self::Finished(_) => false,
             Self::BaselineCaptured(_) => false,
             Self::HostSuspended(_) => false,

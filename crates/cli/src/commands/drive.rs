@@ -203,7 +203,7 @@ async fn finish(
         },
         env.prepared.run_id.clone(),
         env.manifest.clone(),
-        env.prepared.worktree.clone(),
+        report.tree(&env.prepared.worktree),
         report,
     )
     .await?;

@@ -38,9 +38,11 @@ use yunta_core::{
 };
 
 mod baseline;
+mod follow;
 mod reverify;
 
 pub use baseline::owed_baseline;
+pub use follow::follows_build;
 
 use crate::modes::dependencies_in_mode;
 use crate::replay::{NodeState, RunState};
@@ -289,6 +291,9 @@ pub struct Policy {
     pub grants_scope: bool,
     /// What the project denies to every run: never offered as a grant.
     pub denied: Vec<yunta_core::ScopeGlob>,
+    /// Whether the run may move into the checkout its last unit built in:
+    /// it works in a checkout of the project's pool of its own.
+    pub follows_builds: bool,
 }
 
 impl Policy {
@@ -312,6 +317,8 @@ impl Policy {
             may_promote: next_mode_after(&manifest.workflow, mode_name).is_some(),
             grants_scope: person_may_grant_scope(&manifest.config),
             denied: manifest.config.denied_paths().to_vec(),
+            follows_builds: manifest.isolation == yunta_core::Isolation::Worktree
+                && run.checkout().is_some(),
         }
     }
 }

@@ -412,6 +412,9 @@ pub fn all_kinds() -> Vec<EventPayload> {
             policies: Vec::new(),
             environment: None,
         })),
+        EventPayload::Run(RunEvent::Moved(yunta_core::events::RunMovedPayload {
+            checkout: std::path::PathBuf::from("/pool/slot-2"),
+        })),
         EventPayload::Run(RunEvent::Finished(RunFinishedPayload {
             terminal_state: TerminalState::Done,
             metrics: RunMetrics {

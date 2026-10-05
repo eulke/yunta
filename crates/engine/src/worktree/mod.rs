@@ -54,12 +54,12 @@ pub use old_layouts::{remove_old_checkouts, OldCheckout};
 pub use overlay::{remove_files, tree_with, write_files};
 pub use pool::{
     adopt_unit_branches, clear_work, forget_run_units, hand_over_run_checkout, pool_home,
-    release_run_checkout, release_unit_checkouts, still_the_runs, CheckoutPool, Lease, PoolReport,
-    Tidied,
+    release_run_checkout, release_unit_checkouts, still_the_runs, Birth, CheckoutPool, Lease,
+    PoolReport, Tidied,
 };
 pub use unit::{
-    carry_work, commit_work, land, rebase_onto, snapshot_commit, Carried, Rebase, Unit, UnitHome,
-    UnitId,
+    carry_work, commit_work, land, lands_units, rebase_onto, snapshot_commit, Carried, Rebase,
+    Unit, UnitHome, UnitId,
 };
 
 #[derive(Debug, Error)]
