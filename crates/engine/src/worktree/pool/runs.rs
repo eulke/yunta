@@ -23,10 +23,8 @@ impl CheckoutPool {
         supervision: Supervision<'_>,
     ) -> Result<(PathBuf, Lease), WorktreeError> {
         let branch = crate::worktree::run_branch(run_id);
-        match self
-            .take(fit::User::Run { branch: &branch }, base, supervision)
-            .await?
-        {
+        let user = fit::User::Run { branch: &branch };
+        match Box::pin(self.take(user, base, supervision)).await? {
             Taken::Held(checkout, lease) => {
                 reset(&checkout, Some(&branch), base, supervision).await?;
                 Ok((checkout, lease))
@@ -61,7 +59,7 @@ impl CheckoutPool {
                 source,
             })?;
         let user = fit::User::Run { branch: &branch };
-        match self.take(user, &head, supervision).await? {
+        match Box::pin(self.take(user, &head, supervision)).await? {
             Taken::Held(checkout, lease) => {
                 let on = crate::git::output(&checkout, &["branch", "--show-current"], supervision)
                     .await?;
@@ -78,6 +76,23 @@ impl CheckoutPool {
                     .await
             }
         }
+    }
+
+    /// The checkout run `run_id` works in on this wake: `named`, the one
+    /// its log names, while it is still the run's, or else the one the
+    /// pool finds for the run's branch — given back while the run was
+    /// parked, or taken away.
+    pub async fn wake_checkout(
+        self: &Arc<Self>,
+        run_id: &yunta_core::RunId,
+        named: &Path,
+        supervision: Supervision<'_>,
+    ) -> Result<PathBuf, WorktreeError> {
+        if super::release::still_the_runs(named, run_id, supervision).await {
+            return Ok(named.to_path_buf());
+        }
+        let (checkout, _held) = self.reopen_run(run_id, supervision).await?;
+        Ok(checkout)
     }
 
     /// Whether `checkout` is one of the pool's.

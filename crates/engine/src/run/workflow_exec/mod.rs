@@ -314,14 +314,14 @@ pub(super) async fn execute_workflow(
         // A tree of its own is a checkout of the project's pool, like the
         // parent's.
         Isolation::Worktree => {
-            let opened = ctx
-                .pool
-                .open_run(
-                    &child_id,
-                    &child_manifest.base_commit,
-                    ctx.root_supervision(),
-                )
-                .await;
+            // Boxed: a child's tree is taken at the bottom of every composed
+            // run's stack.
+            let opened = Box::pin(ctx.pool.open_run(
+                &child_id,
+                &child_manifest.base_commit,
+                ctx.root_supervision(),
+            ))
+            .await;
             match opened {
                 Ok((tree, _held)) => tree,
                 // Somebody stopped the run while its child's tree was
@@ -459,16 +459,16 @@ async fn resume_child(
             });
             // A checkout given back while the child was parked, or taken
             // away, is found again on the child's branch.
-            let supervision = ctx.root_supervision();
-            if crate::worktree::still_the_runs(&tree, child_id, supervision).await {
-                tree
-            } else {
-                match ctx.pool.reopen_run(child_id, supervision).await {
-                    Ok((tree, _held)) => tree,
-                    Err(e) => {
-                        let said = format!("child run `{child_id}` cannot resume: {e}");
-                        return fail(ctx, node, said, false).await;
-                    }
+            match Box::pin(
+                ctx.pool
+                    .wake_checkout(child_id, &tree, ctx.root_supervision()),
+            )
+            .await
+            {
+                Ok(tree) => tree,
+                Err(e) => {
+                    let said = format!("child run `{child_id}` cannot resume: {e}");
+                    return fail(ctx, node, said, false).await;
                 }
             }
         }

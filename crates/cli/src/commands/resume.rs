@@ -65,16 +65,14 @@ async fn still_or_again(
     run_id: &RunId,
     named: PathBuf,
 ) -> Result<PathBuf, CliError> {
-    let supervision = ctx.supervision();
-    if manifest.isolation != yunta_core::Isolation::Worktree
-        || yunta_engine::still_the_runs(&named, run_id, supervision).await
-    {
+    if manifest.isolation != yunta_core::Isolation::Worktree {
         return Ok(named);
     }
     let run_dir = ctx.project.runs_root.join(run_id.as_str());
     let pool = ctx.project.pool_of(manifest, &ctx.cwd, &run_dir);
-    let (checkout, _held) = pool.reopen_run(run_id, supervision).await?;
-    Ok(checkout)
+    Ok(pool
+        .wake_checkout(run_id, &named, ctx.supervision())
+        .await?)
 }
 
 pub async fn resume(run_id: &RunId, quiet: bool, json: bool) -> Result<Outcome, CliError> {

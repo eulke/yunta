@@ -20,6 +20,12 @@ impl Bench {
         self.runs_root.join(self.run_id.as_str())
     }
 
+    /// The checkout the run works in: the bench's worktree, or for a
+    /// pooled bench the checkout of the project's pool it took last.
+    pub fn tree(&self) -> std::path::PathBuf {
+        self.driven(|driven| driven.tree.clone())
+    }
+
     /// Where the project's pool of checkouts lives — the pool every run of
     /// this bench takes its checkouts from — known before any run, so a
     /// fixture can name a path inside one of them.

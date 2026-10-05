@@ -268,7 +268,7 @@ impl CheckoutPool {
         let keeps = super::UnitRef::of(home.run_id, &who, attempt);
         let refs = super::UnitRef::of_unit(home.run_id, &who);
         let user = fit::User::Unit { refs: &refs };
-        let (checkout, lease) = match self.take(user, home.base, supervision).await? {
+        let (checkout, lease) = match Box::pin(self.take(user, home.base, supervision)).await? {
             Taken::Held(checkout, lease) => {
                 reset(&checkout, None, home.base, supervision).await?;
                 (checkout, lease)
@@ -299,7 +299,7 @@ impl CheckoutPool {
         base: &CommitSha,
         supervision: Supervision<'_>,
     ) -> Result<(PathBuf, Lease), WorktreeError> {
-        match self.take(fit::User::Passing, base, supervision).await? {
+        match Box::pin(self.take(fit::User::Passing, base, supervision)).await? {
             Taken::Held(checkout, lease) => {
                 let detach = [
                     "switch",

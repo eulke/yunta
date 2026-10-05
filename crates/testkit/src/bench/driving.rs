@@ -207,8 +207,8 @@ impl Bench {
         fixture_yaml: &str,
         human_interaction: &dyn HumanInteraction,
     ) -> RunReport {
-        let run_dir = self.driven(|driven| driven.run_dir.clone());
-        let mock = self.mock_from(fixture_yaml, &run_dir);
+        let (run_dir, tree) = self.driven(|driven| (driven.run_dir.clone(), driven.tree.clone()));
+        let mock = self.mock_from(fixture_yaml, &run_dir, &tree);
         {
             let mut driven = self.driven.lock().expect("the bench's own lock");
             let driven = driven.as_mut().expect("a run to wake");
@@ -271,6 +271,7 @@ impl Bench {
             self.birth.iter().cloned().chain(frozen.documents).collect();
         let manifest = frozen.manifest;
         between();
+        let tree = self.tree_for(&manifest).await?;
 
         let run_dir = create_run(
             CreateRunParams {
@@ -278,7 +279,7 @@ impl Bench {
                 manifest: &manifest,
                 runs_root: &self.runs_root,
                 mode: &self.mode,
-                worktree: &self.worktree,
+                worktree: &tree,
                 promoted_from: None,
                 artifacts: &artifacts,
                 // A run a caller starts is the root of its lineage: it
@@ -292,26 +293,60 @@ impl Bench {
         )
         .await?;
 
-        let mock = self.mock_from(fixture_yaml, &run_dir);
+        let mock = self.mock_from(fixture_yaml, &run_dir, &tree);
         let mut adapters: HashMap<AdapterId, Arc<dyn Adapter>> = HashMap::new();
         adapters.insert("mock".into(), mock.clone() as Arc<dyn Adapter>);
         *self.driven.lock().expect("the bench's own lock") = Some(Driven {
             manifest,
             run_dir: run_dir.clone(),
+            tree,
             adapters,
             mock,
         });
         Ok(run_dir)
     }
 
+    /// The checkout a run of `manifest` is born in: the bench's worktree,
+    /// or for a pooled bench one of the project's pool, taken on the run's
+    /// own branch.
+    async fn tree_for(
+        &self,
+        manifest: &yunta_core::Manifest,
+    ) -> Result<std::path::PathBuf, yunta_engine::RunError> {
+        if !self.pooled {
+            return Ok(self.worktree.clone());
+        }
+        let (checkout, _held) = self
+            .pool_handle(manifest)
+            .open_run(&self.run_id, &manifest.base_commit, self.supervision())
+            .await?;
+        Ok(checkout)
+    }
+
+    /// The project's pool as the run of `manifest` reaches it.
+    fn pool_handle(&self, manifest: &yunta_core::Manifest) -> Arc<yunta_engine::CheckoutPool> {
+        let run_dir = self.run_dir();
+        yunta_engine::CheckoutPool::of_run(
+            &yunta_engine::run_dir::worktrees_root(manifest, &run_dir),
+            &self.worktree,
+            &run_dir,
+            manifest,
+        )
+    }
+
     /// The mock a fixture scripts, against the directories the run owns.
-    fn mock_from(&self, fixture_yaml: &str, run_dir: &std::path::Path) -> Arc<MockAdapter> {
+    fn mock_from(
+        &self,
+        fixture_yaml: &str,
+        run_dir: &std::path::Path,
+        tree: &std::path::Path,
+    ) -> Arc<MockAdapter> {
         Arc::new(MockAdapter::new(
             MockFixture::parse(
                 fixture_yaml,
                 &RunPaths {
                     run_dir,
-                    worktree: &self.worktree,
+                    worktree: tree,
                     staging: &yunta_engine::run_dir::staging_root(run_dir),
                 },
             )
@@ -325,18 +360,30 @@ impl Bench {
         human_interaction: &dyn HumanInteraction,
         secrets: Option<Arc<dyn yunta_core::SecretSource>>,
     ) -> Result<RunReport, yunta_engine::RunError> {
-        let (manifest, run_dir, adapters) = self.driven(|driven| {
+        let (manifest, run_dir, adapters, named) = self.driven(|driven| {
             (
                 driven.manifest.clone(),
                 driven.run_dir.clone(),
                 driven.adapters.clone(),
+                driven.tree.clone(),
             )
         });
+        let tree = match self.pooled {
+            true => {
+                let pool = self.pool_handle(&manifest);
+                pool.wake_checkout(&self.run_id, &named, self.supervision())
+                    .await?
+            }
+            false => named,
+        };
+        if let Some(driven) = self.driven.lock().expect("the bench's own lock").as_mut() {
+            driven.tree = tree.clone();
+        }
         execute_run(RunEnv {
             run_id: &self.run_id,
             manifest: &manifest,
             run_dir: &run_dir,
-            worktree: &self.worktree,
+            worktree: &tree,
             adapters: &adapters,
             storage: &self.storage.async_handle(),
             clock: self.clock.clone(),

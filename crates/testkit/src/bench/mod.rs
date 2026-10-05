@@ -66,6 +66,9 @@ pub struct Bench {
     /// What the run is born holding — a document its `inputs:` named,
     /// or what another run hands over.
     birth: Vec<BirthArtifact>,
+    /// Whether the run works in a checkout of the project's pool, as a
+    /// run `yunta run` starts does, rather than in the bench's worktree.
+    pooled: bool,
     /// What the last run left behind. A bench answers about the run it
     /// drove, and wakes it again, without the test carrying any of it:
     /// one reading, taken under one lock, so two answers can never come
@@ -77,6 +80,8 @@ pub struct Bench {
 pub(super) struct Driven {
     manifest: yunta_core::Manifest,
     run_dir: std::path::PathBuf,
+    /// The checkout the run works in.
+    tree: std::path::PathBuf,
     adapters: HashMap<AdapterId, Arc<dyn Adapter>>,
     /// The adapter the run used, so a test can ask what each session was
     /// actually handed.
@@ -122,6 +127,7 @@ impl Bench {
             ambient: None,
             observer: None,
             birth: Vec::new(),
+            pooled: false,
             driven: std::sync::Mutex::new(None),
         }
     }
@@ -151,6 +157,7 @@ impl Bench {
             ambient: self.ambient.clone(),
             observer: self.observer.clone(),
             birth: Vec::new(),
+            pooled: self.pooled,
             driven: std::sync::Mutex::new(None),
         }
     }
@@ -249,6 +256,14 @@ impl Bench {
             yunta_home: Some(root.into()),
             ..Default::default()
         });
+        self
+    }
+
+    /// Has the run work in a checkout of the project's pool, taken on its
+    /// own branch as `yunta run` takes it, and found again on a wake as
+    /// `yunta resume` finds it.
+    pub fn pooled(mut self) -> Self {
+        self.pooled = true;
         self
     }
 
