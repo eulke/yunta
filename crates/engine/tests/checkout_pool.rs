@@ -203,3 +203,29 @@ async fn a_seeded_private_index_captures_what_a_fresh_one_does() {
 
     assert_eq!(captured.as_str(), expected.trim());
 }
+
+/// A checkout that holds a build goes before an empty one nearer the
+/// unit's start: only what changed is built again in it, where the empty
+/// one builds everything, its dependencies first.
+#[tokio::test]
+async fn a_checkout_holding_a_build_goes_before_a_nearer_empty_one() {
+    let world = World::new();
+    let (warm, warm_held) = world.open("T001").await;
+    let (cold, cold_held) = world.open("T002").await;
+    write(&warm.worktree.join("target/debug/built"), "built");
+    world.land(&warm).await;
+    world.land(&cold).await;
+    drop((warm_held, cold_held));
+    write(&world.repo.join("moved.txt"), "moved");
+    yunta_testkit::git(&world.repo, &["add", "-A"]);
+    yunta_testkit::git(&world.repo, &["commit", "-q", "-m", "moved"]);
+    let start = world.head();
+    yunta_testkit::git(
+        &cold.worktree,
+        &["switch", "-q", "--detach", start.as_str()],
+    );
+
+    let (next, _held) = world.open("T003").await;
+
+    assert_eq!(next.worktree, warm.worktree);
+}

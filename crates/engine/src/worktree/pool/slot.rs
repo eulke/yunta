@@ -67,30 +67,49 @@ pub(super) async fn listed(home: &Path) -> Vec<(u32, PathBuf)> {
 /// pick its session back up there. One on a run's branch is that run's
 /// for as long as the run lives, and one on any other branch — a
 /// person's — is nobody's to take. One on no branch is anybody's. Among
-/// those, the nearer to `target` the better.
+/// those, one that holds a build goes first — only what changed is built
+/// again in it, where an empty one builds everything — and then the
+/// nearer to `target` the better.
 pub(super) async fn rank(
     checkout: &Path,
     owner: Option<&str>,
     target: &CommitSha,
     supervision: Supervision<'_>,
-) -> Option<(u8, usize)> {
+) -> Option<(u8, bool, usize)> {
     let branch = crate::git::output(checkout, &["branch", "--show-current"], supervision)
         .await
         .ok()?;
     if !is_clean(checkout, supervision).await {
         return None;
     }
-    match (branch.trim(), owner) {
-        ("", _) => Some((1, distance(checkout, target, supervision).await)),
-        (on, Some(owner)) if on.starts_with(owner) => Some((0, 0)),
-        (on, _)
-            if super::super::is_unit_branch(on)
-                && landed_in(checkout, target, supervision).await =>
-        {
-            Some((1, distance(checkout, target, supervision).await))
+    let free = match (branch.trim(), owner) {
+        ("", _) => true,
+        (on, Some(owner)) if on.starts_with(owner) => return Some((0, false, 0)),
+        (on, _) => {
+            super::super::is_unit_branch(on) && landed_in(checkout, target, supervision).await
         }
-        _ => None,
+    };
+    if !free {
+        return None;
     }
+    let empty = !holds_builds(checkout, supervision).await;
+    Some((1, empty, distance(checkout, target, supervision).await))
+}
+
+/// Whether `checkout` holds anything git ignores: what a build leaves
+/// behind, whatever the project builds with.
+async fn holds_builds(checkout: &Path, supervision: Supervision<'_>) -> bool {
+    let ignored = [
+        "ls-files",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--directory",
+        "--no-empty-directory",
+    ];
+    crate::git::output(checkout, &ignored, supervision)
+        .await
+        .is_ok_and(|listed| !listed.trim().is_empty())
 }
 
 /// Whether everything `checkout` committed is in `target`.

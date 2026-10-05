@@ -48,8 +48,12 @@ path again, never from sharing or copying what a path built.
    adding a checkout takes, after the checkout's own: git reads every
    checkout's metadata to cut, move or delete a branch, and one being added
    beside it may be half written.
-4. **Nearest first.** A unit with no checkout of its own takes the free one whose
-   commit differs from where it starts in the fewest paths.
+4. **A build first, then the nearest.** A unit with no checkout of its own takes
+   a free one that holds a build — anything git ignores, whatever the project
+   builds with — before an empty one, and among those the one whose commit
+   differs from where it starts in the fewest paths: in a checkout with a
+   build only what changed is built again, where an empty one builds
+   everything, its dependencies first.
 5. **A landed task lets go of its branch.** When a task's work lands on the run's
    tree, its checkout goes back on no branch and the branch is deleted: the run's
    tree holds the work, and a done task is never picked back up. A node keeps its
