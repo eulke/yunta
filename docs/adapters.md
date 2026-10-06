@@ -43,9 +43,9 @@ says which:
 
 | Adapter | How it fences | What it covers |
 |---|---|---|
-| `claude-code` | A `PreToolUse` hook on every writing tool runs `yunta fence`, which answers before the write happens. | Exact under `edit` and `read-only`; tool calls only under `full`, which also exposes a shell. |
+| `claude-code` | A `PreToolUse` hook on every writing tool runs `yunta rail`, which asks the run's engine before the write happens. | Exact under `edit` and `read-only`; tool calls only under `full`, which also exposes a shell. |
 | `codex` | The sandbox the process itself runs under, by directory. | The worktree and the run's directories — by directory, never by glob. |
-| `mock` | The fixture says which of the three levels it builds, and every scripted effect goes through the same judge. | Whatever the fixture declares. |
+| `mock` | The fixture says which of the three levels it builds; at the per-call level each scripted effect asks the engine the way a CLI's hook does. | Whatever the fixture declares. |
 
 A refusal reaches the model with the reason and the way out — ask for more
 scope, or report the need as a finding — and reaches the log as

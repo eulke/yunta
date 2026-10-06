@@ -79,8 +79,9 @@ rutas del run.dir), el objeto de salida (veredicto, diagnóstico, artifacts prod
 un `schema_version` propio, versionado como los eventos (spec-events §2).
 
 **A-13 · El cerco en los adapters.** Cerrada por D172 (`plan-de-raiz/cerco.md`,
-ítem 3-08): `yunta_core::fence::Fence::judge` es el único juez, `yunta fence
-<adapter-id>` el hook que los CLIs ejecutan, `claude-code` lo instala como
+ítem 3-08): `yunta_core::fence::Fence::judge` es el único juez, `yunta rail
+<adapter-id> before-write` el hook que los CLIs ejecutan para preguntarle al
+engine (D249), `claude-code` lo instala como
 `PreToolUse`, `codex` cerca por el sandbox de su proceso, y el mock juzga
 cada efecto de su fixture por la misma función. Lo que el cerco no pudo
 evitar sigue atrapándolo el diff del post-check, y una escritura que cruza un

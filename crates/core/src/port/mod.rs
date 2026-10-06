@@ -16,5 +16,5 @@ pub use forge::{
 pub use policy::{absence_of, Absence, POLICY};
 pub use session::{
     Adapter, AgentError, AgentEvent, AgentOutcome, AgentSession, Budget, CodecError, FailureCause,
-    FenceCodec, HookReply, PermissionProfile, ProbeReport, RunToolsEndpoint, SessionRequest,
+    HookReply, PermissionProfile, ProbeReport, RailCodec, RunToolsEndpoint, SessionRequest,
 };

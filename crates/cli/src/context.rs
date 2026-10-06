@@ -8,7 +8,7 @@
 //! touches the event log or the agents.
 
 use std::path::PathBuf;
-use yunta_core::fence::FenceHook;
+use yunta_core::rail::RailCommand;
 
 use yunta_core::events::StoredEvent;
 use yunta_core::persisted::PersistedDoc;
@@ -38,7 +38,7 @@ pub struct Context {
     /// This binary, as the hook a CLI runs to ask the judge about one
     /// write. Resolved once here, so nothing below the shell reads the
     /// process to find out where it lives.
-    pub fence_hook: FenceHook,
+    pub rail_command: RailCommand,
 }
 
 impl Context {
@@ -68,7 +68,7 @@ impl Context {
             ids: SystemIdSource,
             env: crate::project::process_env(),
             interrupt,
-            fence_hook: fence_hook(),
+            rail_command: rail_command(),
         })
     }
 
@@ -112,7 +112,7 @@ impl Context {
             ids: SystemIdSource,
             env: yunta_core::Env::default(),
             interrupt: Interrupt::never(),
-            fence_hook: fence_hook(),
+            rail_command: rail_command(),
         }
     }
 
@@ -141,7 +141,7 @@ impl Context {
             // One stream per process: a sandbox sees the same two
             // stages the invocation that made it does.
             interrupt: self.interrupt.shared(),
-            fence_hook: self.fence_hook.clone(),
+            rail_command: self.rail_command.clone(),
         }
     }
 
@@ -246,6 +246,6 @@ pub fn own_binary() -> PathBuf {
 
 /// The hook a CLI runs to ask the judge about one write. Resolved in
 /// the shell — every path below it takes the value, never the process.
-pub fn fence_hook() -> FenceHook {
-    FenceHook::new(own_binary())
+pub fn rail_command() -> RailCommand {
+    RailCommand::new(own_binary())
 }

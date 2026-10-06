@@ -219,7 +219,7 @@ pub(crate) async fn run_case(
         // A case's verdict is its report, compared against `expect:` —
         // there is no live surface drawing it.
         observer: None,
-        fence_hook: ctx.fence_hook.clone(),
+        rail_command: ctx.rail_command.clone(),
         // A test case is hermetic: no ambient user knowledge from the
         // developer's own `~/.yunta`, and its nodes inherit this
         // process's environment with nothing injected.
@@ -376,7 +376,7 @@ async fn answered(
             cancel: ctx.cancellation(),
             adapter_override: None,
             observer: None,
-            fence_hook: ctx.fence_hook.clone(),
+            rail_command: ctx.rail_command.clone(),
             ambient: &yunta_core::Env::default(),
         })
         .await?;

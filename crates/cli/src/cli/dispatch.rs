@@ -120,7 +120,7 @@ pub(super) async fn dispatch(command: Command) -> Result<Outcome, CliError> {
                 .await
         }
         Command::Init { interactive, force } => commands::init::init(interactive, force).await,
-        Command::Fence { adapter } => fence_hook(&adapter),
+        Command::Rail { adapter, event } => rail_hook(&adapter, event),
         Command::Schema { kind, json } => commands::schema::schema(kind.as_deref(), json),
         Command::New {
             name,
@@ -135,20 +135,25 @@ pub(super) async fn dispatch(command: Command) -> Result<Outcome, CliError> {
 /// protocol expects: the streams, and the exit code as the outcome.
 ///
 /// Reading stdin happens here and the environment at the shell's one
-/// boundary; the judgement itself is a pure function below both.
-fn fence_hook(adapter: &yunta_core::AdapterId) -> Result<Outcome, CliError> {
+/// boundary; what the hook answers comes from the engine it asks.
+fn rail_hook(
+    adapter: &yunta_core::AdapterId,
+    event: yunta_core::rail::RailEvent,
+) -> Result<Outcome, CliError> {
     use std::io::{Read, Write};
 
     let mut stdin = Vec::new();
-    std::io::stdin().read_to_end(&mut stdin).map_err(|source| {
-        CliError::msg(format!("the fence hook cannot read its call: {source}"))
-    })?;
+    std::io::stdin()
+        .read_to_end(&mut stdin)
+        .map_err(|source| CliError::msg(format!("the hook cannot read its call: {source}")))?;
     let built = commands::built_adapter(adapter);
     let env = crate::project::process_env();
-    let reply = commands::fence::run(
-        built.as_ref().and_then(|built| built.fence_codec()),
-        env.fence_var.as_deref(),
+    let reply = commands::rail::run(
+        built.as_ref().and_then(|built| built.rail_codec()),
+        event,
+        env.rail.as_ref(),
         &stdin,
+        commands::rail::over_loopback,
     );
     // A hook that cannot deliver its answer has not answered, and the
     // exit code alone is what the calling CLI then reads: a failure
@@ -156,8 +161,6 @@ fn fence_hook(adapter: &yunta_core::AdapterId) -> Result<Outcome, CliError> {
     std::io::stdout()
         .write_all(&reply.stdout)
         .and_then(|()| std::io::stderr().write_all(&reply.stderr))
-        .map_err(|source| {
-            CliError::msg(format!("the fence hook cannot answer its call: {source}"))
-        })?;
+        .map_err(|source| CliError::msg(format!("the hook cannot answer its call: {source}")))?;
     Ok(Outcome::Code(u8::try_from(reply.exit).unwrap_or(1)))
 }

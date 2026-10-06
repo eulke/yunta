@@ -122,8 +122,9 @@ async fn killing_a_hung_session_before_draining_ends_the_stream_with_no_terminal
     ));
 }
 
-/// The mock judges by the same function every real adapter asks, so a
-/// fixture exercises the rule rather than a second implementation of it.
+/// With no engine to ask, the mock judges by the same function the engine
+/// asks, so a fixture exercises the rule rather than a second
+/// implementation of it.
 #[tokio::test]
 async fn a_fixture_effect_outside_the_fence_is_refused_and_recorded() {
     let dir = tempfile::tempdir().unwrap();
@@ -146,6 +147,7 @@ outcome: { type: completed, summary: "done" }
         denied: Vec::new(),
         naming: yunta_core::ToolNaming::Bare,
     };
+    req.rail = None;
     let session = fixture.spawn(req).await.unwrap();
     let events = drain(session).await;
 

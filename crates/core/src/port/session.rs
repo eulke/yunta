@@ -18,7 +18,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::events::SessionExit;
-use crate::fence::{Coverage, Fence, FenceHook, Verdict};
+use crate::fence::{Coverage, Fence};
+use crate::rail::{RailAnswer, RailCall, RailCommand, RailEndpoint, RailEvent};
 use crate::{
     AdapterError, AdapterId, AgentName, Capabilities, Capability, ModelName, Pid, Result, Secret,
     SessionId,
@@ -63,11 +64,15 @@ pub struct SessionRequest {
     /// adapter that can build none of it ignores the field, and the
     /// engine already recorded the degradation.
     pub fence: Fence,
-    /// The command a CLI runs to ask [`Fence::judge`] about one write.
-    /// `None` only in a harness with no binary to run; an adapter whose
-    /// fence needs it and does not have it fails the session rather
-    /// than opening one that writes freely.
-    pub fence_hook: Option<FenceHook>,
+    /// The command a CLI's hooks run to ask the engine — before a write,
+    /// first of all. `None` only in a harness with no binary to run; an
+    /// adapter whose fence needs it and does not have it fails the
+    /// session rather than opening one that writes freely.
+    pub rail_command: Option<RailCommand>,
+    /// Where those hooks reach the engine: the rail route of this
+    /// session's own listener, with the same single-use token as its
+    /// tools. `None` when the session has no listener.
+    pub rail: Option<RailEndpoint>,
     pub budget: Budget,
     /// Adapter-specific settings with no portable expression — model,
     /// agent and permissions are typed fields above precisely so this
@@ -333,11 +338,11 @@ pub trait Adapter: Send + Sync {
         Ok(())
     }
 
-    /// How this adapter translates between [`Fence::judge`] and its
-    /// CLI's hook. `Some` exactly when `capabilities().fence` is
-    /// [`crate::FenceLevel::ToolCalls`]: a sandbox needs no codec, and nothing
-    /// to build needs none either.
-    fn fence_codec(&self) -> Option<&dyn FenceCodec> {
+    /// How this adapter translates between its CLI's hooks and the
+    /// engine's rail. `Some` exactly when `capabilities().fence` is
+    /// [`crate::FenceLevel::ToolCalls`]: a sandbox needs no codec, and
+    /// nothing to build needs none either.
+    fn rail_codec(&self) -> Option<&dyn RailCodec> {
         None
     }
 
@@ -419,17 +424,21 @@ pub trait AgentSession: Send {
     }
 }
 
-/// What one CLI's hook sends and expects back. The adapter writes only
-/// this: the judgement itself is [`Fence::judge`], the same function for
-/// every adapter.
-pub trait FenceCodec: Send + Sync {
-    /// The path this call would write, read out of what the CLI sent on
-    /// stdin. `None` when the call writes no path at all, which is
-    /// allowed without a judgement.
-    fn decode(&self, stdin: &[u8]) -> std::result::Result<Option<PathBuf>, CodecError>;
+/// What one CLI's hooks send and expect back. The adapter writes only
+/// this: what the engine answers is the engine's, the same for every
+/// adapter.
+pub trait RailCodec: Send + Sync {
+    /// The call, read out of what the CLI sent on stdin for `event`.
+    /// `None` when the call has nothing to ask — a write that names no
+    /// path — and goes on without asking.
+    fn decode(
+        &self,
+        event: RailEvent,
+        stdin: &[u8],
+    ) -> std::result::Result<Option<RailCall>, CodecError>;
 
-    /// The answer in the shape this CLI reads.
-    fn encode(&self, verdict: &Verdict) -> HookReply;
+    /// The engine's answer in the shape this CLI reads for `event`.
+    fn encode(&self, event: RailEvent, answer: &RailAnswer) -> HookReply;
 }
 
 /// What the hook process leaves behind: a CLI reads the exit code, the

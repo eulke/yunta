@@ -25,6 +25,11 @@ use yunta_core::RunTool;
 /// no listener ever outlives the session it authenticated.
 pub struct RunToolsSession {
     pub endpoint: RunToolsEndpoint,
+    /// Where the session's hooks reach the engine, on the same socket
+    /// and behind the same credential.
+    rail: yunta_core::rail::RailEndpoint,
+    /// What those hooks are judged against, and what they were refused.
+    rails: Arc<super::rail::SessionRails>,
     /// How the session's CLI names these tools to its model.
     naming: yunta_core::ToolNaming,
     /// The tools this session is served, in the order it reads them.
@@ -34,6 +39,17 @@ pub struct RunToolsSession {
 }
 
 impl RunToolsSession {
+    /// Where the session's hooks reach the engine.
+    pub fn rail_endpoint(&self) -> yunta_core::rail::RailEndpoint {
+        self.rail.clone()
+    }
+
+    /// What the session's hooks are judged against, and what they were
+    /// refused.
+    pub fn rails(&self) -> &super::rail::SessionRails {
+        &self.rails
+    }
+
     /// How this session's CLI names these tools to its model.
     pub fn naming(&self) -> yunta_core::ToolNaming {
         self.naming
@@ -80,38 +96,100 @@ pub async fn open_session_listener(
 ) -> std::io::Result<RunToolsSession> {
     let token = mint_token();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-    let url = format!("http://127.0.0.1:{}/mcp", listener.local_addr()?.port());
+    let port = listener.local_addr()?.port();
+    let url = format!("http://127.0.0.1:{port}/mcp");
+    let rail_url = format!("http://127.0.0.1:{port}{}", yunta_core::rail::ROUTE);
     // What a tool runs for a task session stops with the task, and with the listener.
     let shutdown = task
         .as_ref()
         .map_or_else(CancellationToken::new, |t| t.cancel.child_token());
 
     let naming = access.naming;
-    let tools = SessionTools::new(access, (task, node_scope), cwd, shutdown.clone());
-    let offered = super::catalog::offered(&tools);
-    let service = StreamableHttpService::new(
-        move || Ok(tools.clone()),
-        Arc::new(transport_sessions()),
-        StreamableHttpServerConfig::default().with_cancellation_token(shutdown.child_token()),
+    let rails = Arc::new(super::rail::SessionRails::default());
+    let tools = SessionTools::new(
+        access,
+        (task, node_scope),
+        cwd,
+        shutdown.clone(),
+        Arc::clone(&rails),
     );
-    let router = behind_bearer(axum::Router::new().nest_service("/mcp", service), &token);
-    let serve_ct = shutdown.clone();
-    let server = tokio::spawn(async move {
-        let _ = axum::serve(listener, router)
-            .with_graceful_shutdown(async move { serve_ct.cancelled().await })
-            .await;
-    });
+    let offered = super::catalog::offered(&tools);
+    let server = serve(listener, tools, &shutdown, &token);
 
+    let token = yunta_core::Secret::from(token);
     Ok(RunToolsSession {
         endpoint: RunToolsEndpoint {
             url,
-            token: token.into(),
+            token: token.clone(),
         },
+        rail: yunta_core::rail::RailEndpoint {
+            url: rail_url,
+            token,
+        },
+        rails,
         naming,
         offered,
         shutdown,
         server,
     })
+}
+
+/// Serves `tools` on `listener` until `shutdown`: the session's run
+/// tools at `/mcp` and its rail beside them, both behind `token`.
+fn serve(
+    listener: tokio::net::TcpListener,
+    tools: SessionTools,
+    shutdown: &CancellationToken,
+    token: &str,
+) -> tokio::task::JoinHandle<()> {
+    let rail_tools = tools.clone();
+    let service = StreamableHttpService::new(
+        move || Ok(tools.clone()),
+        Arc::new(transport_sessions()),
+        StreamableHttpServerConfig::default().with_cancellation_token(shutdown.child_token()),
+    );
+    let router = behind_bearer(
+        axum::Router::new().nest_service("/mcp", service).route(
+            &format!("{}/{{event}}", yunta_core::rail::ROUTE),
+            rail_route(rail_tools),
+        ),
+        token,
+    );
+    let serve_ct = shutdown.clone();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router)
+            .with_graceful_shutdown(async move { serve_ct.cancelled().await })
+            .await;
+    })
+}
+
+/// The route a session's hooks call: one call in, one answer out. A call
+/// that does not read, or names an event its body does not carry, is
+/// answered `400` — the hook then answers as one that could not ask.
+fn rail_route(tools: SessionTools) -> axum::routing::MethodRouter {
+    axum::routing::post(
+        move |axum::extract::Path(event): axum::extract::Path<String>, body: axum::body::Bytes| {
+            let tools = tools.clone();
+            async move {
+                use axum::response::IntoResponse;
+                let call = serde_json::from_slice::<yunta_core::rail::RailCall>(&body)
+                    .ok()
+                    .filter(|call| call.act.moment().as_str() == event);
+                let Some(call) = call else {
+                    return axum::http::StatusCode::BAD_REQUEST.into_response();
+                };
+                let answer = tools.rail(call).await;
+                match serde_json::to_string(&answer) {
+                    Ok(body) => (
+                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                        body,
+                    )
+                        .into_response(),
+                    Err(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                }
+            }
+        },
+    )
 }
 
 /// The transport sessions one listener keeps, none of which is ever

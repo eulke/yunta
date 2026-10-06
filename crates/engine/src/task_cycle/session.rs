@@ -80,7 +80,7 @@ pub struct SessionSetup {
     /// The hook a CLI runs to ask the judge about one write. `None` in a
     /// harness with no binary to run; an adapter whose fence needs it
     /// and does not have it fails the session.
-    pub fence_hook: Option<yunta_core::fence::FenceHook>,
+    pub rail_command: Option<yunta_core::rail::RailCommand>,
     /// What a node's own session works to: the scope the node declared
     /// plus every path a person granted it on this run, which fences the
     /// session and is what its scope tools judge by. `None` for a node
@@ -159,7 +159,7 @@ impl SessionSetup {
             adapter_settings: serde_json::Map::new(),
             env: std::collections::HashMap::new(),
             run_tools: None,
-            fence_hook: None,
+            rail_command: None,
             run_dir,
             node,
             chosen,

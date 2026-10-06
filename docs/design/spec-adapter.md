@@ -101,11 +101,15 @@ pub struct SessionRequest {
     /// cuánto fue; uno que no puede construir nada lo ignora, sin fallar
     /// — el engine ya degradó y avisó (D172).
     pub fence: Fence,   // { allowed: Option<Vec<ScopeGlob>>, roots: Vec<PathBuf>, advice }
-    /// El comando que un CLI ejecuta para preguntarle al juez por una
-    /// escritura. `None` solo en un arnés sin binario que correr; un
-    /// adapter cuyo cerco lo necesita y no lo tiene falla la sesión con
+    /// El comando que los hooks de un CLI ejecutan para preguntarle al
+    /// engine — antes de escribir, primero que nada. `None` solo en un
+    /// arnés sin binario que correr; un adapter cuyo cerco lo necesita y
+    /// no lo tiene falla la sesión con
     /// `AdapterError::FenceUnbuildable(HookUnavailable)`.
-    pub fence_hook: Option<FenceHook>,
+    pub rail_command: Option<RailCommand>,
+    /// Dónde esos hooks encuentran al engine: la ruta `/rail` del listener
+    /// de esta sesión, con el mismo token que sus herramientas (D249).
+    pub rail: Option<RailEndpoint>,
     /// Endpoint del MCP por-run de Yunta, si `run_tools`. Forma
     /// concreta (HTTP loopback + token bearer, ciclo de vida por
     /// sesión) en Contrato §6.5 — el adapter solo debe traducirlo
@@ -294,7 +298,8 @@ el engine consulta antes de pedir nada (§5).
 Lanza `claude -p` headless con salida en streaming JSON y traduce ese stream a
 `AgentEvent`; `resume` reutiliza la sesión vía el flag de reanudación del CLI con el
 `SessionId` persistido; el cerco es `FenceLevel::ToolCalls`: un hook `PreToolUse`
-sobre cada herramienta de escritura ejecuta `yunta fence claude-code`, y las raíces
+sobre cada herramienta de escritura ejecuta `yunta rail claude-code before-write`, que
+le pregunta al engine por el listener de la sesión, y las raíces
 del cerco entran por `--add-dir`. Cobertura `Exact` bajo `edit` y `read_only` (que no
 exponen shell), `ToolsOnly` bajo `full`. `read_only` conserva `Write`/`Edit` solo
 cuando el cerco tiene raíces, que es donde van los archivos declarados. Límite

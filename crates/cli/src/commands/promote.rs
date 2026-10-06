@@ -106,7 +106,7 @@ pub(crate) async fn drive_promotions(
             // the `--adapter` override belongs to whoever asked for it.
             adapter_override: None,
             observer: env.observer.clone(),
-            fence_hook: env.ctx.fence_hook.clone(),
+            rail_command: env.ctx.rail_command.clone(),
             ambient: &env.ctx.env,
         })
         .await?;
@@ -253,7 +253,7 @@ nodes:
             ambient: None,
             secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
             observer: Some(recorder.clone()),
-            fence_hook: Some(crate::context::fence_hook()),
+            rail_command: Some(crate::context::rail_command()),
         })
         .await
         .unwrap();

@@ -361,7 +361,7 @@ pub struct RunEnv<'a> {
     /// run. `None` in a harness with no binary to run — an adapter
     /// whose fence needs it then fails the session rather than opening
     /// one that writes freely.
-    pub fence_hook: Option<yunta_core::fence::FenceHook>,
+    pub rail_command: Option<yunta_core::rail::RailCommand>,
     /// Where the values of the variables `secrets:` names come from. The
     /// config names them; only the shell that started the run may read
     /// their values, so the engine asks here and never the process.

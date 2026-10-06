@@ -67,7 +67,7 @@ pub(crate) async fn resolve_setup(
         adapter_settings: ctx.adapter_settings(&chosen.adapter),
         env: SessionSetup::secrets_env(&ctx.manifest.config, ctx.secrets.as_deref()),
         run_tools,
-        fence_hook: ctx.fence_hook.clone(),
+        rail_command: ctx.rail_command.clone(),
         run_dir: ctx.run_dir.to_path_buf(),
         node: node.id.clone(),
         chosen: chosen.clone(),
@@ -278,6 +278,11 @@ pub(crate) async fn open_session(
     let run_tools = mount_tools(setup, &plan, &held_to, adapter, observer).await?;
     let scratch_dir = scratch_dir(setup, &plan);
     let fence = fence(setup, &plan, &held_to, run_tools.as_ref());
+    // No hook can ask before the session is dispatched, so the fence its
+    // writes are judged against is in place before the first one does.
+    if let Some(session) = &run_tools {
+        session.rails().fence(fence.clone());
+    }
     let task = plan.task.clone();
 
     let request = SessionRequest {
@@ -288,7 +293,8 @@ pub(crate) async fn open_session(
         permissions: plan.profile,
         env: setup.env.clone(),
         fence,
-        fence_hook: setup.fence_hook.clone(),
+        rail_command: setup.rail_command.clone(),
+        rail: run_tools.as_ref().map(RunToolsSession::rail_endpoint),
         budget: plan.budget,
         adapter_settings: setup.adapter_settings.clone(),
         skills: setup.skills.clone(),

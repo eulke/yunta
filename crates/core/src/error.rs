@@ -65,7 +65,10 @@ pub enum AdapterError {
 /// Why an adapter cannot build a session's fence.
 #[derive(Debug, thiserror::Error)]
 pub enum Unbuildable {
-    #[error("this adapter cannot run its fence hook: no yunta binary was handed to the session")]
+    #[error(
+        "this adapter cannot run its fence hook: the session was handed no yunta binary to run, \
+         or no engine listener to ask"
+    )]
     HookUnavailable,
     #[error(
         "this adapter cannot keep {} writable under a read-only profile; hand the files over \

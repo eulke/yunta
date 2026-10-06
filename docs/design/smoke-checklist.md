@@ -141,3 +141,65 @@ ejercitar.
    shorthand `host/path` expande a `https://`, el clone-por-ref y el
    vendoring funcionan igual que con los repos locales de los tests;
    `yunta pack list` reporta `ok` contra el lock recién escrito.
+
+## E. Session hooks on the real CLIs (2026-10-06)
+
+Run against codex-cli 0.157.0 and Claude Code 2.1.289 with a hook script that
+logs its stdin and answers as told. Each item is what the engine relies on.
+
+**codex**
+
+- Hooks passed with `-c 'hooks.<Event>=[…]'` load in `codex exec`. They are
+  skipped until trusted; the trust can be seeded in the same call with
+  `-c 'hooks.state={"/<session-flags>/config.toml:<event>:<group>:<handler>"={trusted_hash="sha256:…"}}'`,
+  so `--dangerously-bypass-hook-trust` is not needed. The hash is the SHA-256
+  of the compact, key-sorted JSON of
+  `{event_name, matcher?, hooks: [{type, command, timeout, async}]}`; it was
+  reproduced for an existing user hook.
+- Hooks in a checkout's own `.codex/hooks.json` do not run there (the
+  checkout is not a trusted project).
+- `PreToolUse` for an edit names the tool `apply_patch`; `tool_input.command`
+  is the patch, its paths relative to `cwd` (`*** Add File: b/c.txt`). Exit 2
+  with a message on stderr refuses the patch, and the model reads the message
+  verbatim. The `--json` stream shows nothing for a refused patch.
+- Every hook gets `session_id` (equal to `thread.started.thread_id`) and
+  `model`. A hook reaches a server on `127.0.0.1` under `workspace-write`.
+- `--sandbox read-only --add-dir R` does not make `R` writable, for patches
+  or the shell: a read-only session that must write its run's roots runs
+  under `workspace-write`, with the hook refusing everything else.
+- `Stop` answering `{"decision":"block","reason":…}` makes the session go on
+  within the same turn; the next `Stop` gets `stop_hook_active: true`. The
+  stream still ends with a single `turn.completed`.
+- A `PostToolUse` hook that rewrites the patched file makes the next patch
+  on stale context fail once (`apply_patch verification failed`); the model
+  reads the file again and retries.
+- A skill under `<cwd>/.agents/skills/<name>/SKILL.md` is found and used.
+  `-c model_reasoning_effort="high"` is accepted.
+
+**claude-code**
+
+- `--setting-sources "" --strict-mcp-config` keeps OAuth working and drops
+  what the user installed — their extensions, synced skills, MCP connectors
+  and hooks; what Claude Code bundles remains. `--bare` is not usable: it is not logged
+  in, and it runs no hook.
+- `--settings` hooks run under both modes. A `sandbox` block
+  (`enabled`, `failIfUnavailable`, `allowUnsandboxedCommands: false`,
+  `network.allowLocalBinding: true`) lets Bash write the working directory
+  and `--add-dir` roots, refuses `~`, refuses the internet, reaches
+  `127.0.0.1`, and lets `cargo build` run.
+- `Stop` with `decision: block` and `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP=0`:
+  the session goes on, `stop_hook_active` is `true` the next time, and a
+  single `result` line closes it.
+- After a `PostToolUse` rewrite with `additionalContext`, Claude reads the
+  file again and its next `Edit` applies.
+- Each assistant line repeats its message's `usage` once per content block.
+  Counted once per `message.id`, `input_tokens`, `cache_read_input_tokens`
+  and `cache_creation_input_tokens` add up to the `result` totals exactly;
+  `output_tokens` is only complete in `result`.
+- `--add-dir` is variadic: the prompt goes on stdin, never after it.
+
+**macOS**
+
+- The first run of a freshly linked binary takes 310–500 ms (24 MB: ~500 ms);
+  later runs take 5–10 ms. The suite runs 229 test binaries in sequence, and
+  a suite whose binaries were linked again spends ~200–230 s outside any test.

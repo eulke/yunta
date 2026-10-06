@@ -37,7 +37,7 @@ pub(super) fn build_ctx(
         ambient,
         secrets,
         observer,
-        fence_hook,
+        rail_command,
     } = env;
     // Resolved once, when the run wakes: every append this invocation
     // makes takes the same values back out, and a run that declares no
@@ -73,7 +73,7 @@ pub(super) fn build_ctx(
     let registry_for_host = registry.clone();
     let subprocess_vars = super::invocation::subprocess_vars(ambient, &manifest.config);
     let ctx = RunCtx {
-        fence_hook,
+        rail_command,
         run_id,
         manifest,
         run_dir,

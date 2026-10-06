@@ -66,7 +66,7 @@ pub(crate) struct RunCtx<'a> {
     pub root_cancel: CancellationToken,
     /// The fence hook this invocation was given, handed to every
     /// session the run opens.
-    pub fence_hook: Option<yunta_core::fence::FenceHook>,
+    pub rail_command: Option<yunta_core::rail::RailCommand>,
     pub(crate) adapter_override: Option<&'a AdapterId>,
     /// The forge this invocation was given — on the ctx so a
     /// `kind: workflow` node can hand it down to its child run (whose
@@ -170,7 +170,7 @@ impl<'a> RunCtx<'a> {
             budget_lifted: self.budget_lifted.clone(),
             process_registry: self.process_registry.clone(),
             root_cancel: self.root_cancel.clone(),
-            fence_hook: self.fence_hook.clone(),
+            rail_command: self.rail_command.clone(),
             adapter_override: self.adapter_override,
             forge: self.forge,
             depth: self.depth,
@@ -216,7 +216,7 @@ impl<'a> RunCtx<'a> {
             budget_lifted: self.budget_lifted.clone(),
             process_registry: self.process_registry.clone(),
             root_cancel: self.root_cancel.clone(),
-            fence_hook: self.fence_hook.clone(),
+            rail_command: self.rail_command.clone(),
             adapter_override: self.adapter_override,
             forge: self.forge,
             depth: self.depth,

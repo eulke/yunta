@@ -13,6 +13,7 @@
 //! engine test proves a skill, an agent or a run-tools endpoint reached
 //! the session without a real CLI.
 
+mod effects;
 mod fixture;
 mod run_tool;
 mod script;
@@ -22,11 +23,9 @@ pub use fixture::{
     SessionScript, ToolExpectation,
 };
 
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use yunta_core::events::SessionExit;
-use yunta_core::fence::{Fence, Verdict};
 use yunta_core::FenceLevel;
 
 use async_trait::async_trait;
@@ -169,50 +168,6 @@ impl MockAdapter {
     pub fn from_yaml(yaml: &str) -> std::result::Result<Self, FixtureError> {
         Ok(Self::new(MockFixture::parse_without_a_run(yaml)?))
     }
-
-    /// Whether the fence refuses an effect at `path` — by the same
-    /// judge every adapter asks, so a fixture exercises the rule the
-    /// real ones enforce.
-    ///
-    /// A filesystem sandbox knows nothing of globs: at that level the
-    /// judgement is against the directories alone. A fixture with no
-    /// fence at all writes whatever it scripts, and the engine's own
-    /// post-check diff is what catches it.
-    fn refuses(&self, req: &SessionRequest, path: &std::path::Path) -> bool {
-        let fence = match self.fixture.capabilities.fence {
-            FenceLevel::None => return false,
-            FenceLevel::ToolCalls => req.fence.clone(),
-            FenceLevel::Filesystem => Fence::everything(req.fence.roots.clone(), req.fence.advice),
-        };
-        matches!(fence.judge(&req.cwd, path), Verdict::Refused(_))
-    }
-
-    /// Applies one session's filesystem effects under the request's
-    /// `cwd`, leaving out the ones the fence refuses: an adapter that
-    /// can judge a write blocks it before it lands, and the session
-    /// says so.
-    fn apply_effects(&self, script: &SessionScript, req: &SessionRequest) -> Result<()> {
-        let cwd = &req.cwd;
-        for effect in &script.effects {
-            if self.refuses(req, &effect.path) {
-                continue;
-            }
-            let full_path = cwd.join(&effect.path);
-            let io_err = |action: String, source: std::io::Error| AdapterError::AdapterIo {
-                adapter: ID.clone(),
-                action,
-                source,
-            };
-            if let Some(parent) = full_path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| {
-                    io_err(format!("create directories for {}", full_path.display()), e)
-                })?;
-            }
-            std::fs::write(&full_path, &effect.content)
-                .map_err(|e| io_err(format!("write {}", full_path.display()), e))?;
-        }
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -275,28 +230,19 @@ impl MockAdapter {
             });
         };
 
-        self.apply_effects(script, &req)?;
+        // A session whose writes the engine judges asks it about each one
+        // as it plays, the way a CLI's hook does; any other has its
+        // effects judged here, before it opens.
+        let railed = self.fixture.capabilities.fence == FenceLevel::ToolCalls && req.rail.is_some();
+        if !railed {
+            self.apply_effects(script, &req)?;
+        }
 
         let (events, receiver) = mpsc::unbounded_channel();
         let interrupt = Arc::new(Notify::new());
         let kill = Arc::new(Notify::new());
         let stops = script::Stops::of(&script.outcome, Arc::clone(&interrupt), Arc::clone(&kill));
-        let played = script::Script {
-            session_id: self.session_id(resume_as)?,
-            model: script.model.clone(),
-            refused: self.refused(script, &req),
-            fence: self.fixture.fence_coverage.map(|coverage| {
-                coverage.resolve(
-                    std::iter::once(req.cwd.clone())
-                        .chain(req.fence.roots.iter().cloned())
-                        .collect(),
-                )
-            }),
-
-            steps: script.steps.clone(),
-            outcome: script.outcome.clone(),
-            run_tools_endpoint: req.run_tools_endpoint.clone(),
-        };
+        let played = self.played(script, &req, railed, resume_as)?;
         let player = tokio::spawn(script::play(played, events, stops));
 
         Ok(Box::new(MockSession {
@@ -306,6 +252,44 @@ impl MockAdapter {
             player,
             interrogated: Arc::clone(&self.interrogated),
         }))
+    }
+
+    /// The script a session plays, cut loose from the fixture: what it
+    /// announces, what it writes and how, and what it does after.
+    fn played(
+        &self,
+        script: &SessionScript,
+        req: &SessionRequest,
+        railed: bool,
+        resume_as: Option<SessionId>,
+    ) -> Result<script::Script> {
+        Ok(script::Script {
+            session_id: self.session_id(resume_as)?,
+            model: script.model.clone(),
+            refused: match railed {
+                true => Vec::new(),
+                false => self.refused(script, req),
+            },
+            asked: req
+                .rail
+                .clone()
+                .filter(|_| railed)
+                .map(|rail| script::Asked {
+                    rail,
+                    cwd: req.cwd.clone(),
+                    effects: script.effects.clone(),
+                }),
+            fence: self.fixture.fence_coverage.map(|coverage| {
+                coverage.resolve(
+                    std::iter::once(req.cwd.clone())
+                        .chain(req.fence.roots.iter().cloned())
+                        .collect(),
+                )
+            }),
+            steps: script.steps.clone(),
+            outcome: script.outcome.clone(),
+            run_tools_endpoint: req.run_tools_endpoint.clone(),
+        })
     }
 
     /// Records what this session was asked to mount, in claim order.
@@ -409,17 +393,6 @@ impl MockAdapter {
                 message: error.to_string(),
             }),
         }
-    }
-
-    /// The effects the fence kept from landing — what the session
-    /// reports as writes it refused.
-    fn refused(&self, script: &SessionScript, req: &SessionRequest) -> Vec<PathBuf> {
-        script
-            .effects
-            .iter()
-            .filter(|e| self.refuses(req, &e.path))
-            .map(|e| e.path.clone())
-            .collect()
     }
 }
 

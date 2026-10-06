@@ -792,8 +792,8 @@ async fn argv_for(dir: &std::path::Path, mut req: SessionRequest) -> Vec<String>
 }
 
 /// Everything the fence installs, and nothing of it under the worktree:
-/// the judge as a `PreToolUse` hook, the roots the CLI would otherwise
-/// refuse, and the fence itself in the child's environment.
+/// the engine as a `PreToolUse` hook, and the roots the CLI would
+/// otherwise refuse.
 #[tokio::test]
 async fn a_claude_session_installs_the_fence_by_settings_and_add_dir_and_nothing_under_cwd() {
     let dir = tempfile::tempdir().unwrap();
@@ -823,10 +823,10 @@ async fn a_claude_session_installs_the_fence_by_settings_and_add_dir_and_nothing
         .iter()
         .position(|a| a == "--settings")
         .map(|pos| args[pos + 1].clone())
-        .expect("the judge is installed as the CLI's own pre-write hook");
+        .expect("the engine is asked by the CLI's own pre-write hook");
     assert!(
-        settings.contains("PreToolUse") && settings.contains("fence"),
-        "the hook runs `yunta fence` before every writing tool: {settings}"
+        settings.contains("PreToolUse") && settings.contains("rail claude-code before-write"),
+        "the hook runs `yunta rail` before every writing tool: {settings}"
     );
     assert!(
         !dir.path().join(".claude").exists(),
@@ -1208,25 +1208,30 @@ async fn a_session_id_that_cannot_be_one_fails_keeping_what_rejected_it() {
     );
 }
 
-/// The judge reaches this CLI only by a hook it can run. Without one
-/// there is no fence to build, and a session that opened anyway would
-/// write wherever it liked.
+/// The engine judges this CLI's writes only through a hook it can run and
+/// a listener the hook can reach. Without either there is no fence to
+/// build, and a session that opened anyway would write wherever it liked.
 #[tokio::test]
-async fn a_claude_session_without_a_hook_fails_before_spawning() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut req = request(dir.path().to_path_buf());
-    req.fence_hook = None;
+async fn a_claude_session_without_a_hook_or_an_engine_to_ask_fails_before_spawning() {
+    for unset in ["command", "endpoint"] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut req = request(dir.path().to_path_buf());
+        match unset {
+            "command" => req.rail_command = None,
+            _ => req.rail = None,
+        }
 
-    let refused = adapter()
-        .spawn(req)
-        .await
-        .err()
-        .expect("a session never opens without a fence to build");
-    let said = yunta_core::describe(&refused);
-    assert!(
-        said.contains("fence hook"),
-        "the refusal names what it could not build: {said}"
-    );
+        let refused = adapter()
+            .spawn(req)
+            .await
+            .err()
+            .expect("a session never opens without a fence to build");
+        let said = yunta_core::describe(&refused);
+        assert!(
+            said.contains("fence hook"),
+            "the refusal names what it could not build ({unset}): {said}"
+        );
+    }
 }
 
 /// An `edit` session exposes no shell, so both channels are exact; a
@@ -1249,10 +1254,11 @@ async fn an_edit_profile_reports_exact_coverage_and_full_reports_tools_only() {
     }
 }
 
-/// The hook's refusal comes back through the conversation, as an errored
-/// tool result. The one parser of the marker reads the path out of it.
+/// The hook's refusal comes back through the conversation as an errored
+/// tool result, but the engine already recorded it when the hook asked:
+/// the stream reporting it again would count one refusal twice.
 #[tokio::test]
-async fn a_refused_write_in_the_stream_becomes_write_refused() {
+async fn a_refusal_in_the_stream_is_left_to_the_engine_that_judged_it() {
     let dir = tempfile::tempdir().unwrap();
     let refusal = yunta_core::fence::Refusal {
         target: dir.path().join("docs/readme.md"),
@@ -1280,13 +1286,10 @@ async fn a_refused_write_in_the_stream_becomes_write_refused() {
     )
     .await;
 
-    let refused = events.iter().find_map(|event| match event {
-        AgentEvent::WriteRefused { target } => Some(target),
-        _ => None,
-    });
-    assert_eq!(
-        refused.and_then(|target| target.display.as_deref()),
-        Some("docs/readme.md"),
-        "the refused path reaches the log relative to the work: {events:?}"
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::WriteRefused { .. })),
+        "the adapter reports no refusal of its own: {events:?}"
     );
 }

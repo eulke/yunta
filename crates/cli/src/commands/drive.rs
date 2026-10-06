@@ -100,7 +100,7 @@ pub(crate) async fn drive(env: Driving<'_>) -> Result<Outcome, CliError> {
         cancel: &root_cancel,
         adapter_override: env.adapter_override.as_ref(),
         observer: watching.observer.clone(),
-        fence_hook: env.ctx.fence_hook.clone(),
+        rail_command: env.ctx.rail_command.clone(),
         ambient: &env.ctx.env,
     })
     .await
@@ -148,7 +148,7 @@ pub(crate) struct Executing<'a> {
     /// carrying on, not a new invocation.
     pub(crate) adapter_override: Option<&'a AdapterId>,
     pub(crate) observer: Option<std::sync::Arc<dyn yunta_engine::RunObserver>>,
-    pub(crate) fence_hook: yunta_core::fence::FenceHook,
+    pub(crate) rail_command: yunta_core::rail::RailCommand,
     pub(crate) ambient: &'a yunta_core::Env,
 }
 
@@ -171,7 +171,7 @@ pub(crate) async fn execute(on: Executing<'_>) -> Result<RunReport, yunta_engine
         ambient: Some(on.ambient),
         secrets: Some(std::sync::Arc::new(yunta_core::ProcessSecrets)),
         observer: on.observer,
-        fence_hook: Some(on.fence_hook),
+        rail_command: Some(on.rail_command),
     })
     .await
 }

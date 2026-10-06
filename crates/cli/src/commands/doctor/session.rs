@@ -188,7 +188,7 @@ async fn drive_probe(ctx: &Context, candidate: &RunnerCandidate) -> Result<Outco
         cancel: ctx.cancellation(),
         adapter_override: None,
         observer: None,
-        fence_hook: ctx.fence_hook.clone(),
+        rail_command: ctx.rail_command.clone(),
         ambient: &ctx.env,
     })
     .await?;

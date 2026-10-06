@@ -398,7 +398,7 @@ async fn open_and_dispatch(
             fresh_prompt: Some(&brief),
         }),
     };
-    let dispatched = dispatch_session(adapter, request, cancel, audit, opening)
+    let mut dispatched = dispatch_session(adapter, request, cancel, audit, opening)
         .await
         .map_err(|error| match error {
             DispatchError::Adapter(source) => TaskCycleError::Spawn {
@@ -410,6 +410,11 @@ async fn open_and_dispatch(
                 source,
             },
         })?;
+    // What the session's hooks were refused reached the engine through
+    // its listener, not its stream.
+    if let Some(session) = &run_tools {
+        dispatched.refused.extend(session.rails().refused());
+    }
     Ok((last_staged, dispatched))
 }
 

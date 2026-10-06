@@ -34,9 +34,43 @@ pub(super) struct Script {
     /// hook-capable CLI reports an edit it refused.
     pub(super) refused: Vec<PathBuf>,
     pub(super) fence: Option<Coverage>,
+    /// The effects this session writes by asking the engine first, as a
+    /// CLI's hook does — `None` when they were judged before it opened.
+    pub(super) asked: Option<Asked>,
     pub(super) steps: Vec<MockStep>,
     pub(super) outcome: MockOutcome,
     pub(super) run_tools_endpoint: Option<RunToolsEndpoint>,
+}
+
+/// A session's effects, each written only once the engine allows it.
+pub(super) struct Asked {
+    pub(super) rail: yunta_core::rail::RailEndpoint,
+    pub(super) cwd: PathBuf,
+    pub(super) effects: Vec<super::fixture::MockEffect>,
+}
+
+impl Asked {
+    /// Asks the engine about each effect and writes the ones it allows.
+    async fn written(self, session: SessionId) -> Result<(), String> {
+        for effect in self.effects {
+            let call = yunta_core::rail::RailCall {
+                session_id: session.clone(),
+                act: yunta_core::rail::RailAct::BeforeWrite {
+                    paths: vec![effect.path.clone()],
+                },
+            };
+            let rail = self.rail.clone();
+            let answer =
+                tokio::task::spawn_blocking(move || rail.ask(&call, Duration::from_secs(30)))
+                    .await
+                    .map_err(|e| format!("the write hook did not finish: {e}"))?
+                    .map_err(|e| format!("the write hook could not ask the engine: {e}"))?;
+            if answer == yunta_core::rail::RailAnswer::Proceed {
+                super::effects::write_effect(&self.cwd, &effect).map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
+    }
 }
 
 /// What ends a played session before its script runs out.
@@ -87,6 +121,7 @@ impl Stops {
 /// engine stops listening.
 pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEvent>, stops: Stops) {
     // SessionOpened is always the first event, unconditionally.
+    let session = script.session_id.clone();
     if events
         .send(AgentEvent::SessionOpened {
             session_id: script.session_id,
@@ -98,15 +133,8 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
         return;
     }
 
-    for path in script.refused {
-        if events
-            .send(AgentEvent::WriteRefused {
-                target: yunta_core::events::ToolTarget::of_path(&path),
-            })
-            .is_err()
-        {
-            return;
-        }
+    if !wrote(script.asked, session, script.refused, &events).await {
+        return;
     }
 
     for step in script.steps {
@@ -116,10 +144,7 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
         let generated = match played(step, script.run_tools_endpoint.as_ref()).await {
             Ok(events) => events,
             Err(message) => {
-                let _ = events.send(AgentEvent::Failed {
-                    error: AgentError::message(message),
-                    cause: FailureCause::Final,
-                });
+                failed(&events, message);
                 return;
             }
         };
@@ -135,6 +160,44 @@ pub(super) async fn play(script: Script, events: mpsc::UnboundedSender<AgentEven
     }
 
     end(script.outcome, &events, &stops).await;
+}
+
+/// The session's writes: the ones it asks the engine about, then the ones
+/// judged before it opened that were refused. `false` once the session
+/// has ended, failed or unheard.
+async fn wrote(
+    asked: Option<Asked>,
+    session: SessionId,
+    refused: Vec<PathBuf>,
+    events: &mpsc::UnboundedSender<AgentEvent>,
+) -> bool {
+    if let Some(asked) = asked {
+        if let Err(message) = asked.written(session).await {
+            failed(events, message);
+            return false;
+        }
+    }
+    refused.iter().all(|path| {
+        events
+            .send(AgentEvent::WriteRefused {
+                target: yunta_core::events::ToolTarget::of_path(path),
+            })
+            .is_ok()
+    })
+}
+
+/// Ends the session failed with `message`. A receiver that is gone has
+/// stopped reading already, and there is nobody left to tell.
+fn failed(events: &mpsc::UnboundedSender<AgentEvent>, message: String) {
+    if events
+        .send(AgentEvent::Failed {
+            error: AgentError::message(message),
+            cause: FailureCause::Final,
+        })
+        .is_err()
+    {
+        tracing::debug!("a mock session failed after its reader left");
+    }
 }
 
 /// The event one step produces, or the message the session fails with

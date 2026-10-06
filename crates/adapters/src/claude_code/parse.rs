@@ -14,7 +14,6 @@
 //! atomic-turn execution model can't reliably support anyway.
 
 use std::collections::HashMap;
-use std::path::Path;
 
 use serde_json::Value;
 use yunta_core::{InvalidId, ModelName, RunTool, SessionId, ToolNaming};
@@ -59,7 +58,6 @@ struct SystemLine {
 
 pub(super) fn parse_line(
     line: &str,
-    cwd: &Path,
     fence: Option<&Coverage>,
     run_tool_calls: &mut HashMap<String, RunTool>,
 ) -> Vec<AgentEvent> {
@@ -73,11 +71,7 @@ pub(super) fn parse_line(
             opened(&system.rest, fence)
         }
         ClaudeLine::Assistant(value) => assistant_message(&value, run_tool_calls),
-        ClaudeLine::User(value) => {
-            let mut events = refused_writes(&value, cwd);
-            events.extend(failed_run_tools(&value, run_tool_calls));
-            events
-        }
+        ClaudeLine::User(value) => failed_run_tools(&value, run_tool_calls),
         ClaudeLine::Result(value) => result_events(&value),
         ClaudeLine::System(_) | ClaudeLine::Unknown => Vec::new(),
     }
@@ -96,46 +90,6 @@ fn opened(value: &Value, fence: Option<&Coverage>) -> Vec<AgentEvent> {
         Some(count) => vec![opened, AgentEvent::RunToolsMounted { count }],
         None => vec![opened],
     }
-}
-
-/// Every write the fence refused, as the CLI hands the hook's own
-/// refusal back: a `tool_result` marked an error whose text the one
-/// parser of the marker recognises. Anything else in a `user` line is
-/// the conversation, which this adapter does not record.
-fn refused_writes(value: &Value, cwd: &Path) -> Vec<AgentEvent> {
-    let Some(content) = value
-        .get("message")
-        .and_then(|message| message.get("content"))
-        .and_then(Value::as_array)
-    else {
-        return Vec::new();
-    };
-    content
-        .iter()
-        .filter(|part| part.get("type").and_then(Value::as_str) == Some("tool_result"))
-        .filter(|part| part.get("is_error").and_then(Value::as_bool) == Some(true))
-        .filter_map(|part| refusal_target(part.get("content")?, cwd))
-        .map(|target| AgentEvent::WriteRefused { target })
-        .collect()
-}
-
-/// The path a refusal names, relative to the work when it is under it:
-/// the log records what changed in the worktree, not where the worktree
-/// happens to sit on this host. A `content` the CLI wrote as a list of
-/// parts is read part by part.
-fn refusal_target(content: &Value, cwd: &Path) -> Option<ToolTarget> {
-    let text = match content {
-        Value::String(text) => text.clone(),
-        Value::Array(parts) => parts
-            .iter()
-            .filter_map(|part| part.get("text").and_then(Value::as_str))
-            .collect::<Vec<_>>()
-            .join("\n"),
-        _ => return None,
-    };
-    let target = yunta_core::fence::refused_target(&text)?;
-    let shown = target.strip_prefix(cwd).unwrap_or(&target);
-    Some(ToolTarget::of_path(shown))
 }
 
 /// How many of the per-run server's tools the init line's own tool set

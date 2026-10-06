@@ -108,7 +108,7 @@ The current table contains 48 event kinds in 39 rows; some rows group related va
 | `promotion_signaled` | engine | razón, evidencia, modo sugerido |
 | `child_run_created` / `child_run_finished` | engine | node_id, child run_id, `workflow_hash` del hijo, estado terminal |
 | `capability_degraded` | engine | capacidad, adapter, política aplicada |
-| `write_refused` | adapter | sesión que la rechazó, y el path que la escritura nombraba (§6) |
+| `write_refused` | engine (riel) | sesión que la rechazó, y el path que la escritura nombraba (§6) |
 | `run_tool_failed` | adapter (recorded by engine) | session ID, known `yunta-run` tool, closed failure cause; no arguments, response, or raw error text |
 | `run_tool_refused` | engine | el tool conocido de `yunta-run` que nombró la llamada, y el motivo cerrado por el que el engine la rechazó |
 | `host_suspended` | engine | cuánto durmió el host (ms), notado al despertar; no despierta el run y las duraciones lo descuentan |

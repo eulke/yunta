@@ -4,8 +4,8 @@
 //! A node declares a scope; a run grants expansions; a run's own
 //! directories stay writable wherever a session sits. The fence is all
 //! of that as one value, and [`Fence::judge`] is the only thing that
-//! decides whether a path is inside it — the CLI's hook, the mock's
-//! fixture effects and every adapter's codec ask the same function.
+//! decides whether a path is inside it — the engine asks it for every
+//! write a session's hook reports, whichever adapter opened the session.
 //! Nothing here reads the disk: a judgement about a path is about the
 //! path.
 //!
@@ -16,25 +16,12 @@
 use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
-
 use crate::glob::{listed_globs, scope_globset, ScopeGlob};
-use crate::ids::AdapterId;
 use crate::port::PermissionProfile;
+use serde::{Deserialize, Serialize};
 
-/// The environment variable a session's fence travels in. Globs and
-/// paths, never a secret: the hook reads it from the child's own
-/// environment.
-pub const ENV_VAR: &str = "YUNTA_FENCE";
-
-/// The hidden subcommand that is the hook. Named here so the CLI that
-/// registers it and the adapters that embed it in a CLI's config cannot
-/// disagree.
-pub const SUBCOMMAND: &str = "fence";
-
-/// Every refusal starts with this, so a CLI that only gives us prose
-/// still gives us something to recognise.
+/// Every refusal starts with this, so whoever reads one — the model, a
+/// person reading its transcript — knows it was the fence.
 pub const REFUSAL_MARKER: &str = "yunta: write refused: ";
 
 /// What a session may write: the globs it may write under the worktree,
@@ -112,28 +99,6 @@ pub enum Coverage {
 pub enum Fenced {
     Exact,
     Roots(Vec<PathBuf>),
-}
-
-/// The hook a CLI runs before it writes: this binary, its `fence`
-/// subcommand, and the adapter whose codec reads the call.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FenceHook {
-    bin: PathBuf,
-}
-
-/// What the fence looks like in the child's environment: the fence
-/// itself plus the worktree every relative path is judged against.
-#[derive(Debug, Serialize, Deserialize)]
-struct FenceEnv {
-    fence: Fence,
-    worktree: PathBuf,
-}
-
-/// A `YUNTA_FENCE` that does not read.
-#[derive(Debug, Error)]
-pub enum FenceEnvError {
-    #[error("`{ENV_VAR}` is not a fence")]
-    Json(#[from] serde_json::Error),
 }
 
 impl Fence {
@@ -245,24 +210,6 @@ impl Fence {
             })
         }
     }
-
-    /// The fence as the child's environment carries it.
-    pub fn to_env(&self, worktree: &Path) -> (&'static str, String) {
-        let env = FenceEnv {
-            fence: self.clone(),
-            worktree: worktree.to_path_buf(),
-        };
-        // `Fence` and `PathBuf` both serialize; a failure here would be
-        // a bug in this module, and an empty fence refuses everything,
-        // which is the safe side of it.
-        (ENV_VAR, serde_json::to_string(&env).unwrap_or_default())
-    }
-
-    /// The fence and the worktree a hook was handed.
-    pub fn from_env(value: &str) -> Result<(Self, PathBuf), FenceEnvError> {
-        let env: FenceEnv = serde_json::from_str(value)?;
-        Ok((env.fence, env.worktree))
-    }
 }
 
 impl Coverage {
@@ -297,28 +244,9 @@ fn merged_roots(tools: Fenced, others: Fenced) -> Vec<PathBuf> {
     roots
 }
 
-impl FenceHook {
-    /// The binary a CLI will run. The shell resolves this once, at
-    /// startup, from its own executable.
-    pub fn new(bin: PathBuf) -> Self {
-        FenceHook { bin }
-    }
-
-    /// The command line a CLI's config embeds, for the adapter whose
-    /// codec reads what it sends.
-    pub fn command(&self, adapter: &AdapterId) -> Vec<String> {
-        vec![
-            self.bin.display().to_string(),
-            SUBCOMMAND.to_string(),
-            adapter.to_string(),
-        ]
-    }
-}
-
 impl fmt::Display for Refusal {
-    /// The one text of a refusal: read by the model that tried the
-    /// write, and by [`refused_target`] reading it back out of a CLI's
-    /// stream.
+    /// The one text of a refusal, read by the model that tried the
+    /// write.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.denied {
             return write!(
@@ -372,15 +300,6 @@ fn or_none(list: String) -> String {
     } else {
         list
     }
-}
-
-/// The path a refusal names, read back out of whatever a CLI passed
-/// through. The one parser of [`REFUSAL_MARKER`]; text without it is not
-/// a refusal.
-pub fn refused_target(text: &str) -> Option<PathBuf> {
-    let after = text.split_once(REFUSAL_MARKER)?.1;
-    let target = after.split_once(" is outside")?.0;
-    Some(PathBuf::from(target))
 }
 
 /// `path` as an absolute path, resolved against `base` when relative,

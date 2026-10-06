@@ -6,16 +6,16 @@
 //! `crates/adapters/tests/claude_code.rs` against a scripted fake binary,
 //! plus one manual smoke test.
 
-mod fence;
 mod parse;
 mod permissions;
+mod rail;
 mod settings;
 
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use yunta_core::{
-    AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, Secret, SessionId,
+    AdapterError, AdapterId, AdapterSettings, Capabilities, FenceLevel, Result, SessionId,
     ToolNaming, Unbuildable,
 };
 
@@ -81,7 +81,7 @@ fn write_mcp_config(req: &SessionRequest) -> Result<Option<PathBuf>> {
 }
 
 /// How the fence reaches this CLI: the roots it would otherwise refuse
-/// to write, and the judge as the hook it runs before every writing
+/// to write, and the engine as the hook it asks before every writing
 /// tool.
 ///
 /// The CLI confines file writes to its working directory, and a root the
@@ -95,9 +95,9 @@ fn fence_args(req: &SessionRequest) -> Vec<String> {
         args.push("--add-dir".to_string());
         args.push(root.display().to_string());
     }
-    if let Some(hook) = &req.fence_hook {
+    if let Some(command) = &req.rail_command {
         args.push("--settings".to_string());
-        args.push(fence::settings_json(hook));
+        args.push(rail::settings_json(command));
     }
     args
 }
@@ -186,10 +186,11 @@ impl ClaudeCodeAdapter {
                 detail: unreadable.to_string(),
             });
         }
-        // The judge reaches this CLI only by a hook it can run. Without
-        // one there is no fence to build, and a session that opens
-        // anyway writes wherever it likes.
-        if req.fence_hook.is_none() {
+        // The engine judges this CLI's writes only through a hook it can
+        // run and a listener the hook can reach. Without both there is no
+        // fence to build, and a session that opens anyway writes wherever
+        // it likes.
+        if req.rail_command.is_none() || req.rail.is_none() {
             return Err(AdapterError::FenceUnbuildable {
                 adapter: ID.clone(),
                 source: Unbuildable::HookUnavailable,
@@ -198,11 +199,12 @@ impl ClaudeCodeAdapter {
         stage_skills(&req)?;
         let mcp_config = write_mcp_config(&req)?;
         let args = self.build_args(&req, resume, mcp_config.as_deref());
-        // The fence travels in the child's own environment: globs and
-        // paths, never a secret, read back by the hook this CLI runs.
-        let (var, value) = req.fence.to_env(&req.cwd);
+        // Where the hooks reach the engine travels in the child's own
+        // environment, which is how a hook this CLI runs inherits it.
         let mut env = req.env.clone();
-        env.insert(var.to_string(), Secret::new(value));
+        if let Some(rail) = &req.rail {
+            env.extend(rail.env().map(|(var, value)| (var.to_string(), value)));
+        }
         subprocess::open(Launch {
             adapter: &ID,
             binary: &self.binary,
@@ -210,28 +212,24 @@ impl ClaudeCodeAdapter {
             cwd: &req.cwd,
             env: &env,
             prompt: &req.prompt,
-            parser: Box::new(ClaudeParser::new(
-                req.cwd.clone(),
-                Coverage::of(Fenced::Exact, permissions::other_channels(req.permissions)),
-            )),
+            parser: Box::new(ClaudeParser::new(Coverage::of(
+                Fenced::Exact,
+                permissions::other_channels(req.permissions),
+            ))),
         })
         .await
     }
 }
 
-/// The CLI's stream-json lines, one event list per line. Holds the
-/// worktree because a refusal names an absolute path and the log
-/// records it relative to the work.
+/// The CLI's stream-json lines, one event list per line.
 struct ClaudeParser {
-    cwd: PathBuf,
     fence: Coverage,
     run_tool_calls: std::collections::HashMap<String, yunta_core::RunTool>,
 }
 
 impl ClaudeParser {
-    fn new(cwd: PathBuf, fence: Coverage) -> Self {
+    fn new(fence: Coverage) -> Self {
         ClaudeParser {
-            cwd,
             fence,
             run_tool_calls: std::collections::HashMap::new(),
         }
@@ -240,7 +238,7 @@ impl ClaudeParser {
 
 impl LineParser for ClaudeParser {
     fn parse(&mut self, line: &str) -> Vec<AgentEvent> {
-        parse::parse_line(line, &self.cwd, Some(&self.fence), &mut self.run_tool_calls)
+        parse::parse_line(line, Some(&self.fence), &mut self.run_tool_calls)
     }
 }
 
@@ -261,8 +259,8 @@ impl Adapter for ClaudeCodeAdapter {
         unstage_skills(req)
     }
 
-    fn fence_codec(&self) -> Option<&dyn yunta_core::port::FenceCodec> {
-        Some(&fence::ClaudeFenceCodec)
+    fn rail_codec(&self) -> Option<&dyn yunta_core::port::RailCodec> {
+        Some(&rail::ClaudeRailCodec)
     }
 
     fn capabilities(&self) -> Capabilities {

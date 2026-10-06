@@ -53,11 +53,11 @@ pub struct Env {
     /// command the run spawns is looked up, unless `subprocess_vars`
     /// sets a `PATH` of its own.
     pub path: Vec<PathBuf>,
-    /// `$YUNTA_FENCE` — the fence a session's CLI was handed, read back
-    /// by the hook it runs (`crate::fence::ENV_VAR`). Set only in the
-    /// environment an adapter built for its child; every other
+    /// Where a session's hooks reach the engine
+    /// (`crate::rail::URL_VAR`, `crate::rail::TOKEN_VAR`). Set only in
+    /// the environment an adapter built for its child; every other
     /// invocation sees `None`.
-    pub fence_var: Option<String>,
+    pub rail: Option<crate::rail::RailEndpoint>,
     /// Variables layered onto every subprocess the run spawns (bash nodes,
     /// hooks, executors) on top of the inherited environment — a test
     /// prepends a stub directory to `PATH` here instead of mutating the
@@ -83,7 +83,14 @@ impl Env {
             path: var("PATH")
                 .map(|path| std::env::split_paths(&path).collect())
                 .unwrap_or_default(),
-            fence_var: var(crate::fence::ENV_VAR).and_then(|value| value.into_string().ok()),
+            rail: var(crate::rail::URL_VAR)
+                .zip(var(crate::rail::TOKEN_VAR))
+                .and_then(|(url, token)| {
+                    Some(crate::rail::RailEndpoint {
+                        url: url.into_string().ok()?,
+                        token: crate::Secret::new(token.into_string().ok()?),
+                    })
+                }),
             subprocess_vars: Vec::new(),
             service: service
                 .iter()

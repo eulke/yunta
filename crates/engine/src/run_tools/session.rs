@@ -63,6 +63,9 @@ pub(super) struct SessionTools {
     pub(super) declared: Vec<ArtifactSpec>,
     /// How the session's CLI names these tools to its model.
     pub(super) naming: yunta_core::ToolNaming,
+    /// What the session's hooks are judged against, and what they were
+    /// refused.
+    pub(super) rails: Arc<super::rail::SessionRails>,
 }
 
 impl SessionTools {
@@ -74,6 +77,7 @@ impl SessionTools {
         (task, node_scope): (Option<Arc<TaskAccess>>, Option<Arc<NodeScopeAccess>>),
         cwd: PathBuf,
         stop: CancellationToken,
+        rails: Arc<super::rail::SessionRails>,
     ) -> Self {
         let RunToolsAccess {
             host,
@@ -92,6 +96,7 @@ impl SessionTools {
             stop,
             declared,
             naming,
+            rails,
         }
     }
 

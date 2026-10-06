@@ -289,16 +289,20 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// Answer an agent CLI's fence hook.
+    /// Answer an agent CLI's hook.
     ///
-    /// The hook an agent's CLI runs before it writes: reads the call on
-    /// stdin, answers whether the fence allows it. Hidden because no
-    /// person invokes it — a session's own CLI does, and the adapter
-    /// that opened the session is what put the command there.
-    #[command(name = yunta_core::fence::SUBCOMMAND, hide = true)]
-    Fence {
+    /// What an agent's CLI runs while it works — before it writes, among
+    /// other moments: reads the call on stdin, asks the engine of the
+    /// session it belongs to, and answers in that CLI's own shape.
+    /// Hidden because no person invokes it — a session's own CLI does,
+    /// and the adapter that opened the session is what put the command
+    /// there.
+    #[command(name = yunta_core::rail::SUBCOMMAND, hide = true)]
+    Rail {
         /// The adapter whose codec reads this call.
         adapter: yunta_core::AdapterId,
+        /// When in the session the CLI asks.
+        event: yunta_core::rail::RailEvent,
     },
     /// Show the shape of a document Yunta reads.
     ///

@@ -8,7 +8,6 @@ pub mod close;
 pub(crate) mod committer;
 pub mod doctor;
 pub(crate) mod drive;
-pub mod fence;
 pub(crate) mod forge;
 pub mod gc;
 pub mod init;
@@ -19,6 +18,7 @@ pub mod pack;
 pub mod pack_audit;
 pub(crate) mod pack_needs;
 pub(crate) mod promote;
+pub mod rail;
 pub mod receipt;
 pub(crate) mod refusals;
 pub mod resolve_gate;
@@ -167,7 +167,7 @@ pub(crate) fn declared_capabilities(adapter: &AdapterId) -> Option<yunta_core::C
 }
 
 /// The adapter this binary built under `id`, constructed without a
-/// probe: what the fence hook needs to reach one adapter's codec.
+/// probe: what a rail hook needs to reach one adapter's codec.
 pub(crate) fn built_adapter(id: &AdapterId) -> Option<std::sync::Arc<dyn Adapter>> {
     built_adapters(|_| AdapterSettings::default())
         .into_iter()

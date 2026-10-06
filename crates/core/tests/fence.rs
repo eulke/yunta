@@ -2,9 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use yunta_core::fence::{
-    refused_target, Advice, Coverage, Fence, FenceHook, Fenced, Verdict, SUBCOMMAND,
-};
+use yunta_core::fence::{Advice, Coverage, Fence, Fenced, Verdict, REFUSAL_MARKER};
 use yunta_core::ScopeGlob;
 
 fn worktree() -> PathBuf {
@@ -135,11 +133,11 @@ fn a_refusal_names_the_tool_it_advises_the_way_the_session_s_cli_does() {
         text.contains("mcp__yunta-run__yunta_request_scope_expansion"),
         "{text}"
     );
-    assert_eq!(refused_target(&text), Some(refusal.target.clone()));
+    assert!(text.starts_with(REFUSAL_MARKER), "{text}");
 }
 
 #[test]
-fn a_refusal_message_round_trips_its_target_and_says_its_advice() {
+fn a_refusal_message_names_its_target_and_says_its_advice() {
     for (advice, expected) in [
         (Advice::RequestExpansion, "yunta_request_scope_expansion"),
         (Advice::ReportFinding, "Report the need as a finding"),
@@ -156,17 +154,15 @@ fn a_refusal_message_round_trips_its_target_and_says_its_advice() {
             panic!("outside every glob");
         };
         let text = refusal.to_string();
-        assert_eq!(refused_target(&text), Some(refusal.target.clone()));
+        assert!(
+            text.contains(&refusal.target.display().to_string()),
+            "{text}"
+        );
         assert!(
             text.contains(expected),
             "the advice reaches the model: {text}"
         );
     }
-}
-
-#[test]
-fn text_without_the_marker_is_not_a_refusal() {
-    assert_eq!(refused_target("Edit succeeded on src/lib.rs"), None);
 }
 
 #[test]
@@ -198,30 +194,6 @@ fn coverage_is_the_weakest_channel() {
     );
 }
 
-#[test]
-fn a_fence_round_trips_through_the_environment() {
-    let fence = fence(&["src/**"], &["/work/run-1/artifacts"]);
-    let (var, value) = fence.to_env(&worktree());
-    assert_eq!(var, yunta_core::fence::ENV_VAR);
-
-    let (read, worktree_read) = Fence::from_env(&value).unwrap();
-    assert_eq!(read, fence);
-    assert_eq!(worktree_read, worktree());
-}
-
-#[test]
-fn a_fence_hook_names_the_subcommand_and_the_adapter() {
-    let hook = FenceHook::new(PathBuf::from("/usr/local/bin/yunta"));
-    assert_eq!(
-        hook.command(&yunta_core::AdapterId::from("claude-code")),
-        vec![
-            "/usr/local/bin/yunta".to_string(),
-            SUBCOMMAND.to_string(),
-            "claude-code".to_string()
-        ]
-    );
-}
-
 /// What the project denies to every run is refused whatever the scope
 /// admits, and the refusal says no request widens it.
 #[test]
@@ -234,10 +206,7 @@ fn a_denied_path_is_refused_where_the_scope_allows_it() {
     assert!(refusal.denied);
     let said = refusal.to_string();
     assert!(said.contains("no request widens"), "{said}");
-    assert_eq!(
-        refused_target(&said),
-        Some(worktree().join(".github/ci.yml"))
-    );
+    assert!(said.contains(".github/ci.yml"), "{said}");
     assert_eq!(
         fence.judge(&worktree(), Path::new("src/lib.rs")),
         Verdict::Allowed
@@ -256,13 +225,4 @@ fn an_unscoped_fence_still_refuses_denied_paths() {
         fence.judge(&worktree(), Path::new("README.md")),
         Verdict::Allowed
     );
-}
-
-#[test]
-fn denied_globs_survive_the_env() {
-    let fence = Fence::everything(Vec::new(), Advice::ReportFinding)
-        .denying(&[ScopeGlob::from(".github/**")]);
-    let (_, value) = fence.to_env(&worktree());
-    let (read, _) = Fence::from_env(&value).expect("the fence reads back");
-    assert_eq!(read, fence);
 }

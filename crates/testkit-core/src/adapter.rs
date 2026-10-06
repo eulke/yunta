@@ -11,7 +11,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use yunta_core::fence::{Advice, Fence, FenceHook};
+use yunta_core::fence::{Advice, Fence};
+use yunta_core::rail::{RailCommand, RailEndpoint};
 
 use futures::StreamExt;
 use yunta_core::events::SessionExit;
@@ -31,7 +32,13 @@ pub fn request(cwd: PathBuf) -> SessionRequest {
         permissions: PermissionProfile::Edit,
         env: HashMap::new(),
         fence: Fence::everything(Vec::new(), Advice::ReportFinding),
-        fence_hook: Some(FenceHook::new(PathBuf::from("yunta"))),
+        rail_command: Some(RailCommand::new(PathBuf::from("yunta"))),
+        // Where a hook would reach the engine: nothing listens there, and
+        // a stub CLI never runs its hooks.
+        rail: Some(RailEndpoint {
+            url: "http://127.0.0.1:9/rail".to_string(),
+            token: yunta_core::Secret::new("token".to_string()),
+        }),
         budget: Budget::default(),
         adapter_settings: serde_json::Map::new(),
         skills: Vec::new(),

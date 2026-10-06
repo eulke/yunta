@@ -723,8 +723,11 @@ tuvo el artifact y el log no dice cómo.
 | `adapter` | string (`id()` del adapter) | sí | — |
 | `policy_applied` | string | sí | de la tabla de degradación de capacidades del adapter, o —cuando el listener MCP de `run_tools` no puede abrir, o cuando abrió y la sesión no recibió ninguna de sus tools— el texto que dice que la sesión corre sin run tools y por qué |
 
-### 5.25 `write_refused` — adapter (por el engine)
-**Fuente:** la sesión que la rechazó, y qué iba a escribir
+### 5.25 `write_refused` — engine (el riel de la sesión)
+**Fuente:** la sesión que la rechazó, y qué iba a escribir. La escribe el
+engine cuando el hook de la sesión le pregunta antes de escribir y el cerco
+rechaza, antes de responderle (D249); el mock sin riel y el sandbox de un CLI
+que reporta su rechazo por el stream la escriben por la misma vía del stream.
 
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|

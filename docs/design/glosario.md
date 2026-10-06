@@ -282,19 +282,23 @@ Lo que un canal tiene: cerco exacto, o raíces.
 **Juez** (`Fence::judge`):
 La función pura que decide si un path está dentro del cerco. No toca disco:
 resuelve `.` y `..` lexicalmente contra el worktree y responde. Es una sola
-para todo el workspace — el hook de cada CLI, los efectos del mock y el
-comando `yunta fence` preguntan la misma.
+para todo el workspace: el engine la pregunta por cada escritura que el riel
+de una sesión le consulta, y el mock por los efectos de un fixture sin riel
+(D249).
 _Evitar_: validador de scope, checker.
 
-**Hook** (`FenceHook`):
-El comando que un CLI ejecuta antes de escribir y que invoca al juez: este
-binario, su subcomando `fence`, y el adapter cuyo codec lee la llamada. Lo
-resuelve la cáscara una sola vez.
+**Riel** (`RailCommand`, `/rail`):
+Lo que el CLI de una sesión le pregunta al engine mientras trabaja — antes de
+escribir, primero que nada. El hook es este binario, su subcomando `rail`, el
+adapter cuyo codec lee la llamada y el momento (`before-write`); la respuesta
+la da el engine por el listener de esa sesión, con el mismo token que sus
+herramientas, y deja en el log lo que juzgó (D249).
+_Evitar_: hook del cerco, `yunta fence`.
 
-**Codec** (`FenceCodec`):
-La traducción entre el juez y el hook de un CLI: qué path nombra la llamada
-que llegó por stdin, y en qué forma ese CLI lee la respuesta. Un adapter
-escribe solo el codec; el juicio es de core.
+**Codec** (`RailCodec`):
+La traducción entre el riel y el hook de un CLI: qué pregunta la llamada que
+llegó por stdin, y en qué forma ese CLI lee la respuesta. Un adapter escribe
+solo el codec; lo que se responde es del engine.
 
 **Rechazo** (`write_refused`):
 El hecho de que una escritura fue rechazada antes de ocurrir. Su texto para el

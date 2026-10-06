@@ -402,7 +402,7 @@ impl Bench {
             // The bench runs no binary, so nothing can run a hook:
             // an adapter whose fence needs one fails the session, and
             // the mock judges in process.
-            fence_hook: None,
+            rail_command: None,
             observer: self.observer.clone(),
         })
         .await?;

@@ -548,7 +548,7 @@ async fn drive_child(
                     secrets: ctx.secrets.clone(),
                     // A child run's sessions ask the same judge the
                     // parent's do: the hook is the binary, not the run.
-                    fence_hook: ctx.fence_hook.clone(),
+                    rail_command: ctx.rail_command.clone(),
                     // One observer serves the whole invocation, this
                     // child included: its frames name the child's own
                     // run_id, because the child emits through its own
