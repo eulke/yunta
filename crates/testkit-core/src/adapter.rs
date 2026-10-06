@@ -29,6 +29,7 @@ pub fn request(cwd: PathBuf) -> SessionRequest {
         cwd,
         model: None,
         agent: None,
+        effort: None,
         permissions: PermissionProfile::Edit,
         cli_config: yunta_core::CliConfig::Inherit,
         network: true,

@@ -29,6 +29,20 @@ A role can list more than one candidate — the engine picks the first whose
 adapter is healthy, so a role degrades gracefully across a team with mixed
 tooling instead of hard-failing.
 
+A candidate can say how long its model reasons with `effort:` — `low`,
+`medium`, `high` or `xhigh`, the levels both CLIs accept — and a node can say
+its own, which wins. `claude-code` receives it as `--effort` and `codex` as
+`-c model_reasoning_effort`, a resumed session included; absent, each CLI
+reasons as it would on its own. Each session's level is on the log, in
+`agent_session_opened`.
+
+```yaml
+runners:
+  planner:
+    - { adapter: claude-code, model: claude-opus-4-8, effort: high }
+    - { adapter: codex, model: gpt-5-codex, effort: high }
+```
+
 ## Agents
 
 `agent:` on a candidate, or on the node itself (which wins), names an agent:

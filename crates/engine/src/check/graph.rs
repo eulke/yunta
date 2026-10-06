@@ -26,6 +26,7 @@ pub(crate) fn check_workflow_nodes(
                 (node.runner.is_some(), "runner"),
                 (!node.runners.is_empty(), "runners"),
                 (node.agent.is_some(), "agent"),
+                (node.effort.is_some(), "effort"),
             ] {
                 if present {
                     errors.push(CheckError::WorkflowNodeRunnerBinding {

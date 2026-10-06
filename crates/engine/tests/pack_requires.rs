@@ -88,6 +88,7 @@ fn a_role_with_at_least_one_candidate_resolves() {
                 adapter: "claude-code".into(),
                 model: "sonnet".into(),
                 agent: None,
+                effort: None,
             }],
         )])),
         ..Default::default()

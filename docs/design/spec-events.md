@@ -196,8 +196,9 @@ que `from_tree` es exactamente el árbol de `found` (D201).
 | Campo | Tipo | Oblig. | Notas |
 |---|---|---|---|
 | `session_id` | `SessionId` (opaco) | sí | persiste para `resume` |
-| `agent` | `Option<String>` | no | agente nombrado del adapter, si se pidió (`agent:`) |
+| `agent` | `Option<String>` | no | el agente con que trabajó la sesión, si se pidió (`agent:`) |
 | `model` | `Option<ModelName>` | no | el modelo que el CLI reportó para la sesión; ausente cuando no reportó ninguno — nunca el pedido |
+| `effort` | `Option<Effort>` (`low \| medium \| high \| xhigh`) | no | el nivel de razonamiento que se le pidió a la sesión, el del nodo sobre el del runner; ausente cuando ninguno lo dijo y quedó en el del CLI |
 | `capabilities` | `Capabilities` (`fence`: `none \| tool_calls \| filesystem`; `tool_naming`: `bare \| mcp_prefixed \| mcp_prefixed_underscored`; el resto bools: resume_session, permission_profiles, custom_agents, usage_reporting, skills, run_tools, network_isolation) | sí | snapshot de capacidades del adapter en ese momento — constantes tras construcción. `tool_naming` es cómo el CLI le nombra al modelo las tools de un servidor MCP (`yunta_task`, `mcp__yunta-run__yunta_task`, `mcp__yunta_run__yunta_task`): el nombre con el que todo texto del engine le menciona una run tool a esa sesión. Un log viejo lleva `edit_hooks` en vez de `fence`, y el lector lo lee como `none`; uno sin `tool_naming`, como `bare` |
 | `fence` | `Coverage` (`{"coverage": "exact"}` · `{"coverage": "widened_to_roots", "roots": [...]}` · `{"coverage": "tools_only"}`) | no | cuánto del canal de escritura cercó realmente la sesión, derivado de lo que el adapter construyó; ausente cuando no construyó ninguno. El nivel viaja una vez, en `capabilities.fence` |
 | `task_id` | `Option<TaskId>` | no | la tarea que trabaja una sesión de `loop`; ausente para la sesión propia de un nodo. Con `concurrency` > 1 las sesiones de un loop se intercalan, y es lo que dice de qué tarea es cada una |

@@ -344,6 +344,16 @@
       "description": "An amount of a disk: bytes — `80G`, `500M`, `1.5T`, in decimal units —\nor a share of the whole file system, `20%`.",
       "type": "string"
     },
+    "Effort": {
+      "description": "How long the model reasons before it answers. The four levels every\nadapter's CLI accepts, each handed to it under the CLI's own name for\nthem; a level one CLI has and another lacks is no level here.",
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ]
+    },
     "ExecutorKind": {
       "description": "Closed at `binary` today — `wasm` is reserved as a future\nadditive variant once demand for it shows up, so this is an enum even\nwith a single variant, not a bare string that would silently accept\nanything.",
       "type": "string",
@@ -777,6 +787,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/AgentName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effort": {
+          "description": "How long the model reasons, unless the node says otherwise; absent\nleaves it to the CLI.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effort"
             },
             {
               "type": "null"

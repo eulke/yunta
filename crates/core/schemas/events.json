@@ -114,6 +114,17 @@
             }
           ]
         },
+        "effort": {
+          "description": "The effort the session was asked to reason with; absent when the\nnode and its runner left it to the CLI.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effort"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "fence": {
           "description": "How much of this session the adapter's fence covered — derived\nfrom what it built, never declared. Absent when it built none.\nThe level travels once, in `capabilities.fence`.",
           "anyOf": [
@@ -1572,6 +1583,16 @@
       "required": [
         "kind",
         "path"
+      ]
+    },
+    "Effort": {
+      "description": "How long the model reasons before it answers. The four levels every\nadapter's CLI accepts, each handed to it under the CLI's own name for\nthem; a level one CLI has and another lacks is no level here.",
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
       ]
     },
     "Envelope": {
@@ -4310,6 +4331,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/AgentName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effort": {
+          "description": "How long the model reasons, unless the node says otherwise; absent\nleaves it to the CLI.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effort"
             },
             {
               "type": "null"

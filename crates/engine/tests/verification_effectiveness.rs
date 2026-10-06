@@ -30,6 +30,7 @@ fn node(id: &str, on_failure: Option<OnFailure>) -> Node {
         skills: Vec::new(),
         runners: Vec::new(),
         agent: None,
+        effort: None,
         optional: false,
         ask: None,
         cli_config: None,
@@ -38,6 +39,7 @@ fn node(id: &str, on_failure: Option<OnFailure>) -> Node {
 
 fn gate_node(id: &str) -> Node {
     Node {
+        effort: None,
         id: id.into(),
         kind: NodeKind::Gate {
             assignee: "reviewer".to_string(),

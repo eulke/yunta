@@ -39,6 +39,30 @@ pub enum CliConfig {
     Isolated,
 }
 
+/// How long the model reasons before it answers. The four levels every
+/// adapter's CLI accepts, each handed to it under the CLI's own name for
+/// them; a level one CLI has and another lacks is no level here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Effort {
+    Low,
+    Medium,
+    High,
+    Xhigh,
+}
+
+impl Effort {
+    /// The YAML spelling, which is also what both CLIs call the level.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Effort::Low => "low",
+            Effort::Medium => "medium",
+            Effort::High => "high",
+            Effort::Xhigh => "xhigh",
+        }
+    }
+}
+
 /// A node's crash-recovery policy — the full triple of options.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,

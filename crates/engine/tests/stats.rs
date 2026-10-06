@@ -36,6 +36,7 @@ fn node(id: &str, depends_on: &[&str]) -> Node {
         skills: Vec::new(),
         runners: Vec::new(),
         agent: None,
+        effort: None,
         optional: false,
         ask: None,
         cli_config: None,
@@ -60,6 +61,7 @@ fn candidate() -> RunnerCandidate {
         adapter: "mock".into(),
         model: "mock-model".into(),
         agent: None,
+        effort: None,
     }
 }
 

@@ -48,6 +48,7 @@ fn node(id: &str) -> Node {
         skills: Vec::new(),
         runners: Vec::new(),
         agent: None,
+        effort: None,
         optional: false,
         ask: None,
         cli_config: None,
@@ -122,6 +123,7 @@ fn session_opened(session: &str) -> EventPayload {
     EventPayload::Session(SessionEvent::Opened(AgentSessionOpenedPayload {
         session_id: session.into(),
         agent: Some("reviewer".into()),
+        effort: None,
         model: Some("mock-model".into()),
         capabilities: Capabilities::default(),
         fence: None,

@@ -331,6 +331,7 @@ mod tests {
         let opened = EventPayload::Session(SessionEvent::Opened(AgentSessionOpenedPayload {
             session_id: "doctor-session".into(),
             agent: None,
+            effort: None,
             model: None,
             capabilities: yunta_core::Capabilities::default(),
             fence: None,

@@ -318,6 +318,7 @@ async fn capability_resume_session_passes_the_session_id_to_the_resume_flag() {
         "CLAUDE_STUB_LINES_FILE".to_string(),
         lines.display().to_string().into(),
     );
+    req.effort = Some(yunta_core::Effort::Xhigh);
     let session_id = SessionId::from("sess-to-resume");
     let session = adapter().resume(&session_id, req).await.unwrap();
     let _ = drain(session).await;
@@ -329,6 +330,28 @@ async fn capability_resume_session_passes_the_session_id_to_the_resume_flag() {
         .collect();
     let resume_pos = args.iter().position(|a| a == "--resume").unwrap();
     assert_eq!(args[resume_pos + 1], "sess-to-resume");
+    let effort_pos = args.iter().position(|a| a == "--effort").unwrap();
+    assert_eq!(
+        args[effort_pos + 1],
+        "xhigh",
+        "a resumed session keeps its effort"
+    );
+}
+
+/// The effort a session was asked for reaches the CLI by its own flag;
+/// a session asked for none leaves it to the CLI.
+#[tokio::test]
+async fn a_session_s_effort_reaches_the_cli_and_none_leaves_it_to_the_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut req = request(dir.path().to_path_buf());
+    req.effort = Some(yunta_core::Effort::Low);
+    let args = argv_for(dir.path(), req).await;
+    let effort_pos = args.iter().position(|a| a == "--effort").unwrap();
+    assert_eq!(args[effort_pos + 1], "low");
+
+    let dir = tempfile::tempdir().unwrap();
+    let args = argv_for(dir.path(), request(dir.path().to_path_buf())).await;
+    assert!(!args.iter().any(|a| a == "--effort"), "{args:?}");
 }
 
 /// An interrupted session that leaves on its own is not held for the

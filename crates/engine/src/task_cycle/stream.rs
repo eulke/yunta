@@ -54,6 +54,7 @@ pub(super) struct AgentEventCtx<'a> {
     pub(super) event: AgentEvent,
     pub(super) adapter: &'a dyn Adapter,
     pub(super) requested_agent: &'a Option<yunta_core::AgentName>,
+    pub(super) requested_effort: Option<yunta_core::Effort>,
     /// Whether the engine gave this session a per-run tool server.
     pub(super) run_tools_offered: bool,
     pub(super) max_tokens: Option<u64>,
@@ -92,6 +93,7 @@ pub(super) async fn apply_agent_event(
         event,
         adapter,
         requested_agent,
+        requested_effort,
         run_tools_offered,
         max_tokens,
         audit,
@@ -121,6 +123,7 @@ pub(super) async fn apply_agent_event(
                         session_id,
                         agent: requested_agent.clone(),
                         model,
+                        effort: requested_effort,
                         capabilities: adapter.capabilities(),
                         fence,
                         task_id: task.cloned(),

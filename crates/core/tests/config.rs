@@ -21,6 +21,7 @@ fn candidate(adapter: &str, model: &str) -> RunnerCandidate {
         adapter: adapter.into(),
         model: model.into(),
         agent: None,
+        effort: None,
     }
 }
 
@@ -212,6 +213,25 @@ fn an_unknown_isolation_value_is_a_parse_error_not_silently_ignored() {
     let err =
         yunta_core::yaml::parse::<ConfigLayer>("defaults:\n  isolation: container\n").unwrap_err();
     assert!(err.to_string().contains("container") || err.to_string().contains("unknown"));
+}
+
+/// A runner's effort is one of the levels every adapter's CLI accepts; a
+/// level only one of them has is refused, not passed to the other.
+#[test]
+fn a_runner_s_effort_is_a_level_every_cli_accepts() {
+    let runner = |effort: &str| {
+        yunta_core::yaml::parse::<ConfigLayer>(&format!(
+            "runners:\n  thinker:\n    - {{ adapter: codex, model: m, effort: {effort} }}\n"
+        ))
+    };
+    let layer = runner("xhigh").unwrap();
+    assert_eq!(
+        layer.runners.unwrap()["thinker"][0].effort,
+        Some(yunta_core::Effort::Xhigh)
+    );
+    for only_one_cli in ["max", "minimal", "none"] {
+        assert!(runner(only_one_cli).is_err(), "`{only_one_cli}` is refused");
+    }
 }
 
 #[test]

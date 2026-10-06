@@ -36,6 +36,7 @@ fn bare_setup(run_dir: &std::path::Path) -> yunta_engine::SessionSetup {
             adapter: "mock".into(),
             model: "mock-model".into(),
             agent: None,
+            effort: None,
         },
     )
 }

@@ -86,6 +86,11 @@ pub struct SessionRequest {
     /// CLI, sumadas a las propias; nunca busca un agente por su cuenta
     /// (D253).
     pub agent: Option<AgentDefinition>,   // { name, instructions }
+    /// Cuánto razona el modelo (`low | medium | high | xhigh`), el del nodo
+    /// sobre el del runner; `None` lo deja al CLI. Todo adapter lo entrega,
+    /// también al retomar: `claude-code` como `--effort`, `codex` como
+    /// `-c model_reasoning_effort`.
+    pub effort: Option<Effort>,
     /// Perfil de permisos del nodo.
     pub permissions: PermissionProfile,   // ReadOnly | Edit | Full
     /// Env vars para la sesión. Los secretos llegan SOLO por acá,

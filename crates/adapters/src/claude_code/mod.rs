@@ -179,6 +179,10 @@ impl ClaudeCodeAdapter {
             args.push("--model".to_string());
             args.push(model.to_string());
         }
+        if let Some(effort) = req.effort {
+            args.push("--effort".to_string());
+            args.push(effort.as_str().to_string());
+        }
         // The agent's instructions join the CLI's own, read from the file
         // the session's scratch holds.
         if let Some(path) = agent_file {

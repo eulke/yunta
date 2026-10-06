@@ -6,8 +6,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use super::parse::{describe, list};
 use super::{
-    Artifacts, Ask, CliConfig, ContextSpec, Hooks, NodeKind, NodePermissions, NodeScope, OnFailure,
-    OnInterrupt,
+    Artifacts, Ask, CliConfig, ContextSpec, Effort, Hooks, NodeKind, NodePermissions, NodeScope,
+    OnFailure, OnInterrupt,
 };
 use crate::ids::{AgentName, NodeId, RunnerName, SkillName};
 use crate::yaml::{self, Mapping, Value};
@@ -52,11 +52,15 @@ pub struct Node {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runners: Vec<RunnerName>,
     /// `agent:` at node level — overrides the resolved
-    /// candidate's own agent for this node. Portable field: each
-    /// adapter maps it to its native mechanism, and one without
-    /// `custom_agents` fails the node rather than silently ignoring it.
+    /// candidate's own agent for this node. Portable field: it resolves to
+    /// a definition the run owns, and an adapter without `custom_agents`
+    /// fails the node rather than silently ignoring it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentName>,
+    /// `effort:` at node level — how long the model reasons in this
+    /// node's sessions, over the resolved candidate's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<Effort>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifacts: Option<Artifacts>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -189,6 +193,7 @@ pub(super) const NODE_KEYS: &[&str] = &[
     "optional",
     "ask",
     "cli_config",
+    "effort",
 ];
 
 /// Keys an author reaches for that no node accepts, each with the key
@@ -249,6 +254,8 @@ struct NodeFields {
     ask: Option<Ask>,
     #[serde(default)]
     cli_config: Option<CliConfig>,
+    #[serde(default)]
+    effort: Option<Effort>,
 }
 
 impl<'de> Deserialize<'de> for Node {
@@ -352,6 +359,7 @@ impl<'de> Deserialize<'de> for Node {
             optional: fields.optional,
             ask: fields.ask,
             cli_config: fields.cli_config,
+            effort: fields.effort,
         })
     }
 }
@@ -454,6 +462,7 @@ invariant: true
 optional: true
 ask: required
 cli_config: isolated
+effort: high
 "#,
         )
         .unwrap();

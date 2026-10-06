@@ -175,7 +175,8 @@ logs its stdin and answers as told. Each item is what the engine relies on.
   on stale context fail once (`apply_patch verification failed`); the model
   reads the file again and retries.
 - A skill under `<cwd>/.agents/skills/<name>/SKILL.md` is found and used.
-  `-c model_reasoning_effort="high"` is accepted.
+  `-c model_reasoning_effort="high"` is accepted, and so are `"low"` and
+  `"xhigh"` on `gpt-6-luna`; `claude -p --effort xhigh` answers too.
 - Through the engine: a `codex` session scoped to `src/**` told to write
   `src/a.txt` and `docs/b.txt` wrote the first; the second was refused by the
   engine before it applied, recorded as `write_refused` naming `docs/b.txt`,

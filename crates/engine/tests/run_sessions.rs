@@ -569,6 +569,51 @@ sessions:
     assert_eq!(instructions.as_deref(), Some("Work as security-auditor."));
 }
 
+/// A node's own effort wins over its runner's, one that names none runs
+/// at its runner's, and the log says at which each session reasoned.
+#[tokio::test]
+async fn a_node_s_effort_wins_over_its_runner_s_and_the_session_records_it() {
+    let bench = Bench::new();
+    let workflow = r#"
+name: effort
+nodes:
+  - { id: deep, kind: prompt, runner: thinker, effort: xhigh, prompt: "Think." }
+  - { id: plain, kind: prompt, runner: thinker, depends_on: [deep], prompt: "Do." }
+"#;
+    let config = r#"
+runners:
+  thinker:
+    - { adapter: mock, model: mock-model, effort: medium }
+"#;
+    let fixture = r#"
+sessions:
+  - outcome: { type: completed, summary: "thought" }
+  - outcome: { type: completed, summary: "done" }
+"#;
+    let RunReport { terminal, .. } = bench.run_with_config(workflow, fixture, config).await;
+    assert_eq!(terminal, RunTerminal::Finished);
+
+    let asked: Vec<_> = bench
+        .mock()
+        .requests_seen()
+        .iter()
+        .map(|request| request.effort)
+        .collect();
+    use yunta_core::Effort;
+    assert_eq!(asked, vec![Some(Effort::Xhigh), Some(Effort::Medium)]);
+    let recorded: Vec<_> = bench
+        .events()
+        .iter()
+        .filter_map(|e| match e.payload() {
+            Some(yunta_core::events::EventPayload::Session(SessionEvent::Opened(p))) => {
+                Some(p.effort)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(recorded, asked);
+}
+
 /// An agent the run cannot resolve to a definition fails its node before
 /// any session spends a token on it, saying where it looked.
 #[tokio::test]

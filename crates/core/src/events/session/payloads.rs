@@ -148,6 +148,10 @@ pub struct AgentSessionOpenedPayload {
     /// reported none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<ModelName>,
+    /// The effort the session was asked to reason with; absent when the
+    /// node and its runner left it to the CLI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<crate::Effort>,
     pub capabilities: Capabilities,
     /// How much of this session the adapter's fence covered — derived
     /// from what it built, never declared. Absent when it built none.

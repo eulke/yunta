@@ -351,6 +351,16 @@
         "node"
       ]
     },
+    "Effort": {
+      "description": "How long the model reasons before it answers. The four levels every\nadapter's CLI accepts, each handed to it under the CLI's own name for\nthem; a level one CLI has and another lacks is no level here.",
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ]
+    },
     "ExecutorName": {
       "description": "An executor name: a letter followed by letters, digits, `_` or `-`",
       "type": "string",
@@ -844,7 +854,7 @@
       "type": "object",
       "properties": {
         "agent": {
-          "description": "`agent:` at node level — overrides the resolved\ncandidate's own agent for this node. Portable field: each\nadapter maps it to its native mechanism, and one without\n`custom_agents` fails the node rather than silently ignoring it.",
+          "description": "`agent:` at node level — overrides the resolved\ncandidate's own agent for this node. Portable field: it resolves to\na definition the run owns, and an adapter without `custom_agents`\nfails the node rather than silently ignoring it.",
           "anyOf": [
             {
               "$ref": "#/$defs/AgentName"
@@ -904,6 +914,17 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "effort": {
+          "description": "`effort:` at node level — how long the model reasons in this\nnode's sessions, over the resolved candidate's own.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Effort"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "hooks": {

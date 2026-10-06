@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::ids::{
     AdapterId, AgentName, ExecutorName, GitHubRepo, ModelName, RunnerName, SkillName,
 };
-use crate::workflow::OnInterrupt;
+use crate::workflow::{Effort, OnInterrupt};
 
 /// One binding candidate for a role in `runners:`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -19,6 +19,10 @@ pub struct RunnerCandidate {
     pub model: ModelName,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentName>,
+    /// How long the model reasons, unless the node says otherwise; absent
+    /// leaves it to the CLI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<Effort>,
 }
 
 /// One server in `mcp_servers:` — the reference config's own

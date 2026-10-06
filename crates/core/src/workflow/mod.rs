@@ -49,7 +49,7 @@ pub use node_kind::{
     CheckBuiltin, Coordination, ExternalGate, ForgeKind, JoinPolicy, MountArtifact, MountSpec,
     NodeKind, PromptSource,
 };
-pub use node_policy::{Ask, CliConfig, LoopUntil, NodePermissions, OnInterrupt};
+pub use node_policy::{Ask, CliConfig, Effort, LoopUntil, NodePermissions, OnInterrupt};
 pub use optional::{followers, left_out, reroute_sources, Because, LeftOut};
 pub use scope::NodeScope;
 

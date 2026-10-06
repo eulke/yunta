@@ -45,6 +45,7 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
         skills: Vec::new(),
         runners: Vec::new(),
         agent: None,
+        effort: None,
         ask: None,
         cli_config: None,
     }
@@ -52,6 +53,7 @@ fn bash(id: &str, run: &str, depends_on: &[&str]) -> Node {
 
 fn prompt(id: &str, runner: &str, depends_on: &[&str]) -> Node {
     Node {
+        effort: None,
         id: id.into(),
         kind: NodeKind::Prompt {
             prompt: PromptSource::Inline("do the thing".to_string()),
@@ -85,6 +87,7 @@ fn bash_with_scope(id: &str, run: &str, scope: &[&str]) -> Node {
 
 fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
     Node {
+        effort: None,
         id: id.into(),
         kind: NodeKind::Parallel {
             join,
@@ -114,6 +117,7 @@ fn parallel(id: &str, join: JoinPolicy, nodes: Vec<Node>) -> Node {
 
 fn gate(id: &str, depends_on: &[&str]) -> Node {
     Node {
+        effort: None,
         id: id.into(),
         kind: NodeKind::Gate {
             assignee: "reviewer".to_string(),
@@ -200,6 +204,7 @@ fn config_with_runner(role: &str, candidates: usize) -> ConfigLayer {
             adapter: "mock".into(),
             model: "mock-model".into(),
             agent: None,
+            effort: None,
         })
         .collect();
     ConfigLayer {
@@ -259,6 +264,7 @@ fn on_failure_goto_never_counts_as_a_depends_on_cycle() {
             adapter: "mock".into(),
             model: "mock-model".into(),
             agent: None,
+            effort: None,
         }],
     );
 
@@ -768,6 +774,7 @@ fn context_on_a_prompt_node_is_never_an_error() {
                     adapter: "mock".into(),
                     model: "mock-model".into(),
                     agent: None,
+                    effort: None,
                 }],
             )])),
             ..Default::default()
@@ -810,6 +817,7 @@ fn a_context_artifact_reference_creates_an_implicit_dependency_cycle_check() {
                     adapter: "mock".into(),
                     model: "mock-model".into(),
                     agent: None,
+                    effort: None,
                 }],
             )])),
             ..Default::default()
@@ -1122,6 +1130,10 @@ nodes:
     kind: workflow
     use: qa-review
     agent: benito
+  - id: qa-effort
+    kind: workflow
+    use: qa-review
+    effort: high
 "#;
     let wf: Workflow = yunta_core::yaml::parse(yaml).unwrap();
     let errors = check(&wf, &ConfigLayer::default());
@@ -1129,6 +1141,7 @@ nodes:
         ("qa", "runner"),
         ("qa-fanout", "runners"),
         ("qa-agent", "agent"),
+        ("qa-effort", "effort"),
     ] {
         assert!(
             errors.iter().any(|e| matches!(
@@ -2110,11 +2123,13 @@ fn a_fan_out_is_refused_only_when_no_candidate_can_do_it() {
                     adapter: "plain".into(),
                     model: "m".into(),
                     agent: None,
+                    effort: None,
                 },
                 RunnerCandidate {
                     adapter: "fancy".into(),
                     model: "m".into(),
                     agent: None,
+                    effort: None,
                 },
             ],
         )])),

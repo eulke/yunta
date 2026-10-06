@@ -37,11 +37,12 @@ pub(super) async fn resolve_node_runner(
     ) {
         Ok(resolved) => {
             let mut chosen = resolved.chosen.clone();
-            // The node's own `agent:` wins over the
+            // The node's own `agent:` and `effort:` win over the
             // candidate's.
             if let Some(agent) = &node.agent {
                 chosen.agent = Some(agent.clone());
             }
+            chosen.effort = node.effort.or(chosen.effort);
             // An adapter without `custom_agents` fails the node
             // rather than silently dropping the requested agent.
             if chosen.agent.is_some() {

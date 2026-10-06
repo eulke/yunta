@@ -297,6 +297,7 @@ pub(crate) async fn open_session(
         cwd: plan.cwd,
         model: Some(setup.chosen.model.clone()),
         agent: setup.agent.clone(),
+        effort: setup.chosen.effort,
         permissions: plan.profile,
         cli_config: setup.cli_config,
         network: setup.network,

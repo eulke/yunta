@@ -1145,6 +1145,21 @@ nodes:
 }
 
 #[test]
+fn a_node_s_effort_is_a_level_every_cli_accepts() {
+    let node = |effort: &str| {
+        yunta_core::yaml::parse::<Workflow>(&format!(
+            "name: w\nnodes:\n  - {{ id: a, kind: prompt, prompt: p, effort: {effort} }}\n"
+        ))
+    };
+    assert_eq!(
+        node("low").unwrap().nodes[0].effort,
+        Some(yunta_core::Effort::Low)
+    );
+    assert!(node("max").is_err());
+    assert!(node("minimal").is_err());
+}
+
+#[test]
 fn a_gate_option_that_is_not_a_name_is_refused_naming_the_field() {
     // Options are identifiers: a `yunta resolve-gate` argument, a key of
     // `on:`, a value the log records. One with a space is not one.

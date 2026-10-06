@@ -595,6 +595,7 @@ async fn capability_resume_session_passes_the_thread_id_to_the_resume_subcommand
         "CODEX_STUB_LINES_FILE".to_string(),
         lines.display().to_string().into(),
     );
+    req.effort = Some(yunta_core::Effort::Xhigh);
     let session_id = SessionId::from("thread-to-resume");
     let session = adapter().resume(&session_id, req).await.unwrap();
     let _ = drain(session).await;
@@ -606,6 +607,49 @@ async fn capability_resume_session_passes_the_thread_id_to_the_resume_subcommand
         .collect();
     let resume_pos = args.iter().position(|a| a == "resume").unwrap();
     assert_eq!(args[resume_pos + 1], "thread-to-resume");
+    let effort = args
+        .iter()
+        .position(|a| a == r#"model_reasoning_effort="xhigh""#)
+        .expect("a resumed session keeps its effort");
+    assert!(
+        effort < resume_pos,
+        "an `exec` option precedes the subcommand"
+    );
+}
+
+/// The effort a session was asked for reaches the CLI as the key its
+/// configuration names it by; a session asked for none leaves it to the
+/// CLI.
+#[tokio::test]
+async fn a_session_s_effort_reaches_the_cli_and_none_leaves_it_to_the_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let args_file = dir.path().join("args.txt");
+    let lines = write_lines(dir.path(), "lines.jsonl", &[]);
+    let mut req = request(dir.path().to_path_buf());
+    req.effort = Some(yunta_core::Effort::Low);
+    req.env.insert(
+        "CODEX_STUB_ARGS_FILE".to_string(),
+        args_file.display().to_string().into(),
+    );
+    req.env.insert(
+        "CODEX_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let _ = drain(adapter().spawn(req).await.unwrap()).await;
+    let args = tokio::fs::read_to_string(&args_file).await.unwrap();
+    let pos = args
+        .lines()
+        .position(|a| a == r#"model_reasoning_effort="low""#);
+    assert!(
+        pos.is_some_and(|pos| args.lines().nth(pos - 1) == Some("-c")),
+        "{args}"
+    );
+
+    let args = argv_under(&adapter(), PermissionProfile::Edit).await;
+    assert!(
+        !args.iter().any(|a| a.starts_with("model_reasoning_effort")),
+        "{args:?}"
+    );
 }
 
 /// `codex exec resume` takes the thread id, `--last`, `--all` and

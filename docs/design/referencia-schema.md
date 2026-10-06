@@ -23,8 +23,11 @@ project:
 # Cada rol resuelve a una lista ordenada de candidatos.
 runners:
   planner:
-    - { adapter: claude-code, model: claude-opus-4-8 }
-    - { adapter: codex, model: gpt-5-codex }
+    - { adapter: claude-code, model: claude-opus-4-8, effort: high }
+    - { adapter: codex, model: gpt-5-codex, effort: high }
+                                    # effort: low | medium | high | xhigh — cuánto razona
+                                    # el modelo; ausente lo deja al CLI. Un nodo puede
+                                    # decir el suyo, que gana
   executor:
     - { adapter: claude-code, model: claude-sonnet-4-6 }
   reviewer:
@@ -164,6 +167,7 @@ nodes:                              # id: letra seguida de letras, dígitos, `_`
   - id: plan
     kind: prompt
     runner: planner
+    effort: xhigh                   # sobre el `effort` del candidato que resuelva
     permissions: read-only
     depends_on: [brief]
     context:
@@ -381,3 +385,8 @@ que siempre está al día.
   que un pack declara en `contents.agents` (`publisher/agente`): front matter con
   `name` y `description`, y el cuerpo como instrucciones. La misma definición corre
   en todo adapter; un nombre sin definición falla el nodo antes de abrir la sesión.
+- **`effort:`** en un candidato del runner o en el nodo, que gana: `low`, `medium`,
+  `high` o `xhigh`, los niveles que aceptan todos los CLIs. `claude-code` lo recibe
+  como `--effort` y `codex` como `-c model_reasoning_effort`, también al retomar una
+  sesión; un nivel que solo un CLI tiene (`max`, `minimal`) se rechaza al leer el
+  YAML. El nivel pedido queda en `agent_session_opened.effort`.

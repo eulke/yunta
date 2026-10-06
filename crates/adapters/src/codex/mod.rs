@@ -210,6 +210,9 @@ fn config_overrides(req: &SessionRequest, opens_network: bool) -> Vec<String> {
             ConfigOverride::bool("sandbox_workspace_write.network_access", true).into_args(),
         );
     }
+    if let Some(effort) = req.effort {
+        args.extend(ConfigOverride::string("model_reasoning_effort", effort.as_str()).into_args());
+    }
     // The agent's instructions join the CLI's own, the key a profile
     // carries them in.
     if let Some(agent) = &req.agent {

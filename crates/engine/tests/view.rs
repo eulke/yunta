@@ -168,6 +168,7 @@ fn session_opened(session: &str) -> EventPayload {
     EventPayload::Session(SessionEvent::Opened(AgentSessionOpenedPayload {
         session_id: session.into(),
         agent: Some("builder".into()),
+        effort: None,
         model: Some("mock-model".into()),
         capabilities: Capabilities::default(),
         fence: None,
@@ -690,12 +691,14 @@ fn a_runner_that_fell_back_carries_the_candidates_it_passed_over() {
                     adapter: "mock".into(),
                     model: "mock-model".into(),
                     agent: Some("builder".into()),
+                    effort: None,
                 },
                 discarded: vec![DiscardedCandidate {
                     candidate: RunnerCandidate {
                         adapter: "absent".into(),
                         model: "big-model".into(),
                         agent: None,
+                        effort: None,
                     },
                     reason: "adapter `absent` is not installed".to_string(),
                 }],

@@ -53,6 +53,10 @@ pub struct SessionRequest {
     /// the adapter adds to its CLI's own. Only populated if
     /// `capabilities().custom_agents`.
     pub agent: Option<crate::agent::AgentDefinition>,
+    /// How long the model reasons, the node's word over its runner's;
+    /// absent leaves it to the CLI. Every adapter hands it over, a resumed
+    /// session included.
+    pub effort: Option<crate::Effort>,
     pub permissions: PermissionProfile,
     /// Whose configuration of the CLI the session loads beside what the
     /// run mounts: the person's own, or none but the run's.

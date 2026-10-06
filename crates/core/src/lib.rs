@@ -114,7 +114,7 @@ pub use tasks::{
 pub use workflow::{
     followers, left_out, node_commands, reroute_sources, ArtifactContextRef, ArtifactKind,
     ArtifactName, ArtifactRefId, ArtifactSpec, Artifacts, Ask, Because, CheckBuiltin,
-    CleanupTarget, CliConfig, ContextFile, ContextSpec, Coordination, DistillArtifact,
+    CleanupTarget, CliConfig, ContextFile, ContextSpec, Coordination, DistillArtifact, Effort,
     ExternalGate, ForgeKind, HookFailurePolicy, HookStep, Hooks, JoinPolicy, KnowledgeLayer,
     KnowledgeParams, LeftOut, LoopUntil, McpQueryParams, ModeInclude, ModeSpec, MountArtifact,
     MountSpec, Node, NodeDefaults, NodeIter, NodeKind, NodeOutputParams, NodePermissions,

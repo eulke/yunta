@@ -307,6 +307,7 @@ pub(super) async fn stream_session(
     }
     let budget = request.budget;
     let requested_agent = request.agent.as_ref().map(|agent| agent.name.clone());
+    let requested_effort = request.effort;
     // Whether this session was handed a per-run tool server at all: a
     // session that holds none of those tools only means something went
     // wrong if it was given a server to hold them from.
@@ -419,6 +420,7 @@ pub(super) async fn stream_session(
                     event,
                     adapter,
                     requested_agent: &requested_agent,
+                    requested_effort,
                     run_tools_offered,
                     max_tokens: budget.max_tokens,
                     audit,

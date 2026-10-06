@@ -34,6 +34,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
                 adapter: "mock".into(),
                 model: "mock-model".into(),
                 agent: None,
+                effort: None,
             },
             discarded: vec![],
         })),
@@ -52,6 +53,7 @@ pub fn all_kinds() -> Vec<EventPayload> {
         EventPayload::Session(SessionEvent::Opened(AgentSessionOpenedPayload {
             session_id: "sess-1".into(),
             agent: None,
+            effort: None,
             model: Some("mock-model".into()),
             capabilities: Capabilities::default(),
             fence: None,

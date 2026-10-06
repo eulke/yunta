@@ -867,6 +867,7 @@ pub async fn resume_orphan_with_mock(
                         yunta_core::events::AgentSessionOpenedPayload {
                             session_id: session_id.into(),
                             agent: None,
+                            effort: None,
                             model: Some("mock-model".into()),
                             capabilities: yunta_core::Capabilities::default(),
                             fence: None,
