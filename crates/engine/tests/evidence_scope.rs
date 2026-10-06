@@ -95,3 +95,64 @@ async fn a_request_citing_a_red_criterion_is_granted() {
     assert_eq!(state.tasks.status("task-h"), Some(TaskStatus::Done));
     assert!(matches!(granted_by(&bench), Some(Decider::Evidence { .. })));
 }
+
+/// A request that cites nothing is tried against the task's own criteria
+/// before anyone is asked: the red one that locates every path asked for
+/// grants it, even in `ask` mode.
+#[tokio::test]
+async fn a_request_citing_nothing_is_granted_on_the_red_criterion_that_locates_it() {
+    let bench = bench();
+    let request = format!(
+        "      - {{ path: {:?}, content: \"paths: [b.rs]\\nreason: the caller breaks\\n\" }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE
+    );
+    let fixture = fixture(
+        "capabilities: { run_tools: true, resume_session: true }",
+        &request,
+    );
+
+    let RunReport { terminal, state } = bench
+        .run(&scope_expansion_workflow("ask", &[], None), &fixture)
+        .await;
+
+    assert_eq!(terminal, RunTerminal::Finished);
+    assert_eq!(state.tasks.status("task-h"), Some(TaskStatus::Done));
+    assert_eq!(
+        granted_by(&bench),
+        Some(Decider::Evidence {
+            criterion: "sh check.sh".into()
+        })
+    );
+}
+
+/// The evidence has to locate every path asked for: a request reaching one
+/// it does not is a person's to decide, as before.
+#[tokio::test]
+async fn a_request_citing_nothing_with_a_path_no_red_output_locates_goes_to_a_person() {
+    let bench = bench();
+    let request = format!(
+        "      - {{ path: {:?}, content: \"paths: [b.rs, c.rs]\\nreason: the caller breaks\\n\" }}\n",
+        yunta_engine::scope_expansion::SCOPE_EXPANSION_REQUEST_FILE
+    );
+    let fixture = fixture(
+        "capabilities: { run_tools: true, resume_session: true }",
+        &request,
+    );
+
+    let RunReport { terminal, .. } = bench
+        .run(&scope_expansion_workflow("ask", &[], None), &fixture)
+        .await;
+
+    assert!(
+        matches!(terminal, RunTerminal::Paused { .. }),
+        "{terminal:?}"
+    );
+    assert_eq!(granted_by(&bench), None, "no grant without a person");
+    let escalated = bench.events().into_iter().any(|event| {
+        matches!(
+            event.payload(),
+            Some(EventPayload::Scope(ScopeEvent::Requested(_)))
+        )
+    });
+    assert!(escalated, "the request stands, for a person to decide");
+}

@@ -59,20 +59,43 @@ pub(super) async fn of_refusals(
     granted(params, paths, cmd, reason).await
 }
 
-/// The grant a request citing `evidence` earns: the criterion is one the
-/// task declares, it is red on the session's work, and what it printed
-/// locates every path asked for. `None` when any of that does not hold,
-/// and the request is decided like any other.
+/// The grant a request earns on evidence: a criterion the task declares,
+/// red on the session's work, whose output locates every path asked for —
+/// the one the request cites, or, when it cites none, the first of the
+/// task's own that does: what the engine can verify, nobody is asked. The
+/// task's own criteria are what this attempt's check runs anyway, so
+/// trying them costs nothing it would not spend. `None` when no criterion
+/// does, and the request is decided like any other.
 pub(super) async fn of_request(
     params: &AttemptParams<'_>,
     request: &ScopeExpansionRequest,
 ) -> Result<Option<ScopeExpansionOutcome>, TaskCycleError> {
-    let Some(cmd) = request.evidence.as_deref() else {
-        return Ok(None);
+    let tried: Vec<&str> = match request.evidence.as_deref() {
+        Some(cmd) if own(params.task, cmd) => vec![cmd],
+        Some(_) => return Ok(None),
+        None => params
+            .task
+            .criteria
+            .iter()
+            .filter(|criterion| !criterion.is_guard())
+            .map(|criterion| criterion.cmd.as_str())
+            .collect(),
     };
-    if !own(params.task, cmd) {
-        return Ok(None);
+    for cmd in tried {
+        if let Some(granted) = located_by(params, request, cmd).await? {
+            return Ok(Some(granted));
+        }
     }
+    Ok(None)
+}
+
+/// The grant `request` earns when `cmd`, run on the session's work, is red
+/// and locates every path it asks for.
+async fn located_by(
+    params: &AttemptParams<'_>,
+    request: &ScopeExpansionRequest,
+    cmd: &str,
+) -> Result<Option<ScopeExpansionOutcome>, TaskCycleError> {
     let worktree = params.unit.worktree.as_path();
     let answer = params
         .memo
