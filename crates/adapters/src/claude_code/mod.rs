@@ -248,6 +248,7 @@ impl ClaudeCodeAdapter {
 struct ClaudeParser {
     fence: Coverage,
     run_tool_calls: std::collections::HashMap<String, yunta_core::RunTool>,
+    reported: parse::Reported,
 }
 
 impl ClaudeParser {
@@ -255,13 +256,19 @@ impl ClaudeParser {
         ClaudeParser {
             fence,
             run_tool_calls: std::collections::HashMap::new(),
+            reported: parse::Reported::default(),
         }
     }
 }
 
 impl LineParser for ClaudeParser {
     fn parse(&mut self, line: &str) -> Vec<AgentEvent> {
-        parse::parse_line(line, Some(&self.fence), &mut self.run_tool_calls)
+        parse::parse_line(
+            line,
+            Some(&self.fence),
+            &mut self.run_tool_calls,
+            &mut self.reported,
+        )
     }
 }
 

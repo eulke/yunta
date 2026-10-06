@@ -100,10 +100,11 @@ async fn capability_usage_reporting_surfaces_the_streams_usage() {
     assert!(events
         .iter()
         .any(|e| matches!(e, AgentEvent::Note { text } if text == "working on it")));
+    // What a call read from the cache is part of what it read.
     assert!(events.iter().any(|e| matches!(
         e,
         AgentEvent::Usage {
-            input_tokens: Some(10),
+            input_tokens: Some(12),
             output_tokens: Some(4),
             cached_input_tokens: Some(2)
         }
@@ -1143,6 +1144,70 @@ async fn a_missing_token_count_is_absent_not_zero() {
         })
         .expect("the result reported its usage");
     assert_eq!(usage, (Some(40), None, None));
+}
+
+/// Usage is reported as the session spends it: each assistant message
+/// once — the CLI repeats its usage on every line carrying one of its
+/// blocks — and the result's totals only for what the messages did not
+/// say. The sum is the result's, with the cache read inside the input.
+#[tokio::test]
+async fn usage_is_reported_per_message_once_and_reconciled_by_the_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let usage = |input: u64, read: u64, created: u64, output: u64| {
+        format!(
+            r#"{{"input_tokens":{input},"cache_read_input_tokens":{read},"cache_creation_input_tokens":{created},"output_tokens":{output}}}"#
+        )
+    };
+    let assistant = |id: &str, block: &str, usage: &str| {
+        format!(
+            r#"{{"type":"assistant","message":{{"id":"{id}","content":[{{"type":"text","text":"{block}"}}],"usage":{usage}}}}}"#
+        )
+    };
+    let first = usage(3, 0, 8599, 8);
+    let second = usage(1, 8599, 473, 2);
+    let lines = [
+        INIT_LINE.to_string(),
+        assistant("msg-1", "thinking", &first),
+        assistant("msg-1", "writing", &first),
+        assistant("msg-2", "reading", &second),
+        format!(
+            r#"{{"type":"result","is_error":false,"result":"done","usage":{}}}"#,
+            usage(4, 8599, 9072, 896)
+        ),
+    ];
+    let lines = write_lines(
+        dir.path(),
+        "lines.jsonl",
+        &lines.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
+    let mut req = request(dir.path().to_path_buf());
+    req.env.insert(
+        "CLAUDE_STUB_LINES_FILE".to_string(),
+        lines.display().to_string().into(),
+    );
+    let events = drain(adapter().spawn(req).await.unwrap()).await;
+
+    let spent: Vec<(u64, u64, u64)> = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::Usage {
+                input_tokens,
+                output_tokens,
+                cached_input_tokens,
+            } => Some((
+                input_tokens.unwrap_or(0),
+                cached_input_tokens.unwrap_or(0),
+                output_tokens.unwrap_or(0),
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(spent.len(), 3, "two messages and the rest: {spent:?}");
+    let total = spent
+        .iter()
+        .fold((0, 0, 0), |(i, c, o), (a, b, d)| (i + a, c + b, o + d));
+    assert_eq!(total, (4 + 8599 + 9072, 8599, 896));
+    assert!(spent.iter().all(|(input, cached, _)| cached <= input));
 }
 
 /// A line kind this adapter does not read is tolerated: the stream goes

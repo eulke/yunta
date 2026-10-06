@@ -4,16 +4,17 @@
 //! rather than an error, the same tolerant-reader stance the event log
 //! itself takes for unknown event kinds.
 //!
-//! Token accounting trusts only the terminal `result` line's `usage`,
-//! never a per-message `assistant` line's: observed CLI output shows an
-//! `assistant` message's `output_tokens` undercounting thinking tokens
-//! later reconciled in the terminal total. Reporting a single, correct
-//! total costs mid-run budget granularity — this adapter can't cut a
-//! turn off mid-generation — but never double-counts or under-reports,
-//! and correct cost attribution matters more than a cutoff this CLI's
-//! atomic-turn execution model can't reliably support anyway.
+//! Tokens are reported as the session spends them, in the shape every
+//! adapter reports them: what a message read counts as its input, cache
+//! reads and writes included, and the cache reads are the cached part of
+//! it. Each assistant message's `usage` is reported once — the CLI repeats
+//! it on every line that carries one of the message's blocks — and the
+//! terminal `result` line reports whatever its totals hold beyond what the
+//! messages said: a message's `output_tokens` undercounts what the
+//! `result` reconciles, while the input it read adds up to the total
+//! exactly.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 use yunta_core::{InvalidId, ModelName, RunTool, SessionId, ToolNaming};
@@ -60,6 +61,7 @@ pub(super) fn parse_line(
     line: &str,
     fence: Option<&Coverage>,
     run_tool_calls: &mut HashMap<String, RunTool>,
+    reported: &mut Reported,
 ) -> Vec<AgentEvent> {
     // A line that is not JSON at all is not this protocol: the stream
     // carries whatever the CLI wrote to stdout, warnings included.
@@ -70,9 +72,13 @@ pub(super) fn parse_line(
         ClaudeLine::System(system) if system.subtype.as_deref() == Some("init") => {
             opened(&system.rest, fence)
         }
-        ClaudeLine::Assistant(value) => assistant_message(&value, run_tool_calls),
+        ClaudeLine::Assistant(value) => {
+            let mut events = assistant_message(&value, run_tool_calls);
+            events.extend(message_usage(&value, reported));
+            events
+        }
         ClaudeLine::User(value) => failed_run_tools(&value, run_tool_calls),
-        ClaudeLine::Result(value) => result_events(&value),
+        ClaudeLine::Result(value) => result_events(&value, reported),
         ClaudeLine::System(_) | ClaudeLine::Unknown => Vec::new(),
     }
 }
@@ -249,14 +255,109 @@ fn tool_target(input: &Value) -> ToolTarget {
     ToolTarget::opaque(input.to_string().as_bytes())
 }
 
-fn result_events(value: &Value) -> Vec<AgentEvent> {
+/// What this session's usage has reported so far: every assistant message
+/// once, by its id, and the totals they added up to.
+#[derive(Debug, Default)]
+pub(super) struct Reported {
+    messages: HashSet<String>,
+    spent: Spent,
+}
+
+/// Tokens in the shape every adapter reports: the input a call read,
+/// cache included, the part of it read from the cache, and the output. A
+/// count the CLI did not give stays absent: absent is not zero.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct Spent {
+    input: Option<u64>,
+    cached: Option<u64>,
+    output: Option<u64>,
+}
+
+impl Spent {
+    /// A `usage` object of this CLI's in that shape.
+    fn of(usage: &Value) -> Self {
+        let count = |field: &str| usage.get(field).and_then(Value::as_u64);
+        let read = [
+            "input_tokens",
+            "cache_read_input_tokens",
+            "cache_creation_input_tokens",
+        ]
+        .map(count);
+        Spent {
+            input: read
+                .iter()
+                .any(Option::is_some)
+                .then(|| read.iter().flatten().sum()),
+            cached: count("cache_read_input_tokens"),
+            output: count("output_tokens"),
+        }
+    }
+
+    /// Both counts together, field by field.
+    fn plus(self, other: Spent) -> Spent {
+        let add = |a: Option<u64>, b: Option<u64>| match (a, b) {
+            (None, None) => None,
+            (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
+        };
+        Spent {
+            input: add(self.input, other.input),
+            cached: add(self.cached, other.cached),
+            output: add(self.output, other.output),
+        }
+    }
+
+    /// What `self` holds beyond `said`, never below nothing.
+    fn beyond(self, said: Spent) -> Spent {
+        let rest = |total: Option<u64>, said: Option<u64>| {
+            total.map(|t| t.saturating_sub(said.unwrap_or(0)))
+        };
+        Spent {
+            input: rest(self.input, said.input),
+            cached: rest(self.cached, said.cached),
+            output: rest(self.output, said.output),
+        }
+    }
+
+    /// Whether this says a count above nothing.
+    fn says_anything(self) -> bool {
+        [self.input, self.cached, self.output]
+            .into_iter()
+            .flatten()
+            .any(|count| count > 0)
+    }
+
+    fn event(self) -> AgentEvent {
+        AgentEvent::Usage {
+            input_tokens: self.input,
+            output_tokens: self.output,
+            cached_input_tokens: self.cached,
+        }
+    }
+}
+
+/// An assistant message's usage, the first time one of its lines carries
+/// it.
+fn message_usage(value: &Value, reported: &mut Reported) -> Option<AgentEvent> {
+    let message = value.get("message")?;
+    let id = message.get("id")?.as_str()?;
+    let usage = message.get("usage")?;
+    if !reported.messages.insert(id.to_string()) {
+        return None;
+    }
+    let spent = Spent::of(usage);
+    reported.spent = reported.spent.plus(spent);
+    Some(spent.event())
+}
+
+fn result_events(value: &Value, reported: &mut Reported) -> Vec<AgentEvent> {
     let mut events = Vec::new();
     if let Some(usage) = value.get("usage") {
-        events.push(AgentEvent::Usage {
-            input_tokens: usage.get("input_tokens").and_then(Value::as_u64),
-            output_tokens: usage.get("output_tokens").and_then(Value::as_u64),
-            cached_input_tokens: usage.get("cache_read_input_tokens").and_then(Value::as_u64),
-        });
+        let total = Spent::of(usage);
+        let rest = total.beyond(reported.spent);
+        reported.spent = total;
+        if rest.says_anything() {
+            events.push(rest.event());
+        }
     }
 
     let Some(is_error) = value.get("is_error").and_then(Value::as_bool) else {

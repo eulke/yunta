@@ -209,6 +209,10 @@ logs its stdin and answers as told. Each item is what the engine relies on.
 - Through the engine: an `edit` session under `network: false` wrote the
   checkout from Bash, was refused `example.com` by the sandbox's proxy, and
   could not write `~`.
+- Through the engine, the same session's usage arrived per message (116k
+  and 117k read, cache included) and the result added the 868 output tokens
+  the messages had not counted: 233k in, 98% of it cached, where the same
+  session had counted 770 tokens before.
 
 **macOS**
 

@@ -201,8 +201,12 @@ pub enum AgentEvent {
     ToolUse { name: String, target: ToolTarget },
     /// Uso acumulable de tokens. Frecuencia: al menos al cierre;
     /// idealmente incremental. Requerido si `usage_reporting`.
-    /// `cached_input_tokens` es opcional: se puebla solo si el CLI
-    /// distingue lectura de caché (Contrato §8.4).
+    /// `input_tokens` es todo lo que la llamada leyó, caché incluida, y
+    /// `cached_input_tokens` la parte leída de la caché —opcional: se
+    /// puebla solo si el CLI distingue lectura de caché (Contrato §8.4)—,
+    /// así que `cached_input_tokens ≤ input_tokens` en todo adapter.
+    /// `claude-code` informa cada mensaje una vez y concilia el resto con
+    /// el `result`; `codex`, cada `turn.completed`.
     Usage { input_tokens: u64, output_tokens: u64, cached_input_tokens: Option<u64> },
     /// Texto final o resumen de progreso significativo (acotado).
     Note { text: String },
