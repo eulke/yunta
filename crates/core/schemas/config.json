@@ -63,6 +63,16 @@
         }
       ]
     },
+    "format": {
+      "description": "`format:` — which project command formats which files, run on what\na session writes the moment it writes it. The first rule whose\npaths match a file formats it.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/FormatRule"
+      }
+    },
     "limits": {
       "anyOf": [
         {
@@ -225,6 +235,11 @@
       "required": [
         "suite"
       ]
+    },
+    "CommandName": {
+      "description": "A command name: a letter followed by letters, digits, `_` or `-`",
+      "type": "string",
+      "minLength": 1
     },
     "CommandPermissions": {
       "description": "`permissions.commands` — patterns matched against every hook, criterion,\nbash node and executor command right before it runs. Empty\n`allow` = denylist mode (everything not denied runs); a non-empty\n`allow` switches to a strict, opt-in allowlist.",
@@ -403,6 +418,28 @@
         }
       },
       "additionalProperties": false
+    },
+    "FormatRule": {
+      "description": "One rule of `format:`: the files a project command formats the moment a\nsession writes one of them.",
+      "type": "object",
+      "properties": {
+        "paths": {
+          "description": "The files it formats, as scope globs.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ScopeGlob"
+          }
+        },
+        "run": {
+          "description": "The project command that formats them, handed every path as an\nargument.",
+          "$ref": "#/$defs/CommandName"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "paths",
+        "run"
+      ]
     },
     "GitHubForgeConfig": {
       "type": "object",

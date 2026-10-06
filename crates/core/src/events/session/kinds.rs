@@ -12,6 +12,8 @@ pub enum SessionEvent {
     /// The session asked to stop with work its close would not take, and
     /// was sent back to it.
     StopRefused(StopRefusedPayload),
+    /// What the session wrote, formatted the moment it wrote it.
+    WriteFormatted(WriteFormattedPayload),
     RunToolFailed(RunToolFailedPayload),
     /// A call this binary refused, and why; the session was answered with
     /// the refusal.
@@ -30,6 +32,7 @@ impl SessionEvent {
         "capability_degraded",
         "write_refused",
         "stop_refused",
+        "write_formatted",
         "run_tool_failed",
         "run_tool_refused",
         "service_unreachable",
@@ -44,6 +47,7 @@ impl SessionEvent {
             Self::CapabilityDegraded(_) => "capability_degraded",
             Self::WriteRefused(_) => "write_refused",
             Self::StopRefused(_) => "stop_refused",
+            Self::WriteFormatted(_) => "write_formatted",
             Self::RunToolFailed(_) => "run_tool_failed",
             Self::RunToolRefused(_) => "run_tool_refused",
             Self::ServiceUnreachable(_) => "service_unreachable",
@@ -65,6 +69,7 @@ impl SessionEvent {
             Self::CapabilityDegraded(_) => false,
             Self::WriteRefused(_) => false,
             Self::StopRefused(_) => false,
+            Self::WriteFormatted(_) => true,
             Self::RunToolFailed(_) => false,
             Self::RunToolRefused(_) => true,
             Self::ServiceUnreachable(_) => true,

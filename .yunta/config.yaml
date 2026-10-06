@@ -39,6 +39,12 @@ baseline:
 # (`run: { command: lint }`): fragua's `lint` runs this one.
 commands:
   lint: "cargo clippy --workspace --all-targets -- -D warnings"
+  format: "rustfmt --edition 2021"
+
+# What a session writes is formatted the moment it writes it, so `fmt` never
+# has anything left to find.
+format:
+  - { paths: ["**/*.rs"], run: format }
 
 # Where a `pull_request` node (fragua's `pr`) opens its pull request.
 forge:

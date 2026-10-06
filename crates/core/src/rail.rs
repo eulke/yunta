@@ -44,18 +44,25 @@ pub const ROUTE: &str = "/rail";
 pub enum RailEvent {
     /// A file tool is about to write.
     BeforeWrite,
+    /// A file tool wrote.
+    AfterWrite,
     /// The session is about to end its turn, and with it its work.
     BeforeStop,
 }
 
 impl RailEvent {
     /// Every event, in the order a session meets them.
-    pub const ALL: [RailEvent; 2] = [RailEvent::BeforeWrite, RailEvent::BeforeStop];
+    pub const ALL: [RailEvent; 3] = [
+        RailEvent::BeforeWrite,
+        RailEvent::AfterWrite,
+        RailEvent::BeforeStop,
+    ];
 
     /// The word the subcommand and the route take.
     pub fn as_str(self) -> &'static str {
         match self {
             RailEvent::BeforeWrite => "before-write",
+            RailEvent::AfterWrite => "after-write",
             RailEvent::BeforeStop => "before-stop",
         }
     }
@@ -98,6 +105,8 @@ pub enum RailAct {
     /// Every path one call is about to write, as the CLI named them:
     /// absolute, or relative to the session's working directory.
     BeforeWrite { paths: Vec<PathBuf> },
+    /// Every path one call wrote, named as for [`RailAct::BeforeWrite`].
+    AfterWrite { paths: Vec<PathBuf> },
     /// The session would end here.
     BeforeStop,
 }
@@ -107,6 +116,7 @@ impl RailAct {
     pub fn moment(&self) -> RailEvent {
         match self {
             RailAct::BeforeWrite { .. } => RailEvent::BeforeWrite,
+            RailAct::AfterWrite { .. } => RailEvent::AfterWrite,
             RailAct::BeforeStop => RailEvent::BeforeStop,
         }
     }
@@ -120,6 +130,8 @@ pub enum RailAnswer {
     Proceed,
     /// Do not; `reason` is what the model reads.
     Refuse { reason: String },
+    /// Go on, and know this: `context` is what the model reads.
+    Tell { context: String },
 }
 
 /// What a hook answers when it could not ask: a write is refused, because
@@ -131,7 +143,7 @@ pub fn unasked(event: RailEvent, why: &str) -> RailAnswer {
             let reason = format!("yunta: write refused: the engine could not be asked ({why}).");
             RailAnswer::Refuse { reason }
         }
-        RailEvent::BeforeStop => RailAnswer::Proceed,
+        RailEvent::AfterWrite | RailEvent::BeforeStop => RailAnswer::Proceed,
     }
 }
 

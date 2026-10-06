@@ -123,6 +123,7 @@ fn fence_args(req: &SessionRequest, mode: crate::session::Sandbox) -> Vec<String
             command,
             permissions::sandbox(mode, &req.cwd, req.network),
             RunToolsEndpoint::call_timeout(&req.budget),
+            req.formats,
         ));
     }
     args

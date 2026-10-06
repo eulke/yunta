@@ -58,6 +58,9 @@ pub struct SessionRequest {
     /// session included.
     pub effort: Option<crate::Effort>,
     pub permissions: PermissionProfile,
+    /// Whether the engine formats what this session writes, the moment it
+    /// writes it: the adapter installs the hook that tells it only then.
+    pub formats: bool,
     /// Whose configuration of the CLI the session loads beside what the
     /// run mounts: the person's own, or none but the run's.
     pub cli_config: crate::CliConfig,

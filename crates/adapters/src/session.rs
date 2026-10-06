@@ -69,6 +69,22 @@ impl Sandbox {
 /// else.
 pub(crate) const HOOK_TIMEOUT_SECONDS: u32 = 10;
 
+/// What a hook after a write answers to tell the model something about
+/// it: the context both CLIs add to what the model reads next.
+pub(crate) fn told_after_write(context: &str) -> yunta_core::port::HookReply {
+    let said = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": context,
+        }
+    });
+    yunta_core::port::HookReply {
+        stdout: said.to_string().into_bytes(),
+        stderr: Vec::new(),
+        exit: 0,
+    }
+}
+
 /// What a stop hook answers to keep a session working: the decision both
 /// CLIs read on stdout, with the reason the model is shown.
 pub(crate) fn kept_working(reason: &str) -> yunta_core::port::HookReply {

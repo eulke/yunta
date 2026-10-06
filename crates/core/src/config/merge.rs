@@ -40,6 +40,9 @@ pub(super) fn merge(base: ConfigLayer, more_specific: ConfigLayer) -> ConfigLaye
         // Per-command: a repo naming its own `lint` keeps the `test` a
         // user or org layer declared.
         commands: merge_maps(base.commands, more_specific.commands, |_base, more| more),
+        // A list read in order: the most specific layer's rules replace
+        // the whole list, as `runners`' candidates do.
+        format: more_specific.format.or(base.format),
         // Per-variable, same as `commands`.
         shared_dirs: merge_maps(
             base.shared_dirs,

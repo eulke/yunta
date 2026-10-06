@@ -299,6 +299,13 @@ pub(crate) async fn open_session(
         agent: setup.agent.clone(),
         effort: setup.chosen.effort,
         permissions: plan.profile,
+        // Only a session the engine listens to can be told what was
+        // formatted.
+        formats: run_tools.is_some()
+            && setup
+                .run_tools
+                .as_ref()
+                .is_some_and(|access| access.host.formats()),
         cli_config: setup.cli_config,
         network: setup.network,
         env: setup.env.clone(),

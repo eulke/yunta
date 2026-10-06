@@ -52,6 +52,9 @@ pub(super) struct Asked {
     pub(super) rail: yunta_core::rail::RailEndpoint,
     pub(super) cwd: PathBuf,
     pub(super) effects: Vec<super::fixture::MockEffect>,
+    /// Whether the engine formats what is written: each write that lands
+    /// is then told to it, as a CLI's after-write hook does.
+    pub(super) formats: bool,
 }
 
 /// What a session that asks before it stops does when it is sent back.
@@ -92,8 +95,22 @@ impl Asked {
                     .await
                     .map_err(|e| format!("the write hook did not finish: {e}"))?
                     .map_err(|e| format!("the write hook could not ask the engine: {e}"))?;
-            if answer == yunta_core::rail::RailAnswer::Proceed {
-                super::effects::write_effect(&self.cwd, &effect).map_err(|e| e.to_string())?;
+            if answer != yunta_core::rail::RailAnswer::Proceed {
+                continue;
+            }
+            super::effects::write_effect(&self.cwd, &effect).map_err(|e| e.to_string())?;
+            if self.formats {
+                let call = yunta_core::rail::RailCall {
+                    session_id: session.clone(),
+                    act: yunta_core::rail::RailAct::AfterWrite {
+                        paths: vec![effect.path.clone()],
+                    },
+                };
+                let rail = self.rail.clone();
+                tokio::task::spawn_blocking(move || rail.ask(&call, Some(Duration::from_secs(30))))
+                    .await
+                    .map_err(|e| format!("the after-write hook did not finish: {e}"))?
+                    .map_err(|e| format!("the after-write hook could not ask the engine: {e}"))?;
             }
         }
         Ok(())
@@ -205,7 +222,9 @@ async fn stopped(
     let mut after = Some((stop.writes.effects.clone(), stop.steps.clone()));
     for _ in 0..3 {
         match stop.asked(&session).await {
-            Ok(yunta_core::rail::RailAnswer::Proceed) => return true,
+            Ok(
+                yunta_core::rail::RailAnswer::Proceed | yunta_core::rail::RailAnswer::Tell { .. },
+            ) => return true,
             Ok(yunta_core::rail::RailAnswer::Refuse { .. }) => {}
             Err(message) => {
                 failed(events, message);
@@ -219,6 +238,7 @@ async fn stopped(
             rail: stop.writes.rail.clone(),
             cwd: stop.writes.cwd.clone(),
             effects,
+            formats: stop.writes.formats,
         };
         if let Err(message) = writes.written(session.clone()).await {
             failed(events, message);

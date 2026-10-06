@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{
-    AdapterId, AgentName, ExecutorName, GitHubRepo, ModelName, RunnerName, SkillName,
+    AdapterId, AgentName, CommandName, ExecutorName, GitHubRepo, ModelName, RunnerName, SkillName,
 };
 use crate::workflow::{Effort, OnInterrupt};
 
@@ -23,6 +23,18 @@ pub struct RunnerCandidate {
     /// leaves it to the CLI.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<Effort>,
+}
+
+/// One rule of `format:`: the files a project command formats the moment a
+/// session writes one of them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FormatRule {
+    /// The files it formats, as scope globs.
+    pub paths: Vec<crate::ScopeGlob>,
+    /// The project command that formats them, handed every path as an
+    /// argument.
+    pub run: CommandName,
 }
 
 /// One server in `mcp_servers:` — the reference config's own

@@ -94,6 +94,7 @@ pub(super) struct RunStatsJson {
 #[derive(Serialize)]
 struct TimeJson {
     working_secs: f64,
+    rails_secs: f64,
     checks_secs: f64,
     decided_checks_secs: f64,
     measuring_secs: f64,
@@ -107,6 +108,7 @@ impl TimeJson {
     fn of(time: &yunta_engine::TimeSpent) -> Self {
         TimeJson {
             working_secs: time.working.as_secs_f64(),
+            rails_secs: time.rails.as_secs_f64(),
             checks_secs: time.checks.as_secs_f64(),
             decided_checks_secs: time.decided_checks.as_secs_f64(),
             measuring_secs: time.measuring.as_secs_f64(),

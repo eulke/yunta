@@ -31,6 +31,7 @@ pub fn request(cwd: PathBuf) -> SessionRequest {
         agent: None,
         effort: None,
         permissions: PermissionProfile::Edit,
+        formats: false,
         cli_config: yunta_core::CliConfig::Inherit,
         network: true,
         env: HashMap::new(),

@@ -291,9 +291,9 @@ _Evitar_: validador de scope, checker.
 Lo que el CLI de una sesión le pregunta al engine mientras trabaja — antes de
 escribir y antes de terminar. El hook es este binario, su subcomando `rail`, el
 adapter cuyo codec lee la llamada y el momento (`before-write`,
-`before-stop`); la respuesta la da el engine por el listener de esa sesión,
-con el mismo token que sus herramientas, y deja en el log lo que juzgó (D249,
-D254).
+`after-write`, `before-stop`); la respuesta la da el engine por el listener de
+esa sesión, con el mismo token que sus herramientas, y deja en el log lo que
+juzgó o hizo (D249, D254, D255).
 _Evitar_: hook del cerco, `yunta fence`.
 
 **Codec** (`RailCodec`):

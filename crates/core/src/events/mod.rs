@@ -427,6 +427,7 @@ wire_kinds! {
     CapabilityDegraded => "capability_degraded",
     WriteRefused => "write_refused",
     StopRefused => "stop_refused",
+    WriteFormatted => "write_formatted",
     RunToolFailed => "run_tool_failed",
     RunToolRefused => "run_tool_refused",
     ServiceUnreachable => "service_unreachable",

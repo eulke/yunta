@@ -2848,3 +2848,35 @@ nodes:
         Vec::new()
     );
 }
+
+/// A `format:` rule whose command the project does not declare would leave
+/// every write it covers unformatted, with nobody told: `check` says so,
+/// with the declared command it most likely meant.
+#[test]
+fn a_format_rule_naming_an_undeclared_command_is_refused() {
+    let wf: Workflow =
+        yunta_core::yaml::parse("name: w\nnodes:\n  - { id: a, kind: bash, run: \"true\" }\n")
+            .unwrap();
+    let config: ConfigLayer = yunta_core::yaml::parse(
+        "commands:\n  format: \"rustfmt\"\nformat:\n  - { paths: [\"**/*.rs\"], run: formt }\n",
+    )
+    .unwrap();
+
+    let errors = check(&wf, &config);
+
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            CheckError::FormatCommandUnset { command, near }
+                if command.as_str() == "formt" && near.as_deref() == Some("format")
+        )),
+        "{errors:?}"
+    );
+    let declared: ConfigLayer = yunta_core::yaml::parse(
+        "commands:\n  format: \"rustfmt\"\nformat:\n  - { paths: [\"**/*.rs\"], run: format }\n",
+    )
+    .unwrap();
+    assert!(!check(&wf, &declared)
+        .iter()
+        .any(|e| matches!(e, CheckError::FormatCommandUnset { .. })));
+}

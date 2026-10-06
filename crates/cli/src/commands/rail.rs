@@ -60,7 +60,7 @@ pub fn over_loopback(
     call: &RailCall,
 ) -> Result<yunta_core::rail::RailAnswer, String> {
     let deadline = match call.act.moment() {
-        RailEvent::BeforeWrite => Some(DEADLINE),
+        RailEvent::BeforeWrite | RailEvent::AfterWrite => Some(DEADLINE),
         RailEvent::BeforeStop => None,
     };
     endpoint

@@ -40,9 +40,9 @@ pub use permissions::{
 pub use pool::{DiskShare, PoolConfig};
 pub use sections::{
     is_default_isolation, AdapterSettings, BaselineConfig, CoverageConfig, DefaultOnFailure,
-    DefaultsConfig, ExecutorKind, ExecutorRegistration, ForgeConfig, GitHubForgeConfig, Isolation,
-    LimitsConfig, McpServerConfig, PathsConfig, PricingEntry, ProjectConfig, RunnerCandidate,
-    SkillsConfig, StorageConfig,
+    DefaultsConfig, ExecutorKind, ExecutorRegistration, ForgeConfig, FormatRule, GitHubForgeConfig,
+    Isolation, LimitsConfig, McpServerConfig, PathsConfig, PricingEntry, ProjectConfig,
+    RunnerCandidate, SkillsConfig, StorageConfig,
 };
 
 /// One config layer as parsed from a single file (project/user/org), and
@@ -75,6 +75,11 @@ pub struct ConfigLayer {
     /// lint" and the project says which tool that is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commands: Option<BTreeMap<CommandName, String>>,
+    /// `format:` — which project command formats which files, run on what
+    /// a session writes the moment it writes it. The first rule whose
+    /// paths match a file formats it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<Vec<FormatRule>>,
     /// `shared_dirs:` — `{VARIABLE: directory}`, directories every
     /// command and every session of a run shares: each is exported under
     /// its variable and stays writable inside every session's sandbox,
@@ -108,6 +113,11 @@ pub struct ConfigLayer {
 }
 
 impl ConfigLayer {
+    /// Every `format:` rule, in the order a file is matched against them.
+    pub fn format_rules(&self) -> &[FormatRule] {
+        self.format.as_deref().unwrap_or_default()
+    }
+
     /// The paths no run may write, as `permissions.paths.deny` declares
     /// them across every layer.
     pub fn denied_paths(&self) -> &[crate::ScopeGlob] {

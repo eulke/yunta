@@ -61,6 +61,40 @@ pub struct HostOf {
     /// The suite the run measures, which a handed-over document's
     /// commands extend when they run the project's tests.
     pub suite: Option<yunta_core::Suite>,
+    /// What formats a file a session writes, rule by rule.
+    pub formatters: Vec<Formatter>,
+}
+
+/// One `format:` rule as the run runs it: the files it covers, the
+/// project command's name, and the text the project gave that command.
+#[derive(Debug, Clone)]
+pub struct Formatter {
+    pub paths: Vec<ScopeGlob>,
+    pub run: yunta_core::CommandName,
+    pub command: String,
+}
+
+impl Formatter {
+    /// The run's formatters: every rule of `config` whose command the
+    /// project declares, in the order a file is matched against them.
+    pub fn of(config: &yunta_core::ConfigLayer) -> Vec<Formatter> {
+        config
+            .format_rules()
+            .iter()
+            .filter_map(|rule| {
+                Some(Formatter {
+                    paths: rule.paths.clone(),
+                    run: rule.run.clone(),
+                    command: config.command(&rule.run)?.to_string(),
+                })
+            })
+            .collect()
+    }
+
+    /// Whether this rule formats `path`, relative to the worktree.
+    pub(super) fn covers(&self, path: &std::path::Path) -> bool {
+        yunta_core::scope_globset(&self.paths).is_ok_and(|set| set.is_match(path))
+    }
 }
 
 #[derive(Clone)]
@@ -114,6 +148,8 @@ pub struct RunToolsHost {
     /// The frozen workflow, for what a document handed over is held to
     /// by the nodes around the one that hands it over.
     pub(super) workflow: Workflow,
+    /// What formats a file a session writes.
+    pub(super) formatters: Vec<Formatter>,
 }
 
 /// Each blackboard group's members, by group.
@@ -160,6 +196,7 @@ impl RunToolsHost {
             environment,
             worktree,
             suite,
+            formatters,
         } = host;
         let (groups, member_of) = blackboards(workflow);
         Self {
@@ -180,7 +217,13 @@ impl RunToolsHost {
             worktree,
             suite,
             workflow: workflow.clone(),
+            formatters,
         }
+    }
+
+    /// Whether the run formats what its sessions write.
+    pub fn formats(&self) -> bool {
+        !self.formatters.is_empty()
     }
 
     /// This host for the run once it moved into `worktree`, reaching its

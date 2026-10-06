@@ -194,6 +194,11 @@ fn session_words(happening: &session::happening::Happening, sep: char) -> String
         ),
         H::Refused(target) => format!("write refused: {}", target.sentence()),
         H::StopRefused(why) => stop_refused(why),
+        H::Formatted {
+            run,
+            changed,
+            exit_code,
+        } => formatted(run, changed, *exit_code),
         H::RunToolFailed { tool, cause } => {
             format!("run tool call failed: {} ({})", tool.name(), cause.as_str())
         }
@@ -228,6 +233,25 @@ fn opened(
         said.push_str(&format!(" {sep} {}", fence_covered(coverage)));
     }
     said
+}
+
+/// What a session wrote, formatted by the project's command `run`.
+fn formatted(
+    run: &yunta_core::CommandName,
+    changed: &[std::path::PathBuf],
+    exit_code: i32,
+) -> String {
+    match (exit_code, changed) {
+        (0, []) => format!("`{run}` left what it wrote as it was"),
+        (0, changed) => {
+            let names: Vec<String> = changed
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect();
+            format!("`{run}` formatted {}", names.join(", "))
+        }
+        (code, _) => format!("`{run}` could not format what it wrote (exit {code})"),
+    }
 }
 
 /// A stop sent back to the work, and what kept the work from closing.

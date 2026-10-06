@@ -311,7 +311,9 @@ sobre cada herramienta de escritura ejecuta `yunta rail claude-code before-write
 le pregunta al engine por el listener de la sesión, y uno `Stop` ejecuta
 `yunta rail claude-code before-stop`, cuya negativa es `{"decision":"block","reason":…}`
 y para el que el adapter apaga el tope del CLI (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP=0`,
-D254); las raíces
+D254); cuando el run formatea, uno `PostToolUse` sobre las mismas herramientas
+ejecuta `yunta rail claude-code after-write` y lo que el engine dice llega al
+modelo como `additionalContext` (D255); las raíces
 del cerco entran por `--add-dir`. Las ediciones se cubren exactas; los comandos, por
 directorio: `WidenedToRoots { [cwd, …raíces] }` bajo `edit`, `WidenedToRoots { raíces }`
 bajo `read_only` con raíces y `Exact` sin ellas, `ToolsOnly` bajo `full`. `read_only`
@@ -345,8 +347,9 @@ incluido, se abre solo cuando el pedido la abre (`allowedDomains: ["*"]`,
 `codex exec` headless con salida JSON; `permission_profiles` mapea a sus modos de
 sandbox. El cerco es `FenceLevel::ToolCalls`: un hook `PreToolUse` sobre
 `apply_patch` ejecuta `yunta rail codex before-write`, que le pregunta al engine por
-cada path que el patch nombra, y uno `Stop` ejecuta `yunta rail codex before-stop`
-(D254); los hooks llegan como overrides `-c` junto con su propia
+cada path que el patch nombra, uno `Stop` ejecuta `yunta rail codex before-stop`
+(D254) y, cuando el run formatea, uno `PostToolUse` sobre `apply_patch` ejecuta
+`yunta rail codex after-write` (D255); los hooks llegan como overrides `-c` junto con su propia
 confianza en `hooks.state` (el hash con que Codex confía en un hook), así que ningún
 hook ajeno corre sin revisar (D251). Los comandos quedan confinados por el sandbox:
 `--sandbox workspace-write` más las raíces del cerco en

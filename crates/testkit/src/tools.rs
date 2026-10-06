@@ -57,6 +57,7 @@ impl ToolsHost {
         let host = Arc::new(RunToolsHost::new(
             &workflow,
             yunta_engine::HostOf {
+                formatters: Vec::new(),
                 storage: storage.async_handle(),
                 run_id: run_id.clone(),
                 clock: clock.clone(),

@@ -123,6 +123,7 @@ pub(super) fn build_ctx(
                 environment: crate::process::execution_environment(ambient),
                 worktree: worktree.to_path_buf(),
                 suite: crate::run::baseline::suite(manifest).and_then(yunta_core::Suite::of),
+                formatters: crate::run_tools::Formatter::of(&manifest.config),
             },
         )),
     };

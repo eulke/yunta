@@ -64,6 +64,10 @@ mcp_servers:                        # servers para la fuente de contexto `mcp`
 commands:                           # lo que el proyecto corre por cada capacidad que un workflow nombra
   lint: "cargo clippy --workspace -- -D warnings"
   fmt: "cargo fmt"
+  format: "rustfmt --edition 2021"
+
+format:                             # qué comando formatea qué archivos en cuanto una sesión los escribe (D255)
+  - { paths: ["**/*.rs"], run: format }   # la primera regla que cubre un archivo; recibe las rutas como argumentos
 
 shared_dirs:                        # caches que comparten todos los comandos y sesiones de un run; nunca la salida de un build (D236)
   PIP_CACHE_DIR: ~/.cache/yunta/pip   # exportado bajo la variable; escribible en cada sandbox que escribe

@@ -4,7 +4,10 @@
 //! the call as JSON on stdin, the patch in `tool_input.command`. One patch
 //! can add, change, delete and move several files, so every path it names
 //! is asked about at once. Exit 2 with the reason on stderr refuses the
-//! patch, and the model reads the reason; exit 0 lets it through. Its
+//! patch, and the model reads the reason; exit 0 lets it through. A
+//! `PostToolUse` hook after the same patch hands the model
+//! `additionalContext` when the engine has something to say about what it
+//! wrote. Its
 //! `Stop` hook runs when the session would end its turn, and
 //! `{"decision":"block"}` with a reason on stdout keeps it working.
 //!
@@ -47,7 +50,7 @@ impl RailCodec for CodexRailCodec {
                 session_id,
                 act: RailAct::BeforeStop,
             })),
-            RailEvent::BeforeWrite => {
+            RailEvent::BeforeWrite | RailEvent::AfterWrite => {
                 let patch = call
                     .get("tool_input")
                     .and_then(|input| input.get("command"))
@@ -57,10 +60,11 @@ impl RailCodec for CodexRailCodec {
                 if paths.is_empty() {
                     return Err(CodecError::MissingField("a file the patch names"));
                 }
-                Ok(Some(RailCall {
-                    session_id,
-                    act: RailAct::BeforeWrite { paths },
-                }))
+                let act = match event {
+                    RailEvent::AfterWrite => RailAct::AfterWrite { paths },
+                    _ => RailAct::BeforeWrite { paths },
+                };
+                Ok(Some(RailCall { session_id, act }))
             }
         }
     }
@@ -80,7 +84,11 @@ impl RailCodec for CodexRailCodec {
             (RailEvent::BeforeStop, RailAnswer::Refuse { reason }) => {
                 crate::session::kept_working(reason)
             }
-            (_, RailAnswer::Proceed) => HookReply {
+            (
+                RailEvent::AfterWrite,
+                RailAnswer::Tell { context: said } | RailAnswer::Refuse { reason: said },
+            ) => crate::session::told_after_write(said),
+            (_, RailAnswer::Proceed | RailAnswer::Tell { .. }) => HookReply {
                 stdout: Vec::new(),
                 stderr: Vec::new(),
                 exit: 0,
@@ -124,27 +132,16 @@ struct Hook {
 
 /// The `-c` overrides that install the hooks and trust them. The stop
 /// hook waits for the engine as long as `judging` allows: judging the
-/// work runs its checks.
-pub(super) fn hook_overrides(command: &RailCommand, judging: std::time::Duration) -> Vec<String> {
-    let installed = [
-        Hook {
-            event: "PreToolUse",
-            key: "pre_tool_use",
-            matcher: Some(WRITING_TOOL),
-            rail: RailEvent::BeforeWrite,
-            timeout: u64::from(crate::session::HOOK_TIMEOUT_SECONDS),
-        },
-        Hook {
-            event: "Stop",
-            key: "stop",
-            matcher: None,
-            rail: RailEvent::BeforeStop,
-            timeout: judging.as_secs(),
-        },
-    ];
+/// work runs its checks. The hook after a patch is installed only when the
+/// engine `formats` what it wrote.
+pub(super) fn hook_overrides(
+    command: &RailCommand,
+    judging: std::time::Duration,
+    formats: bool,
+) -> Vec<String> {
     let mut trust = Table::new();
     let mut overrides = Vec::new();
-    for hook in installed {
+    for hook in installed(judging, formats) {
         let argv = command
             .argv(&super::ID, hook.rail)
             .iter()
@@ -169,6 +166,36 @@ pub(super) fn hook_overrides(command: &RailCommand, judging: std::time::Duration
         .into_iter()
         .flat_map(ConfigOverride::into_args)
         .collect()
+}
+
+/// The hooks a session gets: before a patch and before a stop always,
+/// after a patch when the engine formats what it wrote.
+fn installed(judging: std::time::Duration, formats: bool) -> Vec<Hook> {
+    let patching = |event, key, rail| Hook {
+        event,
+        key,
+        matcher: Some(WRITING_TOOL),
+        rail,
+        timeout: u64::from(crate::session::HOOK_TIMEOUT_SECONDS),
+    };
+    let mut hooks = vec![
+        patching("PreToolUse", "pre_tool_use", RailEvent::BeforeWrite),
+        Hook {
+            event: "Stop",
+            key: "stop",
+            matcher: None,
+            rail: RailEvent::BeforeStop,
+            timeout: judging.as_secs(),
+        },
+    ];
+    if formats {
+        hooks.push(patching(
+            "PostToolUse",
+            "post_tool_use",
+            RailEvent::AfterWrite,
+        ));
+    }
+    hooks
 }
 
 /// `hook`'s one group as the CLI's config reads it: its matcher, and its
@@ -318,7 +345,11 @@ mod tests {
     #[test]
     fn the_overrides_read_back_as_the_hooks_and_their_trust() {
         let judging = std::time::Duration::from_secs(900);
-        let args = hook_overrides(&RailCommand::new(PathBuf::from("/bin/yunta")), judging);
+        let args = hook_overrides(
+            &RailCommand::new(PathBuf::from("/bin/yunta")),
+            judging,
+            false,
+        );
         let assignments: Vec<&String> = args.iter().skip(1).step_by(2).collect();
         let hooks: toml::Table = toml::from_str(assignments[0]).unwrap();
         let group = &hooks["hooks"]["PreToolUse"][0];
@@ -352,6 +383,33 @@ mod tests {
             ))
         );
         assert!(trusted("pre_tool_use").is_some_and(|hash| hash.starts_with("sha256:")));
+    }
+
+    #[test]
+    fn the_hook_after_a_patch_is_installed_and_trusted_only_when_the_engine_formats() {
+        let command = RailCommand::new(PathBuf::from("/bin/yunta"));
+        let judging = std::time::Duration::from_secs(60);
+        let formatting = hook_overrides(&command, judging, true);
+        let quiet = hook_overrides(&command, judging, false);
+        assert!(!quiet
+            .iter()
+            .any(|arg| arg.starts_with("hooks.PostToolUse=")));
+        let after = formatting
+            .iter()
+            .find(|arg| arg.starts_with("hooks.PostToolUse="))
+            .expect("the hook after a patch is installed");
+        let after: toml::Table = toml::from_str(after).unwrap();
+        let group = &after["hooks"]["PostToolUse"][0];
+        assert_eq!(group["matcher"].as_str(), Some("apply_patch"));
+        assert_eq!(
+            group["hooks"][0]["command"].as_str(),
+            Some("/bin/yunta rail codex after-write")
+        );
+        let state = formatting
+            .iter()
+            .find(|arg| arg.starts_with("hooks.state="))
+            .unwrap();
+        assert!(state.contains("/<session-flags>/config.toml:post_tool_use:0:0"));
     }
 
     #[test]

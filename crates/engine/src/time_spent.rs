@@ -33,6 +33,10 @@ pub struct TimeSpent {
     /// A node's attempt open with nothing else holding it: sessions at
     /// work, and the engine's own steps inside a node.
     pub working: Duration,
+    /// What sessions waited while the engine formatted what they wrote,
+    /// by each format's own measure: taken out of `working`, where it
+    /// was spent.
+    pub rails: Duration,
     /// Criteria and suites the engine ran on a task's tree: before and
     /// after its attempts, and while its session waited on a check.
     pub checks: Duration,
@@ -56,6 +60,7 @@ impl TimeSpent {
     /// Every stretch, counted once.
     pub fn total(&self) -> Duration {
         self.working
+            + self.rails
             + self.checks
             + self.measuring
             + self.people
@@ -102,7 +107,20 @@ pub fn time_spent(
         let stretch = asleep.awake_between(last.timestamp, until);
         *spent.slot_open(&open) += stretch;
     }
+    let rails: Duration = events.iter().map(formatting).sum();
+    spent.rails = rails.min(spent.working);
+    spent.working -= spent.rails;
     spent
+}
+
+/// How long the format `event` records took; nothing for any other event.
+fn formatting(event: &StoredEvent) -> Duration {
+    match event.payload() {
+        Some(EventPayload::Session(SessionEvent::WriteFormatted(formatted))) => {
+            Duration::from_millis(formatted.duration_ms)
+        }
+        _ => Duration::ZERO,
+    }
 }
 
 impl TimeSpent {

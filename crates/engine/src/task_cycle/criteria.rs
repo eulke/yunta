@@ -19,7 +19,7 @@ use crate::process::{
 /// A command the engine stopped before it answered — a timeout, or a
 /// cancellation — has no exit code of its own, so it is recorded as
 /// `-2`, which no process exits with; one killed by a signal as `-1`.
-pub(super) fn exit_code_of(outcome: Outcome) -> i32 {
+pub(crate) fn exit_code_of(outcome: Outcome) -> i32 {
     match outcome {
         Outcome::Exited { status, .. } => status.code().unwrap_or(-1),
         Outcome::TimedOut { .. } | Outcome::Cancelled { .. } => -2,

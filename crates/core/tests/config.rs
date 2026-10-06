@@ -234,6 +234,34 @@ fn a_runner_s_effort_is_a_level_every_cli_accepts() {
     }
 }
 
+/// `format:` is read in order, and a more specific layer's rules replace
+/// the whole list, as a runner's candidates do.
+#[test]
+fn format_rules_read_in_order_and_a_repo_replaces_them_whole() {
+    let org: ConfigLayer = yunta_core::yaml::parse(
+        "format:\n  - { paths: [\"**/*.rs\"], run: rustfmt }\n  - { paths: [\"**/*.md\"], run: prose }\n",
+    )
+    .unwrap();
+    let names = |layer: &ConfigLayer| {
+        layer
+            .format_rules()
+            .iter()
+            .map(|rule| rule.run.to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(&org), vec!["rustfmt", "prose"]);
+    let repo: ConfigLayer =
+        yunta_core::yaml::parse("format:\n  - { paths: [\"*.ts\"], run: prettier }\n").unwrap();
+    assert_eq!(
+        names(&ConfigLayer::merge_layers([org, repo])),
+        vec!["prettier"]
+    );
+    assert!(
+        yunta_core::yaml::parse::<ConfigLayer>("format:\n  - { paths: [x], run: a, on: b }\n")
+            .is_err()
+    );
+}
+
 #[test]
 fn repo_isolation_overrides_org_isolation() {
     let org = ConfigLayer {

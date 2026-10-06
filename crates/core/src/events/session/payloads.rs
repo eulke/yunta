@@ -182,6 +182,22 @@ impl WriteRefusedPayload {
     }
 }
 
+/// What the engine formatted the moment a session wrote it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WriteFormattedPayload {
+    pub session_id: SessionId,
+    /// The project command that formatted them.
+    pub run: crate::ids::CommandName,
+    /// Every file it was handed, relative to the worktree.
+    pub paths: Vec<std::path::PathBuf>,
+    /// The ones whose content it changed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed: Vec<std::path::PathBuf>,
+    pub exit_code: i32,
+    /// How long the command took, which the session waited.
+    pub duration_ms: u64,
+}
+
 /// A session that asked to stop with work its close would not take, told
 /// why and sent back to it — at most once for one state of that work.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -4,7 +4,8 @@
 //! own fence, judged here, and every refusal is on the log before the
 //! hook hears it — so a refused write is recorded the same way whichever
 //! CLI made it, and whatever that CLI does or does not print about it.
-//! Before the session stops, its work is judged (`stop`).
+//! After a write, what it wrote is formatted (`format`); before the
+//! session stops, its work is judged (`stop`).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -34,6 +35,11 @@ impl SessionRails {
         self.fence.get_or_init(|| fence);
     }
 
+    /// The fence the session was opened with, once it is set.
+    pub(super) fn fence_of(&self) -> Option<&Fence> {
+        self.fence.get()
+    }
+
     /// Every write this session was refused, in the order it asked.
     pub fn refused(&self) -> Vec<ToolTarget> {
         self.refused
@@ -48,6 +54,7 @@ impl SessionTools {
     pub(super) async fn rail(&self, call: RailCall) -> RailAnswer {
         match call.act {
             RailAct::BeforeWrite { paths } => self.before_write(&call.session_id, &paths).await,
+            RailAct::AfterWrite { paths } => self.after_write(&call.session_id, &paths).await,
             RailAct::BeforeStop => self.before_stop(&call.session_id).await,
         }
     }

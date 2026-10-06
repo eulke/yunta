@@ -252,3 +252,37 @@ fn a_stop_hook_that_cannot_ask_lets_the_session_stop() {
     assert_eq!(out.status.code(), Some(0));
     assert!(out.stdout.is_empty());
 }
+
+/// What the engine says after a write reaches the model as context, on
+/// both CLIs; a hook after a write that cannot ask says nothing.
+#[test]
+fn what_the_engine_says_after_a_write_is_context_for_every_adapter() {
+    for (adapter, call) in [
+        ("claude-code", writing("/work/task-1/docs/readme.md")),
+        (
+            "codex",
+            serde_json::json!({
+                "session_id": "s-1",
+                "tool_name": "apply_patch",
+                "tool_input": { "command": "*** Begin Patch\n*** Add File: docs/readme.md\n+a\n*** End Patch" },
+            })
+            .to_string(),
+        ),
+    ] {
+        let (url, heard) = engine();
+
+        let out = hook_at(adapter, "after-write", Some((&url, TOKEN)), &call);
+
+        assert_eq!(out.status.code(), Some(0), "{adapter}");
+        let said: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(said["hookSpecificOutput"]["hookEventName"], "PostToolUse");
+        assert!(said["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .is_some_and(|context| !context.is_empty()));
+        let (path, _) = heard.recv().expect("the engine was asked");
+        assert_eq!(path, "/rail/after-write");
+    }
+    let out = hook_at("claude-code", "after-write", None, &writing("a.rs"));
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stdout.is_empty());
+}

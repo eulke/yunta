@@ -250,6 +250,25 @@ created. `yunta check` refuses such a workflow before the first token, naming th
 node and the command, and a run that meets one anyway fails the node without
 offering a retry or spending its `on_failure` re-route.
 
+### Formatting what a session writes
+
+`format:` names, for a set of files, the project command that formats them,
+and the run formats each such file the moment a session writes it:
+
+```yaml
+commands:
+  format: "rustfmt --edition 2021"
+format:
+  - { paths: ["**/*.rs"], run: format }
+```
+
+The first rule whose globs cover a file formats it; its command receives the
+files of one write as arguments and must be one `commands:` declares, which
+`yunta check` verifies. When the command changes a file, the session is told to
+read it again before editing it; when it fails, what it printed. Otherwise the
+session hears nothing. Each format is on the log as `write_formatted`, and
+`yunta stats` shows the time sessions waited for it as `rails`.
+
 `yunta init` writes `commands:` for what it finds in the repository: the
 scripts a `package.json` declares for `lint`, `typecheck`, `test`, `format` and
 `build`, run by the package manager its lockfile names (`pnpm lint`,

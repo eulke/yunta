@@ -2241,6 +2241,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "write_formatted"
+            }
+          },
+          "$ref": "#/$defs/WriteFormattedPayload",
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "run_tool_failed"
             }
           },
@@ -5187,6 +5200,50 @@
       "required": [
         "option",
         "because"
+      ]
+    },
+    "WriteFormattedPayload": {
+      "description": "What the engine formatted the moment a session wrote it.",
+      "type": "object",
+      "properties": {
+        "changed": {
+          "description": "The ones whose content it changed.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "duration_ms": {
+          "description": "How long the command took, which the session waited.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "exit_code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "paths": {
+          "description": "Every file it was handed, relative to the worktree.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "run": {
+          "description": "The project command that formatted them.",
+          "$ref": "#/$defs/CommandName"
+        },
+        "session_id": {
+          "$ref": "#/$defs/SessionId"
+        }
+      },
+      "required": [
+        "session_id",
+        "run",
+        "paths",
+        "exit_code",
+        "duration_ms"
       ]
     },
     "WriteRefusedPayload": {

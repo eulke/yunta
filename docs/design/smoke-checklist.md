@@ -185,6 +185,9 @@ logs its stdin and answers as told. Each item is what the engine relies on.
   shell and finish, asked before stopping; the engine found `b.txt` outside
   the scope, recorded `stop_refused` (`outside_scope`), and the same session
   removed `b.txt` and finished — the `Stop` hook trusted by its seeded hash.
+- Through the engine: with `format: [{ paths: ["*.txt"], run: upper }]`, both
+  patches to `notes.txt` were formatted (12 ms each, `write_formatted`), and the
+  file ended `HELLO`/`BYE` — the `PostToolUse` hook trusted by its seeded hash.
 
 **claude-code**
 
@@ -211,6 +214,9 @@ logs its stdin and answers as told. Each item is what the engine relies on.
   command reaches the internet and `127.0.0.1`; with neither it reaches
   neither. `filesystem.denyWrite` on the working directory keeps a command
   from writing it while `--add-dir` roots stay writable.
+- Through the engine: the same `format:` rule formatted both edits of
+  `notes.txt` (13 ms each); the model said the hook uppercased the file, and
+  its second edit applied to the formatted text.
 - Through the engine: the same `outside_scope` stop as on `codex` — one
   `stop_refused`, `b.txt` removed by the same session, the node finished.
 - Through the engine: an `edit` session under `network: false` wrote the

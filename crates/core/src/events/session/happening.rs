@@ -41,6 +41,13 @@ pub enum Happening {
     Refused(ToolTarget),
     /// A stop sent back to the work, and what kept that work from closing.
     StopRefused(Vec<crate::events::StopRefusal>),
+    /// What a session wrote, formatted: by which command, what it changed,
+    /// and how the command exited.
+    Formatted {
+        run: crate::ids::CommandName,
+        changed: Vec<std::path::PathBuf>,
+        exit_code: i32,
+    },
     /// One failed call is a moment in the chronicle.
     RunToolFailed {
         tool: crate::RunTool,
@@ -84,6 +91,11 @@ impl From<&SessionEvent> for Happening {
             },
             SessionEvent::WriteRefused(p) => Happening::Refused(p.target.clone()),
             SessionEvent::StopRefused(p) => Happening::StopRefused(p.why.clone()),
+            SessionEvent::WriteFormatted(p) => Happening::Formatted {
+                run: p.run.clone(),
+                changed: p.changed.clone(),
+                exit_code: p.exit_code,
+            },
             SessionEvent::RunToolFailed(p) => Happening::RunToolFailed {
                 tool: p.tool,
                 cause: p.cause,

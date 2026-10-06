@@ -58,6 +58,21 @@ pub(crate) fn check_unset_keys(
     }
 }
 
+/// Every `format:` rule whose command the project does not declare.
+pub(crate) fn check_format_commands(config: &ConfigLayer, errors: &mut Vec<CheckError>) {
+    for rule in config.format_rules() {
+        if config.command(&rule.run).is_none() {
+            let key = ConfigKey::Command {
+                command: rule.run.clone(),
+            };
+            errors.push(CheckError::FormatCommandUnset {
+                command: rule.run.clone(),
+                near: near_key(&key, config),
+            });
+        }
+    }
+}
+
 /// The command `config` declares that the one `key` asks for most likely
 /// misspells. Only a command has a name a person types: the other keys
 /// are sections, present or not.

@@ -124,6 +124,8 @@ impl NodeLedger {
                 state: p.state.clone(),
             }),
             SessionEvent::RunToolFailed(p) => record.last_tool_failure = Some(p.clone()),
+            // What was formatted is `stats`' and the chronicle's to read.
+            SessionEvent::WriteFormatted(_) => {}
             // The refusal itself reaches a reader through the log; for the
             // node it is a moment of activity and nothing more.
             SessionEvent::RunToolRefused(_) => {}

@@ -282,6 +282,7 @@ impl MockAdapter {
                     rail,
                     cwd: req.cwd.clone(),
                     effects: script.effects.clone(),
+                    formats: req.formats,
                 }),
             before_stop: req
                 .rail
@@ -292,6 +293,7 @@ impl MockAdapter {
                         rail,
                         cwd: req.cwd.clone(),
                         effects: stop.writes.clone(),
+                        formats: req.formats,
                     },
                     steps: stop.steps.clone(),
                 }),

@@ -440,6 +440,18 @@ pub enum CheckError {
     #[error("{sites}: {}", yunta_core::ConfigKey::BaselineSuite)]
     BaselineWithoutSuite { sites: String },
 
+    /// A `format:` rule whose command the project does not declare: every
+    /// write it covers would go unformatted, with nobody told why.
+    #[error(
+        "`format` runs `{command}`, which `commands:` does not declare — declare it, or drop \
+         the rule{}",
+        super::pointer::near(.near.as_ref())
+    )]
+    FormatCommandUnset {
+        command: yunta_core::CommandName,
+        near: Option<String>,
+    },
+
     /// A pack says what it needs from the project and the machine under
     /// `requires:`; a run of its workflows without it stops where the need
     /// is.

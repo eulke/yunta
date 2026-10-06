@@ -102,6 +102,7 @@ fn every_stretch_of_a_run_is_the_time_of_one_thing() {
             checks: Duration::from_secs(100),
             decided_checks: Duration::from_secs(80),
             working: Duration::from_secs(30),
+            rails: Duration::ZERO,
             people: Duration::from_secs(90 + 300),
             offline: Duration::ZERO,
             parked: Duration::from_secs(1000),
@@ -188,4 +189,26 @@ fn unreachable_time_is_not_working() {
 
     assert_eq!(time.offline, Duration::from_secs(60));
     assert_eq!(time.working, Duration::from_secs(20));
+}
+
+const FORMATTED: &str = r#"{"kind":"write_formatted","session_id":"s1","run":"format","paths":["a.rs"],"changed":["a.rs"],"exit_code":0,"duration_ms":2000}"#;
+
+/// What sessions waited while what they wrote was formatted is its own
+/// share, by each format's measure, taken out of the working time it
+/// was spent inside.
+#[test]
+fn formatting_what_a_session_wrote_is_its_own_share_of_the_working_time() {
+    let events = log(&[
+        (0, None, CREATED),
+        (0, Some("a"), STARTED),
+        (40, Some("a"), FORMATTED),
+        (60, Some("a"), FORMATTED),
+        (100, Some("a"), FINISHED),
+    ]);
+
+    let time = time_of(&events);
+
+    assert_eq!(time.rails, Duration::from_secs(4));
+    assert_eq!(time.working, Duration::from_secs(96));
+    assert_eq!(time.total(), Duration::from_secs(100));
 }

@@ -94,6 +94,7 @@ impl CodexAdapter {
         args.extend(rail::hook_overrides(
             command,
             RunToolsEndpoint::call_timeout(&req.budget),
+            req.formats,
         ));
         // An isolated session loads none of the person's own configuration
         // or rules; its credentials stay theirs.
